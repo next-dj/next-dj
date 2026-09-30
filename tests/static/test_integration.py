@@ -146,7 +146,10 @@ class TestJsContextFlowsThroughInit:
         collector.add_js_context("score", 42)
 
         out = wired_manager.inject(f"<body>{SCRIPTS_PLACEHOLDER}</body>", collector)
-        assert 'Next._init({"user":"alice","score":42})' in out
+        assert (
+            'Next._init({"user":"alice","score":42,'
+            '"$chunks":{"scripts":"/static/next/next.scripts.min.js"}})'
+        ) in out
 
 
 class TestJsContextEscapedInInit:

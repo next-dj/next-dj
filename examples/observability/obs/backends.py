@@ -44,7 +44,7 @@ class BabelJsxBackend(StaticFilesBackend):
         self._babel_tag = str(opts.get("babel_tag") or self._DEFAULT_BABEL_TAG)
 
     def render_babel_script_tag(
-        self, url: str, *, request: HttpRequest | None = None
+        self, url: str, *, request: HttpRequest | None = None, nonce: str | None = None
     ) -> str:
         """Return a `<script type="text/babel">` tag pointing at `url`."""
         return self._babel_tag.format(url=url)

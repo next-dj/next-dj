@@ -92,9 +92,16 @@ NEXT_FRAMEWORK = {
         }
     ],
     "STATIC_VERSION": "v1",
+    "SITE": {"URL": "https://flags.example", "NAME": "next.dj flags"},
     "METADATA": {
         "DEFAULTS": {
-            "site_name": "next.dj flags",
+            "viewport": "width=device-width, initial-scale=1",
+            "icons": {
+                "icon": {"url": "/static/flags/icon.svg", "type": "image/svg+xml"}
+            },
+            "description": (
+                "A feature flag board with composite guards and cache invalidation."
+            ),
             "title": {
                 "template": "{title} · {site_name}",
                 "default": "next.dj — Feature flags admin",

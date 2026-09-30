@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { HistoryAdapter } from "./apply";
 import { createLayers, nativeDialog } from "./layers";
 import type { DialogAdapter, LayerDeps, LayerStack, PopStateAdapter } from "./layers";
-import { HEADER_ORIGIN, HEADER_ZONE } from "./protocol";
+import { createNavigation } from "./navigation";
+import type { Navigation } from "./navigation";
+import { HEADER_ORIGIN, HEADER_ZONE, pageKey } from "./protocol";
 
 interface Dispatched {
   event: string;
@@ -24,8 +27,25 @@ function mockDialog() {
 // Every stack registers here so the afterEach resets them all, leaking no dialogs.
 const madeStacks: LayerStack[] = [];
 
-function createTrackedLayers(deps: LayerDeps): LayerStack {
-  const layers = createLayers(deps);
+// The runtime shares one navigation with the applier. A case that brings none gets
+// one over its history seam, or over window.history.
+function createTrackedLayers(
+  deps: Omit<LayerDeps, "navigation"> & {
+    navigation?: Navigation;
+    history?: HistoryAdapter;
+  },
+): LayerStack {
+  const { history, ...rest } = deps;
+  const layers = createLayers({
+    ...rest,
+    navigation:
+      deps.navigation ??
+      createNavigation({
+        dispatch: deps.dispatch,
+        ...(deps.document !== undefined ? { document: deps.document } : {}),
+        ...(history !== undefined ? { history } : {}),
+      }),
+  });
   madeStacks.push(layers);
   return layers;
 }
@@ -34,19 +54,37 @@ afterEach(() => {
   for (const layers of madeStacks.splice(0)) layers._reset();
 });
 
-function makeStackOn(doc: Document) {
+// The applier's commit as the body envelope lands, the one point a layer's push is
+// written. A stack without an applier never reaches it on its own.
+function landBody(navigation: Navigation, url: string, doc: Document = document): void {
+  const commit = navigation.begin();
+  commit.claim(pageKey(url, doc));
+  commit.end();
+}
+
+function makeStackOn(doc: Document, history?: HistoryAdapter) {
   const dispatched: Dispatched[] = [];
   const fetched: { url: string; zone: string }[] = [];
   const { adapter, dismissed } = mockDialog();
+  const dispatch = (event: string, detail: Record<string, unknown>): void => {
+    dispatched.push({ event, detail });
+  };
+  const navigation = createNavigation({
+    dispatch,
+    document: doc,
+    ...(history !== undefined ? { history } : {}),
+  });
   const layers = createTrackedLayers({
-    dispatch: (event, detail) => dispatched.push({ event, detail }),
+    dispatch,
     fetch: async (request) => {
       fetched.push({ url: request.url, zone: request.zone });
+      landBody(navigation, request.url, doc);
     },
     document: doc,
     dialog: adapter,
+    navigation,
   });
-  return { layers, dispatched, fetched, dismissed };
+  return { layers, dispatched, fetched, dismissed, navigation };
 }
 
 function makeStack() {
@@ -456,44 +494,52 @@ describe("a meta op keeps to the page it was rendered for", () => {
 
   it("sets the title directly while no layer is open", () => {
     const { layers } = makeStack();
-    layers.retitle("Inbox (3)", "/inbox/");
+    layers.head({ title: "Inbox (3)" }, "/inbox/");
     expect(document.title).toBe("Inbox (3)");
   });
 
   it("a layer's own meta lasts only as long as the layer", async () => {
     const { layers } = makeStack();
     await layers.open(null, "/inbox/7/", "mail");
-    layers.retitle("Mail 7", "/inbox/7/");
+    layers.head({ title: "Mail 7" }, "/inbox/7/");
     expect(document.title).toBe("Mail 7");
     layers.close({ result: 1 });
     expect(document.title).toBe("Inbox (0)");
   });
 
-  it("a meta with no page or an unknown one belongs to the top layer", async () => {
+  it("a meta with no page belongs to the top layer", async () => {
     const { layers } = makeStack();
     await layers.open(null, "/inbox/7/", "mail");
-    layers.retitle("Saved", undefined);
+    layers.head({ title: "Saved" }, undefined);
     expect(document.title).toBe("Saved");
-    layers.retitle("Elsewhere", "/other/");
-    expect(document.title).toBe("Elsewhere");
     layers.close({ result: 1 });
     expect(document.title).toBe("Inbox (0)");
   });
 
-  it("a host retitle under a titled layer waits for the close", async () => {
+  it("a meta for a page no longer on the stack is dropped", async () => {
     const { layers } = makeStack();
     await layers.open(null, "/inbox/7/", "mail");
-    layers.retitle("Mail 7", "/inbox/7/");
-    layers.retitle("Inbox (3)", "/inbox/");
+    layers.head({ title: "Elsewhere" }, "/other/");
+    expect(document.title).toBe("Inbox (0)");
+    layers.close({ result: 1 });
+    layers.head({ title: "Mail 7" }, "/inbox/7/");
+    expect(document.title).toBe("Inbox (0)");
+  });
+
+  it("a host meta under a titled layer waits for the close", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/inbox/7/", "mail");
+    layers.head({ title: "Mail 7" }, "/inbox/7/");
+    layers.head({ title: "Inbox (3)" }, "/inbox/");
     expect(document.title).toBe("Mail 7");
     layers.close({ result: 1 });
     expect(document.title).toBe("Inbox (3)");
   });
 
-  it("a host retitle under an untitled layer shows at once and survives", async () => {
+  it("a host meta under an untitled layer shows at once and survives", async () => {
     const { layers } = makeStack();
     await layers.open(null, "/inbox/7/", "mail");
-    layers.retitle("Inbox (3)", "/inbox/");
+    layers.head({ title: "Inbox (3)" }, "/inbox/");
     expect(document.title).toBe("Inbox (3)");
     layers.close({ dismiss: true, reason: "escape" });
     expect(document.title).toBe("Inbox (3)");
@@ -502,11 +548,11 @@ describe("a meta op keeps to the page it was rendered for", () => {
   it("nested layers each restore the newest title of the layer below", async () => {
     const { layers } = makeStack();
     await layers.open(null, "/inbox/7/", "mail");
-    layers.retitle("Mail 7", "/inbox/7/");
+    layers.head({ title: "Mail 7" }, "/inbox/7/");
     await layers.open(null, "/inbox/7/reply/", "reply");
-    layers.retitle("Reply", "/inbox/7/reply/");
-    layers.retitle("Inbox (3)", "/inbox/");
-    layers.retitle("Mail 7 (read)", "/inbox/7/");
+    layers.head({ title: "Reply" }, "/inbox/7/reply/");
+    layers.head({ title: "Inbox (3)" }, "/inbox/");
+    layers.head({ title: "Mail 7 (read)" }, "/inbox/7/");
     expect(document.title).toBe("Reply");
     layers.close({ result: 1 });
     expect(document.title).toBe("Mail 7 (read)");
@@ -514,12 +560,12 @@ describe("a meta op keeps to the page it was rendered for", () => {
     expect(document.title).toBe("Inbox (3)");
   });
 
-  it("a host retitle passes through an untitled middle layer", async () => {
+  it("a host meta passes through an untitled middle layer", async () => {
     const { layers } = makeStack();
     await layers.open(null, undefined, "bare");
     await layers.open(null, "/inbox/7/", "mail");
-    layers.retitle("Mail 7", "/inbox/7/");
-    layers.retitle("Inbox (3)", "/inbox/");
+    layers.head({ title: "Mail 7" }, "/inbox/7/");
+    layers.head({ title: "Inbox (3)" }, "/inbox/");
     expect(document.title).toBe("Mail 7");
     layers.close({ result: 1 });
     expect(document.title).toBe("Inbox (3)");
@@ -530,9 +576,9 @@ describe("a meta op keeps to the page it was rendered for", () => {
   it("_reset lands on the host's newest title", async () => {
     const { layers } = makeStack();
     await layers.open(null, "/inbox/7/", "mail");
-    layers.retitle("Mail 7", "/inbox/7/");
+    layers.head({ title: "Mail 7" }, "/inbox/7/");
     await layers.open(null, "/inbox/7/reply/", "reply");
-    layers.retitle("Inbox (3)", "/inbox/");
+    layers.head({ title: "Inbox (3)" }, "/inbox/");
     layers._reset();
     expect(document.title).toBe("Inbox (3)");
   });
@@ -767,32 +813,15 @@ describe("page-scoped zone resolution", () => {
   });
 });
 
-describe("open unwinds when history.push throws", () => {
-  function makeThrowingStack(history: {
-    push(href: string): void;
-    replace(href: string): void;
-  }) {
-    const dispatched: Dispatched[] = [];
-    const fetched: string[] = [];
-    const layers = createTrackedLayers({
-      dispatch: (event, detail) => dispatched.push({ event, detail }),
-      fetch: async (request) => {
-        fetched.push(request.url);
-      },
-      document,
-      dialog: mockDialog().adapter,
-      history,
-    });
-    return { layers, dispatched, fetched };
-  }
-
+describe("a layer whose push throws stays open without an entry", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
+    window.history.replaceState(null, "", "/feed/");
   });
 
-  it("a throwing pushState tears the half-open layer down and rejects", async () => {
+  it("reports the failed push and closes without writing history", async () => {
     const replaced: string[] = [];
-    const { layers, dispatched, fetched } = makeThrowingStack({
+    const { layers, dispatched } = makeStackOn(document, {
       push: () => {
         throw new Error("pushState rate limited");
       },
@@ -800,35 +829,14 @@ describe("open unwinds when history.push throws", () => {
     });
     const opener = document.createElement("a");
     document.body.append(opener);
-    await expect(layers.open(opener, "/photos/1/", "photo")).rejects.toThrow(
-      "pushState rate limited",
-    );
-    expect(layers.size()).toBe(0);
-    expect(document.querySelector("[data-next-dialog]")).toBeNull();
-    expect(opener.hasAttribute("data-next-busy")).toBe(false);
-    expect(opener.hasAttribute("aria-busy")).toBe(false);
-    // The URL never moved and the body GET never left, so nothing rolls back.
-    expect(replaced).toEqual([]);
-    expect(fetched).toEqual([]);
-    expect(dispatched.some((d) => d.event === "partial:layer-opened")).toBe(false);
-  });
-
-  it("a fresh open succeeds after a failed push released the opener", async () => {
-    let fail = true;
-    const { layers } = makeThrowingStack({
-      push: () => {
-        if (fail) {
-          fail = false;
-          throw new Error("boom");
-        }
-      },
-      replace: () => undefined,
-    });
-    const opener = document.createElement("a");
-    document.body.append(opener);
-    await expect(layers.open(opener, "/photos/1/", "photo")).rejects.toThrow("boom");
     await layers.open(opener, "/photos/1/", "photo");
     expect(layers.size()).toBe(1);
+    expect(opener.hasAttribute("aria-busy")).toBe(false);
+    const error = dispatched.find((d) => d.event === "partial:error");
+    expect(error?.detail).toMatchObject({ kind: "op", op: "url" });
+    layers.close({ result: 1 });
+    expect(replaced).toEqual([]);
+    expect(dispatched.some((d) => d.event === "next:navigated")).toBe(false);
   });
 });
 
@@ -901,16 +909,25 @@ describe("layer intercepting URL lifecycle", () => {
         };
       },
     };
+    const dispatch = (event: string, detail: Record<string, unknown>): void => {
+      dispatched.push({ event, detail });
+    };
+    const navigation = createNavigation({ dispatch, document });
     layers = createTrackedLayers({
-      dispatch: (event, detail) => dispatched.push({ event, detail }),
-      fetch: async () => {},
+      dispatch,
+      fetch: async (request) => landBody(navigation, request.url),
       document,
       dialog: mockDialog().adapter,
       popstate,
+      navigation,
     });
     layers.install(document);
     fire = () => handler?.();
   });
+
+  function navigated(): Record<string, unknown>[] {
+    return dispatched.filter((d) => d.event === "next:navigated").map((d) => d.detail);
+  }
 
   it("pushes the honest URL of the layer body on open", async () => {
     await layers.open(null, "/photos/1/", "photo");
@@ -942,6 +959,51 @@ describe("layer intercepting URL lifecycle", () => {
     layers.close({ dismiss: true, reason: "escape" });
     expect(layers.size()).toBe(0);
     expect(window.location.pathname).toBe("/feed/");
+  });
+
+  it("a filter inside a layer moves its URL, so a close still replaces to the host", async () => {
+    await layers.open(null, "/photos/1/", "photo");
+    const form = document.createElement("form");
+    document.querySelector('dialog [data-next-zone="photo"]')!.append(form);
+    expect(layers.rewrite(form, "/photos/1/?tab=exif")).toBe(true);
+    window.history.replaceState(null, "", "/photos/1/?tab=exif");
+    expect(layers.urlFor(form)).toBe("/photos/1/?tab=exif");
+    layers.close({ result: undefined });
+    expect(window.location.pathname + window.location.search).toBe("/feed/");
+  });
+
+  it("Back from a filtered layer still closes it", async () => {
+    await layers.open(null, "/photos/1/", "photo");
+    const form = document.createElement("form");
+    document.querySelector('dialog [data-next-zone="photo"]')!.append(form);
+    layers.rewrite(form, "/photos/1/?tab=exif");
+    window.history.replaceState(null, "", "/feed/");
+    fire();
+    expect(layers.size()).toBe(0);
+  });
+
+  it("a filter inside a layer that wrote no URL leaves the bar alone", async () => {
+    await layers.open(null, undefined, "cart");
+    const form = document.createElement("form");
+    document.querySelector('dialog [data-next-zone="cart"]')!.append(form);
+    expect(layers.rewrite(form, "/cart/?sort=price")).toBe(false);
+  });
+
+  it("a filter on the base page under a pushed layer leaves the bar alone", async () => {
+    const form = document.createElement("form");
+    document.body.append(form);
+    expect(layers.rewrite(form, "/feed/?q=x")).toBe(true);
+    await layers.open(null, "/photos/1/", "photo");
+    expect(layers.rewrite(form, "/feed/?q=y")).toBe(false);
+    layers.close({ result: undefined });
+    expect(window.location.pathname).toBe("/feed/");
+  });
+
+  it("a filter on the base page under a bare layer moves the bar", async () => {
+    const form = document.createElement("form");
+    document.body.append(form);
+    await layers.open(null, undefined, "cart");
+    expect(layers.rewrite(form, "/feed/?q=x")).toBe(true);
   });
 
   it("restores the host query string on a programmatic close", async () => {
@@ -987,8 +1049,8 @@ describe("layer intercepting URL lifecycle", () => {
   it("Back past a layer lands on the host's newest title", async () => {
     document.title = "Feed";
     await layers.open(null, "/photos/1/", "a");
-    layers.retitle("Photo", "/photos/1/");
-    layers.retitle("Feed (2)", "/feed/");
+    layers.head({ title: "Photo" }, "/photos/1/");
+    layers.head({ title: "Feed (2)" }, "/feed/");
     expect(document.title).toBe("Photo");
     window.history.replaceState(null, "", "/feed/");
     fire();
@@ -1002,6 +1064,36 @@ describe("layer intercepting URL lifecycle", () => {
     expect(layers.size()).toBe(1);
   });
 
+  it("announces the push once the body lands, then the replace on close", async () => {
+    document.title = "Feed";
+    await layers.open(null, "/photos/1/", "photo");
+    expect(navigated()).toEqual([
+      expect.objectContaining({ path: "/photos/1/", action: "push" }),
+    ]);
+    layers.close({ result: 1 });
+    expect(navigated()[1]).toMatchObject({ path: "/feed/", action: "replace" });
+  });
+
+  it("announces a Back past a layer as a pop, after the head is restored", async () => {
+    document.title = "Feed";
+    await layers.open(null, "/photos/1/", "photo");
+    layers.head({ title: "Photo" }, "/photos/1/");
+    window.history.replaceState(null, "", "/feed/");
+    fire();
+    expect(navigated().at(-1)).toMatchObject({
+      path: "/feed/",
+      title: "Feed",
+      action: "pop",
+    });
+  });
+
+  it("a popstate that leaves the path alone announces nothing", async () => {
+    await layers.open(null, undefined, "bare");
+    const before = navigated().length;
+    fire();
+    expect(navigated()).toHaveLength(before);
+  });
+
   it("a stray popstate after a programmatic close is a no-op", async () => {
     await layers.open(null, "/photos/1/", "photo");
     layers.close({ result: undefined });
@@ -1011,7 +1103,7 @@ describe("layer intercepting URL lifecycle", () => {
   });
 });
 
-describe("layer open is single-flight and rolls back on failure", () => {
+describe("layer open is single-flight and writes history only once the body lands", () => {
   function makeHistory() {
     const pushed: string[] = [];
     const replaced: string[] = [];
@@ -1022,22 +1114,58 @@ describe("layer open is single-flight and rolls back on failure", () => {
     return { history, pushed, replaced };
   }
 
-  let layers: LayerStack;
+  // A body GET held open until the test lands or fails it.
+  function heldFetch(navigation: Navigation) {
+    const pending: {
+      url: string;
+      queue: string | undefined;
+      settle: (error?: Error) => void;
+    }[] = [];
+    const fetch: LayerDeps["fetch"] = (request) =>
+      new Promise<void>((resolve, reject) => {
+        pending.push({
+          url: request.url,
+          queue: request.queue,
+          settle: (error) => {
+            if (error !== undefined) {
+              reject(error);
+              return;
+            }
+            landBody(navigation, request.url);
+            resolve();
+          },
+        });
+      });
+    return { fetch, pending };
+  }
+
+  function makeHeld(dialog: DialogAdapter = mockDialog().adapter) {
+    const { history, pushed, replaced } = makeHistory();
+    const aborted: string[] = [];
+    const navigation = createNavigation({
+      dispatch: () => undefined,
+      document,
+      history,
+    });
+    const { fetch, pending } = heldFetch(navigation);
+    const layers = createTrackedLayers({
+      dispatch: () => undefined,
+      fetch,
+      abort: (key) => aborted.push(key),
+      document,
+      dialog,
+      navigation,
+    });
+    return { layers, pushed, replaced, aborted, pending };
+  }
 
   beforeEach(() => {
     document.body.innerHTML = "";
     window.history.replaceState(null, "", "/feed/");
   });
 
-  it("a double click opens one dialog and pushes history once", () => {
-    const { history, pushed } = makeHistory();
-    layers = createTrackedLayers({
-      dispatch: () => undefined,
-      fetch: () => new Promise<void>(() => undefined),
-      document,
-      dialog: mockDialog().adapter,
-      history,
-    });
+  it("a double click opens one dialog and pushes once the body lands", () => {
+    const { layers, pushed, pending } = makeHeld();
     const opener = document.createElement("a");
     opener.setAttribute("href", "/photos/1/");
     opener.setAttribute("data-next-layer", "photo");
@@ -1046,80 +1174,86 @@ describe("layer open is single-flight and rolls back on failure", () => {
     opener.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     opener.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     expect(document.querySelectorAll("[data-next-dialog]")).toHaveLength(1);
+    expect(pushed).toEqual([]);
+    pending[0]!.settle();
     expect(pushed).toEqual(["/photos/1/"]);
     expect(layers.size()).toBe(1);
   });
 
-  it("a second open for a busy opener is dropped before any mutation", async () => {
-    const { history, pushed } = makeHistory();
-    layers = createTrackedLayers({
-      dispatch: () => undefined,
-      fetch: () => new Promise<void>(() => undefined),
-      document,
-      dialog: mockDialog().adapter,
-      history,
-    });
+  it("a filter inside a layer whose push is held leaves the bar alone", () => {
+    const { layers, pending } = makeHeld();
+    void layers.open(null, "/feed/", "photo");
+    const form = document.createElement("form");
+    document.querySelector('dialog [data-next-zone="photo"]')!.append(form);
+    expect(layers.rewrite(form, "/feed/?q=x")).toBe(false);
+    pending[0]!.settle();
+    expect(layers.urlFor(form)).toBe("/feed/");
+  });
+
+  it("a second open for a busy opener is dropped before any request", async () => {
+    const { layers, pending } = makeHeld();
     const opener = document.createElement("a");
     opener.setAttribute("href", "/photos/1/");
     document.body.append(opener);
     void layers.open(opener, "/photos/1/", "photo");
     await layers.open(opener, "/photos/1/", "photo");
     expect(document.querySelectorAll("[data-next-dialog]")).toHaveLength(1);
-    expect(pushed).toEqual(["/photos/1/"]);
+    expect(pending).toHaveLength(1);
   });
 
-  it("a fetch failure tears down the orphan and rolls the URL back to the host", async () => {
-    const { history, replaced } = makeHistory();
-    layers = createTrackedLayers({
-      dispatch: () => undefined,
-      fetch: () => Promise.reject(new Error("boom")),
-      document,
-      dialog: mockDialog().adapter,
-      history,
-    });
+  it("the body GET rides its own queue, so a close can abort it", async () => {
+    const { layers, aborted, pending } = makeHeld();
+    const opening = layers.open(null, "/photos/1/", "photo");
+    expect(pending[0]!.queue).toBe("layer:1");
+    layers.close({ dismiss: true, reason: "escape" });
+    expect(aborted).toEqual(["layer:1"]);
+    pending[0]!.settle();
+    await opening;
+  });
+
+  it("a fetch failure tears down the orphan and leaves history untouched", async () => {
+    const { layers, pushed, replaced, pending } = makeHeld();
     const opener = document.createElement("a");
     opener.setAttribute("href", "/photos/1/");
     document.body.append(opener);
-    await expect(layers.open(opener, "/photos/1/", "photo")).rejects.toThrow("boom");
+    const opening = layers.open(opener, "/photos/1/", "photo");
+    pending[0]!.settle(new Error("boom"));
+    await expect(opening).rejects.toThrow("boom");
     expect(document.querySelector("[data-next-dialog]")).toBeNull();
     expect(layers.size()).toBe(0);
-    expect(replaced).toEqual(["/feed/"]);
+    expect(pushed).toEqual([]);
+    expect(replaced).toEqual([]);
     expect(opener.hasAttribute("data-next-busy")).toBe(false);
     expect(opener.hasAttribute("aria-busy")).toBe(false);
   });
 
   it("a dismiss during an in-flight open then a fetch reject tears down once", async () => {
-    const { history, replaced } = makeHistory();
     const { adapter, dismissed } = mockDialog();
-    let rejectFetch: ((reason: Error) => void) | undefined;
-    layers = createTrackedLayers({
-      dispatch: () => undefined,
-      fetch: () =>
-        new Promise<void>((_resolve, reject) => {
-          rejectFetch = reject;
-        }),
-      document,
-      dialog: adapter,
-      history,
-    });
+    const { layers, pushed, replaced, aborted, pending } = makeHeld(adapter);
     const opener = document.createElement("a");
     opener.setAttribute("href", "/photos/1/");
     document.body.append(opener);
-    const pending = layers.open(opener, "/photos/1/", "photo");
-    // Dismiss the dialog (Esc, backdrop) while the body fetch is still in
-    // flight, the first remove that splices the layer and rolls the URL back.
+    const opening = layers.open(opener, "/photos/1/", "photo");
     dismissed[0]?.("escape");
     expect(layers.size()).toBe(0);
-    expect(replaced).toEqual(["/feed/"]);
-    rejectFetch?.(new Error("boom"));
-    await expect(pending).rejects.toThrow("boom");
-    // The catch arm hands remove the already-spliced layer, so the index===-1
-    // early return makes the second teardown a no-op: no second URL rollback.
-    expect(replaced).toEqual(["/feed/"]);
+    pending[0]!.settle(new Error("boom"));
+    await expect(opening).rejects.toThrow("boom");
+    // The catch arm hands remove the already-spliced layer, so the second
+    // teardown is a no-op: one abort, and no entry was ever written.
+    expect(aborted).toEqual(["layer:1"]);
+    expect(pushed).toEqual([]);
+    expect(replaced).toEqual([]);
     expect(document.querySelector("[data-next-dialog]")).toBeNull();
-    expect(layers.size()).toBe(0);
-    expect(opener.hasAttribute("data-next-busy")).toBe(false);
     expect(opener.hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("a body landing after its layer closed writes no entry", async () => {
+    const { layers, pushed, pending } = makeHeld();
+    const opening = layers.open(null, "/photos/1/", "photo");
+    layers.close({ dismiss: true, reason: "escape" });
+    pending[0]!.settle();
+    await opening;
+    expect(pushed).toEqual([]);
   });
 });
 
@@ -1223,5 +1357,151 @@ describe("the native dialog adapter", () => {
     control();
     expect(reasons).toEqual(["saved"]);
     expect(dialog.open).toBe(false);
+  });
+});
+
+describe("layer head scoping from the audit", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    document.head.innerHTML = "<title>Feed</title>";
+    window.history.replaceState(null, "", "/feed/");
+  });
+
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("Esc before the body lands keeps the host title and writes no entry", async () => {
+    const pushed: string[] = [];
+    const aborted: string[] = [];
+    const { adapter, dismissed } = mockDialog();
+    let land!: () => void;
+    const navigation = createNavigation({
+      dispatch: () => undefined,
+      history: { push: (href) => pushed.push(href), replace: () => undefined },
+    });
+    const layers = createTrackedLayers({
+      dispatch: () => undefined,
+      fetch: (request) =>
+        new Promise<void>((resolve) => {
+          land = () => {
+            // The late envelope as the applier would commit it for the closed page.
+            layers.head({ title: "Photo" }, pageKey(request.url, document));
+            landBody(navigation, request.url);
+            resolve();
+          };
+        }),
+      abort: (key) => aborted.push(key),
+      document,
+      dialog: adapter,
+      navigation,
+    });
+    const opening = layers.open(null, "/photos/1/", "photo");
+    dismissed[0]!("escape");
+    land();
+    await opening;
+    expect(document.title).toBe("Feed");
+    expect(aborted).toEqual(["layer:1"]);
+    expect(pushed).toEqual([]);
+  });
+
+  it("a host title rendered with stray whitespace restores normalised", async () => {
+    document.head.innerHTML = "<title>\n  Feed\n  (2) </title>";
+    const { layers } = makeStack();
+    await layers.open(null, "/photos/1/", "photo");
+    layers.head({ title: "Photo" }, "/photos/1/");
+    layers.close({ result: 1 });
+    expect(document.head.querySelector("title")!.textContent).toBe("Feed (2)");
+  });
+
+  it("a layer titled like its host still holds a host update back", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/photos/1/", "photo");
+    layers.head({ title: "Feed" }, "/photos/1/");
+    layers.head({ title: "Feed (2)" }, "/feed/");
+    expect(document.title).toBe("Feed");
+    layers.close({ result: 1 });
+    expect(document.title).toBe("Feed (2)");
+  });
+
+  it("an absolute href with a fragment keys the layer by path and search", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, `${location.origin}/photos/1/?size=l#comments`, "photo");
+    expect(window.location.pathname + window.location.search).toBe("/photos/1/?size=l");
+    layers.head({ title: "Photo" }, "/photos/1/?size=l");
+    expect(document.title).toBe("Photo");
+    const root = document.querySelector('dialog [data-next-zone="photo"]')!;
+    expect(layers.urlFor(root)).toBe("/photos/1/?size=l");
+    expect(layers.resolveZone("photo", document, "/photos/1/?size=l")).toBe(root);
+  });
+
+  it("nested layers restore each other's head and then the host's", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/photos/1/", "photo");
+    layers.head({ title: "Photo", description: "one photo" }, "/photos/1/");
+    await layers.open(null, "/photos/1/edit/", "edit");
+    layers.head({ title: "Edit", robots: "noindex" }, "/photos/1/edit/");
+    expect(document.querySelector('meta[name="robots"]')!.getAttribute("content")).toBe(
+      "noindex",
+    );
+    layers.close({ result: 1 });
+    expect(document.title).toBe("Photo");
+    expect(document.querySelector('meta[name="robots"]')).toBeNull();
+    expect(
+      document.querySelector('meta[name="description"]')!.getAttribute("content"),
+    ).toBe("one photo");
+    layers.close({ result: 1 });
+    expect(document.title).toBe("Feed");
+    expect(document.querySelector('meta[name="description"]')).toBeNull();
+  });
+
+  it("closing a layer restores all four head tags it covered", async () => {
+    document.head.innerHTML =
+      "<title>Feed</title>" +
+      '<meta name="description" content="the feed">' +
+      '<link rel="canonical" href="https://example.com/feed/">' +
+      '<meta name="robots" content="index, follow">';
+    const { layers } = makeStack();
+    await layers.open(null, "/photos/1/", "photo");
+    layers.head(
+      {
+        title: "Photo",
+        description: null,
+        canonical: "https://example.com/photos/1/",
+        robots: "noindex",
+      },
+      "/photos/1/",
+    );
+    expect(document.querySelector('meta[name="description"]')).toBeNull();
+    layers.close({ result: 1 });
+    expect(document.title).toBe("Feed");
+    expect(
+      document.querySelector('meta[name="description"]')!.getAttribute("content"),
+    ).toBe("the feed");
+    expect(document.querySelector('link[rel="canonical"]')!.getAttribute("href")).toBe(
+      "https://example.com/feed/",
+    );
+    expect(document.querySelector('meta[name="robots"]')!.getAttribute("content")).toBe(
+      "index, follow",
+    );
+  });
+
+  it("a lower layer torn down under an open one hands its snapshot up", async () => {
+    const { adapter, dismissed } = mockDialog();
+    const layers = createTrackedLayers({
+      dispatch: () => undefined,
+      fetch: async () => undefined,
+      document,
+      dialog: adapter,
+      history: { push: () => undefined, replace: () => undefined },
+    });
+    await layers.open(null, undefined, "lower");
+    layers.head({ title: "Lower" }, undefined);
+    await layers.open(null, undefined, "upper");
+    layers.head({ title: "Upper" }, undefined);
+    dismissed[0]!("escape");
+    expect(document.title).toBe("Upper");
+    layers.close({ result: 1 });
+    expect(document.title).toBe("Feed");
   });
 });

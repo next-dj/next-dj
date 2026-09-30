@@ -136,13 +136,13 @@ class TrieURLResolver(URLResolver):
     for the canonical `Resolver404` with a complete `tried` list.
     """
 
-    _index_cache: tuple[tuple[int, int], _RouteIndex] | None = None
+    _index_cache: tuple[tuple[int, ...], _RouteIndex] | None = None
 
-    def _current_token(self) -> tuple[int, int]:
+    def _current_token(self) -> tuple[int, ...]:
         source = getattr(self.url_patterns, "version_token", None)
         if source is None:
-            return (0, 0)
-        return cast("tuple[int, int]", source())
+            return ()
+        return cast("tuple[int, ...]", source())
 
     def _route_index(self) -> _RouteIndex:
         cached = self._index_cache

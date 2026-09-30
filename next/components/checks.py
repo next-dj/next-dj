@@ -1,8 +1,4 @@
-"""System checks for the components subsystem.
-
-The ids are `next.E020`, `next.E021`, `next.E023`, `next.E031` to `next.E034`,
-`next.E055` to `next.E057`, `next.E075`, `next.E079`, `next.E080` and `next.E084`.
-"""
+"""System checks for the components subsystem."""
 
 from __future__ import annotations
 

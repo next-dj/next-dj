@@ -6,18 +6,19 @@ each provider once and the resolver replays the short-list.
 
 from __future__ import annotations
 
+# The `type` aliases below evaluate when autodoc reads them, so their names import here.
 import inspect
+from collections.abc import Callable
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
+from .context import ResolutionContext
 from .introspect import prepared_parameter
+from .providers import ParameterProvider
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
-
-    from .context import ResolutionContext
-    from .providers import ParameterProvider
+    from collections.abc import Mapping, Sequence
 
 
 type ParameterFiller = Callable[[ResolutionContext], object]

@@ -1,7 +1,4 @@
-"""System check for the custom patch verbs a project registers.
-
-The ids are `next.E066` for a shadowed built-in and `next.E090` for a bad verb name.
-"""
+"""System check for the custom patch verbs a project registers."""
 
 import re
 

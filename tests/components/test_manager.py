@@ -510,7 +510,7 @@ class TestRegisterComponentsFolderFromRouterWalk:
     def test_lazy_component_modules_skips_eager_load(
         self, tmp_path: Path, min_component_config: dict
     ) -> None:
-        """With ``LAZY_COMPONENT_MODULES=True`` modules load on resolve, not at discovery."""
+        """With ``LAZY_COMPONENT_MODULES=True`` a module loads on resolve."""
         root = tmp_path / "_components"
         comp_dir = root / "lazy_c"
         comp_dir.mkdir(parents=True)

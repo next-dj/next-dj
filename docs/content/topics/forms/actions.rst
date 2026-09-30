@@ -564,6 +564,31 @@ The UID is derived, never stored in a template by hand.
 A ``{% form "name" %}`` tag reverses the current UID at render time, so a freshly rendered page always posts to the right URL.
 Only out-of-band references to a stale UID break.
 
+.. _topics-forms-actions-requires-runtime:
+
+Forms that post through the runtime alone
+-----------------------------------------
+
+A page a CDN caches carries no CSRF token in its HTML, so its forms post only through the client runtime, which fetches a token first, and a browser without JavaScript gets 403, see :doc:`/content/security/csrf-and-forms`.
+``Meta.requires_runtime = True`` on a ``Form``, ``ModelForm``, or ``FormWizard``, and ``requires_runtime=True`` on ``@action``, declare that an action is meant to post that way.
+
+.. code-block:: python
+   :caption: shop/pages/lp/[slug]/page.py
+
+   from shop.models import Lead
+
+   import next.forms
+
+   class LeadForm(next.forms.ModelForm):
+       class Meta:
+           model = Lead
+           fields = ["email"]
+           requires_runtime = True
+
+The flag changes no dispatch behaviour.
+It tells ``next.W124`` that a shared page rendering this form has accepted the JavaScript requirement, so the warning stays for a shared page whose other forms must still work without the runtime.
+Like the guard keys, it survives subclassing through the inherited ``Meta``.
+
 .. _topics-forms-actions-success:
 
 Success feedback

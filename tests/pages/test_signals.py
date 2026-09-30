@@ -1,13 +1,20 @@
 from pathlib import Path
 
+import pytest
+
 from next.pages import Page
-from next.pages.metadata import PageMetadataRegistry
+from next.pages.metadata.registry import PageMetadataRegistry
 from next.pages.registry import PageContextRegistry
 from next.testing import SignalRecorder
+from tests.support import attribution, handler_declared_here
 
 
 def _meta() -> dict[str, str]:
     return {}
+
+
+def _value() -> str:
+    return "value"
 
 
 class TestTemplateLoadedSignal:
@@ -53,7 +60,7 @@ class TestTemplateLoadedSignal:
     def test_does_not_fire_without_register(
         self, capture_template_loaded: SignalRecorder
     ) -> None:
-        """Creating a ``Page`` without registering templates does not emit the signal."""
+        """A ``Page`` that registers no template emits nothing."""
         Page()
         assert len(capture_template_loaded) == 0
 
@@ -62,50 +69,43 @@ class TestContextRegisteredSignal:
     """``context_registered`` fires when a context function is registered."""
 
     def test_fires_on_register_context(
-        self, capture_context_registered: SignalRecorder, tmp_path: Path
+        self, capture_context_registered: SignalRecorder
     ) -> None:
         """Registering a context function emits ``context_registered``."""
-        page_inst = Page()
-        page_file = tmp_path / "page.py"
-        page_inst._context_manager.register_context(page_file, "key", lambda: "value")
+        Page().context("key")(_value)
         assert len(capture_context_registered) == 1
 
     def test_sender_is_page_context_registry_class(
-        self, capture_context_registered: SignalRecorder, tmp_path: Path
+        self, capture_context_registered: SignalRecorder
     ) -> None:
         """``context_registered`` sender is the ``PageContextRegistry`` class."""
-        page_inst = Page()
-        page_file = tmp_path / "page.py"
-        page_inst._context_manager.register_context(page_file, "key", lambda: "value")
+        Page().context("key")(_value)
         assert capture_context_registered.events[0].sender is PageContextRegistry
 
     def test_fires_once_per_registration(
-        self, capture_context_registered: SignalRecorder, tmp_path: Path
+        self, capture_context_registered: SignalRecorder
     ) -> None:
         """Each ``register_context`` call emits exactly one event."""
         page_inst = Page()
-        page_file = tmp_path / "page.py"
-        page_inst._context_manager.register_context(page_file, "key1", lambda: "v1")
-        page_inst._context_manager.register_context(page_file, "key2", lambda: "v2")
+        page_inst.context("key1")(_value)
+        page_inst.context("key2")(_value)
         assert len(capture_context_registered) == 2
 
     def test_event_contains_file_path(
-        self, capture_context_registered: SignalRecorder, tmp_path: Path
+        self, capture_context_registered: SignalRecorder
     ) -> None:
         """The emitted event carries the ``file_path`` kwarg."""
-        page_inst = Page()
-        page_file = tmp_path / "page.py"
-        page_inst._context_manager.register_context(page_file, "k", lambda: "v")
+        Page().context("k")(_value)
         assert "file_path" in capture_context_registered.events[0].kwargs
-        assert capture_context_registered.events[0].kwargs["file_path"] == page_file
+        assert capture_context_registered.events[0].kwargs["file_path"] == Path(
+            __file__
+        )
 
     def test_event_contains_key(
-        self, capture_context_registered: SignalRecorder, tmp_path: Path
+        self, capture_context_registered: SignalRecorder
     ) -> None:
         """The emitted event carries the ``key`` kwarg."""
-        page_inst = Page()
-        page_file = tmp_path / "page.py"
-        page_inst._context_manager.register_context(page_file, "my_key", lambda: "v")
+        Page().context("my_key")(_value)
         assert capture_context_registered.events[0].kwargs["key"] == "my_key"
 
     def test_does_not_fire_without_registration(
@@ -120,36 +120,28 @@ class TestMetadataRegisteredSignal:
     """``metadata_registered`` fires when a metadata callable is registered."""
 
     def test_fires_once_per_registration(
-        self, capture_metadata_registered: SignalRecorder, tmp_path: Path
-    ) -> None:
-        page_inst = Page()
-        page_inst._metadata_registry.register(tmp_path / "a.py", dict)
-        page_inst._metadata_registry.register(tmp_path / "b.py", dict)
-        assert len(capture_metadata_registered) == 2
-
-    def test_sender_is_the_registry_class(
-        self, capture_metadata_registered: SignalRecorder, tmp_path: Path
-    ) -> None:
-        page_inst = Page()
-        page_inst._metadata_registry.register(tmp_path / "page.py", dict)
-        assert capture_metadata_registered.events[0].sender is PageMetadataRegistry
-
-    def test_event_carries_file_path_and_inherit(
-        self, capture_metadata_registered: SignalRecorder, tmp_path: Path
-    ) -> None:
-        page_inst = Page()
-        page_file = tmp_path / "page.py"
-        page_inst._metadata_registry.register(page_file, dict, inherit=True)
-        event = capture_metadata_registered.events[0]
-        assert event.kwargs == {"file_path": page_file, "inherit": True}
-
-    def test_the_decorator_fires_it(
         self, capture_metadata_registered: SignalRecorder
     ) -> None:
         page_inst = Page()
         page_inst.metadata(_meta)
-        assert len(capture_metadata_registered) == 1
-        assert capture_metadata_registered.events[0].kwargs["inherit"] is False
+        page_inst.metadata(handler_declared_here)
+        assert [
+            event.kwargs["file_path"] for event in capture_metadata_registered.events
+        ] == [Path(__file__), Path(attribution.__file__)]
+
+    def test_sender_is_the_registry_class(
+        self, capture_metadata_registered: SignalRecorder
+    ) -> None:
+        Page().metadata(_meta)
+        assert capture_metadata_registered.events[0].sender is PageMetadataRegistry
+
+    @pytest.mark.parametrize("inherit", [False, True])
+    def test_event_carries_file_path_and_inherit(
+        self, capture_metadata_registered: SignalRecorder, inherit
+    ) -> None:
+        Page().metadata(inherit=inherit)(_meta)
+        event = capture_metadata_registered.events[0]
+        assert event.kwargs == {"file_path": Path(__file__), "inherit": inherit}
 
     def test_does_not_fire_without_registration(
         self, capture_metadata_registered: SignalRecorder

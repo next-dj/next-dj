@@ -37,6 +37,13 @@ READ_FIRST_ROW_TAG = (
 )
 
 
+@pytest.fixture()
+def decided_visitor(page: Page, base_url: str) -> None:
+    page.context.add_cookies(
+        [{"name": "next_consent", "value": "1::1700000000", "url": base_url}]
+    )
+
+
 def open_listing(page: Page, base_url: str) -> None:
     page.set_viewport_size(SENTINEL_BELOW_THE_FOLD)
     page.goto(f"{base_url}/catalog/")
@@ -160,7 +167,11 @@ def test_revealing_the_sentinel_appends_the_next_page(
 
 
 def test_the_sentinel_walks_the_pages_once_and_then_retires(
-    page: Page, base_url: str, demo_data: None, next_probe: PageProbe
+    page: Page,
+    base_url: str,
+    demo_data: None,
+    next_probe: PageProbe,
+    decided_visitor: None,
 ) -> None:
     open_listing(page, base_url)
 

@@ -2,7 +2,10 @@ from next import context
 from next.pages import MetadataDict
 
 
-metadata: MetadataDict = {"title": "Components"}
+metadata: MetadataDict = {
+    "title": "Components",
+    "description": "Composite components with co-located assets and a children body.",
+}
 
 
 @context("section")

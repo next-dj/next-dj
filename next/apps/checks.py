@@ -1,8 +1,4 @@
-"""System checks for next-dj template engine wiring.
-
-The ids are `next.W062` for a project with no `DjangoTemplates` backend and
-`next.W063` for a tag library left out of the builtin tuple.
-"""
+"""System checks for next-dj template engine wiring."""
 
 from __future__ import annotations
 

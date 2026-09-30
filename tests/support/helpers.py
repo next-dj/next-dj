@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import os
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import TYPE_CHECKING, Optional
 from unittest.mock import MagicMock
 
 from django.http import HttpRequest
+from django.test import RequestFactory
 
 from next.conf import NextFrameworkSettings
 from next.deps import DependencyResolver
@@ -155,7 +157,7 @@ def file_router_config_entry(
 
 
 def default_page_router_config(pages_dir: Path | str) -> list[dict[str, object]]:
-    """Single-router list with ``DIRS`` containing ``pages_dir`` (``APP_DIRS`` false)."""
+    """Return one router naming ``pages_dir`` in ``DIRS``, ``APP_DIRS`` off."""
     return [file_router_config_entry(pages_dir=pages_dir)]
 
 
@@ -187,3 +189,28 @@ def counting_provider(calls: list[str], name: str) -> Callable[[], str]:
 def check_ids(messages: Iterable[CheckMessage]) -> list[str]:
     """Return the ids of system check `messages` in order."""
     return [message.id for message in messages]
+
+
+def touch_later(path: Path, source: str | None = None) -> None:
+    """Rewrite `path` with `source` when given, stamped ten seconds past its old mtime.
+
+    A rewrite inside one mtime tick reads as unchanged, so a staleness test pins it.
+    """
+    stamp = path.stat().st_mtime_ns + 10 * 10**9
+    if source is not None:
+        path.write_text(source)
+    os.utime(path, ns=(stamp, stamp))
+
+
+def cookie_request(path: str = "/", **cookies: str | None) -> HttpRequest:
+    """Return a GET for `path` carrying every named cookie given a value."""
+    request = RequestFactory().get(path)
+    request.COOKIES.update(
+        {name: value for name, value in cookies.items() if value is not None}
+    )
+    return request
+
+
+def consent_request(cookie: str | None = None) -> HttpRequest:
+    """Return a GET carrying `cookie` as the consent cookie when one is given."""
+    return cookie_request(next_consent=cookie)

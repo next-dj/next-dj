@@ -261,6 +261,23 @@ def page_tree_skip_names(router: RouterBackend) -> frozenset[str]:
     return contract.skip_names | {contract.components_folder}
 
 
+def routed_page_trees(manager: RouterManager) -> list[tuple[PageRoot, frozenset[str]]]:
+    """Return each tree `manager` routes once, in router order, with the names it skips.
+
+    The sources at the top of a tree, `scripts.py` and the SEO files, read this list.
+    """
+    seen: set[Path] = set()
+    found: list[tuple[PageRoot, frozenset[str]]] = []
+    for router in manager.backends:
+        skip_names = page_tree_skip_names(router)
+        found.extend(
+            (root, skip_names)
+            for root in get_page_roots(router)
+            if first_visit(root.path, seen)
+        )
+    return found
+
+
 def _walk_page_trees(router: RouterBackend) -> _ScannedTrees:
     """Walk every tree `router` reports once, keeping both things checks read."""
     components_folder = _router_contract(router).components_folder
@@ -320,4 +337,5 @@ __all__ = [
     "page_tree_skip_names",
     "read_page_roots",
     "reset_router_manager_cache",
+    "routed_page_trees",
 ]

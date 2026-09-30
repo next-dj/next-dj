@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8,13 +10,17 @@ from django.test import override_settings
 
 from next.errors import InvalidDirsError
 from next.utils import (
+    TreeSource,
     classify_dirs_entries,
-    is_bool,
+    exec_module_file,
     is_dynamic_trail,
     is_int,
+    load_tree_source,
     resolve_base_dir,
     stat_mtime_ns,
     template_edits_watched,
+    tree_label,
+    unique_labels,
 )
 
 
@@ -66,7 +72,7 @@ class TestClassifyDirsEntries:
         assert segs == frozenset()
 
     def test_slash_path_that_is_file_becomes_segment(self, tmp_path: Path) -> None:
-        """When a path with a slash exists but is a file, it is treated as a segment name."""
+        """A slashed path that exists as a file is read as a segment name."""
         f = tmp_path / "a" / "b"
         f.parent.mkdir(parents=True)
         f.write_text("x")
@@ -164,19 +170,11 @@ class TestResolveBaseDir:
 
 class TestTypePredicates:
     @pytest.mark.parametrize(
-        ("value", "boolean", "integer"),
-        [
-            (True, True, False),
-            (0, False, True),
-            (1.5, False, False),
-            ("1", False, False),
-        ],
+        ("value", "integer"),
+        [(True, False), (0, True), (1.5, False), ("1", False)],
         ids=["bool", "int", "float", "str"],
     )
-    def test_a_bool_is_never_an_int(
-        self, value: object, *, boolean: bool, integer: bool
-    ) -> None:
-        assert is_bool(value) is boolean
+    def test_a_bool_is_never_an_int(self, value: object, *, integer: bool) -> None:
         assert is_int(value) is integer
 
 
@@ -197,3 +195,90 @@ class TestIsDynamicTrail:
         self, trail: str, *, expected: bool
     ) -> None:
         assert is_dynamic_trail(trail) is expected
+
+
+class TestTreeLabels:
+    """A page tree is named by its app, else its directory, and made unique."""
+
+    def test_a_repeated_label_takes_a_numeric_suffix(self) -> None:
+        assert unique_labels(["pages"] * 3) == ["pages", "pages-2", "pages-3"]
+
+    def test_a_suffix_never_takes_the_label_of_another_tree(self) -> None:
+        assert unique_labels(["blog", "blog", "blog-2"]) == ["blog", "blog-3", "blog-2"]
+        assert unique_labels(["blog-2", "blog", "blog"]) == ["blog-2", "blog", "blog-3"]
+
+    def test_every_tree_is_labelled_in_order(self, tmp_path: Path) -> None:
+        roots = [tmp_path / "a" / "pages", tmp_path / "b" / "Pages", tmp_path / "!"]
+        assert [tree_label(root) for root in roots] == ["pages", "pages", "root"]
+
+
+class _SourceError(Exception):
+    def __init__(self, path: Path) -> None:
+        super().__init__(f"{path} failed")
+        self.path = path
+
+
+class TestLoadTreeSource:
+    """A file at the top of a tree runs once, its failure kept on the source."""
+
+    def test_an_absent_file_answers_none(self, tmp_path) -> None:
+        assert load_tree_source(tmp_path / "x.py", "probe", _SourceError) is None
+
+    def test_a_module_that_runs_answers_itself_and_its_stamp(self, tmp_path) -> None:
+        path = tmp_path / "x.py"
+        path.write_text("value = 1\n")
+        source = load_tree_source(path, "probe", _SourceError)
+        assert source is not None
+        assert source.module is not None
+        assert source.module.value == 1
+        assert source.error is None
+        assert source.stamp == path.stat().st_mtime_ns
+
+    def test_a_failure_rides_the_source_with_its_cause(self, tmp_path, caplog) -> None:
+        path = tmp_path / "x.py"
+        path.write_text("raise RuntimeError('boom')\n")
+        source = load_tree_source(path, "probe", _SourceError)
+        assert source is not None
+        assert source.module is None
+        assert isinstance(source.error, _SourceError)
+        assert isinstance(source.error.__cause__, RuntimeError)
+        assert f"{path} failed to import" in caplog.text
+
+
+class TestExecModuleFile:
+    """A source file runs as a fresh module, its bytecode cache never older than it."""
+
+    def test_a_same_size_rewrite_within_one_second_runs_the_new_source(
+        self, tmp_path
+    ) -> None:
+        path = tmp_path / "x.py"
+        second = path.parent.stat().st_mtime_ns // 10**9 * 10**9
+        with patch.object(sys, "dont_write_bytecode", False):
+            for value, offset in ((1, 100), (2, 200)):
+                path.write_text(f"value = {value}\n")
+                os.utime(path, ns=(second + offset, second + offset))
+                module = exec_module_file(path, "probe")
+                assert module is not None
+                assert module.value == value
+
+    def test_a_suffix_without_a_loader_answers_none(self, tmp_path) -> None:
+        path = tmp_path / "x.unknown"
+        path.write_text("value = 1\n")
+        assert exec_module_file(path, "probe") is None
+
+
+class TestTreeSource:
+    """A source is stale once its file moves or goes."""
+
+    def test_an_unmoved_file_is_fresh(self, tmp_path) -> None:
+        path = tmp_path / "x.py"
+        path.write_text("")
+        source = TreeSource[Exception](path, stamp=path.stat().st_mtime_ns)
+        assert not source.stale()
+
+    def test_a_removed_file_is_stale(self, tmp_path) -> None:
+        path = tmp_path / "x.py"
+        path.write_text("")
+        source = TreeSource[Exception](path, stamp=path.stat().st_mtime_ns)
+        path.unlink()
+        assert source.stale()

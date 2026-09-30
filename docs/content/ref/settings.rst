@@ -21,7 +21,8 @@ A plural ``*_BACKENDS`` key holds an ordered list of sources the manager consult
 Partial rendering uses a single protocol backend, so only the first entry runs.
 A singular ``*_BACKEND`` key holds the one engine for a concern.
 A subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``, ``URL_``, ``TEMPLATE_``, ``JS_``, ``PARTIAL_``) groups related keys.
-``NEXT_JS_OPTIONS`` stands outside the prefix scheme and configures the bundled client runtime, and ``METADATA`` stands outside it as the page metadata scope.
+``NEXT_JS_OPTIONS`` stands outside the prefix scheme and configures the bundled client runtime.
+``METADATA``, ``SITE``, ``SEO``, and ``CONSENT`` stand outside it as the scopes of one concern each, and ``CSRF_DELIVERY`` and ``CSP_NONCE`` as single values.
 
 .. _ref-settings-merge:
 
@@ -37,6 +38,8 @@ The rule holds for every key, with no per-key exception.
 This is what Django does with its own configuration mappings.
 Defining :doc:`STORAGES <django:ref/settings>` overrides the default configuration rather than merging with it, and ``TEMPLATES``, ``DATABASES``, and ``CACHES`` each read the whole list or mapping the project wrote.
 Filling in what a single entry leaves out belongs to the code that consumes the entry, the same place Django fills a ``DATABASES`` alias with ``ATOMIC_REQUESTS`` or a ``TEMPLATES`` entry with ``APP_DIRS``.
+The scopes ``METADATA``, ``SITE``, ``SEO``, and ``CONSENT`` are such consumers, since every read goes through ``next.conf.scopes.scope_value``, which answers the default of a sub-key the project leaves out, see :doc:`conf`.
+A nested ``OPTIONS`` inside a scope still comes from the project alone once the project sets it.
 
 A single backend dict follows the rule like any other key.
 ``FORM_WIZARD_BACKEND`` set to ``{"OPTIONS": {...}}`` alone carries no ``BACKEND``, which ``manage.py check`` reports as ``next.E069`` and the wizard manager answers with :exc:`~django.core.exceptions.ImproperlyConfigured` on first use.
@@ -45,11 +48,12 @@ Write the whole entry, ``BACKEND`` included.
 Each key accepts one shape, and a value of any other type is dropped in favour of the default rather than merged into it.
 
 - The list keys (``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``PARTIAL_BACKENDS``, ``TEMPLATE_LOADERS``, ``FORM_ANCHOR_FILES``) accept a list.
-- The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``, ``METADATA``) accept a dict.
+- The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``, ``METADATA``, ``SITE``, ``SEO``, ``CONSENT``) accept a dict.
 - The dotted-path keys (``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string naming an importable class, and ``JS_CONTEXT_SERIALIZER`` accepts such a dotted path or ``None``.
+- ``CSRF_DELIVERY`` accepts a string naming a mode.
 - ``STATIC_VERSION`` accepts a string or ``None``.
 - ``URL_NAME_TEMPLATE`` also accepts a string, but a format template such as ``page_{name}`` rather than a dotted path.
-- The bool flags (``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``) accept any value and pass through ``bool()``.
+- The bool flags (``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, ``CSP_NONCE``) accept any value and pass through ``bool()``.
 
 A dropped value is reported at ``manage.py check`` as ``next.E076``, or under the code the key owns where it carries one, and a bool flag holding a non-bool is reported as ``next.W072``.
 A top-level key that is not in this catalog is reported as ``next.E035``, and the merged view raises ``AttributeError`` for it, so a typo never reaches a read site as a default.
@@ -477,17 +481,41 @@ The key is also the deploy stamp the partial asset version derives from, so one 
 A project that wants the two to differ pins ``VERSION`` in its ``PARTIAL_BACKENDS`` entry, which wins over this key, and a project that names neither while running no manifest earns ``next.W083`` on ``manage.py check --deploy``.
 See :doc:`/content/deployment/static-files` for the trade-off, :doc:`/content/topics/partial-rendering/reference` for the ``VERSION`` option, and :doc:`/content/topics/static-assets/template-tags` for the per-URL ``version`` argument of ``{% asset %}``.
 
-Metadata
---------
+Site and SEO
+------------
+
+SITE
+~~~~
+
+Dict naming the public origin of the site, its name, and whether search engines may index it.
+
+Default value ``{"URL": None, "NAME": None, "INDEXABLE": "auto"}``.
+
+``URL`` is an ``http`` or ``https`` origin with no path, a callable taking the request, or the dotted path of one, and every absolute URL of the head, the sitemap, and the robots file is built on it, the ``Site`` row of ``django.contrib.sites`` and then the request host standing in without it.
+A callable's answer is validated like a literal, so one that is no origin falls through to the same fallbacks.
+``NAME`` seeds the ``site_name`` metadata key when ``DEFAULTS`` sets none.
+``INDEXABLE`` is ``"auto"``, which follows ``not DEBUG``, a bool, or a callable taking the request or ``None``, and every robots meta, ``X-Robots-Tag``, sitemap, and robots file follows its answer.
+Under ``"auto"`` with ``DEBUG`` on, the sitemap and the robots file are still served under ``X-Robots-Tag: noindex, nofollow``.
+A value the scope cannot use is ``next.E129``, and ``manage.py check --deploy`` warns with ``next.W119`` about a missing ``URL`` unless ``SITE_ID`` pins a row, with ``next.W132`` when ``ALLOWED_HOSTS`` also holds ``"*"``, and with ``next.W120`` about ``INDEXABLE`` set to ``False`` on a site that still publishes a sitemap or a robots source.
+See :doc:`/content/topics/seo/site`.
 
 METADATA
 ~~~~~~~~
 
 Dict holding the page metadata scope, the site-wide defaults of the metadata chain and the options beside them.
 
-Default value ``{"RENDERER": "next.pages.HtmlMetadataRenderer"}``.
+Default value.
 
-The scope takes five upper-case options, and any other key is reported as ``next.E035``.
+.. code-block:: python
+
+   {
+       "RENDERER": "next.pages.HtmlMetadataRenderer",
+       "DEFAULTS": {},
+       "CANONICAL_QUERY": [],
+   }
+
+A key the project leaves out of its ``METADATA`` reads the default above, so a scope naming only ``DEFAULTS`` keeps the other two.
+The scope takes three upper-case options, and any other key is reported as ``next.E035``.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -495,52 +523,101 @@ The scope takes five upper-case options, and any other key is reported as ``next
    from django.utils.translation import gettext_lazy as _
 
    NEXT_FRAMEWORK = {
+       "SITE": {"URL": "https://notes.example", "NAME": _("Notes")},
        "METADATA": {
            "DEFAULTS": {
-               "base": "https://notes.example",
-               "site_name": _("Notes"),
                "title": {"template": _("{title} · {site_name}"), "default": _("Notes")},
                "description": _("A notebook that lives in the browser."),
-               "robots": {"index": True, "follow": True},
                "og": {"type": "website"},
                "twitter": {"card": "summary_large_image", "site": "@notes"},
+               "jsonld": [{"@type": "Organization", "@id": "#org", "name": "Notes", "url": "https://notes.example/"}],
            },
-           "NOINDEX": False,
            "CANONICAL_QUERY": ("page",),
-           "CHECKS": {"TITLE_MAX": 60, "DESCRIPTION_MAX": 160, "REQUIRE_DESCRIPTION": True},
            "RENDERER": "next.pages.HtmlMetadataRenderer",
        },
    }
 
-``DEFAULTS`` is the outermost segment of every page's metadata chain and takes the same lower-case keys a ``metadata`` dict in a ``page.py`` takes, with one difference.
+``DEFAULTS`` is the outermost segment of every page's metadata chain and takes the lower-case keys a ``metadata`` dict in a ``page.py`` takes, less ``breadcrumb``.
 Its ``title`` is the ``{"template": ..., "default": ...}`` form alone, because the settings tier has no page of its own to title, and its template therefore applies to every page, the root included.
-The value is normalised once per settings reload, a key or a value the schema refuses is reported as ``next.E098``, and a template without a default, a ``base`` that is not an origin, and an empty title draw ``next.E100``, ``next.E101``, and ``next.E105`` here as they do on a page.
-See :doc:`/content/topics/seo/metadata` for the merge order and the title template.
+The value is normalised once per settings reload, a key or a value the schema refuses is reported as ``next.E098``, a template without a default and an empty title draw ``next.E100`` and ``next.E105`` as they do on a page, and a ``Replace`` or ``RESET`` there is a no-op that ``next.W109`` reports.
+See :doc:`/content/topics/seo/metadata` for the declaration forms and :doc:`/content/topics/seo/merge` for the merge.
 
-``NOINDEX`` set to ``True`` keeps the whole deployment out of the index, for a staging host a crawler must not index.
-Every page renders ``noindex, nofollow`` in place of its robots directives, and the sitemap and the checks read every page as ``noindex`` through ``page_noindex`` of ``next.pages.metadata``.
-``Metadata.noindex`` itself reads the robots directives of the fold alone, so a folded value answers the same with the switch on or off.
-The sitemap routes are not built, and the sitemap view answers 404, the ``next.seo.urls`` mount at the host root included.
-A generated robots leaves its ``Sitemap:`` line out, and a static ``robots.txt`` is served as written.
-The system checks read the same switch, so ``next.W101`` treats every page as ``noindex``, ``next.W088`` fires for any cross-origin canonical, and ``next.W098``, ``next.W100``, and ``next.W103``, which concern a served sitemap, stay silent.
-It passes through ``bool()`` and defaults to ``False``.
-
-``CANONICAL_QUERY`` is the tuple of query parameter names a self canonical keeps, in the order the tuple lists them.
+``CANONICAL_QUERY`` is the list or tuple of query parameter names a self canonical keeps, in the order it lists them.
 Every other parameter is dropped from the canonical URL, and a ``page=1`` pair is dropped even when ``page`` is listed.
-It defaults to the empty tuple, so a self canonical carries no query at all until the project names the parameters that change the content.
+It defaults to an empty list.
 
-``CHECKS`` holds the thresholds of the four audits, ``next.W089`` to ``next.W096``, that run under ``manage.py check --deploy``.
-``TITLE_MAX`` defaults to 60 and ``DESCRIPTION_MAX`` to 160 characters, and ``REQUIRE_DESCRIPTION`` defaults to ``True``.
-A threshold holding anything but an integer falls back to its default, and ``REQUIRE_DESCRIPTION`` passes through ``bool()``.
-See :doc:`/content/topics/seo/auditing` for the audits and :doc:`system-checks` for the codes.
-
-``RENDERER`` is the dotted path to the class ``{% metadata %}`` renders the fold through.
-A custom value names a ``next.pages.MetadataRenderer`` subclass, whose ``render`` takes the folded ``Metadata`` and the request and answers the head markup, see :doc:`pages` for the contract.
-The key is read through ``next.backends.resolve_setting_class``, documented in :doc:`backends`, the same helper ``URL_RESOLVER`` goes through, and a ``METADATA`` written without the key keeps the default.
-A path that fails to import, or one that names anything other than a ``MetadataRenderer`` subclass, raises :exc:`~django.core.exceptions.ImproperlyConfigured` on the first render of ``{% metadata %}``.
+``RENDERER`` is the dotted path to the class ``{% metadata %}`` renders through.
+A custom value names a ``next.pages.MetadataRenderer`` subclass, whose ``render`` takes the ``ResolvedMetadata`` of one response and answers the head markup, see :doc:`metadata` for the contract.
+The key is read through ``next.backends.resolve_setting_class``, documented in :doc:`backends`, and a path that fails to import or names anything else raises :exc:`~django.core.exceptions.ImproperlyConfigured` on the first render of ``{% metadata %}``.
 The renderer is built once and built again on ``settings_reloaded``.
 
 A ``METADATA`` value that is not a dict is dropped in favour of the default and reported as ``next.E076``.
+
+SEO
+~~~
+
+Dict holding the sitemap backends.
+
+Default value ``{"SITEMAP_BACKENDS": [{"BACKEND": "next.seo.PageTreeSitemapBackend", "OPTIONS": {}}]}``.
+
+``SITEMAP_BACKENDS`` lists the sources of sitemap sections in merge order, each an entry of ``BACKEND`` naming a ``next.seo.SitemapBackend`` subclass and ``OPTIONS``.
+A backend that does not import, an entry that is no mapping, and a list that is no list are ``next.E120``, and an unknown key of the scope is ``next.E035``.
+See :doc:`/content/topics/seo/sitemap-sections`.
+
+CSRF_DELIVERY
+~~~~~~~~~~~~~
+
+String naming where a rendered page puts its CSRF token.
+
+Default value ``"auto"``.
+
+``"eager"`` embeds the token in every form and init payload, ``"lazy"`` never does and lets the runtime fetch it from ``/_next/csrf/``, and ``"auto"`` is lazy on a page whose ``cache`` lets a shared cache keep it and eager everywhere else.
+A value outside the three reads as ``"auto"`` and is ``next.E132``.
+See :doc:`/content/security/csrf-and-forms`.
+
+CSP and consent
+---------------
+
+CSP_NONCE
+~~~~~~~~~
+
+Boolean that controls whether every tag the framework writes carries the CSP nonce of the request.
+
+Default value ``True``.
+
+The nonce is the one django-csp or Django's own CSP middleware minted, read without a setting of its own, see :doc:`/content/security/csp-and-nonce`.
+A render that reads a nonce goes out private, so ``manage.py check`` warns with ``next.W130`` while a nonce is active beside a page a shared cache may keep, and ``False`` suits a site that allows its scripts by hash or by source.
+A value that is no bool passes through ``bool()`` and is reported as ``next.W072``.
+
+CONSENT
+~~~~~~~
+
+Dict holding the consent categories, the backend that reads the visitor's choice, and where gated content renders.
+
+Default value.
+
+.. code-block:: python
+
+   {
+       "BACKEND": "next.consent.CookieConsentBackend",
+       "CATEGORIES": ["necessary"],
+       "SERVER_RENDER": "auto",
+       "OPTIONS": {
+           "cookie_name": "next_consent",
+           "max_age": 15552000,
+           "samesite": "Lax",
+           "secure": None,
+           "domain": None,
+           "path": "/",
+       },
+   }
+
+The presence of the key switches consent on.
+A project that sets ``CONSENT``, even to an empty dict, gives every page its consent state, so the banner works on pages without a gated script, and a project that leaves it out has no consent at all.
+``BACKEND`` names a ``next.consent.ConsentBackend`` subclass, ``CATEGORIES`` the categories the project declares with ``necessary`` always among them, and ``SERVER_RENDER`` is ``"auto"``, ``True``, or ``False``.
+``OPTIONS`` belongs to the backend, and the cookie backend reads the cookie name, lifetime, ``SameSite``, domain, path, and ``secure`` flag from it.
+``next.E135`` reports a category list without ``necessary``, ``next.E146`` a category name the cookie cannot carry, ``next.E137`` an unusable backend, ``next.E145`` an unknown render mode, ``next.W129`` an insecure consent cookie beside a secure session cookie, and ``next.W133`` a ``{% #consented %}`` block on a project without ``CONSENT``.
+See :doc:`/content/topics/scripts/consent`.
 
 Patching defaults
 -----------------
@@ -583,5 +660,6 @@ See also
    :doc:`/content/topics/extending` for the broader picture.
    :doc:`/content/deployment/settings` for production tuned values.
    :doc:`/content/topics/static-assets/js-context` for ``NEXT_JS_OPTIONS``.
-   :doc:`/content/topics/seo/metadata` for ``METADATA``.
-   :class:`next.static.scripts.ScriptInjectionPolicy` for the policy enum.
+   :doc:`/content/topics/seo/metadata` for ``METADATA`` and :doc:`/content/topics/seo/site` for ``SITE``.
+   :doc:`/content/topics/scripts/index` for ``CONSENT`` and :doc:`/content/security/csp-and-nonce` for ``CSP_NONCE``.
+   :class:`next.static.runtime.ScriptInjectionPolicy` for the policy enum.

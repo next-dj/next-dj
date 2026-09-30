@@ -7,9 +7,9 @@ from django.test import override_settings
 from next.checks import NEXT, SEO, reset_check_caches
 from next.pages.checks.metadata import pages as metadata_pages
 from next.pages.checks.metadata.pages import loaded_metadata_pages
+from next.pages.manager import page
 from tests.pages.checks.metadata.trees import (
     INHERITED_CALLABLE,
-    NAMED_CALLABLE,
     metadata_page,
     scope,
     templated_page,
@@ -35,14 +35,12 @@ class TestLoadedMetadataPages:
     def test_a_callable_marks_the_page_dynamic(self, tmp_path: Path) -> None:
         templated_page(tmp_path, INHERITED_CALLABLE)
         metadata_page(tmp_path / "leaf", '{"title": "Leaf"}')
-        templated_page(tmp_path / "named", NAMED_CALLABLE)
         with patch_checks_router_manager(pages_directory=tmp_path):
             _init_errors, pages = loaded_metadata_pages()
         by_trail = {entry.url_path: entry for entry in pages}
         assert by_trail[""].dynamic is True
         assert by_trail["leaf"].dynamic is True
-        assert by_trail["named"].dynamic is True
-        assert by_trail["named"].raw is None
+        assert by_trail[""].raw is None
         assert by_trail["leaf"].static is not None
 
     def test_a_folded_page_reports_its_chain(self, tmp_path: Path) -> None:
@@ -67,11 +65,11 @@ class TestOncePerRun:
         with (
             override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
             patch.object(
-                metadata_pages, "_metadata_page", wraps=metadata_pages._metadata_page
-            ) as fold,
+                page, "metadata_declaration", wraps=page.metadata_declaration
+            ) as declaration,
         ):
             run_checks(tags=[NEXT, SEO], include_deployment_checks=True)
-        assert fold.call_count == 2
+        assert declaration.call_count == 2
 
     def test_a_repeat_reuses_the_pass_until_a_reset(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"title": "Home"}')

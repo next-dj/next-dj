@@ -299,7 +299,7 @@ Two consequences flow from this.
 - Re-render after a validation failure is cheap because layouts and context functions reuse the values cached during the initial bind.
 
 The cache hangs on ``request`` under the attribute named ``REQUEST_DEP_CACHE_ATTR``.
-Read it through ``next.deps.get_request_dep_cache(request)`` rather than the raw attribute.
+Read it through ``next.deps.render_dep_cache(request)`` rather than the raw attribute.
 
 The origin-page re-render also reuses the compiled page template.
 The page manager caches the composed template source and its compiled ``Template`` keyed by source mtime, so a warm re-render performs no file reads and no template parsing.

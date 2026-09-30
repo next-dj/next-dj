@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import posixpath
+from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 from urllib.parse import urlsplit
 
@@ -28,7 +29,6 @@ from .signals import asset_registered
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from pathlib import Path
 
     from next.components import ComponentInfo
 

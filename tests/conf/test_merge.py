@@ -49,9 +49,11 @@ class TestAcceptedValue:
             pytest.param("URL_RESOLVER", "myapp.Resolver", id="str"),
             pytest.param("PAGE_BACKENDS", [{"BACKEND": "myapp.Router"}], id="list"),
             pytest.param("NEXT_JS_OPTIONS", {"policy": "disabled"}, id="dict"),
-            pytest.param("METADATA", {"NOINDEX": True}, id="metadata_dict"),
+            pytest.param("METADATA", {"CANONICAL_QUERY": ["page"]}, id="metadata_dict"),
+            pytest.param("SITE", {"URL": "https://acme.example"}, id="site_dict"),
             pytest.param("JS_CONTEXT_SERIALIZER", "myapp.dumps", id="optional_str"),
             pytest.param("JS_CONTEXT_SERIALIZER", None, id="optional_none"),
+            pytest.param("CSP_NONCE", False, id="nonce_off"),
         ],
     )
     def test_usable_value_is_taken(self, key: str, raw: object) -> None:
@@ -64,6 +66,7 @@ class TestAcceptedValue:
             pytest.param("PAGE_BACKENDS", "myapp.Router", id="list"),
             pytest.param("NEXT_JS_OPTIONS", [], id="dict"),
             pytest.param("METADATA", [], id="metadata_list"),
+            pytest.param("SITE", "https://acme.example", id="site_str"),
             pytest.param("JS_CONTEXT_SERIALIZER", 42, id="optional_str"),
         ],
     )

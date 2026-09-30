@@ -1,35 +1,33 @@
-"""The head markup of a folded `Metadata`, one tag per line in a fixed order."""
+"""The head markup of a `ResolvedMetadata`, one tag per line in section order.
+
+A renderer sees no request, so every policy is settled before it runs.
+"""
 
 import functools
 import json
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
-from datetime import datetime
-from typing import Final, cast, override
-from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
+from collections.abc import Iterable, Mapping
+from itertools import chain
+from typing import ClassVar, Final, override
 
-from django.conf import settings
-from django.conf.urls.i18n import is_language_prefix_patterns_used
 from django.core.serializers.json import DjangoJSONEncoder
-from django.core.signals import setting_changed
-from django.http import HttpRequest
-from django.urls import get_script_prefix, get_urlconf, translate_url
-from django.utils.html import format_html
+from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString
-from django.utils.translation import get_language, to_locale
 
 from next.backends import resolve_setting_class
-from next.caches import LruCache
 from next.conf.signals import settings_reloaded
-from next.pages.errors import (
-    PageMetadataRequestError,
-    PageMetadataShapeError,
-    PageMetadataURLError,
-)
-from next.utils import WEB_SCHEMES
 
-from .schema import Alternates, Article, Metadata, OpenGraph, Robots, Text, Twitter
-from .scope import metadata_options
+from .markers import (
+    Article,
+    Book,
+    OpenGraph,
+    OpenGraphAudio,
+    OpenGraphImage,
+    OpenGraphVideo,
+    Profile,
+    ResolvedMetadata,
+)
+from .resolve import CONTEXT
 
 
 _TITLE: Final = "<title>{}</title>"
@@ -37,321 +35,284 @@ _NAMED: Final = '<meta name="{}" content="{}">'
 _PROPERTY: Final = '<meta property="{}" content="{}">'
 _CANONICAL: Final = '<link rel="canonical" href="{}">'
 _ALTERNATE: Final = '<link rel="alternate" hreflang="{}" href="{}">'
+_LINK: Final = "<link{}>"
+_META: Final = "<meta{}>"
+_ATTR: Final = ' {}="{}"'
 _JSONLD: Final = '<script type="application/ld+json">{}</script>'
 _JSONLD_ESCAPES: Final = {ord("<"): "\\u003C", ord(">"): "\\u003E", ord("&"): "\\u0026"}
-_PAGE_ONE: Final = ("page", "1")
-_NOINDEX: Final = "noindex, nofollow"
-_ROBOTS_BOOLEANS: Final = ("noarchive", "nosnippet", "noimageindex", "notranslate")
-_ROBOTS_LIMITS: Final = (
-    ("unavailable_after", "unavailable_after: "),
-    ("max_snippet", "max-snippet:"),
-    ("max_image_preview", "max-image-preview:"),
-    ("max_video_preview", "max-video-preview:"),
-)
-_VERIFICATION: Final = (
-    ("google", "google-site-verification"),
-    ("yandex", "yandex-verification"),
-    ("bing", "msvalidate.01"),
-)
-_URLCONF_SETTINGS: Final = frozenset({"ROOT_URLCONF", "LANGUAGES"})
-_CANONICAL_SELF: Final = "canonical"
-_ALTERNATES_SELF: Final = "alternates"
-_METADATA_SOURCE: Final = "metadata"
+_SCHEMA: Final = "https://schema.org"
+_IMAGE_DETAILS: Final = ("secure_url", "type", "width", "height", "alt")
+_VIDEO_DETAILS: Final = ("secure_url", "type", "width", "height")
+_AUDIO_DETAILS: Final = ("secure_url", "type")
+_PROFILE: Final = ("first_name", "last_name", "username", "gender")
+_ICON_DETAILS: Final = ("type", "sizes", "media", "color")
 
-_translated: Final[LruCache[tuple[str, str, str, str], str]] = LruCache()
+type Lines = Iterable[SafeString]
+type Pairs = Iterable[tuple[str, object]]
+type _Media = OpenGraphImage | OpenGraphVideo | OpenGraphAudio
+type _MediaGroup = tuple[str, tuple[_Media, ...], tuple[str, ...]]
 
 
-def absolute_url(url: str, *, base: str | None, request: HttpRequest | None) -> str:
-    """Return `url` absolute, against `base` first and the request host second.
-
-    A protocol-relative URL keeps its own host and takes only the scheme.
-    """
-    parts = urlsplit(url)
-    if parts.scheme in WEB_SCHEMES:
-        return url
-    if parts.scheme:
-        detail = f"carries the URL {url!r} with a scheme outside http and https"
-        raise PageMetadataShapeError(_METADATA_SOURCE, detail)
-    if parts.netloc:
-        return f"{_scheme(base, request, url)}:{url}"
-    if not url.startswith("/"):
-        if request is None:
-            raise PageMetadataURLError(url)
-        url = urljoin(request.path, url)
-    if base is not None:
-        return base.rstrip("/") + url
-    if request is None:
-        raise PageMetadataURLError(url)
-    return request.build_absolute_uri(url)
+def _tag(template: str, pairs: Pairs) -> SafeString:
+    """Render one void tag of the attribute pairs, a `None` value left out."""
+    attrs = ((name, value) for name, value in pairs if value is not None)
+    return format_html(template, format_html_join("", _ATTR, attrs))
 
 
-def _scheme(base: str | None, request: HttpRequest | None, url: str) -> str:
-    """Return the scheme of `base`, else of the request, for a protocol-relative URL."""
-    if base is not None:
-        return urlsplit(base).scheme
-    if request is None:
-        raise PageMetadataURLError(url)
-    return request.scheme or "https"
-
-
-def _self_path(request: HttpRequest) -> str:
-    """Return the request path with the allowlisted query, the self canonical."""
-    query = request.GET
-    pairs = [
-        (key, value)
-        for key in metadata_options().canonical_query
-        for value in query.getlist(key)
-        if (key, value) != _PAGE_ONE
+def _properties(prefix: str, value: object, names: Iterable[str]) -> list[SafeString]:
+    """Render the set `names` of a block as `prefix:name` properties."""
+    return [
+        format_html(_PROPERTY, f"{prefix}:{name}", detail)
+        for name in names
+        if (detail := getattr(value, name)) is not None
     ]
-    if not pairs:
-        return request.path
-    return f"{request.path}?{urlencode(pairs)}"
-
-
-def _canonical_path(meta: Metadata, request: HttpRequest | None) -> str | None:
-    """Return the canonical as declared, `True` read as the self path."""
-    canonical = meta.canonical
-    if canonical is None or canonical is False:
-        return None
-    if canonical is True:
-        if request is None:
-            raise PageMetadataRequestError(_CANONICAL_SELF)
-        return _self_path(request)
-    return canonical
-
-
-def _translated_url(path: str, code: str, *, urlconf: str, prefix: str) -> str:
-    """Return `path` under the language `code`, memoised per URLconf and prefix.
-
-    A path outside the script prefix, or one no route answers, comes back as given.
-    """
-    key = (urlconf, prefix, path, code)
-    url = _translated.get(key)
-    if url is None:
-        url = path
-        parts = urlsplit(path)
-        if parts.path.startswith(prefix):
-            local = urlunsplit(parts._replace(path=parts.path[len(prefix) - 1 :]))
-            translated = translate_url(local, code)
-            if translated != local:
-                url = translated
-        _translated[key] = url
-    return url
-
-
-def forget_translated_urls(**kwargs) -> None:
-    """Drop the hreflang memo, which a URLconf or language change invalidates."""
-    _translated.clear()
-
-
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
-    if setting in _URLCONF_SETTINGS:
-        _translated.clear()
-
-
-settings_reloaded.connect(forget_translated_urls)
-setting_changed.connect(_on_setting_changed)
-
-
-def _alternate_links(
-    meta: Metadata, request: HttpRequest | None
-) -> list[tuple[str, str]]:
-    """Return the hreflang pairs, from the mapping or the localised URLconf."""
-    alternates = cast("Alternates", meta.alternates)
-    languages = alternates.languages
-    x_default = alternates.x_default
-    if isinstance(languages, Mapping):
-        links = list(languages.items())
-    elif languages is True:
-        urlconf = get_urlconf() or str(getattr(settings, "ROOT_URLCONF", ""))
-        used, _prefixed = is_language_prefix_patterns_used(urlconf)
-        if not used:
-            return []
-        path = _canonical_path(meta, request)
-        if path is None:
-            if request is None:
-                raise PageMetadataRequestError(_ALTERNATES_SELF)
-            path = _self_path(request)
-        prefix = get_script_prefix()
-        links = [
-            (code, _translated_url(path, code, urlconf=urlconf, prefix=prefix))
-            for code, _ in settings.LANGUAGES
-        ]
-        if x_default is None:
-            x_default = _translated_url(
-                path, settings.LANGUAGE_CODE, urlconf=urlconf, prefix=prefix
-            )
-    else:
-        return []
-    if x_default is not None:
-        links.append(("x-default", x_default))
-    return links
-
-
-def _robots_value(robots: Robots | str) -> str:
-    """Fold the directives to the comma-joined content of a robots meta."""
-    if isinstance(robots, str):
-        return robots
-    parts: list[str] = []
-    if robots.index is not None:
-        parts.append("index" if robots.index else "noindex")
-    if robots.follow is not None:
-        parts.append("follow" if robots.follow else "nofollow")
-    parts.extend(flag for flag in _ROBOTS_BOOLEANS if getattr(robots, flag))
-    for name, label in _ROBOTS_LIMITS:
-        limit = getattr(robots, name)
-        if limit is not None:
-            parts.append(f"{label}{limit}")
-    return ", ".join(parts)
-
-
-def _time(value: datetime | str) -> str:
-    return value.isoformat() if isinstance(value, datetime) else value
-
-
-def _first(value: Text | None, fallback: Text | None) -> Text | None:
-    return fallback if value is None else value
 
 
 class MetadataRenderer(ABC):
-    """The contract a renderer of a folded `Metadata` fulfils."""
+    """The contract a renderer of one `ResolvedMetadata` fulfils."""
 
     @abstractmethod
-    def render(self, meta: Metadata, *, request: HttpRequest | None) -> SafeString:
-        """Return the markup of `meta` for the head of one response."""
+    def render(self, resolved: ResolvedMetadata) -> SafeString:
+        """Return the markup of `resolved` for the head of one response."""
 
 
 class HtmlMetadataRenderer(MetadataRenderer):
-    """Render the head tags, every value escaped and every URL made absolute."""
+    """Render the head tags section by section, every value escaped.
+
+    A subclass reorders or extends `sections` and overrides the `render_*` hooks.
+    """
+
+    sections: ClassVar[tuple[str, ...]] = (
+        "title",
+        "viewport",
+        "theme_color",
+        "color_scheme",
+        "description",
+        "keywords",
+        "robots",
+        "canonical",
+        "alternates",
+        "feeds",
+        "icons",
+        "manifest",
+        "links",
+        "verification",
+        "other",
+        "og",
+        "properties",
+        "twitter",
+        "jsonld",
+    )
 
     @override
-    def render(self, meta: Metadata, *, request: HttpRequest | None) -> SafeString:
-        """Return the head lines of `meta` joined by newlines, empty for nothing."""
-        lines: list[SafeString] = []
-        if meta.title is not None:
-            lines.append(format_html(_TITLE, meta.title))
-        if meta.description is not None:
-            lines.append(format_html(_NAMED, "description", meta.description))
-        lines.extend(self._robots(meta))
-        canonical = self._canonical(meta, request)
-        if canonical is not None:
-            lines.append(format_html(_CANONICAL, canonical))
-        lines.extend(self._alternates(meta, request))
-        lines.extend(self._verification(meta))
-        lines.extend(format_html(_NAMED, name, value) for name, value in meta.other)
-        if meta.og is not None:
-            lines.extend(self._open_graph(meta, canonical, request))
-        if meta.twitter is not None:
-            lines.extend(self._twitter(meta, request))
-        lines.extend(self._jsonld(obj) for obj in meta.jsonld)
-        return SafeString("\n".join(lines))
+    def render(self, resolved: ResolvedMetadata) -> SafeString:
+        """Return the lines of every section joined by newlines, empty for nothing."""
+        hooks = (getattr(self, f"render_{name}") for name in self.sections)
+        return SafeString("\n".join(chain.from_iterable(h(resolved) for h in hooks)))
 
-    def _robots(self, meta: Metadata) -> list[SafeString]:
-        if metadata_options().noindex:
-            return [format_html(_NAMED, "robots", _NOINDEX)]
-        robots = meta.robots
-        if robots is None:
-            return []
-        lines: list[SafeString] = []
-        value = _robots_value(robots)
-        if value:
-            lines.append(format_html(_NAMED, "robots", value))
-        googlebot = robots.googlebot if isinstance(robots, Robots) else None
-        if googlebot is not None:
-            value = _robots_value(googlebot)
-            if value:
-                lines.append(format_html(_NAMED, "googlebot", value))
-        return lines
+    def render_title(self, resolved: ResolvedMetadata) -> Lines:
+        """Render the `<title>`."""
+        if resolved.title is None:
+            return ()
+        return (format_html(_TITLE, resolved.title),)
 
-    def _canonical(self, meta: Metadata, request: HttpRequest | None) -> str | None:
-        path = _canonical_path(meta, request)
-        if path is None:
-            return None
-        return absolute_url(path, base=meta.base, request=request)
+    def render_viewport(self, resolved: ResolvedMetadata) -> Lines:
+        """Render the viewport meta."""
+        if resolved.viewport is None:
+            return ()
+        return (format_html(_NAMED, "viewport", resolved.viewport),)
 
-    def _alternates(
-        self, meta: Metadata, request: HttpRequest | None
-    ) -> list[SafeString]:
-        if meta.alternates is None:
-            return []
+    def render_theme_color(self, resolved: ResolvedMetadata) -> Lines:
+        """Render one theme-color meta per color, with its media query."""
         return [
-            format_html(
-                _ALTERNATE, code, absolute_url(url, base=meta.base, request=request)
+            _tag(
+                _META,
+                (
+                    ("name", "theme-color"),
+                    ("content", color.color),
+                    ("media", color.media),
+                ),
             )
-            for code, url in _alternate_links(meta, request)
+            for color in resolved.theme_color
         ]
 
-    def _verification(self, meta: Metadata) -> list[SafeString]:
-        verification = meta.verification
-        if verification is None:
-            return []
+    def render_color_scheme(self, resolved: ResolvedMetadata) -> Lines:
+        """Render the color-scheme meta."""
+        if resolved.color_scheme is None:
+            return ()
+        return (format_html(_NAMED, "color-scheme", resolved.color_scheme),)
+
+    def render_description(self, resolved: ResolvedMetadata) -> Lines:
+        """Render the description meta."""
+        if resolved.description is None:
+            return ()
+        return (format_html(_NAMED, "description", resolved.description),)
+
+    def render_keywords(self, resolved: ResolvedMetadata) -> Lines:
+        """Render the keywords as one comma-joined meta."""
+        if not resolved.keywords:
+            return ()
+        joined = ", ".join(str(keyword) for keyword in resolved.keywords)
+        return (format_html(_NAMED, "keywords", joined),)
+
+    def render_robots(self, resolved: ResolvedMetadata) -> Lines:
+        """Render the robots and googlebot metas."""
+        pairs = (("robots", resolved.robots), ("googlebot", resolved.googlebot))
         return [
-            format_html(_NAMED, name, token)
-            for field, name in _VERIFICATION
-            for token in getattr(verification, field)
+            format_html(_NAMED, name, value)
+            for name, value in pairs
+            if value is not None
         ]
 
-    def _open_graph(
-        self, meta: Metadata, canonical: str | None, request: HttpRequest | None
-    ) -> list[SafeString]:
-        og = cast("OpenGraph", meta.og)
-        base = meta.base
-        language = get_language()
-        locale = og.locale
-        if locale is None and language is not None:
-            locale = to_locale(language)
-        url = canonical
-        if og.url is not None:
-            url = absolute_url(og.url, base=base, request=request)
-        derived = (
-            ("og:title", _first(og.title, meta.title)),
-            ("og:description", _first(og.description, meta.description)),
-            ("og:url", url),
+    def render_canonical(self, resolved: ResolvedMetadata) -> Lines:
+        """Render the canonical link."""
+        if resolved.canonical is None:
+            return ()
+        return (format_html(_CANONICAL, resolved.canonical),)
+
+    def render_alternates(self, resolved: ResolvedMetadata) -> Lines:
+        """Render one hreflang link per alternate, x-default last."""
+        return [format_html(_ALTERNATE, code, url) for code, url in resolved.alternates]
+
+    def render_feeds(self, resolved: ResolvedMetadata) -> Lines:
+        """Render one alternate link per feed."""
+        return [
+            _tag(
+                _LINK,
+                (
+                    ("rel", "alternate"),
+                    ("type", feed.type),
+                    ("title", feed.title),
+                    ("href", feed.url),
+                ),
+            )
+            for feed in resolved.feeds
+        ]
+
+    def render_icons(self, resolved: ResolvedMetadata) -> Lines:
+        """Render one link per icon, icon then apple then the other rels."""
+        return [
+            _tag(
+                _LINK,
+                (
+                    ("rel", icon.rel),
+                    ("href", icon.url),
+                    *((name, getattr(icon, name)) for name in _ICON_DETAILS),
+                ),
+            )
+            for icon in resolved.icons
+        ]
+
+    def render_manifest(self, resolved: ResolvedMetadata) -> Lines:
+        """Render the web app manifest link."""
+        if resolved.manifest is None:
+            return ()
+        return (_tag(_LINK, (("rel", "manifest"), ("href", resolved.manifest))),)
+
+    def render_links(self, resolved: ResolvedMetadata) -> Lines:
+        """Render the free-form links, their attributes in declared order."""
+        return [
+            _tag(_LINK, (("rel", link.rel), ("href", link.href), *link.attrs))
+            for link in resolved.links
+        ]
+
+    def render_verification(self, resolved: ResolvedMetadata) -> Lines:
+        """Render one verification meta per token."""
+        return [
+            format_html(_NAMED, name, token) for name, token in resolved.verification
+        ]
+
+    def render_other(self, resolved: ResolvedMetadata) -> Lines:
+        """Render the free-form named metas."""
+        return [format_html(_NAMED, name, value) for name, value in resolved.other]
+
+    def render_og(self, resolved: ResolvedMetadata) -> Lines:
+        """Render the Open Graph properties, the media, and the typed objects."""
+        og = resolved.og
+        if og is None:
+            return ()
+        fields = (
+            ("og:title", og.title),
+            ("og:description", og.description),
+            ("og:url", og.url),
             ("og:type", og.type),
-            ("og:site_name", _first(og.site_name, meta.site_name)),
-            ("og:locale", locale),
+            ("og:site_name", og.site_name),
+            ("og:locale", og.locale),
         )
         lines = [
             format_html(_PROPERTY, name, value)
-            for name, value in derived
+            for name, value in fields
             if value is not None
         ]
-        for image in og.images:
-            if image.url is not None:
-                url = absolute_url(image.url, base=base, request=request)
-                lines.append(format_html(_PROPERTY, "og:image", url))
-            for name in ("width", "height", "alt"):
-                value = getattr(image, name)
-                if value is not None:
-                    lines.append(format_html(_PROPERTY, f"og:image:{name}", value))
+        alternates = og.locale_alternates
+        if not isinstance(alternates, bool):
+            lines.extend(
+                format_html(_PROPERTY, "og:locale:alternate", code)
+                for code in alternates
+            )
+        if og.determiner is not None:
+            lines.append(format_html(_PROPERTY, "og:determiner", og.determiner))
+        lines.extend(self._media(og))
         if og.article is not None:
             lines.extend(self._article(og.article))
+        if og.profile is not None:
+            lines.extend(self._profile(og.profile))
+        if og.book is not None:
+            lines.extend(self._book(og.book))
+        return lines
+
+    def _media(self, og: OpenGraph) -> list[SafeString]:
+        groups: tuple[_MediaGroup, ...] = (
+            ("og:image", og.images, _IMAGE_DETAILS),
+            ("og:video", og.videos, _VIDEO_DETAILS),
+            ("og:audio", og.audio, _AUDIO_DETAILS),
+        )
+        lines: list[SafeString] = []
+        for prefix, items, details in groups:
+            for item in items:
+                if item.url is not None:
+                    lines.append(format_html(_PROPERTY, prefix, item.url))
+                lines.extend(_properties(prefix, item, details))
         return lines
 
     def _article(self, article: Article) -> list[SafeString]:
-        lines: list[SafeString] = []
-        if article.published_time is not None:
-            time = _time(article.published_time)
-            lines.append(format_html(_PROPERTY, "article:published_time", time))
-        if article.modified_time is not None:
-            time = _time(article.modified_time)
-            lines.append(format_html(_PROPERTY, "article:modified_time", time))
+        lines = _properties("article", article, ("published_time", "modified_time"))
         lines.extend(
             format_html(_PROPERTY, "article:author", author)
             for author in article.authors
         )
-        if article.section is not None:
-            lines.append(format_html(_PROPERTY, "article:section", article.section))
+        lines.extend(_properties("article", article, ("section",)))
         lines.extend(format_html(_PROPERTY, "article:tag", tag) for tag in article.tags)
         return lines
 
-    def _twitter(self, meta: Metadata, request: HttpRequest | None) -> list[SafeString]:
-        twitter = cast("Twitter", meta.twitter)
-        base = meta.base
+    def _profile(self, profile: Profile) -> list[SafeString]:
+        return _properties("profile", profile, _PROFILE)
+
+    def _book(self, book: Book) -> list[SafeString]:
+        lines = [
+            format_html(_PROPERTY, "book:author", author) for author in book.authors
+        ]
+        lines.extend(_properties("book", book, ("isbn", "release_date")))
+        lines.extend(format_html(_PROPERTY, "book:tag", tag) for tag in book.tags)
+        return lines
+
+    def render_properties(self, resolved: ResolvedMetadata) -> Lines:
+        """Render the free-form `property` metas."""
+        return [
+            format_html(_PROPERTY, name, value) for name, value in resolved.properties
+        ]
+
+    def render_twitter(self, resolved: ResolvedMetadata) -> Lines:
+        """Render the Twitter card metas, each image with its alt text."""
+        twitter = resolved.twitter
+        if twitter is None:
+            return ()
         fields = (
             ("twitter:card", twitter.card),
             ("twitter:site", twitter.site),
+            ("twitter:site:id", twitter.site_id),
             ("twitter:creator", twitter.creator),
+            ("twitter:creator:id", twitter.creator_id),
             ("twitter:title", twitter.title),
             ("twitter:description", twitter.description),
         )
@@ -360,17 +321,38 @@ class HtmlMetadataRenderer(MetadataRenderer):
             for name, value in fields
             if value is not None
         ]
-        lines.extend(
-            format_html(
-                _NAMED, "twitter:image", absolute_url(url, base=base, request=request)
+        for image in twitter.images:
+            lines.append(format_html(_NAMED, "twitter:image", image.url))
+            if image.alt is not None:
+                lines.append(format_html(_NAMED, "twitter:image:alt", image.alt))
+        player = twitter.player
+        if player is not None:
+            details = (
+                ("twitter:player", player.url),
+                ("twitter:player:width", player.width),
+                ("twitter:player:height", player.height),
+                ("twitter:player:stream", player.stream),
             )
-            for url in twitter.images
-        )
+            lines.extend(
+                format_html(_NAMED, name, value)
+                for name, value in details
+                if value is not None
+            )
+        return lines
+
+    def render_jsonld(self, resolved: ResolvedMetadata) -> Lines:
+        """Render the graph as one JSON-LD script, a foreign context in its own.
+
+        Every script is closed against a `</script>` in a value.
+        """
+        graph = [node for node in resolved.jsonld if CONTEXT not in node]
+        lines = [self._jsonld({CONTEXT: _SCHEMA, "@graph": graph})] if graph else []
+        lines.extend(self._jsonld(node) for node in resolved.jsonld if CONTEXT in node)
         return lines
 
     def _jsonld(self, obj: Mapping[str, object]) -> SafeString:
-        text = json.dumps(obj, cls=DjangoJSONEncoder).translate(_JSONLD_ESCAPES)
-        return format_html(_JSONLD, SafeString(text))
+        text = json.dumps(obj, cls=DjangoJSONEncoder, allow_nan=False)
+        return format_html(_JSONLD, SafeString(text.translate(_JSONLD_ESCAPES)))
 
 
 def _configured_renderer_class() -> type[MetadataRenderer]:
@@ -390,23 +372,17 @@ def metadata_renderer() -> MetadataRenderer:
     return _configured_renderer_class()()
 
 
-def _forget_renderer(**kwargs) -> None:
+def forget_metadata_renderer(**kwargs) -> None:
+    """Drop the memoised renderer, so a settings reload takes effect."""
     metadata_renderer.cache_clear()
 
 
-settings_reloaded.connect(_forget_renderer)
-
-
-def render_metadata(meta: Metadata, *, request: HttpRequest | None) -> SafeString:
-    """Render `meta` through the renderer `NEXT_FRAMEWORK["METADATA"]` configures."""
-    return metadata_renderer().render(meta, request=request)
+settings_reloaded.connect(forget_metadata_renderer)
 
 
 __all__ = [
     "HtmlMetadataRenderer",
     "MetadataRenderer",
-    "absolute_url",
-    "forget_translated_urls",
+    "forget_metadata_renderer",
     "metadata_renderer",
-    "render_metadata",
 ]

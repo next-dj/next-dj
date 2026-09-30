@@ -4,8 +4,8 @@ Sitemaps
 ========
 
 A ``sitemap.py`` at the top of a page root switches ``/sitemap.xml`` on for that tree.
-Every static route is listed on its own, a dynamic route lists the URLs an ``@sitemap.items`` callable yields, and the XML comes from :doc:`django:ref/contrib/sitemaps`.
-This page covers the file convention, the two kinds of routes, the module attributes, the index, the origin every URL is made absolute on, caching, mounting the routes at the host root, and the checks that read the file.
+Every static route is listed on its own, a dynamic route lists the rows an ``@sitemap.items`` callable answers, and the XML comes from the templates of :doc:`django:ref/contrib/sitemaps`.
+This page covers the file, the two kinds of routes, lazy items, the module attributes, and languages, and :doc:`sitemap-sections` covers sections, backends, the origin, and caching.
 
 .. contents::
    :local:
@@ -16,78 +16,112 @@ The file convention
 
 A page root is every tree the routers report, an application's pages directory or an entry of ``DIRS``.
 The framework probes the top of each root for ``sitemap.py``, and a file there is what switches the feature on.
-Without one no sitemap route exists, so a ``path("sitemap.xml", ...)`` a project places after ``include("next.urls")`` keeps answering, and with one the routes join the lazy pattern sequence the include mounts, named ``next:sitemap`` and ``next:sitemap_section``.
-``NEXT_FRAMEWORK["METADATA"]["NOINDEX"]`` keeps the routes out even with the file in place, the switch a staging host sets, see :doc:`/content/ref/settings`.
+Without one no sitemap route exists, so a ``path("sitemap.xml", ...)`` placed after ``include("next.urls")`` keeps answering.
 
 .. code-block:: python
    :caption: notes/pages/sitemap.py
 
    changefreq = "weekly"
-   exclude = ["drafts/**"]
+   exclude = ["drafts/*"]
 
-It is executed like a ``page.py`` when the framework discovers the tree, and the module stays with the tree until the SEO routes reset on a router or settings reload.
-The development server watches the file and restarts on an edit, so a change lands with the restart.
-``next.W102`` reports a ``sitemap.py`` below the top of the tree, where nothing reads it.
+The file is executed once when the framework discovers the tree and kept until the SEO routes reset on a router or settings reload.
+While ``DEBUG`` is on an edit shows on the next request without a restart, since every SEO route first checks the files at the top of each page root.
+A file that fails to import is logged once, keeps its route, and answers 404, so no partial sitemap ships, and ``manage.py check`` reports the cause.
+``sitemap.py`` is read by the dependency resolver like a ``page.py``, so it keeps ``from __future__ import annotations`` out.
+A ``sitemap.py`` below the top of the tree is never read, and the checks say so.
 
-``django.contrib.sitemaps`` has to sit in ``INSTALLED_APPS`` with ``APP_DIRS`` on the Django template backend, because the XML is rendered from the ``sitemap.xml`` and ``sitemap_index.xml`` templates that application ships.
-``next.E112`` reports a project whose ``sitemap.py`` exists while the templates do not load.
+``django.contrib.sitemaps`` sits in ``INSTALLED_APPS`` with ``APP_DIRS`` on the Django template backend, because the XML is rendered from the ``sitemap.xml`` and ``sitemap_index.xml`` templates it ships.
+A site closed to search answers 404 for every sitemap address, and a site only ``DEBUG`` closes serves them under ``noindex``, see :doc:`site`.
 
 Static routes
 -------------
 
 Every route of the tree without a bracket segment is listed automatically, reversed through ``page_reverse`` at render time.
-Two things keep a static route out.
-A route whose static metadata carries ``robots.index`` set to ``False``, or a robots string naming ``noindex``, is skipped, because a sitemap invites the crawler to a page the tag then turns away.
-A route matching a glob in ``exclude`` is skipped as well, and a glob matches the whole route trail, ``drafts/**`` for a whole subtree and ``admin`` for one page.
-Only ``*`` and ``?`` are wildcards, and brackets are literal because trails spell parameters with them, so ``posts/[slug]`` names that one dynamic trail.
+A route whose static metadata is ``noindex`` is left out, because a sitemap invites the crawler to a page the tag then turns away.
+A route matching a glob in ``exclude`` is left out as well, and a glob matches the whole route, ``drafts/*`` for a subtree and ``admin`` for one page.
+Only ``*`` and ``?`` are wildcards, and brackets are literal because routes spell parameters with them, so ``posts/[slug]`` names that one dynamic route.
 
-Only the static fold is read, the settings tier plus every ``metadata`` dict along the chain.
-A chain the schema refuses does not break the document, the route is listed as indexed with a logged warning, and the metadata checks report the fault.
-A ``noindex`` a ``@page.metadata`` callable decides at request time is invisible here, and ``exclude`` is the way to keep such a route out.
+Only the static metadata is read, ``DEFAULTS`` plus every ``metadata`` dict from the page root down.
+Metadata the schema refuses does not break the document, the route is listed with a logged warning, and the metadata checks report the fault.
+The list is memoised until a ``page.py`` of the tree loads again.
 
-Dynamic routes
---------------
+Dynamic routes and lazy items
+-----------------------------
 
 A route with a parameter has no URLs until the file names them.
-``@sitemap.items`` binds a callable to a trail, and the callable yields one ``Entry`` per URL, each carrying the kwargs that reverse the route.
+``@sitemap.items`` binds a callable to a route, and the callable answers the rows, a ``QuerySet``, a list, a range, or any other sliceable sequence.
 
 .. code-block:: python
    :caption: notes/pages/sitemap.py
 
-   from collections.abc import Iterator
-
+   from django.db.models import QuerySet
    from notes.models import Note
 
-   from next.seo import Entry, sitemap
+   from next.seo import sitemap
 
-   @sitemap.items("notes/[int:note_id]")
-   def notes() -> Iterator[Entry]:
-       for note in Note.objects.filter(published=True).only("pk", "updated_at"):
-           yield Entry(kwargs={"note_id": note.pk}, lastmod=note.updated_at)
+   changefreq = "weekly"
+   cache = 900
 
-The trail is the route as the directory names spell it, and it has to be routed by the same tree, otherwise the build raises ``SitemapTrailError`` and ``next.E111`` reports it ahead of time.
-The callable is resolved through dependency injection like a ``@context`` callable, so ``Depends`` and a provider of the project are available to it, and a parameter annotated :class:`~django.http.HttpRequest` receives the request of the crawler.
-A bare mapping yielded instead of an ``Entry`` is read as the kwargs alone, and any other value is a ``TypeError`` naming the callable.
+   @sitemap.items("notes/[int:note_id]", kwargs=lambda note: {"note_id": note.pk}, lastmod="updated_at")
+   def notes() -> QuerySet[Note]:
+       return Note.objects.filter(published=True).only("pk", "updated_at").order_by("pk")
 
+A ``QuerySet`` stays lazy.
+The paginator counts it with one ``COUNT`` and reads a page with one ``LIMIT`` and ``OFFSET``, so a table of a million rows costs the rows of one page per request, and the newest ``lastmod`` of the section is one aggregate query.
+An unordered ``QuerySet`` is ordered by primary key, since a page slice needs a stable order.
+A generator is read into a list first, so a large table belongs in a ``QuerySet``.
+
+Each row becomes one URL in one of three ways.
+A ``SitemapEntry`` carries its own ``kwargs``, ``lastmod``, ``changefreq``, and ``priority``, a mapping is read as the kwargs alone, and any other row, a model instance among them, needs ``kwargs=`` on the decorator, a callable answering the kwargs of the row.
+``lastmod="updated_at"`` names the column or key the date of each row is read from.
+A row that none of these reverses is a ``TypeError`` naming the callable.
+
+.. code-block:: python
+   :caption: notes/pages/sitemap.py
+
+   from next.seo import SitemapEntry, sitemap
+
+   @sitemap.items("tags/[slug]")
+   def tags() -> list[SitemapEntry]:
+       return [SitemapEntry(kwargs={"slug": slug}, changefreq="daily") for slug in ("python", "django")]
+
+The first argument is the route as the directory names spell it, and the same tree has to serve it, otherwise the build raises ``SitemapTrailError`` and ``manage.py check`` reports it ahead of time.
+The callable is resolved through dependency injection like a ``@context`` callable, so ``Depends`` and a parameter annotated :class:`~django.http.HttpRequest` are available to it.
 A registration binds to the ``sitemap.py`` that runs the decorator, so the callable may live in a helper module and be registered as ``sitemap.items("notes/[int:note_id]")(notes)`` after its import.
-``next.E118`` reports the decorator run anywhere else, a nested ``sitemap.py``, a ``page.py``, or a helper module, because only the file at the top of a routed tree is read.
+The decorator run anywhere else registers nothing, and two callables on one route keep only the later one, and the checks report both.
 
-``lastmod`` is whatever the entry carries, a :class:`~datetime.datetime` or a :class:`~datetime.date`, and it is never read off a file mtime, because the mtime of a deployed checkout says nothing about the content.
-Dates and datetimes mix freely in one tree, and a date or a naive datetime reads in the current ``TIME_ZONE``, so the ``<lastmod>`` of a URL keeps the day the entry declared.
+A route with an ``@sitemap.items`` callable is listed by that callable alone, so a static route named by one loses its automatic entry and takes the callable's ``lastmod``, ``changefreq``, and ``priority``.
+An ``exclude`` glob drops a callable's route as well, which the checks flag as a contradiction.
+``lastmod`` is never read off a file mtime, because the mtime of a deployed checkout says nothing about the content, and a date or a naive datetime reads in the current ``TIME_ZONE``.
+``manage.py check`` reports a dynamic route the file neither lists nor excludes, and a route whose static metadata is ``noindex`` needs neither.
 
-Two declared entries that reverse to one location are collapsed to the first, with a logged warning naming the trail and the kwargs.
-An ``@sitemap.items`` callable may name a static trail as well, and its entry replaces the automatic listing of that URL, carrying its ``lastmod``, ``changefreq``, and ``priority``.
-``next.W097`` reports a dynamic route the file neither lists nor excludes, and ``next.W098`` a listed trail whose page is ``noindex`` by its static metadata.
+Keeping noindex rows out
+------------------------
+
+A ``noindex`` a ``@page.metadata`` callable decides per row is invisible to the sitemap, since no request renders the page.
+Filter such rows out in the items callable, ideally through the same manager method the page uses to decide its robots, so the two cannot drift.
+
+.. code-block:: python
+   :caption: notes/models.py
+
+   from django.db import models
+
+   class NoteQuerySet(models.QuerySet):
+       def indexable(self):
+           return self.filter(published=True, private=False)
+
+A test that fetches a listed URL and asserts its robots with ``assert_metadata`` catches the rows the filter missed, see :doc:`auditing`.
+``manage.py check`` reports a listed route whose page is ``noindex`` by its static metadata.
 
 Module attributes
 -----------------
 
-The attributes below map onto :class:`django.contrib.sitemaps.Sitemap`, with ``exclude`` and ``cache`` as the two the framework adds.
-An attribute the file does not declare keeps the Django default, and ``next.E113`` reports a value outside its shape.
+The attributes below map onto :class:`django.contrib.sitemaps.Sitemap`, with ``exclude``, ``cache``, and ``section`` as the ones the framework adds.
+An attribute the file does not declare keeps the Django default, and ``manage.py check`` reports a value outside its shape.
 
 .. list-table::
    :header-rows: 1
-   :widths: 18 22 60
+   :widths: 16 28 56
 
    * - Attribute
      - Shape
@@ -99,11 +133,11 @@ An attribute the file does not declare keeps the Django default, and ``next.E113
      - a number from 0 to 1
      - The ``<priority>`` of every URL without one of its own.
    * - ``exclude``
-     - a list of trail globs
-     - Static routes matching a glob are left out, and a dynamic route matching one draws no ``next.W097``.
+     - a list of route globs
+     - Routes, those of an items callable included, matching a glob are left out.
    * - ``i18n``
      - a bool
-     - Every URL is listed once per entry of ``LANGUAGES``, reversed under that language so the :func:`~django.conf.urls.i18n.i18n_patterns` prefix lands in the path.
+     - Every URL is listed once per language, reversed under that language.
    * - ``languages``
      - a list of language codes
      - Narrows the languages ``i18n`` walks.
@@ -112,121 +146,35 @@ An attribute the file does not declare keeps the Django default, and ``next.E113
      - Adds the ``<xhtml:link rel="alternate" hreflang="...">`` block to every URL under ``i18n``.
    * - ``x_default``
      - a bool
-     - Adds the ``x-default`` alternate, pointing at the prefix-free URL.
+     - Adds the ``x-default`` alternate under ``alternates``, naming the URL of ``LANGUAGE_CODE``.
    * - ``protocol``
      - ``"http"`` or ``"https"``
-     - The scheme of every URL, ahead of the ``base`` scheme and the request.
+     - The scheme of every URL, ahead of the site URL and the request.
    * - ``limit``
-     - a positive int
+     - an int from 1 to 50000
      - URLs per page, 50000 by default, and a section past it paginates.
    * - ``cache``
-     - seconds as an int, not a bool
-     - Wraps the sitemap views in :func:`~django.views.decorators.cache.cache_page`.
+     - an int, ``False``, or a ``CacheDict``
+     - The ``Cache-Control`` of the sitemap responses, and the server-side cache, see :doc:`sitemap-sections`.
+   * - ``section``
+     - a slug
+     - The section name of the tree, ahead of the application label.
 
-hreflang alternates
--------------------
+Languages
+---------
 
-``i18n = True`` lists each URL once per language, and every entry is reversed under :func:`~django.utils.translation.override` for that language.
-The router include therefore has to sit inside :func:`~django.conf.urls.i18n.i18n_patterns`, the way :doc:`/content/howto/internationalize-routes` mounts it, otherwise every language reverses to the same path.
-That include takes the sitemap address under the language prefix with it, and `Mounting at the host root`_ brings it back to the root of the host.
-``alternates = True`` adds the hreflang block to each entry, the same set the ``<head>`` renders through ``alternates.languages``, and ``x_default = True`` adds the fallback that Django derives by stripping the language prefix.
-That derivation is right when the default language carries no prefix, so a project that sets ``prefix_default_language=False`` gets a correct ``x-default`` and a project that prefixes every language gets one pointing at a redirect.
-
-The index and the sections
---------------------------
-
-Each page root that declares a ``sitemap.py`` is one section, served at ``/sitemap-<section>.xml``.
-The section label is the label of the innermost installed application whose directory holds the root, and for a ``DIRS`` root it is the slugified directory name.
-Two roots taking one label keep it for the first, and a later one gains the lowest ``-N`` suffix no other tree takes as its own label, so ``blog``, ``blog``, and ``blog-2`` serve as ``blog``, ``blog-3``, and ``blog-2``.
-``next.W104`` warns about the clash with the sections actually served, because the numbered addresses follow router order, so the trees can be routed from differently named directories or different apps for stable section addresses.
-
-``/sitemap.xml`` is the one document while there is one section and it fits in a page.
-With several sections, or a section whose URLs exceed ``limit``, the same address answers an index listing every section and every ``?p=N`` page of it.
-The index is a thin view of the framework's own rather than Django's, because Django's index reads the domain off the request and would ignore ``base``.
-Both documents carry the ``X-Robots-Tag`` header Django's sitemap views set, so the XML itself never ranks, and a ``Last-Modified`` header when every listed entry carries a ``lastmod``.
-The index lists the newest ``lastmod`` of each section as a full datetime, ``2026-01-02T00:00:00+00:00`` for a section of dates alone, and a bare date counts from local midnight in ``Last-Modified``.
-
-.. mermaid::
-
-   flowchart LR
-       Request["GET /sitemap.xml"] --> Include["include('next.urls')"]
-       Include --> Slot["seo_routes_slot"]
-       Slot --> Manager["seo_manager.sitemaps()"]
-       Manager --> Root1["RouteSitemap per root"]
-       Root1 -- "one section, one page" --> Django["django.contrib.sitemaps.views.sitemap"]
-       Root1 -- "several sections or pages" --> Index["next.seo index view"]
-       Django --> XML["sitemap.xml"]
-       Index --> IndexXML["sitemap_index.xml"]
-
-The origin of every URL
------------------------
-
-A sitemap lists absolute URLs, so every location needs a scheme and a host.
-``NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]["base"]`` supplies both once for the whole site, the same origin the canonical links and the social images are made absolute on, and the sitemap reads it ahead of everything else.
-
-.. code-block:: python
-   :caption: config/settings.py
-
-   NEXT_FRAMEWORK = {
-       "METADATA": {
-           "DEFAULTS": {"base": "https://notes.example"},
-       },
-   }
-
-Without a base the host comes from :func:`~django.contrib.sites.shortcuts.get_current_site`, the ``Site`` row of the database with ``django.contrib.sites`` installed and the host of the request without it.
-The scheme is ``protocol`` when the file declares one, then the scheme of ``base``, then the scheme of the request.
-A build with neither a request nor a base raises ``SitemapOriginError`` naming the tree.
-
-.. warning::
-
-   Set ``base`` on every deployment that installs ``django.contrib.sites``.
-   The ``Site`` row ships as ``example.com`` and no check reads the table, so a sitemap of ``example.com`` URLs is caught by nothing before a crawler reads it.
-
-Caching
--------
-
-Every request calls the ``@sitemap.items`` callables again, so a catalog of many rows pays its query on every crawler visit, while the walk of the page tree is kept until the SEO routes reset.
-``cache`` in ``sitemap.py`` names a number of seconds, and the framework wraps the sitemap and index views in :func:`~django.views.decorators.cache.cache_page` for that long on the default cache, while ``/robots.txt`` is never cached.
-The index and every section share the wrapper, with several roots the shortest declared ``cache`` wins for all of them, and a ``cache`` of ``0`` leaves the views unwrapped.
-A bool is no count of seconds, so ``cache = True`` caches nothing and ``next.E113`` reports it.
-
-.. _topics-seo-host-root:
-
-Mounting at the host root
--------------------------
-
-Crawlers read ``/robots.txt`` and ``/sitemap.xml`` at the root of the host, and the routes go wherever ``include("next.urls")`` goes.
-A router mounted under a prefix, or inside :func:`~django.conf.urls.i18n.i18n_patterns`, moves them out of reach, which ``next.W099`` reports as an address the URLconf does not resolve.
-``next.seo.urls`` mounts the same three routes on its own, under the ``next_seo`` namespace, for the root of the URLconf.
-
-.. code-block:: python
-   :caption: config/urls.py
-
-   from django.conf.urls.i18n import i18n_patterns
-   from django.urls import include, path
-
-   urlpatterns = [
-       path("", include("next.seo.urls")),
-       *i18n_patterns(path("", include("next.urls")), prefix_default_language=False),
-   ]
-
-The include lists ``sitemap.xml``, ``sitemap-<section>.xml``, and ``robots.txt`` whether or not a source exists, and a route without one answers 404, as the sitemap routes do under ``NOINDEX``.
-Mounted beside a prefix-free ``include("next.urls")`` the two answer the same views, so the pair draws no collision error.
-The copies an ``include("next.urls")`` mounts under a prefix or inside :func:`~django.conf.urls.i18n.i18n_patterns` answer 404 once ``next.seo.urls`` serves the host root, so each document has one address, and the prefix-free copy of the example above keeps serving because its address is that root.
-
-What the checks catch
----------------------
-
-The sitemap checks run on every ``manage.py check`` under the ``seo`` and ``urls`` tags, and ``manage.py check --tag seo`` runs them alone.
-:doc:`auditing` places them beside the metadata checks, and :doc:`/content/ref/system-checks` holds the condition of every code.
+Without ``i18n`` every URL is reversed under ``LANGUAGE_CODE``, so the document is the same whatever the ``Accept-Language`` of the crawler.
+``i18n = True`` lists each URL once per language, and the router include has to sit inside :func:`~django.conf.urls.i18n.i18n_patterns` for the languages to differ.
+``alternates = True`` adds the hreflang block the ``<head>`` renders through ``alternates.languages``, and ``x_default = True`` adds the ``x-default`` alternate on the URL of the default language, the same one the head names.
+``manage.py check`` reports ``alternates`` or ``x_default`` without ``i18n``, ``x_default`` without ``alternates``, a ``languages`` code outside ``LANGUAGES``, and ``i18n`` on a router outside ``i18n_patterns``.
 
 See also
 --------
 
 .. seealso::
 
-   :doc:`robots` for the ``Sitemap:`` line and the ``/robots.txt`` that goes with the document.
-   :doc:`/content/howto/publish-a-sitemap` for the recipe from an empty project to a verified document.
-   :doc:`/content/ref/seo` for ``Entry``, ``sitemap``, ``RouteSitemap``, and the two exceptions.
-   :doc:`/content/internals/seo-pipeline` for the discovery, the registry, and the URL slot.
-   :repo:`markdown-blog <tree/main/examples/markdown-blog#13-sitemap-and-robots-from-the-page-root>` for a static tree under ``i18n``, :repo:`wiki <tree/main/examples/wiki#12-a-sitemap-fed-by-the-database>` for entries read off a table with ``lastmod``, and :repo:`search-catalog <tree/main/examples/search-catalog#12-cached-sitemap-over-categories-and-products>` for two dynamic trails behind ``cache``.
+   :doc:`sitemap-sections` for sections, backends, the origin, caching, and the host-root mount.
+   :doc:`robots` for the ``Sitemap:`` line.
+   :doc:`quickstart` for the first sitemap of a site.
+   :doc:`/content/ref/seo` for ``sitemap``, ``SitemapEntry``, and the errors.
+   :repo:`wiki <tree/main/examples/wiki>` for items read off a table and :repo:`search-catalog <tree/main/examples/search-catalog>` for two dynamic routes behind ``cache``.

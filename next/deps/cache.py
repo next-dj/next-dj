@@ -15,24 +15,13 @@ _CACHE_MISS: object = object()
 REQUEST_DEP_CACHE_ATTR: Final[str] = "_next_dep_cache"
 
 
-def get_request_dep_cache(request: object | None) -> dict[str, Any] | None:
-    """Return the dispatch-scoped dep cache attached to `request`, or `None`.
-
-    `FormActionDispatch.dispatch` attaches this so a re-render can rejoin the DI cache.
-    """
-    if request is None:
-        return None
-    cache = getattr(request, REQUEST_DEP_CACHE_ATTR, None)
-    return cache if isinstance(cache, dict) else None
-
-
-def shared_dep_cache(request: object | None) -> dict[str, Any]:
-    """Return the dispatch cache on `request`, or a fresh dict the request never sees.
+def render_dep_cache(request: object | None) -> dict[str, Any]:
+    """Return the form dispatch cache on `request`, or a fresh dict it never carries.
 
     A render publishing its own cache would hand it to every component on the page.
     """
-    cache = get_request_dep_cache(request)
-    return {} if cache is None else cache
+    cache = None if request is None else getattr(request, REQUEST_DEP_CACHE_ATTR, None)
+    return cache if isinstance(cache, dict) else {}
 
 
 class DependencyCache:

@@ -148,7 +148,7 @@ class TestDjxNotInStatReloaderGlobMatches:
     def test_changing_only_djx_does_not_call_notify_file_changed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Editing ``.djx`` does not go through ``notify_file_changed`` (no process reload)."""
+        """A ``.djx`` edit skips ``notify_file_changed``, so nothing reloads."""
         page = tmp_path / "p" / "page.py"
         page.parent.mkdir(parents=True)
         page.write_text("#")

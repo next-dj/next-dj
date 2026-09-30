@@ -35,10 +35,11 @@ Manager
 It is a ``Sequence`` rather than a ``list``, so a root URLconf mounts it through ``include()`` and never concatenates or appends to it.
 Code that reads ``next.urls.urlpatterns`` directly observes that one element, not the individual page patterns.
 
-The wrapped sequence caches the concatenated pattern list against a two-part version token, one counter owned by ``RouterManager`` and one by the form-action manager.
-``router_manager.reload()`` bumps the router counter and registering or clearing form actions through ``form_action_manager`` bumps the forms counter, so the next access rebuilds the list exactly when something changed.
-The third source is the sitemap and robots routes of :doc:`seo`, read through the ``SeoRoutes`` port of :doc:`ports`, the sitemap routes present only while the project serves a sitemap, which ``NOINDEX`` turns off, and the robots route only while a robots source exists at the top of a page root.
-Those sources change only through a router reload, which already moves the router counter, so they need no counter of their own.
+The wrapped sequence caches the concatenated pattern list against a three-part version token, one counter owned by ``RouterManager``, one by the form-action manager, and ``seo_routes_version`` of ``next.urls.manager`` for the SEO routes spliced in through a port.
+``router_manager.reload()`` bumps the router counter, registering or clearing form actions through ``form_action_manager`` bumps the forms counter, and binding the SEO routes port in ``NextFrameworkConfig.ready()`` or resetting the SEO sources moves the third, so the next access rebuilds the list exactly when something changed.
+The spliced source is the SEO routes of :doc:`seo`, read through the ``SeoRoutes`` port of :doc:`ports`, each present only while its source exists, the sitemap routes while a backend serves a sitemap and the robots route while a page root carries a ``robots.py`` or a ``robots.txt``.
+The pattern set also carries ``/_next/csrf/``, named ``next:csrf``, the token endpoint of :doc:`csrf`, mounted whatever the sources.
+``seo_routes_version`` is a ``SeoRoutesVersion`` holding a plain ``value``, so the token is read without a call across the port, and its ``move()`` draws from the same process-wide counter as the router versions, so no two states share a number.
 A sequence read before ``NextFrameworkConfig.ready()`` binds the port leaves the seo routes out and caches nothing, so an application that resolves or reverses a URL from an earlier ``ready()`` still gets the page routes.
 
 The counters are read after the pattern build, because expanding page modules can register form actions mid-build, so the cache stays valid for the post-registration state.
@@ -95,7 +96,7 @@ Errors
 ~~~~~~
 
 ``URLParameterError`` is the base of every bracket-segment refusal, and it carries the refused ``param_name``, the ``url_path`` it sat in, and the ``file_path`` that ``with_file`` fills in.
-``DuplicateURLParameterError`` covers a normalised parameter name repeated within one trail and a second ``[[wildcard]]`` segment.
+``DuplicateURLParameterError`` covers a normalised parameter name repeated within one route and a second ``[[wildcard]]`` segment.
 ``InvalidURLParameterError`` covers a name that is no Python identifier once a hyphen is read as an underscore, which :func:`~django.urls.path` refuses while it compiles the route.
 
 All three names are exported from ``next.urls``.

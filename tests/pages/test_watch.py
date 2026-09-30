@@ -26,7 +26,7 @@ from tests.support import (
     file_router_config_entry,
     importable_dir,
 )
-from tests.support.cases import WATCHED_BACKENDS_CASES, WatchedBackendsCase
+from tests.support.cases.watch import WATCHED_BACKENDS_CASES, WatchedBackendsCase
 
 
 # The promise every watcher diagnostic ends on, which a reload then keeps.

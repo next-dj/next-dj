@@ -13,8 +13,8 @@ A wiki served from two stores at once. Some pages live as files in `wiki/routes/
 | `/articles/edit/<slug>/` | Edit form for the given article with a live Markdown preview. |
 | `/wiki/<slug>/` | Public article view rendered from the database row. |
 | `/search/?q=routing` | Mixed search across the file catalogue and article titles plus bodies. |
-| `/sitemap.xml` | The three documentation routes plus one entry per article row with its save date as `lastmod`. |
-| `/robots.txt` | Rendered from `robots.py`, keeps crawlers off the search, names the sitemap. |
+| `/sitemap.xml` | The three documentation routes plus one entry per article row with its save date as `lastmod`, paged by the database. |
+| `/robots.txt` | Rendered from `robots.py`, keeps crawlers off the search and two AI training crawlers off the wiki, names the sitemap. |
 
 Articles persist in SQLite. After every create, edit, or delete the router rebuilds itself in-process and the new URL is reachable on the next request.
 
@@ -94,39 +94,58 @@ The two channels differ, and `/docs/components/` shows the difference on one cal
 
 The router walks two roots. `PAGE_BACKENDS["DIRS"]` lists `shell/`, a project-level page root whose only file is [`shell/layout.djx`](shell/layout.djx) with the outer HTML envelope. `APP_DIRS = True` plus `PAGES_DIR = "routes"` picks up `wiki/routes/`, which owns every page and ships no `layout.djx` of its own. One wrapper covers the whole site, so nothing here needs a nested layout. Examples that do are `examples/multi-tenant` and `examples/markdown-blog`.
 
-### 11. Article titles through the slug provider
+### 11. Article titles and descriptions through the slug provider
 
-The tab title of an article is the article's title, and the row is not fetched again for it. [`wiki/[slug]/page.py`](wiki/routes/wiki/[slug]/page.py) registers two `@context` callables that take `item: DArticle[Article]`, the provider of section 3, and a third callable under `@page.metadata` that names the `article` context key as its parameter:
+The tab title of an article is the article's title, its description is its first paragraph, and the row is not fetched again for either. [`wiki/[slug]/page.py`](wiki/routes/wiki/[slug]/page.py) registers two `@context` callables that take `item: DArticle[Article]`, the provider of section 3, and a third callable under `@page.metadata` that names the `article` context key as its parameter:
 
 ```python
 @page.metadata
 def article_meta(article: Article) -> MetadataDict:
-    return {"title": article.title}
+    meta: MetadataDict = {"title": article.title}
+    if article.summary:
+        meta["description"] = article.summary
+    return meta
 ```
+
+`Article.summary` in [`wiki/models.py`](wiki/models.py) is the first paragraph of the Markdown body that is not a heading, stripped of inline markup and cut to 160 characters, the length a search result shows. Each article therefore publishes a snippet of its own. A body with no paragraph adds no key, and the description the index declares for the site stays in place.
 
 Context callables run before the head is rendered and share one dependency cache with the metadata callable, so a parameter named after a context key receives the value that callable produced, exactly as a downstream `@context` would. `article_meta` therefore reads the row the slug provider fetched for `article` and issues no query of its own, which the integration test pins by counting the by-slug selects of one GET. The `{% metadata %}` tag in the shared `page_head` component renders the fold of `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`, the module dict of every ancestor `page.py`, and the callable, so the title lands as `Routing internals · next.dj Wiki` through the template the settings declare.
 
-The rest of the tree is static. The root [`routes/page.py`](wiki/routes/page.py) titles the index `Home` and declares a site description that every page inherits. The two documentation pages and the search page name themselves with a one-line dict. `articles/new/` and `articles/edit/<slug>/` add `"robots": {"index": False}`, so a crawler that follows the edit links off the index gets `<meta name="robots" content="noindex">` on the form pages and keeps the public article as the page worth ranking. The search page is the robots file's job instead, section 12 explains why the two are split that way.
+The rest of the tree is static. The root [`routes/page.py`](wiki/routes/page.py) titles the index `Home` and declares the site description, which a dict passes down to every page below that names none. The two documentation pages declare a title and a description of their own, the search page a title. `articles/new/` and `articles/edit/<slug>/` add `"robots": {"index": False}`, so a crawler that follows the edit links off the index gets `<meta name="robots" content="noindex">` and an `X-Robots-Tag: noindex` header on the form pages and keeps the public article as the page worth ranking. The search page is the robots file's job instead, section 12 explains why the two are split that way.
 
 ### 12. A sitemap fed by the database
 
 Articles are rows, so the sitemap has to ask the table. [`wiki/routes/sitemap.py`](wiki/routes/sitemap.py) sits at the top of the page root and declares the one dynamic trail:
 
 ```python
-exclude = ["search", "articles/**"]
+exclude = ["search"]
 
 
-@sitemap.items("wiki/[slug]")
-def articles() -> Iterator[Entry]:
-    for article in Article.objects.only("slug", "updated_at"):
-        yield Entry(kwargs={"slug": article.slug}, lastmod=article.updated_at)
+@sitemap.items(
+    "wiki/[slug]", kwargs=lambda article: {"slug": article.slug}, lastmod="updated_at"
+)
+def articles() -> QuerySet[Article]:
+    return Article.objects.only("slug", "updated_at").order_by("pk")
 ```
 
-The trail is the directory path of the page, `[slug]` included, and the check refuses a trail no page under the root answers to. Each `Entry` carries the kwargs that reverse the page's URL name, so `/wiki/<slug>/` is built by the router rather than spelled by hand, and the `lastmod` lands as `<lastmod>` on the entry. The callable runs through the same resolver as a `@context`, `request` is a parameter when it is needed and a `Depends` works, this one needs nothing. `only()` keeps the query to the two columns the entry reads. The file is loaded once and re-read when it changes, the query runs on every request of the document.
+The trail is the directory path of the page, `[slug]` included, and the check refuses a trail no page under the root answers to. The callable returns the queryset itself rather than a list of entries, so nothing runs until the document is requested, and then the database does the paging: one `COUNT` sizes the document, one `LIMIT`/`OFFSET` slice fills the page asked for, and the newest `updated_at` for the index comes from one ordered query. A thousand articles or a million cost the same two queries per page. `kwargs` maps one row onto the URL kwargs that reverse the page, so `/wiki/<slug>/` is built by the router rather than spelled by hand, and `lastmod="updated_at"` names the column each `<lastmod>` is read from. `only()` keeps the query to the two columns those read, and `order_by("pk")` gives the pages a stable order, which the framework would add on its own for an unordered queryset. The callable runs through the same resolver as a `@context`, `request` is a parameter when it is needed and a `Depends` works, this one needs nothing. The file is loaded once and re-read when it changes.
 
-The static side of the tree needs no declaration. `/`, `/docs/routing/` and `/docs/components/` are listed because they are routes without a parameter, `articles/new/` is skipped because section 11 marks it `noindex`, and `exclude` drops two trails by glob, `search`, which the robots file below keeps crawlers off, and `articles/edit/[slug]`, a dynamic route with no callable. Without the second glob the check asks whether that trail was forgotten, and without the first it reports a listed URL that robots disallows. The aliases the `HybridRouterBackend` of section 1 appends are named patterns for the same page, the sitemap walks the page tree and lists each article once. `base` in `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` is `https://wiki.example`, so every `<loc>` is absolute on the published origin and the document does not depend on the host that served it. The section route is `/sitemap-wiki.xml`, labelled after the app.
+The static side of the tree needs no declaration. `/`, `/docs/routing/` and `/docs/components/` are listed because they are routes without a parameter, and `articles/new/` drops out on its own because section 11 marks it `noindex`, no glob names it. `articles/edit/[slug]` is a dynamic route without a callable, and the check that asks whether such a trail was forgotten skips it, since its static metadata already says `noindex`. `exclude` drops one trail, `search`, which the robots file below keeps crawlers off, and the check reports a listed URL that robots disallows. The aliases the `HybridRouterBackend` of section 1 appends are named patterns for the same page, the sitemap walks the page tree and lists each article once. `NEXT_FRAMEWORK["SITE"]["URL"]` is `https://wiki.example`, so every `<loc>` is absolute on the published origin and the document does not depend on the host that served it. `INDEXABLE` is pinned to `True` beside it, so the dev server serves the sitemap a deploy does, where `"auto"` would close the site while `DEBUG` is on. The section route is `/sitemap-wiki.xml`, labelled after the app.
 
-[`wiki/routes/robots.py`](wiki/routes/robots.py) is the declared form of robots, `rules = [Rule(user_agent="*", disallow=["/search/"])]`, and `/robots.txt` renders the group followed by a `Sitemap:` line with the absolute sitemap URL. `host` beside `rules` adds a `Host:` line, an empty `robots.py` renders allow-all plus the `Sitemap:` line. The two mechanisms split the work by what each can do. A `Disallow` stops the fetch, which is right for the search, every query is a URL of its own and none of them has content to rank. A `noindex` needs the fetch, the tag is inside the page, so the two form pages of section 11 stay crawlable and carry the tag instead. The framework never derives one from the other, and `manage.py check` reports a `Disallow` that covers a `noindex` page or a URL the sitemap lists.
+### 13. Robots from a list of rules
+
+[`wiki/routes/robots.py`](wiki/routes/robots.py) declares `rules` as a list of `RobotsRule` groups, two here:
+
+```python
+rules = [
+    RobotsRule(disallow="/search/"),
+    RobotsRule(user_agent=("GPTBot", "CCBot"), disallow="/"),
+]
+```
+
+The first group fences the search for every crawler, the second keeps two crawlers that collect training data off the whole wiki, and `/robots.txt` renders both followed by a `Sitemap:` line with the absolute sitemap URL, which the framework writes because the root declares a `sitemap.py`. A list is read at startup, so the check of section 12 compares the `Disallow` prefixes of the `*` group with the URLs the sitemap lists and with the pages marked `noindex`. The bot group stays out of that comparison, a crawler named in a group of its own follows that group alone, so the rest of the web still reads the sitemap. `rules` may also be a callable that takes `request` and builds the groups per request, the checks then never see them.
+
+The two mechanisms split the work by what each can do. A `Disallow` stops the fetch, which is right for the search, every query is a URL of its own and none of them has content to rank. A `noindex` needs the fetch, the tag is inside the page, so the two form pages of section 11 stay crawlable and carry the tag instead. The framework never derives one from the other.
 
 ## Further reading
 
@@ -134,6 +153,7 @@ The static side of the tree needs no declaration. `/`, `/docs/routing/` and `/do
 - [next/urls/backends.py](../../next/urls/backends.py) — `FileRouterBackend.generate_urls` is the public extension surface.
 - [next/deps/providers.py](../../next/deps/providers.py) — DI provider contract used by `ArticleProvider`.
 - [next/pages/metadata/](../../next/pages/metadata/) — the metadata chain behind `@page.metadata` and `{% metadata %}`.
-- [next/seo/](../../next/seo/) — `@sitemap.items`, `Entry`, `Rule`, and the `RouteSitemap` that lists the page tree.
+- [next/seo/](../../next/seo/) — `@sitemap.items`, `RobotsRule`, and the sitemap backend that lists the page tree.
+- [next/testing/](../../next/testing/) — `assert_metadata` and `parse_sitemap`, which the integration tests read the head and the sitemap back through.
 - [next/components/context.py](../../next/components/context.py) — `@component.context` wiring used by `markdown_preview`.
 - [next/templatetags/components.py](../../next/templatetags/components.py) — the `{% #component %}` tag that collects slots and free children.

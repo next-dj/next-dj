@@ -69,6 +69,12 @@ Subclass the base class listed for its family and register the dotted path in ``
    * - Form wizard drafts
      - ``FORM_WIZARD_BACKEND``
      - ``next.forms.FormWizardBackend``
+   * - Sitemap sections
+     - ``SEO["SITEMAP_BACKENDS"]``
+     - ``next.seo.SitemapBackend``
+   * - Visitor consent
+     - ``CONSENT["BACKEND"]``
+     - ``next.consent.ConsentBackend``
 
 Each base is spelled through the curated package path, which is the import a project writes.
 The class also lives at a deeper module path, and that path carries no stability promise.
@@ -316,9 +322,6 @@ A port is the narrow surface one subsystem calls another through.
    * - Slot
      - Shipped implementation
      - What it answers
-   * - ``component_tags_slot``
-     - ``next.components.ports.ComponentTagsImpl``
-     - Names every ``{% component %}`` tag a compiled template holds.
    * - ``page_scan_slot``
      - ``next.pages.ports.PageScanImpl``
      - Executes every routed ``page.py`` and answers the ones that loaded.
@@ -328,6 +331,9 @@ A port is the narrow surface one subsystem calls another through.
    * - ``router_access_slot``
      - ``next.urls.ports.RouterAccessImpl``
      - Builds router backends and managers and answers the URL pattern parser.
+   * - ``page_scripts_slot``
+     - ``next.scripts.ports.PageScriptsImpl``
+     - Answers the head scripts and the ``$scripts`` and ``$consent`` payload entries of one render.
    * - ``seo_routes_slot``
      - ``next.seo.ports.SeoRoutesImpl``
      - Answers the sitemap and robots routes the lazy urlpatterns append, each only while its source exists.
@@ -423,7 +429,7 @@ Position the app relative to ``next`` in ``INSTALLED_APPS`` by what it registers
    ]
 
 For every registry on this page the position does not change the outcome, as *App order in* ``INSTALLED_APPS`` above explains.
-A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all six slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
+A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all eight slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
 A package that reuses an existing kind or placeholder name with different parameters fails at startup either way, and its position only decides which ``ready`` call raises.
 
 Declare the dependency on next.dj under its distribution name, and constrain it from below only.

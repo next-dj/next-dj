@@ -1,17 +1,16 @@
-"""System checks on the `sitemap.py`, `robots.py` and `robots.txt` files themselves.
-
-The ids are `next.E110`, `next.E113`, `next.E118` and `next.W102`.
-"""
+"""System checks on the SEO source files themselves."""
 
 from __future__ import annotations
 
 import ast
 import os
 import reprlib
+from collections.abc import Callable
 from dataclasses import fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
+from django.conf import settings
 from django.core.checks import (
     CheckMessage,
     Error,
@@ -21,26 +20,34 @@ from django.core.checks import (
 )
 
 from next.checks import NEXT, SEO
-from next.seo.discovery import SOURCE_NAMES, SeoRoot, SeoSource
-from next.seo.markers import Rule
+from next.pages.responses import cache_problems
+from next.seo.discovery import (
+    ROBOTS_FILE,
+    ROBOTS_MODULE,
+    SITEMAP_MODULE,
+    SLUG,
+    SeoRoot,
+    SeoSource,
+)
+from next.seo.markers import CHANGEFREQS, RobotsRule, is_number
 from next.seo.registry import sitemap_items_registry
-from next.seo.sitemaps import SitemapOptions
-from next.utils import WEB_SCHEMES, is_bool, is_int
+from next.seo.robots import is_sitemap_url
+from next.seo.sitemaps import MAX_LIMIT, SitemapOptions
+from next.site import site_config
+from next.utils import WEB_SCHEMES, is_int
 
-from .roots import loaded_seo_roots, robots_modules, sitemap_roots
+from .roots import loaded_seo_roots, published_sources, robots_modules, sitemap_roots
 
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Callable, Iterator
+    from collections.abc import Iterator
 
 
-_CHANGEFREQS: Final = frozenset(
-    {"always", "hourly", "daily", "weekly", "monthly", "yearly", "never"}
-)
+_BELOW_ROOT_NAMES: Final = (SITEMAP_MODULE, ROBOTS_MODULE, ROBOTS_FILE)
 
 
-def _imports_future_annotations(file_path: Path) -> bool:
+def imports_future_annotations(file_path: Path) -> bool:
     """Whether the module source opens with `from __future__ import annotations`."""
     try:
         tree = ast.parse(file_path.read_text(encoding="utf-8"))
@@ -54,40 +61,61 @@ def _imports_future_annotations(file_path: Path) -> bool:
     )
 
 
-def _import_errors(source: SeoSource, *, resolved: bool) -> Iterator[CheckMessage]:
-    """Yield `next.E110` for a failed import, or deferred annotations when `resolved`.
+def _import_error(source: SeoSource) -> CheckMessage | None:
+    """Return `next.E110` naming the cause of a failed import."""
+    if source.error is None:
+        return None
+    cause = source.error.__cause__
+    return Error(
+        f"{source.path} failed to import ({type(cause).__name__}: {cause}), so "
+        "it declares nothing. Fix the module so its declarations reach the SEO "
+        "routes.",
+        obj=str(source.path),
+        id="next.E110",
+    )
 
-    Only a `sitemap.py` runs callables through the dependency resolver.
-    """
-    if source.error is not None:
-        cause = source.error.__cause__
-        yield Error(
-            f"{source.path} failed to import ({type(cause).__name__}: {cause}), so "
-            "it declares nothing. Fix the module so its declarations reach the "
-            "sitemap and robots routes.",
-            obj=str(source.path),
-            id="next.E110",
-        )
-    elif resolved and _imports_future_annotations(source.path):
-        yield Error(
-            f"{source.path} imports annotations from __future__, which turns the "
-            "annotations of its callables into strings the dependency resolver "
-            "cannot read. Drop the import and keep the annotations real.",
-            obj=str(source.path),
-            id="next.E110",
-        )
+
+def _sources(root: SeoRoot) -> Iterator[SeoSource]:
+    for source in (root.sitemap, root.robots):
+        if source is not None:
+            yield source
 
 
 @register(Tags.urls, NEXT, SEO)
 def check_seo_module_imports(*args, **kwargs) -> list[CheckMessage]:
-    """Require every `sitemap.py` and `robots.py` to import (`next.E110`)."""
+    """Require every Python SEO source to import (`next.E110`)."""
     init_errors, roots = loaded_seo_roots()
     errors = list(init_errors)
     for root in roots:
-        if root.sitemap is not None:
-            errors.extend(_import_errors(root.sitemap, resolved=True))
-        if root.robots is not None:
-            errors.extend(_import_errors(root.robots, resolved=False))
+        errors.extend(
+            error
+            for source in _sources(root)
+            if (error := _import_error(source)) is not None
+        )
+    return errors
+
+
+@register(Tags.urls, NEXT, SEO)
+def check_seo_module_annotations(*args, **kwargs) -> list[CheckMessage]:
+    """Refuse deferred annotations in the sources the resolver calls into (`next.E119`).
+
+    A `sitemap.py` and a `robots.py` hand their callables to the dependency resolver.
+    """
+    init_errors, roots = loaded_seo_roots()
+    errors = list(init_errors)
+    for root in roots:
+        for source in (root.sitemap, root.robots):
+            if source is None or not imports_future_annotations(source.path):
+                continue
+            errors.append(
+                Error(
+                    f"{source.path} imports annotations from __future__, which turns "
+                    "the annotations of its callables into strings the dependency "
+                    "resolver cannot read. Drop the import and keep them real.",
+                    obj=str(source.path),
+                    id="next.E119",
+                )
+            )
     return errors
 
 
@@ -97,42 +125,69 @@ def _is_string_list(value: object) -> bool:
     )
 
 
-def _is_rule_list(value: object) -> bool:
-    return isinstance(value, list | tuple) and all(
-        isinstance(item, Rule) for item in value
+def _is_rules(value: object) -> bool:
+    return callable(value) or (
+        isinstance(value, list | tuple)
+        and all(isinstance(item, RobotsRule) for item in value)
     )
+
+
+def _is_sitemap_urls(value: object) -> bool:
+    return isinstance(value, list | tuple) and all(map(is_sitemap_url, value))
 
 
 type _Shape = tuple[Callable[[Any], bool], str]
 type _Attribute = tuple[str, Callable[[Any], bool], str]
 
+_CACHE_SHAPE: Final[_Shape] = (
+    lambda value: not cache_problems(value, callable_allowed=False),
+    "seconds as an int, False, or a valid next.pages.CacheDict",
+)
+_BOOL_SHAPE: Final[_Shape] = (lambda value: isinstance(value, bool), "a bool")
 _SITEMAP_SHAPES: Final[dict[str, _Shape]] = {
     "changefreq": (
-        lambda value: isinstance(value, str) and value in _CHANGEFREQS,
-        "one of " + ", ".join(sorted(_CHANGEFREQS)),
+        lambda value: isinstance(value, str) and value in CHANGEFREQS,
+        "one of " + ", ".join(sorted(CHANGEFREQS)),
     ),
     "priority": (
-        lambda value: (is_int(value) or isinstance(value, float)) and 0 <= value <= 1,
-        "a number 0..1",
+        lambda value: is_number(value) and 0 <= value <= 1,
+        "a number from 0 to 1",
     ),
-    "limit": (lambda value: is_int(value) and value > 0, "a positive int"),
-    "cache": (lambda value: is_int(value) and value >= 0, "seconds as an int, no bool"),
+    "limit": (
+        lambda value: is_int(value) and 0 < value <= MAX_LIMIT,
+        f"an int from 1 to {MAX_LIMIT}",
+    ),
+    "cache": _CACHE_SHAPE,
     "exclude": (_is_string_list, "a list of trail globs"),
     "languages": (_is_string_list, "a list of language codes"),
-    "i18n": (is_bool, "a bool"),
-    "alternates": (is_bool, "a bool"),
-    "x_default": (is_bool, "a bool"),
+    "i18n": _BOOL_SHAPE,
+    "alternates": _BOOL_SHAPE,
+    "x_default": _BOOL_SHAPE,
     "protocol": (
         lambda value: isinstance(value, str) and value in WEB_SCHEMES,
         "'http' or 'https'",
     ),
 }
-_SITEMAP_ATTRIBUTES: Final[tuple[_Attribute, ...]] = tuple(
-    (field.name, *_SITEMAP_SHAPES[field.name]) for field in fields(SitemapOptions)
+_SITEMAP_ATTRIBUTES: Final[tuple[_Attribute, ...]] = (
+    *((field.name, *_SITEMAP_SHAPES[field.name]) for field in fields(SitemapOptions)),
+    (
+        "section",
+        lambda value: isinstance(value, str) and SLUG.fullmatch(value) is not None,
+        "a slug naming the sitemap section of the tree",
+    ),
 )
 _ROBOTS_ATTRIBUTES: Final[tuple[_Attribute, ...]] = (
-    ("rules", _is_rule_list, "a list of next.seo.Rule"),
-    ("host", lambda value: isinstance(value, str), "a string"),
+    (
+        "rules",
+        _is_rules,
+        "a list of next.seo.RobotsRule, or a callable taking the request",
+    ),
+    (
+        "sitemaps",
+        _is_sitemap_urls,
+        "a list of absolute http or https URLs on one line each",
+    ),
+    ("cache", *_CACHE_SHAPE),
 )
 
 
@@ -156,6 +211,21 @@ def _shape_errors(
     return errors
 
 
+def _items_conflicts(path: Path) -> list[CheckMessage]:
+    """Return `next.E113` for every trail a `sitemap.py` binds two callables to."""
+    return [
+        Error(
+            f"{path} runs @sitemap.items twice for the trail {conflict.trail!r}, on "
+            f"{conflict.replaced} and then on {conflict.kept}, so only "
+            f"{conflict.kept} lists its URLs. Merge them into one callable.",
+            obj=str(path),
+            id="next.E113",
+        )
+        for conflict in sitemap_items_registry.conflicts()
+        if conflict.file == path
+    ]
+
+
 @register(Tags.urls, NEXT, SEO)
 def check_seo_module_attributes(*args, **kwargs) -> list[CheckMessage]:
     """Validate the module attributes of `sitemap.py` and `robots.py` (`next.E113`)."""
@@ -163,6 +233,7 @@ def check_seo_module_attributes(*args, **kwargs) -> list[CheckMessage]:
     errors = list(init_errors)
     for root, module in sitemap_roots(roots):
         errors.extend(_shape_errors(root.sitemap_path, module, _SITEMAP_ATTRIBUTES))
+        errors.extend(_items_conflicts(root.sitemap_path))
     for path, module in robots_modules(roots):
         errors.extend(_shape_errors(path, module, _ROBOTS_ATTRIBUTES))
     return errors
@@ -199,7 +270,7 @@ def _sources_below(root: SeoRoot) -> Iterator[Path]:
         dirnames[:] = sorted(name for name in dirnames if name not in root.skip_names)
         if Path(dirpath) == root.path:
             continue
-        for name in SOURCE_NAMES:
+        for name in _BELOW_ROOT_NAMES:
             if name in filenames:
                 yield Path(dirpath) / name
 
@@ -222,9 +293,36 @@ def check_seo_sources_below_root(*args, **kwargs) -> list[CheckMessage]:
     return warnings
 
 
+@register(NEXT, SEO, deploy=True)
+def check_seo_sources_on_closed_site(*args, **kwargs) -> list[CheckMessage]:
+    """Warn when a site closed to search still publishes for crawlers (`next.W120`).
+
+    A site private by design serves no sitemap or robots.txt, so it is silent.
+    """
+    if site_config().indexable is not False:
+        return []
+    _errors, roots = loaded_seo_roots()
+    sources = published_sources(roots)
+    if not sources:
+        return []
+    return [
+        DjangoWarning(
+            "NEXT_FRAMEWORK['SITE']['INDEXABLE'] is False, so every page renders "
+            f"noindex, yet the site publishes {' and '.join(sources)} for crawlers. "
+            "Remove the key, answer per request through a callable, or drop the "
+            "sources if the site is private.",
+            obj=settings,
+            id="next.W120",
+        )
+    ]
+
+
 __all__ = [
+    "check_seo_module_annotations",
     "check_seo_module_attributes",
     "check_seo_module_imports",
     "check_seo_sources_below_root",
+    "check_seo_sources_on_closed_site",
     "check_sitemap_items_files",
+    "imports_future_annotations",
 ]

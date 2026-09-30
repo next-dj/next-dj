@@ -33,8 +33,11 @@ from .isolation import (
     reset_form_registration_state,
     reset_page_cache,
     reset_registries,
+    reset_scripts,
+    reset_seo,
 )
 from .loaders import clear_loaded_dirs, eager_load_components, eager_load_pages
+from .metadata import assert_metadata
 from .patching import (
     StaticCollectorProxy,
     override_component_backends,
@@ -45,6 +48,7 @@ from .patching import (
     patch_static_collector,
 )
 from .rendering import render_component_by_name, render_page
+from .seo import SitemapUrl, parse_sitemap
 
 
 __all__ = [
@@ -52,8 +56,10 @@ __all__ = [
     "PartialEnvelope",
     "SignalEvent",
     "SignalRecorder",
+    "SitemapUrl",
     "StaticCollectorProxy",
     "assert_has_class",
+    "assert_metadata",
     "assert_missing_class",
     "build_form_for",
     "capture_framework_signals",
@@ -74,6 +80,7 @@ __all__ = [
     "override_form_action",
     "override_next_settings",
     "override_provider",
+    "parse_sitemap",
     "patch_static_collector",
     "render_component_by_name",
     "render_page",
@@ -83,6 +90,8 @@ __all__ = [
     "reset_form_registration_state",
     "reset_page_cache",
     "reset_registries",
+    "reset_scripts",
+    "reset_seo",
     "resolve_action_url",
     "resolve_call",
 ]

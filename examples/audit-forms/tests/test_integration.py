@@ -13,7 +13,13 @@ from next.forms.signals import (
     form_access_denied,
     form_validation_failed,
 )
-from next.testing import SignalRecorder, envelope_of, hidden_fields, resolve_action_url
+from next.testing import (
+    SignalRecorder,
+    assert_metadata,
+    envelope_of,
+    hidden_fields,
+    resolve_action_url,
+)
 
 
 pytestmark = pytest.mark.django_db
@@ -776,7 +782,8 @@ class TestPageMetadata:
         noindex: bool,
     ) -> None:
         pk = submitted_request.pk
-        body = next_client.get(path.format(pk=pk)).content.decode()
-        assert f"<title>{title.format(pk=pk)}</title>" in body
-        robots = ['<meta name="robots" content="noindex">'] if noindex else []
-        assert re.findall(r'<meta name="robots"[^>]*>', body) == robots
+        assert_metadata(
+            next_client.get(path.format(pk=pk)),
+            title=title.format(pk=pk),
+            robots="noindex" if noindex else None,
+        )

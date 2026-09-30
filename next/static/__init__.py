@@ -26,7 +26,7 @@ from .manager import (
     get_static_manager,
     reset_default_manager,
 )
-from .scripts import NextScriptBuilder, ScriptInjectionPolicy
+from .runtime import NextScriptBuilder, ScriptInjectionPolicy
 from .serializers import (
     JsContextSerializer,
     JsonJsContextSerializer,

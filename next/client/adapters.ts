@@ -31,7 +31,7 @@ export function defaultNavigate(): Navigate {
   return (url) => globalThis.location.assign(url);
 }
 
-/** The history seam for the url verb, push and replace map onto the History global. */
+/** The history seam the navigation writes through, over the History global. */
 export function defaultHistory(): HistoryAdapter {
   return {
     push: (href) =>

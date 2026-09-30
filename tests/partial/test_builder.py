@@ -18,7 +18,7 @@ from next.partial.errors import (
     UnknownPatchOpError,
 )
 from next.partial.headers import CONTENT_TYPE
-from next.static.scripts import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY
+from next.static.runtime import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY
 from tests.support import partial_request, plain_request
 
 
@@ -322,6 +322,18 @@ class TestStandaloneVerbs:
         with pytest.raises(CrossSiteHrefError) as exc:
             Patches(partial_request()).push_url("https://evil.example.com/x")
         assert "redirect(external=True)" in str(exc.value)
+
+    def test_replace_url_validates_same_site(self) -> None:
+        envelope = Patches(partial_request()).replace_url("/list/?q=a").envelope()
+        assert envelope.ops[0].as_dict() == {
+            "op": "url",
+            "action": "replace",
+            "href": "/list/?q=a",
+        }
+
+    def test_replace_url_raises_on_a_cross_site_host(self) -> None:
+        with pytest.raises(CrossSiteHrefError):
+            Patches(partial_request()).replace_url("https://evil.example.com/x")
 
     def test_redirect_internal_is_validated(self) -> None:
         envelope = Patches(partial_request()).redirect("/safe/").envelope()

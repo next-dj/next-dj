@@ -43,6 +43,17 @@ Defaults
 .. automodule:: next.conf.defaults
    :members:
 
+Scopes
+~~~~~~
+
+The nested scopes, ``METADATA``, ``SITE``, ``SEO``, and ``CONSENT``, are read through ``next.conf.scopes`` alone.
+``settings_scope(name)`` answers the merged scope, or an empty mapping where the setting holds none, and ``scope_value(name, key)`` answers one key of it, the entry of ``DEFAULTS`` where the project leaves the key out.
+``DEFAULTS`` holds every key of every scope, so the defaults live in one place and a consumer never spells a fallback of its own.
+``AUTO`` of ``next.conf.defaults`` is the one ``"auto"`` constant the defaults of ``SITE["INDEXABLE"]``, ``CSRF_DELIVERY``, and ``CONSENT["SERVER_RENDER"]`` hold and the site and consent areas compare against.
+
+.. automodule:: next.conf.scopes
+   :members:
+
 Helpers
 ~~~~~~~
 
@@ -53,6 +64,10 @@ Import utilities
 ~~~~~~~~~~~~~~~~
 
 .. autofunction:: next.conf.imports.import_class_cached
+
+``import_callable`` is the one reading of a dotted path that names a callable, such as a ``SITE["URL"]`` rule, and answers ``None`` for a path that does not import or names no callable, so the system checks report the value rather than the read raising.
+
+.. autofunction:: next.conf.imports.import_callable
 
 ``next.conf.imports.clear_import_cache`` is framework-internal.
 The settings object invokes it from ``reload`` to drop cached imports when settings change.

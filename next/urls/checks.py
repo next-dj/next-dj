@@ -1,9 +1,4 @@
-"""System checks for the URL routing subsystem.
-
-The ids are `next.E002` to `next.E006`, `next.E022`, `next.E024` to `next.E028`,
-`next.E039`, `next.E081`, `next.E082`, and `next.E094` to `next.E097` for the
-`OPTIONS` shapes, plus `next.E014` to `next.E016` for the pattern walk itself.
-"""
+"""System checks for the URL routing subsystem."""
 
 from __future__ import annotations
 

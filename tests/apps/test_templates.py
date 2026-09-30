@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import re
 
 import pytest
@@ -17,8 +18,9 @@ _DJANGO_BACKEND = "django.template.backends.django.DjangoTemplates"
 
 _DJANGO_TAG_PATTERN = r"({%.*?%}|{{.*?}}|{#.*?#})"
 _NEXT_TAG_ALTERNATION = (
-    "action_url|asset|collect_scripts|collect_styles|component|form|metadata|"
-    "set_slot|slot|template|use_module|use_script|use_style|zone"
+    "action_url|asset|breadcrumbs|collect_head|collect_scripts|collect_styles|"
+    "component|consented|form|metadata|script|set_slot|slot|template|"
+    "use_module|use_script|use_style|zone"
 )
 _WIDENED_TAG_PATTERN = (
     rf"((?:{{%\s*#?(?:{_NEXT_TAG_ALTERNATION})\b(?s:.*?)%}}|{{%.*?%}})"
@@ -151,6 +153,18 @@ class TestBlockTagLexingSpansLines:
     def test_inline_script_with_a_stray_brace_renders_verbatim(self) -> None:
         """A `{%` in inline JS used to swallow every line up to the next `%}`."""
         assert Template(_STRAY_BRACE_SOURCE).render(Context({})) == _STRAY_BRACE_SOURCE
+
+    @pytest.mark.parametrize(
+        "name",
+        sorted(
+            name
+            for module in _BUILTIN_MODULES
+            for name in importlib.import_module(module).register.tags
+        ),
+    )
+    def test_every_next_tag_spans_lines(self, name: str) -> None:
+        """A tag the widened branch leaves out lexes a line break as text."""
+        assert _token_types(f"{{% {name}\n%}}") == [TokenType.BLOCK]
 
     def test_a_next_tag_still_spans_lines_beside_a_stray_brace(self) -> None:
         """Both branches in one source, so neither change hides the other."""

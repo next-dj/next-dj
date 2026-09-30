@@ -42,6 +42,12 @@ def _slot_token(name: str) -> str:
 
 
 @register.simple_tag
+def collect_head() -> SafeString:
+    """Mark where the head scripts go, the end of `<head>` when the mark is absent."""
+    return SafeString(_slot_token("head"))
+
+
+@register.simple_tag
 def collect_styles() -> SafeString:
     """Mark where collected CSS link tags will be injected after rendering."""
     return SafeString(_slot_token("styles"))

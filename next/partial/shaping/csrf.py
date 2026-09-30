@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from next.static.scripts import csrf_payload
+from next.csrf import csrf_token_payload
 
 
 if TYPE_CHECKING:
@@ -29,4 +29,4 @@ def _csrf_rotated(request: "HttpRequest") -> bool:
 def _stamp_csrf(request: "HttpRequest", patches: "Patches", *, rotated: bool) -> None:
     """Attach the rotated CSRF payload when the request rotated its token."""
     if rotated:
-        patches.set_csrf(csrf_payload(request))
+        patches.set_csrf(csrf_token_payload(request))

@@ -15,6 +15,119 @@ from next.pages import context, page
 
 _CURATED = frozenset({"Depends", "action", "component", "context", "page"})
 
+AREA_EXPORTS: dict[str, frozenset[str]] = {
+    "next.consent": frozenset(
+        {
+            "NECESSARY",
+            "UNDECIDED",
+            "Consent",
+            "ConsentBackend",
+            "CookieConsentBackend",
+            "checks",
+            "consent_categories",
+            "get_consent",
+            "signals",
+        }
+    ),
+    "next.pages.metadata": frozenset(
+        {
+            "RESET",
+            "Alternates",
+            "AlternatesDict",
+            "Article",
+            "ArticleDict",
+            "Book",
+            "BookDict",
+            "Breadcrumb",
+            "Crumb",
+            "Feed",
+            "FeedDict",
+            "HtmlMetadataRenderer",
+            "Icon",
+            "IconDict",
+            "IconsDict",
+            "Link",
+            "LinkDict",
+            "Metadata",
+            "MetadataDict",
+            "MetadataRenderer",
+            "OpenGraph",
+            "OpenGraphAudio",
+            "OpenGraphAudioDict",
+            "OpenGraphDict",
+            "OpenGraphImage",
+            "OpenGraphImageDict",
+            "OpenGraphVideo",
+            "OpenGraphVideoDict",
+            "OtherIconDict",
+            "Profile",
+            "ProfileDict",
+            "Replace",
+            "ResolvedMetadata",
+            "Robots",
+            "RobotsDict",
+            "SiteMetadataDict",
+            "SiteTitleDict",
+            "Text",
+            "ThemeColor",
+            "ThemeColorDict",
+            "TitleDict",
+            "Twitter",
+            "TwitterDict",
+            "TwitterImage",
+            "TwitterImageDict",
+            "TwitterPlayer",
+            "TwitterPlayerDict",
+            "Verification",
+            "VerificationDict",
+            "Viewport",
+            "ViewportDict",
+            "absolute_url",
+            "ld",
+            "noindexed",
+            "resolve_metadata",
+        }
+    ),
+    "next.scripts": frozenset(
+        {"Script", "ScriptsSourceImportError", "Strategy", "checks", "signals"}
+    ),
+    "next.seo": frozenset(
+        {
+            "PageTreeSitemapBackend",
+            "RobotsRule",
+            "RobotsRuleError",
+            "SeoSourceImportError",
+            "SitemapBackend",
+            "SitemapEntry",
+            "SitemapEntryError",
+            "SitemapTrailError",
+            "checks",
+            "seo_manager",
+            "signals",
+            "sitemap",
+        }
+    ),
+    "next.server": frozenset(
+        {
+            "NextStatReloader",
+            "get_framework_filesystem_roots_for_linking",
+            "iter_all_autoreload_watch_specs",
+            "register_autoreload_watch_spec",
+            "signals",
+        }
+    ),
+    "next.site": frozenset(
+        {
+            "SiteConfig",
+            "SiteOriginError",
+            "site_config",
+            "site_indexable",
+            "site_origin",
+            "site_url",
+        }
+    ),
+}
+
 
 class TestCuratedSurface:
     """`next.__all__` is the curated top-level facade plus the version constant."""
@@ -93,3 +206,18 @@ class TestImportStaysDjangoFree:
             check=True,
         )
         assert result.stdout.strip() == "0"
+
+
+class TestAreaSurfaces:
+    """Each curated area package names exactly what it exports."""
+
+    @pytest.mark.parametrize(
+        ("module", "exported"), AREA_EXPORTS.items(), ids=list(AREA_EXPORTS)
+    )
+    def test_exported_names_are_pinned(
+        self, module: str, exported: frozenset[str]
+    ) -> None:
+        """A dropped name coming back and a new one both have to be decided."""
+        package = importlib.import_module(module)
+        assert set(package.__all__) == exported
+        assert all(hasattr(package, name) for name in exported)

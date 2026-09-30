@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-{% component "page_head" icon="🔍" %}
+{% component "page_head" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="next.dj catalog" brand_href="/" brand_icon="🔍" %}
     {% #slot "actions" %}
@@ -10,6 +10,7 @@
       {% template %}
     {% /slot %}
   {% /component %}
+  {% component "consent_banner" %}
   {% collect_scripts %}
 </body>
 </html>

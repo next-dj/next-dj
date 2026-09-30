@@ -37,14 +37,16 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 
 .. rubric:: SEO
 
-:doc:`set-page-titles-and-seo-tags`
-   Give every page its title, description, canonical link, and Open Graph tags.
-
-:doc:`publish-a-sitemap`
-   Serve ``/sitemap.xml`` and ``/robots.txt`` from the page root, with database-backed routes.
+:doc:`/content/topics/seo/quickstart` covers titles, the head, the sitemap, and the robots file of a new site.
 
 :doc:`audit-seo-before-deploy`
-   Run the opt-in SEO audits in CI and tune their thresholds.
+   Gate CI on the SEO checks and on tests that pin the head and the sitemap.
+
+:doc:`cache-pages-on-a-cdn`
+   Serve public pages from a CDN edge with lazy CSRF and a bypass for partial requests.
+
+:doc:`move-and-remove-pages`
+   Answer 301 for a moved page and 410 for a removed one through ``django.contrib.redirects``.
 
 .. rubric:: Context and components
 
@@ -137,6 +139,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`observe-framework-signals`
    Receive framework signals in production receivers.
 
+:doc:`write-a-vendor-adapter`
+   Load Plausible or GA4 under consent and count every partial navigation as a page view.
+
 :doc:`stream-live-updates-with-sse`
    Push live updates to the browser with server-sent events.
 
@@ -156,9 +161,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    require-login-on-pages
    internationalize-routes
    customize-error-pages
-   set-page-titles-and-seo-tags
-   publish-a-sitemap
    audit-seo-before-deploy
+   cache-pages-on-a-cdn
+   move-and-remove-pages
    share-context-across-pages
    resolve-feature-flags-with-di
    build-a-composite-component
@@ -186,6 +191,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    integrate-django-admin
    scope-requests-per-tenant
    observe-framework-signals
+   write-a-vendor-adapter
    stream-live-updates-with-sse
    split-settings-per-environment
 

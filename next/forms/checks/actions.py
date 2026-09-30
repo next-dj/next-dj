@@ -1,10 +1,4 @@
-"""System checks for the form classes and `@action` handlers a project registers.
-
-The ids are `next.E041` and `next.E046` for colliding names, `next.W046` for a class
-outside `BASE_DIR`, `next.E047` and `next.E085` for a bad scope, `next.E053` for
-`@action` on a class, `next.E048` and `next.E049` for `Meta.instance_from_url`, and
-`next.W060` and `next.W061` for a missing `django.contrib` app.
-"""
+"""System checks for the form classes and `@action` handlers a project registers."""
 
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register

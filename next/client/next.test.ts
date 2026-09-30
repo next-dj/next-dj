@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "./next";
+// The scripts chunk registers on evaluation, as it does once the runtime fetches it.
+import "./extras";
+
+interface Consent {
+  get(): Readonly<Record<string, boolean>>;
+  decided(): boolean;
+  update(choice: Record<string, boolean>, opts?: { reload?: boolean }): void;
+}
 
 interface NextStatic {
   context: Readonly<Record<string, unknown>>;
@@ -11,6 +19,7 @@ interface NextStatic {
       handler: (patch: Record<string, unknown>, ctx: unknown) => void,
     ): void;
     setCsrf(csrf: { header: string; token: string } | undefined): void;
+    onMount(selector: string, callback: (el: Element) => void): () => void;
     ready(): void;
     _configure(adapters: {
       dev?: boolean;
@@ -20,6 +29,13 @@ interface NextStatic {
     }): void;
     _reset(): void;
   };
+  consent: Consent;
+  scripts: {
+    load(name: string): Promise<void>;
+    status(name: string): string | undefined;
+  };
+  ready(chunk: "scripts"): Promise<{ consent: Consent; scripts: unknown }>;
+  navigation: { current(): { url: string; path: string; title: string } };
   _init(context: Record<string, unknown>): void;
   on(event: string, listener: (payload: Record<string, unknown>) => void): () => void;
   use<T>(plugin: (next: NextStatic) => T): T;
@@ -498,5 +514,288 @@ describe("Next.use", () => {
     });
     win.Next._init({});
     expect(triggered).toBe(true);
+  });
+});
+
+describe("Next._init deferred csrf", () => {
+  const calls: string[] = [];
+
+  beforeEach(() => {
+    calls.length = 0;
+    win.Next.partial._reset();
+    win.Next.partial._configure({
+      document,
+      navigate: () => {},
+      fetch: async (url, init) => {
+        calls.push(new URL(url).pathname);
+        const token = new Headers(init.headers).get("X-CSRFToken");
+        if (token !== null) calls.push(`token ${token}`);
+        const minted = url.endsWith("/_next/csrf/");
+        return new Response(
+          minted
+            ? '{"header":"X-CSRFToken","token":"minted"}'
+            : '{"version":"v1","ops":[],"assets":[],"form":null}',
+          {
+            headers: {
+              "content-type": minted
+                ? "application/json"
+                : "application/vnd.next.patches+json",
+            },
+          },
+        );
+      },
+    });
+  });
+
+  afterEach(() => {
+    win.Next.partial._reset();
+    win.Next._init({});
+  });
+
+  it("seeds the endpoint so the first mutation mints its token", async () => {
+    win.Next._init({ $csrf: { header: "X-CSRFToken", url: "/_next/csrf/" } });
+    await win.Next.partial.fetch({ url: "/mutate/", method: "POST" });
+    expect(calls).toEqual(["/_next/csrf/", "/mutate/", "token minted"]);
+  });
+});
+
+describe("Next.consent and Next.scripts", () => {
+  function clearCookies(): void {
+    for (const pair of document.cookie.split(";")) {
+      const name = pair.split("=")[0]!.trim();
+      if (name !== "") document.cookie = `${name}=; max-age=0; path=/`;
+    }
+  }
+
+  // The chunk's registry lives for the file, so each case names its own scripts.
+  beforeEach(() => {
+    document.head.innerHTML = "";
+  });
+
+  afterEach(clearCookies);
+
+  it("seeds consent from $consent and activates a gated script on update", () => {
+    win.Next._init({
+      $consent: {
+        categories: ["necessary", "marketing"],
+        decided: false,
+        granted: ["necessary"],
+      },
+      $scripts: [
+        { name: "pixel", init: "window.nextPixel = 1", category: "marketing" },
+        { name: "base", init: "window.nextBase = 1" },
+      ],
+    });
+    expect(win.Next.consent.decided()).toBe(false);
+    expect(win.Next.scripts.status("base")).toBe("loaded");
+    expect(win.Next.scripts.status("pixel")).toBe("blocked");
+    win.Next.consent.update({ marketing: true });
+    expect(win.Next.consent.get()).toEqual({ necessary: true, marketing: true });
+    expect(win.Next.scripts.status("pixel")).toBe("loaded");
+    expect(document.cookie).toContain("next_consent=1:marketing:");
+  });
+
+  it("announces the starting consent once the chunk is configured", () => {
+    const seen: Record<string, unknown>[] = [];
+    const off = win.Next.on("next:consent", (payload) => seen.push(payload));
+    document.cookie = "next_consent=1:marketing:1700000000; path=/";
+    win.Next._init({
+      $consent: { categories: ["necessary", "marketing"], decided: false, granted: [] },
+    });
+    off();
+    expect(seen).toEqual([
+      { granted: ["necessary", "marketing"], denied: [], changed: [], initial: true },
+    ]);
+  });
+
+  it("leaves a late subscriber to read the state rather than replaying it", () => {
+    win.Next._init({ $consent: { categories: ["necessary", "analytics"] } });
+    win.Next.consent.update({ analytics: true });
+    const seen = vi.fn();
+    const off = win.Next.on("next:consent", seen);
+    off();
+    expect(seen).not.toHaveBeenCalled();
+    expect(win.Next.consent.get()).toEqual({ necessary: true, analytics: true });
+  });
+
+  it("resolves ready with the installed surfaces once configured", async () => {
+    document.cookie = "next_consent=1:analytics:1700000000; path=/";
+    win.Next._init({
+      $consent: { categories: ["necessary", "analytics", "marketing"] },
+    });
+    const chunk = await win.Next.ready("scripts");
+    expect(chunk.consent).toBe(win.Next.consent);
+    expect(chunk.scripts).toBe(win.Next.scripts);
+    expect(chunk.consent.decided()).toBe(true);
+    expect(chunk.consent.get()).toEqual({
+      necessary: true,
+      analytics: true,
+      marketing: false,
+    });
+  });
+
+  it("reveals consented markup a zone morph brings in", () => {
+    document.cookie = "next_consent=1:marketing:1700000000; path=/";
+    win.Next._init({ $consent: { categories: ["necessary", "marketing"] } });
+    document.body.innerHTML = '<div data-next-zone="video"></div>';
+    win.Next.partial.apply({
+      version: "v1",
+      ops: [
+        {
+          op: "inner",
+          target: { zone: "video" },
+          html:
+            '<template data-next-consented="marketing"><b>video</b></template>' +
+            "<a>allow</a><!--/next-consented-->",
+        },
+      ],
+    });
+    expect(document.querySelector('[data-next-zone="video"]')!.innerHTML).toBe(
+      "<b>video</b>",
+    );
+  });
+
+  it("reveals only inside the nodes a patch touched", () => {
+    document.cookie = "next_consent=1:marketing:1700000000; path=/";
+    win.Next._init({ $consent: { categories: ["necessary", "marketing"] } });
+    const block =
+      '<template data-next-consented="marketing"><b>video</b></template>' +
+      "<a>allow</a><!--/next-consented-->";
+    document.body.innerHTML =
+      `<div id="aside">${block}</div>` + '<div data-next-zone="video"></div>';
+    win.Next.partial.apply({
+      version: "v1",
+      ops: [{ op: "inner", target: { zone: "video" }, html: block }],
+    });
+    expect(document.querySelector("#aside template")).not.toBeNull();
+    expect(document.querySelector('[data-next-zone="video"]')!.innerHTML).toBe(
+      "<b>video</b>",
+    );
+  });
+
+  it("reveals a consented block a replace patch puts in place", () => {
+    document.cookie = "next_consent=1:marketing:1700000000; path=/";
+    win.Next._init({ $consent: { categories: ["necessary", "marketing"] } });
+    document.body.innerHTML = '<p id="slot"></p>';
+    win.Next.partial.apply({
+      version: "v1",
+      ops: [
+        {
+          op: "replace",
+          target: { css: "#slot" },
+          html:
+            '<template data-next-consented="marketing"><b>video</b></template>' +
+            "<a>allow</a><!--/next-consented-->",
+        },
+      ],
+    });
+    expect(document.body.innerHTML).toBe("<b>video</b>");
+  });
+
+  it("mounts revealed markup the way it mounts morphed markup", async () => {
+    const calls: string[] = [];
+    win.Next.partial._reset();
+    win.Next.partial._configure({
+      document,
+      navigate: () => {},
+      fetch: async (url, init) => {
+        calls.push(
+          `${new URL(url).pathname} ${new Headers(init.headers).get("X-Next-Zone")}`,
+        );
+        return new Response('{"version":"v1","ops":[]}', {
+          headers: { "content-type": "application/vnd.next.patches+json" },
+        });
+      },
+    });
+    const mounted: string[] = [];
+    const embeds: Element[] = [];
+    const onMounted = (event: Event): void => {
+      mounted.push((event.target as Element).className);
+    };
+    document.addEventListener("next:mounted", onMounted);
+    const off = win.Next.partial.onMount(".embed", (el) => embeds.push(el));
+    document.cookie = "next_consent=1:marketing:1700000000; path=/";
+    document.body.innerHTML =
+      '<template data-next-consented="marketing"><div class="embed" ' +
+      'data-next-zone="player" data-next-lazy="load"></div></template>' +
+      "<a>allow</a><!--/next-consented-->";
+    win.Next._init({ $consent: { categories: ["necessary", "marketing"] } });
+    document.removeEventListener("next:mounted", onMounted);
+    off();
+    await Promise.resolve();
+    expect(mounted).toEqual(["embed"]);
+    expect(embeds).toHaveLength(1);
+    expect(calls).toEqual([`${location.pathname} player`]);
+    win.Next.partial._reset();
+  });
+
+  it("carries the bootstrap nonce onto an inserted script", () => {
+    win.Next._init({ $scripts: [{ name: "plain", init: "window.nextPlain = 1" }] });
+    const el = document.head.querySelector('script[data-next-script="plain"]')!;
+    expect(el.getAttribute("nonce")).toBeNull();
+  });
+});
+
+describe("Next.navigation", () => {
+  afterEach(() => {
+    win.Next._init({});
+  });
+
+  it("answers where the page stands", () => {
+    document.title = "Home";
+    expect(win.Next.navigation.current()).toEqual({
+      url: location.href,
+      path: location.pathname + location.search,
+      title: "Home",
+    });
+  });
+
+  it("announces nothing for the page load itself", () => {
+    const navigated = vi.fn();
+    const off = win.Next.on("next:navigated", navigated);
+    win.Next._init({});
+    off();
+    expect(navigated).not.toHaveBeenCalled();
+  });
+});
+
+describe("the dev chunk", () => {
+  function devTags(): Element[] {
+    return Array.from(document.head.querySelectorAll('script[src*="next.dev"]'));
+  }
+
+  beforeEach(() => {
+    for (const el of devTags()) el.remove();
+  });
+
+  afterEach(() => {
+    win.Next._init({});
+  });
+
+  // First, since the page fetches its dev chunk once and only a failure frees it.
+  it("reports a dev chunk that failed to load on the bus", () => {
+    const errors: Record<string, unknown>[] = [];
+    const off = win.Next.on("partial:error", (payload) => errors.push(payload));
+    win.Next._init({ $dev: true, $chunks: { dev: "/static/next/next.dev.min.js" } });
+    devTags()[0]!.dispatchEvent(new Event("error"));
+    off();
+    expect(errors).toEqual([
+      expect.objectContaining({ kind: "asset", url: "/static/next/next.dev.min.js" }),
+    ]);
+  });
+
+  it("is fetched once for a page rendered under $dev", () => {
+    const chunks = { dev: "/static/next/next.dev.min.js" };
+    win.Next._init({ $dev: true, $chunks: chunks });
+    win.Next._init({ $dev: true, $chunks: chunks });
+    expect(devTags().map((el) => el.getAttribute("src"))).toEqual([
+      "/static/next/next.dev.min.js",
+    ]);
+  });
+
+  it("is never fetched for a production page", () => {
+    win.Next._init({ $chunks: { dev: "/static/next/next.dev.min.js" } });
+    win.Next._init({ $dev: "true", $chunks: { dev: "/static/next/next.dev.min.js" } });
+    expect(devTags()).toEqual([]);
   });
 });

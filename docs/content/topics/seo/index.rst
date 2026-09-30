@@ -4,44 +4,80 @@ SEO
 ===
 
 A page declares its metadata next to its body, in ``page.py``, and one ``{% metadata %}`` tag in the root layout renders the whole head.
-A ``sitemap.py`` and a ``robots.py`` at the top of the page root serve ``/sitemap.xml`` and ``/robots.txt`` from the same tree.
-The section covers the two declaration forms and their merge along the page tree, the social and canonical tags the head carries, the sitemap and the robots file, and the system checks that audit the result before a deploy.
+``NEXT_FRAMEWORK["SITE"]`` names the public origin of the site and whether search engines may index it, and every head tag, response header, sitemap, and robots file reads that one answer.
+A ``sitemap.py`` and a ``robots.py`` at the top of the page root serve the crawler documents from the same tree.
+Metadata belongs to the pages the file router serves, and a plain Django view renders none.
+
+.. rubric:: Start here
+
+:doc:`quickstart`
+   The settings, the head tag, a title per page, a sitemap, and a robots file, in five minutes.
 
 .. rubric:: Declaring
 
 :doc:`metadata`
-   The ``metadata`` dict, the ``@page.metadata`` callable, the title template, the merge along the tree, and the ``meta`` patch verb.
+   The ``metadata`` dict, the ``@page.metadata`` callable, the title template, the ``{% metadata %}`` tag, and the ``meta`` patch verb.
+
+:doc:`merge`
+   The merge rule of every key, ``None`` as unset, and ``RESET`` to drop an inherited value.
+
+:doc:`site`
+   The ``SITE`` scope, the origin every absolute URL is built on, and the indexability rule for production, staging, and preview hosts.
 
 .. rubric:: Rendering
 
 :doc:`social-and-canonical`
-   Open Graph, Twitter cards, the canonical link, robots directives, hreflang alternates, JSON-LD, verification tokens, and free-form ``other`` tags.
+   Absolute URLs, the canonical link, robots directives and their header, hreflang alternates, Open Graph, and Twitter cards.
+
+:doc:`head-tags`
+   Viewport, theme color, color scheme, keywords, verification tokens, feeds, free-form links, and the ``other`` and ``properties`` escape hatches.
+
+:doc:`structured-data`
+   JSON-LD as plain mappings or ``next.pages.ld`` nodes, the single ``@graph``, and the ``@id`` rules.
+
+:doc:`breadcrumbs`
+   The ``breadcrumb`` key, the ``{% breadcrumbs %}`` tag, and the ``BreadcrumbList`` the graph gains.
+
+:doc:`icons-and-images`
+   The ``icons`` key, the social card images, and a card drawn per page.
 
 .. rubric:: Crawlers
 
 :doc:`sitemaps`
-   The ``sitemap.py`` convention, static and dynamic routes, the module attributes, the index, the ``base`` origin, caching, and mounting at the host root.
+   The ``sitemap.py`` convention, static and dynamic routes, lazy items, and the module attributes.
+
+:doc:`sitemap-sections`
+   Sections, the index, sitemap backends, the origin of every URL, caching, and mounting at the host root.
 
 :doc:`robots`
-   The declared and the static ``/robots.txt``, the ``Sitemap:`` line, the one-source rule, and why ``noindex`` never becomes ``Disallow``.
+   ``robots.py`` with static or per-request rules, blocking AI crawlers, the static ``robots.txt``, and a site closed to search.
 
-.. rubric:: Auditing
+.. rubric:: Checking
 
 :doc:`auditing`
-   The checks a plain ``manage.py check`` runs, the opt-in content audits behind ``--deploy --tag seo``, and the thresholds behind them.
+   The system checks, ``showmetadata``, and the test helpers.
 
 .. toctree::
    :hidden:
    :maxdepth: 1
 
+   quickstart
    metadata
+   merge
+   site
    social-and-canonical
+   head-tags
+   structured-data
+   breadcrumbs
+   icons-and-images
    sitemaps
+   sitemap-sections
    robots
    auditing
 
 .. seealso::
 
-   :doc:`/content/howto/set-page-titles-and-seo-tags` for the recipe that wires a site up from scratch, and :doc:`/content/howto/publish-a-sitemap` for the sitemap and robots files.
-   :doc:`/content/ref/pages` for the ``Metadata`` value object and the renderer contract, and :doc:`/content/ref/seo` for the sitemap and robots API.
-   :repo:`markdown-blog <tree/main/examples/markdown-blog>` for the settings tier, hreflang alternates, and a per-post callable, :repo:`wiki <tree/main/examples/wiki>` for a title read off a resolved row and ``noindex`` on the editing pages, and :repo:`search-catalog <tree/main/examples/search-catalog>` for a canonical with ``CANONICAL_QUERY`` and the ``meta`` verb.
+   :doc:`/content/topics/caching` for ``cache`` and ``headers`` in ``page.py`` and the shared-cache rules.
+   :doc:`/content/howto/audit-seo-before-deploy` for the checks and the tests in CI.
+   :doc:`/content/ref/metadata` for the metadata value objects and the renderer contract, and :doc:`/content/ref/seo` for the sitemap and robots API.
+   :repo:`markdown-blog <tree/main/examples/markdown-blog>` for ``DEFAULTS`` and a feed, :repo:`wiki <tree/main/examples/wiki>` for a title read off a resolved row and a database-fed sitemap, and :repo:`search-catalog <tree/main/examples/search-catalog>` for a canonical with ``CANONICAL_QUERY`` and the ``meta`` verb.

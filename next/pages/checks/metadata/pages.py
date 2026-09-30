@@ -7,9 +7,8 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from next.checks.common import RunMemo, discover_page_registrations, get_router_manager
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
-from next.pages.loaders import load_page_module
 from next.pages.manager import page
-from next.pages.metadata import chain_entry, normalize_metadata
+from next.pages.metadata.normalize import normalize_metadata
 
 
 if TYPE_CHECKING:
@@ -18,7 +17,9 @@ if TYPE_CHECKING:
 
     from django.core.checks import CheckMessage
 
-    from next.pages.metadata import Metadata, PageMetadataEntry, Segment
+    from next.pages.metadata import Metadata
+    from next.pages.metadata.markers import Segment
+    from next.pages.metadata.registry import PageMetadataEntry
 
 
 class MetadataPage(NamedTuple):
@@ -56,11 +57,7 @@ def loaded_metadata_pages() -> tuple[list[CheckMessage], list[MetadataPage]]:
 
 
 def _metadata_page(url_path: str, page_path: Path) -> MetadataPage:
-    module, _error = load_page_module(page_path)
-    raw = None if module is None else getattr(module, "metadata", None)
-    entry = page._metadata_registry.entry(page_path)
-    if entry is not None and raw is entry.func:
-        raw = None
+    raw, entry = page.metadata_declaration(page_path)
     segment: Segment | None = None
     shape_error: PageMetadataShapeError | None = None
     if isinstance(raw, Mapping):
@@ -88,10 +85,10 @@ def _static_fold(page_path: Path) -> tuple[Metadata | None, bool, bool]:
     A dynamic chain carries a callable, so the static fold is not what a render shows.
     """
     try:
-        entry = chain_entry(page._metadata_registry, page_path)
+        chain = page.metadata_chain(page_path)
     except (PageMetadataShapeError, PageMetadataConflictError):
         return None, False, False
-    return entry.static, bool(entry.sources), entry.folded is None
+    return chain.static, bool(chain.sources), chain.folded is None
 
 
 def folded_pages(pages: list[MetadataPage]) -> Iterator[tuple[MetadataPage, Metadata]]:

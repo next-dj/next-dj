@@ -16,6 +16,7 @@ from next.caches import BoundedCache
 
 from .assets import StaticNamespace, static_name
 from .errors import StaticAssetNotFoundError
+from .runtime import nonce_attr
 
 
 if TYPE_CHECKING:
@@ -85,13 +86,15 @@ class StaticBackend(ABC):
 class StaticFilesBackend(StaticBackend):
     """Resolve co-located asset URLs through Django staticfiles.
 
-    `css_tag`, `js_tag`, and `module_tag` hold format strings needing `{url}`, and the
-    URL is escaped into them because the finished tag is spliced past the engine.
+    `css_tag`, `js_tag`, and `module_tag` hold format strings needing `{url}` and
+    `{nonce_attr}`, both escaped because the tag is spliced past the engine.
     """
 
-    _DEFAULT_CSS_TAG: ClassVar[str] = '<link rel="stylesheet" href="{url}">'
-    _DEFAULT_JS_TAG: ClassVar[str] = '<script src="{url}"></script>'
-    _DEFAULT_MODULE_TAG: ClassVar[str] = '<script type="module" src="{url}"></script>'
+    _DEFAULT_CSS_TAG: ClassVar[str] = '<link rel="stylesheet" href="{url}"{nonce_attr}>'
+    _DEFAULT_JS_TAG: ClassVar[str] = '<script src="{url}"{nonce_attr}></script>'
+    _DEFAULT_MODULE_TAG: ClassVar[str] = (
+        '<script type="module" src="{url}"{nonce_attr}></script>'
+    )
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
         """Read the tag templates from the OPTIONS mapping."""
@@ -147,26 +150,34 @@ class StaticFilesBackend(StaticBackend):
         self._url_cache[cache_key] = url
         return url
 
-    def render_link_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+    def render_link_tag(
+        self, url: str, *, request: HttpRequest | None = None, nonce: str | None = None
+    ) -> str:
         """Return a link tag built from the configured css_tag template.
 
         The `request` argument holds the contract and the default backend ignores it.
         """
         del request
-        return self._css_tag.format(url=escape(str(url)))
+        return self._css_tag.format(url=escape(str(url)), nonce_attr=nonce_attr(nonce))
 
-    def render_script_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+    def render_script_tag(
+        self, url: str, *, request: HttpRequest | None = None, nonce: str | None = None
+    ) -> str:
         """Return a script tag built from the configured js_tag template.
 
         The `request` argument holds the contract and the default backend ignores it.
         """
         del request
-        return self._js_tag.format(url=escape(str(url)))
+        return self._js_tag.format(url=escape(str(url)), nonce_attr=nonce_attr(nonce))
 
-    def render_module_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+    def render_module_tag(
+        self, url: str, *, request: HttpRequest | None = None, nonce: str | None = None
+    ) -> str:
         """Return a module script tag built from the configured module_tag template.
 
         The `request` argument holds the contract and the default backend ignores it.
         """
         del request
-        return self._module_tag.format(url=escape(str(url)))
+        return self._module_tag.format(
+            url=escape(str(url)), nonce_attr=nonce_attr(nonce)
+        )

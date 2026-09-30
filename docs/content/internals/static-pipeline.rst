@@ -135,9 +135,13 @@ Modules
 
 ``next.static.inject``.
    ``PlaceholderInjector`` renders what a collector holds into the placeholder tokens of a finished page, and the manager delegates its ``inject`` to one.
+   It asks the ``page_scripts_slot`` port for the head scripts and the ``$scripts`` and ``$consent`` entries of the render, placing the head scripts at ``{% collect_head %}`` or before ``</head>``.
 
-``next.static.scripts``.
-   ``NextScriptBuilder`` and ``ScriptInjectionPolicy`` for the ``Next`` runtime script.
+``next.static.runtime``.
+   ``NextScriptBuilder`` and ``ScriptInjectionPolicy`` for the ``Next`` runtime script, and the reserved init payload keys.
+
+``next.static.nonce``.
+   ``resolve_nonce`` reads the CSP nonce of a render once while ``CSP_NONCE`` is on, marks the render personal when a nonce was minted, and the injector hands it to the script builder and to every backend renderer as the ``nonce`` keyword.
 
 ``next.static.serializers``.
    ``JsContextSerializer`` protocol plus ``JsonJsContextSerializer`` and ``PydanticJsContextSerializer``.
@@ -185,7 +189,7 @@ A standalone zone render runs the same discovery but ships the collected assets 
 Extension points
 ----------------
 
-- Subclass ``StaticFilesBackend`` to change the rendered output.
+- Subclass ``StaticFilesBackend`` to change the rendered output, keeping each renderer's ``request`` and ``nonce`` keywords, which ``manage.py check`` verifies.
 - Override ``StaticBackend.resolve_url`` to look an authored reference up somewhere other than Django staticfiles, and keep core's reading of a reference with ``next.static.static_name``.
 - Override ``StaticBackend.forget_urls`` when a backend memoises resolved URLs somewhere other than the base memo, and the manager drives it over every configured backend whenever ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` changes.
 - Implement the ``DedupStrategy`` protocol and point ``DEDUP_STRATEGY`` at it.

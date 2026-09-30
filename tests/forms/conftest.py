@@ -30,8 +30,7 @@ def _isolate_form_registries():
 def _clear_guarded_tenant_resolutions():
     """Empty the shared provider log on the guarded form around each test.
 
-    The list is class state, so a test reading it depends on no other test having
-    written to it first.
+    The list is class state, so no test reading it may depend on an earlier writer.
     """
     GuardedTenantForm.resolutions.clear()
     yield

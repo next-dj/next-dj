@@ -1,8 +1,4 @@
-"""System checks for the configuration layer.
-
-The ids are `next.E035` for an unknown key, `next.E076` and `next.W072` for a value the
-merge would discard, and `next.E077` for a non-dict `NEXT_FRAMEWORK`.
-"""
+"""System checks for the configuration layer."""
 
 from __future__ import annotations
 
@@ -57,7 +53,13 @@ _KEY_TYPES: dict[str, type] = (
     dict.fromkeys(sorted(_TYPED_LIST_KEYS), list)
     | dict.fromkeys(sorted(NextFrameworkSettings.STR_KEYS), str)
     | dict.fromkeys(sorted(_TYPED_OPTIONAL_KEYS), str)
-    | {"METADATA": dict, "NEXT_JS_OPTIONS": dict}
+    | {
+        "CONSENT": dict,
+        "METADATA": dict,
+        "NEXT_JS_OPTIONS": dict,
+        "SEO": dict,
+        "SITE": dict,
+    }
 )
 
 _SILENCE_HINT = (

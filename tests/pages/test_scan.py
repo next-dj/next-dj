@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from django.core.checks import Error
 
-from next.pages.loaders import _MODULE_MEMO
+from next.pages.loaders import module_stamps
 from next.pages.scan import iter_serialized_page_context_keys, load_scanned_page_modules
 from tests.support import MalformedRootsRouter, patch_checks_router_manager
 
@@ -122,7 +122,7 @@ class TestLoadScannedPageModules:
         page_file.write_text('template = "ok"\n')
         with patch_checks_router_manager(pages_directory=tmp_path) as (manager, _r, _d):
             load_scanned_page_modules(manager)
-        assert page_file in _MODULE_MEMO
+        assert module_stamps((page_file,)) == (page_file.stat().st_mtime_ns,)
 
     def test_a_page_the_router_never_walked_stays_unexecuted(
         self, tmp_path: Path
@@ -136,4 +136,4 @@ class TestLoadScannedPageModules:
         stray.write_text('template = "ok"\n')
         with patch_checks_router_manager(pages_directory=routed) as (manager, _r, _d):
             load_scanned_page_modules(manager)
-        assert stray not in _MODULE_MEMO
+        assert module_stamps((stray,)) == (None,)

@@ -236,12 +236,12 @@ class TestStaticBackendLoadedSignal:
     ) -> None:
         config = {"BACKEND": "next.static.StaticFilesBackend", "OPTIONS": {}}
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": [config]}):
-            fresh_manager._ensure_backends()
+            backend = fresh_manager.default_backend
 
         assert len(capture_static_backend_loaded) == 1
         event = capture_static_backend_loaded.events[0]
         assert event.sender is StaticFilesBackend
-        assert event.kwargs["instance"] is fresh_manager.default_backend
+        assert event.kwargs["instance"] is backend
         assert event.kwargs["config"] == config
 
     def test_sender_class_allows_filtering(
@@ -254,7 +254,7 @@ class TestStaticBackendLoadedSignal:
                 "STATIC_BACKENDS": [{"BACKEND": "next.static.StaticFilesBackend"}]
             }
         ):
-            fresh_manager._ensure_backends()
+            _ = fresh_manager.default_backend
         senders = [e.sender for e in capture_static_backend_loaded]
         assert all(s is StaticFilesBackend for s in senders)
 
@@ -264,9 +264,9 @@ class TestStaticBackendLoadedSignal:
         capture_static_backend_loaded: SignalRecorder,
     ) -> None:
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}):
-            fresh_manager._ensure_backends()
+            backend = fresh_manager.default_backend
 
-        assert isinstance(fresh_manager.default_backend, StaticFilesBackend)
+        assert isinstance(backend, StaticFilesBackend)
         assert [event.sender for event in capture_static_backend_loaded] == [
             StaticFilesBackend
         ]
@@ -279,12 +279,12 @@ class TestStaticBackendLoadedSignal:
         with override_settings(
             NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": "builtins.dict"}]}
         ):
-            fresh_manager._ensure_backends()
+            backend = fresh_manager.default_backend
 
-        assert isinstance(fresh_manager.default_backend, StaticFilesBackend)
+        assert isinstance(backend, StaticFilesBackend)
         assert [
             event.kwargs["instance"] for event in capture_static_backend_loaded
-        ] == [fresh_manager.default_backend]
+        ] == [backend]
 
 
 class TestSignalsAreDjangoSignals:

@@ -1,10 +1,27 @@
 <article class="space-y-6">
-  <a href="{% url 'next:page_' %}" class="text-sm text-muted-foreground hover:text-foreground">← Back to posts</a>
+  {% breadcrumbs as crumbs %}
+  <nav aria-label="Breadcrumb" class="text-sm text-muted-foreground">
+    <ol class="flex flex-wrap items-center gap-1">
+      {% for crumb in crumbs %}
+        <li class="flex items-center gap-1">
+          {% if not forloop.first %}<span aria-hidden="true">/</span>{% endif %}
+          {% if crumb.current %}
+            <span aria-current="page" class="font-medium text-foreground">{{ crumb.label }}</span>
+          {% else %}
+            <a href="{{ crumb.url }}" class="hover:text-foreground">{{ crumb.label }}</a>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+  </nav>
 
   <header class="space-y-1 border-b border-border pb-4">
-    <h1 class="text-3xl font-bold tracking-tight text-foreground">{{ post.title }}</h1>
+    <h1 class="text-3xl font-bold tracking-tight text-foreground">{{ article.title }}</h1>
     <div class="flex items-center justify-between text-sm text-muted-foreground">
-      <span>~ {{ reading_minutes }} min read · <code class="font-mono">/posts/{{ post.slug }}/</code></span>
+      <span>
+        <time datetime="{{ article.published|date:'Y-m-d' }}">{{ article.published|date:"j M Y" }}</time>
+        · ~ {{ article.reading_minutes }} min read · <code class="font-mono">/posts/{{ article.slug }}/</code>
+      </span>
       {% component "share_button" %}
     </div>
   </header>

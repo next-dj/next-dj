@@ -28,8 +28,8 @@ export interface MorphOptions {
   afterNode?: (oldNode: Node, newNode: Node) => void;
   // An unmatched old node is about to be discarded. false keeps it.
   onDiscard?: (node: Node) => boolean | void;
-  // Emit markup diagnostics to the console. Default false.
-  dev?: boolean;
+  // Reports a node carrying both data-next-key and id, the dev channel's warning.
+  keyed?: ((el: Element) => void) | undefined;
 }
 
 interface Ctx {
@@ -42,14 +42,14 @@ interface Ctx {
   onDiscard: (node: Node) => boolean | void;
 }
 
+type Keyed = MorphOptions["keyed"];
+
 // Read the id through getAttribute: the `id` property is subject to DOM
 // clobbering, an `<input name="id">` shadows form.id.
-function readId(el: Element, dev: boolean): string | null {
+function readId(el: Element, keyed: Keyed): string | null {
   const key = el.getAttribute(ATTR_KEY);
   if (key !== null) {
-    if (dev && el.getAttribute("id") !== null) {
-      console.warn(`[next.morph] ${ATTR_KEY} and id on one node`, el);
-    }
+    if (keyed !== undefined && el.getAttribute("id") !== null) keyed(el);
     return key;
   }
   return el.getAttribute("id");
@@ -62,12 +62,12 @@ function collectIds(
   root: Element,
   into: Map<Element, Set<string>>,
   universe: Set<string>,
-  dev: boolean,
+  keyed: Keyed,
 ): void {
-  consume(root, root, into, universe, dev);
+  consume(root, root, into, universe, keyed);
   const tagged = root.querySelectorAll(`[id],[${ATTR_KEY}]`);
   for (const el of Array.from(tagged)) {
-    consume(el, root, into, universe, dev);
+    consume(el, root, into, universe, keyed);
   }
 }
 
@@ -76,9 +76,9 @@ function consume(
   root: Element,
   into: Map<Element, Set<string>>,
   universe: Set<string>,
-  dev: boolean,
+  keyed: Keyed,
 ): void {
-  const id = readId(el, dev);
+  const id = readId(el, keyed);
   if (id === null) return;
   universe.add(id);
   let node: Element | null = el;
@@ -441,7 +441,7 @@ export function morph(
 ): Element {
   const content = parseContent(target, html);
   const mode = options.mode ?? "node";
-  const dev = options.dev ?? false;
+  const keyed = options.keyed;
   const doc = target.ownerDocument;
 
   const newRoot =
@@ -456,12 +456,12 @@ export function morph(
   const ids = new Map<Element, Set<string>>();
   const oldUniverse = new Set<string>();
   const newUniverse = new Set<string>();
-  collectIds(target, ids, oldUniverse, dev);
+  collectIds(target, ids, oldUniverse, keyed);
   if (newRoot instanceof Element) {
-    collectIds(newRoot, ids, newUniverse, dev);
+    collectIds(newRoot, ids, newUniverse, keyed);
   } else {
     for (const child of Array.from(newRoot.childNodes)) {
-      if (isElement(child)) collectIds(child, ids, newUniverse, dev);
+      if (isElement(child)) collectIds(child, ids, newUniverse, keyed);
     }
   }
   const persistent = new Set<string>();

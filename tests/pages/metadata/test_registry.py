@@ -1,12 +1,20 @@
 import functools
+import types
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from next.pages.metadata import PageMetadataEntry, PageMetadataRegistry
+from next.pages.errors import PageMetadataConflictError
+from next.pages.loaders import AncestorStamps
 from next.pages.metadata.chain import ChainEntry
-from next.pages.metadata.schema import EMPTY_METADATA, Segment
-from tests.support import handler_declared_here
+from next.pages.metadata.fold import EMPTY_STATE
+from next.pages.metadata.markers import Metadata, Segment
+from next.pages.metadata.registry import (
+    MetadataRegistrations,
+    PageMetadataEntry,
+    PageMetadataRegistry,
+)
 
 
 def _wallet_meta() -> dict[str, str]:
@@ -17,20 +25,23 @@ def _other_meta() -> dict[str, str]:
     return {"title": "Other"}
 
 
-def _entry(version: int = 0) -> ChainEntry:
+def _rerun(func: Callable[[], dict[str, str]]) -> Callable[[], dict[str, str]]:
+    """Return `func` as a re-executed `page.py` defines it, in a fresh namespace."""
+    return types.FunctionType(func.__code__, {}, func.__name__)
+
+
+def _entry() -> ChainEntry:
     return ChainEntry(
-        version=version,
-        generation=0,
+        ancestors=AncestorStamps(paths=(), version=0, watched=False),
+        registry_stamps=(),
+        registry_version=0,
         site=Segment("site"),
         sources=(),
-        folded=EMPTY_METADATA,
-        static=EMPTY_METADATA,
+        prefix=EMPTY_STATE,
+        tail=(),
+        static=Metadata(),
+        folded=Metadata(),
     )
-
-
-@pytest.fixture()
-def registry() -> PageMetadataRegistry:
-    return PageMetadataRegistry()
 
 
 @pytest.fixture()
@@ -39,7 +50,7 @@ def page_file(tmp_path: Path) -> Path:
 
 
 class TestRegistration:
-    """One callable per file, the last registration winning."""
+    """One callable per file, a re-executed module replacing the one before."""
 
     def test_starts_empty_at_version_zero(
         self, registry: PageMetadataRegistry, page_file: Path
@@ -47,7 +58,6 @@ class TestRegistration:
         assert registry.version == 0
         assert registry.entry(page_file) is None
         assert registry.registered_names() == {}
-        assert registry.conflicts() == {}
         assert registry.misattributed() == ()
 
     def test_register_stores_the_entry_and_bumps(
@@ -65,13 +75,31 @@ class TestRegistration:
         assert entry is not None
         assert entry.inherit is True
 
-    def test_the_last_registration_wins(
+    def test_a_re_executed_module_replaces_the_callable(
         self, registry: PageMetadataRegistry, page_file: Path
     ) -> None:
         registry.register(page_file, _wallet_meta)
-        registry.register(page_file, _other_meta, inherit=True)
-        assert registry.entry(page_file) == PageMetadataEntry(_other_meta, True)
+        rerun = _rerun(_other_meta)
+        registry.register(page_file, rerun, inherit=True)
+        assert registry.entry(page_file) == PageMetadataEntry(rerun, True)
         assert registry.version == 2
+
+    def test_a_second_callable_of_one_run_is_refused(
+        self, registry: PageMetadataRegistry, page_file: Path
+    ) -> None:
+        registry.register(page_file, _wallet_meta)
+        with pytest.raises(PageMetadataConflictError) as caught:
+            registry.register(page_file, _other_meta)
+        assert "'_wallet_meta' and '_other_meta'" in str(caught.value)
+        assert caught.value.file_path == page_file
+        assert registry.entry(page_file) == PageMetadataEntry(_wallet_meta, False)
+
+    def test_one_callable_registered_twice_is_no_conflict(
+        self, registry: PageMetadataRegistry, page_file: Path
+    ) -> None:
+        registry.register(page_file, _wallet_meta)
+        registry.register(page_file, _wallet_meta, inherit=True)
+        assert registry.entry(page_file) == PageMetadataEntry(_wallet_meta, True)
 
     def test_registered_names_carry_one_name_per_file(
         self, registry: PageMetadataRegistry, tmp_path: Path
@@ -86,33 +114,68 @@ class TestRegistration:
         }
 
 
-class TestConflicts:
-    """A second name on one file is kept for the diagnostic, a re-execution is not."""
+class TestStamps:
+    """A stamp moves only when a registration changes what the chain would run."""
 
-    def test_two_names_on_one_file_are_recorded_in_order(
+    def test_an_unregistered_path_has_no_stamp(
+        self, registry: PageMetadataRegistry, page_file: Path
+    ) -> None:
+        assert registry.stamps((page_file,)) == (None,)
+
+    def test_a_new_registration_stamps_the_path(
+        self, registry: PageMetadataRegistry, page_file: Path, tmp_path: Path
+    ) -> None:
+        registry.register(page_file, _wallet_meta)
+        other = tmp_path / "other.py"
+        (stamp, missing) = registry.stamps((page_file, other))
+        assert stamp is not None
+        assert missing is None
+
+    def test_the_same_callable_again_keeps_the_stamp(
         self, registry: PageMetadataRegistry, page_file: Path
     ) -> None:
         registry.register(page_file, _wallet_meta)
-        registry.register(page_file, _other_meta)
-        assert registry.conflicts() == {page_file: ("_wallet_meta", "_other_meta")}
+        before = registry.stamps((page_file,))
+        registry.register(page_file, _wallet_meta)
+        assert registry.stamps((page_file,)) == before
 
-    def test_the_same_name_again_is_no_conflict(
+    @pytest.mark.parametrize(
+        ("func", "inherit"),
+        [(_rerun(_other_meta), False), (_wallet_meta, True)],
+        ids=["other_name", "other_inherit"],
+    )
+    def test_a_changed_registration_moves_the_stamp(
+        self,
+        registry: PageMetadataRegistry,
+        page_file: Path,
+        func: Callable[[], dict[str, str]],
+        *,
+        inherit: bool,
+    ) -> None:
+        registry.register(page_file, _wallet_meta)
+        before = registry.stamps((page_file,))
+        registry.register(page_file, func, inherit=inherit)
+        assert registry.stamps((page_file,)) != before
+
+    def test_a_reset_drops_every_stamp(
         self, registry: PageMetadataRegistry, page_file: Path
     ) -> None:
         registry.register(page_file, _wallet_meta)
-        registry.register(page_file, _wallet_meta)
-        assert registry.conflicts() == {}
+        registry.reset()
+        assert registry.stamps((page_file,)) == (None,)
 
-    def test_a_third_name_extends_the_record(
-        self, registry: PageMetadataRegistry, page_file: Path
+
+class TestRegistrations:
+    """The diagnostics read the names and the misattributions in one call."""
+
+    def test_the_two_views_travel_together(
+        self, registry: PageMetadataRegistry, page_file: Path, tmp_path: Path
     ) -> None:
         registry.register(page_file, _wallet_meta)
-        registry.register(page_file, _other_meta)
-        registry.register(page_file, handler_declared_here)
-        assert registry.conflicts()[page_file] == (
-            "_wallet_meta",
-            "_other_meta",
-            "handler_declared_here",
+        registry.register(page_file, _rerun(_other_meta))
+        registry.note_misattribution(page_file, tmp_path / "x.py", _wallet_meta)
+        assert registry.registrations() == MetadataRegistrations(
+            names={page_file: ("_other_meta",)}, misattributed=registry.misattributed()
         )
 
 
@@ -135,18 +198,17 @@ class TestMisattribution:
 class TestReset:
     """A reset drops every record and memoised chain and moves the version on."""
 
-    def test_reset_clears_entries_conflicts_and_misattributions(
+    def test_reset_clears_entries_and_misattributions(
         self, registry: PageMetadataRegistry, page_file: Path, tmp_path: Path
     ) -> None:
         registry.register(page_file, _wallet_meta)
-        registry.register(page_file, _other_meta)
+        registry.register(page_file, _rerun(_other_meta))
         registry.note_misattribution(page_file, tmp_path / "x.py", _wallet_meta)
         before = registry.version
 
         registry.reset()
 
         assert registry.entry(page_file) is None
-        assert registry.conflicts() == {}
         assert registry.misattributed() == ()
         assert registry.version == before + 1
 

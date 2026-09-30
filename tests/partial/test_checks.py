@@ -10,7 +10,7 @@ from django.test import override_settings
 from next.checks import reset_check_caches
 from next.components import ComponentInfo, FileComponentsBackend
 from next.forms.backends import FormActionBackend, RegistryFormActionBackend
-from next.pages.checks import composed
+from next.pages.manager import page
 from next.partial import checks
 from next.partial.registry import BUILTIN_OPS, register_patch_op
 from tests.support import (
@@ -201,6 +201,15 @@ class TestComposedTemplateCompileCheck:
             messages = checks.check_composed_templates_compile()
         assert [m.id for m in messages] == [checks.E_COMPOSED_TEMPLATE_SYNTAX]
         assert messages[0].obj == str(broken)
+
+    def test_a_template_attribute_without_a_layout_is_compiled(
+        self, tmp_path: Path
+    ) -> None:
+        page_file = _page_dir(tmp_path, "inline")
+        page_file.write_text('template = "{% if %}"\n')
+        with _scanned_root(tmp_path):
+            messages = checks.check_composed_templates_compile()
+        assert [m.obj for m in messages] == [str(page_file)]
 
 
 class TestComposedTemplateCompileIsDeployOnly:
@@ -743,17 +752,12 @@ _ZONE_CHECKS = (
 
 
 @contextmanager
-def _counting_collect() -> Iterator[list[int]]:
-    """Count calls to the composed-page collector, delegating to the real one."""
-    real = composed._collect_composed_pages
-    calls = [0]
-
-    def counting(manager: object) -> Iterator[tuple[Path, object]]:
-        calls[0] += 1
-        return real(manager)
-
-    with patch.object(composed, "_collect_composed_pages", side_effect=counting):
-        yield calls
+def _counting_collect() -> Iterator[MagicMock]:
+    """Count the composed templates the walk builds, one per page and walk."""
+    with patch.object(
+        page, "composed_template_for", wraps=page.composed_template_for
+    ) as compose:
+        yield compose
 
 
 class TestComposedPagesMemo:
@@ -762,10 +766,10 @@ class TestComposedPagesMemo:
     def test_seven_checks_collect_pages_once(self, tmp_path: Path) -> None:
         page_file = _page_dir(tmp_path, "shared")
         body = '{% zone "z" %}<p>{{ a }}</p>{% endzone %}'
-        with _composed_pages((page_file, body)), _counting_collect() as calls:
+        with _composed_pages((page_file, body)), _counting_collect() as compose:
             for check in _ZONE_CHECKS:
                 check()
-        assert calls[0] == 1
+        assert compose.call_count == 1
 
     def test_new_manager_invalidates_memo(self, tmp_path: Path) -> None:
         first_page = _page_dir(tmp_path, "one")
@@ -784,13 +788,13 @@ class TestComposedPagesMemo:
     ) -> None:
         page_file = _page_dir(tmp_path, "live")
         body = '{% zone "z" %}<p>{{ a }}</p>{% endzone %}'
-        with _composed_pages((page_file, body)), _counting_collect() as calls:
+        with _composed_pages((page_file, body)), _counting_collect() as compose:
             checks.check_duplicate_zone_names()
             checks.check_zone_name_is_slug()
-            assert calls[0] == 1
+            assert compose.call_count == 1
             reset_check_caches()
             checks.check_zone_not_in_loop()
-            assert calls[0] == 2
+            assert compose.call_count == 2
 
     def test_memo_does_not_hide_e072(self, tmp_path: Path) -> None:
         broken = _page_dir(tmp_path, "torn")

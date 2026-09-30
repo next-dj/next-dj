@@ -1,126 +1,220 @@
 import re
-from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
-from typing import override
+from collections.abc import Iterable
+from typing import ClassVar, override
 
 import pytest
-from django.core.signals import setting_changed
-from django.http import HttpRequest
-from django.test import RequestFactory, override_settings
-from django.urls import clear_script_prefix, set_script_prefix, set_urlconf
+from django.test import override_settings
 from django.utils import translation
 from django.utils.functional import lazy
 from django.utils.safestring import SafeString
 
-import next.pages.metadata.backends as backends_module
-from next.conf.signals import settings_reloaded
 from next.errors import (
     AbstractBackendError,
     SettingImportError,
     SettingNotSubclassError,
 )
-from next.pages.errors import (
-    PageMetadataRequestError,
-    PageMetadataShapeError,
-    PageMetadataURLError,
-)
 from next.pages.metadata import (
+    Article,
+    Book,
+    Feed,
     HtmlMetadataRenderer,
+    Icon,
+    Link,
     Metadata,
     MetadataRenderer,
-    render_metadata,
-)
-from next.pages.metadata.backends import (
-    absolute_url,
-    forget_translated_urls,
-    metadata_renderer,
-)
-from next.pages.metadata.schema import (
-    EMPTY_METADATA,
-    Alternates,
-    Article,
     OpenGraph,
+    OpenGraphAudio,
     OpenGraphImage,
-    Robots,
+    OpenGraphVideo,
+    Profile,
+    ResolvedMetadata,
+    ThemeColor,
     Twitter,
-    Verification,
+    TwitterImage,
+    TwitterPlayer,
+    resolve_metadata,
 )
-from next.testing import override_next_settings
-from tests.support import (
-    ABSOLUTE_URL_CASES,
-    ROBOTS_CASES,
-    AbsoluteUrlCase,
-    RobotsCase,
-    build_mock_http_request,
-    record_calls,
-)
+from next.pages.metadata.backends import metadata_renderer
+from tests.support import BASE
 
 
-BASE = "https://acme.example"
-I18N = {
-    "ROOT_URLCONF": "tests.support.urls_i18n_pages",
-    "LANGUAGES": [("en", "English"), ("de", "German")],
-    "LANGUAGE_CODE": "en",
-    "USE_I18N": True,
-}
-NOINDEX = {"METADATA": {"NOINDEX": True}}
-QUERY = {"METADATA": {"CANONICAL_QUERY": ("q", "page")}}
-FULL = Metadata(
+def _resolved(**values: object) -> ResolvedMetadata:
+    defaults: dict[str, object] = {
+        "title": None,
+        "description": None,
+        "noindex": False,
+        "robots": None,
+        "googlebot": None,
+        "canonical": None,
+        "alternates": (),
+        "verification": (),
+        "other": (),
+        "og": None,
+        "twitter": None,
+        "jsonld": (),
+        "source": Metadata(),
+    }
+    return ResolvedMetadata(**{**defaults, **values})
+
+
+FULL = _resolved(
     title="Wallet",
+    viewport="width=device-width, initial-scale=1, viewport-fit=cover",
+    theme_color=(
+        ThemeColor("#fff", "(prefers-color-scheme: light)"),
+        ThemeColor("#111"),
+    ),
+    color_scheme="light dark",
     description="Money",
-    base=BASE,
-    site_name="Acme",
-    canonical="/wallet/",
-    alternates=Alternates(languages={"en": "/wallet/", "de": "/de/wallet/"}),
-    robots=Robots(index=True, follow=True, googlebot="noimageindex"),
+    keywords=("rockets", "acme"),
+    robots="index, follow",
+    googlebot="noimageindex",
+    canonical=f"{BASE}/wallet/",
+    alternates=(("en", f"{BASE}/wallet/"), ("de", f"{BASE}/de/wallet/")),
+    feeds=(
+        Feed(f"{BASE}/feed.xml", "application/rss+xml", "Acme blog"),
+        Feed(f"{BASE}/atom.xml", "application/atom+xml"),
+    ),
+    icons=(
+        Icon("icon", f"{BASE}/icon.svg", sizes="any", type="image/svg+xml"),
+        Icon(
+            "apple-touch-icon", f"{BASE}/apple.png", sizes="180x180", type="image/png"
+        ),
+        Icon("mask-icon", f"{BASE}/mask.svg", color="#1d4ed8"),
+    ),
+    manifest=f"{BASE}/manifest.webmanifest",
+    links=(
+        Link(
+            "preconnect", "https://fonts.gstatic.com", (("crossorigin", "anonymous"),)
+        ),
+        Link(
+            "preload",
+            f"{BASE}/font.woff2",
+            (("as", "font"), ("type", "font/woff2"), ("crossorigin", "anonymous")),
+        ),
+    ),
+    verification=(
+        ("google-site-verification", "g1"),
+        ("yandex-verification", "y"),
+        ("msvalidate.01", "b"),
+        ("p:domain_verify", "p"),
+        ("facebook-domain-verification", "f"),
+        ("baidu-site-verification", "bd"),
+    ),
+    other=(("application-name", "Acme"),),
     og=OpenGraph(
+        title="Wallet",
+        description="Money",
+        url=f"{BASE}/wallet/",
         type="article",
+        site_name="Acme",
         locale="en_GB",
-        images=(OpenGraphImage(url="/a.png", width=1, height=2, alt="A"),),
+        locale_alternates=("de_DE",),
+        determiner="the",
+        images=(
+            OpenGraphImage(
+                url=f"{BASE}/a.png",
+                secure_url=f"{BASE}/s.png",
+                type="image/png",
+                width=1,
+                height=2,
+                alt="A",
+            ),
+        ),
+        videos=(
+            OpenGraphVideo(f"{BASE}/v.mp4", type="video/mp4", width=640, height=360),
+        ),
+        audio=(OpenGraphAudio(f"{BASE}/a.mp3", type="audio/mpeg"),),
         article=Article(
-            published_time=datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC),
+            published_time="2026-01-02T03:04:05+00:00",
             modified_time="2026-02-03",
             authors=("Ann", "Bob"),
             section="Finance",
             tags=("money", "apps"),
         ),
+        profile=Profile(first_name="Ann", username="ann"),
+        book=Book(
+            authors=("Ann",), isbn="978-3", release_date="2026-01-02", tags=("x",)
+        ),
     ),
+    properties=(("fb:app_id", "123"), ("product:price:amount", "49.00")),
     twitter=Twitter(
-        card="summary",
+        card="player",
         site="@acme",
+        site_id="1",
         creator="@ann",
+        creator_id="2",
         title="Tw",
         description="TwD",
-        images=("/t.png",),
+        images=(TwitterImage(f"{BASE}/t.png", "Alt"),),
+        player=TwitterPlayer(f"{BASE}/p", 640, 360, f"{BASE}/s.mp4"),
     ),
-    verification=Verification(google=("g1", "g2"), yandex=("y",), bing=("b",)),
-    other=(("keywords", "a, b"), ("theme-color", "#fff")),
-    jsonld=({"@type": "WebPage"}, {"@type": "Article"}),
+    jsonld=(
+        {"@type": "WebPage"},
+        {"@type": "Article"},
+        {"@context": "https://example.org/vocab", "@type": "Custom"},
+    ),
 )
 FULL_LINES = (
     "<title>Wallet</title>",
+    (
+        '<meta name="viewport" content="width=device-width, initial-scale=1, '
+        'viewport-fit=cover">'
+    ),
+    '<meta name="theme-color" content="#fff" media="(prefers-color-scheme: light)">',
+    '<meta name="theme-color" content="#111">',
+    '<meta name="color-scheme" content="light dark">',
     '<meta name="description" content="Money">',
+    '<meta name="keywords" content="rockets, acme">',
     '<meta name="robots" content="index, follow">',
     '<meta name="googlebot" content="noimageindex">',
     f'<link rel="canonical" href="{BASE}/wallet/">',
     f'<link rel="alternate" hreflang="en" href="{BASE}/wallet/">',
     f'<link rel="alternate" hreflang="de" href="{BASE}/de/wallet/">',
+    (
+        '<link rel="alternate" type="application/rss+xml" title="Acme blog" '
+        f'href="{BASE}/feed.xml">'
+    ),
+    f'<link rel="alternate" type="application/atom+xml" href="{BASE}/atom.xml">',
+    f'<link rel="icon" href="{BASE}/icon.svg" type="image/svg+xml" sizes="any">',
+    (
+        f'<link rel="apple-touch-icon" href="{BASE}/apple.png" type="image/png" '
+        'sizes="180x180">'
+    ),
+    f'<link rel="mask-icon" href="{BASE}/mask.svg" color="#1d4ed8">',
+    f'<link rel="manifest" href="{BASE}/manifest.webmanifest">',
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">',
+    (
+        f'<link rel="preload" href="{BASE}/font.woff2" as="font" type="font/woff2" '
+        'crossorigin="anonymous">'
+    ),
     '<meta name="google-site-verification" content="g1">',
-    '<meta name="google-site-verification" content="g2">',
     '<meta name="yandex-verification" content="y">',
     '<meta name="msvalidate.01" content="b">',
-    '<meta name="keywords" content="a, b">',
-    '<meta name="theme-color" content="#fff">',
+    '<meta name="p:domain_verify" content="p">',
+    '<meta name="facebook-domain-verification" content="f">',
+    '<meta name="baidu-site-verification" content="bd">',
+    '<meta name="application-name" content="Acme">',
     '<meta property="og:title" content="Wallet">',
     '<meta property="og:description" content="Money">',
     f'<meta property="og:url" content="{BASE}/wallet/">',
     '<meta property="og:type" content="article">',
     '<meta property="og:site_name" content="Acme">',
     '<meta property="og:locale" content="en_GB">',
+    '<meta property="og:locale:alternate" content="de_DE">',
+    '<meta property="og:determiner" content="the">',
     f'<meta property="og:image" content="{BASE}/a.png">',
+    f'<meta property="og:image:secure_url" content="{BASE}/s.png">',
+    '<meta property="og:image:type" content="image/png">',
     '<meta property="og:image:width" content="1">',
     '<meta property="og:image:height" content="2">',
     '<meta property="og:image:alt" content="A">',
+    f'<meta property="og:video" content="{BASE}/v.mp4">',
+    '<meta property="og:video:type" content="video/mp4">',
+    '<meta property="og:video:width" content="640">',
+    '<meta property="og:video:height" content="360">',
+    f'<meta property="og:audio" content="{BASE}/a.mp3">',
+    '<meta property="og:audio:type" content="audio/mpeg">',
     '<meta property="article:published_time" content="2026-01-02T03:04:05+00:00">',
     '<meta property="article:modified_time" content="2026-02-03">',
     '<meta property="article:author" content="Ann">',
@@ -128,65 +222,74 @@ FULL_LINES = (
     '<meta property="article:section" content="Finance">',
     '<meta property="article:tag" content="money">',
     '<meta property="article:tag" content="apps">',
-    '<meta name="twitter:card" content="summary">',
+    '<meta property="profile:first_name" content="Ann">',
+    '<meta property="profile:username" content="ann">',
+    '<meta property="book:author" content="Ann">',
+    '<meta property="book:isbn" content="978-3">',
+    '<meta property="book:release_date" content="2026-01-02">',
+    '<meta property="book:tag" content="x">',
+    '<meta property="fb:app_id" content="123">',
+    '<meta property="product:price:amount" content="49.00">',
+    '<meta name="twitter:card" content="player">',
     '<meta name="twitter:site" content="@acme">',
+    '<meta name="twitter:site:id" content="1">',
     '<meta name="twitter:creator" content="@ann">',
+    '<meta name="twitter:creator:id" content="2">',
     '<meta name="twitter:title" content="Tw">',
     '<meta name="twitter:description" content="TwD">',
     f'<meta name="twitter:image" content="{BASE}/t.png">',
-    '<script type="application/ld+json">{"@type": "WebPage"}</script>',
-    '<script type="application/ld+json">{"@type": "Article"}</script>',
+    '<meta name="twitter:image:alt" content="Alt">',
+    f'<meta name="twitter:player" content="{BASE}/p">',
+    '<meta name="twitter:player:width" content="640">',
+    '<meta name="twitter:player:height" content="360">',
+    f'<meta name="twitter:player:stream" content="{BASE}/s.mp4">',
+    (
+        '<script type="application/ld+json">{"@context": "https://schema.org", '
+        '"@graph": [{"@type": "WebPage"}, {"@type": "Article"}]}</script>'
+    ),
+    (
+        '<script type="application/ld+json">{"@context": "https://example.org/vocab", '
+        '"@type": "Custom"}</script>'
+    ),
 )
 
 
-def _request(path: str = "/wallet/") -> HttpRequest:
-    return RequestFactory().get(path)
-
-
-def _lines(meta: Metadata, request: HttpRequest | None = None) -> list[str]:
-    return render_metadata(meta, request=request).split("\n")
-
-
-def _changed(setting: str) -> None:
-    setting_changed.send(sender=None, setting=setting, value=None, enter=True)
-
-
-@pytest.fixture(autouse=True)
-def _fresh_translation_memo() -> Iterator[None]:
-    forget_translated_urls()
-    yield
-    forget_translated_urls()
+def _lines(resolved: ResolvedMetadata) -> list[str]:
+    return HtmlMetadataRenderer().render(resolved).split("\n")
 
 
 class TestRendererContract:
-    """The ABC binds `render`, and the module renderer is the default."""
+    """The ABC binds `render`, and the configured renderer is the default."""
 
     def test_the_abc_cannot_be_instantiated(self) -> None:
+        abstract: type = MetadataRenderer
         with pytest.raises(TypeError):
-            MetadataRenderer()  # type: ignore[abstract]
+            abstract()
 
-    def test_a_subclass_answers_render(self) -> None:
-        class Plain(MetadataRenderer):
-            @override
-            def render(self, meta: Metadata, *, request: HttpRequest | None) -> str:
-                return SafeString(str(meta.title))
-
-        assert Plain().render(Metadata(title="T"), request=None) == "T"
-
-    def test_render_metadata_goes_through_the_default_renderer(self) -> None:
+    def test_the_default_renderer_is_the_html_one(self) -> None:
         assert isinstance(metadata_renderer(), HtmlMetadataRenderer)
-        assert render_metadata(EMPTY_METADATA, request=None) == ""
 
-    def test_empty_metadata_renders_a_safe_empty_string(self) -> None:
-        rendered = HtmlMetadataRenderer().render(EMPTY_METADATA, request=None)
+    def test_nothing_renders_a_safe_empty_string(self) -> None:
+        rendered = HtmlMetadataRenderer().render(_resolved())
         assert isinstance(rendered, SafeString)
         assert rendered == ""
 
 
 class TitleOnlyRenderer(MetadataRenderer):
     @override
-    def render(self, meta: Metadata, *, request: HttpRequest | None) -> SafeString:
-        return SafeString(f"<title>{meta.title}</title>")
+    def render(self, resolved: ResolvedMetadata) -> SafeString:
+        return SafeString(f"<title>{resolved.title}</title>")
+
+
+class RobotsFirstRenderer(HtmlMetadataRenderer):
+    sections: ClassVar[tuple[str, ...]] = ("robots", "title", "brand")
+
+    @override
+    def render_title(self, resolved: ResolvedMetadata) -> Iterable[SafeString]:
+        return (SafeString(f"<title>[{resolved.title}]</title>"),)
+
+    def render_brand(self, resolved: ResolvedMetadata) -> Iterable[SafeString]:
+        return (SafeString('<meta name="brand" content="acme">'),)
 
 
 TITLE_ONLY = f"{__name__}.TitleOnlyRenderer"
@@ -197,20 +300,20 @@ def _renderer_setting(dotted: object) -> dict[str, object]:
 
 
 class TestConfiguredRenderer:
-    """`METADATA["RENDERER"]` names the class `render_metadata` goes through."""
+    """`METADATA["RENDERER"]` names the class the tag renders through."""
 
     def test_the_renderer_is_built_once_per_reload(self) -> None:
         first = metadata_renderer()
         assert metadata_renderer() is first
-        with override_settings(NEXT_FRAMEWORK={"METADATA": {"NOINDEX": True}}):
+        with override_settings(NEXT_FRAMEWORK={"METADATA": {}}):
             assert metadata_renderer() is not first
             assert isinstance(metadata_renderer(), HtmlMetadataRenderer)
 
     def test_the_setting_names_the_renderer(self) -> None:
         with override_settings(NEXT_FRAMEWORK=_renderer_setting(TITLE_ONLY)):
-            assert type(metadata_renderer()).__name__ == "TitleOnlyRenderer"
-            html = render_metadata(Metadata(title="T"), request=None)
-        assert html == "<title>T</title>"
+            renderer = metadata_renderer()
+        assert type(renderer).__name__ == "TitleOnlyRenderer"
+        assert renderer.render(_resolved(title="T")) == "<title>T</title>"
         assert isinstance(metadata_renderer(), HtmlMetadataRenderer)
 
     def test_a_class_outside_the_family_is_refused(self) -> None:
@@ -236,7 +339,6 @@ class TestConfiguredRenderer:
         ):
             metadata_renderer()
         assert caught.value.setting == "RENDERER"
-        assert "NEXT_FRAMEWORK['METADATA']['RENDERER']" in str(caught.value)
 
     def test_the_abstract_root_is_refused(self) -> None:
         dotted = "next.pages.MetadataRenderer"
@@ -247,503 +349,129 @@ class TestConfiguredRenderer:
             metadata_renderer()
 
 
+class TestSections:
+    """A subclass reorders, extends and overrides the sections through public hooks."""
+
+    def test_a_subclass_orders_and_extends_the_sections(self) -> None:
+        resolved = _resolved(title="T", robots="noindex, nofollow", description="D")
+        assert RobotsFirstRenderer().render(resolved).split("\n") == [
+            '<meta name="robots" content="noindex, nofollow">',
+            "<title>[T]</title>",
+            '<meta name="brand" content="acme">',
+        ]
+
+    @override_settings(NEXT_FRAMEWORK={"SITE": {"INDEXABLE": False}})
+    def test_a_custom_renderer_cannot_lose_a_closed_site(self) -> None:
+        resolved = resolve_metadata(Metadata(title="T"), request=None)
+        assert '<meta name="robots" content="noindex, nofollow">' in (
+            RobotsFirstRenderer().render(resolved)
+        )
+
+
 class TestEscaping:
     """Every value is escaped, the lazy ones under the language of the render."""
 
     def test_the_description_is_escaped(self) -> None:
-        meta = Metadata(description='"><script>alert(1)</script>')
-        html = render_metadata(meta, request=None)
-        assert "<script>" not in html
+        html = HtmlMetadataRenderer().render(
+            _resolved(description='"><script>alert(1)</script>')
+        )
         assert html == (
             '<meta name="description" '
             'content="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;">'
         )
 
     def test_the_title_is_escaped(self) -> None:
-        assert _lines(Metadata(title="<b>")) == ["<title>&lt;b&gt;</title>"]
+        assert _lines(_resolved(title="<b>")) == ["<title>&lt;b&gt;</title>"]
 
-    def test_the_output_is_safe(self) -> None:
-        assert isinstance(
-            render_metadata(Metadata(title="T"), request=None), SafeString
-        )
+    def test_a_safe_title_is_not_escaped_twice(self) -> None:
+        title = SafeString("Tom &amp; Jerry")
+        assert _lines(_resolved(title=title)) == ["<title>Tom &amp; Jerry</title>"]
 
     def test_a_lazy_value_follows_the_active_language(self) -> None:
-        meta = Metadata(title=lazy(translation.get_language, str)())
+        resolved = _resolved(title=lazy(translation.get_language, str)())
         with translation.override("de"):
-            assert _lines(meta) == ["<title>de</title>"]
+            assert _lines(resolved) == ["<title>de</title>"]
         with translation.override("en"):
-            assert _lines(meta) == ["<title>en</title>"]
+            assert _lines(resolved) == ["<title>en</title>"]
 
     def test_jsonld_escapes_the_script_closers(self) -> None:
-        meta = Metadata(jsonld=({"name": "</script><!-- & x"},))
-        html = render_metadata(meta, request=None)
-        assert "</script><!--" not in html
+        html = HtmlMetadataRenderer().render(
+            _resolved(jsonld=({"name": "</script><!-- & x"},))
+        )
         assert html == (
-            '<script type="application/ld+json">'
-            '{"name": "\\u003C/script\\u003E\\u003C!-- \\u0026 x"}</script>'
+            '<script type="application/ld+json">{"@context": "https://schema.org", '
+            '"@graph": [{"name": "\\u003C/script\\u003E\\u003C!-- \\u0026 x"}]}'
+            "</script>"
         )
 
-    def test_jsonld_serialises_through_the_django_encoder(self) -> None:
-        meta = Metadata(jsonld=({"at": datetime(2026, 1, 2, tzinfo=UTC)},))
-        assert _lines(meta) == [
-            (
-                '<script type="application/ld+json">'
-                '{"at": "2026-01-02T00:00:00Z"}</script>'
-            )
-        ]
+    def test_jsonld_refuses_a_value_json_cannot_carry(self) -> None:
+        with pytest.raises(ValueError, match="not JSON compliant"):
+            _lines(_resolved(jsonld=({"v": float("nan")},)))
 
 
-class TestAbsoluteUrl:
-    """`absolute_url` prefers the base, then the request host, and rejects schemes."""
-
-    @pytest.mark.parametrize(
-        "case", ABSOLUTE_URL_CASES, ids=[case.id for case in ABSOLUTE_URL_CASES]
-    )
-    @override_settings(ALLOWED_HOSTS=["testserver"])
-    def test_a_url_resolves_on_the_base_or_the_request(
-        self, case: AbsoluteUrlCase
-    ) -> None:
-        request = None if case.path is None else _request(case.path)
-        if case.error is not None:
-            with pytest.raises(case.error):
-                absolute_url(case.url, base=case.base, request=request)
-            return
-        assert absolute_url(case.url, base=case.base, request=request) == case.expected
-
-    def test_a_foreign_scheme_names_the_url(self) -> None:
-        with pytest.raises(PageMetadataShapeError) as info:
-            absolute_url("javascript:alert(1)", base=BASE, request=_request())
-        assert info.value.source == "metadata"
-        assert info.value.detail == (
-            "carries the URL 'javascript:alert(1)' with a scheme outside http and https"
-        )
-
-    def test_an_unresolvable_url_names_itself(self) -> None:
-        with pytest.raises(PageMetadataURLError) as info:
-            absolute_url("/a/", base=None, request=None)
-        assert info.value.url == "/a/"
-
-    def test_a_relative_form_resolves_against_the_request_path(self) -> None:
-        request = build_mock_http_request(path="/p/q/")
-        assert absolute_url("./a", base=BASE, request=request) == f"{BASE}/p/q/a"
-
-    @pytest.mark.parametrize(
-        "meta",
-        [
-            Metadata(canonical="ftp://x/"),
-            Metadata(alternates=Alternates(languages={"en": "ftp://x/"})),
-            Metadata(og=OpenGraph(url="ftp://x/")),
-            Metadata(og=OpenGraph(images=(OpenGraphImage("ftp://x"),))),
-            Metadata(twitter=Twitter(images=("ftp://x",))),
-        ],
-        ids=["canonical", "hreflang", "og_url", "og_image", "twitter_image"],
-    )
-    def test_every_url_field_goes_through_the_scheme_allowlist(
-        self, meta: Metadata
-    ) -> None:
-        with pytest.raises(PageMetadataShapeError):
-            render_metadata(meta, request=_request())
-
-    @pytest.mark.parametrize(
-        ("base", "scheme", "expected"),
-        [
-            (BASE, "http", "https://cdn.example/x.png"),
-            ("http://acme.example", "https", "http://cdn.example/x.png"),
-            (None, "https", "https://cdn.example/x.png"),
-            (None, "http", "http://cdn.example/x.png"),
-        ],
-        ids=["base_https", "base_http", "request_https", "request_http"],
-    )
-    @override_settings(ALLOWED_HOSTS=["testserver"])
-    def test_a_protocol_relative_url_keeps_its_own_host(
-        self, base: str | None, scheme: str, expected: str
-    ) -> None:
-        request = RequestFactory().get("/p/", secure=scheme == "https")
-        assert absolute_url("//cdn.example/x.png", base=base, request=request) == (
-            expected
-        )
-
-    def test_a_protocol_relative_url_takes_the_base_scheme_without_a_request(
-        self,
-    ) -> None:
-        url = absolute_url("//cdn.example/x.png", base=BASE, request=None)
-        assert url == "https://cdn.example/x.png"
-
-    def test_a_protocol_relative_url_needs_a_base_or_a_request(self) -> None:
-        with pytest.raises(PageMetadataURLError) as info:
-            absolute_url("//cdn.example/x.png", base=None, request=None)
-        assert info.value.url == "//cdn.example/x.png"
-
-    def test_og_url_given_absolute_is_kept(self) -> None:
-        meta = Metadata(og=OpenGraph(url="https://x.example/a/"))
-        assert '<meta property="og:url" content="https://x.example/a/">' in _lines(meta)
-
-
-class TestCanonical:
-    """`True` is the self URL under the query allowlist, a string is untouched."""
-
-    @pytest.mark.parametrize("canonical", [None, False], ids=["none", "false"])
-    def test_off_renders_no_link(self, *, canonical: bool | None) -> None:
-        assert _lines(Metadata(canonical=canonical, base=BASE)) == [""]
-
-    def test_true_without_a_request_names_the_key(self) -> None:
-        with pytest.raises(PageMetadataRequestError) as info:
-            render_metadata(Metadata(canonical=True, base=BASE), request=None)
-        assert info.value.key == "canonical"
-        assert str(info.value) == (
-            "`canonical=True` names the page itself and needs a request"
-        )
-
-    def test_true_is_the_request_path_without_a_query(self) -> None:
-        meta = Metadata(canonical=True, base=BASE)
-        request = _request("/wallet/?utm=1&page=2")
-        assert _lines(meta, request) == [
-            f'<link rel="canonical" href="{BASE}/wallet/">'
-        ]
-
-    @pytest.mark.parametrize(
-        ("path", "href"),
-        [
-            ("/wallet/?utm=1&page=2&q=a%20b&q=c", "/wallet/?q=a+b&amp;q=c&amp;page=2"),
-            ("/wallet/?page=1&q=x", "/wallet/?q=x"),
-        ],
-        ids=["allowlist_order", "first_page_dropped"],
-    )
-    @override_settings(NEXT_FRAMEWORK=QUERY)
-    def test_true_keeps_the_allowlisted_query(self, path: str, href: str) -> None:
-        meta = Metadata(canonical=True, base=BASE)
-        assert _lines(meta, _request(path)) == [
-            f'<link rel="canonical" href="{BASE}{href}">'
-        ]
-
-    def test_true_keeps_the_script_name(self) -> None:
-        meta = Metadata(canonical=True, base=BASE)
-        request = RequestFactory().get("/wallet/", SCRIPT_NAME="/app")
-        assert _lines(meta, request) == [
-            f'<link rel="canonical" href="{BASE}/app/wallet/">'
-        ]
-
-    @override_settings(ALLOWED_HOSTS=["testserver"])
-    def test_true_falls_back_to_the_request_host(self) -> None:
-        assert _lines(Metadata(canonical=True), _request()) == [
-            '<link rel="canonical" href="http://testserver/wallet/">'
-        ]
-
-    def test_a_string_is_left_as_declared(self) -> None:
-        meta = Metadata(canonical="/other", base=f"{BASE}/")
-        assert _lines(meta, _request("/x/?q=1")) == [
-            f'<link rel="canonical" href="{BASE}/other">'
-        ]
-
-
-class TestRobots:
-    """The directives fold like Next.js, and `NOINDEX` overrides everything."""
-
-    @pytest.mark.parametrize(
-        "case", ROBOTS_CASES, ids=[case.id for case in ROBOTS_CASES]
-    )
-    def test_the_directives_fold_into_one_meta(self, case: RobotsCase) -> None:
-        expected = [f'<meta name="robots" content="{case.expected}">']
-        assert _lines(Metadata(robots=case.robots)) == (
-            expected if case.expected else [""]
-        )
-
-    @pytest.mark.parametrize(
-        ("robots", "expected"),
-        [
-            (
-                Robots(index=True, googlebot=Robots(index=False, nosnippet=True)),
-                [
-                    '<meta name="robots" content="index">',
-                    '<meta name="googlebot" content="noindex, nosnippet">',
-                ],
-            ),
-            (Robots(googlebot="none"), ['<meta name="googlebot" content="none">']),
-            (
-                Robots(index=True, googlebot=Robots()),
-                ['<meta name="robots" content="index">'],
-            ),
-        ],
-        ids=["folded", "text", "empty_fold"],
-    )
-    def test_googlebot_renders_as_a_meta_of_its_own(
-        self, robots: Robots, expected: list[str]
-    ) -> None:
-        assert _lines(Metadata(robots=robots)) == expected
-
-    @pytest.mark.parametrize(
-        "meta",
-        [
-            Metadata(robots=Robots(index=True, follow=True, googlebot="all")),
-            EMPTY_METADATA,
-        ],
-        ids=["declared_robots", "no_robots"],
-    )
-    @override_settings(NEXT_FRAMEWORK=NOINDEX)
-    def test_noindex_overrides_the_chain_and_drops_googlebot(
-        self, meta: Metadata
-    ) -> None:
-        assert _lines(meta) == ['<meta name="robots" content="noindex, nofollow">']
-
-
-class TestHreflang:
-    """A mapping is emitted as given, `True` walks the localised URLconf."""
-
-    def test_a_mapping_emits_one_link_per_entry(self) -> None:
-        alternates = Alternates(languages={"en": "/a/", "de": "https://de.example/a/"})
-        assert _lines(Metadata(base=BASE, alternates=alternates)) == [
-            f'<link rel="alternate" hreflang="en" href="{BASE}/a/">',
-            '<link rel="alternate" hreflang="de" href="https://de.example/a/">',
-        ]
-
-    def test_a_mapping_puts_the_given_x_default_last(self) -> None:
-        alternates = Alternates(languages={"de": "/de/"}, x_default="/")
-        assert _lines(Metadata(base=BASE, alternates=alternates)) == [
-            f'<link rel="alternate" hreflang="de" href="{BASE}/de/">',
-            f'<link rel="alternate" hreflang="x-default" href="{BASE}/">',
-        ]
-
-    @pytest.mark.parametrize("languages", [None, False], ids=["none", "false"])
-    def test_off_emits_nothing(self, *, languages: bool | None) -> None:
-        alternates = Alternates(languages=languages, x_default="/")
-        assert _lines(Metadata(base=BASE, alternates=alternates)) == [""]
-
-    def test_true_without_i18n_patterns_emits_nothing(self) -> None:
-        meta = Metadata(base=BASE, alternates=Alternates(languages=True))
-        assert _lines(meta, _request("/headed/")) == [""]
-
-    @override_settings(**I18N)
-    def test_true_emits_one_link_per_language_and_an_unprefixed_default(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        calls = record_calls(monkeypatch, backends_module, "translate_url")
-        meta = Metadata(base=BASE, alternates=Alternates(languages=True))
-        expected = [
-            f'<link rel="alternate" hreflang="en" href="{BASE}/headed/">',
-            f'<link rel="alternate" hreflang="de" href="{BASE}/de/headed/">',
-            f'<link rel="alternate" hreflang="x-default" href="{BASE}/headed/">',
-        ]
-        assert _lines(meta, _request("/headed/")) == expected
-        assert [call.args for call in calls] == [("/headed/", "en"), ("/headed/", "de")]
-        assert _lines(meta, _request("/headed/")) == expected
-        assert len(calls) == 2
-
-    @override_settings(**I18N)
-    def test_true_takes_the_given_x_default(self) -> None:
-        alternates = Alternates(languages=True, x_default="/all/")
-        meta = Metadata(base=BASE, alternates=alternates)
-        assert _lines(meta, _request("/headed/"))[-1] == (
-            f'<link rel="alternate" hreflang="x-default" href="{BASE}/all/">'
-        )
-
-    @override_settings(**I18N)
-    def test_true_translates_the_canonical_string(self) -> None:
-        meta = Metadata(
-            base=BASE, canonical="/headed/", alternates=Alternates(languages=True)
-        )
-        assert _lines(meta)[1:] == [
-            f'<link rel="alternate" hreflang="en" href="{BASE}/headed/">',
-            f'<link rel="alternate" hreflang="de" href="{BASE}/de/headed/">',
-            f'<link rel="alternate" hreflang="x-default" href="{BASE}/headed/">',
-        ]
-
-    @override_settings(**I18N)
-    def test_true_without_a_request_or_canonical_raises(self) -> None:
-        meta = Metadata(base=BASE, alternates=Alternates(languages=True))
-        with pytest.raises(PageMetadataRequestError) as info:
-            render_metadata(meta, request=None)
-        assert info.value.key == "alternates"
-
-    @override_settings(**I18N)
-    def test_true_keeps_the_canonical_query(self) -> None:
-        meta = Metadata(base=BASE, alternates=Alternates(languages=True))
-        with override_next_settings(**QUERY):
-            lines = _lines(meta, _request("/headed/?page=2&x=1"))
-        assert lines[1] == (
-            f'<link rel="alternate" hreflang="de" href="{BASE}/de/headed/?page=2">'
-        )
-
-    @override_settings(**I18N)
-    def test_true_translates_below_the_script_prefix(self) -> None:
-        meta = Metadata(base=BASE, alternates=Alternates(languages=True))
-        request = RequestFactory().get("/headed/", SCRIPT_NAME="/app")
-        set_script_prefix("/app/")
-        try:
-            lines = _lines(meta, request)
-        finally:
-            clear_script_prefix()
-        assert lines == [
-            f'<link rel="alternate" hreflang="en" href="{BASE}/app/headed/">',
-            f'<link rel="alternate" hreflang="de" href="{BASE}/app/de/headed/">',
-            f'<link rel="alternate" hreflang="x-default" href="{BASE}/app/headed/">',
-        ]
-
-    @override_settings(**I18N)
-    def test_an_unrouted_path_keeps_the_script_prefix(self) -> None:
-        meta = Metadata(base=BASE, alternates=Alternates(languages=True))
-        request = RequestFactory().get("/nowhere/", SCRIPT_NAME="/app")
-        set_script_prefix("/app/")
-        try:
-            lines = _lines(meta, request)
-        finally:
-            clear_script_prefix()
-        assert {line.split('href="')[1] for line in lines} == {f'{BASE}/app/nowhere/">'}
-
-    @override_settings(**I18N)
-    def test_a_canonical_outside_the_script_prefix_stays_as_declared(self) -> None:
-        canonical = "https://other.example/headed/"
-        meta = Metadata(canonical=canonical, alternates=Alternates(languages=True))
-        set_script_prefix("/app/")
-        try:
-            lines = _lines(meta)
-        finally:
-            clear_script_prefix()
-        assert {line.split('href="')[1] for line in lines} == {f'{canonical}">'}
-
-    @override_settings(**I18N)
-    def test_the_memo_tells_script_prefixes_apart(self) -> None:
-        meta = Metadata(base=BASE, alternates=Alternates(languages=True))
-        request = RequestFactory().get("/headed/", SCRIPT_NAME="/app")
-        bare = _lines(meta, request)[1]
-        set_script_prefix("/app/")
-        try:
-            prefixed = _lines(meta, request)[1]
-        finally:
-            clear_script_prefix()
-        assert bare == (
-            f'<link rel="alternate" hreflang="de" href="{BASE}/app/headed/">'
-        )
-        assert prefixed == (
-            f'<link rel="alternate" hreflang="de" href="{BASE}/app/de/headed/">'
-        )
-
-    @override_settings(LANGUAGES=I18N["LANGUAGES"], LANGUAGE_CODE="en")
-    def test_the_thread_urlconf_is_honoured(self) -> None:
-        meta = Metadata(base=BASE, alternates=Alternates(languages=True))
-        set_urlconf(I18N["ROOT_URLCONF"])
-        try:
-            lines = _lines(meta, _request("/headed/"))
-        finally:
-            set_urlconf(None)
-        assert lines[1] == (
-            f'<link rel="alternate" hreflang="de" href="{BASE}/de/headed/">'
-        )
-
-
-class TestTranslationMemo:
-    """The memo drops on a settings reload and on a URLconf or language change."""
-
-    @pytest.mark.parametrize(
-        ("invalidate", "translations"),
-        [
-            (lambda: settings_reloaded.send(sender=None), 4),
-            (lambda: _changed("ROOT_URLCONF"), 4),
-            (lambda: _changed("LANGUAGES"), 4),
-            (lambda: _changed("DEBUG"), 2),
-        ],
-        ids=["settings_reloaded", "urlconf", "languages", "other_setting"],
-    )
-    @override_settings(**I18N)
-    def test_a_second_render_translates_again_only_after_a_drop(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        invalidate: Callable[[], object],
-        translations: int,
-    ) -> None:
-        calls = record_calls(monkeypatch, backends_module, "translate_url")
-        meta = Metadata(base=BASE, alternates=Alternates(languages=True))
-        _lines(meta, _request("/headed/"))
-        invalidate()
-        _lines(meta, _request("/headed/"))
-        assert len(calls) == translations
-
-
-class TestOpenGraphDerivation:
-    """The og block borrows from the page only when it exists, twitter never."""
-
-    def test_no_og_block_derives_nothing(self) -> None:
-        meta = Metadata(title="T", description="D", site_name="S", canonical="/x/")
-        assert not any("og:" in line for line in _lines(meta, _request()))
-
-    def test_an_empty_og_block_borrows_title_description_url_and_site_name(
-        self,
-    ) -> None:
-        meta = Metadata(
-            title="T",
-            description="D",
-            site_name="S",
-            base=BASE,
-            canonical=True,
-            og=OpenGraph(),
-        )
-        with translation.override(None):
-            og_lines = [line for line in _lines(meta, _request()) if "og:" in line]
-        assert og_lines == [
-            '<meta property="og:title" content="T">',
-            '<meta property="og:description" content="D">',
-            f'<meta property="og:url" content="{BASE}/wallet/">',
-            '<meta property="og:site_name" content="S">',
-        ]
-
-    def test_explicit_og_fields_win(self) -> None:
-        meta = Metadata(
-            title="T",
-            description="D",
-            og=OpenGraph(title="Social T", description="Social D"),
-        )
-        lines = _lines(meta)
-        assert '<meta property="og:title" content="Social T">' in lines
-        assert '<meta property="og:description" content="Social D">' in lines
-
-    def test_og_url_is_not_derived_without_a_canonical(self) -> None:
-        assert not any("og:url" in line for line in _lines(Metadata(og=OpenGraph())))
-
-    def test_og_locale_comes_from_the_active_language(self) -> None:
-        with translation.override("en-us"):
-            lines = _lines(Metadata(og=OpenGraph()))
-        assert lines == ['<meta property="og:locale" content="en_US">']
-
-    def test_an_explicit_og_locale_wins(self) -> None:
-        with translation.override("de"):
-            lines = _lines(Metadata(og=OpenGraph(locale="fr_FR")))
-        assert lines == ['<meta property="og:locale" content="fr_FR">']
-
-    def test_no_active_language_gives_no_locale(self) -> None:
-        with translation.override(None):
-            assert _lines(Metadata(og=OpenGraph())) == [""]
+class TestSparseBlocks:
+    """A block renders only the values it carries."""
 
     def test_an_image_without_a_url_keeps_its_dimensions(self) -> None:
         og = OpenGraph(images=(OpenGraphImage(width=3),))
-        with translation.override(None):
-            assert _lines(Metadata(og=og)) == [
-                '<meta property="og:image:width" content="3">'
-            ]
+        assert _lines(_resolved(og=og)) == [
+            '<meta property="og:image:width" content="3">'
+        ]
 
     def test_a_sparse_article_renders_only_what_it_carries(self) -> None:
         og = OpenGraph(article=Article(authors=("Ann",), tags=("x",)))
-        with translation.override(None):
-            assert _lines(Metadata(og=og)) == [
-                '<meta property="article:author" content="Ann">',
-                '<meta property="article:tag" content="x">',
-            ]
+        assert _lines(_resolved(og=og)) == [
+            '<meta property="article:author" content="Ann">',
+            '<meta property="article:tag" content="x">',
+        ]
 
-    def test_twitter_copies_nothing_from_og(self) -> None:
-        meta = Metadata(
-            title="T",
-            description="D",
-            og=OpenGraph(images=(OpenGraphImage(url="https://x/a.png"),)),
-            twitter=Twitter(card="summary"),
-        )
-        twitter_lines = [line for line in _lines(meta) if "twitter:" in line]
-        assert twitter_lines == ['<meta name="twitter:card" content="summary">']
+    def test_unresolved_true_alternates_render_no_line(self) -> None:
+        og = OpenGraph(locale="en_US", locale_alternates=True)
+        assert _lines(_resolved(og=og)) == [
+            '<meta property="og:locale" content="en_US">'
+        ]
+
+    def test_a_twitter_image_without_alt_and_no_player(self) -> None:
+        twitter = Twitter(images=(TwitterImage("https://acme.example/t.png"),))
+        assert _lines(_resolved(twitter=twitter)) == [
+            '<meta name="twitter:image" content="https://acme.example/t.png">'
+        ]
+
+    def test_a_player_renders_only_what_it_carries(self) -> None:
+        twitter = Twitter(player=TwitterPlayer("https://acme.example/p", 1, 2))
+        assert _lines(_resolved(twitter=twitter)) == [
+            '<meta name="twitter:player" content="https://acme.example/p">',
+            '<meta name="twitter:player:width" content="1">',
+            '<meta name="twitter:player:height" content="2">',
+        ]
+
+    def test_a_foreign_context_alone_renders_no_graph(self) -> None:
+        node = {"@context": "https://example.org/vocab", "@type": "X"}
+        assert _lines(_resolved(jsonld=(node,))) == [
+            (
+                '<script type="application/ld+json">'
+                '{"@context": "https://example.org/vocab", "@type": "X"}</script>'
+            )
+        ]
+
+    def test_a_link_attribute_is_escaped(self) -> None:
+        link = Link("me", "https://acme.example/", (("title", '"><x'),))
+        assert _lines(_resolved(links=(link,))) == [
+            '<link rel="me" href="https://acme.example/" title="&quot;&gt;&lt;x">'
+        ]
+
+    def test_googlebot_renders_alone(self) -> None:
+        assert _lines(_resolved(googlebot="none")) == [
+            '<meta name="googlebot" content="none">'
+        ]
 
 
 class TestOutputOrder:
-    """A fully populated value renders every line in the documented order."""
+    """A fully populated value renders every line in the section order."""
 
     def test_every_line_renders_in_the_documented_order(self) -> None:
-        assert _lines(FULL, _request()) == list(FULL_LINES)
+        assert _lines(FULL) == list(FULL_LINES)
 
     def test_lines_are_joined_by_newlines_only(self) -> None:
-        html = render_metadata(FULL, request=_request())
+        html = HtmlMetadataRenderer().render(FULL)
         assert re.fullmatch(r"(<[^\n]+>\n)*<[^\n]+>", html)

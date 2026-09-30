@@ -67,16 +67,16 @@ Each one carries an explicit ``priority`` value, the resolver consults them from
    A parameter with default ``Depends(...)`` receives the resolved dependency.
 2. Context by default provider (priority 20).
    A parameter with a ``Context(...)`` default receives the named context value.
-3. Parent metadata provider (priority 25).
-   A parameter annotated ``Metadata`` inside a ``@page.metadata`` callable receives the fold of every metadata segment before it, and the empty fold anywhere else.
-4. Context by name provider (priority 30).
+3. Context by name provider (priority 30).
    A parameter whose name matches a context key receives that context value.
-5. Form provider (priority 40).
+4. Form provider (priority 40).
    A parameter named ``form`` or annotated ``DForm[FormClass]`` receives the bound form during action dispatch.
-6. Cleaned data provider (priority 40).
+5. Cleaned data provider (priority 40).
    A parameter named ``cleaned_data`` receives the merged wizard cleaned data on a wizard ``done()`` handler.
-7. HttpRequest provider (priority 50).
+6. HttpRequest provider (priority 50).
    A parameter annotated ``HttpRequest`` or ``HttpRequest | None`` receives the current request, and one annotated with a concrete subclass receives it only when the request is an instance of that subclass.
+7. Consent provider (priority 50).
+   A parameter annotated ``Consent`` receives the visitor's consent, and an undecided visitor on a page a shared cache holds, see :doc:`/content/topics/scripts/consent`.
 8. URL annotation provider (priority 60).
    A parameter annotated ``DUrl[T]`` reads the captured URL segment and coerces it to ``T``.
 9. URL kwargs provider (priority 70).
@@ -477,20 +477,18 @@ Keep a dependency cheap when several components ask for it, or have it read a st
 
 The cache lives for one form dispatch.
 Every stage of that POST, from ``get_initial`` through the validation-failure re-render, shares it, and the ``@component.context`` callables of the re-rendered page join it too rather than each building their own.
-``FormActionDispatch`` attaches its dependency cache to the request, and ``get_request_dep_cache`` reads it back.
-The function returns ``None`` outside a form dispatch, so callers handle the missing case.
+``FormActionDispatch`` attaches its dependency cache to the request, and ``render_dep_cache`` reads it back.
+Outside a form dispatch the function answers a fresh empty dict the request never carries, so a caller never handles a missing cache.
 
 .. code-block:: python
    :caption: reading the cache
 
    from django.http import HttpRequest
 
-   from next.deps import get_request_dep_cache
+   from next.deps import render_dep_cache
 
    def render(request: HttpRequest) -> str:
-       cache = get_request_dep_cache(request)
-       if cache is None:
-           return "No form dispatch cache on this request."
+       cache = render_dep_cache(request)
        return f"Cache has {len(cache)} entries."
 
 The constant ``REQUEST_DEP_CACHE_ATTR`` names the request attribute that holds the cache.

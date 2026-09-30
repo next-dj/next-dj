@@ -2,41 +2,32 @@
 
 import functools
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from types import MappingProxyType
+from dataclasses import dataclass, replace
 from typing import Final
 
-from next.conf import next_framework_settings
-from next.conf.signals import settings_reloaded
+from django.http import HttpRequest
 
+from next.conf.defaults import DEFAULTS
+from next.conf.scopes import scope_value
+from next.conf.signals import settings_reloaded
+from next.site import site_config, site_indexable
+
+from .markers import Metadata, Segment
 from .normalize import normalize_site_metadata
-from .schema import Metadata, Segment
 
 
 SITE_SOURCE: Final = "NEXT_FRAMEWORK['METADATA']['DEFAULTS']"
 """The source name the settings segment reports in its shape errors."""
 
-METADATA_KEYS: Final = frozenset(
-    {"CANONICAL_QUERY", "CHECKS", "DEFAULTS", "NOINDEX", "RENDERER"}
-)
+METADATA_KEYS: Final = frozenset(DEFAULTS["METADATA"])
 """The keys a `NEXT_FRAMEWORK["METADATA"]` mapping may carry."""
-
-_NO_CHECKS: Final[Mapping[str, object]] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
 class MetadataOptions:
     """The upper-case switches beside `DEFAULTS`, each read leniently."""
 
-    noindex: bool = False
     canonical_query: tuple[str, ...] = ()
-    checks: Mapping[str, object] = _NO_CHECKS
-
-
-def metadata_scope() -> Mapping[str, object]:
-    """Return the `METADATA` mapping, empty where the setting holds anything else."""
-    raw = next_framework_settings.METADATA
-    return raw if isinstance(raw, Mapping) else {}
 
 
 def _str_tuple(value: object) -> tuple[str, ...]:
@@ -48,16 +39,8 @@ def _str_tuple(value: object) -> tuple[str, ...]:
 @functools.cache
 def metadata_options() -> MetadataOptions:
     """Return the options read leniently from the metadata scope."""
-    scope = metadata_scope()
-    checks = scope.get("CHECKS")
     return MetadataOptions(
-        noindex=bool(scope.get("NOINDEX", False)),
-        canonical_query=_str_tuple(scope.get("CANONICAL_QUERY", ())),
-        checks=(
-            MappingProxyType(dict(checks))
-            if isinstance(checks, Mapping)
-            else _NO_CHECKS
-        ),
+        canonical_query=_str_tuple(scope_value("METADATA", "CANONICAL_QUERY"))
     )
 
 
@@ -65,17 +48,23 @@ def metadata_options() -> MetadataOptions:
 def site_segment() -> Segment:
     """Return the settings defaults as the outermost segment of every chain.
 
-    A malformed scope folds to an empty segment here, the system checks report it.
+    The site name falls back to `SITE["NAME"]`, and a malformed scope folds to nothing.
     """
-    defaults = metadata_scope().get("DEFAULTS", {})
-    if not isinstance(defaults, Mapping):
-        return Segment(SITE_SOURCE)
-    return normalize_site_metadata(defaults, source=SITE_SOURCE)
+    defaults = scope_value("METADATA", "DEFAULTS")
+    segment = (
+        normalize_site_metadata(defaults, source=SITE_SOURCE)
+        if isinstance(defaults, Mapping)
+        else Segment(SITE_SOURCE)
+    )
+    name = site_config().name
+    if segment.metadata.site_name is None and name is not None:
+        segment = replace(segment, metadata=replace(segment.metadata, site_name=name))
+    return segment
 
 
-def page_noindex(meta: Metadata) -> bool:
-    """Whether the page stays out of the index, by its robots or by `NOINDEX`."""
-    return metadata_options().noindex or meta.noindex
+def noindexed(meta: Metadata, *, request: HttpRequest | None = None) -> bool:
+    """Whether a page stays out of the index, by the site rule or its own robots."""
+    return not site_indexable(request) or meta.noindex
 
 
 def forget_metadata_scope(**kwargs) -> None:
@@ -93,7 +82,6 @@ __all__ = [
     "MetadataOptions",
     "forget_metadata_scope",
     "metadata_options",
-    "metadata_scope",
-    "page_noindex",
+    "noindexed",
     "site_segment",
 ]

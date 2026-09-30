@@ -1,4 +1,4 @@
-from next.seo import Rule
+from next.seo import RobotsRule
 
 
-rules = [Rule(user_agent="*", disallow=["/s/"])]
+rules = [RobotsRule(user_agent="*", disallow=["/s/"])]

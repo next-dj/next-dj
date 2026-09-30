@@ -1,8 +1,4 @@
-"""System checks for the `@context` callables a routed `page.py` registers.
-
-The ids are `next.E029` for a keyless callable returning no dict, `next.E074` for a
-dead registration, and `next.E018` for two keyless callables on one page.
-"""
+"""System checks for the `@context` callables a routed `page.py` registers."""
 
 from __future__ import annotations
 

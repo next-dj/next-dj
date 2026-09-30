@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 from django.urls import Resolver404, get_script_prefix, resolve
 
 from next.deps import RESERVED_KEYS
-from next.utils import decode_url_path
+from next.utils import UNSET, decode_url_path
 
 from .uid import URL_NAME_FORM_ACTION, is_path_only, posted_origin_path
 
@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
 
 _ORIGIN_MATCH_ATTR = "_next_form_origin_match"
-_UNSET = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,8 +97,8 @@ def _resolve_origin_match(request: "HttpRequest") -> "OriginMatch | None":
 
 def resolve_origin(request: "HttpRequest") -> "OriginMatch | None":
     """Return the posted-origin match for the request, memoised on the request."""
-    cached = getattr(request, _ORIGIN_MATCH_ATTR, _UNSET)
-    if cached is not _UNSET:
+    cached = getattr(request, _ORIGIN_MATCH_ATTR, UNSET)
+    if cached is not UNSET:
         return cast("OriginMatch | None", cached)
     match = _resolve_origin_match(request)
     setattr(request, _ORIGIN_MATCH_ATTR, match)

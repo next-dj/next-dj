@@ -9,6 +9,8 @@ from django.test import override_settings
 from notes.models import Note, Tenant
 from notes.themes import DEFAULT_ACCENT
 
+from next.testing import assert_metadata
+
 
 pytestmark = pytest.mark.django_db
 
@@ -524,6 +526,4 @@ class TestPageMetadata:
         self, next_client: NextClient, acme_note: Note, slug: str, path: str, title: str
     ) -> None:
         response = next_client.get(path.format(pk=acme_note.pk), HTTP_X_TENANT=slug)
-        body = response.content.decode()
-        assert f"<title>{title}</title>" in body
-        assert '<meta name="robots" content="noindex">' in body
+        assert_metadata(response, title=title, robots="noindex")

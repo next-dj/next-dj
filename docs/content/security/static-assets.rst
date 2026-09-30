@@ -72,11 +72,12 @@ A custom backend overrides the renderer methods to add the ``integrity`` and ``c
    from django.contrib.staticfiles.storage import staticfiles_storage
 
    from next.static import StaticFilesBackend
+   from next.static.runtime import nonce_attr
 
    class SriBackend(StaticFilesBackend):
-       def render_link_tag(self, url, *, request=None) -> str:
+       def render_link_tag(self, url, *, request=None, nonce=None) -> str:
            integrity = self._integrity_for(url)
-           return f'<link rel="stylesheet" href="{url}" integrity="{integrity}" crossorigin>'
+           return f'<link rel="stylesheet" href="{url}" integrity="{integrity}" crossorigin{nonce_attr(nonce)}>'
 
        def _integrity_for(self, url: str) -> str:
            base_path = urlsplit(staticfiles_storage.base_url).path
@@ -98,58 +99,10 @@ Content Security Policy
 -----------------------
 
 A strict Content Security Policy denies inline ``<script>`` and ``<style>`` unless they carry a nonce.
-
-Use a context processor to publish the nonce.
-
-.. code-block:: python
-   :caption: notes/context_processors.py
-
-   import secrets
-
-   def csp_nonce(request) -> dict:
-       nonce = secrets.token_urlsafe(16)
-       request._csp_nonce = nonce
-       return {"csp_nonce": nonce}
-
-Bake the nonce into the backend tag templates so every collected ``<script>`` and ``<link>`` carries it.
-A request aware backend reads the nonce from the request and writes it into each tag.
-
-.. code-block:: python
-   :caption: notes/backends.py
-
-   from next.static import StaticFilesBackend
-
-   class NonceBackend(StaticFilesBackend):
-       def render_script_tag(self, url, *, request=None) -> str:
-           nonce = getattr(request, "_csp_nonce", "")
-           return f'<script src="{url}" nonce="{nonce}"></script>'
-
-The ``next.min.js`` tag and the inline ``Next._init`` script are built by ``NextScriptBuilder`` rather than by a renderer method, so a backend nonce never reaches them.
-The ``script_tag_template`` and ``init_template`` keys of ``NEXT_JS_OPTIONS`` are read once per process and cannot carry a per-request nonce either.
-A policy that must cover those two fragments admits them by hash, or through ``strict-dynamic`` from a script that already carries a nonce.
-
-Register the backend by its dotted path.
-
-.. code-block:: python
-   :caption: config/settings.py
-
-   NEXT_FRAMEWORK = {
-       "STATIC_BACKENDS": [
-           {
-               "BACKEND": "notes.backends.NonceBackend",
-               "OPTIONS": {},
-           }
-       ]
-   }
-
-Send the matching ``Content-Security-Policy`` header from middleware.
-
-The runtime script and the nonce
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The backend covers the collected assets only.
-The ``next.min.js`` tag and the inline ``Next._init`` script come from the runtime script builder, which formats its templates once per process and cannot carry a per-request nonce.
-Under a strict CSP switch ``NEXT_JS_OPTIONS`` to the ``MANUAL`` policy and emit the three fragments from a template tag that reads the nonce off the request.
+``NEXT_FRAMEWORK["CSP_NONCE"]``, ``True`` by default, has the framework read the nonce django-csp or Django's own CSP middleware minted for the request.
+The framework passes that nonce to every renderer as the ``nonce`` keyword and to the runtime script builder, so the collected assets, the ``next.min.js`` tag, its preload hint, the inline ``Next._init`` payload, the inline ``use_script`` and ``use_style`` blocks, and the third-party scripts all carry it.
+A custom renderer writes it through ``nonce_attr(nonce)``, as the SRI backend above does, and a custom tag template through ``{nonce_attr}``.
+:doc:`csp-and-nonce` covers the policy and the runtime side.
 
 Co-located JS
 -------------

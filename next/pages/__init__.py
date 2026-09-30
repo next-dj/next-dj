@@ -14,22 +14,29 @@ from .errors import (
     PageMetadataRequestError,
     PageMetadataShapeError,
     PageMetadataTemplateError,
-    PageMetadataURLError,
     PageModuleImportError,
 )
 from .manager import Page, context, page
 from .metadata import (
+    RESET,
     HtmlMetadataRenderer,
     Metadata,
     MetadataDict,
     MetadataRenderer,
+    Replace,
+    ResolvedMetadata,
     SiteMetadataDict,
+    ld,
 )
+from .responses import CacheDict, HeadersDict
 
 
 __all__ = [
+    "RESET",
+    "CacheDict",
     "Context",
     "ContextResult",
+    "HeadersDict",
     "HtmlMetadataRenderer",
     "Metadata",
     "MetadataDict",
@@ -40,11 +47,13 @@ __all__ = [
     "PageMetadataRequestError",
     "PageMetadataShapeError",
     "PageMetadataTemplateError",
-    "PageMetadataURLError",
     "PageModuleImportError",
+    "Replace",
+    "ResolvedMetadata",
     "SiteMetadataDict",
     "checks",
     "context",
+    "ld",
     "page",
     "signals",
 ]

@@ -93,13 +93,14 @@ The failure costs that backend its trees and nothing else.
 It is logged once per backend and subject rather than per tick, and again once the framework is reconfigured.
 
 - Each page root contributes a ``**/page.py`` spec.
-- Each page root contributes one spec per name in ``next.seo.discovery.SOURCE_NAMES``, the ``sitemap.py``, ``robots.py``, and ``robots.txt`` at the top of the tree, so an edit to a sitemap or robots source restarts the process like a ``page.py`` edit does.
 - Each page root paired with the name its router returns from ``components_folder_name`` contributes a ``**/<components-folder>/**/component.py`` spec, ``_components`` by default.
   A router that returns ``None`` there contributes no component spec.
 - Each extra component root from ``COMPONENT_BACKENDS`` contributes a ``**/component.py`` spec.
 
-Only Python entrypoints and the static ``robots.txt`` are watched.
+Only Python entrypoints are watched.
 ``.djx`` templates and co-located assets are deliberately omitted from the specs.
+The tree-top sources, ``sitemap.py``, ``robots.py``, ``robots.txt``, and ``scripts.py``, are omitted as well, because they reload in process without restarting ``runserver``.
+While ``DEBUG`` is on, every SEO route compares the modification times of the SEO sources with the ones they were loaded at, every page render does the same for ``scripts.py``, and a file that appeared, went, or moved is read again on that request, see :doc:`seo-pipeline`.
 
 ``iter_all_autoreload_watch_specs`` appends the specs registered through ``register_autoreload_watch_spec``.
 It deduplicates the combined list by resolved path and glob, then emits ``watch_specs_ready`` with the final list.

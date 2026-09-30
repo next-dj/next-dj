@@ -1,7 +1,4 @@
-"""System checks for the page-body placeholder of every `layout.djx`.
-
-The ids are `next.W001` for a layout with no placeholder and `next.W078` for several.
-"""
+"""System checks for the page-body placeholder of every `layout.djx`."""
 
 from __future__ import annotations
 

@@ -1,8 +1,12 @@
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from pathlib import Path
 
 import pytest
+from django.apps import apps
+from django.conf import settings
 from django.core.exceptions import DisallowedRedirect
+from django.db import connection
+from django.db.models import Model
 from django.http import HttpRequest, HttpResponseRedirect
 from django.middleware.csrf import get_token
 from django.template.engine import Engine
@@ -15,6 +19,7 @@ from next.forms import uid
 from next.forms.wizard import SessionFormWizardBackend, wizard_backend_manager
 from next.pages import Page
 from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
+from next.pages.metadata.hreflang import forget_translated_urls
 from next.pages.registry import PageContextRegistry
 from next.ports import partial_shaper_slot
 from next.server import NextStatReloader
@@ -47,6 +52,22 @@ def cap_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture()
+def site_model(transactional_db) -> Iterator[type[Model]]:
+    """Install `django.contrib.sites` with its table for the test, then drop both."""
+    installed = [*settings.INSTALLED_APPS, "django.contrib.sites"]
+    with override_settings(INSTALLED_APPS=installed):
+        model = apps.get_model("sites", "Site")
+        with connection.schema_editor() as editor:
+            editor.create_model(model)
+        try:
+            yield model
+        finally:
+            model.objects.clear_cache()
+            with connection.schema_editor() as editor:
+                editor.delete_model(model)
+
+
+@pytest.fixture()
 def mock_http_request():
     """Return the ``build_mock_http_request`` callable for injecting mock requests."""
     return build_mock_http_request
@@ -68,6 +89,14 @@ def _reset_check_caches() -> Generator[None, None, None]:
     reset_check_caches()
     yield
     reset_check_caches()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_translation_memo() -> Generator[None, None, None]:
+    """Drop the process-wide hreflang memo so no test reads the URLconf of another."""
+    forget_translated_urls()
+    yield
+    forget_translated_urls()
 
 
 @pytest.fixture()

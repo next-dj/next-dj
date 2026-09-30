@@ -1,11 +1,13 @@
-"""The routed page trees the SEO checks read."""
+"""The routed page trees the SEO checks read, discovered once per check run."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 from next.checks.common import RunMemo, get_router_manager
+from next.seo.backends import PageTreeSitemapBackend
 from next.seo.discovery import SeoRoot, discover_seo_roots
+from next.seo.manager import seo_manager
 from next.seo.robots import robots_candidates
 
 
@@ -54,27 +56,41 @@ def declares_sitemap(roots: tuple[SeoRoot, ...]) -> bool:
     return any(root.sitemap is not None for root in roots)
 
 
+def serves_sitemap(roots: tuple[SeoRoot, ...]) -> bool:
+    """Whether `/sitemap.xml` is routed, by a `sitemap.py` or another backend."""
+    return declares_sitemap(roots) or any(
+        backend.serves()
+        for backend in seo_manager.backends
+        if not isinstance(backend, PageTreeSitemapBackend)
+    )
+
+
 def serves_robots(roots: tuple[SeoRoot, ...]) -> bool:
     """Whether a robots source serves `/robots.txt`, the way the route decides it."""
     return any(served is not None for _path, served in robots_candidates(roots))
 
 
-def robots_paths(roots: tuple[SeoRoot, ...]) -> list[Path]:
-    """Return every robots source in the order the route prefers them."""
-    return [path for path, _served in robots_candidates(roots)]
+def published_sources(roots: tuple[SeoRoot, ...]) -> list[str]:
+    """Name the crawler-facing sources the site serves."""
+    served = (
+        ("a sitemap", serves_sitemap(roots)),
+        ("a robots.txt", serves_robots(roots)),
+    )
+    return [name for name, present in served if present]
 
 
 def items_trails(root: SeoRoot) -> set[str]:
     """Return the trails `@sitemap.items` lists URLs of in the tree."""
-    return {trail for trail, _func in root.items_entries()}
+    return {entry.trail for entry in root.items_entries()}
 
 
 __all__ = [
     "declares_sitemap",
     "items_trails",
     "loaded_seo_roots",
+    "published_sources",
     "robots_modules",
-    "robots_paths",
     "serves_robots",
+    "serves_sitemap",
     "sitemap_roots",
 ]

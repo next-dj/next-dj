@@ -1,9 +1,4 @@
-"""System checks for the `{% zone %}` tags of a composed page.
-
-The ids are `next.E060` to `next.E065` for a zone that is duplicated, misnamed, badly
-nested, lazy without a placeholder or declared in a component, plus `next.E078` for a
-`@context(zone=)` naming no zone and `next.W067` for a `{% with %}` over one.
-"""
+"""System checks for the `{% zone %}` tags of a composed page."""
 
 import re
 from typing import TYPE_CHECKING, Final

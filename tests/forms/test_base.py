@@ -275,7 +275,7 @@ class TestAutoRegistration:
     def test_duplicate_name_same_scope_records_collision(
         self, settings, tmp_path
     ) -> None:
-        """Two registrations of the same name with different handlers produce a collision."""
+        """Two registrations of one name with different handlers are a collision."""
         settings.BASE_DIR = tmp_path
         app_dir = tmp_path / "myapp"
         app_dir.mkdir()

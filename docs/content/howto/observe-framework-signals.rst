@@ -144,8 +144,8 @@ The URL subsystem emits ``route_registered`` for each route discovered during a 
 Inventory the loaded backends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Each of the six settings-driven backend families announces what it built through a signal of its own.
-Every one of them carries the same two keyword arguments, ``config``, a copy of the settings entry that named the class, and ``instance``, the object the loader built from it, so one receiver serves all six.
+Each of the eight settings-driven backend families announces what it built through a signal of its own.
+Every one of them carries the same two keyword arguments, ``config``, a copy of the settings entry that named the class, and ``instance``, the object the loader built from it, so one receiver serves all eight.
 
 .. code-block:: python
    :caption: obs/receivers.py
@@ -155,9 +155,11 @@ Every one of them carries the same two keyword arguments, ``config``, a copy of 
 
    from next.signals import (
        component_backend_loaded,
+       consent_backend_loaded,
        form_backend_loaded,
        partial_backend_loaded,
        router_backend_loaded,
+       sitemap_backend_loaded,
        static_backend_loaded,
        wizard_backend_loaded,
    )
@@ -166,9 +168,11 @@ Every one of them carries the same two keyword arguments, ``config``, a copy of 
 
    BACKEND_LOADED = {
        "components": component_backend_loaded,
+       "consent": consent_backend_loaded,
        "forms": form_backend_loaded,
        "partial": partial_backend_loaded,
        "urls": router_backend_loaded,
+       "sitemap": sitemap_backend_loaded,
        "static": static_backend_loaded,
        "wizard": wizard_backend_loaded,
    }

@@ -109,9 +109,9 @@ A value is pushed by the name of a registered ``serialize=True`` provider on the
        return Patches(request).context(cart_count=cart.count).response()
 
 A name that is not a ``serialize=True`` provider of the origin page raises ``UnknownContextNameError``, so the verb cannot smuggle an arbitrary value past the provider contract.
-The ``$csrf`` and ``$dev`` keys of the init payload raise ``ReservedContextKeyError`` whether or not the origin page registered them, symmetric to ``event()`` refusing a framework-owned event name.
+The reserved keys of the init payload, ``$csrf``, ``$dev``, ``$chunks``, ``$scripts``, and ``$consent``, raise ``ReservedContextKeyError`` whether or not the origin page registered them, symmetric to ``event()`` refusing a framework-owned event name.
 The ``$`` namespace therefore stays the framework's on a patch as it is on a full render.
-A page that registers either name loses that value on the full render too, so no patch has anything to update, see :doc:`/content/topics/static-assets/js-context`.
+A page that registers such a name loses that value on the full render too, so no patch has anything to update, see :doc:`/content/topics/static-assets/js-context`.
 
 Read the merged value on the client through ``Next.context`` and react to the merge through ``context-updated``.
 The event payload carries the whole merged store in ``context`` and the keys of the delta in ``changed``, so a listener filters on ``changed`` instead of re-reading every value.

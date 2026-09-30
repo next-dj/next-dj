@@ -11,6 +11,7 @@ from library.models import Book, Chapter, Tag
 
 from next.testing import (
     NextClient,
+    assert_metadata,
     envelope_of,
     find_form,
     form_action,
@@ -1316,9 +1317,9 @@ class TestPageMetadata:
     """Every page is `noindex, nofollow`, model pages are titled after the model."""
 
     def test_login_page_carries_the_site_default_and_noindex(self, next_client):
-        body = next_client.get("/admin/login/").content.decode()
-        assert "<title>next.dj admin</title>" in body
-        assert '<meta name="robots" content="noindex, nofollow">' in body
+        response = next_client.get("/admin/login/")
+        assert_metadata(response, title="next.dj admin", robots="noindex, nofollow")
+        assert response["X-Robots-Tag"] == "noindex, nofollow"
 
     @pytest.mark.parametrize(
         "suffix",
@@ -1327,9 +1328,11 @@ class TestPageMetadata:
     )
     def test_model_pages_are_titled_after_the_model(self, admin_client, book, suffix):
         path = "/admin/library/book/" + suffix.format(pk=book.pk)
-        body = admin_client.get(path).content.decode()
-        assert "<title>Books · next.dj admin</title>" in body
-        assert '<meta name="robots" content="noindex, nofollow">' in body
+        assert_metadata(
+            admin_client.get(path),
+            title="Books · next.dj admin",
+            robots="noindex, nofollow",
+        )
 
     @pytest.mark.parametrize(
         "path",

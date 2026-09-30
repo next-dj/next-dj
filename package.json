@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "build:next": "esbuild next/client/next.ts --bundle --minify --target=es2022 --sourcemap=external --outfile=next/static/next/next.min.js",
+    "build:next": "esbuild next/client/next.ts --bundle --minify --target=es2022 --sourcemap=external --outfile=next/static/next/next.min.js && esbuild next/client/extras.ts --bundle --minify --target=es2022 --sourcemap=external --outfile=next/static/next/next.scripts.min.js && esbuild next/client/dev.ts --bundle --minify --target=es2022 --sourcemap=external --outfile=next/static/next/next.dev.min.js",
     "test:js": "vitest run",
     "test:js:coverage": "vitest run --coverage",
     "lint:js": "eslint \"{next,examples}/**/*.{mjs,ts,js,css}\"",

@@ -5,7 +5,11 @@ from typing import TYPE_CHECKING
 
 from django.http import HttpRequest
 
-from next.pages.loaders import _load_python_module_memo
+from next.pages.loaders import load_page_module
+from next.pages.manager.views import unified_view as build_unified_view
+from next.pages.metadata import resolve_metadata
+from next.pages.metadata.chain import MetadataThunk
+from next.seeding import METADATA_KEY
 from tests.support.partial_requests import partial_meta
 
 
@@ -16,6 +20,7 @@ if TYPE_CHECKING:
     from django.http.response import HttpResponseBase
 
     from next.pages import Page
+    from next.pages.metadata import ResolvedMetadata
 
 
 def build_page_request() -> HttpRequest:
@@ -25,6 +30,16 @@ def build_page_request() -> HttpRequest:
     request.META["SERVER_NAME"] = "testserver"
     request.META["SERVER_PORT"] = "80"
     return request
+
+
+def resolve_page_metadata(
+    page: Page, file_path: Path, request: HttpRequest | None = None, **kwargs: object
+) -> ResolvedMetadata:
+    """Resolve the metadata of `file_path` by building its whole render context."""
+    context_data = page.build_render_context(file_path, request, **kwargs)
+    thunk = context_data[METADATA_KEY]
+    assert isinstance(thunk, MetadataThunk)
+    return resolve_metadata(thunk.fold(context_data), request=request)
 
 
 def build_zone_request(zone: str) -> HttpRequest:
@@ -73,7 +88,7 @@ def write_page(
 
 
 def write_page_chain(root: Path, specs: Sequence[tuple[str, str]]) -> list[Path]:
-    """Write one nested ``page.py`` per spec under ``root`` and return them root first."""
+    """Write one nested ``page.py`` per spec under ``root``, returned root first."""
     directory = root
     pages: list[Path] = []
     for name, source in specs:
@@ -100,7 +115,7 @@ def page_naming_one_style(root: Path, *, directory: str = "named") -> Path:
 
 def unified_view(page: Page, page_file: Path) -> Callable[..., HttpResponseBase]:
     """Return the view of `page_file` the way the URL builder creates it."""
-    return page._create_unified_view(page_file, _load_python_module_memo(page_file))
+    return build_unified_view(page, page_file, load_page_module(page_file)[0])
 
 
 def path_under(root: Path) -> Callable[[Path], bool]:

@@ -26,7 +26,8 @@ Pipeline
        Django --> Resolver["Django URL resolver"]
        Resolver -- form dispatch path --> FormDispatch["Form dispatcher"]
        Resolver -- file routed path --> PageView["Page view"]
-       PageView --> Loader["Page loader"]
+       PageView --> Policy["Response policy<br/>cache, headers, CSRF delivery"]
+       Policy --> Loader["Page loader"]
        Loader --> BodySource{"Body source"}
        BodySource -- "render() function" --> RenderFn["Call render(), resolve its arguments"]
        BodySource -- "template / template.djx" --> StaticBody["Read static body string"]
@@ -39,7 +40,8 @@ Pipeline
        ContextCtx --> Metadata["Fold page metadata as the head renders"]
        Metadata --> CollectAssets["Static collector"]
        CollectAssets --> InjectTags["Emit collected tags"]
-       InjectTags --> Response(["HTTP response"])
+       InjectTags --> Stamp["Stamp headers, cache, X-Robots-Tag"]
+       Stamp --> Response(["HTTP response"])
        FormDispatch --> Validation{"Form valid"}
        Validation -- yes --> Handler["Run handler"]
        Handler --> Response
@@ -65,7 +67,9 @@ A match on ``/_next/form/<str:uid>/`` dispatches to the form dispatcher instead.
 Page view
 ~~~~~~~~~
 
-The page view loads the page module and resolves the body source first.
+The page view first reads the response policy of the page, the ``cache`` of its ``page.py`` and the ``headers`` of every ``page.py`` along its chain, memoised per module reload, with a callable ``cache`` resolved through the render's dependency cache.
+A policy that lets a shared cache keep the response defers the CSRF token under ``CSRF_DELIVERY="auto"`` and marks the render shared, so the forms carry no token and a ``Consent`` parameter reads an undecided visitor.
+The view then loads the page module and resolves the body source.
 When the module exposes a ``render`` function the view calls it before context runs, resolving its arguments through the dependency resolver.
 ``render`` may return a string body or an ``HttpResponseBase`` that short-circuits the layout and static pipelines.
 When the body comes from the ``template`` attribute or a ``template.djx`` file the view reads that source as a plain string.
@@ -98,9 +102,21 @@ The collector finalises before the template tags emit their slot.
 Tag injection
 ~~~~~~~~~~~~~
 
-``{% collect_styles %}`` and ``{% collect_scripts %}`` emit placeholder tokens during template rendering.
-After the layout chain finishes, the static manager replaces every placeholder token with the rendered tags accumulated by the request-scoped ``StaticCollector``.
-The framework injects the ``Next`` JS context script before any other script in the page.
+``{% collect_styles %}``, ``{% collect_head %}``, and ``{% collect_scripts %}`` emit placeholder tokens during template rendering.
+After the layout chain finishes, the static manager replaces every placeholder token with the rendered tags accumulated by the request-scoped ``StaticCollector``, each carrying the CSP nonce of the request.
+The head slot receives the ``scripts.py`` scripts the visitor may run at once, before ``</head>`` when the layout carries no ``{% collect_head %}``.
+The framework injects the ``Next`` JS context script before any other script in the page, its payload carrying ``$csrf``, ``$chunks``, and, when the page has any, ``$scripts`` and ``$consent``.
+
+Response headers
+~~~~~~~~~~~~~~~~
+
+The view stamps what the policy declares on the response.
+The ``headers`` go on first, then the ``cache`` of a successful ``GET`` or ``HEAD``, taken back to ``private`` when the render set a cookie, read the session, minted a CSRF cookie, read the consent cookie, or minted a CSP nonce, or when the request carries ``Authorization``, then ``X-Robots-Tag``.
+A shared cache swaps the response's cookie jar for ``SharedCookies``, which takes the cache private the moment a middleware sets a cookie after the view, and a lazily rendered ``TemplateResponse`` settles the same question in a post-render callback.
+On a site closed to search the header is ``noindex, nofollow``, and otherwise it repeats the robots directives the ``{% metadata %}`` resolve published on the request when they block, or those of the static fold when no head rendered.
+``Vary: Cookie`` joins when the HTML followed the consent cookie.
+A ``render()`` that returns its own response passes the same stamping, its own headers winning.
+A zone response goes through ``finish_zone_response``, which stamps the page ``headers``, ``private, no-store`` where the response names no ``Cache-Control`` of its own, and the site-level robots header, so a CDN that ignores ``Vary`` never keeps it.
 
 Both routed views then stamp the partial ``Vary`` set on the finished response, whether or not the project declares a single zone.
 The header names ``X-Next-Request``, ``X-Next-Zone``, ``X-Next-Merge``, and ``X-Next-Version``, because a full page and a zone envelope answer the same URL and a shared cache that ignores those headers would serve one where the other belongs.

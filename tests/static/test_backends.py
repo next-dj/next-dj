@@ -51,12 +51,16 @@ class _CollectingBackend(StaticBackend):
     def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
         return f"/{logical_name}.{kind}"
 
-    def render_link_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
-        del request
+    def render_link_tag(
+        self, url: str, *, request: HttpRequest | None = None, nonce: str | None = None
+    ) -> str:
+        del request, nonce
         return f"<link {url}>"
 
-    def render_script_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
-        del request
+    def render_script_tag(
+        self, url: str, *, request: HttpRequest | None = None, nonce: str | None = None
+    ) -> str:
+        del request, nonce
         return f"<script {url}>"
 
 

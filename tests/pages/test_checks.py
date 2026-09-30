@@ -78,7 +78,7 @@ def render(request, **kwargs):
     def test_has_template_or_djx(
         self, tmp_path, page_content, create_djx, djx_content, expected_result
     ) -> None:
-        """Only a ``template`` attribute or a sibling ``template.djx`` counts, ``render()`` does not."""
+        """Only a ``template`` attribute or ``template.djx`` counts, not render()."""
         page_file = tmp_path / "page.py"
         page_file.write_text(page_content)
 
@@ -250,7 +250,6 @@ class TestMemoAndBrokenPages:
         """A syntactically invalid page.py surfaces as E017 only, never E012."""
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
-        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager_with_routers(
             routers=[AppRootRouter(tmp_path)]
@@ -263,7 +262,6 @@ class TestMemoAndBrokenPages:
         """A page.py with a real render body raises no E012."""
         page_file = tmp_path / "page.py"
         page_file.write_text('def render(request, **kwargs):\n    return "x"\n')
-        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager_with_routers(
             routers=[AppRootRouter(tmp_path)]
@@ -276,7 +274,6 @@ class TestMemoAndBrokenPages:
         """A valid but bodyless page.py keeps the genuine no-body-source E012."""
         page_file = tmp_path / "page.py"
         page_file.write_text("")
-        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager_with_routers(
             routers=[AppRootRouter(tmp_path)]
@@ -289,7 +286,6 @@ class TestMemoAndBrokenPages:
         """Two check passes over one page.py exec the module at most once per mtime."""
         page_file = tmp_path / "page.py"
         page_file.write_text('template = "hi"\n')
-        loaders_module._MODULE_MEMO.pop(page_file)
 
         real_load = loaders_module._load_python_module
         calls: list[Path] = []
@@ -452,7 +448,6 @@ def get_context_data():
             'def data() -> "dict":\n'
             "    return {}\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
             assert check_context_functions(None) == []
@@ -467,7 +462,6 @@ def get_context_data():
             "def data() -> dict:\n"
             "    return {}\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
             assert check_context_functions(None) == []
@@ -481,7 +475,6 @@ def get_context_data():
             'def data() -> "Nowhere":\n'
             "    return {}\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
             assert check_context_functions(None) == []
@@ -497,7 +490,6 @@ def get_context_data():
             'def data() -> "str":\n'
             "    return {}\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
             errors = check_context_functions(None)
@@ -513,7 +505,6 @@ from next.pages import page
 def get_context_data() -> str:
     return {}
         """)
-        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
             errors = check_context_functions(None)
@@ -530,7 +521,6 @@ from next.pages import context
 async def get_context_data() -> str:
     return {}
         """)
-        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
             errors = check_context_functions(None)
@@ -547,7 +537,6 @@ from next.pages import context as ctx
 def get_context_data() -> str:
     return {}
         """)
-        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
             errors = check_context_functions(None)
@@ -564,7 +553,6 @@ from next.pages import page
 def get_context_data() -> str:
     return {}
         """)
-        loaders_module._MODULE_MEMO.pop(page_file)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
             first = check_context_functions(None)
@@ -1127,7 +1115,6 @@ class TestContextRegistrationFileCheck:
             "from tests.support.attribution import handler_declared_here\n\n"
             "context('greeting')(handler_declared_here)\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file)
         with (
             patch.object(page, "_context_manager", PageContextRegistry()),
             patch_checks_router_manager(pages_directory=tmp_path),
@@ -1149,7 +1136,6 @@ class TestContextRegistrationFileCheck:
             "from donor.page import donated\n\n"
             "context('greeting')(donated)\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file)
         with (
             patch.object(page, "_context_manager", PageContextRegistry()),
             patch_checks_router_manager(pages_directory=tmp_path),
@@ -1168,7 +1154,6 @@ class TestContextRegistrationFileCheck:
             "from tests.support.attribution import handler_declared_here\n\n"
             "context('greeting')(functools.partial(handler_declared_here))\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file)
         with (
             patch.object(page, "_context_manager", PageContextRegistry()),
             patch_checks_router_manager(pages_directory=tmp_path),
@@ -1185,7 +1170,6 @@ class TestContextRegistrationFileCheck:
             "def greeting() -> str:\n"
             "    return 'hi'\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file)
         with (
             patch.object(page, "_context_manager", PageContextRegistry()),
             patch_checks_router_manager(pages_directory=tmp_path),

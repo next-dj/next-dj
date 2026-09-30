@@ -202,7 +202,7 @@ Modules that use these markers never start with `from __future__ import annotati
 
 ### 10. One title for the board and its settings page
 
-No template spells the `<title>`. [`cockpit/layout.djx`](cockpit/layout.djx) calls the shared `page_head` component, which renders the builtin `{% metadata %}` tag, and the tag folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with whatever the page tree declares. The settings tier holds a `site_name`, the template `{title} · {site_name}` and a `default`, and the index renders that default because it names no title of its own. [`board/[int:id]/page.py`](kanban/boards/board/%5Bint%3Aid%5D/page.py) adds the one dynamic tier:
+No template spells the `<title>`. [`cockpit/layout.djx`](cockpit/layout.djx) calls the shared `page_head` component, which renders the builtin `{% metadata %}` tag, and the tag folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with whatever the page tree declares. The settings tier holds the template `{title} · {site_name}` and a `default`, `NEXT_FRAMEWORK["SITE"]["NAME"]` fills `{site_name}`, and the index renders that default because it names no title of its own. [`board/[int:id]/page.py`](kanban/boards/board/%5Bint%3Aid%5D/page.py) adds the one dynamic tier:
 
 ```python
 @page.metadata(inherit=True)

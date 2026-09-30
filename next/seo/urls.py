@@ -1,14 +1,31 @@
-"""The SEO routes for mounting at the host root when `next.urls` sits under a prefix."""
+"""The SEO routes for mounting at the host root when `next.urls` sits under a prefix.
 
-from django.urls import path
+Only the routes a source backs are served, so a project view below still answers.
+"""
 
-from .views import HOST_ROOT_NAMESPACE, robots_view, sitemap_view
+from typing import Final
 
+from django.urls import URLPattern, path
+
+from .routes import (
+    HOST_ROOT_NAMESPACE,
+    ROBOTS_NAME,
+    ROBOTS_ROUTE,
+    SECTION_NAME,
+    SECTION_ROUTE,
+    SITEMAP_NAME,
+    SITEMAP_ROUTE,
+    SeoPatterns,
+)
+from .views import robots_view, sitemap_view
+
+
+PATTERNS: Final[tuple[URLPattern, ...]] = (
+    path(SITEMAP_ROUTE, sitemap_view, name=SITEMAP_NAME),
+    path(SECTION_ROUTE, sitemap_view, name=SECTION_NAME),
+    path(ROBOTS_ROUTE, robots_view, name=ROBOTS_NAME),
+)
+"""Every SEO route, served or not."""
 
 app_name = HOST_ROOT_NAMESPACE
-
-urlpatterns = [
-    path("sitemap.xml", sitemap_view, name="sitemap"),
-    path("sitemap-<slug:section>.xml", sitemap_view, name="sitemap_section"),
-    path("robots.txt", robots_view, name="robots"),
-]
+urlpatterns = SeoPatterns(PATTERNS)

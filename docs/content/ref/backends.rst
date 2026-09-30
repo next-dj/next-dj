@@ -21,7 +21,7 @@ The two loading paths differ in how they treat a misconfigured entry.
 Announcing a load
 ~~~~~~~~~~~~~~~~~
 
-``load_backends`` and ``SingleBackendManager`` both take an optional ``signal=`` keyword, and that parameter is the mechanism behind all six ``*_backend_loaded`` signals.
+``load_backends`` and ``SingleBackendManager`` both take an optional ``signal=`` keyword, and that parameter is the mechanism behind all eight ``*_backend_loaded`` signals.
 The loader sends the signal once per instance it built, with the resolved backend class as the sender and a copy of the settings entry as ``config`` beside the ``instance`` itself, immediately after the constructor returned and before any caller can reach the instance.
 An entry ``load_backends`` skips announces nothing, because the send sits after the two guards that log and continue.
 

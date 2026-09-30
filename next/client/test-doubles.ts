@@ -75,7 +75,7 @@ export function stubBridge(overrides: Partial<LayerBridge> = {}): LayerBridge {
     urlFor: () => STUB_OWNER,
     open: vi.fn<LayerBridge["open"]>(),
     close: vi.fn<LayerBridge["close"]>(),
-    retitle: vi.fn<LayerBridge["retitle"]>(),
+    head: vi.fn<LayerBridge["head"]>(),
     toast: vi.fn<LayerBridge["toast"]>(),
     ...overrides,
   };

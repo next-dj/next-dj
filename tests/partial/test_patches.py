@@ -3,12 +3,14 @@ from pathlib import Path
 
 import pytest
 from django.test import override_settings
-from django.utils.functional import lazy
+from django.utils.functional import Promise, lazy
 
 import next.pages
 import next.partial
 import next.partial.errors
 import next.partial.patches
+from next.pages import ld
+from next.pages.errors import PageMetadataShapeError
 from next.partial import Asset, FormMeta, Patches, PatchResponse
 from next.partial.errors import (
     BuiltinPatchOpError,
@@ -377,25 +379,70 @@ class TestPatchesBuilder:
         assert Patches(None, version="9f3c").envelope().version == "9f3c"
 
 
+def _meta(title: str | None, **rest: str | None) -> dict[str, object]:
+    return {
+        "title": title,
+        "description": rest.get("description"),
+        "canonical": rest.get("canonical"),
+        "robots": rest.get("robots"),
+    }
+
+
 class TestMeta:
-    """`meta` ships the title the origin page would render, and nothing else."""
+    """`meta` ships the four head tags the origin page would render, each or null."""
 
     def test_the_ancestor_template_wraps_the_title_of_the_verb(self) -> None:
         envelope = Patches(partial_request("/titled/leaf/")).meta("Wallets").envelope()
-        assert envelope.ops[0].as_dict() == {"op": "meta", "title": "Wallets · Site"}
-        assert envelope.ops[0].extras == {"title": "Wallets · Site"}
+        assert envelope.ops[0].as_dict() == {"op": "meta", **_meta("Wallets · Site")}
 
-    def test_the_template_applies_only_to_descendants(self) -> None:
+    def test_the_verb_stands_in_the_place_of_the_own_title(self) -> None:
         envelope = Patches(partial_request("/titled/")).meta("Wallets").envelope()
-        assert envelope.ops[0].extras == {"title": "Wallets"}
+        assert envelope.ops[0].extras == _meta("Wallets")
 
-    def test_absolute_bypasses_the_template(self) -> None:
+    def test_an_absolute_title_bypasses_the_template(self) -> None:
         envelope = (
             Patches(partial_request("/titled/leaf/"))
-            .meta("Wallets", absolute=True)
+            .meta({"title": {"absolute": "Wallets"}})
             .envelope()
         )
-        assert envelope.ops[0].as_dict() == {"op": "meta", "title": "Wallets"}
+        assert envelope.ops[0].extras == _meta("Wallets")
+
+    def test_a_mapping_syncs_description_canonical_and_robots(self) -> None:
+        with override_next_settings(SITE={"URL": "https://acme.example"}):
+            envelope = (
+                Patches(partial_request("/titled/leaf/"))
+                .meta(
+                    {
+                        "title": "Wallets",
+                        "description": "All of them",
+                        "canonical": True,
+                        "robots": {"index": False},
+                    }
+                )
+                .envelope()
+            )
+        assert envelope.ops[0].extras == _meta(
+            "Wallets · Site",
+            description="All of them",
+            canonical="https://acme.example/titled/leaf/",
+            robots="noindex",
+        )
+
+    def test_the_title_travels_as_plain_text(self) -> None:
+        envelope = (
+            Patches(partial_request("/titled/leaf/")).meta("Tom & Jerry").envelope()
+        )
+        assert envelope.ops[0].extras["title"] == "Tom & Jerry · Site"
+
+    def test_braces_in_the_title_stay_literal_under_the_template(self) -> None:
+        builder = Patches(partial_request("/titled/leaf/"))
+        envelope = builder.meta("Set {title} {0} {{x}}").envelope()
+        assert envelope.ops[0].extras["title"] == "Set {title} {0} {{x}} · Site"
+
+    def test_a_closed_site_ships_its_robots(self) -> None:
+        with override_next_settings(SITE={"INDEXABLE": False}):
+            envelope = Patches(partial_request("/titled/leaf/")).meta("W").envelope()
+        assert envelope.ops[0].extras["robots"] == "noindex, nofollow"
 
     @pytest.mark.parametrize(
         "builder",
@@ -406,11 +453,36 @@ class TestMeta:
         ],
         ids=["no_request", "no_origin", "foreign_origin"],
     )
-    def test_a_builder_without_an_origin_page_sends_the_bare_title(
+    def test_a_builder_without_an_origin_page_folds_the_defaults_alone(
         self, builder: Callable[[], Patches]
     ) -> None:
-        envelope = builder().meta("Wallets").envelope()
-        assert envelope.ops[0].as_dict() == {"op": "meta", "title": "Wallets"}
+        defaults = {"title": {"template": "{title} | Acme", "default": "Acme"}}
+        with override_next_settings(METADATA={"DEFAULTS": defaults}):
+            envelope = builder().meta("Wallets").envelope()
+        assert envelope.ops[0].as_dict() == {"op": "meta", **_meta("Wallets | Acme")}
+
+    def test_a_builder_without_a_request_leaves_a_self_canonical_alone(self) -> None:
+        defaults = {
+            "canonical": True,
+            "alternates": {"languages": True},
+            "og": {"images": [{"url": "/og.png"}]},
+            "twitter": {"images": ["/tw.png"]},
+            "icons": {"icon": "/icon.svg"},
+            "manifest": "/app.webmanifest",
+            "links": [{"rel": "preload", "href": "/f.woff2", "as": "font"}],
+            "jsonld": [ld.Node(id="#org", type="Organization", extra={"url": "/"})],
+        }
+        with override_next_settings(METADATA={"DEFAULTS": defaults}):
+            extras = Patches.versioned("v1").meta("Wallets").envelope().ops[0].extras
+        assert extras == {"title": "Wallets", "description": None, "robots": None}
+
+    def test_a_builder_without_a_request_ships_a_declared_canonical(self) -> None:
+        with override_next_settings(
+            SITE={"URL": "https://acme.example"},
+            METADATA={"DEFAULTS": {"canonical": "/home/"}},
+        ):
+            extras = Patches.versioned("v1").meta("Wallets").envelope().ops[0].extras
+        assert extras["canonical"] == "https://acme.example/home/"
 
     def test_a_lazy_title_is_evaluated_when_the_op_is_recorded(self) -> None:
         language = ["en"]
@@ -418,8 +490,14 @@ class TestMeta:
         builder = Patches(partial_request("/titled/leaf/")).meta(title)
         language[0] = "de"
         payload = builder.envelope().ops[0].as_dict()
-        assert payload == {"op": "meta", "title": "Wallets (en) · Site"}
-        assert type(payload["title"]) is str
+        assert payload == {"op": "meta", **_meta("Wallets (en) · Site")}
+        assert isinstance(payload["title"], str)
+        assert not isinstance(payload["title"], Promise)
+
+    def test_a_refused_mapping_names_the_verb(self) -> None:
+        with pytest.raises(PageMetadataShapeError) as caught:
+            Patches.versioned("v1").meta({"canonical": "javascript:x"})
+        assert caught.value.source == "Patches.meta"
 
     def test_op_refuses_the_builtin_verb(self) -> None:
         with pytest.raises(BuiltinPatchOpError):
@@ -433,7 +511,7 @@ class TestMeta:
         )
         with _routed(tmp_path):
             envelope = _builder_for(tmp_path, leaf).meta("Post").envelope()
-        assert envelope.ops[0].extras == {"title": "Post | Kanban"}
+        assert envelope.ops[0].extras == _meta("Post | Kanban")
 
     def test_an_inherited_callable_runs_behind_the_origin_guard(
         self, tmp_path: Path
@@ -450,7 +528,7 @@ class TestMeta:
         )
         with _routed(tmp_path):
             envelope = _builder_for(tmp_path, leaf).meta("Post").envelope()
-        assert envelope.ops[0].extras == {"title": "Post | Static"}
+        assert envelope.ops[0].extras == _meta("Post | Static")
 
     def test_meta_chains_in_order(self) -> None:
         envelope = (
@@ -481,6 +559,9 @@ class TestPatchResponse:
     def test_custom_status(self) -> None:
         response = PatchResponse(b"{}", status=409)
         assert response.status_code == 409
+
+    def test_no_cache_ever_keeps_it(self) -> None:
+        assert PatchResponse(b"{}")["Cache-Control"] == "private, no-store"
 
 
 class TestBuilderExceptionSurface:

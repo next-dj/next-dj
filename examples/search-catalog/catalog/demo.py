@@ -4,10 +4,10 @@ from catalog.models import Category, Product
 
 
 CATEGORIES = [
-    ("electronics", "Electronics"),
-    ("books", "Books"),
-    ("home", "Home"),
-    ("clothing", "Clothing"),
+    ("electronics", "Electronics", "Phones, laptops and gadgets that ship in a day."),
+    ("books", "Books", "Paperbacks and hardcovers picked by people who read them."),
+    ("home", "Home", "Kitchen, living room and garden goods built to last."),
+    ("clothing", "Clothing", "Everyday wear in honest fabrics, free returns included."),
 ]
 
 BRANDS = ["Acme", "Globex", "Initech", "Hooli"]
@@ -16,8 +16,10 @@ BRANDS = ["Acme", "Globex", "Initech", "Hooli"]
 def seed_demo() -> None:
     """Populate the catalog with deterministic demo data."""
     cats = [
-        Category.objects.get_or_create(slug=slug, defaults={"name": name})[0]
-        for slug, name in CATEGORIES
+        Category.objects.get_or_create(
+            slug=slug, defaults={"name": name, "tagline": tagline}
+        )[0]
+        for slug, name, tagline in CATEGORIES
     ]
     for index in range(24):
         category = cats[index % len(cats)]

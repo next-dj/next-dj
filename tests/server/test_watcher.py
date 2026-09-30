@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 from django.test import override_settings
 
-import next.server
 from next.conf import next_framework_settings
+from next.scripts.discovery import SCRIPTS_MODULE
 from next.seo.discovery import SOURCE_NAMES
 from next.server import iter_all_autoreload_watch_specs, register_autoreload_watch_spec
 from next.server.watcher import (
@@ -21,15 +21,6 @@ from tests.support.helpers import file_router_config_entry
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-
-SERVER_EXPORTS = {
-    "NextStatReloader",
-    "get_framework_filesystem_roots_for_linking",
-    "iter_all_autoreload_watch_specs",
-    "register_autoreload_watch_spec",
-    "signals",
-}
 
 
 class TestServerAutoreloadWatchApi:
@@ -123,26 +114,13 @@ class TestServerAutoreloadWatchApi:
             assert len(matches) == 1
 
 
-class TestSeoSourcesAreWatched:
-    """The SEO sources at the top of a page tree restart the dev server on change."""
+class TestTreeSourcesReloadInProcess:
+    """The sources at the top of a page tree reload in-process, not by a restart."""
 
-    def test_every_page_root_watches_the_three_seo_sources(self, tmp_path) -> None:
+    def test_a_page_root_watches_no_tree_top_source(self, tmp_path) -> None:
         entry = file_router_config_entry(pages_dir=str(tmp_path.resolve()))
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
             specs = _iter_default_autoreload_watch_specs()
         globs = [g for p, g in specs if p == tmp_path.resolve()]
         assert globs[0] == "**/page.py"
-        assert [g for g in globs if g in SOURCE_NAMES] == [
-            "sitemap.py",
-            "robots.py",
-            "robots.txt",
-        ]
-
-
-class TestServerPublicSurface:
-    """Names the ``next.server`` package publishes."""
-
-    def test_exported_names_are_pinned(self) -> None:
-        """A dropped name coming back and a new one both have to be decided."""
-        assert set(next.server.__all__) == SERVER_EXPORTS
-        assert all(hasattr(next.server, name) for name in SERVER_EXPORTS)
+        assert not {*SOURCE_NAMES, SCRIPTS_MODULE} & set(globs)

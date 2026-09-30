@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Applier, parseEnvelope } from "./apply";
 import type { Asset, AssetBridge, Envelope } from "./apply";
+import { createNavigation } from "./navigation";
+import { createDiagnostics } from "./diagnostics";
 import { stubBridge } from "./test-doubles";
 
 interface Dispatched {
@@ -8,14 +10,17 @@ interface Dispatched {
   detail: Record<string, unknown>;
 }
 
+// A dev applier carries the dev chunk's diagnostics, as it does once the chunk lands.
 function makeApplier(dev = false) {
   const dispatched: Dispatched[] = [];
   const merged: Record<string, unknown>[] = [];
+  const diagnostics = createDiagnostics();
   const applier = new Applier({
     dispatch: (event, detail) => dispatched.push({ event, detail }),
     mergeContext: (data) => merged.push(data),
     document,
     dev,
+    ...(dev ? { diagnostics: () => diagnostics } : {}),
   });
   return { applier, dispatched, merged };
 }
@@ -89,7 +94,10 @@ describe("parseEnvelope", () => {
 
   it("counts an op-less record among the malformed ops in dev", () => {
     const logs = spyConsole();
-    parseEnvelope({ version: "v1", ops: [{}, { op: 7 }, { op: "inner" }] }, true);
+    parseEnvelope(
+      { version: "v1", ops: [{}, { op: 7 }, { op: "inner" }] },
+      createDiagnostics(),
+    );
     expect(logs.warn).toHaveBeenCalledExactlyOnceWith(
       "[next] dropped malformed ops: 2",
     );
@@ -179,7 +187,7 @@ describe("parseEnvelope", () => {
     const logs = spyConsole();
     const parsed = parseEnvelope(
       { version: "v1", assets: [{ kind: 42, load: "link", url: "/a.css" }] },
-      true,
+      createDiagnostics(),
     );
     // The boundary and the dev breakdown call the same entry broken, so the
     // console cannot report an asset the loader went on to insert.
@@ -236,7 +244,7 @@ describe("parseEnvelope", () => {
     const logs = spyConsole();
     parseEnvelope(
       { version: "v1", assets: [{ kind: "css", url: "/b.css", load: 7 }] },
-      true,
+      createDiagnostics(),
     );
     expect(logs.warn).toHaveBeenCalledExactlyOnceWith(
       "[next] dropped malformed assets: 1",
@@ -265,7 +273,7 @@ describe("parseEnvelope", () => {
           { kind: "wasm", url: "/lib.wasm" },
         ],
       },
-      true,
+      createDiagnostics(),
     );
     expect(logs.warn).not.toHaveBeenCalled();
     expect(logs.debug).toHaveBeenCalledExactlyOnceWith(
@@ -277,7 +285,10 @@ describe("parseEnvelope", () => {
 
   it("counts the malformed ops in dev and says nothing about the assets", () => {
     const logs = spyConsole();
-    const parsed = parseEnvelope({ version: "v1", ops: [null, { op: "inner" }] }, true);
+    const parsed = parseEnvelope(
+      { version: "v1", ops: [null, { op: "inner" }] },
+      createDiagnostics(),
+    );
     expect(logs.warn).toHaveBeenCalledExactlyOnceWith(
       "[next] dropped malformed ops: 1",
     );
@@ -299,7 +310,7 @@ describe("parseEnvelope", () => {
           { kind: "js" },
         ],
       },
-      true,
+      createDiagnostics(),
     );
     expect(logs.warn).toHaveBeenCalledExactlyOnceWith(
       "[next] dropped malformed assets: 3",
@@ -320,7 +331,7 @@ describe("parseEnvelope", () => {
           { kind: "vue", url: "/dist/component-Dlb.js" },
         ],
       },
-      true,
+      createDiagnostics(),
     );
     expect(logs.warn).not.toHaveBeenCalled();
     expect(logs.debug).toHaveBeenCalledExactlyOnceWith(
@@ -342,7 +353,7 @@ describe("parseEnvelope", () => {
           { kind: "js", url: "/c.js" },
         ],
       },
-      true,
+      createDiagnostics(),
     );
     expect(logs.warn).not.toHaveBeenCalled();
     expect(logs.debug).toHaveBeenCalledExactlyOnceWith(
@@ -363,7 +374,7 @@ describe("parseEnvelope", () => {
           { kind: "vue", url: "/page.js" },
         ],
       },
-      true,
+      createDiagnostics(),
     );
     expect(logs.warn.mock.calls).toEqual([
       ["[next] dropped malformed ops: 2"],
@@ -389,13 +400,12 @@ describe("parseEnvelope", () => {
         { kind: "vue", url: "/page.js" },
       ],
     };
-    const implicit = parseEnvelope(wire);
-    const explicit = parseEnvelope(wire, false);
+    const parsed = parseEnvelope(wire);
     expect(logs.warn).not.toHaveBeenCalled();
     expect(logs.debug).not.toHaveBeenCalled();
-    expect(implicit).toEqual(explicit);
-    expect(explicit.ops).toEqual([{ op: "inner" }]);
-    expect(explicit.assets).toEqual([{ kind: "css", url: "/ok.css" }]);
+    expect(parsed).toEqual(parseEnvelope(wire, undefined));
+    expect(parsed.ops).toEqual([{ op: "inner" }]);
+    expect(parsed.assets).toEqual([{ kind: "css", url: "/ok.css" }]);
     logs.restore();
   });
 
@@ -410,7 +420,7 @@ describe("parseEnvelope", () => {
           { kind: "js", inline: "console.log(1)", load: "script" },
         ],
       },
-      true,
+      createDiagnostics(),
     );
     expect(logs.warn).not.toHaveBeenCalled();
     expect(logs.debug).not.toHaveBeenCalled();
@@ -420,7 +430,7 @@ describe("parseEnvelope", () => {
 
   it("keeps quiet in dev on an envelope carrying no ops and no assets", () => {
     const logs = spyConsole();
-    const parsed = parseEnvelope({ version: "v1" }, true);
+    const parsed = parseEnvelope({ version: "v1" }, createDiagnostics());
     expect(logs.warn).not.toHaveBeenCalled();
     expect(logs.debug).not.toHaveBeenCalled();
     expect(parsed.ops).toEqual([]);
@@ -434,7 +444,7 @@ describe("parseEnvelope", () => {
     // whole envelope's ops, the most common serialisation slip there is.
     const parsed = parseEnvelope(
       { version: "v1", ops: { op: "morph", html: "<p>x</p>" } },
-      true,
+      createDiagnostics(),
     );
     expect(logs.warn).toHaveBeenCalledExactlyOnceWith(
       "[next] envelope ops is not an array, all ops dropped",
@@ -447,7 +457,7 @@ describe("parseEnvelope", () => {
     const logs = spyConsole();
     const parsed = parseEnvelope(
       { version: "v1", ops: [{ op: "inner" }], assets: { kind: "css", url: "/a.css" } },
-      true,
+      createDiagnostics(),
     );
     expect(logs.warn).toHaveBeenCalledExactlyOnceWith(
       "[next] envelope assets is not an array, all assets dropped",
@@ -458,7 +468,7 @@ describe("parseEnvelope", () => {
 
   it("names a null ops field, a field the server did spell", () => {
     const logs = spyConsole();
-    parseEnvelope({ version: "v1", ops: null, assets: null }, true);
+    parseEnvelope({ version: "v1", ops: null, assets: null }, createDiagnostics());
     expect(logs.warn.mock.calls).toEqual([
       ["[next] envelope ops is not an array, all ops dropped"],
       ["[next] envelope assets is not an array, all assets dropped"],
@@ -643,16 +653,20 @@ describe("Applier verbs", () => {
       dispatch: () => undefined,
       mergeContext: () => undefined,
       document,
-      history: () => ({
-        push: (h: string) => calls.push(h),
-        replace: (h: string) => calls.push(h),
-      }),
+      navigation: () =>
+        createNavigation({
+          dispatch: () => undefined,
+          history: {
+            push: (h: string) => calls.push(h),
+            replace: (h: string) => calls.push(h),
+          },
+        }),
     });
     applier.apply(envelope([{ op: "url" }]));
     expect(calls).toEqual([]);
   });
 
-  it("url is a no-op for an applier built with no history seam", () => {
+  it("url is a no-op for an applier built with no navigation", () => {
     const { applier, dispatched } = makeApplier();
     applier.apply(envelope([{ op: "url", href: "/elsewhere/" }]));
     expect(dispatched.filter((d) => d.event === "partial:error")).toEqual([]);
@@ -750,6 +764,30 @@ describe("Applier script neutralisation", () => {
     );
     expect(document.querySelector('[data-next-zone="z"] script')).toBeNull();
     expect(ran).not.toHaveBeenCalled();
+  });
+
+  it("sweeps scripts out of template content, nested templates included", () => {
+    document.body.innerHTML = '<div data-next-zone="z"></div>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "inner",
+          target: { zone: "z" },
+          html:
+            '<template data-next-consented="marketing"><b>embed</b>' +
+            "<script>document.body.dataset.ran = '1'</script>" +
+            "<template><script>document.body.dataset.ran = '2'</script></template>" +
+            "</template>",
+        },
+      ]),
+    );
+    const outer = document.querySelector("template")!;
+    expect(outer.content.querySelector("script")).toBeNull();
+    expect(
+      outer.content.querySelector("template")!.content.querySelector("script"),
+    ).toBeNull();
+    expect(outer.content.querySelector("b")).not.toBeNull();
   });
 
   it("warns on each neutralised script in dev builds", () => {
@@ -1258,6 +1296,23 @@ describe("Applier lifecycle events", () => {
     expect(names).toEqual(["partial:before-apply", "partial:applied"]);
     const applied = dispatched.find((d) => d.event === "partial:applied");
     expect(applied!.detail.ok).toBe(true);
+  });
+
+  it("names the nodes the ops touched on applied", () => {
+    document.body.innerHTML = '<div data-next-zone="z"></div><p id="gone"></p>';
+    const { applier, dispatched } = makeApplier();
+    applier.apply(
+      envelope([
+        { op: "inner", target: { zone: "z" }, html: "<b>new</b>" },
+        { op: "replace", target: { css: "#gone" }, html: "<i>a</i><u>b</u>" },
+      ]),
+    );
+    const applied = dispatched.find((d) => d.event === "partial:applied");
+    expect(applied!.detail.nodes).toEqual([
+      document.querySelector('[data-next-zone="z"]'),
+      document.querySelector("i"),
+      document.querySelector("u"),
+    ]);
   });
 
   it("a cancelled before-apply skips the ops", () => {
@@ -1815,7 +1870,7 @@ describe("Applier layer, toast, and url verbs", () => {
       open: (opener, href, zone) =>
         calls.push({ verb: "open", args: [opener, href, zone] }),
       close: (detail) => calls.push({ verb: "close", args: [detail] }),
-      retitle: (title, page) => calls.push({ verb: "retitle", args: [title, page] }),
+      head: (patch, page) => calls.push({ verb: "head", args: [patch, page] }),
       toast: (text, variant) => calls.push({ verb: "toast", args: [text, variant] }),
     });
     const history = {
@@ -1827,7 +1882,7 @@ describe("Applier layer, toast, and url verbs", () => {
       mergeContext: () => undefined,
       document,
       layers: () => layers,
-      history: () => history,
+      navigation: () => createNavigation({ dispatch: () => undefined, history }),
     });
     return { applier, calls };
   }
@@ -1880,24 +1935,52 @@ describe("Applier layer, toast, and url verbs", () => {
     });
   });
 
-  it("meta hands the title and the envelope's page to the stack", () => {
+  it("meta hands the head and the envelope's page to the stack", () => {
     const { applier, calls } = makeLayerApplier();
     applier.apply(envelope([{ op: "meta", title: "Inbox (3)" }]), { page: "/inbox/" });
-    applier.apply(envelope([{ op: "meta", title: "Live" }]), {
+    applier.apply(envelope([{ op: "meta", title: "Live", robots: null }]), {
       page: "/a/",
       owner: "/b/",
     });
     applier.apply(envelope([{ op: "meta", title: "Saved" }]));
     expect(calls).toEqual([
-      { verb: "retitle", args: ["Inbox (3)", "/inbox/"] },
-      { verb: "retitle", args: ["Live", "/b/"] },
-      { verb: "retitle", args: ["Saved", undefined] },
+      { verb: "head", args: [{ title: "Inbox (3)" }, "/inbox/"] },
+      { verb: "head", args: [{ title: "Live", robots: null }, "/b/"] },
+      { verb: "head", args: [{ title: "Saved" }, undefined] },
     ]);
   });
 
-  it("meta with a non-string title never reaches the stack", () => {
+  it("two meta ops in one envelope reach the stack once, the later tag winning", () => {
     const { applier, calls } = makeLayerApplier();
-    applier.apply(envelope([{ op: "meta", title: 7 }]));
+    applier.apply(
+      envelope([
+        { op: "meta", title: "First", description: "kept" },
+        { op: "meta", title: "Second" },
+      ]),
+    );
+    expect(calls).toEqual([
+      { verb: "head", args: [{ title: "Second", description: "kept" }, undefined] },
+    ]);
+  });
+
+  it("an envelope moving the address bar writes it, then heads the top of the stack", () => {
+    const { applier, calls } = makeLayerApplier();
+    applier.apply(
+      envelope([
+        { op: "meta", title: "Page 2" },
+        { op: "url", href: "/list/?page=2" },
+      ]),
+      { page: "/list/?page=2" },
+    );
+    expect(calls).toEqual([
+      { verb: "push", args: ["/list/?page=2"] },
+      { verb: "head", args: [{ title: "Page 2" }, undefined] },
+    ]);
+  });
+
+  it("meta with no readable tag never reaches the stack", () => {
+    const { applier, calls } = makeLayerApplier();
+    applier.apply(envelope([{ op: "meta", title: 7, canonical: false }]));
     expect(calls).toEqual([]);
   });
 

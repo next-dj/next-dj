@@ -22,11 +22,18 @@ from next.discovery import (
     page_tree_skip_names,
     read_page_roots,
     reset_router_manager_cache,
+    routed_page_trees,
 )
 from next.pages import page
 from next.pages.ports import PageScanImpl
 from next.ports import PortSlot
-from next.urls import FileRouterBackend, PageRoot, RouterBackend, RouterFactory
+from next.urls import (
+    FileRouterBackend,
+    PageRoot,
+    RouterBackend,
+    RouterFactory,
+    RouterManager,
+)
 from next.urls.dispatcher import scan_pages_tree
 from next.urls.ports import RouterAccessImpl
 from next.utils import walk_page_tree
@@ -507,6 +514,19 @@ class TestPageRootsAreTheRoutersOwn:
         router = _RootTreeRouter([configured])
 
         assert get_page_roots(router) == [PageRoot(path=configured, label="Root")]
+
+
+class TestRoutedPageTrees:
+    """Every routed tree is listed once, in router order, with the names it skips."""
+
+    def test_a_tree_two_routers_share_is_listed_once(self, tmp_path: Path) -> None:
+        tree = tmp_path / "shell"
+        tree.mkdir()
+        manager = MagicMock(spec=RouterManager)
+        manager.backends = (_RootTreeRouter([tree]), _RootTreeRouter([tree, tmp_path]))
+        found = routed_page_trees(manager)
+        assert [root.path for root, _skip in found] == [tree, tmp_path]
+        assert all(isinstance(skip, frozenset) for _root, skip in found)
 
 
 class TestPageTreeSkipNames:

@@ -13,6 +13,7 @@ from flags.receivers import access_denied_count
 
 from next.testing import (
     assert_has_class,
+    assert_metadata,
     assert_missing_class,
     find_anchor,
     find_form,
@@ -351,7 +352,6 @@ class TestPageMetadata:
     def test_each_panel_carries_its_title_and_robots(
         self, next_client, path: str, title: str, *, noindex: bool
     ) -> None:
-        body = next_client.get(path).content.decode()
-        assert f"<title>{title}</title>" in body
-        robots = ['<meta name="robots" content="noindex">'] if noindex else []
-        assert re.findall(r'<meta name="robots"[^>]*>', body) == robots
+        assert_metadata(
+            next_client.get(path), title=title, robots="noindex" if noindex else None
+        )

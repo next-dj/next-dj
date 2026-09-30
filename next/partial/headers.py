@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, cast
 
 from django.utils.cache import patch_vary_headers
 
+from next.utils import UNSET
+
 
 if TYPE_CHECKING:
     from django.http import HttpRequest, HttpResponseBase
@@ -31,7 +33,6 @@ ACCEPT = "application/vnd.next.patches+json, text/html;q=0.9"
 VARY_HEADERS: tuple[str, ...] = (REQUEST_FLAG, ZONE, MERGE, VERSION)
 
 _INTENT_ATTR = "_next_partial_intent"
-_UNSET = object()
 
 
 class MergeMode(enum.StrEnum):
@@ -102,8 +103,8 @@ def _parse_intent(request: "HttpRequest") -> PartialIntent:
 
 def partial_intent(request: "HttpRequest") -> PartialIntent:
     """Return the partial intent of the request, memoised on the request."""
-    cached = getattr(request, _INTENT_ATTR, _UNSET)
-    if cached is not _UNSET:
+    cached = getattr(request, _INTENT_ATTR, UNSET)
+    if cached is not UNSET:
         return cast("PartialIntent", cached)
     intent = _parse_intent(request)
     setattr(request, _INTENT_ATTR, intent)

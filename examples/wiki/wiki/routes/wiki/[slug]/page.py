@@ -21,5 +21,11 @@ def rendered_html(item: DArticle[Article]) -> SafeString:
 
 @page.metadata
 def article_meta(article: Article) -> MetadataDict:
-    """Title the tab after the row the `article` context above already fetched."""
-    return {"title": article.title}
+    """Title and describe the tab from the row the `article` context already fetched.
+
+    A body without a paragraph keeps the description the index declares for the site.
+    """
+    meta: MetadataDict = {"title": article.title}
+    if article.summary:
+        meta["description"] = article.summary
+    return meta

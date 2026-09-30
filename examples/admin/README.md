@@ -217,19 +217,26 @@ Login runs Django's own `AuthenticationForm`, which the dispatcher cannot build 
 
 ### 13. A private site in the head
 
-Every tag the admin puts in `<head>` comes from `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in [`config/settings.py`](config/settings.py):
+Every tag the admin puts in `<head>` comes from `NEXT_FRAMEWORK["SITE"]` and `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in [`config/settings.py`](config/settings.py):
 
 ```python
+"SITE": {
+    "URL": "https://admin.example",
+    "NAME": "next.dj admin",
+    "INDEXABLE": False,
+},
 "METADATA": {
     "DEFAULTS": {
-        "site_name": "next.dj admin",
+        "viewport": "width=device-width, initial-scale=1",
+        "icons": {"icon": {"url": "/static/shadcn_admin/icon.svg", "type": "image/svg+xml"}},
         "title": {"template": "{title} · {site_name}", "default": "next.dj admin"},
-        "robots": {"index": False, "follow": False},
     }
 },
 ```
 
-[`chrome/layout.djx`](chrome/layout.djx) calls the shared `page_head` component without a title, and the component renders the builtin `{% metadata %}` tag. The settings tier sits under every fold, so every page, the login screen included, carries `<meta name="robots" content="noindex, nofollow">`. `nofollow` earns its place on the one page a crawler can reach. `AdminPermissionMiddleware` of section 12 sends every anonymous request under `/admin/` to `/admin/login/`, and the tag stops a crawler that lands there from following its links any further.
+`SITE["NAME"]` fills `{site_name}` and `SITE["URL"]` is the origin the icon link is absolute on. `SITE["INDEXABLE"] = False` closes the whole site in one place, whatever `DEBUG` says and whatever a page declares. `check --deploy` stays quiet about it here: its warning about a closed site fires only when the site also publishes a sitemap or a robots file, the sign of a staging setting leaking into production, and the admin publishes none.
+
+[`chrome/layout.djx`](chrome/layout.djx) calls the shared `page_head` component without a title, and the component renders the builtin `{% metadata %}` tag. The site rule sits over every fold, so every page, the login screen included, carries `<meta name="robots" content="noindex, nofollow">`, and every response carries the same `X-Robots-Tag` header. `nofollow` earns its place on the one page a crawler can reach. `AdminPermissionMiddleware` of section 12 sends every anonymous request under `/admin/` to `/admin/login/`, and the tag stops a crawler that lands there from following its links any further.
 
 The one dynamic tier is `changelist_meta` in [`[str:model_name]/page.py`](shadcn_admin/surfaces/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/page.py):
 

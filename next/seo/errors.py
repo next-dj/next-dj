@@ -3,18 +3,6 @@
 from pathlib import Path
 
 
-class SitemapOriginError(ValueError):
-    """A request-free sitemap build has no origin to make its URLs absolute."""
-
-    def __init__(self, root: Path) -> None:
-        """Name the page tree whose sitemap could not be built."""
-        super().__init__(
-            f"the sitemap of {root} needs a request or "
-            "NEXT_FRAMEWORK['METADATA']['DEFAULTS']['base'] to build absolute URLs"
-        )
-        self.root = root
-
-
 class SitemapTrailError(ValueError):
     """`@sitemap.items` names a trail the tree of its `sitemap.py` does not route."""
 
@@ -28,4 +16,41 @@ class SitemapTrailError(ValueError):
         self.trail = trail
 
 
-__all__ = ["SitemapOriginError", "SitemapTrailError"]
+class SitemapEntryError(ValueError):
+    """A `SitemapEntry` carries a value the sitemap protocol has no place for."""
+
+    def __init__(self, value: object, *, field: str, expected: str) -> None:
+        """Name the field, the value it holds and the shape it takes."""
+        super().__init__(f"SitemapEntry.{field} is {value!r}, expected {expected}")
+        self.field = field
+        self.value = value
+
+
+class RobotsRuleError(ValueError):
+    """A `RobotsRule` carries a value that would break the robots.txt grammar."""
+
+    def __init__(self, value: object, *, field: str, expected: str) -> None:
+        """Name the field, the value it holds and the shape it takes."""
+        super().__init__(f"RobotsRule.{field} is {value!r}, expected {expected}")
+        self.field = field
+        self.value = value
+
+
+class SeoSourceImportError(Exception):
+    """A `sitemap.py` or a `robots.py` raised while importing.
+
+    The original exception travels as `__cause__` and the offending file as `path`.
+    """
+
+    def __init__(self, path: Path) -> None:
+        """Compose the message from the failing file."""
+        super().__init__(f"{path} failed to import")
+        self.path = path
+
+
+__all__ = [
+    "RobotsRuleError",
+    "SeoSourceImportError",
+    "SitemapEntryError",
+    "SitemapTrailError",
+]
