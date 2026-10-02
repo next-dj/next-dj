@@ -42,6 +42,24 @@ class TestSettingsScope:
         assert ", ".join(sorted(METADATA_KEYS)) in messages[0].msg
 
     @pytest.mark.parametrize(
+        ("dotted", "fragment"),
+        [
+            ("nope.Renderer", "could not be imported"),
+            ("next.pages.Metadata", "is not a next.pages.MetadataRenderer subclass"),
+            ("next.pages.MetadataRenderer", "is abstract"),
+        ],
+        ids=["import", "family", "abstract"],
+    )
+    def test_a_renderer_that_cannot_render_is_e107(
+        self, dotted: str, fragment: str
+    ) -> None:
+        with override_settings(NEXT_FRAMEWORK=scope(RENDERER=dotted)):
+            messages = check_metadata_settings_scope()
+        assert check_ids(messages) == ["next.E107"]
+        assert fragment in messages[0].msg
+        assert "falls back to HtmlMetadataRenderer" in messages[0].msg
+
+    @pytest.mark.parametrize(
         ("defaults", "fragment"),
         [
             ("x", "must be a mapping"),
@@ -83,7 +101,7 @@ class TestSettingsScope:
         with override_settings(NEXT_FRAMEWORK=scope(DEFAULTS=defaults)):
             messages = check_metadata_settings_scope()
         assert check_ids(messages) == ["next.W108"]
-        assert "'#org'" in messages[0].msg
+        assert "'/#org'" in messages[0].msg
         assert "'#site'" not in messages[0].msg
 
     def test_an_empty_default_title_is_e105(self) -> None:

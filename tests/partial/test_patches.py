@@ -2,6 +2,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from django.http import Http404
 from django.test import override_settings
 from django.utils.functional import Promise, lazy
 
@@ -53,6 +54,24 @@ metadata = {"title": "Leaf"}
 
 def render():
     return HttpResponseForbidden()
+"""
+RAISING_ROOT = """
+from next.pages import page
+
+
+@page.metadata(inherit=True)
+def root_meta():
+    raise LookupError("board")
+"""
+GONE_ROOT = """
+from django.http import Http404
+
+from next.pages import page
+
+
+@page.metadata(inherit=True)
+def root_meta():
+    raise Http404
 """
 LEAF_TITLE = 'template = "<p>Leaf</p>"\nmetadata = {"title": "Leaf"}\n'
 STATIC_ROOT = 'metadata = {"title": {"template": "{title} | Static"}}\n'
@@ -531,6 +550,44 @@ class TestMeta:
             tmp_path, [("root", INHERITING_ROOT), ("leaf", DENYING_LEAF)]
         )
         with _routed(tmp_path), pytest.raises(ForeignPageNotAuthorizedError):
+            _builder_for(tmp_path, leaf).meta("Post")
+
+    def test_a_raising_inherited_callable_skips_only_the_meta_op(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        next.partial.patches._failures.clear()
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", RAISING_ROOT), ("leaf", LEAF_TITLE)]
+        )
+        with _routed(tmp_path), caplog.at_level("ERROR", logger="next.partial.patches"):
+            first = _builder_for(tmp_path, leaf).meta("Post").event("saved")
+            second = _builder_for(tmp_path, leaf).meta("Post")
+        assert [op.op for op in first.envelope().ops] == ["event"]
+        assert second.envelope().ops == ()
+        assert len(caplog.records) == 1
+        assert "raised LookupError" in caplog.text
+
+    def test_a_raising_inherited_callable_is_loud_under_debug(
+        self, tmp_path: Path
+    ) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", RAISING_ROOT), ("leaf", LEAF_TITLE)]
+        )
+        with (
+            _routed(tmp_path),
+            override_settings(DEBUG=True),
+            pytest.raises(LookupError) as caught,
+        ):
+            _builder_for(tmp_path, leaf).meta("Post")
+        assert "Patches.meta()" in caught.value.__notes__[0]
+
+    def test_an_intended_404_of_an_inherited_callable_propagates(
+        self, tmp_path: Path
+    ) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", GONE_ROOT), ("leaf", LEAF_TITLE)]
+        )
+        with _routed(tmp_path), pytest.raises(Http404):
             _builder_for(tmp_path, leaf).meta("Post")
 
     def test_a_static_chain_runs_no_guard(self, tmp_path: Path) -> None:

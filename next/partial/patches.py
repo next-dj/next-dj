@@ -2,6 +2,7 @@
 
 import html
 import json
+import logging
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
@@ -12,6 +13,7 @@ from django.utils.functional import Promise
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.safestring import SafeData
 
+from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog
 from next.forms.origin import resolve_origin, resolve_url_to_page
 from next.forms.uid import redirect_or_fallback, validated_origin_path
 from next.pages import page as page_manager
@@ -61,6 +63,13 @@ if TYPE_CHECKING:
 
     from .render import ZoneRenderResult
 
+
+_failures = FailureLog(logging.getLogger(__name__))
+# A denied guard or a 404 of an inherited callable answers the action, never a log.
+_META_PASSES: tuple[type[BaseException], ...] = (
+    *INTENDED_EXCEPTIONS,
+    ForeignPageNotAuthorizedError,
+)
 
 _SEE_OTHER = 303
 _NO_STORE = "private, no-store"
@@ -483,6 +492,9 @@ class Patches:
 
         Text is the title alone. Without an origin page only `DEFAULTS` sits under it,
         and a URL operation queued before names the address the canonical reads.
+        The operation syncs the title, the description, the canonical and the robots.
+        A shape error in `metadata` raises, while an inherited callable that fails
+        drops the operation with one log, so the rest of the patch still applies.
         """
         raw = {"title": metadata} if isinstance(metadata, str | Promise) else metadata
         segment = normalize_metadata(raw, source=_META_SOURCE)
@@ -494,13 +506,27 @@ class Patches:
             self_canonical = folded.canonical is True
             folded = _requestless(folded)
         else:
-            folded = page_manager.fold_metadata(
-                match.page_path,
-                overlay=segment,
-                request=request,
-                url_kwargs=dict(match.url_kwargs),
-                context_data=self._metadata_context,
-            )
+            try:
+                folded = page_manager.fold_metadata(
+                    match.page_path,
+                    overlay=segment,
+                    request=request,
+                    url_kwargs=dict(match.url_kwargs),
+                    context_data=self._metadata_context,
+                )
+            except _META_PASSES:
+                raise
+            except Exception as exc:  # noqa: BLE001 - an inherited callable may raise anything
+                _failures.contain(
+                    exc,
+                    (match.page_path, type(exc)),
+                    "The metadata %s inherits for Patches.meta() raised %s, so the "
+                    "head is left as it is and the rest of the patch applies. Fix "
+                    "the @page.metadata callable or the metadata it names.",
+                    match.page_path,
+                    type(exc).__name__,
+                )
+                return self
             queued = self._queued_url()
             address = (
                 match.origin if queued is None else _local_url(match.origin, queued)

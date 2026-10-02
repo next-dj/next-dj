@@ -21,6 +21,7 @@ from django.utils import timezone, translation
 
 from next.caches import DEFAULT_CACHE_SIZE
 from next.deps.resolver import current_resolver
+from next.diagnostics import FailureLog
 from next.introspect import describe_callable
 from next.pages import page
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+_refusals: Final = FailureLog(logger)
 
 MAX_LIMIT: Final = 50000
 """The most URLs one sitemap document may list, by the sitemap protocol."""
@@ -152,15 +154,28 @@ def lastmod_datetime(value: datetime.date) -> datetime.datetime:
 def static_noindex(page_path: Path) -> bool:
     """Whether the static metadata of a page keeps it out of the index.
 
-    A chain the schema refuses reads as indexed with a warning, the checks report it.
+    A chain the schema refuses reads as indexed with one warning per edit of the
+    file, and the checks report it.
     """
     try:
         return page.static_metadata(page_path).noindex
     except (PageMetadataShapeError, PageMetadataConflictError) as exc:
-        logger.warning(
-            "the metadata of %s is refused (%s), so it reads as indexed", page_path, exc
+        _refusals.warn(
+            (page_path, _mtime(page_path)),
+            "The metadata of %s is refused (%s), so the sitemap reads it as indexed. "
+            "Run manage.py check to see what to fix.",
+            page_path,
+            exc,
         )
         return False
+
+
+def _mtime(page_path: Path) -> float | None:
+    """Return when `page_path` last changed, `None` once it is gone."""
+    try:
+        return page_path.stat().st_mtime
+    except OSError:
+        return None
 
 
 def listed_trails(trails: Mapping[str, Path], exclude: Sequence[str]) -> list[str]:

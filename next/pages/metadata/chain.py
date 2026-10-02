@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 from next.deps.resolver import current_resolver
+from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog
 from next.introspect import callable_name
-from next.pages.errors import PageMetadataConflictError
+from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.loaders import AncestorStamps, load_page_module
 
 from .fold import (
     EMPTY_STATE,
     FoldState,
     finish,
+    fold_metadata,
     fold_segment,
+    fold_segments,
     merge_segments,
     trace_origins,
 )
@@ -31,6 +35,9 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
     from .registry import PageMetadataEntry, PageMetadataRegistry
+
+
+_failures: Final = FailureLog(logging.getLogger(__name__))
 
 
 class MetadataDeclaration(NamedTuple):
@@ -139,12 +146,8 @@ def _build_chain(
         (index for index, source in enumerate(sources) if source.func is not None),
         len(sources),
     )
-    prefix = fold_segment(EMPTY_STATE, site)
-    for source in sources[:split]:
-        prefix = fold_segment(prefix, source.segment)
-    state = prefix
-    for source in sources[split:]:
-        state = fold_segment(state, source.segment)
+    prefix = fold_segments((site, *(source.segment for source in sources[:split])))
+    state = fold_segments((source.segment for source in sources[split:]), prefix)
     static = finish(state)
     tail = tuple(sources[split:])
     return ChainEntry(
@@ -199,8 +202,12 @@ def _fold_tail(
     url_kwargs: Mapping[str, object],
     dep_cache: dict[str, Any],
     context_data: MutableMapping[str, object],
+    contain: bool,
 ) -> FoldState:
-    """Fold `tail` over `prefix`, each callable resolved against the render context."""
+    """Fold `tail` over `prefix`, each callable resolved against the render context.
+
+    With `contain`, a callable that raises or returns a refused shape is left out.
+    """
     state = prefix
     active = current_resolver()
     for source in tail:
@@ -208,17 +215,32 @@ def _fold_tail(
         if func is None:
             state = fold_segment(state, source.segment)
             continue
-        resolved = active.resolve_dependencies(
-            func,
-            request=request,
-            _cache=dep_cache,
-            _stack=[],
-            _context_data=context_data,
-            **url_kwargs,
-        )
-        result = func(**resolved)
         source_name = f"{callable_name(func)} in {source.file_path}"
-        segment = normalize_metadata(result, source=source_name)
+        try:
+            resolved = active.resolve_dependencies(
+                func,
+                request=request,
+                _cache=dep_cache,
+                _stack=[],
+                _context_data=context_data,
+                **url_kwargs,
+            )
+            segment = normalize_metadata(func(**resolved), source=source_name)
+        except INTENDED_EXCEPTIONS:
+            raise
+        except Exception as exc:
+            if not contain:
+                raise
+            _failures.contain(
+                exc,
+                (source.file_path, type(exc)),
+                "The @page.metadata callable %s raised %s, so the page renders "
+                "without what it returns. Fix the callable, or raise Http404 for a "
+                "missing object.",
+                source_name,
+                type(exc).__name__,
+            )
+            continue
         state = fold_segment(state, replace(segment, trail=source.segment.trail))
     return state
 
@@ -249,6 +271,7 @@ def fold_chain(
     """Fold the chain of `file_path`, `overlay` standing as the page's own segment.
 
     The overlay lies over the page's own dict and replaces its callable.
+    A callable that fails raises, so the caller decides what a failure costs.
     """
     entry = chain_entry(registry, file_path)
     if overlay is None:
@@ -267,6 +290,7 @@ def fold_chain(
         url_kwargs=url_kwargs or {},
         dep_cache=dep_cache,
         context_data=context,
+        contain=False,
     )
     return finish(state)
 
@@ -320,19 +344,47 @@ class MetadataThunk:
         self.dep_cache = dep_cache
 
     def folded(self) -> Metadata | None:
-        """Return the fold of a chain without callables, `None` when one must run."""
-        return chain_entry(self.registry, self.file_path).folded
+        """Return the fold of a chain without callables, `None` when one must run.
+
+        A chain the schema refuses folds to the site defaults alone, see `_refused`.
+        """
+        try:
+            return chain_entry(self.registry, self.file_path).folded
+        except (PageMetadataShapeError, PageMetadataConflictError) as exc:
+            return self._refused(exc)
 
     def fold(self, context_data: MutableMapping[str, object]) -> Metadata:
-        """Fold the chain of the render, its callables reading `context_data`."""
-        return fold_chain(
-            self.registry,
-            self.file_path,
-            dep_cache=self.dep_cache,
+        """Fold the chain of the render, its callables reading `context_data`.
+
+        A callable that fails is left out, and the rest of the chain still renders.
+        """
+        entry = chain_entry(self.registry, self.file_path)
+        if entry.folded is not None:
+            return entry.folded
+        state = _fold_tail(
+            entry.prefix,
+            entry.tail,
             request=self.request,
             url_kwargs=self.url_kwargs,
-            context_data=lambda: context_data,
+            dep_cache=self.dep_cache,
+            context_data=context_data,
+            contain=True,
         )
+        return finish(state)
+
+    def _refused(
+        self, exc: PageMetadataShapeError | PageMetadataConflictError
+    ) -> Metadata:
+        """Report a chain the schema refuses once, and fold the site defaults alone."""
+        _failures.contain(
+            exc,
+            (self.file_path, type(exc)),
+            "The metadata chain of %s is refused (%s), so the page renders the "
+            "site defaults alone. Run manage.py check to see what to fix.",
+            self.file_path,
+            exc,
+        )
+        return fold_metadata((site_segment(),))
 
 
 __all__ = [

@@ -14,11 +14,13 @@ from django.core.checks import (
     Warning as DjangoWarning,
     register,
 )
+from django.core.exceptions import ImproperlyConfigured
 
 from next.checks import NEXT, SEO
-from next.checks.common import errors_for_unknown_keys
+from next.checks.common import RunMemo, errors_for_unknown_keys
 from next.conf.defaults import USER_SETTING
 from next.pages.errors import PageMetadataShapeError
+from next.pages.metadata.backends import configured_renderer_class
 from next.pages.metadata.ld import raw_id
 from next.pages.metadata.normalize import normalize_site_metadata
 from next.pages.metadata.scope import METADATA_KEYS, SITE_SOURCE
@@ -42,8 +44,17 @@ def raw_metadata_scope() -> dict[str, Any] | None:
     return scope if isinstance(scope, dict) else None
 
 
-def site_defaults(scope: dict[str, Any]) -> tuple[Segment | None, CheckMessage | None]:
-    """Normalise the raw `DEFAULTS`, answering the `next.E098` it earns instead."""
+type _SiteDefaults = tuple["Segment | None", CheckMessage | None]
+
+_site_defaults: RunMemo[_SiteDefaults] = RunMemo()
+
+
+def site_defaults(scope: dict[str, Any]) -> _SiteDefaults:
+    """Normalise the raw `DEFAULTS` once per check run, or answer its `next.E098`."""
+    return _site_defaults.get(scope, lambda: _normalised_defaults(scope))
+
+
+def _normalised_defaults(scope: dict[str, Any]) -> _SiteDefaults:
     defaults = scope.get("DEFAULTS", {})
     if not isinstance(defaults, Mapping):
         return None, Error(
@@ -132,6 +143,26 @@ def segment_errors(segment: Segment, *, source: str, obj: object) -> list[CheckM
     return errors
 
 
+def renderer_errors() -> list[CheckMessage]:
+    """Return `next.E107` when `METADATA["RENDERER"]` names no concrete renderer.
+
+    Resolving the path imports its module, and the class is never instantiated.
+    """
+    try:
+        configured_renderer_class()
+    except ImproperlyConfigured as exc:
+        return [
+            Error(
+                f"{exc} Every page falls back to HtmlMetadataRenderer and logs it. "
+                "Name a concrete subclass of next.pages.MetadataRenderer, or drop "
+                "the key for the default.",
+                obj=settings,
+                id="next.E107",
+            )
+        ]
+    return []
+
+
 @register(Tags.templates, NEXT, SEO)
 def check_metadata_settings_scope(*args, **kwargs) -> list[CheckMessage]:
     """Validate the `METADATA` options, and the `DEFAULTS` tier like a page.
@@ -142,6 +173,7 @@ def check_metadata_settings_scope(*args, **kwargs) -> list[CheckMessage]:
     if scope is None:
         return []
     errors = errors_for_unknown_keys(scope, allowed=METADATA_KEYS, prefix=_SCOPE_PREFIX)
+    errors.extend(renderer_errors())
     segment, error = site_defaults(scope)
     if error is not None:
         errors.append(error)

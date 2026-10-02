@@ -29,8 +29,8 @@ class SiteTitleDict(TypedDict, total=False):
     default: Text
 
 
-class RobotsDict(TypedDict, total=False):
-    """The robots directives as flags and limits."""
+class GooglebotDict(TypedDict, total=False):
+    """The robots directives as flags and limits, for one crawler or for all."""
 
     index: bool | Replace[bool]
     follow: bool | Replace[bool]
@@ -42,7 +42,12 @@ class RobotsDict(TypedDict, total=False):
     max_snippet: int | Replace[int]
     max_image_preview: str | Replace[str]
     max_video_preview: int | Replace[int]
-    googlebot: "str | RobotsDict | Replace[str | RobotsDict]"
+
+
+class RobotsDict(GooglebotDict, total=False):
+    """The robots directives, and the ones only Googlebot reads under `googlebot`."""
+
+    googlebot: str | GooglebotDict | Replace[str | GooglebotDict]
 
 
 class OpenGraphImageDict(TypedDict, total=False):
@@ -294,6 +299,7 @@ __all__ = [
     "ArticleDict",
     "BookDict",
     "FeedDict",
+    "GooglebotDict",
     "IconDict",
     "IconsDict",
     "LinkDict",

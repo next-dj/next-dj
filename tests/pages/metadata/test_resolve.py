@@ -23,6 +23,7 @@ from next.pages.metadata import (
     Breadcrumb,
     Crumb,
     Feed,
+    HtmlMetadataRenderer,
     Icon,
     Link,
     Metadata,
@@ -43,6 +44,7 @@ from next.pages.metadata import (
 from next.pages.metadata.normalize import normalize_metadata
 from next.pages.metadata.resolve import (
     SITE_NOINDEX,
+    _failures,
     iso_time,
     og_locale,
     publish_metadata,
@@ -779,6 +781,10 @@ def _resolved_raw(raw: object) -> object:
     return dataclasses.replace(resolved, source=Metadata())
 
 
+# A lone x-default renders no alternates, so its lazy URL is never forced.
+_FORCED_URL_CASES = tuple(case for case in URL_SCHEME_CASES if case.id != "x_default")
+
+
 @pytest.mark.usefixtures("with_base")
 class TestLazyUrls:
     """A lazy URL is forced per resolve and lands where the plain string would."""
@@ -814,7 +820,24 @@ class TestLazyUrls:
             assert og.url == f"{BASE}/feed/"
         assert calls == ["forced", "forced"]
 
-    def test_a_foreign_scheme_fails_when_the_resolve_forces_it(self) -> None:
+    @pytest.mark.parametrize(
+        "case", _FORCED_URL_CASES, ids=[case.id for case in _FORCED_URL_CASES]
+    )
+    def test_a_foreign_scheme_drops_its_tag_and_logs_once(
+        self, case: UrlSchemeCase, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _failures.clear()
+        raw = case.build(lazy(str, str)("javascript:alert(1)"))
+        with caplog.at_level("ERROR", logger="next.pages.metadata.resolve"):
+            first = HtmlMetadataRenderer().render(_resolved_raw(raw))
+            second = HtmlMetadataRenderer().render(_resolved_raw(raw))
+        assert "javascript" not in first
+        assert first == second
+        assert len(caplog.records) == 1
+        assert "so its tag is left out" in caplog.text
+
+    @override_settings(DEBUG=True)
+    def test_a_foreign_scheme_fails_loudly_under_debug(self) -> None:
         raw = {"canonical": lazy(str, str)("javascript:alert(1)")}
         meta = normalize_metadata(raw, source="page.py").metadata
         with pytest.raises(PageMetadataShapeError) as caught:
@@ -824,6 +847,7 @@ class TestLazyUrls:
             "declares metadata key 'canonical' as the URL 'javascript:alert(1)', "
             "expected an http or https URL or a path"
         )
+        assert "so its tag is left out" in caught.value.__notes__[0]
 
 
 class TestManifest:
@@ -841,6 +865,29 @@ class TestManifest:
 @pytest.mark.usefixtures("with_base")
 class TestGraph:
     """The JSON-LD nodes resolve into one graph, `@id` absolute on the site."""
+
+    def test_a_node_json_cannot_hold_is_left_out_and_logged_once(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _failures.clear()
+        bad = ld.Node(type="Offer", extra={"price": float("nan")})
+        good = {"@type": "Thing", "tags": {"a"}}
+        meta = Metadata(jsonld=(bad, good, ld.Node(id="#ok")))
+        with caplog.at_level("ERROR", logger="next.pages.metadata.resolve"):
+            first = resolve_metadata(meta, request=_request()).jsonld
+            second = resolve_metadata(meta, request=_request()).jsonld
+        assert first == second == ({"@type": "Thing", "@id": f"{BASE}/#ok"},)
+        messages = [record.getMessage() for record in caplog.records]
+        assert len(messages) == 2
+        assert "The JSON-LD Offer node holds a value JSON cannot write" in messages[0]
+        assert "The JSON-LD Thing node" in messages[1]
+
+    @override_settings(DEBUG=True)
+    def test_a_node_json_cannot_hold_fails_loudly_under_debug(self) -> None:
+        meta = Metadata(jsonld=(ld.Node(extra={"price": float("inf")}),))
+        with pytest.raises(ValueError, match="a finite number") as caught:
+            resolve_metadata(meta, request=_request())
+        assert "left out of the graph" in caught.value.__notes__[0]
 
     def test_a_typed_node_resolves_its_fragment_id_on_the_site_root(self) -> None:
         trail = ld.BreadcrumbList(

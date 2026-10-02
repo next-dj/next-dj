@@ -139,9 +139,10 @@ class PageMetadataRegistry:
             self._stamp(file_path)
         self._entries[file_path] = PageMetadataEntry(func=func, inherit=inherit)
         self._bump()
-        metadata_registered.send(
-            sender=PageMetadataRegistry, file_path=file_path, inherit=inherit
-        )
+        if metadata_registered.has_listeners(PageMetadataRegistry):
+            metadata_registered.send(
+                sender=PageMetadataRegistry, file_path=file_path, inherit=inherit
+            )
 
 
 __all__ = ["MetadataRegistrations", "PageMetadataEntry", "PageMetadataRegistry"]

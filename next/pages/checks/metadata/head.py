@@ -347,8 +347,8 @@ def check_metadata_head_tags(*args, **kwargs) -> list[CheckMessage]:
 
     The ids are `next.E122` to `next.E126` and `next.W110` to `next.W112`.
     """
-    init_errors, pages = loaded_metadata_pages()
-    messages = list(init_errors)
+    pages = loaded_metadata_pages()
+    messages: list[CheckMessage] = []
     for item in declared_segments(pages):
         messages.extend(_link_errors(item))
         messages.extend(_icon_errors(item))
@@ -385,8 +385,8 @@ def check_metadata_social_folds(*args, **kwargs) -> list[CheckMessage]:
 
     A language with no `ll_CC` form renders no `og:locale`, reported once.
     """
-    init_errors, pages = loaded_metadata_pages()
-    messages = list(init_errors)
+    pages = loaded_metadata_pages()
+    messages: list[CheckMessage] = []
     underived: set[str] = set()
     for entry, meta in folded_pages(pages):
         og = meta.og
@@ -431,8 +431,8 @@ def check_metadata_head_literals(*args, **kwargs) -> list[CheckMessage]:
 
     The id is `next.W118`, since the head would carry two tags that disagree.
     """
-    init_errors, pages = loaded_metadata_pages()
-    warnings = list(init_errors)
+    pages = loaded_metadata_pages()
+    warnings: list[CheckMessage] = []
     declared = {
         entry.page_path: [key for key in _LITERALS if getattr(meta, key)]
         for entry, meta in static_pages(pages)

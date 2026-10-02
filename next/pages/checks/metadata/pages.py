@@ -15,8 +15,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from django.core.checks import CheckMessage
-
     from next.pages.metadata import Metadata
     from next.pages.metadata.markers import Segment
     from next.pages.metadata.registry import PageMetadataEntry
@@ -42,12 +40,15 @@ class MetadataPage(NamedTuple):
 _metadata_pages: RunMemo[list[MetadataPage]] = RunMemo()
 
 
-def loaded_metadata_pages() -> tuple[list[CheckMessage], list[MetadataPage]]:
-    """Return every routed `page.py` with what it declares and what it folds to."""
-    router_manager, init_errors = get_router_manager()
+def loaded_metadata_pages() -> list[MetadataPage]:
+    """Return every routed `page.py` with what it declares and what it folds to.
+
+    A router that fails to build answers no pages, since `next.E007` reports it once.
+    """
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors, []
-    return init_errors, _metadata_pages.get(
+        return []
+    return _metadata_pages.get(
         router_manager,
         lambda: [
             _metadata_page(url_path, page_path)

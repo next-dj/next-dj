@@ -146,8 +146,8 @@ def check_metadata_title_templates(*args, **kwargs) -> list[CheckMessage]:
 
     The settings tier and each page's own dict are read, one finding per template.
     """
-    init_errors, pages = loaded_metadata_pages()
-    messages = list(init_errors)
+    pages = loaded_metadata_pages()
+    messages: list[CheckMessage] = []
     for finding, codes in _template_findings(_title_templates(pages)).items():
         messages.append(_template_message(finding, codes))
     return messages

@@ -4,12 +4,13 @@ Request and settings are read here, so a custom renderer cannot lose a policy.
 """
 
 import locale
+import logging
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import fields, replace
 from datetime import date, datetime
 from functools import lru_cache, partial
-from typing import Final
+from typing import Final, cast
 from urllib.parse import urlencode, urljoin, urlsplit
 
 from django.conf import settings
@@ -21,14 +22,15 @@ from django.utils.timezone import get_current_timezone, is_naive, make_aware
 from django.utils.translation import get_language, to_locale
 
 from next.conf import next_framework_settings
-from next.pages.errors import PageMetadataRequestError
+from next.diagnostics import FailureLog
+from next.pages.errors import PageMetadataRequestError, PageMetadataShapeError
 from next.ports import router_access_slot
 from next.site import SiteOriginError, site_indexable, site_origin
 from next.site.headers import CLOSED_ROBOTS
 
 from .dicts import Text, Url
 from .hreflang import hreflang_urls, x_default_url
-from .ld import ID, BreadcrumbList, ListItem, Node, Ref, node_type
+from .ld import BreadcrumbList, ListItem, Node, node_id, node_type, to_json
 from .markers import (
     NO_BREADCRUMBS,
     Alternates,
@@ -124,6 +126,7 @@ SCHEMA_CONTEXTS: Final = frozenset(
 """The `@context` values the single graph stands for."""
 
 CONTEXT: Final = "@context"
+_failures: Final = FailureLog(logging.getLogger(__name__))
 _BREADCRUMB_LIST: Final = "BreadcrumbList"
 _ENOUGH_CRUMBS: Final = 2
 _ROUTE_MEMO: Final = 1024
@@ -140,9 +143,47 @@ def _origin(request: HttpRequest | None, url: str) -> tuple[str, str]:
         raise SiteOriginError(url) from exc
 
 
+class _DroppedUrl(Exception):  # noqa: N818 - a control-flow signal, not an error
+    """A lazy URL failed its check once forced, so the tag carrying it is left out."""
+
+
 def _plain_url(url: Url) -> str:
-    """Return a declared URL as a string, a lazy one forced in the current language."""
-    return str(url) if isinstance(url, Promise) else url
+    """Return a declared URL as a string, a lazy one forced in the current language.
+
+    A lazy URL is checked only when forced, so a bad scheme surfaces here per render.
+    """
+    if not isinstance(url, Promise):
+        return url
+    try:
+        return str(url)
+    except PageMetadataShapeError as exc:
+        _failures.contain(
+            exc,
+            ("lazy-url", str(exc)),
+            "%s, so its tag is left out. Give the lazy URL an http or https URL or "
+            "a path.",
+            exc,
+        )
+        raise _DroppedUrl from exc
+
+
+def _kept[T](items: Iterable[T], convert: Callable[[T], T]) -> tuple[T, ...]:
+    """Return each item converted, one whose lazy URL failed left out."""
+    kept: list[T] = []
+    for item in items:
+        try:
+            kept.append(convert(item))
+        except _DroppedUrl:
+            continue
+    return tuple(kept)
+
+
+def _or_none[T](convert: Callable[[], T]) -> T | None:
+    """Return what `convert` builds, `None` when a lazy URL it forces failed."""
+    try:
+        return convert()
+    except _DroppedUrl:
+        return None
 
 
 def absolute_url(url: str, *, request: HttpRequest | None = None) -> str:
@@ -223,13 +264,24 @@ def robots_contents(
 def _canonical(meta: Metadata, request: HttpRequest | None) -> str | None:
     if meta.canonical is None:
         return None
-    return absolute_url(_page_path(meta, request, "canonical"), request=request)
+    return _or_none(
+        lambda: absolute_url(_page_path(meta, request, "canonical"), request=request)
+    )
 
 
 def _alternates(
     meta: Metadata, request: HttpRequest | None
 ) -> tuple[tuple[str, str], ...]:
-    """Return the hreflang pairs with exactly one x-default, last."""
+    """Return the hreflang pairs with exactly one x-default, last, or none at all.
+
+    The pairs answer one another, so a lazy URL that fails drops the whole set.
+    """
+    return _or_none(partial(_hreflang_pairs, meta, request)) or ()
+
+
+def _hreflang_pairs(
+    meta: Metadata, request: HttpRequest | None
+) -> tuple[tuple[str, str], ...]:
     alternates = meta.alternates
     if alternates is None:
         return ()
@@ -315,13 +367,13 @@ def _media_urls[T: (OpenGraphImage, OpenGraphVideo, OpenGraphAudio)](
     items: tuple[T, ...], url: UrlMap
 ) -> tuple[T, ...]:
     """Return the media with the URL and the secure URL of each absolute."""
-    return tuple(
-        replace(
+    return _kept(
+        items,
+        lambda item: replace(
             item,
             url=None if item.url is None else url(item.url),
             secure_url=None if item.secure_url is None else url(item.secure_url),
-        )
-        for item in items
+        ),
     )
 
 
@@ -338,7 +390,7 @@ def _open_graph(
         og,
         title=_first(og.title, meta.title),
         description=_first(og.description, meta.description),
-        url=canonical if og.url is None else url(og.url),
+        url=canonical if og.url is None else _or_none(partial(url, og.url)),
         site_name=_first(og.site_name, meta.site_name),
         locale=current,
         locale_alternates=_locale_alternates(og, current),
@@ -354,11 +406,17 @@ def _twitter(twitter: Twitter | None, request: HttpRequest | None) -> Twitter | 
     if twitter is None:
         return None
     url = _url_map(request)
-    images = tuple(replace(image, url=url(image.url)) for image in twitter.images)
+    images = _kept(twitter.images, lambda image: replace(image, url=url(image.url)))
     player = twitter.player
     if player is not None:
-        stream = None if player.stream is None else url(player.stream)
-        player = replace(player, url=url(player.url), stream=stream)
+        stream = player.stream
+        player = _or_none(
+            lambda: replace(
+                player,
+                url=url(player.url),
+                stream=None if stream is None else url(stream),
+            )
+        )
     return replace(twitter, images=images, player=player)
 
 
@@ -386,9 +444,7 @@ def _id_map(request: HttpRequest | None) -> IdMap:
     """Return the map of a JSON-LD `@id` or URL, a bare fragment on the site root."""
 
     def url(value: str) -> str:
-        return absolute_url(
-            f"/{value}" if value.startswith("#") else value, request=request
-        )
+        return absolute_url(node_id(value), request=request)
 
     return url
 
@@ -411,32 +467,36 @@ def viewport_content(viewport: Viewport | str) -> str:
 
 
 def _icons(icons: tuple[Icon, ...], url: UrlMap) -> tuple[Icon, ...]:
-    return tuple(replace(icon, url=url(icon.url)) for icon in icons)
+    return _kept(icons, lambda icon: replace(icon, url=url(icon.url)))
 
 
 def _links(links: tuple[Link, ...], url: UrlMap) -> tuple[Link, ...]:
     """Return the links with absolute hrefs, an origin rel keeping its own."""
-    return tuple(
-        link
-        if ORIGIN_RELS.intersection(link.rel.split())
-        else replace(link, href=url(link.href))
-        for link in links
+    return _kept(
+        links,
+        lambda link: (
+            link
+            if ORIGIN_RELS.intersection(link.rel.split())
+            else replace(link, href=url(link.href))
+        ),
     )
 
 
 def _feeds(alternates: Alternates | None, url: UrlMap) -> tuple[Feed, ...]:
     if alternates is None:
         return ()
-    return tuple(
-        Feed(url(feed.url), FEED_TYPES.get(feed.type, feed.type), feed.title)
-        for feed in alternates.feeds
+    return _kept(
+        alternates.feeds,
+        lambda feed: Feed(
+            url(feed.url), FEED_TYPES.get(feed.type, feed.type), feed.title
+        ),
     )
 
 
 def _manifest(meta: Metadata, request: HttpRequest | None) -> str | None:
     """Return the declared manifest as an absolute URL."""
     declared = meta.manifest
-    return None if declared is None else _url_map(request)(declared)
+    return None if declared is None else _or_none(partial(_url_map(request), declared))
 
 
 @lru_cache(maxsize=_ROUTE_MEMO)
@@ -499,27 +559,7 @@ def _breadcrumbs(meta: Metadata, request: HttpRequest | None) -> Breadcrumbs:
     )
 
 
-def _graph_value(value: object, url: IdMap) -> object:
-    """Return one raw JSON-LD value with typed nodes rendered and `@id` resolved."""
-    if isinstance(value, Node | Ref):
-        return value.as_jsonld(url)
-    if isinstance(value, Mapping):
-        return {
-            key: url(item)
-            if key == ID and isinstance(item, str)
-            else _graph_value(item, url)
-            for key, item in value.items()
-        }
-    if isinstance(value, list | tuple):
-        return [_graph_value(item, url) for item in value]
-    return value
-
-
-def _verbatim(value: str) -> str:
-    return value
-
-
-def _raw_node(item: Mapping[str, object], url: IdMap) -> Mapping[str, object]:
+def _raw_node(item: Mapping[str, object], url: IdMap) -> object:
     """Resolve a raw mapping into the graph, one under a foreign context kept whole.
 
     A typed value inside a foreign context still renders, its `@id` as written.
@@ -528,10 +568,33 @@ def _raw_node(item: Mapping[str, object], url: IdMap) -> Mapping[str, object]:
     if context is not None and not (
         isinstance(context, str) and context in SCHEMA_CONTEXTS
     ):
-        kept = _graph_value(item, _verbatim)
-        return kept if isinstance(kept, dict) else {}
-    graphed = _graph_value({k: v for k, v in item.items() if k != CONTEXT}, url)
-    return graphed if isinstance(graphed, dict) else {}
+        return to_json(item)
+    return to_json({k: v for k, v in item.items() if k != CONTEXT}, ids=url)
+
+
+def _graph_node(item: object, url: IdMap) -> Mapping[str, object] | None:
+    """Return one node of the graph in JSON form, `None` for one JSON cannot hold.
+
+    A callable builds its nodes per request, so a bad value surfaces only here.
+    """
+    try:
+        node = (
+            item.as_jsonld(url)
+            if isinstance(item, Node)
+            else _raw_node(cast("Mapping[str, object]", item), url)
+        )
+    except ValueError as exc:
+        kind = node_type(item) or type(item).__name__
+        _failures.contain(
+            exc,
+            ("jsonld", kind),
+            "The JSON-LD %s node holds a value JSON cannot write (%s), so the node "
+            "is left out of the graph. Give it finite numbers and JSON values.",
+            kind,
+            exc,
+        )
+        return None
+    return cast("Mapping[str, object]", node)
 
 
 def _crumb_list(
@@ -562,8 +625,7 @@ def _jsonld(
         return ()
     url = _id_map(request)
     nodes = [
-        item.as_jsonld(url) if isinstance(item, Node) else _raw_node(item, url)
-        for item in meta.jsonld
+        node for item in meta.jsonld if (node := _graph_node(item, url)) is not None
     ]
     trail = (
         None if request is None or not listed else _crumb_list(meta, request, crumbs)

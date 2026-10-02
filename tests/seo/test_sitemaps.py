@@ -1,4 +1,5 @@
 import logging
+import os
 import types
 from datetime import UTC, date, datetime
 
@@ -17,6 +18,7 @@ from next.seo.sitemaps import (
     PageTreeSitemap,
     SitemapItem,
     SitemapOptions,
+    _mtime,
     is_excluded,
     lastmod_datetime,
     listed_trails,
@@ -149,7 +151,30 @@ class TestListedTrails:
         )
         with caplog.at_level(logging.WARNING, logger="next.seo"):
             assert static_noindex(page_path) is False
-        assert "is refused" in caplog.text
+            assert static_noindex(page_path) is False
+        refused = [r for r in caplog.records if "is refused" in r.getMessage()]
+        assert len(refused) == 1
+
+    def test_an_edit_of_a_refused_page_warns_again(self, tmp_path, caplog) -> None:
+        page_path = write_page(
+            tmp_path,
+            "",
+            "from next.pages import page\n"
+            'metadata = {"title": "a"}\n'
+            "@page.metadata\n"
+            "def meta():\n"
+            '    return {"title": "b"}\n',
+        )
+        with caplog.at_level(logging.WARNING, logger="next.seo"):
+            static_noindex(page_path)
+            stat = page_path.stat()
+            os.utime(page_path, (stat.st_atime, stat.st_mtime + 5))
+            static_noindex(page_path)
+        refused = [r for r in caplog.records if "is refused" in r.getMessage()]
+        assert len(refused) == 2
+
+    def test_a_vanished_page_has_no_mtime(self, tmp_path) -> None:
+        assert _mtime(tmp_path / "gone.py") is None
 
 
 class TestPageTreeSitemap:

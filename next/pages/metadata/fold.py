@@ -119,29 +119,23 @@ def _by_id(older: Objects, newer: Objects) -> Objects:
     return tuple(folded)
 
 
-def _merge_block(
+def _merge_values(
     strategies_of: Strategies,
-    older: object,
-    newer: object,
-    path: str,
+    older: Iterable[object],
+    newer: Iterable[object],
+    prefix: str,
     replaced: frozenset[str],
-) -> dict[str, object]:
-    """Merge the fields of two values of one class, the plain nearest-wins inline.
+) -> tuple[object, ...]:
+    """Merge two values field by field, the plain nearest-wins inline.
 
-    Only a replaced path or a reset name reads a child path, so it is spelled only then.
+    `prefix` spells the path of the block, `""` at the top and `"og."` below it.
     """
-    merged: dict[str, object] = {}
-    for name, strategy in strategies_of:
-        old = getattr(older, name)
-        new = getattr(newer, name)
-        if strategy is Merge.REPLACE and not replaced:
-            merged[name] = old if _unset(new) else new
-        else:
-            child = f"{path}.{name}" if replaced else name
-            merged[name] = merge_field(
-                strategy, old, new, path=child, replaced=replaced
-            )
-    return merged
+    return tuple(
+        (old if _unset(new) else new)
+        if strategy is Merge.REPLACE and not replaced
+        else merge_field(strategy, old, new, path=f"{prefix}{name}", replaced=replaced)
+        for (name, strategy), old, new in zip(strategies_of, older, newer, strict=True)
+    )
 
 
 def _deep(older: object, newer: object, path: str, replaced: frozenset[str]) -> object:
@@ -150,7 +144,15 @@ def _deep(older: object, newer: object, path: str, replaced: frozenset[str]) -> 
     held = strategies(cls) if type(older) is cls else ()
     if not held:
         return newer
-    return cls(**_merge_block(held, older, newer, path, replaced))
+    names = [name for name, _strategy in held]
+    merged = _merge_values(
+        held,
+        (getattr(older, name) for name in names),
+        (getattr(newer, name) for name in names),
+        f"{path}.",
+        replaced,
+    )
+    return cls(**dict(zip(names, merged, strict=True)))
 
 
 def merge_field(
@@ -219,14 +221,8 @@ def _fold_crumbs(crumbs: tuple[Crumb, ...], segment: Segment) -> tuple[Crumb, ..
 
 def fold_segment(state: FoldState, segment: Segment) -> FoldState:
     """Fold one segment over the state its ancestors left."""
-    replaced = segment.replaced
-    values = tuple(
-        (older if _unset(newer) else newer)
-        if strategy is Merge.REPLACE and not replaced
-        else merge_field(strategy, older, newer, path=name, replaced=replaced)
-        for (name, strategy), older, newer in zip(
-            _FIELDS, state.values, _VALUES(segment.metadata), strict=True
-        )
+    values = _merge_values(
+        _FIELDS, state.values, _VALUES(segment.metadata), "", segment.replaced
     )
     title, wrap, template = _fold_title(state, segment)
     crumbs = _fold_crumbs(state.crumbs, segment)
@@ -262,16 +258,10 @@ def merge_segments(base: Segment, over: Segment) -> Segment:
     A key `over` replaces drops what `base` declares, and still drops the inherited.
     """
     replaced = over.replaced
-    values: dict[str, Any] = {
-        name: merge_field(
-            strategy,
-            getattr(base.metadata, name),
-            getattr(over.metadata, name),
-            path=name,
-            replaced=replaced,
-        )
-        for name, strategy in _FIELDS
-    }
+    merged = _merge_values(
+        _FIELDS, _VALUES(base.metadata), _VALUES(over.metadata), "", replaced
+    )
+    values = cast("dict[str, Any]", dict(zip(_NAMES, merged, strict=True)))
     title = over.title
     if title is None and "title" not in replaced:
         title = base.title
@@ -350,8 +340,6 @@ __all__ = [
     "fold_metadata",
     "fold_segment",
     "fold_segments",
-    "merge_field",
     "merge_segments",
-    "strategies",
     "trace_origins",
 ]

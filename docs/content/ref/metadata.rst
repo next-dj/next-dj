@@ -69,6 +69,8 @@ Input dicts
 ``MetadataDict`` is what a ``page.py`` declares and a ``@page.metadata`` callable returns, and ``SiteMetadataDict`` is what ``DEFAULTS`` declares, the same keys less ``breadcrumb`` and with the title limited to ``template`` and ``default``.
 Every value of a nested block may be wrapped in ``Replace``, ``Text`` is a string or a lazy translation, and ``Url`` is a string or a lazy URL from :func:`~django.urls.reverse_lazy` or ``page_reverse_lazy``.
 A lazy URL stays unforced in the merge and is forced and checked for its scheme on every render, so a static ``metadata`` dict names a route before the URLconf loads.
+A forced URL on a scheme outside http and https leaves out the tag carrying it, logged once, and a whole hreflang set when it is one of the alternates.
+``RobotsDict`` takes the directives of ``GooglebotDict`` and a ``googlebot`` key, a string or a ``GooglebotDict``, so the Googlebot directives nest one level and no deeper.
 
 .. automodule:: next.pages.metadata.dicts
    :members:
@@ -123,6 +125,8 @@ It answers the head markup as a ``SafeString``.
            return (format_html('<meta name="generator" content="{}">', "Acme CMS"),)
 
 ``NEXT_FRAMEWORK["METADATA"]["RENDERER"] = "site.metadata.SiteRenderer"`` installs it, and the framework builds it without arguments once and again on every ``settings_reloaded``.
+A path that does not import, names no concrete subclass, or a class whose constructor raises leaves the page on ``HtmlMetadataRenderer``, logged once, and ``next.E107`` reports the path before the first render.
+Under ``DEBUG`` or ``STRICT_LOADING`` the render raises instead.
 
 .. automodule:: next.pages.metadata.backends
    :members: MetadataRenderer, HtmlMetadataRenderer

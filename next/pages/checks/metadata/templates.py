@@ -137,8 +137,8 @@ def check_metadata_tag_rendered(*args, **kwargs) -> list[CheckMessage]:
 
     The composed template and every component and include it reaches are searched.
     """
-    init_errors, pages = loaded_metadata_pages()
-    warnings = list(init_errors)
+    pages = loaded_metadata_pages()
+    warnings: list[CheckMessage] = []
     declared = {entry.page_path for entry in pages if entry.declared}
     search = TemplateSearch(_has_metadata_tag)
     for page_path, template in iter_composed_pages():
