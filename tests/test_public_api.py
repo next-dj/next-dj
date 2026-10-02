@@ -26,6 +26,7 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "checks",
             "consent_categories",
             "get_consent",
+            "joint_category",
             "signals",
         }
     ),

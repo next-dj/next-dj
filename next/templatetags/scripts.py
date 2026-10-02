@@ -14,7 +14,7 @@ from django.template.base import NodeList
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 
-from next.consent import consent_categories, get_consent
+from next.consent import consent_categories, get_consent, joint_category
 from next.consent.manager import consent_configured, server_mode
 from next.diagnostics import FailureLog
 from next.pages.responses import vary_on_cookie
@@ -101,7 +101,10 @@ def _merge_held(
     for name in shadow.notes(SCRIPT_NOTE):
         collector.note(GATED_NOTE, GatedNote(category, cast("str", name)))
     for note in shadow.notes(GATED_NOTE):
-        collector.note(GATED_NOTE, note)
+        # A block nested in this one held it back first, so it waits for both.
+        if isinstance(note, GatedNote):
+            joint = joint_category(category, note.category)
+            collector.note(GATED_NOTE, GatedNote(joint, note.target))
     for note in shadow.notes(CONSENT_NOTE):
         collector.note(CONSENT_NOTE, note)
 

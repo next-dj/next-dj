@@ -14,7 +14,9 @@ export function createExtrasChunk(host: ExtrasHost): Extras {
   });
   const scripts = createScripts({
     dispatch: host.dispatch,
-    allows: (category) => consent.get()[category] === true,
+    // A joint category names several, space-separated, and waits for each of them.
+    allows: (category) =>
+      category.split(" ").every((name) => consent.get()[name] === true),
     nonce: host.nonce,
   });
   // Consented markup a morph or a layer body brings lies inside the nodes it touched.
