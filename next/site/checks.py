@@ -10,42 +10,40 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 from django.utils.functional import Promise
 
 from next.checks import NEXT, SEO
-from next.checks.common import errors_for_unknown_keys
-from next.conf.defaults import AUTO, USER_SETTING
-from next.conf.imports import import_callable
+from next.checks.common import errors_for_unknown_keys, raw_scope, takes_request
+from next.conf.defaults import AUTO
+from next.introspect import describe_callable
 
-from .config import SITE_KEYS, is_url_literal, url_origin
+from .config import SITE_KEYS, url_rule
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable
+    from typing import Any
 
 
-_PREFIX: Final = "NEXT_FRAMEWORK['SITE']"
+_SCOPE: Final = "SITE"
+_PREFIX: Final = f"NEXT_FRAMEWORK[{_SCOPE!r}]"
 _SITES_APP: Final = "django.contrib.sites"
 
 
-def _raw_site_scope() -> Mapping[str, object] | None:
-    """Return the raw `SITE` scope, or `None` where `next.E076` reports it."""
-    raw = getattr(settings, USER_SETTING, None)
-    if not isinstance(raw, dict):
-        return None
-    scope = raw.get("SITE")
-    return scope if isinstance(scope, dict) else None
-
-
 def _url_usable(value: object) -> bool:
-    if value is None or callable(value):
-        return True
-    if not isinstance(value, str):
-        return False
-    if is_url_literal(value):
-        return url_origin(value) is not None
-    return import_callable(value) is not None
+    return value is None or url_rule(value) is not None
 
 
 def _indexable_usable(value: object) -> bool:
     return value == AUTO or isinstance(value, bool) or callable(value)
+
+
+def _signature_error(key: str, func: Callable[..., Any]) -> CheckMessage:
+    """Return `next.E129` for a callable that cannot take the request alone."""
+    return Error(
+        f"{_PREFIX}[{key!r}] is {describe_callable(func)}, which cannot be called "
+        "with the request as its one positional argument, so every call raises. "
+        "Give it one parameter for the request, which is None outside a request.",
+        obj=settings,
+        id="next.E129",
+    )
 
 
 def _site_error(key: str, value: object, expected: str) -> CheckMessage:
@@ -60,12 +58,15 @@ def _site_error(key: str, value: object, expected: str) -> CheckMessage:
 @register(NEXT, SEO)
 def check_site_settings(*args, **kwargs) -> list[CheckMessage]:
     """Validate the `SITE` values (`next.E129`) and its keys (`next.E035`)."""
-    scope = _raw_site_scope()
+    scope = raw_scope(_SCOPE)
     if scope is None:
         return []
     errors = errors_for_unknown_keys(dict(scope), allowed=SITE_KEYS, prefix=_PREFIX)
     url = scope.get("URL")
-    if not _url_usable(url):
+    rule = url_rule(url)
+    if callable(rule) and not takes_request(rule):
+        errors.append(_signature_error("URL", rule))
+    elif not _url_usable(url):
         errors.append(
             _site_error(
                 "URL",
@@ -78,7 +79,9 @@ def check_site_settings(*args, **kwargs) -> list[CheckMessage]:
     if name is not None and not isinstance(name, str | Promise):
         errors.append(_site_error("NAME", name, "the site name as text"))
     indexable = scope.get("INDEXABLE", AUTO)
-    if not _indexable_usable(indexable):
+    if callable(indexable) and not takes_request(indexable):
+        errors.append(_signature_error("INDEXABLE", indexable))
+    elif not _indexable_usable(indexable):
         errors.append(
             _site_error(
                 "INDEXABLE",
@@ -99,7 +102,7 @@ def _site_row_pinned() -> bool:
 @register(NEXT, SEO, deploy=True)
 def check_site_url_for_deploy(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a deployed site builds its absolute URLs from `Host` (W119, W132)."""
-    scope = _raw_site_scope() or {}
+    scope = raw_scope(_SCOPE) or {}
     if scope.get("URL") is not None or _site_row_pinned():
         return []
     if "*" in getattr(settings, "ALLOWED_HOSTS", ()):

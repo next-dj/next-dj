@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Final
 
 from django.conf import settings
@@ -18,22 +17,28 @@ from django.template import TemplateDoesNotExist
 from django.template.loader import get_template
 
 from next.checks import NEXT, SEO
-from next.seo.backends import PageTreeSitemapBackend
+from next.seo.backends import PageTreeSitemapBackend, backend_path
 from next.seo.manager import seo_manager
-from next.seo.sitemaps import SitemapOptions, is_excluded, static_noindex
-from next.site import site_indexable
-from next.utils import is_dynamic_trail
+from next.seo.sitemaps import (
+    SitemapOptions,
+    effective_limit,
+    is_excluded,
+    sitemap_languages,
+    static_noindex,
+)
+from next.site.config import indexable_without_request
+from next.utils import is_dynamic_trail, is_int
 
 from .roots import declares_sitemap, items_trails, loaded_seo_roots, sitemap_roots
 
 
 if TYPE_CHECKING:
+    import types
     from collections.abc import Iterator
+    from pathlib import Path
 
     from next.seo.discovery import SeoRoot
 
-
-logger = logging.getLogger(__name__)
 
 _SITEMAP_TEMPLATES: Final = ("sitemap.xml", "sitemap_index.xml")
 
@@ -41,8 +46,8 @@ _SITEMAP_TEMPLATES: Final = ("sitemap.xml", "sitemap_index.xml")
 @register(Tags.urls, NEXT, SEO)
 def check_sitemap_items_trails(*args, **kwargs) -> list[CheckMessage]:
     """Require every `@sitemap.items` trail to be routed by its tree (`next.E111`)."""
-    init_errors, roots = loaded_seo_roots()
-    errors = list(init_errors)
+    roots = loaded_seo_roots()
+    errors: list[CheckMessage] = []
     for root, _module in sitemap_roots(roots):
         source = root.sitemap_path
         errors.extend(
@@ -75,8 +80,8 @@ def check_sitemap_templates(*args, **kwargs) -> list[CheckMessage]:
 
     The XML comes from `django.contrib.sitemaps`, found only through `APP_DIRS`.
     """
-    init_errors, roots = loaded_seo_roots()
-    errors = list(init_errors)
+    roots = loaded_seo_roots()
+    errors: list[CheckMessage] = []
     if not declares_sitemap(roots):
         return errors
     missing = _missing_templates()
@@ -97,8 +102,8 @@ def check_sitemap_templates(*args, **kwargs) -> list[CheckMessage]:
 @register(Tags.urls, NEXT, SEO)
 def check_sitemap_section_labels(*args, **kwargs) -> list[CheckMessage]:
     """Warn when page trees share one sitemap section label (`next.W104`)."""
-    init_errors, roots = loaded_seo_roots()
-    warnings = list(init_errors)
+    roots = loaded_seo_roots()
+    warnings: list[CheckMessage] = []
     if not declares_sitemap(roots):
         return warnings
     groups: dict[str, list[SeoRoot]] = {}
@@ -128,8 +133,8 @@ def check_sitemap_dynamic_routes(*args, **kwargs) -> list[CheckMessage]:
 
     A statically noindex route never reaches the sitemap, so it needs neither.
     """
-    init_errors, roots = loaded_seo_roots()
-    warnings = list(init_errors)
+    roots = loaded_seo_roots()
+    warnings: list[CheckMessage] = []
     for root, module in sitemap_roots(roots):
         globs = SitemapOptions.read(module).exclude
         listed = items_trails(root)
@@ -158,9 +163,9 @@ def check_sitemap_noindex_items(*args, **kwargs) -> list[CheckMessage]:
 
     Silent on a closed site, where no sitemap is served and every page reads noindex.
     """
-    init_errors, roots = loaded_seo_roots()
-    warnings = list(init_errors)
-    if not site_indexable():
+    roots = loaded_seo_roots()
+    warnings: list[CheckMessage] = []
+    if not indexable_without_request():
         return warnings
     for root, _module in sitemap_roots(roots):
         source = root.sitemap_path
@@ -181,18 +186,48 @@ def check_sitemap_noindex_items(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _i18n_problems(options: SitemapOptions) -> list[str]:
-    """Return what reads wrong among the i18n options of one `sitemap.py`."""
+    """Return what reads wrong among the i18n options of a `sitemap.py`, with a fix."""
     problems: list[str] = []
     if not options.i18n and (options.alternates or options.x_default):
-        problems.append("alternates and x_default take effect only with i18n = True")
+        problems.append(
+            "alternates and x_default take effect only with i18n = True. Set "
+            "i18n = True, or drop alternates and x_default"
+        )
     if options.x_default and not options.alternates:
-        problems.append("x_default takes effect only with alternates = True")
+        problems.append(
+            "x_default takes effect only with alternates = True. Set "
+            "alternates = True, or drop x_default"
+        )
     known = {code for code, _name in settings.LANGUAGES}
     unknown = sorted(set(options.languages or ()) - known)
     if unknown:
         joined = ", ".join(repr(code) for code in unknown)
-        problems.append(f"languages names {joined}, which settings.LANGUAGES lacks")
+        problems.append(
+            f"languages names {joined}, which settings.LANGUAGES lacks. Add the "
+            "codes to settings.LANGUAGES, or drop them from languages"
+        )
     return problems
+
+
+def _limit_warning(source: Path, module: types.ModuleType) -> CheckMessage | None:
+    """Return `next.W086` when a declared `limit` outgrows a page of alternates."""
+    declared = getattr(module, "limit", None)
+    options = SitemapOptions.read(module)
+    if not is_int(declared) or declared <= 0:
+        return None
+    effective = effective_limit(options, sitemap_languages(options))
+    if options.limit <= effective:
+        return None
+    links = len(sitemap_languages(options))
+    default = " and x-default" if options.x_default else ""
+    return DjangoWarning(
+        f"{source} sets limit = {declared}, but every URL also links its "
+        f"{links} languages{default} under alternates, so a page that long could "
+        f"outgrow the 50 MB a sitemap may weigh, and pages hold {effective} URLs "
+        f"instead. Lower limit to {effective} or less, or drop it.",
+        obj=str(source),
+        id="next.W086",
+    )
 
 
 def _uses_language_prefixes() -> bool:
@@ -202,23 +237,21 @@ def _uses_language_prefixes() -> bool:
 
 @register(Tags.urls, NEXT, SEO)
 def check_sitemap_i18n_options(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about i18n options that take no effect (`next.W105`, `next.W106`).
+    """Warn about i18n options that take no effect or outgrow a page (W105, W106, W086).
 
     Without `i18n_patterns` every language reverses to one URL, listed once per code.
     """
-    init_errors, roots = loaded_seo_roots()
-    warnings = list(init_errors)
+    roots = loaded_seo_roots()
+    warnings: list[CheckMessage] = []
     for root, module in sitemap_roots(roots):
         options = SitemapOptions.read(module)
         source = root.sitemap_path
         warnings.extend(
-            DjangoWarning(
-                f"{source}: {problem}. Align the options, or drop the ones not read.",
-                obj=str(source),
-                id="next.W105",
-            )
+            DjangoWarning(f"{source}: {problem}.", obj=str(source), id="next.W105")
             for problem in _i18n_problems(options)
         )
+        limit = _limit_warning(source, module)
+        warnings.extend(() if limit is None else (limit,))
         if options.i18n and not _uses_language_prefixes():
             warnings.append(
                 DjangoWarning(
@@ -235,8 +268,8 @@ def check_sitemap_i18n_options(*args, **kwargs) -> list[CheckMessage]:
 @register(Tags.urls, NEXT, SEO)
 def check_sitemap_excluded_items(*args, **kwargs) -> list[CheckMessage]:
     """Warn when `@sitemap.items` names a trail `exclude` drops (`next.W107`)."""
-    init_errors, roots = loaded_seo_roots()
-    warnings = list(init_errors)
+    roots = loaded_seo_roots()
+    warnings: list[CheckMessage] = []
     for root, module in sitemap_roots(roots):
         globs = SitemapOptions.read(module).exclude
         source = root.sitemap_path
@@ -268,31 +301,45 @@ def _tree_sections(roots: tuple[SeoRoot, ...]) -> Iterator[tuple[str, str]]:
             yield name, f"@sitemap.items(section={name!r}) in {root.sitemap_path}"
 
 
-def _backend_sections() -> Iterator[tuple[str, str]]:
-    """Yield the sections every other backend serves with the backend naming them."""
+def _backend_sections() -> tuple[list[tuple[str, str]], list[CheckMessage]]:
+    """Return the sections every other backend serves, each with its backend.
+
+    A backend whose `sections(None)` raises is `next.W089` and serves none here.
+    """
+    pairs: list[tuple[str, str]] = []
+    warnings: list[CheckMessage] = []
     for backend in seo_manager.backends:
         if isinstance(backend, PageTreeSitemapBackend):
             continue
-        name = type(backend).__qualname__
+        name = backend_path(backend)
         try:
-            sections = backend.sections(None)
-        except Exception:
-            logger.exception("%s failed to list its sections for the checks", name)
+            sections = list(backend.sections(None))
+        except Exception as exc:  # noqa: BLE001 - a backend is project code
+            warnings.append(
+                DjangoWarning(
+                    f"{name}.sections(None) raised {type(exc).__name__}: {exc}, so "
+                    "the checks cannot compare its sitemap sections with the "
+                    "others. Make sections() work without a request, which is None "
+                    "in a system check.",
+                    obj=name,
+                    id="next.W089",
+                )
+            )
             continue
-        for section in sections:
-            yield section, name
+        pairs.extend((section, name) for section in sections)
+    return pairs, warnings
 
 
 @register(Tags.urls, NEXT, SEO)
 def check_sitemap_section_collisions(*args, **kwargs) -> list[CheckMessage]:
-    """Flag two sources serving one sitemap section name (`next.E116`).
+    """Flag two sources serving one sitemap section name (`next.E116`, `next.W089`).
 
     The first source wins the name, so the second one never reaches the sitemap.
     """
-    init_errors, roots = loaded_seo_roots()
-    errors = list(init_errors)
+    roots = loaded_seo_roots()
+    backend_sections, errors = _backend_sections()
     owners: dict[str, str] = {}
-    for section, source in (*_tree_sections(roots), *_backend_sections()):
+    for section, source in (*_tree_sections(roots), *backend_sections):
         first = owners.setdefault(section, source)
         if first == source:
             continue

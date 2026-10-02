@@ -42,7 +42,7 @@ def _resolved(url: str) -> ResolverMatch | None:
 def _served(roots: tuple[SeoRoot, ...]) -> list[tuple[str, Callable[..., Any], str]]:
     """Return the addresses the sources call for, each with its view and its source."""
     served: list[tuple[str, Callable[..., Any], str]] = []
-    if serves_sitemap(roots):
+    if serves_sitemap():
         served.append((SITEMAP_ROUTE, sitemap_view, "a sitemap backend"))
     if serves_robots(roots):
         served.append((ROBOTS_ROUTE, robots_view, "a robots source"))
@@ -61,8 +61,8 @@ def _trail_address(trail: str, served: list[str]) -> str | None:
 @register(Tags.urls, NEXT, SEO)
 def check_seo_route_collisions(*args, **kwargs) -> list[CheckMessage]:
     """Flag a page routed at an address the SEO sources serve (`next.E115`)."""
-    init_errors, roots = loaded_seo_roots()
-    errors = list(init_errors)
+    roots = loaded_seo_roots()
+    errors: list[CheckMessage] = []
     routes = [route for route, _view, _source in _served(roots)]
     for root in roots:
         for trail, page_path in root.trails.items():
@@ -87,8 +87,8 @@ def check_seo_routes_at_host_root(*args, **kwargs) -> list[CheckMessage]:
 
     A `next.urls` include under a prefix or `i18n_patterns()` moves the routes with it.
     """
-    init_errors, roots = loaded_seo_roots()
-    warnings = list(init_errors)
+    roots = loaded_seo_roots()
+    warnings: list[CheckMessage] = []
     urlconf = str(getattr(settings, "ROOT_URLCONF", ""))
     for route, view, source in _served(roots):
         match = _resolved(f"/{route}")

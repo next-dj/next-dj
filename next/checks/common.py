@@ -5,12 +5,15 @@ The discovery names and the unknown-key probe of `next.conf` travel on from here
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from django.conf import settings
 from django.core.checks import CheckMessage, Error
 
 from next.conf.checks import errors_for_unknown_keys
+from next.conf.defaults import USER_SETTING
 from next.conf.imports import import_class_cached
 from next.discovery import (
     PageRootsError,
@@ -28,7 +31,7 @@ from next.discovery import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
 
 
@@ -36,6 +39,32 @@ WALK_HINT = (
     "Every DIRS entry and every app pages folder must be a readable directory, "
     "and a custom router's page_roots() must answer next.urls.PageRoot entries."
 )
+
+
+def raw_scope(name: str) -> Mapping[str, object] | None:
+    """Return the `NEXT_FRAMEWORK[name]` mapping as written, `None` when it is none.
+
+    A `NEXT_FRAMEWORK` or a scope that is no dict is `next.E076`, reported once there.
+    """
+    raw = getattr(settings, USER_SETTING, None)
+    if not isinstance(raw, dict):
+        return None
+    scope = raw.get(name)
+    return scope if isinstance(scope, dict) else None
+
+
+def takes_request(func: Callable[..., Any]) -> bool:
+    """Whether `func` can be called with the request as its one positional argument.
+
+    A callable whose signature cannot be read is given the benefit of the doubt.
+    """
+    try:
+        inspect.signature(func).bind(None)
+    except TypeError:
+        return False
+    except ValueError:
+        return True
+    return True
 
 
 class RunMemo[T]:
@@ -194,7 +223,9 @@ __all__ = [
     "iter_page_tree_component_folders",
     "iter_scanned_page_pairs",
     "page_tree_skip_names",
+    "raw_scope",
     "read_page_roots",
     "registration_file_errors",
     "reset_router_manager_cache",
+    "takes_request",
 ]

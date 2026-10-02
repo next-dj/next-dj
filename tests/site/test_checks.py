@@ -18,6 +18,22 @@ def preview_hosts(request: HttpRequest | None) -> bool:
     return request is None
 
 
+def no_parameter() -> bool:
+    return True
+
+
+def two_parameters(request: HttpRequest | None, host: str) -> bool:
+    return True
+
+
+def keyword_only(*, request: HttpRequest | None) -> bool:
+    return True
+
+
+def raising_rule(request: HttpRequest | None) -> bool:
+    raise AssertionError
+
+
 @pytest.fixture()
 def production() -> Iterator[None]:
     with override_settings(DEBUG=False):
@@ -102,6 +118,32 @@ class TestSiteSettings:
             messages = check_site_settings()
         assert check_ids(messages) == ["next.E129"]
         assert f"NEXT_FRAMEWORK['SITE'][{key!r}]" in messages[0].msg
+
+    @pytest.mark.parametrize("key", ["URL", "INDEXABLE"])
+    @pytest.mark.parametrize(
+        "rule",
+        [no_parameter, two_parameters, keyword_only],
+        ids=["none", "two", "keyword_only"],
+    )
+    def test_a_callable_that_cannot_take_the_request_is_e129(
+        self, key: str, rule: object
+    ) -> None:
+        with site_settings(**{key: rule}):
+            messages = check_site_settings()
+        assert check_ids(messages) == ["next.E129"]
+        assert f"NEXT_FRAMEWORK['SITE'][{key!r}] is \"{rule.__name__}\"" in (
+            messages[0].msg
+        )
+        assert "one positional argument" in messages[0].msg
+
+    def test_a_dotted_url_callable_is_read_for_its_signature(self) -> None:
+        with site_settings(URL=f"{__name__}.no_parameter"):
+            assert check_ids(check_site_settings()) == ["next.E129"]
+
+    @pytest.mark.parametrize("rule", [len, raising_rule], ids=["builtin", "raising"])
+    def test_a_callable_is_never_called(self, rule: object) -> None:
+        with site_settings(URL=rule, INDEXABLE=rule):
+            assert check_site_settings() == []
 
     def test_an_unknown_key_is_e035(self) -> None:
         with site_settings(HOST="acme.example"):

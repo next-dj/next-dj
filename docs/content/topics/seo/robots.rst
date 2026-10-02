@@ -49,7 +49,7 @@ The response is ``text/plain; charset=utf-8``.
    Sitemap: https://cdn.notes.example/sitemap-news.xml
 
 ``RobotsRule`` validates on construction and raises ``RobotsRuleError`` for an agent that is no token, a path that does not start with ``/`` or ``*`` or carries a space, a control character, or a ``$`` before its end, and a crawl delay that is no finite number of seconds.
-A rule that raises at import keeps the route answering 404 and ``manage.py check`` reports the reason, as it reports a ``rules``, ``sitemaps``, or ``cache`` of the wrong shape.
+A rule that raises at import keeps the route answering 503 with ``Retry-After`` and ``manage.py check`` reports the reason, as it reports a ``rules``, ``sitemaps``, or ``cache`` of the wrong shape.
 
 Rules per request
 -----------------
@@ -70,6 +70,7 @@ Rules per request
        return groups
 
 ``robots.py`` is read by the dependency resolver, so it keeps ``from __future__ import annotations`` out.
+A ``rules`` callable that raises answers 503 with ``Retry-After`` and logs the failure once, and under ``DEBUG`` the exception reaches the technical page with a note naming the callable.
 The checks read a static ``rules`` list alone, so a callable's groups are never compared against the sitemap.
 
 The Sitemap lines
@@ -114,8 +115,10 @@ One source per address
 
 ``/robots.txt`` is one address, so the site has one source for it.
 A ``robots.py`` and a ``robots.txt`` in one root, or a source in two roots, is an error of ``manage.py check``.
-At runtime the first source in router order answers, ``robots.py`` ahead of ``robots.txt`` within a root, and a warning names the ones ignored.
-A ``robots.py`` that fails to import keeps the route and answers 404 rather than falling back to another source.
+At runtime the first source in router order answers, ``robots.py`` ahead of ``robots.txt`` within a root, and under ``DEBUG`` a warning names the ones ignored, once.
+A ``robots.py`` that fails to import keeps the route and answers 503 with ``Retry-After`` rather than falling back to another source.
+A 404 would be wrong here, since RFC 9309 reads a 4xx on ``/robots.txt`` as no restriction at all, which would open a staging host to every crawler.
+A crawler backs off a 5xx and keeps the rules it read before.
 
 A closed site
 -------------

@@ -7,8 +7,6 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from next.introspect import callable_name
 
-from .signals import sitemap_items_registered
-
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -73,12 +71,6 @@ class SitemapItemsRegistry:
                     )
                 )
         self._index[key] = entry
-        sitemap_items_registered.send(
-            sender=SitemapItemsRegistry,
-            file=entry.file,
-            trail=entry.trail,
-            func=entry.func,
-        )
 
     def forget(self, file: Path) -> None:
         """Drop what `file` registered, so executing it again starts from nothing."""

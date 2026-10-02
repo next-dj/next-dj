@@ -11,22 +11,12 @@ from django.core.exceptions import ImproperlyConfigured
 
 from next.backends import resolve_backend_class
 from next.checks import NEXT, SEO
-from next.checks.common import errors_for_unknown_keys
-from next.conf.defaults import USER_SETTING
+from next.checks.common import errors_for_unknown_keys, raw_scope
 from next.seo.backends import SitemapBackend
 from next.seo.manager import SEO_KEYS, SEO_SCOPE, SITEMAP_BACKENDS
 
 
 _PREFIX: Final = f"NEXT_FRAMEWORK[{SEO_SCOPE!r}]"
-
-
-def _raw_seo_scope() -> Mapping[str, object] | None:
-    """Return the raw `SEO` scope, or `None` where `next.E076` reports it."""
-    raw = getattr(settings, USER_SETTING, None)
-    if not isinstance(raw, dict):
-        return None
-    scope = raw.get(SEO_SCOPE)
-    return scope if isinstance(scope, dict) else None
 
 
 def _seo_error(message: str) -> CheckMessage:
@@ -56,7 +46,7 @@ def _entry_errors(index: int, entry: object) -> list[CheckMessage]:
 @register(NEXT, SEO)
 def check_seo_settings(*args, **kwargs) -> list[CheckMessage]:
     """Validate the `SEO` keys (`next.E035`) and its sitemap backends (`next.E120`)."""
-    scope = _raw_seo_scope()
+    scope = raw_scope(SEO_SCOPE)
     if scope is None:
         return []
     errors = errors_for_unknown_keys(dict(scope), allowed=SEO_KEYS, prefix=_PREFIX)

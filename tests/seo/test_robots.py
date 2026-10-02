@@ -10,11 +10,10 @@ from django.test import RequestFactory
 
 from next.pages.responses import NO_STORE, cache_control
 from next.seo import RobotsRule
-from next.seo.discovery import BrokenSource, SeoRoot, SeoSource
+from next.seo.discovery import BrokenSource, SeoRoot, SeoSource, declared_cache
 from next.seo.robots import (
     DeclaredRobots,
     TextFile,
-    declared_cache,
     declared_rules,
     is_sitemap_url,
     render_group,

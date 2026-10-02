@@ -17,6 +17,7 @@ from django.conf import settings
 from django.contrib.sitemaps import Sitemap
 from django.core.paginator import Paginator
 from django.db.models import Max, QuerySet
+from django.urls import NoReverseMatch
 from django.utils import timezone, translation
 
 from next.caches import DEFAULT_CACHE_SIZE
@@ -27,10 +28,10 @@ from next.pages import page
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.metadata.hreflang import x_default_url
 from next.pages.metadata.normalize import X_DEFAULT
-from next.pages.responses import cache_control
 from next.urls.reverse import page_reverse
 from next.utils import is_dynamic_trail, is_int
 
+from .discovery import declared_cache
 from .errors import SitemapTrailError
 from .markers import SitemapEntry, is_number
 from .origin import request_origin
@@ -107,20 +108,38 @@ class SitemapOptions:
         """Read the attributes of `module`, the checks report the wrong shapes."""
         priority = getattr(module, "priority", None)
         limit = getattr(module, "limit", None)
-        cache = getattr(module, "cache", None)
         languages = getattr(module, "languages", None)
         return cls(
             exclude=_string_list(getattr(module, "exclude", None)),
             changefreq=_string(getattr(module, "changefreq", None)),
             priority=float(priority) if is_number(priority) else None,
             limit=min(limit, MAX_LIMIT) if is_int(limit) and limit > 0 else MAX_LIMIT,
-            cache=None if callable(cache) else cache_control(cache),
+            cache=declared_cache(module),
             i18n=bool(getattr(module, "i18n", None)),
             languages=None if languages is None else _string_list(languages),
             alternates=bool(getattr(module, "alternates", None)),
             x_default=bool(getattr(module, "x_default", None)),
             protocol=_string(getattr(module, "protocol", None)),
         )
+
+
+def sitemap_languages(options: SitemapOptions) -> list[str]:
+    """Return the declared `languages`, every code of `LANGUAGES` without them."""
+    if options.languages is not None:
+        return list(options.languages)
+    return [code for code, _name in settings.LANGUAGES]
+
+
+def effective_limit(options: SitemapOptions, languages: Sequence[str]) -> int:
+    """Return how many URLs one page lists, fewer while each carries its alternates.
+
+    Every URL then links each language and `x-default` too, so a page of 50000 would
+    outgrow the 50 MB a sitemap document may weigh, and the page shrinks to fit.
+    """
+    if not (options.i18n and options.alternates):
+        return options.limit
+    links = len(languages) + int(options.x_default) + 1
+    return max(1, min(options.limit, MAX_LIMIT // links))
 
 
 @functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
@@ -221,6 +240,14 @@ def _stamp(row: object, field: str | None) -> datetime.date | None:
     return value if isinstance(value, datetime.date) else None
 
 
+def _items_note(entry: SitemapItemsEntry, what: str) -> str:
+    """Name the `@sitemap.items` declaration an exception escaped, for its report."""
+    return (
+        f"Raised by {what} of @sitemap.items({entry.trail!r}) on "
+        f"{describe_callable(entry.func)}."
+    )
+
+
 def _same(item: SitemapItem) -> SitemapItem:
     return item
 
@@ -232,7 +259,11 @@ def _converter(entry: SitemapItemsEntry) -> Callable[[object], SitemapItem]:
         if isinstance(row, SitemapEntry):
             return SitemapItem(entry.trail, row)
         if entry.kwargs is not None:
-            kwargs = entry.kwargs(row)
+            try:
+                kwargs = entry.kwargs(row)
+            except Exception as exc:
+                exc.add_note(_items_note(entry, "the kwargs= callable"))
+                raise
         elif isinstance(row, Mapping):
             kwargs = row
         else:
@@ -268,10 +299,10 @@ class PageTreeSitemap(_SitemapBase):
         self.seo_root = seo_root
         self.options = options
         self.request = request
-        self.limit = options.limit
         self.protocol = options.protocol
         self.i18n = options.i18n
         self.languages = None if options.languages is None else list(options.languages)
+        self.limit = effective_limit(options, self.language_codes())
         self.alternates = options.alternates
         # The Django variant strips the language prefix from the default URL, while
         # the head names the URL of the default language, which is the one kept.
@@ -293,13 +324,16 @@ class PageTreeSitemap(_SitemapBase):
         """Call one items callable through the resolver and hold what it answers."""
         if entry.trail not in self.seo_root.trails:
             raise SitemapTrailError(self.seo_root.sitemap_path, entry.trail)
-        resolved = current_resolver().resolve_dependencies(
-            entry.func, request=self.request
-        )
+        try:
+            resolved = current_resolver().resolve_dependencies(
+                entry.func, request=self.request
+            )
+            rows = entry.func(**resolved)
+        except Exception as exc:
+            exc.add_note(_items_note(entry, "the items callable"))
+            raise
         return Part(
-            _rows(entry.func(**resolved), entry.func),
-            _converter(entry),
-            lastmod_field=entry.lastmod,
+            _rows(rows, entry.func), _converter(entry), lastmod_field=entry.lastmod
         )
 
     @override
@@ -318,15 +352,20 @@ class PageTreeSitemap(_SitemapBase):
 
     def language_codes(self) -> list[str]:
         """Return the declared `languages`, every code of `LANGUAGES` without them."""
-        if self.languages is not None:
-            return list(self.languages)
-        return [code for code, _name in settings.LANGUAGES]
+        return sitemap_languages(self.options)
 
     @override
     def location(self, item: SitemapItem) -> str:
         """Reverse the item lazily, so an active language prefix lands in the path."""
         kwargs: dict[str, Any] = dict(item.entry.kwargs)
-        return page_reverse(item.trail, **kwargs)
+        try:
+            return page_reverse(item.trail, **kwargs)
+        except NoReverseMatch as exc:
+            exc.add_note(
+                f"Raised reversing the trail {item.trail!r} with the kwargs "
+                f"{sorted(kwargs)} the sitemap of {self.seo_root.path} lists."
+            )
+            raise
 
     def lastmod(self, item: SitemapItem) -> datetime.datetime | None:
         """Return the modification time the entry carries, as an aware datetime."""
@@ -411,8 +450,10 @@ __all__ = [
     "PageTreeSitemap",
     "SitemapItem",
     "SitemapOptions",
+    "effective_limit",
     "is_excluded",
     "lastmod_datetime",
     "listed_trails",
+    "sitemap_languages",
     "static_noindex",
 ]

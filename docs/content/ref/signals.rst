@@ -173,10 +173,6 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - The sitemap backend class
      - ``config``, ``instance``
      - After one ``SEO["SITEMAP_BACKENDS"]`` entry is instantiated, once per entry on every manager reload.
-   * - ``sitemap_items_registered``
-     - ``SitemapItemsRegistry``
-     - ``file``, ``trail``, ``func``
-     - After ``@sitemap.items`` binds a callable to a route trail of the tree of the running file, and again when a re-executed ``sitemap.py`` replaces the binding.
    * - ``sse_stream_closed``
      - ``PatchEventStream``
      - ``request``, ``duration_ms``, ``envelopes_sent``

@@ -1,3 +1,4 @@
+import pytest
 from django.conf import settings
 from django.contrib.sitemaps import Sitemap
 from django.core.checks import WARNING
@@ -25,6 +26,11 @@ from tests.support import (
     write_page,
     write_tree,
 )
+
+
+def refusing_rule(request: object) -> bool:
+    """Fail the test the moment a check calls the rule."""
+    raise AssertionError
 
 
 NO_APP_DIRS = [
@@ -197,6 +203,13 @@ class TestNoindexItems:
         with routed(root, **CLOSED_SITE):
             assert check_sitemap_noindex_items() == []
 
+    def test_a_callable_rule_is_never_called_and_reads_open(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", sitemap=POSTS_ITEMS)
+        write_page(root, "posts/[slug]", NOINDEX)
+        with routed(root, SITE={"INDEXABLE": refusing_rule}):
+            messages = check_sitemap_noindex_items()
+        assert check_ids(messages) == ["next.W098"]
+
 
 class TestI18nOptions:
     """i18n options that take no effect warn (`next.W105`, `next.W106`)."""
@@ -210,8 +223,11 @@ class TestI18nOptions:
             messages = check_sitemap_i18n_options()
         assert check_ids(messages) == ["next.W105"] * 3
         assert "take effect only with i18n = True" in messages[0].msg
+        assert "Set i18n = True, or drop alternates and x_default." in messages[0].msg
         assert "only with alternates = True" in messages[1].msg
+        assert "Set alternates = True, or drop x_default." in messages[1].msg
         assert "languages names 'fr'" in messages[2].msg
+        assert "Add the codes to settings.LANGUAGES" in messages[2].msg
 
     def test_i18n_without_language_prefixes_warns(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", sitemap="i18n = True\n")
@@ -226,6 +242,44 @@ class TestI18nOptions:
             tmp_path / "pages",
             sitemap="i18n = True\nalternates = True\nx_default = True\n",
         )
+        with routed(root, urlconf=I18N_URLCONF):
+            assert check_sitemap_i18n_options() == []
+
+
+class TestLimitUnderAlternates:
+    """A `limit` a page of alternates would outgrow warns (`next.W086`)."""
+
+    @pytest.mark.parametrize(
+        ("options", "effective"),
+        [("", 16666), ("x_default = True\n", 12500)],
+        ids=["alternates", "x_default"],
+    )
+    @override_settings(**I18N)
+    def test_a_limit_above_the_effective_one_warns(
+        self, tmp_path, options, effective
+    ) -> None:
+        sitemap = "i18n = True\nalternates = True\nlimit = 50000\n" + options
+        root = write_tree(tmp_path / "pages", sitemap=sitemap)
+        with routed(root, urlconf=I18N_URLCONF):
+            messages = check_sitemap_i18n_options()
+        assert check_ids(messages) == ["next.W086"]
+        assert f"pages hold {effective} URLs instead" in messages[0].msg
+        assert f"Lower limit to {effective} or less" in messages[0].msg
+        assert messages[0].obj == str(root / "sitemap.py")
+
+    @pytest.mark.parametrize(
+        "sitemap",
+        [
+            "i18n = True\nalternates = True\nlimit = 100\n",
+            "i18n = True\nalternates = True\n",
+            "i18n = True\nlimit = 50000\n",
+            "i18n = True\nalternates = True\nlimit = 'many'\n",
+        ],
+        ids=["within", "no_limit", "no_alternates", "not_an_int"],
+    )
+    @override_settings(**I18N)
+    def test_a_limit_that_fits_passes(self, tmp_path, sitemap) -> None:
+        root = write_tree(tmp_path / "pages", sitemap=sitemap)
         with routed(root, urlconf=I18N_URLCONF):
             assert check_sitemap_i18n_options() == []
 
@@ -290,9 +344,7 @@ class TestSectionCollisions:
         )
         assert f"which {first / 'sitemap.py'} already serves" in messages[0].msg
 
-    def test_a_backend_section_taken_by_a_tree_is_an_error(
-        self, tmp_path, caplog
-    ) -> None:
+    def test_a_backend_section_taken_by_a_tree_is_an_error(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", sitemap="")
         backends = [
             {"BACKEND": "next.seo.PageTreeSitemapBackend"},
@@ -301,9 +353,14 @@ class TestSectionCollisions:
         ]
         with routed(root, SEO={"SITEMAP_BACKENDS": backends}):
             messages = check_sitemap_section_collisions()
-        assert check_ids(messages) == ["next.E116"]
-        assert messages[0].obj == "ExtraBackend"
-        assert "FailingBackend failed to list its sections" in caplog.text
+        assert check_ids(messages) == ["next.W089", "next.E116"]
+        failing, taken = messages
+        assert failing.obj == "tests.seo.checks.test_sitemaps.FailingBackend"
+        assert failing.msg.startswith(
+            "tests.seo.checks.test_sitemaps.FailingBackend.sections(None) raised "
+        )
+        assert "Make sections() work without a request" in failing.msg
+        assert taken.obj == "tests.seo.checks.test_sitemaps.ExtraBackend"
 
     def test_distinct_sections_pass(self, tmp_path) -> None:
         root = write_tree(

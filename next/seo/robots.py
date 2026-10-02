@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING, Final
 from urllib.parse import urlsplit
 
 from next.deps.resolver import current_resolver
-from next.pages.responses import cache_control
+from next.introspect import describe_callable
 from next.utils import WEB_SCHEMES
 
-from .discovery import BrokenSource
+from .discovery import BrokenSource, declared_cache
 from .markers import RobotsRule
 
 
@@ -81,15 +81,6 @@ def is_sitemap_url(value: object) -> bool:
     )
 
 
-def declared_cache(module: types.ModuleType) -> CacheControl | None:
-    """Return the `cache` a source module declares, in any form a page takes but one.
-
-    A callable is left out, since the response is cached before a request calls it.
-    """
-    value = getattr(module, "cache", None)
-    return None if callable(value) else cache_control(value)
-
-
 @dataclass(frozen=True, slots=True)
 class DeclaredRobots:
     """A `robots.py`, its `rules` a list or a callable resolved per request."""
@@ -101,10 +92,17 @@ class DeclaredRobots:
         """Return the groups, calling `rules` through the resolver when it is one."""
         declared = getattr(self.module, "rules", ())
         if callable(declared):
-            resolved = current_resolver().resolve_dependencies(
-                declared, request=request
-            )
-            declared = declared(**resolved)
+            try:
+                resolved = current_resolver().resolve_dependencies(
+                    declared, request=request
+                )
+                declared = declared(**resolved)
+            except Exception as exc:
+                exc.add_note(
+                    f"Raised by the rules callable {describe_callable(declared)} "
+                    f"of {self.path}."
+                )
+                raise
         return rules_of(declared)
 
     @property
@@ -199,7 +197,6 @@ __all__ = [
     "DeclaredRobots",
     "RobotsSource",
     "TextFile",
-    "declared_cache",
     "declared_rules",
     "is_sitemap_url",
     "render_group",

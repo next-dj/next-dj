@@ -27,6 +27,7 @@ Without one no sitemap route exists, so a ``path("sitemap.xml", ...)`` placed af
 The file is executed once when the framework discovers the tree and kept until the SEO routes reset on a router or settings reload.
 While ``DEBUG`` is on an edit shows on the next request without a restart, since every SEO route first checks the files at the top of each page root.
 A file that fails to import is logged once, keeps its route, and answers 404, so no partial sitemap ships, and ``manage.py check`` reports the cause.
+A 404 is safe here, since a crawler reads a missing sitemap as nothing listed and keeps the URLs it already knows.
 ``sitemap.py`` is read by the dependency resolver like a ``page.py``, so it keeps ``from __future__ import annotations`` out.
 A ``sitemap.py`` below the top of the tree is never read, and the checks say so.
 
@@ -86,6 +87,8 @@ A row that none of these reverses is a ``TypeError`` naming the callable.
        return [SitemapEntry(kwargs={"slug": slug}, changefreq="daily") for slug in ("python", "django")]
 
 The first argument is the route as the directory names spell it, and the same tree has to serve it, otherwise the build raises ``SitemapTrailError`` and ``manage.py check`` reports it ahead of time.
+An items callable, its ``kwargs=`` callable, a row of the wrong shape, or a row that does not reverse makes the sitemap answer 503 with ``Retry-After`` and logs the failure once, so a crawler comes back later rather than reading a 500.
+Under ``DEBUG`` the exception reaches the technical page with a note naming the callable and the trail.
 The callable is resolved through dependency injection like a ``@context`` callable, so ``Depends`` and a parameter annotated :class:`~django.http.HttpRequest` are available to it.
 A registration binds to the ``sitemap.py`` that runs the decorator, so the callable may live in a helper module and be registered as ``sitemap.items("notes/[int:note_id]")(notes)`` after its import.
 The decorator run anywhere else registers nothing, and two callables on one route keep only the later one, and the checks report both.
@@ -167,6 +170,10 @@ Without ``i18n`` every URL is reversed under ``LANGUAGE_CODE``, so the document 
 ``i18n = True`` lists each URL once per language, and the router include has to sit inside :func:`~django.conf.urls.i18n.i18n_patterns` for the languages to differ.
 ``alternates = True`` adds the hreflang block the ``<head>`` renders through ``alternates.languages``, and ``x_default = True`` adds the ``x-default`` alternate on the URL of the default language, the same one the head names.
 ``manage.py check`` reports ``alternates`` or ``x_default`` without ``i18n``, ``x_default`` without ``alternates``, a ``languages`` code outside ``LANGUAGES``, and ``i18n`` on a router outside ``i18n_patterns``.
+
+A sitemap document weighs at most 50 MB, and under ``alternates`` every URL carries a link per language, so a page of 50000 URLs would outgrow it.
+A page then holds ``50000 // (languages + 1)`` URLs, or ``50000 // (languages + 2)`` with ``x_default``, and ``limit`` lowers it further but never raises it.
+Two languages and ``x_default`` make pages of 12500 URLs, and a ``limit`` above that number draws ``next.W086``.
 
 See also
 --------

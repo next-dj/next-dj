@@ -9,7 +9,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from types import MappingProxyType
-from typing import Final, TypeGuard
+from typing import Final, TypeGuard, cast
 
 from next.utils import is_int
 
@@ -83,7 +83,10 @@ def _check_path(name: str, path: object) -> None:
 
 @dataclass(frozen=True, slots=True)
 class RobotsRule:
-    """One `User-agent` group of a `robots.py`, a bare string read as one value."""
+    """One `User-agent` group of a `robots.py`, a bare string read as one value.
+
+    A string or a sequence is accepted, and every field holds a tuple once built.
+    """
 
     user_agent: str | Sequence[str] = "*"
     allow: str | Sequence[str] = ()
@@ -114,8 +117,8 @@ class RobotsRule:
 
     @property
     def user_agents(self) -> tuple[str, ...]:
-        """Return the agents of the group, one or several."""
-        return _as_tuple(self.user_agent)
+        """Return the agents of the group, the tuple construction pinned."""
+        return cast("tuple[str, ...]", self.user_agent)
 
 
 __all__ = ["CHANGEFREQS", "RobotsRule", "SitemapEntry", "is_number"]

@@ -47,8 +47,13 @@ Without ``URL`` every absolute URL follows the host of the request or the ``Site
 ``site_url(request)`` answers the declared origin alone as text, and ``None`` where ``URL`` declares none.
 
 A callable ``URL`` answers per request, so one process serving several tenants names each tenant's origin.
-It receives ``None`` where no request exists, in a system check or a sitemap build, and may answer ``None`` then.
-Its answer goes through the same validation as a literal, so a value that is no origin, or ``None``, falls through to the ``Site`` row and the request host.
+It receives ``None`` where no request exists, in a sitemap build or a management command, and may answer ``None`` then.
+An answer of ``None`` falls through to the ``Site`` row and the request host.
+Any other answer goes through the same validation as a literal, and a callable takes the request as its one positional argument, which ``manage.py check`` reads off its signature without calling it.
+
+A callable that raises or answers a value that is no origin is a configuration error.
+Under ``DEBUG`` it raises ``ImproperlyConfigured`` naming the setting and the value.
+In production it is logged once, a page falls back to the request host, and ``/sitemap.xml`` and a ``robots.py`` answer 503 with ``Retry-After``, so no crawler document is built on a host a ``Host`` header chose.
 
 .. code-block:: python
    :caption: tenants/site.py
@@ -83,7 +88,8 @@ Indexability
      - Always, or never.
        ``manage.py check --deploy`` warns about ``False`` while the site still publishes a sitemap or a robots source.
    * - A callable
-     - It answers true for the request, which is ``None`` in a static context such as a system check.
+     - It answers true for the request, which is ``None`` where no request exists.
+       One that raises closes the site for the request, see below.
 
 A callable is the recipe for preview deployments that share the production settings.
 
@@ -105,6 +111,10 @@ A callable is the recipe for preview deployments that share the production setti
    NEXT_FRAMEWORK = {"SITE": {"URL": "https://notes.example", "INDEXABLE": indexable}}
 
 A request for ``https://pr-42.preview.notes.example/`` renders ``noindex, nofollow`` on every page, while the production host renders the robots directives the pages declare.
+
+A callable that raises fails closed, so a broken rule never opens a preview host to search.
+In production the request reads as not indexable and the failure is logged once, and under ``DEBUG`` the exception reaches the technical page with a note naming the setting.
+The answer is cached with the SEO responses per indexability, so a closed host never reads the copy an open one stored.
 
 A site closed to search
 -----------------------
@@ -140,7 +150,8 @@ The form dispatch and the streams take the header from it as well.
 What the checks read
 --------------------
 
-The system checks run without a request, so a callable receives ``None`` and ``"auto"`` reads ``DEBUG`` at check time.
+The system checks run without a request and never call a callable ``INDEXABLE``, which reads as open there so every check runs, and ``"auto"`` reads ``DEBUG`` at check time.
+``next.E129`` reports a callable that cannot take the request as its one positional argument.
 On a site closed at check time the checks treat every page as ``noindex``, and the two that read the served sitemap, ``next.W098`` and ``next.W100``, stay quiet, since no sitemap is served.
 
 See also

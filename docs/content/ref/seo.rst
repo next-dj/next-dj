@@ -38,6 +38,8 @@ Backends
 
 A backend takes its ``SITEMAP_BACKENDS`` entry, keeps ``OPTIONS`` as ``options``, and answers fresh Django sitemaps keyed by section name from ``sections(request)``, the request ``None`` for a check.
 ``serves()`` routes ``/sitemap.xml`` while any backend answers true, and ``cache_control()`` names the cache the sitemap views carry.
+``serves()`` runs while URLs resolve, so ``SeoManager.serves_sitemap`` counts a backend that raises as serving and logs it once, and ``sections()`` raising answers 503 through the route, the exception noted with the backend's dotted path.
+``backend_path`` answers that dotted path.
 ``shortest_cache`` settles the cache of several backends, one that forbids storing winning, then the shortest age.
 ``PageTreeSitemapBackend`` answers one section per page tree with a ``sitemap.py``, plus one per ``section=`` its items name.
 
@@ -51,6 +53,7 @@ Manager
 Its ``version`` reads ``seo_routes_version`` of ``next.urls.manager``, the token the cached views and the lazy URL patterns key on, and every ``reset`` moves it.
 ``refresh()`` resets the manager once a source file of any tree moved on disk while ``DEBUG`` watches template edits, and every SEO view asks it first, so an edited ``sitemap.py``, ``robots.py``, or ``robots.txt`` shows without a restart, as a ``scripts.py`` does.
 ``fingerprint()`` digests the sources, the backend entries, and the site config through ``stable_repr``, which spells a value alike in every process, so the cache keys of every worker agree.
+It covers no data a backend reads, so a cached sitemap of a backend keeps its rows for the declared age.
 ``forget_seo_sources`` is the receiver ``settings_reloaded`` and ``router_reloaded`` reset it through.
 ``reset_seo_sources`` drops the manager state and every ``@sitemap.items`` registration, which ``next.testing.reset_seo`` and ``reset_check_caches`` call.
 
@@ -63,6 +66,7 @@ Sitemaps
 ``PageTreeSitemap`` subclasses :class:`django.contrib.sitemaps.Sitemap` for one section of a page tree.
 Its items are one lazy ``ChainedEntries`` of the static routes and every items callable, and its ``paginator`` slices each part rather than listing it, so a ``QuerySet`` part reads one page of rows.
 ``SitemapOptions`` is the one reader of the module attributes the build and the checks share, and ``listed_trails``, ``is_excluded``, and ``static_noindex`` are the route filters both apply.
+``effective_limit`` answers the URLs one page holds, fewer under ``alternates`` so a page fits in 50 MB, and ``sitemap_languages`` the codes a section lists.
 
 .. automodule:: next.seo.sitemaps
    :members:
@@ -83,8 +87,10 @@ Routes
 ~~~~~~
 
 Every route answers ``GET`` and ``HEAD`` alone, a miss as a plain-text 404 that skips the project's 404 page, and on a site closed to search every response carries ``X-Robots-Tag: noindex, nofollow``.
-The 404 body reads ``Not found`` unless ``DEBUG`` is on, which names the reason, since that reason may name a file on disk.
-The sitemap and robots routes are wrapped in :func:`~django.views.decorators.cache.cache_page` when their source declares a storable ``cache``, keyed on the fingerprint of the sources.
+The 404 body reads ``Not found`` unless ``DEBUG`` is on, which names the reason from a fixed set of constants, never the text of an exception.
+Project code that raises inside a route, an items callable, a backend, a ``rules`` callable, or a row that does not reverse, answers 503 with ``Retry-After`` and is logged once per failure, and ``DEBUG`` or ``STRICT_LOADING`` raises it with a note naming its source.
+``Http404`` and ``PermissionDenied`` pass through, a broken ``robots.py`` answers 503 as well, and a broken ``sitemap.py`` answers 404.
+The sitemap and robots routes are wrapped in :func:`~django.views.decorators.cache.cache_page` when their source declares a storable ``cache``, keyed on the fingerprint of the sources and the indexability of the request, and only a 200 carries the declared ``Cache-Control``.
 
 ``next.seo.routes`` names every route and answers the patterns whose source exists.
 ``include("next.urls")`` carries the routes under ``next`` as ``next:sitemap``, ``next:sitemap_section``, and ``next:robots``.
@@ -137,9 +143,6 @@ The port carries no version, since the lazy urlpatterns read ``seo_routes_versio
 
 Signals
 -------
-
-``sitemap_items_registered``.
-   Sent by ``SitemapItemsRegistry`` on every registration, with the ``file``, ``trail``, and ``func`` keyword arguments.
 
 ``sitemap_backend_loaded``.
    Sent once per ``SITEMAP_BACKENDS`` entry the manager builds, with the backend class as the sender and the ``config`` and ``instance`` keyword arguments.

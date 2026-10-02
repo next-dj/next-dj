@@ -152,7 +152,7 @@ Each root becomes a ``SeoRoot`` carrying the page root, its label and section, i
 
 ``load_source`` executes a Python source through ``load_tree_source`` of ``next.utils``, the loader ``scripts.py`` goes through as well, outside the page module memo, after forgetting what the file registered before, so a re-executed ``sitemap.py`` registers its callables afresh.
 The answer is a ``TreeSource`` carrying the module or the failure and the modification time the file ran at.
-A source that raises is logged once and keeps a ``SeoSourceImportError`` on its ``SeoSource`` for the checks, and its route answers 404 through a ``BrokenSource`` rather than falling back to another source.
+A source that raises is logged once and keeps a ``SeoSourceImportError`` on its ``SeoSource`` for the checks, and its route keeps a ``BrokenSource`` rather than falling back to another source, a sitemap answering 404 and a robots file 503.
 The page module memo and its failure record never see an SEO source, so a broken ``robots.py`` leaves ``has_load_errors`` of the pages untouched.
 
 The section of a root is the ``section`` its ``sitemap.py`` declares, else the label of the innermost installed application holding the root, else the slugified directory, and ``unique_labels`` hands out the lowest free ``-N`` suffix to a repeat.
@@ -161,8 +161,7 @@ Registry
 ~~~~~~~~
 
 ``sitemap.items(trail)`` reads the file running the decorator through ``registering_file`` and registers a ``SitemapItemsEntry`` of that file, the trail, the callable, and its ``section``, ``kwargs``, and ``lastmod`` options.
-The registry keeps an ordered list and an index keyed by ``(file, trail)``, the later binding of one key replacing the earlier and a repeat within one execution recorded as a conflict for ``next.E113``.
-Every write moves its version and sends ``sitemap_items_registered``.
+The registry keeps an ordered list and an index keyed by ``(file, trail)``, the later binding of one key replacing the earlier and a repeat within one execution recorded as a conflict for ``next.E128``.
 
 Manager and backends
 ~~~~~~~~~~~~~~~~~~~~
@@ -181,7 +180,7 @@ A trail an items callable claims is left out of the static list, so the callable
 Building a section
 ~~~~~~~~~~~~~~~~~~
 
-``PageTreeSitemap`` reads its Django attributes once through ``SitemapOptions.read``, the single reader the checks share, which takes a wrong shape as unset and caps ``limit`` at 50000.
+``PageTreeSitemap`` reads its Django attributes once through ``SitemapOptions.read``, the single reader the checks share, which takes a wrong shape as unset and caps ``limit`` at 50000, and ``effective_limit`` shrinks it under ``alternates`` so a page of hreflang links fits in 50 MB.
 Its items are a ``ChainedEntries`` of ``Part`` values, the static trails first and then one part per items callable, each callable resolved through the dependency resolver with the request when there is one.
 A ``QuerySet`` answer stays a query, ordered by primary key when unordered, a sequence stays as it is, and an iterator is read into a list.
 
@@ -208,9 +207,10 @@ The URL slot
 Views
 ~~~~~
 
-Every view answers ``GET`` and ``HEAD`` alone, turns an ``Http404`` into a plain-text 404 that skips the project's 404 handler, and stamps ``X-Robots-Tag: noindex, nofollow`` on a site closed to search.
+Every view answers ``GET`` and ``HEAD`` alone, answers a miss through ``_not_found`` with a constant reason, a plain-text 404 that skips the project's 404 handler, and stamps ``X-Robots-Tag: noindex, nofollow`` on a site closed to search.
+Any other exception, from an items callable, a backend, a ``rules`` callable, or a reverse, goes through ``FailureLog.contain`` of ``next.diagnostics``, answering 503 with ``Retry-After`` and logging once, or raising with a note under ``DEBUG``.
 A view reached through a mount other than ``next_seo`` while ``next.seo.urls`` serves that route at another address answers 404, so each document has one address.
-The sitemap and robots views sit behind a single-slot wrapper that applies the declared ``Cache-Control`` and, for a storable cache with an age, :func:`~django.views.decorators.cache.cache_page` keyed on the fingerprint, and rebuilds the wrap when the manager version moves.
+The sitemap and robots views sit behind a wrapper that applies the declared ``Cache-Control`` to a 200 and, for a storable cache with an age, :func:`~django.views.decorators.cache.cache_page` keyed on the fingerprint and the indexability of the request, one wrap per indexability, rebuilt when the manager version moves.
 
 The sitemap view answers the only section as a urlset, or the index once there are several sections or a section paginates, rendering the templates of ``django.contrib.sitemaps`` with Django's ``SitemapIndexItem``.
 The robots view answers the fixed open document on a closed site, the bytes of a static file, or the rendered rules with the project's own ``Sitemap:`` line first.
@@ -237,7 +237,7 @@ See :doc:`autoreload` for the spec list and the reload decisions.
 Checks
 ~~~~~~
 
-``loaded_seo_roots`` in ``next.seo.checks.roots`` runs the same discovery the routes run and keeps it in a ``RunMemo``, so the checks of one run share a single discovery and read the sources, the modules, and the import errors the runtime loads.
+``loaded_seo_roots`` in ``next.seo.checks.roots`` answers ``seo_manager.roots()``, the discovery the routes hold, so a check run executes no source again, leaves the items registry alone, and reads the sources, the modules, and the import errors the runtime loaded.
 The checks call the helpers the routes call, ``SitemapOptions``, ``listed_trails``, and ``is_excluded`` for the sitemap and ``declared_rules`` and ``robots_candidates`` for robots, rather than restating them.
 See :doc:`/content/ref/seo` for the check list and :doc:`/content/ref/system-checks` for the codes.
 

@@ -8,6 +8,10 @@ def _live_only(request: HttpRequest | None) -> bool:
     return request is None or request.get_host() == "acme.example"
 
 
+def _raising(request: HttpRequest | None) -> bool:
+    raise RuntimeError
+
+
 def _blank(request) -> HttpResponse:
     return HttpResponse()
 
@@ -42,3 +46,9 @@ class TestRobotsHeaderMiddleware:
             preview = middleware(factory.get("/", HTTP_HOST="preview.example"))
         assert "X-Robots-Tag" not in live
         assert preview["X-Robots-Tag"] == "noindex, nofollow"
+
+    def test_a_raising_rule_closes_the_response(self) -> None:
+        middleware = RobotsHeaderMiddleware(_answer)
+        with override_settings(NEXT_FRAMEWORK={"SITE": {"INDEXABLE": _raising}}):
+            response = middleware(RequestFactory().get("/admin/"))
+        assert response["X-Robots-Tag"] == "noindex, nofollow"
