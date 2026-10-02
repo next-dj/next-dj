@@ -342,6 +342,10 @@ def classify_dirs_entries(
     return path_roots, frozenset(segments)
 
 
+_PAGE_FILES: Final = frozenset({"page.py", "template.djx"})
+"""The files that make a directory a page, a `template.djx` alone a virtual one."""
+
+
 def walk_page_tree(
     tree_root: Path,
     skip_dir_names: Iterable[str] = (),
@@ -358,6 +362,20 @@ def walk_page_tree(
     )
 
 
+def _route_rank(name: str) -> tuple[int, str]:
+    """Rank a directory among its siblings, static before parameter before catch-all.
+
+    Django tries patterns in order, so a static `about` must precede a `[slug]` that
+    would match it too, whatever order the directory read returned.
+    """
+    rank = 0
+    for match in ROUTE_BRACKET_PATTERN.finditer(name):
+        if match.group("wild") is not None:
+            return 2, name
+        rank = 1
+    return rank, name
+
+
 def _visit_page_dir(
     current_path: Path,
     tree_root: Path,
@@ -365,7 +383,11 @@ def _visit_page_dir(
     skip_dir_names: frozenset[str],
     on_skipped_dir: Callable[[Path, Path, str], None] | None,
 ) -> Generator[tuple[str, Path], None, None]:
-    """Yield the pages of one directory, then descend into its route children."""
+    """Yield the page of one directory, then descend into its route children.
+
+    The page comes first, real or virtual, and the children follow in `_route_rank`
+    order, so the patterns come out the same on every file system.
+    """
     try:
         with os.scandir(current_path) as scan:
             entries = list(scan)
@@ -373,24 +395,23 @@ def _visit_page_dir(
         logger.debug("Cannot list directory %s: %s", current_path, e)
         return
     has_page = False
-    has_template = False
+    children: list[os.DirEntry[str]] = []
     for entry in entries:
         # The kind rides along with the name the directory read returned, so a
         # tree costs a stat per symlink rather than one per entry it holds.
         if entry.is_dir():
-            if entry.name in skip_dir_names:
-                if on_skipped_dir is not None:
-                    on_skipped_dir(Path(entry.path), tree_root, url_path)
-                continue
-            child_url = f"{url_path}/{entry.name}" if url_path else entry.name
-            yield from _visit_page_dir(
-                Path(entry.path), tree_root, child_url, skip_dir_names, on_skipped_dir
-            )
-        elif entry.name == "page.py":
+            children.append(entry)
+        elif entry.name in _PAGE_FILES:
             has_page = True
-            yield url_path, Path(entry.path)
-        elif entry.name == "template.djx":
-            has_template = True
-
-    if has_template and not has_page:
+    if has_page:
         yield url_path, current_path / "page.py"
+    children.sort(key=lambda entry: _route_rank(entry.name))
+    for entry in children:
+        if entry.name in skip_dir_names:
+            if on_skipped_dir is not None:
+                on_skipped_dir(Path(entry.path), tree_root, url_path)
+            continue
+        child_url = f"{url_path}/{entry.name}" if url_path else entry.name
+        yield from _visit_page_dir(
+            Path(entry.path), tree_root, child_url, skip_dir_names, on_skipped_dir
+        )

@@ -702,12 +702,12 @@ class TestLazyUrlPatterns:
         ):
             lazy = _LazyUrlPatterns()
             assert not isinstance(lazy, list)
-            assert list(lazy) == ["r1", "r2", "f1", "c1", "s1"]
+            assert list(lazy) == ["c1", "f1", "r1", "r2", "s1"]
             assert len(lazy) == 5
-            assert lazy[0] == "r1"
+            assert lazy[0] == "c1"
             assert lazy[-1] == "s1"
-            assert lazy[1:] == ["r2", "f1", "c1", "s1"]
-            assert list(reversed(lazy)) == ["s1", "c1", "f1", "r2", "r1"]
+            assert lazy[1:] == ["f1", "r1", "r2", "s1"]
+            assert list(reversed(lazy)) == ["s1", "r2", "r1", "f1", "c1"]
 
     @pytest.mark.usefixtures("_csrf_marker")
     def test_an_early_build_leaves_the_seo_routes_out_and_caches_nothing(self) -> None:
@@ -721,9 +721,9 @@ class TestLazyUrlPatterns:
         ):
             lazy = _LazyUrlPatterns()
             with patch("next.urls.manager.seo_routes_slot", unbound):
-                assert list(lazy) == ["r1", "f1", "c1"]
+                assert list(lazy) == ["c1", "f1", "r1"]
             with patch("next.urls.manager.seo_routes_slot", bound):
-                assert list(lazy) == ["r1", "f1", "c1", "s1"]
+                assert list(lazy) == ["c1", "f1", "r1", "s1"]
 
     def test_the_token_is_the_router_form_action_and_seo_versions(self) -> None:
         assert lazy_urlpatterns.version_token() == (
@@ -756,11 +756,11 @@ class TestLazyUrlPatterns:
             patch("next.urls.manager.seo_routes_version", version),
         ):
             lazy = _LazyUrlPatterns()
-            assert list(lazy) == ["r1", "f1", "c1", "s1"]
+            assert list(lazy) == ["c1", "f1", "r1", "s1"]
             served[0] = []
-            assert list(lazy) == ["r1", "f1", "c1", "s1"]
+            assert list(lazy) == ["c1", "f1", "r1", "s1"]
             version.move()
-            assert list(lazy) == ["r1", "f1", "c1"]
+            assert list(lazy) == ["c1", "f1", "r1"]
 
     def test_routes_no_area_published_read_as_version_zero(self) -> None:
         """Before the SEO port binds no source is known, so nothing is versioned."""
@@ -813,12 +813,12 @@ class TestLazyUrlPatterns:
             patch("next.urls.manager.form_action_manager", forms),
         ):
             lazy = _LazyUrlPatterns()
-            assert list(lazy) == ["f1", "c1", "s1"]
-            assert list(lazy) == ["f1", "c1", "s1"]
+            assert list(lazy) == ["c1", "f1", "s1"]
+            assert list(lazy) == ["c1", "f1", "s1"]
             assert forms.builds == 1
             forms.items.append("f2")
             forms.version += 1
-            assert list(lazy) == ["f1", "f2", "c1", "s1"]
+            assert list(lazy) == ["c1", "f1", "f2", "s1"]
             assert forms.builds == 2
 
     def test_invalidated_by_register_action(self) -> None:
@@ -874,8 +874,8 @@ class TestLazyUrlPatterns:
             patch("next.urls.manager.form_action_manager", forms),
         ):
             lazy = _LazyUrlPatterns()
-            assert list(lazy) == ["r1", "f1", "f2", "c1", "s1"]
-            assert list(lazy) == ["r1", "f1", "f2", "c1", "s1"]
+            assert list(lazy) == ["c1", "f1", "f2", "r1", "s1"]
+            assert list(lazy) == ["c1", "f1", "f2", "r1", "s1"]
             assert router.builds == 1
             assert forms.builds == 1
 
@@ -889,11 +889,11 @@ class TestLazyUrlPatterns:
             patch("next.urls.manager.form_action_manager", forms),
         ):
             lazy = _LazyUrlPatterns()
-            assert list(reversed(lazy)) == ["s1", "c1", "f1", "r2", "r1"]
+            assert list(reversed(lazy)) == ["s1", "r2", "r1", "f1", "c1"]
             assert len(lazy) == 5
-            assert lazy[0] == "r1"
-            assert lazy[1:] == ["r2", "f1", "c1", "s1"]
-            assert list(lazy) == ["r1", "r2", "f1", "c1", "s1"]
+            assert lazy[0] == "c1"
+            assert lazy[1:] == ["f1", "r1", "r2", "s1"]
+            assert list(lazy) == ["c1", "f1", "r1", "r2", "s1"]
             assert router.builds == 1
             assert forms.builds == 1
 
