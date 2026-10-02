@@ -145,7 +145,7 @@ Every signal the framework emits is listed below with the subsystem that emits i
      - After a sitemap backend is created from its configuration entry.
    * - ``scripts_registered``
      - Scripts
-     - When the ``scripts.py`` of a page tree is registered.
+     - When the ``scripts.py`` of a page tree is registered, a tree without one sending nothing.
    * - ``consent_backend_loaded``
      - Consent
      - After the consent backend is created from its configuration entry.

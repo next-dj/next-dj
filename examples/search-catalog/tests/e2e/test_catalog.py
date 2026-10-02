@@ -40,7 +40,7 @@ READ_FIRST_ROW_TAG = (
 @pytest.fixture()
 def decided_visitor(page: Page, base_url: str) -> None:
     page.context.add_cookies(
-        [{"name": "next_consent", "value": "1::1700000000", "url": base_url}]
+        [{"name": "next_consent", "value": "2::1700000000", "url": base_url}]
     )
 
 

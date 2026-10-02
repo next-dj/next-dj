@@ -65,7 +65,7 @@ def grant(page: Page, base_url: str, categories: str) -> None:
         [
             {
                 "name": "next_consent",
-                "value": f"1:{categories}:1700000000",
+                "value": f"2:{categories}:1700000000",
                 "url": base_url,
             }
         ]

@@ -5,14 +5,16 @@ from unittest.mock import patch
 import pytest
 from django.test import Client, override_settings
 
+from next.errors import BackendImportError
 from next.pages.responses import cookie_varies
+from next.scripts.discovery import load_scripts
 from next.scripts.manager import ScriptsManager, scripts_manager
 from next.scripts.registry import ScriptsRegistry
 from next.static import StaticCollector
-from next.static.errors import StaticAssetNotFoundError
+from next.static.errors import StaticAssetNotFoundError, StaticAssetTraversalError
 from next.testing import NextClient, envelope_of
 from next.utils import PageRoot
-from tests.scripts.trees import NO_HEAD_TOKEN, get, names, payload, write_tree
+from tests.scripts.trees import HEAD, NO_HEAD_TOKEN, get, names, payload, write_tree
 from tests.support import routed, touch_later
 
 
@@ -254,8 +256,8 @@ class TestDiscovery:
             return_value=_trees(tmp_path / "pages"),
         ):
             assert manager.tree(tmp_path / "elsewhere" / "page.py") == ()
+            assert manager.tree(tmp_path / "elsewhere" / "page.py") == ()
             assert manager.tree(None) == ()
-            assert manager.root_of(tmp_path / "elsewhere" / "page.py") is None
         assert registry.roots() == (tmp_path / "pages",)
 
     def test_a_watched_listing_reads_an_edit_of_every_tree(
@@ -301,22 +303,63 @@ class TestDiscovery:
         assert [call.args[1] for call in stale.call_args_list] == [second]
 
     def test_the_innermost_tree_owns_a_nested_page(self, tmp_path: Path) -> None:
-        outer = tmp_path / "pages"
-        inner = outer / "nested"
+        outer = write_tree(tmp_path / "pages")
+        inner = write_tree(outer / "nested", scripts=NEW_SCRIPTS)
         manager = ScriptsManager(ScriptsRegistry())
         with patch(
             "next.scripts.manager.routed_page_trees", return_value=_trees(outer, inner)
         ):
-            manager.sources()
-        assert manager.root_of(inner / "page.py") == inner
-        assert manager.root_of(inner / "page.py") == inner
+            first = manager.tree(inner / "page.py")
+            again = manager.tree(inner / "page.py")
+        assert [script.name for script in first] == ["new"]
+        assert again is first
+
+    def test_a_manager_keeps_a_registry_of_its_own(self, tmp_path: Path) -> None:
+        root = write_tree(tmp_path / "pages")
+        with patch("next.scripts.manager.routed_page_trees", return_value=_trees(root)):
+            assert ScriptsManager().sources()
+        with patch("next.scripts.manager.routed_page_trees", return_value=[]):
+            assert ScriptsManager().sources() == ()
+
+
+class TestReset:
+    """A reset executes again only the `scripts.py` files that moved."""
+
+    def test_an_unchanged_source_is_not_executed_again(self, tmp_path: Path) -> None:
+        first = write_tree(tmp_path / "a" / "pages")
+        second = write_tree(tmp_path / "b" / "pages", scripts=None)
+        manager = ScriptsManager(ScriptsRegistry())
+        with (
+            patch(
+                "next.scripts.manager.routed_page_trees",
+                return_value=_trees(first, second),
+            ),
+            patch(
+                "next.scripts.manager.load_scripts", side_effect=load_scripts
+            ) as loads,
+        ):
+            before = manager.sources()
+            manager.reset()
+            manager.reset()
+            kept = manager.sources()
+            touch_later(first / "scripts.py", NEW_SCRIPTS)
+            manager.reset()
+            moved = manager.sources()
+        assert kept == before
+        assert [call.args[0] for call in loads.call_args_list] == [first, second, first]
+        assert [script.name for script in moved[0].scripts] == ["new"]
 
 
 class TestSources:
     """A script whose file the storage cannot answer costs its tag, not the page."""
 
-    def test_a_missing_file_drops_the_src(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    @pytest.mark.parametrize(
+        "error",
+        [StaticAssetNotFoundError("x"), StaticAssetTraversalError("x")],
+        ids=["missing", "traversal"],
+    )
+    def test_an_unusable_file_drops_the_src_logged_once(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, error: Exception
     ) -> None:
         scripts = (
             "from next.scripts import Script\n"
@@ -324,17 +367,20 @@ class TestSources:
             "init='window.b=1'))\n"
         )
         root = write_tree(tmp_path / "pages", scripts=scripts)
+        client = Client()
         with (
+            routed(root),
             patch(
-                "next.static.backends.StaticFilesBackend.resolve_url",
-                side_effect=StaticAssetNotFoundError("x"),
+                "next.static.backends.StaticFilesBackend.resolve_url", side_effect=error
             ),
             caplog.at_level(logging.WARNING, "next.scripts.manager"),
         ):
-            html = get(root).content.decode()
+            responses = [client.get("/"), client.get("/")]
+        assert [response.status_code for response in responses] == [200, 200]
+        html = responses[0].content.decode()
         assert 'data-next-script="a"' not in html
         assert '<script data-next-script="b">window.b=1</script>' in html
-        assert "'a' names a missing file" in caplog.text
+        assert caplog.text.count("'a' names a missing file") == 1
 
     def test_a_staticfiles_name_resolves_through_the_storage(
         self, tmp_path: Path
@@ -405,3 +451,109 @@ class TestRenderWithoutPage:
         assert scripts_manager.render(
             StaticCollector(), page_path=None, request=None, nonce=None
         ) == ("", {})
+
+
+HELD_PAGE = (
+    'template = \'{% #consented "marketing" %}<video>'
+    '{% script "optional" %}{% script "chat" %}'
+    '{% use_script "https://cdn.example/x.js" %}'
+    '{% use_module "https://cdn.example/m.mjs" %}'
+    '{% use_script "https://cdn.example/both.js" %}'
+    "{% #use_script %}window.y=1{% /use_script %}"
+    '{% use_style "https://cdn.example/a.css" %}'
+    "{% /consented %}"
+    '{% use_script "https://cdn.example/both.js" %}'
+    '{% #consented "marketing" %}'
+    '{% use_script "https://cdn.example/x.js" %}{% /consented %}'
+    '{% #consented "stats" %}{% script "nope" %}{% /consented %}\'\n'
+)
+
+
+class TestHeldScripts:
+    """A client-rendered gated body hands its scripts to the runtime, in its category."""
+
+    def test_they_wait_in_the_manifest(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        root = write_tree(
+            tmp_path / "pages",
+            page=HELD_PAGE + "cache = 60\n",
+            layout=HEAD.replace("<title>", "{% collect_styles %}<title>"),
+        )
+        with caplog.at_level(logging.WARNING, "next.scripts.manager"):
+            response = get(root, cookie=MARKETING, CONSENT=CATEGORIES)
+        html = response.content.decode()
+        assert 'src="https://cdn.example/x.js"' not in html
+        assert 'src="https://cdn.example/m.mjs"' not in html
+        assert ">window.y=1<" not in html
+        assert 'data-next-script="optional"' not in html
+        assert '<script src="https://cdn.example/both.js"' in html
+        assert 'href="https://cdn.example/a.css"' in html
+        entries = {entry["name"]: entry for entry in payload(response)["$scripts"]}
+        assert entries["optional"]["category"] == "marketing"
+        assert entries["chat"]["category"] == "necessary"
+        assert entries["https://cdn.example/x.js"] == {
+            "name": "https://cdn.example/x.js",
+            "src": "https://cdn.example/x.js",
+            "strategy": "defer",
+            "category": "marketing",
+            "attrs": {},
+        }
+        assert entries["https://cdn.example/m.mjs"]["attrs"] == {"type": "module"}
+        [inline] = [name for name in entries if name.startswith("inline:")]
+        assert entries[inline]["init"] == "window.y=1"
+        assert "src" not in entries[inline]
+        assert "https://cdn.example/both.js" not in entries
+        assert "'nope'" in caplog.text
+
+    def test_a_server_render_writes_a_granted_body_in_place(
+        self, tmp_path: Path
+    ) -> None:
+        root = write_tree(tmp_path / "pages", page=HELD_PAGE)
+        response = get(root, cookie=MARKETING, CONSENT=CATEGORIES)
+        html = response.content.decode()
+        assert '<script src="https://cdn.example/x.js"' in html
+        assert 'data-next-script="optional"' in html
+        assert all(
+            not entry["name"].startswith("https://")
+            for entry in payload(response)["$scripts"]
+        )
+
+
+BROKEN_BACKEND = {"BACKEND": "no.such.Backend", "CATEGORIES": ["marketing"]}
+
+
+class TestBrokenConsentBackend:
+    """A consent backend that fails costs the gated scripts, never the page."""
+
+    def test_the_page_renders_with_every_category_denied(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        root = write_tree(tmp_path / "pages")
+        client = Client()
+        client.cookies["next_consent"] = MARKETING
+        with (
+            routed(root, CONSENT=BROKEN_BACKEND),
+            caplog.at_level(logging.ERROR, "next.consent.manager"),
+        ):
+            responses = [client.get("/"), client.get("/")]
+        assert [response.status_code for response in responses] == [200, 200]
+        html = responses[0].content.decode()
+        assert "px.example" not in html.split("</head>")[0]
+        data = payload(responses[0])
+        assert data["$consent"]["decided"] is False
+        assert "cookie" not in data["$consent"]
+        assert caplog.text.count("failed to load") == 1
+
+    def test_debug_raises_naming_the_setting(self, tmp_path: Path) -> None:
+        root = write_tree(tmp_path / "pages")
+        client = Client(raise_request_exception=True)
+        with (
+            routed(root, CONSENT=BROKEN_BACKEND),
+            override_settings(DEBUG=True),
+            pytest.raises(BackendImportError) as caught,
+        ):
+            client.get("/")
+        assert "NEXT_FRAMEWORK['CONSENT']['BACKEND']" in "".join(
+            getattr(caught.value, "__notes__", [])
+        )

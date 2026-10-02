@@ -652,25 +652,30 @@ Errors
      - ``CSRF_DELIVERY`` names no mode, so ``"auto"`` applies.
      - ``next.pages.checks.responses``
    * - ``next.E133``
-     - A ``scripts.py`` fails to import, or its ``scripts`` holds anything but ``Script`` values, and its tree runs none of its scripts.
+     - A ``scripts.py`` fails to import, and its tree runs none of its scripts, or its ``scripts`` holds anything but ``Script`` values, and the tree runs only the ``Script`` values it holds.
+       The message names the import error or the stray type, and the pages keep rendering meanwhile.
      - ``next.scripts.checks``
    * - ``next.E134``
      - A ``scripts.py`` declares one script name twice.
      - ``next.scripts.checks``
    * - ``next.E135``
      - ``CONSENT["CATEGORIES"]`` is no list of names or lacks ``necessary``.
-     - ``next.scripts.checks``
+       While it fires, ``next.E140`` stays silent, since the list is fixed first.
+     - ``next.consent.checks``
    * - ``next.E136``
      - A script carries neither ``src`` nor ``init``.
      - ``next.scripts.checks``
    * - ``next.E137``
      - ``CONSENT["BACKEND"]`` does not import or is no ``ConsentBackend`` subclass.
+       Pages still render, every visitor reading as undecided with every category but ``necessary`` denied, and the failure is logged once, or raised under ``DEBUG``.
+       Name a subclass by its dotted path, or remove ``BACKEND`` to read the cookie the runtime writes.
      - ``next.consent.checks``
    * - ``next.E138``
      - A script loads through the runtime, by a gated category or an ``IDLE``, ``INTERACTION``, or ``MANUAL`` strategy, while ``NEXT_JS_OPTIONS["policy"]`` keeps the runtime off every page.
      - ``next.scripts.checks``
    * - ``next.E140``
      - A script names a category ``CONSENT["CATEGORIES"]`` does not list, so no visitor can grant it.
+       Silent while ``next.E135`` reports the list.
      - ``next.scripts.checks``
    * - ``next.E141``
      - A script ``src`` is neither an http or https URL nor a staticfiles name a finder answers, such as another scheme, a scheme-relative URL, an absolute path, or a name that climbs out of the static root.
@@ -688,8 +693,8 @@ Errors
      - ``CONSENT["SERVER_RENDER"]`` is outside ``"auto"``, ``True``, and ``False``.
      - ``next.consent.checks``
    * - ``next.E146``
-     - A ``CONSENT["CATEGORIES"]`` name holds a character outside letters, digits, ``_``, ``-``, and ``.``, which the consent cookie ``1:<categories>:<seconds>`` cannot carry.
-     - ``next.scripts.checks``
+     - A ``CONSENT["CATEGORIES"]`` name holds a character outside letters, digits, ``_``, ``-``, and ``.``, which the consent cookie ``2:<a>|<b>:<seconds>`` cannot carry.
+     - ``next.consent.checks``
    * - ``next.E147``
      - A registered asset kind renders through a method of the rendering backend, the first ``STATIC_BACKENDS`` entry that loads, which is missing or takes no ``request`` and ``nonce`` keywords, so every page holding such an asset fails to render.
      - ``next.static.checks``
@@ -840,6 +845,11 @@ Warnings
      - A ``noindex`` page points its canonical at another origin, which passes no signal.
        On a site closed to search every page reads as ``noindex``, so any cross-origin canonical draws it.
      - ``next.pages.checks.metadata.shape``
+   * - ``next.W092``
+     - A ``{% #consented %}`` block on a composed page, a component it reaches, or a template it includes names by a literal a category ``CONSENT["CATEGORIES"]`` does not list, so no visitor can grant it and the block always renders its ``else`` branch.
+       A category named by a variable is not read, and under ``DEBUG`` a render logs such a category once.
+       Silent while ``CONSENT`` is unset, which ``next.W133`` reports, or while ``next.E135`` reports the list.
+     - ``next.scripts.checks``
    * - ``next.W097``
      - A dynamic route of a tree with a ``sitemap.py`` has no ``@sitemap.items`` callable, matches no ``exclude`` glob, and is not ``noindex`` by its static metadata, so the sitemap lists no URL for it.
      - ``next.seo.checks.sitemaps``

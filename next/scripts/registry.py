@@ -15,15 +15,17 @@ class ScriptsRegistry:
         self._index: dict[Path, ScriptsSource | None] = {}
 
     def register(self, root: Path, source: ScriptsSource | None) -> None:
-        """Bind the source of the tree at `root`, `None` for a tree without one."""
+        """Bind the source of the tree at `root`, `None` for a tree without one.
+
+        `scripts_registered` announces a tree holding a `scripts.py`, the rest pass.
+        """
         if root not in self._index:
             self._roots.append(root)
         self._index[root] = source
-        scripts_registered.send(
-            sender=ScriptsRegistry,
-            root=root,
-            scripts=() if source is None else source.scripts,
-        )
+        if source is not None:
+            scripts_registered.send(
+                sender=ScriptsRegistry, root=root, source=source, scripts=source.scripts
+            )
 
     def source(self, root: Path) -> ScriptsSource | None:
         """Return the source of the tree at `root`, if it has one."""
@@ -45,7 +47,4 @@ class ScriptsRegistry:
         self._index.clear()
 
 
-scripts_registry = ScriptsRegistry()
-
-
-__all__ = ["ScriptsRegistry", "scripts_registry"]
+__all__ = ["ScriptsRegistry"]

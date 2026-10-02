@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 from urllib.parse import urlsplit
 
 from django.conf import settings
@@ -19,8 +18,7 @@ from django.core.checks import (
 
 from next.checks import NEXT
 from next.conf import next_framework_settings
-from next.conf.defaults import USER_SETTING
-from next.consent import NECESSARY
+from next.consent.checks import category_list_problem
 from next.consent.manager import consent_categories, consent_configured, server_render
 from next.pages.checks.composed import iter_composed_pages
 from next.pages.checks.metadata.templates import TemplateSearch, page_template_path
@@ -40,9 +38,6 @@ if TYPE_CHECKING:
     from .discovery import ScriptsSource
 
 
-_CATEGORY_NAME: Final = re.compile(r"[A-Za-z0-9_.-]+")
-"""A category name the consent cookie `1:<categories>:<seconds>` carries intact."""
-
 _NAMED_PAGES: Final = 3
 
 
@@ -58,7 +53,9 @@ def check_scripts_sources(*args, **kwargs) -> list[CheckMessage]:
         if source.error is not None:
             messages.append(
                 Error(
-                    f"{source.error}: {source.error.__cause__}",
+                    f"{source.error}: {source.error.__cause__!r}. Fix the error the "
+                    "import raises, the pages of the tree render meanwhile without "
+                    "these scripts.",
                     obj=str(source.path),
                     id="next.E133",
                 )
@@ -66,7 +63,8 @@ def check_scripts_sources(*args, **kwargs) -> list[CheckMessage]:
         elif source.problem is not None:
             messages.append(
                 Error(
-                    f"{source.path} declares {source.problem}. Write "
+                    f"{source.path} declares {source.problem}, so its tree runs "
+                    "only the Script values it holds. Write "
                     "scripts = (Script(...), ...).",
                     obj=str(source.path),
                     id="next.E133",
@@ -96,73 +94,28 @@ def check_script_names(*args, **kwargs) -> list[CheckMessage]:
     return messages
 
 
-def _raw_categories() -> object:
-    """Return `CONSENT['CATEGORIES']` as written, `None` where it is not."""
-    raw = getattr(settings, USER_SETTING, None)
-    scope = raw.get("CONSENT") if isinstance(raw, dict) else None
-    return scope.get("CATEGORIES") if isinstance(scope, dict) else None
-
-
-def _listed_categories() -> list[CheckMessage]:
-    """Report a `CONSENT['CATEGORIES']` that is no list of names or lacks necessary."""
-    listed = _raw_categories()
-    if listed is None:
-        return []
-    if not isinstance(listed, list | tuple) or not all(
-        isinstance(name, str) and name for name in listed
-    ):
-        problem = "lists no category names. Write names like ['necessary', 'ads']"
-    elif NECESSARY not in listed:
-        problem = f"does not list {NECESSARY!r}, the category every visitor grants"
-    else:
-        return []
-    return [
-        Error(
-            f"NEXT_FRAMEWORK['CONSENT']['CATEGORIES'] {problem}.",
-            obj=settings,
-            id="next.E135",
-        )
-    ]
-
-
-def _unsafe_categories() -> list[CheckMessage]:
-    """Report a category name the consent cookie cannot carry (`next.E146`)."""
-    listed = _raw_categories()
-    names = listed if isinstance(listed, list | tuple) else ()
-    return [
-        Error(
-            f"NEXT_FRAMEWORK['CONSENT']['CATEGORIES'] lists {name!r}, which the "
-            "consent cookie cannot carry, since it joins the granted names with "
-            "commas between colons. Use only letters, digits, '_', '-' and '.'.",
-            obj=settings,
-            id="next.E146",
-        )
-        for name in names
-        if isinstance(name, str) and name and not _CATEGORY_NAME.fullmatch(name)
-    ]
-
-
 @register(NEXT)
 def check_script_categories(*args, **kwargs) -> list[CheckMessage]:
-    """Report an unusable category list (E135, E146) and a script outside it (E140)."""
+    """Report a script in a category the list leaves out (`next.E140`).
+
+    A list `next.E135` reports is fixed first, so it draws no error per script.
+    """
+    if category_list_problem() is not None:
+        return []
     categories = consent_categories()
-    return (
-        _listed_categories()
-        + _unsafe_categories()
-        + [
-            Error(
-                f"{source.path} puts the script {script.name!r} in the category "
-                f"{script.category!r}, which NEXT_FRAMEWORK['CONSENT']['CATEGORIES'] "
-                f"does not list, so no visitor can grant it. Use one of "
-                f"{', '.join(categories)}.",
-                obj=str(source.path),
-                id="next.E140",
-            )
-            for source in _sources()
-            for script in source.scripts
-            if script.category not in categories
-        ]
-    )
+    return [
+        Error(
+            f"{source.path} puts the script {script.name!r} in the category "
+            f"{script.category!r}, which NEXT_FRAMEWORK['CONSENT']['CATEGORIES'] "
+            f"does not list, so no visitor can grant it. Use one of "
+            f"{', '.join(categories)}, or add {script.category!r} to the list.",
+            obj=str(source.path),
+            id="next.E140",
+        )
+        for source in _sources()
+        for script in source.scripts
+        if script.category not in categories
+    ]
 
 
 def _src_problem(src: str) -> str | None:
@@ -304,6 +257,47 @@ def check_consented_needs_consent(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
+@register(Tags.templates, NEXT)
+def check_consented_categories(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about `{% #consented %}` naming an unlisted category (`next.W092`).
+
+    Only a literal name is read, the first page reaching it named in the message.
+    """
+    if not consent_configured() or category_list_problem() is not None:
+        return []
+    categories = consent_categories()
+    unknown: dict[str, str] = {}
+    page = ""
+
+    def collect(nodelist: NodeList) -> bool:
+        nodes = cast(
+            "list[ConsentedTagNode]", nodelist.get_nodes_by_type(ConsentedTagNode)
+        )
+        for node in nodes:
+            name = node.literal_category()
+            if name is not None and name not in categories:
+                unknown.setdefault(name, page)
+        # Never a match, so the search walks every template the page reaches.
+        return False
+
+    search = TemplateSearch(collect)
+    for page_path, template in iter_composed_pages():
+        page = str(page_path)
+        search.reaches(template.nodelist, page_template_path(page_path))
+    return [
+        DjangoWarning(
+            f"{{% #consented {name!r} %}} renders on {first}, while "
+            "NEXT_FRAMEWORK['CONSENT']['CATEGORIES'] does not list "
+            f"{name!r}, so no visitor can grant it and the block always renders "
+            f"its else branch. Add {name!r} to the list, or name one of "
+            f"{', '.join(categories)}.",
+            obj=settings,
+            id="next.W092",
+        )
+        for name, first in unknown.items()
+    ]
+
+
 @register(NEXT, deploy=True)
 def check_script_deploy(*args, **kwargs) -> list[CheckMessage]:
     """Warn about a script loaded over plain HTTP (`next.W127`)."""
@@ -321,6 +315,7 @@ def check_script_deploy(*args, **kwargs) -> list[CheckMessage]:
 
 
 __all__ = [
+    "check_consented_categories",
     "check_consented_needs_consent",
     "check_gated_blocking_scripts",
     "check_script_categories",

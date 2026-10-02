@@ -12,8 +12,18 @@ from next.utils import is_int
 from .markers import NECESSARY, UNDECIDED, Consent
 
 
-COOKIE_VERSION: Final = "1"
-"""The format the runtime writes the consent cookie in, `1:<categories>:<seconds>`."""
+COOKIE_VERSION: Final = "2"
+"""The format the runtime writes the consent cookie in, `2:<categories>:<seconds>`.
+
+The granted categories are joined by `|`, a cookie-octet a category name never holds.
+"""
+
+_SEPARATORS: Final[Mapping[str, str]] = {COOKIE_VERSION: "|", "1": ","}
+"""The category separator of every format the backend reads.
+
+The first format joined the names with commas, which RFC 6265 keeps out of a cookie
+value, and stays readable for the cookies browsers already hold.
+"""
 
 _COOKIE_PARTS: Final = 3
 _COOKIE_DEFAULTS: Final[Mapping[str, object]] = DEFAULTS["CONSENT"]["OPTIONS"]
@@ -42,6 +52,15 @@ class ConsentBackend(ABC):
     def read(self, request: HttpRequest) -> Consent:
         """Return the consent the request carries, undecided when it carries none."""
 
+    def client_config(self) -> Mapping[str, object]:
+        """Return the entries the backend adds to `$consent` for the runtime.
+
+        The runtime keeps a choice only in its consent cookie, so a backend reading
+        anything else gets nothing back from the browser. The default adds nothing,
+        and the runtime then writes the cookie under its default name and age.
+        """
+        return {}
+
 
 class CookieConsentBackend(ConsentBackend):
     """Reads the first-party cookie the runtime writes, no server endpoint involved.
@@ -67,10 +86,16 @@ class CookieConsentBackend(ConsentBackend):
         if not isinstance(raw, str):
             return UNDECIDED
         parts = raw.split(":")
-        if len(parts) != _COOKIE_PARTS or parts[0] != COOKIE_VERSION:
+        separator = _SEPARATORS.get(parts[0])
+        if len(parts) != _COOKIE_PARTS or separator is None:
             return UNDECIDED
-        granted = {category for category in parts[1].split(",") if category}
+        granted = {category for category in parts[1].split(separator) if category}
         return Consent(frozenset({NECESSARY, *granted}), decided=True)
+
+    @override
+    def client_config(self) -> Mapping[str, object]:
+        """Name the cookie the runtime writes, under the `cookie` entry."""
+        return {"cookie": self.cookie()}
 
     def cookie(self) -> dict[str, object]:
         """Return the cookie the runtime writes, a None `secure` taking the scheme."""

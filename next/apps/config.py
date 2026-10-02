@@ -7,6 +7,8 @@ from typing import override
 from django.apps import AppConfig
 
 from next.checks import register_all as _register_checks
+from next.conf.signals import settings_reloaded
+from next.consent.manager import forget_consent_settings
 from next.deps.resolver import apply_resolver_setting, forget_dep_caches
 from next.forms.autodiscover import autodiscover_forms
 from next.pages.loaders import forget_page_roots
@@ -54,7 +56,11 @@ class NextFrameworkConfig(AppConfig):
         router_reloaded.connect(forget_dep_caches)
         router_reloaded.connect(forget_seo_sources)
         router_reloaded.connect(forget_translated_urls)
-        router_reloaded.connect(forget_scripts)
+        router_reloaded.connect(forget_scripts, dispatch_uid="next.scripts.router")
+        settings_reloaded.connect(forget_scripts, dispatch_uid="next.scripts.settings")
+        settings_reloaded.connect(
+            forget_consent_settings, dispatch_uid="next.consent.settings"
+        )
         # Ahead of every install, because component discovery and form autodiscovery
         # import user modules that must see the configured resolver, not the base one.
         apply_resolver_setting()

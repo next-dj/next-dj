@@ -89,7 +89,7 @@ describe("consent updates", () => {
     document.addEventListener("next:consent", onDocument);
     consent.update({ analytics: true, marketing: false });
     document.removeEventListener("next:consent", onDocument);
-    expect(cookie("next_consent")).toBe("1:analytics:1700000000");
+    expect(cookie("next_consent")).toBe("2:analytics:1700000000");
     expect(consent.decided()).toBe(true);
     expect(dispatched).toEqual([
       {
@@ -115,15 +115,15 @@ describe("consent updates", () => {
       analytics: true,
       marketing: true,
     });
-    expect(cookie("next_consent")).toBe("1:analytics,marketing:1700000000");
+    expect(cookie("next_consent")).toBe("2:analytics|marketing:1700000000");
   });
 
   it("acceptAll and rejectAll flip every category past necessary", () => {
     const { consent, dispatched } = makeConsent();
     consent.acceptAll();
-    expect(cookie("next_consent")).toBe("1:analytics,marketing,preferences:1700000000");
+    expect(cookie("next_consent")).toBe("2:analytics|marketing|preferences:1700000000");
     consent.rejectAll();
-    expect(cookie("next_consent")).toBe("1::1700000000");
+    expect(cookie("next_consent")).toBe("2::1700000000");
     expect(consent.get()).toMatchObject({ necessary: true, analytics: false });
     expect(dispatched.at(-1)!.detail.changed).toEqual([
       "analytics",
@@ -148,7 +148,7 @@ describe("consent updates", () => {
     const { consent, dispatched } = makeConsent();
     consent.rejectAll();
     expect(consent.decided()).toBe(true);
-    expect(cookie("next_consent")).toBe("1::1700000000");
+    expect(cookie("next_consent")).toBe("2::1700000000");
     expect(dispatched).toHaveLength(1);
   });
 
@@ -183,14 +183,14 @@ describe("consent cookie attributes", () => {
         secure: true,
       }),
     ).toBe(
-      "c=1:analytics:1700000000; path=/app/; max-age=60; samesite=Strict; " +
+      "c=2:analytics:1700000000; path=/app/; max-age=60; samesite=Strict; " +
         "domain=example.com; secure",
     );
   });
 
   it("falls back to the default name, root path, age and the page scheme", () => {
     expect(written({ max_age: null })).toBe(
-      "next_consent=1:analytics:1700000000; path=/; max-age=15552000",
+      "next_consent=2:analytics:1700000000; path=/; max-age=15552000",
     );
   });
 
@@ -205,7 +205,7 @@ describe("consent without a payload", () => {
   it("defaults the clock, reload and document", () => {
     const consent = createConsent({ dispatch: () => undefined });
     consent.acceptAll();
-    expect(cookie("next_consent")).toMatch(/^1::\d+$/);
+    expect(cookie("next_consent")).toMatch(/^2::\d+$/);
   });
 
   it("reloads the document it writes to and follows its scheme", () => {
@@ -236,11 +236,18 @@ describe("the stored decision", () => {
   afterEach(clearCookies);
 
   it("wins over the undecided state a shared page carries", () => {
-    document.cookie = "next_consent=1:analytics,unknown:1700000000; path=/";
+    document.cookie = "next_consent=2:analytics|unknown:1700000000; path=/";
     const { consent } = makeConsent();
     expect(consent.decided()).toBe(true);
     expect(consent.get()).toMatchObject({ analytics: true, marketing: false });
     expect(consent.get()).not.toHaveProperty("unknown");
+  });
+
+  it("reads the first format, which joins the categories with commas", () => {
+    document.cookie = "next_consent=1:analytics,unknown:1700000000; path=/";
+    const { consent } = makeConsent();
+    expect(consent.decided()).toBe(true);
+    expect(consent.get()).toMatchObject({ analytics: true, marketing: false });
   });
 
   it("reads the cookie the payload names", () => {
@@ -254,7 +261,7 @@ describe("the stored decision", () => {
     expect(consent.get()).toMatchObject({ analytics: false });
   });
 
-  it.each(["2:analytics:1", "1:analytics", "garbage", ""])(
+  it.each(["3:analytics:1", "2:analytics", "1:analytics", "garbage", ""])(
     "falls back to the payload for a foreign value %j",
     (value) => {
       document.cookie = `next_consent=${value}; path=/`;
