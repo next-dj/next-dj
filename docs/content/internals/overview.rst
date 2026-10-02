@@ -120,7 +120,7 @@ The diagram below shows which subsystem emits each signal and the typical receiv
        Watch["Long lived listeners"]
 
        Pages -- "template_loaded, context_registered, metadata_registered, page_rendered" --> Audit
-       Seo -- "sitemap_items_registered" --> Audit
+       Seo -- "sitemap_backend_loaded" --> Audit
        Components -- "component_registered, components_registered, component_rendered, component_backend_loaded" --> Audit
        URLs -- "route_registered, router_reloaded, router_backend_loaded" --> Watch
        Forms -- "action_registered, action_dispatched, form_validation_failed, form_access_denied, wizard_step_submitted, wizard_completed, form_backend_loaded, wizard_backend_loaded" --> Audit

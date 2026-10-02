@@ -137,9 +137,6 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``partial_backend_loaded``
      - Partial
      - After the partial protocol backend is created from its configuration entry.
-   * - ``sitemap_items_registered``
-     - SEO
-     - After ``@sitemap.items`` binds a callable to a route trail under a page root.
    * - ``sitemap_backend_loaded``
      - SEO
      - After a sitemap backend is created from its configuration entry.

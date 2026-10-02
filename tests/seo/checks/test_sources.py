@@ -198,7 +198,7 @@ class TestModuleAttributes:
             [error] = check_seo_module_attributes()
         assert error.id == "next.E113"
 
-    def test_two_items_callables_on_one_trail_are_e113(self, tmp_path) -> None:
+    def test_two_items_callables_on_one_trail_are_e128(self, tmp_path) -> None:
         root = write_tree(
             tmp_path / "pages",
             pages=("posts/[slug]",),
@@ -212,7 +212,7 @@ class TestModuleAttributes:
         )
         with routed(root):
             [error] = check_seo_module_attributes()
-        assert error.id == "next.E113"
+        assert error.id == "next.E128"
         assert "on drafts and then on published" in error.msg
         assert error.obj == str(root / "sitemap.py")
 

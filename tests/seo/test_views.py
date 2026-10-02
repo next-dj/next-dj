@@ -319,22 +319,26 @@ class TestStaticSitemap:
 
 
 class TestBrokenSources:
-    """A source that fails to import holds its route and answers 404."""
+    """A source that fails to import holds its route, a sitemap answering 404.
+
+    A broken robots answers 503, since a crawler reads a 404 there as allow all.
+    """
 
     @pytest.mark.parametrize(
-        ("sources", "path", "failed"),
+        ("sources", "path", "failed", "status"),
         [
-            ({"sitemap": "1/0\n"}, "/sitemap.xml", "sitemap.py"),
+            ({"sitemap": "1/0\n"}, "/sitemap.xml", "sitemap.py", 404),
             (
                 {"robots": "1/0\n", "robots_txt": b"User-agent: *\n"},
                 "/robots.txt",
                 "robots.py",
+                503,
             ),
         ],
         ids=["sitemap", "robots"],
     )
-    def test_every_broken_source_answers_404_and_logs_once(
-        self, tmp_path, caplog, sources, path, failed
+    def test_every_broken_source_holds_its_route_and_logs_once(
+        self, tmp_path, caplog, sources, path, failed, status
     ) -> None:
         root = write_tree(tmp_path / "pages", **sources)
         with (
@@ -343,9 +347,21 @@ class TestBrokenSources:
         ):
             first = Client().get(path)
             second = Client().get(path)
-        assert first.status_code == second.status_code == 404
-        assert first.content == b"Not found"
+        assert first.status_code == second.status_code == status
         assert caplog.text.count(f"{root / failed} failed to import") == 1
+
+    def test_a_broken_sitemap_answers_the_plain_404(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", sitemap="1/0\n")
+        with routed(root, **WITH_BASE):
+            response = Client().get("/sitemap.xml")
+        assert response.content == b"Not found"
+
+    def test_a_broken_robots_asks_crawlers_to_retry(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", robots="1/0\n")
+        with routed(root, **WITH_BASE):
+            response = Client().get("/robots.txt")
+        assert response["Retry-After"] == "300"
+        assert response.content == b""
 
     def test_one_broken_tree_ships_no_partial_sitemap(self, tmp_path) -> None:
         good = write_tree(tmp_path / "a" / "pages", pages=("about",), sitemap="")
@@ -388,10 +404,23 @@ class TestDeclaredItems:
         assert parse_sitemap(response)[0].lastmod == "2026-01-02"
         assert response["Last-Modified"] == "Fri, 02 Jan 2026 06:00:00 GMT"
 
-    def test_an_unknown_trail_raises_at_build(self, tmp_path) -> None:
+    def test_an_unknown_trail_answers_503_and_logs_once(self, tmp_path, caplog) -> None:
         root = write_tree(tmp_path / "pages", pages=("about",), sitemap=UNKNOWN)
-        with routed(root), pytest.raises(SitemapTrailError, match="nope"):
+        with routed(root), caplog.at_level(logging.ERROR, logger="next.seo"):
+            first = Client().get("/sitemap.xml")
+            second = Client().get("/sitemap.xml")
+        assert first.status_code == second.status_code == 503
+        assert first["Retry-After"] == "300"
+        assert first.content == b""
+        [record] = [r for r in caplog.records if r.name == "next.seo.views"]
+        assert "/sitemap.xml raised SitemapTrailError" in record.getMessage()
+
+    @override_settings(DEBUG=True)
+    def test_debug_raises_an_unknown_trail(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", pages=("about",), sitemap=UNKNOWN)
+        with routed(root), pytest.raises(SitemapTrailError, match="nope") as caught:
             Client().get("/sitemap.xml")
+        assert "answers 503" in caught.value.__notes__[-1]
 
     def test_an_items_trail_under_exclude_lists_nothing(self, tmp_path) -> None:
         root = write_tree(
@@ -514,7 +543,7 @@ class TestCache:
         ):
             Client().get("/sitemap.xml")
             fingerprint = seo_manager.fingerprint()
-        wrapper.assert_called_once_with(60, key_prefix=f"next-seo-{fingerprint}")
+        wrapper.assert_called_once_with(60, key_prefix=f"next-seo-{fingerprint}-1")
 
     def test_a_declared_robots_cache_caches_robots(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", robots="cache = 3600\n")
@@ -570,9 +599,10 @@ class TestCache:
             sitemap="cache = 60\n" + RAISING,
         )
         with routed(root, **WITH_BASE):
-            client = Client(raise_request_exception=False)
-            assert client.get("/sitemap.xml").status_code == 500
-            assert client.get("/sitemap.xml").status_code == 500
+            first = Client().get("/sitemap.xml")
+            second = Client().get("/sitemap.xml")
+        assert first.status_code == second.status_code == 503
+        assert "Cache-Control" not in first
         assert CALLS == ["call", "call"]
 
     def test_an_edited_cache_takes_effect_once_the_manager_resets(
@@ -664,8 +694,7 @@ class TestRobots:
         root = write_tree(tmp_path / "pages", robots=INJECTED)
         with routed(root):
             response = Client().get("/robots.txt")
-        assert response.status_code == 404
-        assert seo_manager.robots_source() is None
+        assert response.status_code == 503
 
     def test_a_static_file_is_served_byte_for_byte(self, tmp_path) -> None:
         raw = b"\xff\xfeUser-agent: *\r\nDisallow: /x/\r\n"

@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from typing import TYPE_CHECKING, Any, Final, Literal, override
 
+from django.conf import settings
 from django.urls import clear_url_caches
 from django.utils.functional import Promise
 
@@ -15,12 +16,13 @@ from next.backends import BackendListManager, load_backends
 from next.conf.defaults import DEFAULTS
 from next.conf.scopes import scope_value
 from next.conf.signals import settings_reloaded
-from next.site import site_config, site_indexable
-from next.site.config import debug_closed
+from next.diagnostics import FailureLog
+from next.site import site_config
+from next.site.config import site_closed_to_crawlers
 from next.urls.manager import seo_routes_version
 from next.utils import UNSET, Unset, template_edits_watched
 
-from .backends import SitemapBackend, shortest_cache
+from .backends import SitemapBackend, backend_path, shortest_cache
 from .discovery import (
     SOURCE_NAMES,
     BrokenSource,
@@ -45,6 +47,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+_failures = FailureLog(logger)
 
 SEO_SCOPE: Final = "SEO"
 SITEMAP_BACKENDS: Final = "SITEMAP_BACKENDS"
@@ -66,10 +69,14 @@ def sitemap_backend_entries() -> list[Mapping[str, Any]]:
 def _first_served[P: tuple[Path, object]](
     kind: str, candidates: Sequence[P]
 ) -> P | None:
-    """Return the first candidate that serves, warning once about every other one."""
+    """Return the first candidate that serves, warning about the rest under `DEBUG`.
+
+    `next.E114` names the same choice, so production logs it nowhere but the checks.
+    """
     served = next((pair for pair in candidates if pair[1] is not None), None)
-    if served is not None and len(candidates) > 1:
-        logger.warning(
+    if served is not None and len(candidates) > 1 and settings.DEBUG:
+        _failures.warn(
+            (kind, served[0]),
             "%s has %d sources and %s serves it, the rest are ignored: %s",
             kind,
             len(candidates),
@@ -120,6 +127,20 @@ def stable_repr(value: object) -> str:
         owner = value if hasattr(value, "__qualname__") else type(value)
         return f"{owner.__module__}.{owner.__qualname__}"
     return repr(value)
+
+
+def _serves(backend: SitemapBackend) -> bool:
+    """Whether `backend` serves, a backend that raises counted as serving."""
+    try:
+        return bool(backend.serves())
+    except Exception:
+        if _failures.first_failure(backend_path(backend), "serves"):
+            logger.exception(
+                "%s.serves() raised, so /sitemap.xml stays routed and answers 503 "
+                "while its sections fail too. Make serves() answer without raising.",
+                backend_path(backend),
+            )
+        return True
 
 
 class SeoManager(BackendListManager[SitemapBackend]):
@@ -180,8 +201,12 @@ class SeoManager(BackendListManager[SitemapBackend]):
         return page_tree_roots()
 
     def serves_sitemap(self) -> bool:
-        """Whether a backend has sections, which routes `/sitemap.xml`."""
-        return any(backend.serves() for backend in self.backends)
+        """Whether a backend has sections, which routes `/sitemap.xml`.
+
+        It runs while URLs resolve, so a backend that raises counts as serving and
+        its route answers 503 rather than taking every other route down with it.
+        """
+        return any(_serves(backend) for backend in self.backends)
 
     def broken_sitemap(self) -> BrokenSource | None:
         """Return the first `sitemap.py` that failed to import, `None` when all ran.
@@ -202,11 +227,16 @@ class SeoManager(BackendListManager[SitemapBackend]):
 
         A closed site lists none, save one only `DEBUG` closes, previewed under noindex.
         """
-        if not site_indexable(request) and not debug_closed():
+        if site_closed_to_crawlers(request):
             return {}
         merged: dict[str, Sitemap[Any]] = {}
         for backend in self.backends:
-            for name, section in backend.sections(request).items():
+            try:
+                sections = backend.sections(request)
+            except Exception as exc:
+                exc.add_note(f"Raised by {backend_path(backend)}.sections().")
+                raise
+            for name, section in sections.items():
                 merged.setdefault(name, section)
         return merged
 

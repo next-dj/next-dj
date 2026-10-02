@@ -86,6 +86,14 @@ A backend subclasses ``SitemapBackend`` and answers fresh Django sitemaps keyed 
 The sections of every backend merge in list order, the first holder of a name winning.
 Each backend built sends ``sitemap_backend_loaded``.
 
+``manage.py check`` calls ``sections(None)`` on every backend but the page trees, to compare its section names with the others, so the method runs without a request and may reach the database there.
+One that raises draws ``next.W089`` and takes no part in the comparison.
+
+A backend that raises never takes the site down.
+``sections()`` raising, or a section raising while it lists its URLs, answers 503 with ``Retry-After`` and logs the failure once, and under ``DEBUG`` the exception reaches the technical page with a note naming the backend.
+``Http404`` and ``PermissionDenied`` pass through as the answers they ask for.
+``serves()`` runs while every URL of the site resolves, so one that raises is logged once and counts as serving, and ``/sitemap.xml`` answers 503 rather than every route failing with it.
+
 The origin of every URL
 -----------------------
 
@@ -104,9 +112,10 @@ Caching
 -------
 
 ``cache`` in ``sitemap.py`` takes the forms ``cache`` takes in a ``page.py``, an int, ``False``, or a ``CacheDict``, and the sitemap responses carry that ``Cache-Control``.
-When the cache lets a copy be kept for a number of seconds, the views are also wrapped in :func:`~django.views.decorators.cache.cache_page` on the default cache for that long, keyed on a fingerprint of the source files, so an edited ``sitemap.py`` never serves a stale copy.
+When the cache lets a copy be kept for a number of seconds, the views are also wrapped in :func:`~django.views.decorators.cache.cache_page` on the default cache for that long, keyed on a fingerprint of the source files and on whether the request is open to search, so an edited ``sitemap.py`` never serves a stale copy and a host closed by a callable ``INDEXABLE`` never reads the copy of an open one.
+The fingerprint covers the files of the page trees and the backend list, not the data a backend reads, so a backend whose rows change keeps serving the cached copy for the declared age.
 The index and every section share the wrapper, and with several trees the shortest declared ``cache`` wins, one that forbids storing beating every age.
-A 404 is never cached, and ``cache`` in ``robots.py`` works the same way for ``/robots.txt``.
+Only a 200 carries the declared ``Cache-Control`` and is stored, so no shared cache holds a 404 or a 503 for its age, and ``cache`` in ``robots.py`` works the same way for ``/robots.txt``.
 
 The walk of the page tree is kept until the SEO routes reset, while the items callables run on every uncached request, so a large table pays one ``COUNT`` and one page query per crawler visit.
 Under ``DEBUG`` every SEO route first checks the source files at the top of each page root, and one that appeared, went, or moved resets the routes, so an edit shows on the next request without a reload.

@@ -68,6 +68,7 @@ Shared helpers
 ``next.checks.common`` holds helpers reused across subsystem check modules.
 It is imported indirectly by those modules rather than by ``register_all``, and the router manager and the page-tree walk it passes on live in ``next.discovery``, outside this package, because production code reads them too.
 The unknown-key probe behind ``next.E035``, ``errors_for_unknown_keys``, lives in ``next.conf.checks``, the lowest layer every area's checks reach, and ``next.checks.common`` passes it on.
+``raw_scope(name)`` answers a ``NEXT_FRAMEWORK`` scope as written, ``None`` where ``next.E076`` reports its shape, and ``takes_request(func)`` whether a callable setting can take the request alone, read off its signature without a call.
 ``RunMemo`` holds one value a check run builds once, kept while its key is the same object, and ``forget_run_memos`` drops every such value, which ``reset_check_caches`` calls.
 
 .. automodule:: next.checks.common
@@ -103,8 +104,10 @@ Sitemap and robots
 
 ``next.seo.checks`` reads the ``sitemap.py``, ``robots.py``, and ``robots.txt`` at the top of every page root, loaded through the same discovery the routes run, and the ``SEO`` settings scope.
 The package splits into ``sources`` for the files themselves and a site closed to search that still publishes them, ``sitemaps`` for what a ``sitemap.py`` lists, ``robots`` for the robots sources, ``routes`` for the addresses the routes answer, and ``backends`` for ``SEO``.
-``roots`` carries no check and holds ``loaded_seo_roots``, the one discovery of the routed page trees every check of a run reads.
+``roots`` carries no check and holds ``loaded_seo_roots``, which answers ``seo_manager.roots()``, the discovery the routes already hold, so a check run executes no ``sitemap.py`` or ``robots.py`` again and leaves the items registry as the runtime filled it.
+A router manager that fails to start is ``next.E007``, reported once, and every SEO check then answers nothing.
 Every check carries the ``seo`` tag beside ``next``, and needs neither a request nor a database.
+No check calls a callable ``SITE["INDEXABLE"]`` or ``SITE["URL"]``, which read as open and are judged by their signature alone, while a ``SITEMAP_BACKENDS`` backend is asked for ``sections(None)``.
 
 The checks call the helpers the routes call, ``SitemapOptions``, ``listed_trails``, and ``is_excluded`` of ``next.seo.sitemaps`` and ``declared_rules`` and ``robots_candidates`` of ``next.seo.robots``, so a check reports what the runtime serves.
 See :doc:`seo` for the check callables.
@@ -594,7 +597,7 @@ Errors
      - ``next.pages.checks.metadata.shape``
    * - ``next.E110``
      - A ``sitemap.py`` or a ``robots.py`` raises on import, the cause named, a ``RobotsRuleError`` among them.
-       The route keeps answering 404 rather than falling back to another source.
+       The route stays and does not fall back to another source, a broken ``sitemap.py`` answering 404 and a broken ``robots.py`` answering 503, since a crawler reads a 404 on ``/robots.txt`` as no restriction at all.
      - ``next.seo.checks.sources``
    * - ``next.E111``
      - An ``@sitemap.items`` trail is routed by no page of its tree, so the sitemap raises when built.
@@ -605,10 +608,11 @@ Errors
    * - ``next.E113``
      - A module attribute of ``sitemap.py`` or ``robots.py`` is outside its shape, a ``changefreq`` outside the protocol, a ``priority`` outside 0 to 1, a ``limit`` outside 1 to 50000, a ``cache`` that is no int, ``False``, or ``CacheDict``, an ``exclude`` or ``languages`` that is not a list of strings, an ``i18n``, ``alternates``, or ``x_default`` that is not a bool, a ``protocol`` outside ``http`` and ``https``, or a ``section`` that is no slug.
        In ``robots.py`` it covers a ``rules`` that is neither a list of ``RobotsRule`` nor a callable, and a ``sitemaps`` entry that is no absolute http or https URL on one line.
-       It also covers two ``@sitemap.items`` callables on one trail of one file, where only the later one lists.
      - ``next.seo.checks.sources``
    * - ``next.E114``
      - More than one source serves ``/robots.txt``, a ``robots.py`` beside a ``robots.txt`` or a source in two page roots, and only the first answers.
+       The message names the source that answers and the ones ignored.
+       At runtime the same choice is logged once under ``DEBUG`` and never in production, where this check is the report.
      - ``next.seo.checks.robots``
    * - ``next.E115``
      - A page directory is named after an address the SEO sources serve, ``sitemap.xml``, ``sitemap-<section>.xml``, or ``robots.txt``, so the page and the framework route shadow each other.
@@ -623,6 +627,10 @@ Errors
    * - ``next.E118``
      - ``@sitemap.items`` runs in a file no sitemap build reads, anything other than the ``sitemap.py`` at the top of a routed page tree, such as a nested ``sitemap.py``, a ``page.py``, or a helper module.
        A registration binds to the file running the decorator, so the fix is to run it in the root ``sitemap.py``, which may import the callable from anywhere.
+     - ``next.seo.checks.sources``
+   * - ``next.E128``
+     - A ``sitemap.py`` runs ``@sitemap.items`` twice for one trail, so only the later callable lists its URLs.
+       The message names both callables, and the fix is to merge them into one.
      - ``next.seo.checks.sources``
    * - ``next.E119``
      - A ``sitemap.py`` or a ``robots.py`` opens with ``from __future__ import annotations``, which turns the annotations the dependency resolver reads into strings.
@@ -656,7 +664,8 @@ Errors
        One ``@id`` under two types is ``next.E101``.
      - ``next.pages.checks.metadata.ld``
    * - ``next.E129``
-     - A ``SITE`` value is unusable, a ``URL`` that is no bare http or https origin, one carrying a path, a query, or a fragment included, or a dotted path that does not import, a ``NAME`` that is no text, or an ``INDEXABLE`` outside ``"auto"``, a bool, and a callable taking the request.
+     - A ``SITE`` value is unusable, a ``URL`` that is no bare http or https origin, one carrying a path, a query, or a fragment included, or a dotted path that does not import, a ``NAME`` that is no text, or an ``INDEXABLE`` outside ``"auto"``, a bool, and a callable.
+       A callable ``URL`` or ``INDEXABLE`` that cannot be called with the request as its one positional argument is reported too, read from its signature alone, since the check never calls it.
      - ``next.site.checks``
    * - ``next.E131``
      - A ``page.py`` declares a ``cache`` or ``headers`` the response cannot carry as written, an unknown key, a negative age, a flag that is no bool, ``public`` with ``no_store``, a forbidden or invalid header name, or a value with a control character or a character outside ASCII.
@@ -851,6 +860,10 @@ Warnings
        An ``{% include %}`` is followed only when it names its template by a literal string, and one the check cannot follow, a variable or filtered name, a missing or broken template, or an include loop, keeps the page silent.
        A ``render()`` page and a composition ``next.E072`` reports are skipped.
      - ``next.pages.checks.metadata.templates``
+   * - ``next.W086``
+     - A ``sitemap.py`` with ``i18n`` and ``alternates`` sets a ``limit`` above the one a page of alternates fits in 50 MB, ``50000 // (languages + 1 + x_default)``.
+       Every URL links each language then, so the section lists the smaller number per page, and the message names it as the highest ``limit`` to set.
+     - ``next.seo.checks.sitemaps``
    * - ``next.W087``
      - A page asks for hreflang alternates with ``alternates.languages=True``, but ``ROOT_URLCONF`` uses no ``i18n_patterns()``, so every language points at the same URL.
      - ``next.pages.checks.metadata.shape``
@@ -858,6 +871,10 @@ Warnings
      - A ``noindex`` page points its canonical at another origin, which passes no signal.
        On a site closed to search every page reads as ``noindex``, so any cross-origin canonical draws it.
      - ``next.pages.checks.metadata.shape``
+   * - ``next.W089``
+     - A ``SITEMAP_BACKENDS`` backend raises from ``sections(None)``, which the checks call without a request to compare its section names with the others, so ``next.E116`` cannot read its sections.
+       The message names the dotted backend class and what it raised, and the fix is to make ``sections()`` answer without a request.
+     - ``next.seo.checks.sitemaps``
    * - ``next.W092``
      - A ``{% #consented %}`` block on a composed page, a component it reaches, or a template it includes names by a literal a category ``CONSENT["CATEGORIES"]`` does not list, so no visitor can grant it and the block always renders its ``else`` branch.
        A category named by a variable is not read, and under ``DEBUG`` a render logs such a category once.
@@ -895,6 +912,7 @@ Warnings
      - ``next.seo.checks.sitemaps``
    * - ``next.W105``
      - The i18n options of a ``sitemap.py`` take no effect as written, ``alternates`` or ``x_default`` without ``i18n``, ``x_default`` without ``alternates``, or a ``languages`` code outside ``settings.LANGUAGES``.
+       Each problem names its own fix, setting the option it needs or dropping the one not read.
      - ``next.seo.checks.sitemaps``
    * - ``next.W106``
      - A ``sitemap.py`` sets ``i18n = True`` while ``ROOT_URLCONF`` mounts no ``i18n_patterns()``, so every language lists the same URL.

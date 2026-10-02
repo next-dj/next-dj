@@ -40,6 +40,12 @@ def shortest_cache(controls: Iterable[CacheControl | None]) -> CacheControl | No
     )
 
 
+def backend_path(backend: object) -> str:
+    """Return the dotted path of the class of `backend`, the name a report gives it."""
+    kind = type(backend)
+    return f"{kind.__module__}.{kind.__qualname__}"
+
+
 class SitemapBackend(ABC):
     """One source of sitemap sections, configured by a `SITEMAP_BACKENDS` entry."""
 
@@ -134,4 +140,4 @@ class PageTreeSitemapBackend(SitemapBackend):
         return trails
 
 
-__all__ = ["PageTreeSitemapBackend", "SitemapBackend", "shortest_cache"]
+__all__ = ["PageTreeSitemapBackend", "SitemapBackend", "backend_path", "shortest_cache"]

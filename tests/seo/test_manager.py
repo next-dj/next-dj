@@ -147,6 +147,7 @@ class TestSources:
             assert seo_manager.robots_source() is None
             assert seo_manager.robots_source() is None
 
+    @override_settings(DEBUG=True)
     def test_a_broken_robots_py_holds_the_route_over_its_robots_txt(
         self, tmp_path, caplog
     ) -> None:
@@ -157,9 +158,18 @@ class TestSources:
         )
         with routed(root), caplog.at_level(logging.WARNING, logger="next.seo"):
             source = seo_manager.robots_source()
+            seo_manager.reset()
+            seo_manager.robots_source()
         assert source == BrokenSource(root / "robots.py")
-        assert f"{root / 'robots.py'} serves it" in caplog.text
+        assert caplog.text.count(f"{root / 'robots.py'} serves it") == 1
         assert f"ignored: {root / 'robots.txt'}" in caplog.text
+
+    def test_production_leaves_the_choice_to_the_checks(self, tmp_path, caplog) -> None:
+        root = write_tree(tmp_path / "pages", robots="", robots_txt=b"x\n")
+        with routed(root), caplog.at_level(logging.WARNING, logger="next.seo"):
+            source = seo_manager.robots_source()
+        assert isinstance(source, DeclaredRobots)
+        assert "serves it" not in caplog.text
 
     def test_a_single_source_warns_nothing(self, tmp_path, caplog) -> None:
         with (

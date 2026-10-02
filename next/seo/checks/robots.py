@@ -18,7 +18,7 @@ from django.urls.converters import get_converters
 from next.checks import NEXT, SEO
 from next.seo.robots import declared_rules, robots_candidates, rule_pattern
 from next.seo.sitemaps import SitemapOptions, listed_trails, static_noindex
-from next.site import site_indexable
+from next.site.config import indexable_without_request
 from next.urls.errors import URLParameterError
 from next.urls.parser import default_url_parser
 from next.urls.reverse import page_reverse
@@ -46,14 +46,17 @@ _PLACEHOLDERS: Final = ("0", "x", "00000000-0000-0000-0000-000000000000")
 
 
 def _single_source(url: str, paths: Sequence[Path]) -> list[CheckMessage]:
+    """Return `next.E114` naming the source that answers `url` and the ones ignored."""
     if len(paths) <= 1:
         return []
-    listed = ", ".join(str(path) for path in paths)
+    winner, *ignored = paths
+    listed = ", ".join(str(path) for path in ignored)
     return [
         Error(
-            f"{url} has {len(paths)} sources and only one answers it: {listed}. "
-            "Keep one source across the page trees.",
-            obj=str(paths[0]),
+            f"{url} has {len(paths)} sources, and {winner} answers it while "
+            f"{listed} is ignored. Keep one source across the page trees, "
+            "deleting the ignored ones or merging them into the one that answers.",
+            obj=str(winner),
             id="next.E114",
         )
     ]
@@ -62,8 +65,8 @@ def _single_source(url: str, paths: Sequence[Path]) -> list[CheckMessage]:
 @register(Tags.urls, NEXT, SEO)
 def check_seo_single_sources(*args, **kwargs) -> list[CheckMessage]:
     """Require one `/robots.txt` source across every page tree (`next.E114`)."""
-    init_errors, roots = loaded_seo_roots()
-    errors = list(init_errors)
+    roots = loaded_seo_roots()
+    errors: list[CheckMessage] = []
     errors.extend(
         _single_source("/robots.txt", [path for path, _s in robots_candidates(roots)])
     )
@@ -97,9 +100,9 @@ def check_seo_text_files(*args, **kwargs) -> list[CheckMessage]:
 
     The files are served byte for byte, so a missing `Sitemap:` line stays missing.
     """
-    init_errors, roots = loaded_seo_roots()
-    messages = list(init_errors)
-    served = serves_sitemap(roots)
+    roots = loaded_seo_roots()
+    messages: list[CheckMessage] = []
+    served = serves_sitemap()
     for root in roots:
         if root.robots_file is None:
             continue
@@ -225,7 +228,7 @@ def _noindex_paths(roots: tuple[SeoRoot, ...]) -> set[str]:
 
 def _listed_paths(roots: tuple[SeoRoot, ...]) -> set[str]:
     """Return every URL path the served sitemaps list, with `/sitemap.xml` itself."""
-    if not serves_sitemap(roots) or not site_indexable():
+    if not serves_sitemap() or not indexable_without_request():
         return set()
     found = {SITEMAP_URL}
     for root, module in sitemap_roots(roots):
@@ -239,8 +242,8 @@ def check_robots_disallow(*args, **kwargs) -> list[CheckMessage]:
 
     `next.W100` flags a listed URL, `next.W101` a noindex page whose tag goes unread.
     """
-    init_errors, roots = loaded_seo_roots()
-    warnings = list(init_errors)
+    roots = loaded_seo_roots()
+    warnings: list[CheckMessage] = []
     disallowed = [
         (path, prefix, allows)
         for path, module in robots_modules(roots)

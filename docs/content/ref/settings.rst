@@ -492,9 +492,10 @@ Dict naming the public origin of the site, its name, and whether search engines 
 Default value ``{"URL": None, "NAME": None, "INDEXABLE": "auto"}``.
 
 ``URL`` is an ``http`` or ``https`` origin with no path, a callable taking the request, or the dotted path of one, and every absolute URL of the head, the sitemap, and the robots file is built on it, the ``Site`` row of ``django.contrib.sites`` and then the request host standing in without it.
-A callable's answer is validated like a literal, so one that is no origin falls through to the same fallbacks.
+A callable answering ``None`` falls through to the same fallbacks, and one that raises or answers no origin raises ``ImproperlyConfigured`` under ``DEBUG``, while production logs it once and answers the SEO routes with 503.
 ``NAME`` seeds the ``site_name`` metadata key when ``DEFAULTS`` sets none.
 ``INDEXABLE`` is ``"auto"``, which follows ``not DEBUG``, a bool, or a callable taking the request or ``None``, and every robots meta, ``X-Robots-Tag``, sitemap, and robots file follows its answer.
+A callable that raises reads as not indexable in production, logged once, and raises under ``DEBUG``.
 Under ``"auto"`` with ``DEBUG`` on, the sitemap and the robots file are still served under ``X-Robots-Tag: noindex, nofollow``.
 A value the scope cannot use is ``next.E129``, and ``manage.py check --deploy`` warns with ``next.W119`` about a missing ``URL`` unless ``SITE_ID`` pins a row, with ``next.W132`` when ``ALLOWED_HOSTS`` also holds ``"*"``, and with ``next.W120`` about ``INDEXABLE`` set to ``False`` on a site that still publishes a sitemap or a robots source.
 See :doc:`/content/topics/seo/site`.
@@ -562,6 +563,7 @@ Default value ``{"SITEMAP_BACKENDS": [{"BACKEND": "next.seo.PageTreeSitemapBacke
 
 ``SITEMAP_BACKENDS`` lists the sources of sitemap sections in merge order, each an entry of ``BACKEND`` naming a ``next.seo.SitemapBackend`` subclass and ``OPTIONS``.
 A backend that does not import, an entry that is no mapping, and a list that is no list are ``next.E120``, and an unknown key of the scope is ``next.E035``.
+A backend whose ``sections(None)`` raises in ``manage.py check`` is ``next.W089``, and one that raises while serving answers 503 with ``Retry-After``.
 See :doc:`/content/topics/seo/sitemap-sections`.
 
 CSRF_DELIVERY

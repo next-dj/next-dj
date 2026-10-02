@@ -1,12 +1,10 @@
-"""The routed page trees the SEO checks read, discovered once per check run."""
+"""The routed page trees the SEO checks read, the very ones the routes serve."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from next.checks.common import RunMemo, get_router_manager
-from next.seo.backends import PageTreeSitemapBackend
-from next.seo.discovery import SeoRoot, discover_seo_roots
+from next.checks.common import get_router_manager
 from next.seo.manager import seo_manager
 from next.seo.robots import robots_candidates
 
@@ -16,20 +14,20 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from django.core.checks import CheckMessage
+    from next.seo.discovery import SeoRoot
 
 
-_seo_roots: RunMemo[tuple[SeoRoot, ...]] = RunMemo()
+def loaded_seo_roots() -> tuple[SeoRoot, ...]:
+    """Return every routed page tree with its sources, as the routes hold them.
 
-
-def loaded_seo_roots() -> tuple[list[CheckMessage], tuple[SeoRoot, ...]]:
-    """Return every routed page tree as the runtime discovers it, once per run."""
+    The checks read the runtime discovery rather than running their own, so no
+    `sitemap.py` or `robots.py` runs twice and the items registry is never rewritten.
+    A router that fails to start is `next.E007`, reported once by the URL checks.
+    """
     router_manager, init_errors = get_router_manager()
-    if router_manager is None:
-        return init_errors, ()
-    return init_errors, _seo_roots.get(
-        router_manager, lambda: discover_seo_roots(router_manager)
-    )
+    if router_manager is None or init_errors:
+        return ()
+    return seo_manager.roots()
 
 
 def sitemap_roots(
@@ -56,13 +54,9 @@ def declares_sitemap(roots: tuple[SeoRoot, ...]) -> bool:
     return any(root.sitemap is not None for root in roots)
 
 
-def serves_sitemap(roots: tuple[SeoRoot, ...]) -> bool:
-    """Whether `/sitemap.xml` is routed, by a `sitemap.py` or another backend."""
-    return declares_sitemap(roots) or any(
-        backend.serves()
-        for backend in seo_manager.backends
-        if not isinstance(backend, PageTreeSitemapBackend)
-    )
+def serves_sitemap() -> bool:
+    """Whether `/sitemap.xml` is routed, the answer the route itself reads."""
+    return seo_manager.serves_sitemap()
 
 
 def serves_robots(roots: tuple[SeoRoot, ...]) -> bool:
@@ -72,10 +66,7 @@ def serves_robots(roots: tuple[SeoRoot, ...]) -> bool:
 
 def published_sources(roots: tuple[SeoRoot, ...]) -> list[str]:
     """Name the crawler-facing sources the site serves."""
-    served = (
-        ("a sitemap", serves_sitemap(roots)),
-        ("a robots.txt", serves_robots(roots)),
-    )
+    served = (("a sitemap", serves_sitemap()), ("a robots.txt", serves_robots(roots)))
     return [name for name, present in served if present]
 
 

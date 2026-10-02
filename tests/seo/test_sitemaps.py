@@ -194,6 +194,23 @@ class TestPageTreeSitemap:
         assert section.x_default is False
         assert section.language_codes() == ["de"]
 
+    @pytest.mark.parametrize(
+        ("options", "limit"),
+        [
+            ("alternates = True\n", MAX_LIMIT // 3),
+            ("alternates = True\nx_default = True\n", MAX_LIMIT // 4),
+            ("alternates = True\nlimit = 10\n", 10),
+            ("", MAX_LIMIT),
+        ],
+        ids=["alternates", "x_default", "smaller_limit", "no_alternates"],
+    )
+    def test_alternates_shrink_a_page_to_fit_50_mb(
+        self, tmp_path, options, limit
+    ) -> None:
+        root = write_tree(tmp_path / "pages", sitemap="i18n = True\n" + options)
+        with routed(root), override_settings(**I18N):
+            assert _section().limit == limit
+
     def test_the_languages_default_to_every_code(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", sitemap="i18n = True\n")
         with routed(root), override_settings(**I18N):

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 from next.discovery import routed_page_trees
+from next.pages.responses import cache_control
 from next.urls.manager import router_manager
 from next.utils import (
     TreeSource,
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
+    from next.pages.responses import CacheControl
     from next.urls import RouterManager
     from next.utils import PageRoot
 
@@ -124,6 +126,15 @@ def declared_section(module: types.ModuleType | None) -> str | None:
     return value if isinstance(value, str) and SLUG.fullmatch(value) else None
 
 
+def declared_cache(module: types.ModuleType) -> CacheControl | None:
+    """Return the `cache` a source module declares, in any form a page takes but one.
+
+    A callable is left out, since the response is cached before a request calls it.
+    """
+    value = getattr(module, "cache", None)
+    return None if callable(value) else cache_control(value)
+
+
 def section_label(path: Path, module: types.ModuleType | None = None) -> str:
     """Return the section a page tree is addressed by in the sitemap index.
 
@@ -183,6 +194,7 @@ __all__ = [
     "BrokenSource",
     "SeoRoot",
     "SeoSource",
+    "declared_cache",
     "declared_section",
     "discover_seo_roots",
     "forget_page_tree_roots",

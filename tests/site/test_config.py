@@ -1,4 +1,7 @@
+import logging
+
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.test import RequestFactory, override_settings
 
@@ -14,7 +17,10 @@ from next.site import (
 from next.site.config import (
     SITE_ORIGIN_ATTR,
     forget_site_config,
+    indexable_without_request,
     is_url_literal,
+    site_closed_to_crawlers,
+    site_url_failed,
     url_origin,
 )
 from tests.support import BASE, site_settings
@@ -44,7 +50,30 @@ def live_only(request: HttpRequest | None) -> bool:
     return request is None or request.get_host() == "acme.example"
 
 
+def raising_rule(request: HttpRequest | None) -> bool:
+    CALLED.append(request)
+    msg = "tenant table down"
+    raise RuntimeError(msg)
+
+
+def counted_url(request: HttpRequest | None) -> str:
+    CALLED.append(request)
+    return "https://tenant.example"
+
+
+CALLED: list[object] = []
 NOT_CALLABLE = "not callable"
+
+
+@pytest.fixture(autouse=True)
+def _fresh_calls():
+    CALLED.clear()
+    yield
+    CALLED.clear()
+
+
+def _records(caplog) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.name == "next.site.config"]
 
 
 def _get(host: str, *, secure: bool = False) -> HttpRequest:
@@ -260,3 +289,100 @@ class TestSiteIndexable:
         with override_settings(DEBUG=True):
             assert site_indexable() is False
         assert site_indexable() is True
+
+
+class TestFailingSiteUrl:
+    """A callable `URL` that raises or answers no origin is reported, never a 500."""
+
+    @pytest.mark.parametrize("rule", [raising_rule, path_url, text_less_url])
+    @override_settings(ALLOWED_HOSTS=["testserver"])
+    def test_production_logs_once_and_declares_no_origin(self, rule, caplog) -> None:
+        with site_settings(URL=rule), caplog.at_level(logging.WARNING):
+            first, second = _get("testserver"), _get("testserver")
+            assert site_url(first) is None
+            assert site_url_failed(first) is True
+            assert site_origin(second) == ("http", "testserver")
+            assert site_url_failed(second) is True
+        [record] = _records(caplog)
+        assert "NEXT_FRAMEWORK['SITE']['URL']" in record.getMessage()
+        assert f'"{rule.__name__}"' in record.getMessage()
+
+    def test_a_request_calls_the_rule_once(self) -> None:
+        request = _get("testserver")
+        with site_settings(URL=counted_url):
+            assert site_url(request) == "https://tenant.example"
+            assert site_origin(request) == ("https", "tenant.example")
+            assert site_url_failed(request) is False
+        assert [request] == CALLED
+
+    def test_a_request_free_caller_raises_on_a_failing_rule(self) -> None:
+        with site_settings(URL=raising_rule), pytest.raises(SiteOriginError):
+            site_origin(None)
+
+    def test_declining_an_origin_is_no_failure(self) -> None:
+        with site_settings(URL=tenant_url):
+            assert site_url_failed(None) is False
+
+    @pytest.mark.parametrize(
+        ("rule", "named"),
+        [
+            (raising_rule, "raised RuntimeError"),
+            (path_url, "'https://tenant.example/app'"),
+        ],
+        ids=["raising", "path"],
+    )
+    @override_settings(DEBUG=True)
+    def test_debug_raises_naming_the_setting(self, rule, named) -> None:
+        with site_settings(URL=rule), pytest.raises(ImproperlyConfigured) as caught:
+            site_url(_get("testserver"))
+        assert "NEXT_FRAMEWORK['SITE']['URL']" in str(caught.value)
+        assert named in str(caught.value)
+
+
+class TestFailingIndexable:
+    """A callable `INDEXABLE` that raises closes the site, loud only under `DEBUG`."""
+
+    def test_production_fails_closed_and_logs_once(self, caplog) -> None:
+        with site_settings(INDEXABLE=raising_rule), caplog.at_level(logging.ERROR):
+            assert site_indexable(_get("testserver")) is False
+            assert site_indexable(_get("testserver")) is False
+        [record] = _records(caplog)
+        assert "closed to search" in record.getMessage()
+        assert '"raising_rule"' in record.getMessage()
+
+    @override_settings(DEBUG=True)
+    def test_debug_raises_with_the_rule_named(self) -> None:
+        with (
+            site_settings(INDEXABLE=raising_rule),
+            pytest.raises(RuntimeError, match="tenant table down") as caught,
+        ):
+            site_indexable(_get("testserver"))
+        assert "INDEXABLE" in caught.value.__notes__[0]
+
+
+class TestStaticAnswers:
+    """The answers the SEO routes and the checks read without calling a rule twice."""
+
+    @pytest.mark.parametrize(
+        ("indexable", "debug", "expected"),
+        [(None, False, True), (None, True, False), (False, False, False)],
+        ids=["auto", "auto_debug", "closed"],
+    )
+    def test_without_a_request_no_rule_is_called(
+        self, indexable, *, debug: bool, expected: bool
+    ) -> None:
+        site = {} if indexable is None else {"INDEXABLE": indexable}
+        with site_settings(**site), override_settings(DEBUG=debug):
+            assert indexable_without_request() is expected
+        with site_settings(INDEXABLE=raising_rule):
+            assert indexable_without_request() is True
+        assert CALLED == []
+
+    @pytest.mark.parametrize(
+        ("site", "debug", "closed"),
+        [({}, True, False), ({"INDEXABLE": False}, True, True), ({}, False, False)],
+        ids=["debug_preview", "explicit", "open"],
+    )
+    def test_closed_to_crawlers(self, site, *, debug: bool, closed: bool) -> None:
+        with site_settings(**site), override_settings(DEBUG=debug):
+            assert site_closed_to_crawlers(_get("testserver")) is closed

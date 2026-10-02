@@ -13,7 +13,9 @@ from next.checks.common import (
     RegistrationSubject,
     RunMemo,
     forget_run_memos,
+    raw_scope,
     registration_file_errors,
+    takes_request,
 )
 from next.deps import resolver
 from next.deps.introspect import introspect_key
@@ -290,3 +292,41 @@ class TestACheckRunLeavesTheLiveCachesWarm:
             run_checks(tags=[NEXT])
 
             assert _state.memo is memo
+
+
+class TestRawScope:
+    """A scope reads as written, `None` where it or `NEXT_FRAMEWORK` is no dict."""
+
+    @pytest.mark.parametrize(
+        ("framework", "expected"),
+        [
+            ({"SITE": {"URL": None}}, {"URL": None}),
+            ({"SITE": "x"}, None),
+            ({}, None),
+            ([], None),
+        ],
+        ids=["dict", "not_a_dict", "absent", "framework_not_a_dict"],
+    )
+    def test_the_scope_reads_as_written(self, framework, expected) -> None:
+        with override_settings(NEXT_FRAMEWORK=framework):
+            assert raw_scope("SITE") == expected
+
+
+def _one(request: object) -> None:
+    """Take the request."""
+
+
+def _none() -> None:
+    """Take nothing."""
+
+
+class TestTakesRequest:
+    """A callable takes the request when it binds to one positional argument."""
+
+    @pytest.mark.parametrize(
+        ("func", "expected"),
+        [(_one, True), (_none, False), (len, True), (max, True)],
+        ids=["one", "none", "builtin", "no_signature"],
+    )
+    def test_the_signature_is_bound(self, func, expected) -> None:
+        assert takes_request(func) is expected

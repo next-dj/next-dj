@@ -84,8 +84,8 @@ def _sources(root: SeoRoot) -> Iterator[SeoSource]:
 @register(Tags.urls, NEXT, SEO)
 def check_seo_module_imports(*args, **kwargs) -> list[CheckMessage]:
     """Require every Python SEO source to import (`next.E110`)."""
-    init_errors, roots = loaded_seo_roots()
-    errors = list(init_errors)
+    roots = loaded_seo_roots()
+    errors: list[CheckMessage] = []
     for root in roots:
         errors.extend(
             error
@@ -101,8 +101,8 @@ def check_seo_module_annotations(*args, **kwargs) -> list[CheckMessage]:
 
     A `sitemap.py` and a `robots.py` hand their callables to the dependency resolver.
     """
-    init_errors, roots = loaded_seo_roots()
-    errors = list(init_errors)
+    roots = loaded_seo_roots()
+    errors: list[CheckMessage] = []
     for root in roots:
         for source in (root.sitemap, root.robots):
             if source is None or not imports_future_annotations(source.path):
@@ -212,14 +212,14 @@ def _shape_errors(
 
 
 def _items_conflicts(path: Path) -> list[CheckMessage]:
-    """Return `next.E113` for every trail a `sitemap.py` binds two callables to."""
+    """Return `next.E128` for every trail a `sitemap.py` binds two callables to."""
     return [
         Error(
             f"{path} runs @sitemap.items twice for the trail {conflict.trail!r}, on "
             f"{conflict.replaced} and then on {conflict.kept}, so only "
             f"{conflict.kept} lists its URLs. Merge them into one callable.",
             obj=str(path),
-            id="next.E113",
+            id="next.E128",
         )
         for conflict in sitemap_items_registry.conflicts()
         if conflict.file == path
@@ -228,9 +228,12 @@ def _items_conflicts(path: Path) -> list[CheckMessage]:
 
 @register(Tags.urls, NEXT, SEO)
 def check_seo_module_attributes(*args, **kwargs) -> list[CheckMessage]:
-    """Validate the module attributes of `sitemap.py` and `robots.py` (`next.E113`)."""
-    init_errors, roots = loaded_seo_roots()
-    errors = list(init_errors)
+    """Validate the module attributes of `sitemap.py` and `robots.py` (`next.E113`).
+
+    Two `@sitemap.items` callables on one trail are `next.E128`.
+    """
+    roots = loaded_seo_roots()
+    errors: list[CheckMessage] = []
     for root, module in sitemap_roots(roots):
         errors.extend(_shape_errors(root.sitemap_path, module, _SITEMAP_ATTRIBUTES))
         errors.extend(_items_conflicts(root.sitemap_path))
@@ -245,9 +248,9 @@ def check_sitemap_items_files(*args, **kwargs) -> list[CheckMessage]:
 
     Only the registrations the `sitemap.py` at the top of a routed tree runs are read.
     """
-    init_errors, roots = loaded_seo_roots()
-    if init_errors:
-        return init_errors
+    roots = loaded_seo_roots()
+    if not roots:
+        return []
     anchors = {root.sitemap.path for root in roots if root.sitemap is not None}
     registered = sitemap_items_registry.registered_names()
     return [
@@ -278,8 +281,8 @@ def _sources_below(root: SeoRoot) -> Iterator[Path]:
 @register(Tags.urls, NEXT, SEO)
 def check_seo_sources_below_root(*args, **kwargs) -> list[CheckMessage]:
     """Warn about an SEO source below the top of its page tree (`next.W102`)."""
-    init_errors, roots = loaded_seo_roots()
-    warnings = list(init_errors)
+    roots = loaded_seo_roots()
+    warnings: list[CheckMessage] = []
     for root in roots:
         warnings.extend(
             DjangoWarning(
@@ -301,7 +304,7 @@ def check_seo_sources_on_closed_site(*args, **kwargs) -> list[CheckMessage]:
     """
     if site_config().indexable is not False:
         return []
-    _errors, roots = loaded_seo_roots()
+    roots = loaded_seo_roots()
     sources = published_sources(roots)
     if not sources:
         return []

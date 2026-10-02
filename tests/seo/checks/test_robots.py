@@ -49,8 +49,10 @@ class TestSingleSources:
         with routed(root):
             messages = check_seo_single_sources()
         assert check_ids(messages) == ["next.E114"]
-        assert f"{root / 'robots.py'}, {root / 'robots.txt'}" in messages[0].msg
-
+        assert (
+            f"{root / 'robots.py'} answers it while {root / 'robots.txt'} is ignored"
+            in messages[0].msg
+        )
         assert messages[0].obj == str(root / "robots.py")
 
     def test_a_source_in_two_trees_is_an_error(self, tmp_path) -> None:
@@ -263,7 +265,7 @@ def _paths(
     """Return the URL paths `route_paths` reads for a tree of `pages` at `root`."""
     write_tree(root, pages=pages)
     with routed(root, urlconf=urlconf):
-        _errors, roots = loaded_seo_roots()
+        roots = loaded_seo_roots()
         return route_paths(roots[0])
 
 

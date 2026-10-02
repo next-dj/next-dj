@@ -5,14 +5,17 @@ A route without its source stays out, so a project view at that address still an
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Final, overload, override
+
+from next.diagnostics import FailureLog
 
 from .manager import seo_manager
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
 
     from django.urls import URLPattern
 
@@ -32,12 +35,34 @@ HOST_ROOT_NAMESPACE: Final = "next_seo"
 """The namespace of `next.seo.urls`, mounted at the host root."""
 
 
+logger = logging.getLogger(__name__)
+_failures = FailureLog(logger)
+
+
+def _served(route: str, probe: Callable[[], bool]) -> bool:
+    """Whether `probe` routes `route`, a probe that raises keeping the route.
+
+    It runs while every URL resolves, so a failure must not take the other routes
+    down, and the view behind the route answers 503 on the same failure.
+    """
+    try:
+        return probe()
+    except Exception:
+        if _failures.first_failure(route):
+            logger.exception(
+                "Deciding whether to route /%s raised, so the route stays and "
+                "answers 503 until its source loads.",
+                route,
+            )
+        return True
+
+
 def served_names() -> frozenset[str]:
     """Return the names of the routes whose source a page tree or a backend backs."""
     names: set[str] = set()
-    if seo_manager.serves_sitemap():
+    if _served(SITEMAP_ROUTE, seo_manager.serves_sitemap):
         names.update((SITEMAP_NAME, SECTION_NAME))
-    if seo_manager.robots_source() is not None:
+    if _served(ROBOTS_ROUTE, lambda: seo_manager.robots_source() is not None):
         names.add(ROBOTS_NAME)
     return frozenset(names)
 

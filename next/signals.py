@@ -38,7 +38,7 @@ from next.partial.signals import (
     zone_rendered,
 )
 from next.scripts.signals import scripts_registered
-from next.seo.signals import sitemap_backend_loaded, sitemap_items_registered
+from next.seo.signals import sitemap_backend_loaded
 from next.server.signals import watch_specs_ready
 from next.static.signals import (
     asset_registered,
@@ -76,7 +76,6 @@ __all__ = [
     "scripts_registered",
     "settings_reloaded",
     "sitemap_backend_loaded",
-    "sitemap_items_registered",
     "sse_stream_closed",
     "sse_stream_opened",
     "static_backend_loaded",
