@@ -102,8 +102,11 @@ Metadata and SEO
 
 ``assert_metadata(response, **expected)`` parses the head of a response or an HTML string and compares the tags it names, ``title``, ``description``, ``keywords``, ``viewport``, ``robots``, ``googlebot``, ``canonical``, ``alternates``, ``jsonld``, ``og``, and ``twitter``.
 ``None`` expects a tag to be absent, ``og`` and ``twitter`` take a dict of property suffixes, and ``jsonld`` lists every node, the members of the ``@graph`` flattened in.
+``og=None`` and ``twitter=None`` expect no tag of that block at all.
 An unknown key raises ``TypeError``, and every mismatch lands in one ``AssertionError``.
-The head is read by ``head_tags(html)`` of ``next.pages.metadata.head``, re-exported from ``next.testing.metadata`` with its ``HeadTags`` result.
+The head is read by ``head_tags(html)`` of ``next.testing.metadata`` into a ``HeadTags`` value, and parsing stops at ``</head>``, so a tag in the body never counts.
+The read is strict, so a single-valued tag rendered twice, a second ``<title>`` or canonical link among them, and a JSON-LD script that holds no JSON raise ``HeadParseError``, a ``ValueError``, rather than reading the first value.
+A response is decoded with its own charset and a streaming one is read to its end, the same way ``parse_sitemap`` reads one.
 ``parse_sitemap`` answers the ``SitemapUrl`` values of a sitemap or an index response, each with ``loc``, ``lastmod``, and ``alternates``, both exported from ``next.testing``.
 A body that is no well-formed XML raises ``xml.etree.ElementTree.ParseError``, so a malformed sitemap fails the test rather than reading as empty.
 A robots file is plain text, so a test reads ``response.content`` directly.
