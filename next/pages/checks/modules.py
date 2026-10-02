@@ -43,9 +43,9 @@ def check_page_functions(*args, **kwargs) -> list[CheckMessage]:
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
-    router_manager, init_errors = get_router_manager()
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors
+        return []
 
     # One `page.py` reached through several page trees is one page.
     seen: set[Path] = set()
@@ -211,9 +211,9 @@ def check_page_module_imports(*args, **kwargs) -> list[CheckMessage]:
     Importing every user module costs a full tree walk, so the check is a deployment
     one and runs under `manage.py check --deploy` instead of on every command.
     """
-    router_manager, init_errors = get_router_manager()
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors
+        return []
     return [
         Error(_page_import_error_message(page_path), obj=str(page_path), id="next.E017")
         for page_path in iter_existing_scanned_pages(router_manager, set())

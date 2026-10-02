@@ -55,9 +55,9 @@ def _check_layout_file(layout_file: Path) -> CheckMessage | None:
 @register(Tags.templates, NEXT)
 def check_layout_templates(*args, **kwargs) -> list[CheckMessage]:
     """Check every `layout.djx` for exactly one page-body placeholder."""
-    router_manager, init_errors = get_router_manager()
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors
+        return []
 
     warnings: list[CheckMessage] = []
     # Nested roots and several routers reach one layout through more than one page.

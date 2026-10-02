@@ -78,6 +78,9 @@ def _keep_alive(router: RouterBackend) -> int:
 def get_router_manager() -> tuple[RouterManager | None, list[CheckMessage]]:
     """Return a per-run cached `RouterManager` or initialisation errors.
 
+    Only `check_router_manager` reports the errors. Every other check returns no
+    messages when the manager is `None`, so one failure is one `next.E007`.
+
     Only `settings_reloaded` or an explicit `reset_check_caches` drops the cache, so
     a change to another router input like `INSTALLED_APPS` needs a manual reset.
     """
@@ -92,7 +95,14 @@ def get_router_manager() -> tuple[RouterManager | None, list[CheckMessage]]:
         router_manager.reload(notify=False)
     except (ImproperlyConfigured, ImportError, AttributeError) as e:
         error = Error(
-            f"Error initializing router manager: {e}", obj=settings, id="next.E007"
+            f"The routers NEXT_FRAMEWORK['PAGE_BACKENDS'] lists failed to "
+            f"initialise: {e}",
+            hint=(
+                "Fix the BACKEND path or OPTIONS of the failing entry. Every other "
+                "page, URL and SEO check is skipped until the routers load."
+            ),
+            obj=settings,
+            id="next.E007",
         )
         result = (None, [error])
     else:

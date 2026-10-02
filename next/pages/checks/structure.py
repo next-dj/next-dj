@@ -38,9 +38,9 @@ def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
     """Check each router's pages tree for layouts, naming, and structure."""
     errors: list[CheckMessage] = []
 
-    router_manager, init_errors = get_router_manager()
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors
+        return []
 
     # Nested and doubly-mounted roots reach one directory through several trees.
     seen: set[Path] = set()

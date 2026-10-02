@@ -41,26 +41,27 @@ class PageContexts(NamedTuple):
     bindings: tuple[ZoneBinding, ...]
 
 
-def load_routed_pages() -> tuple[list[CheckMessage], list[tuple[str, Path]]]:
+def load_routed_pages() -> list[tuple[str, Path]] | None:
     """Import every routed `page.py` once per run, answering with the ones that loaded.
 
     The manager is the one these checks resolved, so a patched router tree reaches it.
+    `None` means the routers failed to load, which `next.E007` reports on its own.
     """
-    router_manager, init_errors = get_router_manager()
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors, []
-    return init_errors, discover_page_registrations(router_manager)
+        return None
+    return discover_page_registrations(router_manager)
 
 
-def loaded_page_contexts() -> tuple[list[CheckMessage], list[PageContexts]]:
+def loaded_page_contexts() -> list[PageContexts]:
     """Return the `@context` every routed `page.py` registered as it imported.
 
     The registry keys on the path importlib gave the module, the same spelling the
     walk reports, so a binding is looked up without resolving a symlink on either side.
     """
-    init_errors, loaded = load_routed_pages()
+    loaded = load_routed_pages() or []
     bindings = page.zone_bindings()
-    return init_errors, [
+    return [
         PageContexts(url_path, page_path, bindings.get(page_path, ()))
         for url_path, page_path in loaded
     ]
@@ -138,9 +139,8 @@ def _keyless_context_errors(
 @register(Tags.templates, NEXT)
 def check_context_functions(*args, **kwargs) -> list[CheckMessage]:
     """Require keyless `@context` callables to return a dict when invoked."""
-    init_errors, pages = loaded_page_contexts()
-    errors = list(init_errors)
-    for entry in pages:
+    errors: list[CheckMessage] = []
+    for entry in loaded_page_contexts():
         errors.extend(_keyless_context_errors(entry.page_path, entry.bindings))
     return errors
 
@@ -152,9 +152,8 @@ def check_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
     A registration keys on the file declaring the callable, so an imported helper
     binds to its own module, and a sibling page's callable binds to that other page.
     """
-    init_errors, _loaded = load_routed_pages()
-    if init_errors:
-        return init_errors
+    if load_routed_pages() is None:
+        return []
 
     return registration_file_errors(
         _PAGE_CONTEXT_SUBJECT,
@@ -169,8 +168,8 @@ def check_single_keyless_context(*args, **kwargs) -> list[CheckMessage]:
 
     Keyless callables share one slot, so only the last survives and runs.
     """
-    init_errors, pages = loaded_page_contexts()
-    errors = list(init_errors)
+    errors: list[CheckMessage] = []
+    pages = loaded_page_contexts()
     conflicts = page._context_manager.keyless_conflicts()
     for entry in pages:
         names = conflicts.get(entry.page_path)
