@@ -102,9 +102,9 @@ def _merge_held(
         collector.note(GATED_NOTE, GatedNote(category, cast("str", name)))
     for note in shadow.notes(GATED_NOTE):
         # A block nested in this one held it back first, so it waits for both.
-        if isinstance(note, GatedNote):
-            joint = joint_category(category, note.category)
-            collector.note(GATED_NOTE, GatedNote(joint, note.target))
+        held = cast("GatedNote", note)
+        joint = joint_category(category, held.category)
+        collector.note(GATED_NOTE, GatedNote(joint, held.target))
     for note in shadow.notes(CONSENT_NOTE):
         collector.note(CONSENT_NOTE, note)
 

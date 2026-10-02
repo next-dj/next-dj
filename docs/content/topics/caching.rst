@@ -47,6 +47,9 @@ The page answers ``Cache-Control: public, max-age=60, s-maxage=300, stale-while-
 The directives are applied through :func:`~django.utils.cache.patch_cache_control` and :func:`~django.utils.cache.patch_vary_headers`, and only on a successful response to a ``GET`` or a ``HEAD``, so a ``POST`` the page answers itself never carries the page's cache and a callable ``cache`` is not even resolved for it.
 ``manage.py check`` reports an unknown key, a negative age, a flag that is no bool, and ``public`` together with ``no_store``.
 A callable ``cache`` that raises, or returns anything but the forms above, sends the page out ``private, no-store``, since no cache may keep a response whose policy is unknown.
+A page a contained failure degraded goes out ``private, no-store`` too, whatever its ``cache`` declares.
+A ``@page.metadata`` callable that raises, a renderer, a serializer or a runtime bundle that fails, each leaves the page without what it would have added, perhaps a ``noindex``, so no cache keeps the page past the failure.
+The page is not marked ``noindex`` in turn, since a callable that fails on every page would otherwise drop the whole site from search for as long as it fails.
 The failure is logged once per page, and under ``DEBUG`` or ``STRICT_LOADING`` it raises instead, naming the ``page.py`` and the shapes it may return.
 ``Http404`` and ``PermissionDenied`` raised from it answer 404 and 403 as from any view.
 

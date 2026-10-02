@@ -5,7 +5,13 @@ from django.core.exceptions import BadRequest, PermissionDenied, SuspiciousOpera
 from django.http import Http404
 
 from next.conf.signals import settings_reloaded
-from next.diagnostics import INTENDED_EXCEPTIONS, BackendReadLog, FailureLog
+from next.diagnostics import (
+    INTENDED_EXCEPTIONS,
+    BackendReadLog,
+    FailureLog,
+    degraded,
+    watch_degraded,
+)
 
 
 class _Backend:
@@ -187,3 +193,28 @@ class TestFailureLog:
             SuspiciousOperation,
             BadRequest,
         }
+
+
+class TestDegraded:
+    """A containment marks the render it degrades, a new render starts clean."""
+
+    def test_a_contained_failure_degrades_the_render(
+        self, failures: FailureLog, settings
+    ) -> None:
+        settings.DEBUG = False
+        watch_degraded()
+        assert degraded() is False
+        _contained(failures, "items")
+        assert degraded() is True
+        watch_degraded()
+        assert degraded() is False
+
+    def test_a_loud_failure_degrades_nothing(
+        self, failures: FailureLog, settings
+    ) -> None:
+        settings.DEBUG = True
+        watch_degraded()
+        with pytest.raises(RuntimeError) as info:
+            _contained(failures, "items")
+        del info.value.__notes__
+        assert degraded() is False

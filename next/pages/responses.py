@@ -24,7 +24,7 @@ from next.conf.signals import settings_reloaded
 from next.csrf import CsrfDelivery, csrf_delivery, defer_token
 from next.deps.cache import render_dep_cache
 from next.deps.resolver import current_resolver
-from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog
+from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog, degraded, watch_degraded
 from next.pages.loaders import AncestorStamps
 from next.pages.metadata.markers import NOINDEX_DIRECTIVES, robots_directives
 from next.pages.metadata.resolve import published_metadata, robots_contents
@@ -365,7 +365,10 @@ def response_policy(
     """Return the policy of one response, a static one read once per module reload.
 
     Only a `GET` or a `HEAD` carries a cache, a callable one resolved by injection.
+    Every page view reads its policy first, so the render it starts is watched for a
+    containment that degrades it.
     """
+    watch_degraded()
     stored = _DECLARED.get(file_path)
     held = None if stored is None else _revalidated(stored)
     if held is None:
@@ -587,6 +590,9 @@ def _after_render(request: HttpRequest, response: HttpResponseBase) -> None:
     """Settle the cookie `Vary` and the shared cache of a lazily rendered response."""
     if cookie_varies(request):
         patch_vary_headers(response, ("Cookie",))
+    if degraded():
+        _hold_degraded(response)
+        return
     cookies = response.cookies
     if isinstance(cookies, SharedCookies) and _personal(request, response):
         cookies.take_private()
@@ -607,6 +613,20 @@ def _apply_cache(
     control.apply(response)
     if control.shared:
         response.cookies = SharedCookies(response, control, file_path)
+
+
+def _hold_degraded(response: HttpResponseBase) -> None:
+    """Keep a page a contained failure degraded out of every cache.
+
+    The page lacks what the failing source would have added, a `noindex` among
+    them, so neither a CDN nor the browser may keep it past the failure.
+    """
+    cookies = response.cookies
+    if isinstance(cookies, SharedCookies):
+        cookies.shared = None
+    if response.has_header("Cache-Control"):
+        del response["Cache-Control"]
+    NO_STORE.apply(response)
 
 
 def _blocks(content: str | None) -> bool:
@@ -646,6 +666,8 @@ def finish_response[R: HttpResponseBase](
     _stamp_headers(response, policy)
     if policy.cache is not None:
         _apply_cache(response, policy.cache, request, file_path)
+    if degraded():
+        _hold_degraded(response)
     stamp_site_robots(response, request)
     if isinstance(response, SimpleTemplateResponse) and not response.is_rendered:
         response.add_post_render_callback(functools.partial(_after_render, request))

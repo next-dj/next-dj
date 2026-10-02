@@ -1,6 +1,7 @@
 """Failures of user and third-party code: raised under DEBUG, else logged once."""
 
 from collections.abc import Callable, Hashable
+from contextvars import ContextVar
 from logging import Logger
 
 from django.core.exceptions import BadRequest, PermissionDenied, SuspiciousOperation
@@ -18,6 +19,26 @@ INTENDED_EXCEPTIONS: tuple[type[BaseException], ...] = (
     SuspiciousOperation,
     BadRequest,
 )
+
+
+_DEGRADED: ContextVar[bool] = ContextVar("next_degraded", default=False)
+
+
+def watch_degraded() -> None:
+    """Start a render that no containment has degraded yet.
+
+    A page render calls it first, so `degraded` answers for that render alone.
+    """
+    _DEGRADED.set(False)
+
+
+def degraded() -> bool:
+    """Whether a containment degraded the render `watch_degraded` started.
+
+    A degraded page is missing what its failing source would have added, so its
+    response must not reach a shared cache as if it were whole.
+    """
+    return _DEGRADED.get()
 
 
 _FAILED = (
@@ -69,6 +90,7 @@ class FailureLog:
         if fail_loudly():
             exc.add_note(message % args if args else message)
             raise  # noqa: PLE0704 - re-raises the exception the caller is handling
+        _DEGRADED.set(True)
         if self.first_failure(key):
             self._logger.error(message, *args, exc_info=exc)
 
@@ -114,4 +136,10 @@ class BackendReadLog(FailureLog):
         return answer
 
 
-__all__ = ["INTENDED_EXCEPTIONS", "BackendReadLog", "FailureLog"]
+__all__ = [
+    "INTENDED_EXCEPTIONS",
+    "BackendReadLog",
+    "FailureLog",
+    "degraded",
+    "watch_degraded",
+]
