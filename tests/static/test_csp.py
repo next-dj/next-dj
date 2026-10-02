@@ -35,7 +35,7 @@ SECURE_CSP = {
 }
 CSP_MIDDLEWARE = "django.middleware.csp.ContentSecurityPolicyMiddleware"
 HEADER_NONCE = re.compile(r"script-src 'self' 'nonce-([^']+)'")
-TAG = re.compile(r"<(?:script|style|link)\b[^>]*>")
+TAG = re.compile(r"<(?:script|style|link)\b[^>]*>", re.IGNORECASE)
 NONCE_ATTR = re.compile(r'\snonce="([^"]*)"')
 
 
