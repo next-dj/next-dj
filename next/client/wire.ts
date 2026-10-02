@@ -9,6 +9,8 @@ import {
   HEADER_VERSION,
   HEADER_ZONE,
   REQUEST_FLAG,
+  newId,
+  pageKey,
   sameOrigin,
 } from "./protocol";
 import type { PartialError } from "./protocol";
@@ -33,17 +35,29 @@ export interface Clock {
 /** Navigation stand-in so jsdom's missing navigation hook is mockable. */
 export type Navigate = (url: string) => void;
 
-/** The CSRF header name and token carried by mutating requests. */
+/**
+ * The CSRF header name with its token, or with the endpoint that mints one.
+ *
+ * A shared page is cached for everyone, so it ships the endpoint instead of a token.
+ */
 export interface CsrfPayload {
   header: string;
-  token: string;
+  token?: string;
+  url?: string;
+}
+
+/** The token a mutation stamps, ensure fetching a deferred one on first need. */
+export interface CsrfSource {
+  current(): CsrfPayload | undefined;
+  ensure(): Promise<CsrfPayload | undefined>;
 }
 
 /** A single wire request with its queueing and locking intent. */
 export interface WireRequest {
   url: string;
   method?: string;
-  // A mutation locks on the form uid, a safe GET queues on url plus queue key.
+  // A mutation locks on the form uid, a safe GET queues on its named queue or on url
+  // plus zone.
   // Absent both, the request runs unqueued and unlocked.
   uid?: string;
   // The X-Next-Zone value, absent when the answer addresses the whole page.
@@ -87,7 +101,7 @@ export interface WireDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   onEnvelope: EnvelopeHandler;
   version?: () => string;
-  csrf?: () => CsrfPayload | undefined;
+  csrf: CsrfSource;
   // The dirty counter read at fetch time, threaded to apply with the response.
   dirtySnapshot?: () => number;
   // Every mutating request stamps X-Next-Request-Id and reports it here so the
@@ -95,22 +109,8 @@ export interface WireDeps {
   rememberRequestId?: (id: string) => void;
 }
 
-interface QueueEntry {
-  controller: AbortController;
-  seq: number;
-}
-
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
-}
-
-// The timestamp fallback covers a plain-HTTP origin, where crypto.randomUUID is
-// absent and the runtime object is narrower than the lib type claims.
-function newRequestId(): string {
-  const impl = globalThis.crypto as { randomUUID?: () => string } | undefined;
-  return impl?.randomUUID
-    ? impl.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 /** Shapes requests, classifies responses, and queues them per target. */
@@ -122,12 +122,13 @@ export class Wire {
   readonly #dispatch: (event: string, detail: Record<string, unknown>) => void;
   readonly #onEnvelope: EnvelopeHandler;
   readonly #version: () => string;
-  readonly #csrf: () => CsrfPayload | undefined;
+  readonly #csrf: CsrfSource;
   readonly #dirtySnapshot: () => number;
   readonly #rememberRequestId: (id: string) => void;
 
-  // Latest-wins per-target GET queues and the per-uid mutation lock.
-  readonly #queues = new Map<string, QueueEntry>();
+  // Latest-wins per-target GET queues and the per-uid mutation lock. A queue holds its
+  // live request only, so a key leaves once that request settles or is aborted.
+  readonly #queues = new Map<string, AbortController>();
   readonly #busy = new Set<string>();
   readonly #parseHooks = new Map<string, ParseHook>();
 
@@ -139,15 +140,15 @@ export class Wire {
     this.#dispatch = deps.dispatch;
     this.#onEnvelope = deps.onEnvelope;
     this.#version = deps.version ?? (() => "");
-    this.#csrf = deps.csrf ?? (() => undefined);
+    this.#csrf = deps.csrf;
     this.#dirtySnapshot = deps.dirtySnapshot ?? (() => 0);
     this.#rememberRequestId = deps.rememberRequestId ?? (() => undefined);
   }
 
   /** Abort every in-flight request and drop all state, for vitest isolation. */
   _reset(): void {
-    for (const entry of this.#queues.values()) {
-      entry.controller.abort();
+    for (const controller of this.#queues.values()) {
+      controller.abort();
     }
     this.#queues.clear();
     this.#busy.clear();
@@ -164,17 +165,11 @@ export class Wire {
 
   /**
    * Abort the in-flight request on a queue without starting a new one, so a form submit
-   * can cancel its own inline validation and the bumped seq drops a late answer.
+   * can cancel its own inline validation and a late answer finds its queue gone.
    */
   abort(key: string): void {
-    const entry = this.#queues.get(key);
-    if (entry === undefined) return;
-    entry.controller.abort();
-    // Bump the seq so a response resolving before the abort lands is still dropped.
-    this.#queues.set(key, {
-      controller: new AbortController(),
-      seq: entry.seq + 1,
-    });
+    this.#queues.get(key)?.abort();
+    this.#queues.delete(key);
   }
 
   /** Shape, queue or lock, send, and classify a single request. */
@@ -198,54 +193,68 @@ export class Wire {
       if (this.#busy.has(uid)) return;
       this.#busy.add(uid);
     }
+    // Queued before a token wait, so a submit can still abort its own validation.
     const queueKey = this.#queueKey(request, safe);
     const entry = queueKey !== undefined ? this.#enqueue(queueKey) : undefined;
     try {
-      await this.#run(request, target, method, queueKey, entry);
+      let csrf = this.#csrf.current();
+      // A deferred token is fetched inside the lock, so a double submit fetches once.
+      if (!safe && csrf?.token === undefined && csrf?.url !== undefined) {
+        csrf = await this.#csrf.ensure();
+        if (csrf?.token === undefined) {
+          this.#dispatch("partial:error", {
+            kind: "csrf",
+            url: request.url,
+            error: new Error("no CSRF token for the mutation"),
+          } satisfies PartialError);
+          return;
+        }
+      }
+      await this.#run(request, target, method, csrf, queueKey, entry);
     } finally {
       if (locked) {
         this.#busy.delete(uid);
       }
+      if (queueKey !== undefined && this.#queues.get(queueKey) === entry) {
+        this.#queues.delete(queueKey);
+      }
     }
   }
 
-  // A safe GET queues per path+key so two pages sharing a zone name run
+  // A zone GET queues per path+zone so two pages sharing a zone name run
   // independently while a re-filtered GET of the same page supersedes its
-  // predecessor. The space separator cannot appear in either part. An abortable
-  // POST keeps the bare queue key that abort() addresses.
+  // predecessor. The space separator cannot appear in either part. A named queue
+  // stays bare, the key abort() addresses.
   #queueKey(request: WireRequest, safe: boolean): string | undefined {
-    const key = request.queue ?? request.zone;
-    if (key === undefined) return undefined;
-    if (safe) return `${request.url.split("?")[0]} ${key}`;
-    return request.abortable === true ? key : undefined;
+    if (request.queue !== undefined) {
+      return safe || request.abortable === true ? request.queue : undefined;
+    }
+    if (request.zone === undefined) return undefined;
+    if (safe) return `${request.url.split("?")[0]} ${request.zone}`;
+    return request.abortable === true ? request.zone : undefined;
   }
 
-  // A new safe GET to a target aborts the in-flight one (latest-wins). The
-  // monotonic seq lets the response discard itself when a fresher one started.
-  #enqueue(key: string): QueueEntry {
-    const previous = this.#queues.get(key);
-    if (previous !== undefined) {
-      previous.controller.abort();
-    }
-    const entry: QueueEntry = {
-      controller: new AbortController(),
-      seq: (previous?.seq ?? 0) + 1,
-    };
-    this.#queues.set(key, entry);
-    return entry;
+  // A new safe GET to a target aborts the in-flight one (latest-wins). The response
+  // compares its own controller, so it drops itself once a fresher one took the key.
+  #enqueue(key: string): AbortController {
+    this.#queues.get(key)?.abort();
+    const controller = new AbortController();
+    this.#queues.set(key, controller);
+    return controller;
   }
 
   async #run(
     request: WireRequest,
     target: string,
     method: string,
+    csrf: CsrfPayload | undefined,
     queueKey: string | undefined,
-    entry: QueueEntry | undefined,
+    entry: AbortController | undefined,
   ): Promise<void> {
-    const headers = this.#headers(request, method);
+    const headers = this.#headers(request, method, csrf);
     const init: RequestInit = { method, headers, mode: "same-origin" };
     if (request.body !== undefined) init.body = request.body;
-    if (entry !== undefined) init.signal = entry.controller.signal;
+    if (entry !== undefined) init.signal = entry.signal;
     // Snapshot the dirty counter before the request leaves: a field touched
     // after this point is dirty relative to the response it will receive.
     const snapshot = this.#dirtySnapshot();
@@ -267,13 +276,7 @@ export class Wire {
       return;
     }
     // A stale safe-GET response that lost its race is dropped silently.
-    if (
-      entry !== undefined &&
-      queueKey !== undefined &&
-      this.#queues.get(queueKey)?.seq !== entry.seq
-    ) {
-      return;
-    }
+    if (queueKey !== undefined && this.#queues.get(queueKey) !== entry) return;
     await this.#classify(request, target, method, response, snapshot);
   }
 
@@ -301,7 +304,9 @@ export class Wire {
     }
     // Only a safe zone GET names a page: mutations keep the unscoped resolve.
     const page =
-      SAFE_METHODS.has(method) && request.zone !== undefined ? request.url : undefined;
+      SAFE_METHODS.has(method) && request.zone !== undefined
+        ? pageKey(request.url, this.#document)
+        : undefined;
     const contentType = response.headers.get("content-type") ?? "";
     const baseType = contentType.replace(/;.*$/, "").trim();
     const hook = this.#parseHooks.get(baseType);
@@ -376,7 +381,11 @@ export class Wire {
 
   // Headers, not a plain record, so a caller writing a name in another case still
   // collides with the runtime's own and each header is stamped exactly once.
-  #headers(request: WireRequest, method: string): Headers {
+  #headers(
+    request: WireRequest,
+    method: string,
+    csrf: CsrfPayload | undefined,
+  ): Headers {
     const headers = new Headers({
       [REQUEST_FLAG]: "1",
       [HEADER_ACCEPT]: ACCEPT,
@@ -388,11 +397,10 @@ export class Wire {
     if (version) headers.set(HEADER_VERSION, version);
     if (request.zone !== undefined) headers.set(HEADER_ZONE, request.zone);
     if (!SAFE_METHODS.has(method)) {
-      const csrf = this.#csrf();
-      if (csrf !== undefined) headers.set(csrf.header, csrf.token);
+      if (csrf?.token !== undefined) headers.set(csrf.header, csrf.token);
       // A true mutation carries a ring id so the SSE bridge suppresses its own echo.
       if (request.abortable !== true && !headers.has(HEADER_REQUEST_ID)) {
-        const id = newRequestId();
+        const id = newId();
         headers.set(HEADER_REQUEST_ID, id);
         this.#rememberRequestId(id);
       }

@@ -15,6 +15,7 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    "django.contrib.sitemaps",
     "django.contrib.staticfiles",
     "next",
     "blog",
@@ -53,7 +54,7 @@ DATABASES = {
     "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
 }
 
-LANGUAGE_CODE = "en-us"
+LANGUAGE_CODE = "en"
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
@@ -98,4 +99,19 @@ NEXT_FRAMEWORK = {
         "next.pages.loaders.DjxTemplateLoader",
     ],
     "STATIC_VERSION": "v1",
+    "SITE": {"URL": "https://blog.example", "NAME": "next.dj blog", "INDEXABLE": True},
+    "METADATA": {
+        "DEFAULTS": {
+            "viewport": "width=device-width, initial-scale=1",
+            "icons": {
+                "icon": {"url": "/static/blog/icon.svg", "type": "image/svg+xml"}
+            },
+            "description": "Small posts, plain Markdown, zero front-end build.",
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "next.dj — Markdown blog",
+            },
+            "og": {"type": "website"},
+        }
+    },
 }

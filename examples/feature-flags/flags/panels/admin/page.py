@@ -6,7 +6,11 @@ from flags.providers import WRITE_GATE_FLAG, FlagService
 
 from next import Depends, context
 from next.forms import Form
+from next.pages import MetadataDict
 from next.urls import page_reverse_lazy
+
+
+metadata: MetadataDict = {"title": "Flag admin", "robots": {"index": False}}
 
 
 class BulkToggleForm(Form):

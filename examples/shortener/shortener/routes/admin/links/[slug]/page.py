@@ -3,8 +3,15 @@ from shortener.cache import CLICK_PREFIX, reset_clicks
 from shortener.models import Link
 from shortener.providers import DLink
 
-from next import action, context
+from next import action, context, page
+from next.pages import MetadataDict
 from next.partial import Patches
+
+
+@page.metadata
+def link_meta(link: DLink[Link]) -> MetadataDict:
+    """Title the detail tab after the slug the provider resolved."""
+    return {"title": link.slug}
 
 
 @context

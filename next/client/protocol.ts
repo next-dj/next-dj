@@ -19,10 +19,37 @@ export const HEADER_ORIGIN = "X-Next-Origin";
 export const MIN_POLL_MS = 1000;
 export const MAX_POLL_MS = 2147483647;
 
+// The poll interval an attribute spells under a strict decimal grammar: only an
+// all-digit value in the server tag's bounds is one, so parseInt("5s")=5 is rejected.
+export function pollInterval(raw: string | null): number | null {
+  if (raw === null || !/^\d+$/.test(raw)) return null;
+  const ms = Number(raw);
+  return ms >= MIN_POLL_MS && ms <= MAX_POLL_MS ? ms : null;
+}
+
+/** The dev channel's reports, lent by next.dev.min.js once it lands under $dev. */
+export interface Diagnostics {
+  /** Report what the envelope boundary dropped from a raw wire envelope. */
+  dropped(wire: Record<string, unknown>): void;
+  /** Time one op under a user-timing span, answering what the op answers. */
+  timed(
+    patch: { op: string; target?: unknown; zone?: unknown },
+    run: () => boolean,
+  ): boolean;
+  /** Warn that a script was stripped from a patch aimed at the described address. */
+  stripped(address: string | undefined): void;
+  /** Warn that one node carries both data-next-key and id, handed to morph as is. */
+  keyed: (el: Element) => void;
+  /** Warn on the hand-written trigger attributes the runtime ignores. */
+  attrs(root: ParentNode): void;
+}
+
 /** The data-next-* attributes the runtime resolves across module boundaries. */
 export const ATTR_ZONE = "data-next-zone";
 export const ATTR_ACTION = "data-next-action";
 export const ATTR_KEY = "data-next-key";
+export const ATTR_SSE = "data-next-sse";
+export const ATTR_POLL = "data-next-poll";
 
 /** A partial:error, a discriminated union so a listener branches on kind. */
 export type PartialError =
@@ -30,7 +57,8 @@ export type PartialError =
   | { kind: "http"; status: number; body: string }
   | { kind: "parse"; body: string; error: unknown }
   | { kind: "op"; op: string; target?: string; error: unknown }
-  | { kind: "asset"; url?: string; error: unknown };
+  | { kind: "asset"; url?: string; error: unknown }
+  | { kind: "csrf"; url?: string; error: unknown };
 
 /** The discriminant of PartialError, aliased for listeners that switch on it. */
 export type PartialErrorKind = PartialError["kind"];
@@ -79,9 +107,60 @@ export function sameOrigin(url: string, doc: Document): string | undefined {
   return target.origin === origin ? target.href : undefined;
 }
 
+/** The page identity of a URL, its path and search on this origin, no fragment. */
+export function pageKey(url: string, doc: Document): string {
+  const href = sameOrigin(url, doc);
+  if (href === undefined) return url;
+  const target = new URL(href);
+  return target.pathname + target.search;
+}
+
+/** Fire a runtime event on the document and on the Next.on bus alike. */
+export function fire(
+  doc: Document,
+  dispatch: (event: string, detail: Record<string, unknown>) => void,
+  event: string,
+  detail: Record<string, unknown>,
+): void {
+  doc.dispatchEvent(new CustomEvent(event, { detail }));
+  dispatch(event, detail);
+}
+
+/**
+ * The bootstrap nonce, read at module evaluation since currentScript is null later.
+ *
+ * A module runtime has no currentScript either, so it takes the nonce of the first
+ * nonced script, which a policy issuing one nonce per response shares with it.
+ */
+export function scriptNonce(doc: Document): string | undefined {
+  const current = doc.currentScript ?? doc.querySelector("script[nonce]");
+  const value = current instanceof HTMLElement ? current.nonce : "";
+  return value === "" ? undefined : value;
+}
+
+// A fresh request or event id, timestamp-based on a plain-HTTP origin where
+// crypto.randomUUID is absent and the runtime object is narrower than its lib type.
+export function newId(): string {
+  const impl = globalThis.crypto as { randomUUID?: () => string } | undefined;
+  return impl?.randomUUID
+    ? impl.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 /** Match a selector across a subtree, folding in the root when it matches too. */
 export function matching(root: ParentNode, selector: string): Element[] {
   const found = Array.from(root.querySelectorAll(selector));
   if (root instanceof Element && root.matches(selector)) found.push(root);
   return found;
+}
+
+// Add a zone to the per-page batch, one comma-joined GET per owning page.
+export function addZone(
+  batches: Map<string, string[]>,
+  url: string,
+  zone: string,
+): void {
+  const zones = batches.get(url);
+  if (zones === undefined) batches.set(url, [zone]);
+  else zones.push(zone);
 }

@@ -6,24 +6,31 @@ static manager, and owns everything that turns a collector into markup.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from django.conf import settings
 
+from next.ports import page_scripts_slot
+
 from .assets import default_kinds
 from .collector import HEAD_CLOSE, default_placeholders
-from .scripts import (
+from .nonce import resolve_nonce
+from .runtime import (
+    CHUNK_STATIC_PATHS,
+    CHUNKS_PAYLOAD_KEY,
     CSRF_PAYLOAD_KEY,
     DEV_PAYLOAD_KEY,
     RESERVED_PAYLOAD_KEYS,
     ScriptInjectionPolicy,
     csrf_payload_for,
+    nonce_attr,
 )
+from .serializers import JsContextSerializer, resolve_serializer
 from .signals import collector_finalized, html_injected
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
     from django.http import HttpRequest
@@ -31,10 +38,18 @@ if TYPE_CHECKING:
     from .assets import StaticAsset
     from .backends import StaticBackend
     from .collector import PlaceholderSlot, StaticCollector
-    from .scripts import NextScriptBuilder
+    from .runtime import NextScriptBuilder
+
+
+DEV_CHUNK: Final = "dev"
+"""The `$chunks` key of the diagnostics chunk, named only under `DEBUG`."""
 
 
 _RUNTIME_SLOT_NAME = "scripts"
+_HEAD_SLOT_NAME = "head"
+_NO_SCRIPTS: tuple[str, Mapping[str, object]] = ("", {})
+
+type _ChunksMemo = tuple[dict[str, str], type[JsContextSerializer], str]
 
 
 class InjectionProvider(Protocol):
@@ -56,6 +71,29 @@ class InjectionProvider(Protocol):
         """Return the builder holding the runtime URL and the tag templates."""
         raise NotImplementedError
 
+    def chunk_url(self, name: str) -> str | None:
+        """Return the URL of the lazy chunk `$chunks` names `name`, if stored."""
+        raise NotImplementedError
+
+
+class _Render:
+    """What one injection settles before it renders a slot."""
+
+    __slots__ = ("head", "nonce", "payload", "request", "runtime_url")
+
+    def __init__(
+        self,
+        request: HttpRequest | None,
+        nonce: str | None,
+        runtime_url: str | None,
+        scripts: tuple[str, Mapping[str, object]],
+    ) -> None:
+        """Hold the request, its nonce, the runtime URL and the scripts it adds."""
+        self.request = request
+        self.nonce = nonce
+        self.runtime_url = runtime_url
+        self.head, self.payload = scripts
+
 
 class PlaceholderInjector:
     """Replace placeholder tokens with the tags a collector accumulated."""
@@ -63,6 +101,7 @@ class PlaceholderInjector:
     def __init__(self, provider: InjectionProvider) -> None:
         """Bind the pipeline the rendered tags and URLs are read from."""
         self._provider = provider
+        self._chunks: _ChunksMemo | None = None
 
     def inject(
         self,
@@ -94,18 +133,26 @@ class PlaceholderInjector:
             if builder.policy is ScriptInjectionPolicy.AUTO
             else None
         )
+        nonce = resolve_nonce(request)
+        scripts = page_scripts_slot.peek()
+        render = _Render(
+            request,
+            nonce,
+            runtime_url,
+            _NO_SCRIPTS
+            if scripts is None
+            else scripts.render(
+                collector, page_path=page_path, request=request, nonce=nonce
+            ),
+        )
         for slot in default_placeholders:
-            rendered = self._render_slot(
-                slot,
-                collector,
-                backend,
-                builder,
-                request=request,
-                runtime_url=runtime_url,
-            )
-            html = html.replace(slot.token, rendered)
+            rendered = self._render_slot(slot, collector, backend, builder, render)
+            if slot.name == _HEAD_SLOT_NAME and rendered and slot.token not in html:
+                html = html.replace(HEAD_CLOSE, f"{rendered}\n{HEAD_CLOSE}", 1)
+            else:
+                html = html.replace(slot.token, rendered)
         if runtime_url is not None:
-            html = self._inject_preload_hint(html, builder, runtime_url)
+            html = self._inject_preload_hint(html, builder, runtime_url, nonce)
         if replaced is not None:
             html_injected.send(
                 sender=sender,
@@ -124,76 +171,102 @@ class PlaceholderInjector:
         collector: StaticCollector,
         backend: StaticBackend,
         builder: NextScriptBuilder,
-        *,
-        request: HttpRequest | None,
-        runtime_url: str | None,
+        render: _Render,
     ) -> str:
         user_tags = self._render_tags(
-            collector.assets_in_slot(slot.name), backend, request=request
+            collector.assets_in_slot(slot.name), backend, render
         )
-        if slot.name == _RUNTIME_SLOT_NAME and runtime_url is not None:
-            return self._wrap_with_runtime(
-                user_tags, collector, builder, runtime_url, request=request
-            )
+        if slot.name == _HEAD_SLOT_NAME and render.head:
+            return f"{render.head}\n{user_tags}" if user_tags else render.head
+        if slot.name == _RUNTIME_SLOT_NAME and render.runtime_url is not None:
+            return self._wrap_with_runtime(user_tags, collector, builder, render)
         return user_tags
 
-    def _reserved_payload(self, request: HttpRequest | None) -> dict[str, Any]:
+    def _reserved_payload(self, render: _Render, *, dev: bool) -> dict[str, Any]:
         """Return the framework-owned init-payload entries for this render."""
         payload: dict[str, Any] = {}
-        csrf = csrf_payload_for(request)
+        csrf = csrf_payload_for(render.request)
         if csrf is not None:
             payload[CSRF_PAYLOAD_KEY] = csrf
-        if settings.DEBUG:
+        if dev:
             payload[DEV_PAYLOAD_KEY] = True
+        payload.update(render.payload)
         return payload
+
+    def _chunks_entry(
+        self, request: HttpRequest | None, *, dev: bool
+    ) -> tuple[dict[str, str], str]:
+        """Return the `$chunks` entry and its encoding, reused while its URLs hold.
+
+        Only `DEBUG` adds the dev chunk, while a later patch may need any other one.
+        A chunk the storage lacks is left out, the runtime looking beside itself.
+        """
+        provider = self._provider
+        urls = {
+            name: provider.asset_url(url, request=request)
+            for name in CHUNK_STATIC_PATHS
+            if (dev or name != DEV_CHUNK) and (url := provider.chunk_url(name))
+        }
+        serializer = resolve_serializer()
+        held = self._chunks
+        if held is not None and held[0] == urls and held[1] is type(serializer):
+            return urls, held[2]
+        fragment = serializer.dumps(urls)
+        self._chunks = (urls, type(serializer), fragment)
+        return urls, fragment
 
     def _wrap_with_runtime(
         self,
         user_tags: str,
         collector: StaticCollector,
         builder: NextScriptBuilder,
-        runtime_url: str,
-        *,
-        request: HttpRequest | None,
+        render: _Render,
     ) -> str:
         payload = collector.js_context_payload(reserved=RESERVED_PAYLOAD_KEYS)
-        js_context = payload.values
-        reserved = self._reserved_payload(request)
-        if reserved:
-            js_context = {**js_context, **reserved}
+        dev = bool(settings.DEBUG)
+        chunks, chunks_encoded = self._chunks_entry(render.request, dev=dev)
+        js_context = {
+            **payload.values,
+            **self._reserved_payload(render, dev=dev),
+            CHUNKS_PAYLOAD_KEY: chunks,
+        }
+        encoded = {**payload.encoded, CHUNKS_PAYLOAD_KEY: chunks_encoded}
         init_payload = builder.init_script(
-            js_context, key_serializers=payload.serializers, encoded=payload.encoded
+            js_context,
+            key_serializers=payload.serializers,
+            encoded=encoded,
+            nonce=render.nonce,
         )
-        next_scripts = f"{builder.script_tag(runtime_url)}\n{init_payload}\n"
+        tag = builder.script_tag(render.runtime_url, nonce=render.nonce)
+        next_scripts = f"{tag}\n{init_payload}\n"
         return next_scripts + user_tags if user_tags else next_scripts
 
     def _inject_preload_hint(
-        self, html: str, builder: NextScriptBuilder, runtime_url: str
+        self, html: str, builder: NextScriptBuilder, runtime_url: str, nonce: str | None
     ) -> str:
-        replacement = f"{builder.preload_link(runtime_url)}\n{HEAD_CLOSE}"
+        replacement = f"{builder.preload_link(runtime_url, nonce=nonce)}\n{HEAD_CLOSE}"
         return html.replace(HEAD_CLOSE, replacement, 1)
 
     def _render_tags(
-        self,
-        assets: Sequence[StaticAsset],
-        backend: StaticBackend,
-        *,
-        request: HttpRequest | None,
+        self, assets: Sequence[StaticAsset], backend: StaticBackend, render: _Render
     ) -> str:
-        return "\n".join(self._render_one(asset, backend, request) for asset in assets)
+        if not assets:
+            return ""
+        return "\n".join([self._render_one(asset, backend, render) for asset in assets])
 
     def _render_one(
-        self, asset: StaticAsset, backend: StaticBackend, request: HttpRequest | None
+        self, asset: StaticAsset, backend: StaticBackend, render: _Render
     ) -> str:
         if asset.inline is not None:
             tag = default_kinds.inline_tag(asset.kind)
             if tag is None:
                 return asset.inline
-            return f"<{tag}>{asset.inline}</{tag}>"
+            return f"<{tag}{nonce_attr(render.nonce)}>{asset.inline}</{tag}>"
         renderer_name = default_kinds.renderer(asset.kind)
         renderer = getattr(backend, renderer_name)
-        url = self._provider.asset_url(asset.url, request=request)
-        return cast("str", renderer(url, request=request))
+        url = self._provider.asset_url(asset.url, request=render.request)
+        rendered: str = renderer(url, request=render.request, nonce=render.nonce)
+        return rendered
 
 
 __all__ = ["InjectionProvider", "PlaceholderInjector"]

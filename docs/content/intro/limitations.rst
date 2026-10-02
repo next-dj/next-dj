@@ -12,6 +12,7 @@ One layout placeholder
 A layout offers exactly one ``{% template %}`` placeholder.
 Composition produces one flat template, so a page cannot override a named region of an ancestor and there is no ``{{ block.super }}``.
 A region that varies per page is expressed through ``@context`` and a component.
+The head is the exception, filled through the metadata a ``page.py`` declares and one ``{% metadata %}`` tag renders, see :doc:`/content/topics/seo/metadata`.
 See :doc:`/content/topics/layouts` for the composition rules.
 
 A synchronous render pipeline

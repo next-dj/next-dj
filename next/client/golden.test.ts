@@ -1,10 +1,11 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Applier, parseEnvelope } from "./apply";
 import type { Envelope } from "./apply";
 import { createLayers } from "./layers";
+import { createNavigation } from "./navigation";
 import type { DialogAdapter } from "./layers";
 
 const GOLDEN_DIR = join(
@@ -284,6 +285,7 @@ describe("layer golden fixtures apply through the layer stack", () => {
       fetch: async () => undefined,
       document,
       dialog: noopDialog(),
+      navigation: createNavigation({ dispatch: () => undefined }),
     });
     const applier = new Applier({
       dispatch: (event, detail) => dispatched.push({ event, detail }),
@@ -323,5 +325,38 @@ describe("layer golden fixtures apply through the layer stack", () => {
     expect(list.textContent).toContain("fresh");
     expect(list.querySelector("li")!.textContent).toBe("fresh");
     layers._reset();
+  });
+});
+
+// The meta fixture comes from the server's golden writer, so the case runs once its
+// fixture exists and reads the expected values out of the envelope.
+function hasCase(name: string): boolean {
+  return existsSync(join(GOLDEN_DIR, `${name}.meta.json`));
+}
+
+function opOf(name: string, op: string): Record<string, unknown> {
+  const raw = JSON.parse(readEnvelopeBytes(readMeta(name).envelope_file)) as {
+    ops: Record<string, unknown>[];
+  };
+  return raw.ops.find((entry) => entry.op === op)!;
+}
+
+describe("head golden fixtures", () => {
+  beforeEach(() => {
+    document.head.innerHTML =
+      '<title>Stale</title><meta name="description" content="stale">' +
+      '<meta name="robots" content="stale">';
+  });
+
+  it.skipIf(!hasCase("meta_head"))("meta_head syncs the four head tags", () => {
+    const meta = opOf("meta_head", "meta");
+    const { applier } = makeApplier();
+    applier.apply(JSON.parse(readEnvelopeBytes(readMeta("meta_head").envelope_file)));
+    const tag = (selector: string, attr: string): string | null =>
+      document.head.querySelector(selector)?.getAttribute(attr) ?? null;
+    expect(document.head.querySelector("title")?.textContent ?? null).toBe(meta.title);
+    expect(tag('meta[name="description"]', "content")).toBe(meta.description);
+    expect(tag('link[rel="canonical"]', "href")).toBe(meta.canonical);
+    expect(tag('meta[name="robots"]', "content")).toBe(meta.robots);
   });
 });

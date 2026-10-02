@@ -7,6 +7,7 @@ and caches the mapping until the same freshness token discovery uses goes stale.
 from __future__ import annotations
 
 import os
+import posixpath
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, NamedTuple, override
@@ -29,7 +30,7 @@ from next.utils import stat_mtime_ns, template_edits_watched
 
 from .assets import StaticNamespace, default_kinds
 from .discovery import PathResolver, default_stems, find_role_files
-from .scripts import NEXT_JS_STATIC_PATH
+from .runtime import CHUNK_STATIC_PATHS, NEXT_JS_STATIC_PATH
 
 
 if TYPE_CHECKING:
@@ -61,8 +62,7 @@ def _collect_stem_static_files(
 def discover_colocated_static_assets() -> dict[str, Path]:
     """Map staticfiles logical paths to absolute source files on disk.
 
-    The helper scans every configured page-backend tree plus registered components, and
-    honors the stem and kind registries filled during `AppConfig.ready`.
+    Every page tree and every component is scanned.
     """
     out: dict[str, Path] = {}
     # Resolved already, because that is what the watch layer promises.
@@ -99,12 +99,20 @@ def discover_colocated_static_assets() -> dict[str, Path]:
         _collect_stem_static_files(
             out, component_dir, logical_name, "component", default_stems
         )
-
     return out
 
 
 _RUNTIME_BUNDLE_ROOT: Final = Path(__file__).parent
-_RUNTIME_BUNDLE_PATHS: Final = (NEXT_JS_STATIC_PATH, f"{NEXT_JS_STATIC_PATH}.map")
+_RUNTIME_BUNDLE_DIR: Final = posixpath.dirname(NEXT_JS_STATIC_PATH)
+_RUNTIME_BUNDLE_PATHS: Final = (
+    NEXT_JS_STATIC_PATH,
+    f"{NEXT_JS_STATIC_PATH}.map",
+    *(
+        path
+        for chunk in CHUNK_STATIC_PATHS.values()
+        for path in (chunk, f"{chunk}.map")
+    ),
+)
 
 
 def _runtime_bundle_source(logical_path: str) -> Path | None:
@@ -120,14 +128,21 @@ def _runtime_bundle_source(logical_path: str) -> Path | None:
 
 
 def _runtime_bundle_static_files() -> dict[str, Path]:
-    """Map the built client runtime and its sourcemap into the `next/` namespace.
+    """Map the built runtime, its chunks and their sourcemaps into `next/`.
 
     A source checkout carries no build output, so a missing file is left unmapped.
+    One directory read answers every bundle, however many chunks the runtime ships.
     """
+    folder = _RUNTIME_BUNDLE_ROOT / _RUNTIME_BUNDLE_DIR
+    try:
+        with os.scandir(folder) as scan:
+            present = {entry.name for entry in scan if entry.is_file()}
+    except OSError:
+        return {}
     return {
-        logical_path: source
+        logical_path: _RUNTIME_BUNDLE_ROOT / logical_path
         for logical_path in _RUNTIME_BUNDLE_PATHS
-        if (source := _runtime_bundle_source(logical_path)) is not None
+        if posixpath.basename(logical_path) in present
     }
 
 
@@ -146,9 +161,12 @@ class _MappedSourceStorage(Storage):
 
     @override
     def exists(self, name: str) -> bool:
-        """Return True when the logical name has a mapping and the file exists."""
+        """Return True when the logical name maps to a regular file.
+
+        The same rule the bundle lookups apply, so a directory never counts as present.
+        """
         source = self._mapping.get(name)
-        return source is not None and source.exists()
+        return source is not None and source.is_file()
 
     @override
     def open(self, name: str, mode: str = "rb") -> File:
@@ -335,7 +353,7 @@ class NextStaticFilesFinder(BaseFinder):
     """Expose next-dj co-located assets under the `next/` staticfiles namespace.
 
     Discovered assets are held until the tree they were read from moves, while the
-    client runtime bundle is a fixed pair of paths and is stat'd on every lookup.
+    client runtime bundles are fixed paths and are stat'd on every lookup.
     """
 
     def __init__(self) -> None:

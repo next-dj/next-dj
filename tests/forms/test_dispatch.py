@@ -156,7 +156,7 @@ def _run_component_context(tmp_path: Path, request: object) -> object:
 
 
 def _run_page_context(tmp_path: Path, request: object) -> object:
-    """Register a `@context` referencing `Depends("token")` and invoke `collect_context`."""
+    """Register a `@context` reading `Depends("token")` and call `collect_context`."""
     page_file = tmp_path / "page.py"
     page_file.write_text("")
 
@@ -999,7 +999,7 @@ class TestDispatchSharedDepCache:
     def test_request_scope_cache_rejoined_by_consumer(
         self, mock_http_request, tmp_path, run_consumer
     ) -> None:
-        """Re-render consumers reuse ``request._next_dep_cache`` instead of re-resolving."""
+        """Re-render consumers reuse ``request._next_dep_cache`` over re-resolving."""
         calls = {"n": 0}
 
         def make_token() -> str:

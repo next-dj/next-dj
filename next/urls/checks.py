@@ -1,9 +1,4 @@
-"""System checks for the URL routing subsystem.
-
-The ids are `next.E002` to `next.E006`, `next.E022`, `next.E024` to `next.E028`,
-`next.E039`, `next.E081`, `next.E082`, and `next.E094` to `next.E097` for the
-`OPTIONS` shapes, plus `next.E014` to `next.E016` for the pattern walk itself.
-"""
+"""System checks for the URL routing subsystem."""
 
 from __future__ import annotations
 
@@ -11,9 +6,11 @@ from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, Tags, register
+from django.urls import NoReverseMatch, Resolver404, resolve
 
-from next.checks import NEXT
+from next.checks import NEXT, SEO
 from next.checks.common import (
+    WALK_HINT,
     errors_for_unknown_keys,
     get_page_roots,
     get_router_manager,
@@ -21,6 +18,8 @@ from next.checks.common import (
 )
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
+from next.csrf import CSRF_URL_NAME, csrf_url
+from next.forms.uid import URL_NAME_FORM_ACTION, reverse_form_action
 
 from .backends import FILE_ROUTER_CONFIG_KEYS, FileRouterBackend, RouterBackend
 from .dispatcher import scan_pages_tree
@@ -29,8 +28,10 @@ from .parser import default_url_parser
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
     from pathlib import Path
+
+    from django.urls import ResolverMatch
 
     from .manager import RouterManager
 
@@ -281,12 +282,23 @@ def check_next_pages_configuration(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
+@register(Tags.urls, Tags.templates, NEXT, SEO)
+def check_router_manager(*args, **kwargs) -> list[CheckMessage]:
+    """Report a router that fails to initialise (`next.E007`), once per check run.
+
+    Every check that walks the routers skips quietly on the same failure, and this
+    one carries each tag those checks run under, so any `--tag` selection sees it.
+    """
+    _router_manager, init_errors = get_router_manager()
+    return init_errors
+
+
 @register(Tags.urls, NEXT)
 def check_url_patterns(*args, **kwargs) -> list[CheckMessage]:
     """Collect patterns from routers and flag duplicate Django path strings."""
-    router_manager, init_errors = get_router_manager()
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors
+        return []
 
     all_patterns, errors = _collect_all_patterns(router_manager)
 
@@ -294,7 +306,15 @@ def check_url_patterns(*args, **kwargs) -> list[CheckMessage]:
         _check_url_conflicts(all_patterns, errors)
     except (ValueError, TypeError) as e:
         errors.append(
-            Error(f"Error checking URL conflicts: {e}", obj=settings, id="next.E014")
+            Error(
+                f"The URL patterns the routers produced could not be compared: {e}",
+                hint=(
+                    "A router answered a pattern that is not a Django URL pattern. "
+                    "Check the custom router named in PAGE_BACKENDS."
+                ),
+                obj=settings,
+                id="next.E014",
+            )
         )
 
     return errors
@@ -305,9 +325,9 @@ def check_reverse_name_collisions(*args, **kwargs) -> list[CheckMessage]:
     """Fail when two distinct routes collapse to the same reverse URL name."""
     errors: list[CheckMessage] = []
 
-    router_manager, init_errors = get_router_manager()
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors
+        return []
 
     # Collection errors surface through check_url_patterns already, so
     # they are dropped here instead of being reported twice.
@@ -359,6 +379,64 @@ class _CollectedPatternsMemo:
 _collected_patterns = _CollectedPatternsMemo()
 
 
+_PROBE_UID = "probe"
+"""A form action uid any `<str:uid>` route accepts, so the address resolves as one."""
+
+
+def _framework_routes() -> tuple[tuple[str, str, Callable[[], str]], ...]:
+    """Return each framework endpoint a page may shadow, by name and how it reverses."""
+    return (
+        ("CSRF token endpoint", CSRF_URL_NAME, csrf_url),
+        (
+            "form action endpoint",
+            URL_NAME_FORM_ACTION,
+            lambda: reverse_form_action(_PROBE_UID),
+        ),
+    )
+
+
+def _answered_by(match: ResolverMatch) -> str:
+    """Name what answers an address, the page file when a page does."""
+    page_path = getattr(match.func, "next_page_path", None)
+    if page_path is not None:
+        return f"the page {page_path} (route {match.route!r})"
+    return f"{match._func_path} (route {match.route!r})"
+
+
+@register(Tags.urls, NEXT)
+def check_framework_routes_reachable(*args, **kwargs) -> list[CheckMessage]:
+    """Report a framework endpoint another pattern answers first (`next.E149`).
+
+    An endpoint that does not reverse is left to the checks of its own setting.
+    """
+    errors: list[CheckMessage] = []
+    for label, url_name, address in _framework_routes():
+        try:
+            url = address()
+        except NoReverseMatch:
+            continue
+        try:
+            match: ResolverMatch | None = resolve(url)
+        except Resolver404:
+            match = None
+        if match is not None and match.url_name == url_name:
+            continue
+        answered = "nothing" if match is None else _answered_by(match)
+        errors.append(
+            Error(
+                f"The {label} reverses to {url}, but ROOT_URLCONF resolves that "
+                f"address to {answered}, so the runtime never reaches the endpoint.",
+                hint=(
+                    "List path('', include('next.urls')) above that pattern in "
+                    "ROOT_URLCONF, or move the page off that route."
+                ),
+                obj=settings,
+                id="next.E149",
+            )
+        )
+    return errors
+
+
 def reset_collected_patterns_cache(**kwargs) -> None:
     """Drop memoised collected patterns so the next check run recollects."""
     _collected_patterns.router_manager = None
@@ -394,7 +472,8 @@ def _collect_all_patterns_uncached(
         except (AttributeError, OSError) as e:
             errors.append(
                 Error(
-                    f"Error collecting patterns from router: {e}",
+                    f"{type(router).__name__} failed to list its URL patterns: {e}",
+                    hint=WALK_HINT,
                     obj=settings,
                     id="next.E016",
                 )

@@ -6,7 +6,7 @@ The resolver backend is pluggable via `NEXT_FRAMEWORK["DEPENDENCY_RESOLVER"]`.
 from __future__ import annotations
 
 from . import signals
-from .cache import REQUEST_DEP_CACHE_ATTR, get_request_dep_cache
+from .cache import REQUEST_DEP_CACHE_ATTR, get_request_dep_cache, render_dep_cache
 from .context import RESERVED_KEYS, ResolutionContext
 from .errors import DependencyCycleError, UnknownDependencyError
 from .markers import DDependencyBase, Depends
@@ -29,6 +29,7 @@ __all__ = [
     "UnknownDependencyError",
     "get_request_dep_cache",
     "provider_registry",
+    "render_dep_cache",
     "resolver",
     "signals",
 ]

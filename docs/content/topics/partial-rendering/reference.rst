@@ -119,15 +119,22 @@ Pass ``request`` whenever one exists, so the asset URLs of the envelope stay sco
      - Close the top layer with an accept result or a dismissal.
      - accept, no result
    * - ``url``
-     - ``push_url()``
-     - Push browser history.
-       The href is validated by the server.
-       The client also honours ``action: "replace"``, reachable only from a raw or backend-authored envelope, the ``push_url()`` builder always pushes.
+     - ``push_url()``, ``replace_url()``
+     - Push or replace the browser history entry, with ``action: "push"`` or ``action: "replace"``.
+       The href is validated by the server, and the write waits for the envelope to commit, so one ``next:navigated`` announces it.
      - ``action: "push"``
    * - ``visit``
      - ``redirect()``
      - A full client navigation to a server-authored href.
        ``external=True`` skips same-host validation, see :ref:`security-overview`.
+     - none
+   * - ``meta``
+     - ``meta()``
+     - Sync the title, the description, the canonical link, and the robots meta the origin page would render with the given text or ``MetadataDict`` folded over its chain as the page's own segment.
+       The operation carries ``title``, ``description``, ``canonical``, and ``robots``, a ``null`` removing the tag and an absent key leaving it alone.
+       No markup travels, see :doc:`/content/topics/seo/metadata`.
+       An inherited metadata callable of an ancestor runs as in the render, after the guard of the origin page.
+       The tags belong to the page whose envelope carried them, and a ``meta`` for a URL that is neither the page nor an open layer is dropped, see :doc:`layers`.
      - none
 
 A target carries exactly one address key, and the client resolves ``zone``, then ``form``, then ``field``, then ``css``.
@@ -155,10 +162,10 @@ See :doc:`extending` for the end-to-end recipe, the ``context`` and ``event`` se
 An event name that starts with ``partial:`` or ``next:``, or equals ``ready`` or ``context-updated``, is reserved for the runtime lifecycle.
 ``Patches.event()`` rejects such a name with ``ReservedEventNameError``, symmetric to ``op()`` rejecting a built-in verb on the generic channel, so an application cannot forge a lifecycle event.
 
-The ``$csrf`` and ``$dev`` keys of the init payload are reserved the same way.
-``Patches.context()`` rejects either name with ``ReservedContextKeyError``, and the js-context delta of a zone render drops them before it becomes a ``context`` op.
+The ``$csrf``, ``$dev``, ``$chunks``, ``$scripts``, and ``$consent`` keys of the init payload are reserved the same way.
+``Patches.context()`` rejects any of them with ``ReservedContextKeyError``, and the js-context delta of a zone render drops them before it becomes a ``context`` op.
 The ``$`` namespace therefore belongs to the framework on a patch exactly as it does on a full render.
-A full render drops a page or component key of either name from the payload whether or not it has a framework value to write there, so no patch has a registered value to update.
+A full render drops a page or component key of such a name from the payload whether or not it has a framework value to write there, so no patch has a registered value to update.
 
 Asset manifest
 --------------
@@ -248,7 +255,7 @@ A target off that origin is refused before any request leaves, with a ``partial:
        A header that does not resolve to a page falls back to the posted form origin.
    * - CSRF header
      - Every unsafe method once the runtime holds a token
-     - The name comes from ``CSRF_HEADER_NAME``, the token from the ``$csrf`` init payload and from any later rotation meta, the cookie is never read.
+     - The name comes from ``CSRF_HEADER_NAME``, the token from the ``$csrf`` init payload, from ``/_next/csrf/`` when the payload defers it, and from any later rotation meta, and the cookie is never read.
 
 An inline-validation POST carries an internal ``validate:<uid>`` value in ``X-Next-Zone`` instead of a declared zone, and the server ignores that name because no page declares it.
 A batch renders every declared name it carries and drops the rest, so one stale name never poisons a sweep.
@@ -424,9 +431,8 @@ Lifecycle events
 
 The runtime fires events on three channels, the element, the document, and the ``Next.on`` bus.
 The ``next:*`` node events fire on the element as a bubbling ``CustomEvent`` caught with ``addEventListener``.
-The apply-stage ``partial:*`` events and ``next:toast`` fire on the document and the ``Next.on`` bus.
-A ``partial:error`` of kind ``asset``, raised when a co-located stylesheet fails to load, when the asset version still mismatches after the reload, or when the reload target sits off the page's origin, reaches only the bus.
-``ready``, ``context-updated``, ``partial:before-request``, and the fetch-stage ``partial:error`` reach only the bus.
+Every ``partial:*`` event and every ``next:*`` runtime event, ``next:toast`` among them, fires on the document and the ``Next.on`` bus with the same payload, whichever stage raised it, the fetch, the apply, the asset loader, a stream, or a chunk that failed to load.
+``ready`` and ``context-updated`` alone reach only the bus.
 The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live only on ``document.addEventListener`` and never reach the bus, so ``Next.on("next:mounted")`` is a silent no-op.
 
 .. list-table::
@@ -447,16 +453,17 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
    * - ``partial:before-request``
      - No
      - ``{url, method, intent}``, where ``intent`` is ``{zone?, uid?}``.
-       The runtime fires this through the bus before the fetch leaves, so a listener observes the request rather than vetoing it.
+       The runtime fires this on the document and the bus before the fetch leaves, so a listener observes the request rather than vetoing it.
    * - ``partial:before-apply``
      - Yes
      - ``{envelope}``, the op list is mutable.
        The veto lives on the document event, so only a ``document.addEventListener`` listener can call ``preventDefault()``, while a ``Next.on`` listener merely observes.
    * - ``partial:applied``
      - No
-     - ``{envelope, ok}``.
+     - ``{envelope, ok, nodes}``.
        ``ok`` is ``false`` when any op threw or named an unknown verb, so a listener tells a clean apply from a degraded one that still mounted what did change.
        Observe ``ok``, not the bare fact of apply.
+       ``nodes`` are the elements the ops inserted or morphed, the roots the mount pass ran over.
    * - ``partial:error``
      - No
      - A discriminated union on ``kind``, where each cause carries only its own fields.
@@ -464,7 +471,8 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
        ``{kind: "http", status, body}`` is a 5xx or a mutating reply that is not an envelope.
        ``{kind: "parse", body, error}`` is a malformed JSON body.
        ``{kind: "op", op, error, target?}`` is a thrown or unknown verb mid-apply, where ``op`` names the verb and ``target`` is the human-readable address of the patch, present only when the op carried a recognised target.
-       ``{kind: "asset", error, url?}`` is a stylesheet that failed to load, a version mismatch surviving a reload, or a reload target off the page's origin, where ``url`` is present only on the last two.
+       ``{kind: "asset", error, url?}`` is a stylesheet that failed to load, a version mismatch surviving a reload, a reload target off the page's origin, or a runtime chunk that failed to load, where ``url`` is present on all but the first.
+       ``{kind: "csrf", error, url?}`` is a deferred CSRF token the runtime could not fetch, where ``url`` names the mutation that never left.
        The ``status`` and ``body`` fields belong to ``http`` alone, and ``body`` also to ``parse``, so a listener branches on ``kind`` before reading them.
        An ``AbortError`` never reaches this event.
    * - ``partial:layer-opened``

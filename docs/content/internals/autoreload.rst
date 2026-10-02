@@ -99,6 +99,8 @@ It is logged once per backend and subject rather than per tick, and again once t
 
 Only Python entrypoints are watched.
 ``.djx`` templates and co-located assets are deliberately omitted from the specs.
+The tree-top sources, ``sitemap.py``, ``robots.py``, ``robots.txt``, and ``scripts.py``, are omitted as well, because they reload in process without restarting ``runserver``.
+While ``DEBUG`` is on, every SEO route compares the modification times of the SEO sources with the ones they were loaded at, every page render does the same for ``scripts.py``, and a file that appeared, went, or moved is read again on that request, see :doc:`seo-pipeline`.
 
 ``iter_all_autoreload_watch_specs`` appends the specs registered through ``register_autoreload_watch_spec``.
 It deduplicates the combined list by resolved path and glob, then emits ``watch_specs_ready`` with the final list.

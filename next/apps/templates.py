@@ -17,6 +17,7 @@ _BUILTIN_MODULES = (
     "next.templatetags.next_static",
     "next.templatetags.pages",
     "next.templatetags.partial",
+    "next.templatetags.scripts",
 )
 
 _DJANGO_BACKEND = "django.template.backends.django.DjangoTemplates"
@@ -26,10 +27,15 @@ _BLOCK_TAG_BRANCH = "{%.*?%}"
 _NEXT_TAG_NAMES = (
     "action_url",
     "asset",
+    "breadcrumbs",
+    "collect_head",
     "collect_scripts",
     "collect_styles",
     "component",
+    "consented",
     "form",
+    "metadata",
+    "script",
     "set_slot",
     "slot",
     "template",

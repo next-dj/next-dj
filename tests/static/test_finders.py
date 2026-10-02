@@ -24,7 +24,7 @@ from next.static.finders import (
     _ScanRoots,
     discover_colocated_static_assets,
 )
-from next.static.scripts import NEXT_JS_STATIC_PATH
+from next.static.runtime import NEXT_JS_STATIC_PATH
 from tests.support import (
     TEMPLATE_AND_COMPONENT_SOURCES,
     MalformedRootsRouter,
@@ -403,9 +403,10 @@ class TestMappedSourceStorage:
     def test_exists(self, tmp_path: Path) -> None:
         src = tmp_path / "a.css"
         src.write_text("")
-        storage = _MappedSourceStorage({"next/a.css": src})
+        storage = _MappedSourceStorage({"next/a.css": src, "next/dir.css": tmp_path})
         assert storage.exists("next/a.css")
         assert not storage.exists("next/missing.css")
+        assert not storage.exists("next/dir.css")
 
     def test_open_reads_source(self, tmp_path: Path) -> None:
         src = tmp_path / "a.css"
@@ -585,6 +586,20 @@ class TestRuntimeBundleMapping:
             "next/next.min.js.map": root / "next" / "next.min.js.map",
         }
 
+    def test_every_built_chunk_maps_with_its_sourcemap(self, tmp_path: Path) -> None:
+        names = ("next.scripts.min.js", "next.dev.min.js")
+        root = _bundle_root(tmp_path, *names, *(f"{name}.map" for name in names))
+
+        with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
+            mapping = _runtime_bundle_static_files()
+
+        assert sorted(mapping) == [
+            "next/next.dev.min.js",
+            "next/next.dev.min.js.map",
+            "next/next.scripts.min.js",
+            "next/next.scripts.min.js.map",
+        ]
+
     def test_a_missing_sourcemap_is_left_out_of_the_mapping(
         self, tmp_path: Path
     ) -> None:
@@ -603,6 +618,21 @@ class TestRuntimeBundleMapping:
 
         with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
             assert _runtime_bundle_static_files() == {}
+
+    def test_an_install_without_the_bundle_folder_maps_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", tmp_path):
+            assert _runtime_bundle_static_files() == {}
+
+    def test_a_folder_named_like_a_bundle_is_left_out(self, tmp_path: Path) -> None:
+        root = _bundle_root(tmp_path, "next.min.js")
+        (root / "next" / "next.dev.min.js").mkdir()
+
+        with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
+            mapping = _runtime_bundle_static_files()
+
+        assert mapping == {"next/next.min.js": root / "next" / "next.min.js"}
 
     def test_a_colocated_asset_wins_a_collision_with_a_bundle_path(
         self, tmp_path: Path, watched_tree: Path

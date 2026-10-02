@@ -9,6 +9,16 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 
 _SOURCEMAP_REFERENCE = "//# sourceMappingURL="
+# The outputs of `npm run build:next`, held to every other list of the chunks by
+# tests/static/test_chunk_sync.py.
+_BUNDLES = (
+    "next.min.js",
+    "next.scripts.min.js",
+    "next.sse.min.js",
+    "next.csrf.min.js",
+    "next.poll.min.js",
+    "next.dev.min.js",
+)
 
 
 def _verify_no_sourcemap_reference(bundle: Path) -> None:
@@ -25,8 +35,17 @@ def _verify_no_sourcemap_reference(bundle: Path) -> None:
         raise RuntimeError(msg)
 
 
+def _verify_built(outputs: list[Path]) -> None:
+    """Refuse a missing bundle or one that links a map the artifact leaves out."""
+    for output in outputs:
+        if not output.exists():
+            msg = f"Expected {output} after npm run build:next, but it is missing."
+            raise RuntimeError(msg)
+        _verify_no_sourcemap_reference(output)
+
+
 class NextJsBuildHook(BuildHookInterface):
-    """Compile `next/client/next.ts` to `next.min.js` via esbuild."""
+    """Compile the client runtime and its scripts and diagnostics chunks via esbuild."""
 
     PLUGIN_NAME = "next-js-build"
 
@@ -36,22 +55,24 @@ class NextJsBuildHook(BuildHookInterface):
             return
 
         root = Path(self.root)
-        output = root / "next" / "static" / "next" / "next.min.js"
+        bundles = root / "next" / "static" / "next"
+        outputs = [bundles / name for name in _BUNDLES]
 
         if os.environ.get("NEXT_DJ_SKIP_JS_BUILD"):
-            if output.exists():
-                _verify_no_sourcemap_reference(output)
+            for output in outputs:
+                if output.exists():
+                    _verify_no_sourcemap_reference(output)
             return
 
         npm = shutil.which("npm")
         if npm is None:
-            if output.exists():
-                _verify_no_sourcemap_reference(output)
+            if all(output.exists() for output in outputs):
+                _verify_built(outputs)
                 return
             msg = (
-                "npm is required to build next/static/next/next.min.js. "
+                f"npm is required to build {', '.join(_BUNDLES)} in next/static/next. "
                 "Install Node.js or set NEXT_DJ_SKIP_JS_BUILD=1 when the "
-                "bundle is already present."
+                "bundles are already present."
             )
             raise RuntimeError(msg)
 
@@ -59,7 +80,4 @@ class NextJsBuildHook(BuildHookInterface):
             subprocess.run([npm, "ci"], cwd=root, check=True)  # noqa: S603
         subprocess.run([npm, "run", "build:next"], cwd=root, check=True)  # noqa: S603
 
-        if not output.exists():
-            msg = f"Expected {output} after npm run build:next, but it is missing."
-            raise RuntimeError(msg)
-        _verify_no_sourcemap_reference(output)
+        _verify_built(outputs)

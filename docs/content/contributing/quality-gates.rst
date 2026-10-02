@@ -139,16 +139,44 @@ That job checks the framework against the ecosystem packages a project is likely
 Client runtime
 --------------
 
-The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, checks formatting with Prettier, lints with ESLint, and bundles ``next/client/next.ts`` with esbuild.
-It then enforces a hard budget of 14 KB gzipped on ``next/static/next/next.min.js``, because the runtime ships on every page, and that budget check runs in continuous integration only.
+The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, checks formatting with Prettier, lints with ESLint, and builds the six bundles with esbuild.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 26 44
+
+   * - Bundle
+     - Entry point
+     - When a page loads it
+   * - ``next.min.js``
+     - ``next/client/next.ts``
+     - On every page, the core runtime behind ``window.Next``.
+   * - ``next.scripts.min.js``
+     - ``next/client/extras.ts``
+     - Only when the init payload carries ``$scripts`` or ``$consent``, or page code calls ``Next.ready("scripts")``, for consent and third-party scripts.
+   * - ``next.sse.min.js``
+     - ``next/client/sse-chunk.ts``
+     - Only once a scan finds a ``data-next-sse`` container, for the stream bridge.
+   * - ``next.csrf.min.js``
+     - ``next/client/csrf-chunk.ts``
+     - Only when a mutation or the first focus in an action form needs a deferred CSRF token, for the fetch that mints it.
+   * - ``next.poll.min.js``
+     - ``next/client/poll-chunk.ts``
+     - Only once a scan finds a ``data-next-poll`` zone, for the zone poller.
+   * - ``next.dev.min.js``
+     - ``next/client/dev.ts``
+     - Only under ``DEBUG``, when the payload carries ``$dev``, for the development diagnostics.
+
+The job then enforces a hard budget of 14 KB gzipped on ``next/static/next/next.min.js`` alone, because the core runtime ships on every page, and that budget check runs in continuous integration only.
+The five chunks carry no budget of their own, since a page that never asks for them never downloads them.
 Growth past the budget calls for a lazily loaded chunk rather than a larger single file.
 The job finishes with the vitest run and its coverage thresholds.
 
-``next/client/next.ts`` is the single entry point that mounts ``window.Next`` and pulls in the morph, apply, wire, layer, trigger, asset, and stream modules.
-``make build-js`` runs the same esbuild pass locally, minifying the bundle to ``next/static/next/next.min.js`` with a source map beside it and targeting ES2022.
+``next/client/next.ts`` is the entry point that mounts ``window.Next`` and pulls in the morph, apply, wire, layer, trigger, asset, and stream modules, and each chunk entry point hands itself to it when it evaluates.
+``make build-js`` runs the same single esbuild call locally, minifying each bundle into ``next/static/next/`` with a source map beside it and targeting ES2022.
 The map is external and the bundle carries no ``sourceMappingURL`` comment, so browser devtools load the map only when a developer points them at it, while manifest storage finds no reference to rewrite at ``collectstatic`` time.
-``build_hooks.py`` reads the bundle before packaging and raises on one that carries the comment, and ``NEXT_DJ_SKIP_JS_BUILD=1`` skips the npm run and packages the bundle already on disk.
-The compiled file is a build product rather than a tracked source file, and the packaging configuration lists it as a build artefact so a distribution carries it.
+``build_hooks.py`` reads all six bundles before packaging and raises on a missing one or one that carries the comment, and ``NEXT_DJ_SKIP_JS_BUILD=1`` skips the npm run and packages the bundle already on disk.
+The compiled files are build products rather than tracked source files, and the packaging configuration lists them as build artefacts so a distribution carries them.
 
 Supply chain
 ------------

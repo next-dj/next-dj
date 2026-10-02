@@ -435,6 +435,20 @@ describe("assets registry and delta", () => {
     expect(script.nonce).toBe("nonce-7a3f");
   });
 
+  it("reads the nonce off a nonced script when a module runtime has no currentScript", () => {
+    const boot = document.createElement("script");
+    boot.type = "module";
+    boot.setAttribute("nonce", "nonce-mod");
+    document.head.append(boot);
+    const { assets } = makeAssets();
+    boot.remove();
+    assets.loadJs([{ kind: "js", url: "http://x/m.js" }]);
+    expect(
+      document.head.querySelector<HTMLScriptElement>('script[src="http://x/m.js"]')!
+        .nonce,
+    ).toBe("nonce-mod");
+  });
+
   it("copies the bootstrap nonce onto inline assets", () => {
     const boot = document.createElement("script");
     boot.nonce = "nonce-7a3f";

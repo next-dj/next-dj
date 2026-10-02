@@ -23,7 +23,7 @@ class TestBuiltinOps:
         assert "morph" in BUILTIN_OPS
 
     def test_core_verbs_present(self) -> None:
-        for verb in ("replace", "inner", "remove", "event", "toast"):
+        for verb in ("replace", "inner", "remove", "event", "toast", "meta"):
             assert verb in BUILTIN_OPS
 
     def test_layer_verbs_present(self) -> None:

@@ -157,8 +157,16 @@ The framework supplies the default for every key left out, so there is no need t
 Runtime script overrides
 ------------------------
 
-Strict content security policies sometimes need nonces or manual ordering for the bundled ``next.min.js`` shell.
-``NEXT_FRAMEWORK["NEXT_JS_OPTIONS"]`` accepts template overrides and ``ScriptInjectionPolicy`` values described on :ref:`ref-settings` and in :doc:`/content/topics/static-assets/js-context`.
+With ``CSP_NONCE`` on, every tag the framework writes carries the nonce the CSP middleware minted, the ``next.min.js`` shell included, so a strict policy needs no manual injection, see :doc:`/content/security/csp-and-nonce`.
+A nonce belongs to one response and takes a shared page private, so a site a CDN serves sets ``CSP_NONCE`` to ``False`` and allows its scripts by hash or by source.
+``NEXT_FRAMEWORK["NEXT_JS_OPTIONS"]`` accepts template overrides, which keep the ``{nonce_attr}`` placeholder, and ``ScriptInjectionPolicy`` values described on :ref:`ref-settings` and in :doc:`/content/topics/static-assets/js-context`.
+
+Site, CSRF, and consent
+-----------------------
+
+Production names its origin in ``SITE["URL"]`` and keeps ``SITE["INDEXABLE"]`` at ``"auto"``, and a staging deployment sharing the settings answers ``INDEXABLE`` through a callable that names the production hosts, see :doc:`/content/topics/seo/site`.
+``CSRF_DELIVERY`` stays at ``"auto"`` behind a CDN, so a shared page carries no token, see :doc:`/content/howto/cache-pages-on-a-cdn`.
+``CONSENT["OPTIONS"]["secure"]`` stays ``None`` or ``True`` under HTTPS, which ``next.W119`` checks.
 
 Template and asset staleness
 ----------------------------

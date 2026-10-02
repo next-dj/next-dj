@@ -1,17 +1,19 @@
 """Shared helpers used by per-subpackage system-check modules.
 
-The discovery names travel on from `next.discovery`, so one import serves a check
-module, and the shared unknown-key probe here owns `next.E035`.
+The discovery names and the unknown-key probe of `next.conf` travel on from here.
 """
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.core.checks import CheckMessage, Error
 
+from next.conf.checks import errors_for_unknown_keys
+from next.conf.defaults import USER_SETTING
 from next.conf.imports import import_class_cached
 from next.discovery import (
     PageRootsError,
@@ -29,8 +31,76 @@ from next.discovery import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
+
+
+WALK_HINT = (
+    "Every DIRS entry and every app pages folder must be a readable directory, "
+    "and a custom router's page_roots() must answer next.urls.PageRoot entries."
+)
+
+
+def raw_scope(name: str) -> Mapping[str, object] | None:
+    """Return the `NEXT_FRAMEWORK[name]` mapping as written, `None` when it is none.
+
+    A `NEXT_FRAMEWORK` or a scope that is no dict is `next.E076`, reported once there.
+    """
+    raw = getattr(settings, USER_SETTING, None)
+    if not isinstance(raw, dict):
+        return None
+    scope = raw.get(name)
+    return scope if isinstance(scope, dict) else None
+
+
+def takes_request(func: Callable[..., Any]) -> bool:
+    """Whether `func` can be called with the request as its one positional argument.
+
+    A callable whose signature cannot be read is given the benefit of the doubt.
+    """
+    try:
+        inspect.signature(func).bind(None)
+    except TypeError:
+        return False
+    except ValueError:
+        return True
+    return True
+
+
+class RunMemo[T]:
+    """One value a check run builds once, held for as long as its key stays the same.
+
+    The key is compared by identity and held, so no reused `id` can pass for it.
+    """
+
+    __slots__ = ("_held",)
+
+    def __init__(self) -> None:
+        """Start empty and join the memos `forget_run_memos` drops."""
+        self._held: tuple[object, T] | None = None
+        _RUN_MEMOS.append(self)
+
+    def get(self, key: object, build: Callable[[], T]) -> T:
+        """Return the value held for `key`, building and keeping it on a miss."""
+        held = self._held
+        if held is not None and held[0] is key:
+            return held[1]
+        value = build()
+        self._held = (key, value)
+        return value
+
+    def forget(self) -> None:
+        """Drop the held value."""
+        self._held = None
+
+
+_RUN_MEMOS: list[RunMemo[Any]] = []
+
+
+def forget_run_memos() -> None:
+    """Drop the value of every run memo, so the next run rebuilds from disk."""
+    for memo in _RUN_MEMOS:
+        memo.forget()
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,8 +121,7 @@ def registration_file_errors(
 ) -> list[CheckMessage]:
     """Report registrations that no render of the intended file ever collects.
 
-    A registration keys on the file declaring the callable, so decorating an imported
-    helper binds it to a non-anchor file, or to another anchor with a different URL.
+    A registration keys on its declaring file, so an imported helper binds elsewhere.
     """
     records = sorted(misattributed, key=_by_paths)
     errors = _cross_file_errors(subject, records)
@@ -138,30 +207,15 @@ def _by_paths(record: tuple[Path, Path, str]) -> tuple[str, str, str]:
     return (str(registered_from), str(declared_in), name)
 
 
-def errors_for_unknown_keys(
-    config: dict[str, Any], *, allowed: frozenset[str], prefix: str
-) -> list[CheckMessage]:
-    """Return an `Error` list when `config` contains keys outside `allowed`."""
-    unknown = sorted(k for k in config if k not in allowed)
-    if not unknown:
-        return []
-    unknown_fmt = ", ".join(repr(k) for k in unknown)
-    allowed_fmt = ", ".join(sorted(allowed))
-    return [
-        Error(
-            f"{prefix} has unknown keys {unknown_fmt}. Allowed keys are {allowed_fmt}.",
-            obj=settings,
-            id="next.E035",
-        )
-    ]
-
-
 __all__ = [
+    "WALK_HINT",
     "PageRootsError",
     "RegistrationSubject",
+    "RunMemo",
     "discover_page_registrations",
     "errors_for_unknown_keys",
     "first_visit",
+    "forget_run_memos",
     "get_page_roots",
     "get_pages_directories",
     "get_router_manager",
@@ -169,7 +223,9 @@ __all__ = [
     "iter_page_tree_component_folders",
     "iter_scanned_page_pairs",
     "page_tree_skip_names",
+    "raw_scope",
     "read_page_roots",
     "registration_file_errors",
     "reset_router_manager_cache",
+    "takes_request",
 ]

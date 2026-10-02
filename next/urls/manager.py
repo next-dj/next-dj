@@ -12,12 +12,14 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, overload, override
 
 from django.core.signals import setting_changed
-from django.urls import URLPattern, URLResolver, clear_url_caches
+from django.urls import URLPattern, URLResolver, clear_url_caches, path
 from django.urls.resolvers import RoutePattern
 
 from next.backends import backend_entries, load_backends, resolve_setting_class
 from next.conf.signals import settings_reloaded
+from next.csrf import CSRF_URL_NAME, csrf_view
 from next.forms.manager import form_action_manager
+from next.ports import seo_routes_slot
 
 from .backends import RouterBackend
 from .resolver import TrieURLResolver
@@ -30,6 +32,29 @@ if TYPE_CHECKING:
 
 _version_counter = itertools.count(1)
 """Process-wide source of router versions, so no two managers share one."""
+
+type VersionToken = tuple[int, int, int]
+
+
+class SeoRoutesVersion:
+    """The version of the SEO routes `seo_routes_slot` splices after the page routes.
+
+    A plain attribute keeps the pattern token free of any call across the port.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self) -> None:
+        """Start at zero, the version of routes no area has published yet."""
+        self.value = 0
+
+    def move(self) -> None:
+        """Take a version no earlier state of these routes carried."""
+        self.value = next(_version_counter)
+
+
+seo_routes_version = SeoRoutesVersion()
+"""Moved when the SEO routes slot binds and on every reset of the SEO sources."""
 
 
 class RouterManager:
@@ -164,35 +189,48 @@ settings_reloaded.connect(_on_settings_reloaded)
 setting_changed.connect(_on_setting_changed)
 
 
+_CSRF_PATTERN = path("_next/csrf/", csrf_view, name=CSRF_URL_NAME)
+"""The token endpoint a page whose HTML defers its CSRF token hands its runtime."""
+
+
 class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
-    """Defer expanding router and form patterns until first use.
+    """Defer expanding CSRF, form, router and SEO patterns until first use.
 
     Skips `list` so `include()` defers materialisation, overrides `__reversed__` to
-    avoid a per-index list build, and caches the concat against both manager versions.
+    avoid a per-index list build, and caches the concat against its version token.
     """
 
     def __init__(self) -> None:
         """Empty cache until the first pattern build."""
-        self._cache: tuple[int, int, list[URLPattern | URLResolver]] | None = None
+        self._cache: tuple[VersionToken, list[URLPattern | URLResolver]] | None = None
 
-    def version_token(self) -> tuple[int, int]:
-        """Router and form-action versions keying caches derived from this."""
-        return (router_manager.version, form_action_manager.version)
+    def version_token(self) -> VersionToken:
+        """Router, form-action and spliced route versions keying derived caches."""
+        return (
+            router_manager.version,
+            form_action_manager.version,
+            seo_routes_version.value,
+        )
 
     def _patterns(self) -> list[URLPattern | URLResolver]:
         cache = self._cache
-        if cache is not None and (cache[0], cache[1]) == (
-            router_manager.version,
-            form_action_manager.version,
-        ):
-            return cache[2]
+        if cache is not None and cache[0] == self.version_token():
+            return cache[1]
+        seo_routes = seo_routes_slot.peek()
+        # The pages expand first, since a page module registers its form actions as
+        # it loads, yet the framework routes lead so a root catch-all cannot take them.
+        pages = list(router_manager)
         patterns: list[URLPattern | URLResolver] = [
-            *router_manager,
+            _CSRF_PATTERN,
             *form_action_manager,
+            *pages,
+            *(() if seo_routes is None else seo_routes.patterns()),
         ]
+        if seo_routes is None:
+            return patterns
         # Versions are read after the build because expanding pages can
         # register form actions and bump the forms version mid-build.
-        self._cache = (router_manager.version, form_action_manager.version, patterns)
+        self._cache = (self.version_token(), patterns)
         return patterns
 
     @override
@@ -283,4 +321,12 @@ app_name = "next"
 urlpatterns = _LazyResolverSlot()
 
 
-__all__ = ["RouterManager", "app_name", "router_manager", "urlpatterns"]
+__all__ = [
+    "RouterManager",
+    "SeoRoutesVersion",
+    "VersionToken",
+    "app_name",
+    "router_manager",
+    "seo_routes_version",
+    "urlpatterns",
+]

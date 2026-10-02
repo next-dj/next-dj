@@ -8,8 +8,15 @@ from django.core.checks import run_checks
 from django.core.checks.registry import registry
 from django.test import override_settings
 
-from next.checks import _LAZY_SOURCES_BY_MODULE, NEXT, register_all
-from next.checks.common import RegistrationSubject, registration_file_errors
+from next.checks import _LAZY_SOURCES_BY_MODULE, NEXT, register_all, reset_check_caches
+from next.checks.common import (
+    RegistrationSubject,
+    RunMemo,
+    forget_run_memos,
+    raw_scope,
+    registration_file_errors,
+    takes_request,
+)
 from next.deps import resolver
 from next.deps.introspect import introspect_key
 from next.deps.resolver import forget_dep_caches
@@ -18,7 +25,7 @@ from next.pages.watch import _page_backends_for_watch, _state, forget_watch_stat
 from next.static.manager import forget_manager_page_roots, get_static_manager
 from next.urls import PageRoot, RouterBackend, checks as urls_checks
 from next.urls.checks import check_reverse_name_collisions, check_url_patterns
-from tests.support import patch_checks_router_manager_with_routers
+from tests.support import patch_checks_router_manager_with_routers, write_page
 
 
 if TYPE_CHECKING:
@@ -28,14 +35,6 @@ if TYPE_CHECKING:
 
 def _labelled_root(index: int, tree: Path) -> PageRoot:
     return PageRoot(path=tree, label="Root" if index == 0 else f"Root ({tree})")
-
-
-def _write_page(tree: Path, route: str) -> Path:
-    directory = tree / route
-    directory.mkdir(parents=True, exist_ok=True)
-    page_file = directory / "page.py"
-    page_file.write_text('template = "ok"\n')
-    return page_file
 
 
 class _RootTreeRouter(RouterBackend):
@@ -61,8 +60,8 @@ class TestCollectAllPatternsDedup:
     ) -> None:
         tree_a = tmp_path / "a"
         tree_b = tmp_path / "b"
-        _write_page(tree_a, "blog")
-        _write_page(tree_b, "blog")
+        write_page(tree_a, "blog")
+        write_page(tree_b, "blog")
         router = _RootTreeRouter(root_trees=[tree_a, tree_b])
 
         with (
@@ -86,6 +85,34 @@ class TestCollectAllPatternsDedup:
 
         assert [(m.id, m.msg) for m in memo_url] == [(m.id, m.msg) for m in control_url]
         assert [(m.id, m.msg) for m in memo_rev] == [(m.id, m.msg) for m in control_rev]
+
+
+class TestRunMemo:
+    """A run memo builds once per key and forgets on a check-cache reset."""
+
+    def test_a_repeat_with_the_same_key_builds_once(self) -> None:
+        memo: RunMemo[list[int]] = RunMemo()
+        key = object()
+        first = memo.get(key, lambda: [1])
+        assert memo.get(key, lambda: [2]) is first
+
+    def test_a_new_key_builds_again(self) -> None:
+        memo: RunMemo[list[int]] = RunMemo()
+        memo.get(object(), lambda: [1])
+        assert memo.get(object(), lambda: [2]) == [2]
+
+    def test_an_equal_key_is_not_the_same_key(self) -> None:
+        memo: RunMemo[str] = RunMemo()
+        memo.get([1], lambda: "first")
+        assert memo.get([1], lambda: "second") == "second"
+
+    @pytest.mark.parametrize("forget", [forget_run_memos, reset_check_caches])
+    def test_a_reset_drops_every_memo(self, forget) -> None:
+        memo: RunMemo[str] = RunMemo()
+        key = object()
+        memo.get(key, lambda: "before")
+        forget()
+        assert memo.get(key, lambda: "after") == "after"
 
 
 class TestRegisterAll:
@@ -265,3 +292,41 @@ class TestACheckRunLeavesTheLiveCachesWarm:
             run_checks(tags=[NEXT])
 
             assert _state.memo is memo
+
+
+class TestRawScope:
+    """A scope reads as written, `None` where it or `NEXT_FRAMEWORK` is no dict."""
+
+    @pytest.mark.parametrize(
+        ("framework", "expected"),
+        [
+            ({"SITE": {"URL": None}}, {"URL": None}),
+            ({"SITE": "x"}, None),
+            ({}, None),
+            ([], None),
+        ],
+        ids=["dict", "not_a_dict", "absent", "framework_not_a_dict"],
+    )
+    def test_the_scope_reads_as_written(self, framework, expected) -> None:
+        with override_settings(NEXT_FRAMEWORK=framework):
+            assert raw_scope("SITE") == expected
+
+
+def _one(request: object) -> None:
+    """Take the request."""
+
+
+def _none() -> None:
+    """Take nothing."""
+
+
+class TestTakesRequest:
+    """A callable takes the request when it binds to one positional argument."""
+
+    @pytest.mark.parametrize(
+        ("func", "expected"),
+        [(_one, True), (_none, False), (len, True), (max, True)],
+        ids=["one", "none", "builtin", "no_signature"],
+    )
+    def test_the_signature_is_bound(self, func, expected) -> None:
+        assert takes_request(func) is expected

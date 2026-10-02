@@ -357,6 +357,15 @@ Resolution preserves the concatenated list order.
 The first match wins.
 Both backends emit the same signals and follow the same naming rules.
 
+Route order
+-----------
+
+Within one tree a static directory always routes before a parameter sibling, and a parameter sibling before a catch-all.
+``pages/blog/about/`` therefore answers ``/blog/about/`` even though ``pages/blog/[slug]/`` matches that path too.
+Among siblings of the same kind the more specific one routes first, ``post-[id]`` before ``[slug]`` and ``[int:id]`` before ``[str:key]``, and the name settles the rest, so the order is the same on every file system.
+The framework endpoints under ``/_next/`` route ahead of every page, so a root ``[[rest]]`` page cannot swallow them.
+See :doc:`/content/internals/url-router` for the complete rule.
+
 Resolution performance
 ----------------------
 

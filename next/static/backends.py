@@ -16,6 +16,7 @@ from next.caches import BoundedCache
 
 from .assets import StaticNamespace, static_name
 from .errors import StaticAssetNotFoundError
+from .runtime import TAG_FIELDS, nonce_attr, usable_template
 
 
 if TYPE_CHECKING:
@@ -85,21 +86,29 @@ class StaticBackend(ABC):
 class StaticFilesBackend(StaticBackend):
     """Resolve co-located asset URLs through Django staticfiles.
 
-    `css_tag`, `js_tag`, and `module_tag` hold format strings needing `{url}`, and the
-    URL is escaped into them because the finished tag is spliced past the engine.
+    `css_tag`, `js_tag`, and `module_tag` hold format strings needing `{url}` and
+    `{nonce_attr}`, both escaped because the tag is spliced past the engine.
     """
 
-    _DEFAULT_CSS_TAG: ClassVar[str] = '<link rel="stylesheet" href="{url}">'
-    _DEFAULT_JS_TAG: ClassVar[str] = '<script src="{url}"></script>'
-    _DEFAULT_MODULE_TAG: ClassVar[str] = '<script type="module" src="{url}"></script>'
+    _DEFAULT_CSS_TAG: ClassVar[str] = '<link rel="stylesheet" href="{url}"{nonce_attr}>'
+    _DEFAULT_JS_TAG: ClassVar[str] = '<script src="{url}"{nonce_attr}></script>'
+    _DEFAULT_MODULE_TAG: ClassVar[str] = (
+        '<script type="module" src="{url}"{nonce_attr}></script>'
+    )
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
-        """Read the tag templates from the OPTIONS mapping."""
+        """Read the tag templates from the OPTIONS mapping, a broken one as default."""
         super().__init__(config)
         opts = dict(self._config.get("OPTIONS") or {})
-        self._css_tag = str(opts.get("css_tag") or self._DEFAULT_CSS_TAG)
-        self._js_tag = str(opts.get("js_tag") or self._DEFAULT_JS_TAG)
-        self._module_tag = str(opts.get("module_tag") or self._DEFAULT_MODULE_TAG)
+        self._css_tag = self._template(opts, "css_tag", self._DEFAULT_CSS_TAG)
+        self._js_tag = self._template(opts, "js_tag", self._DEFAULT_JS_TAG)
+        self._module_tag = self._template(opts, "module_tag", self._DEFAULT_MODULE_TAG)
+
+    def _template(self, opts: Mapping[str, Any], key: str, default: str) -> str:
+        where = f"STATIC_BACKENDS OPTIONS[{key!r}] of {type(self).__name__}"
+        return usable_template(
+            str(opts.get(key) or default), default, TAG_FIELDS, where
+        )
 
     def _logical_static_path(self, logical_name: str, suffix: str) -> str:
         return f"{StaticNamespace.NEXT}/{logical_name}{suffix}"
@@ -147,26 +156,34 @@ class StaticFilesBackend(StaticBackend):
         self._url_cache[cache_key] = url
         return url
 
-    def render_link_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+    def render_link_tag(
+        self, url: str, *, request: HttpRequest | None = None, nonce: str | None = None
+    ) -> str:
         """Return a link tag built from the configured css_tag template.
 
         The `request` argument holds the contract and the default backend ignores it.
         """
         del request
-        return self._css_tag.format(url=escape(str(url)))
+        return self._css_tag.format(url=escape(str(url)), nonce_attr=nonce_attr(nonce))
 
-    def render_script_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+    def render_script_tag(
+        self, url: str, *, request: HttpRequest | None = None, nonce: str | None = None
+    ) -> str:
         """Return a script tag built from the configured js_tag template.
 
         The `request` argument holds the contract and the default backend ignores it.
         """
         del request
-        return self._js_tag.format(url=escape(str(url)))
+        return self._js_tag.format(url=escape(str(url)), nonce_attr=nonce_attr(nonce))
 
-    def render_module_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+    def render_module_tag(
+        self, url: str, *, request: HttpRequest | None = None, nonce: str | None = None
+    ) -> str:
         """Return a module script tag built from the configured module_tag template.
 
         The `request` argument holds the contract and the default backend ignores it.
         """
         del request
-        return self._module_tag.format(url=escape(str(url)))
+        return self._module_tag.format(
+            url=escape(str(url)), nonce_attr=nonce_attr(nonce)
+        )

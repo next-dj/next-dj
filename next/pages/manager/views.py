@@ -8,11 +8,18 @@ from django.http import Http404, HttpResponse
 from django.urls import path
 
 from next.conf import fail_loudly, next_framework_settings
+from next.deps.cache import render_dep_cache
 from next.pages.loaders import (
     build_registered_loaders,
     has_load_errors,
     last_load_error,
     load_page_module,
+)
+from next.pages.responses import (
+    finish_response,
+    finish_zone_response,
+    prepare_page_render,
+    response_policy,
 )
 from next.ports import partial_shaper_slot
 
@@ -73,13 +80,22 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
             error = last_load_error(file_path)
             if error is not None:
                 raise error
+        dep_cache = render_dep_cache(request)
+        policy = response_policy(
+            page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
+        )
         shaper = partial_shaper_slot.get()
         intent = shaper.intent(request)
         if intent.zones:
-            return shaper.zone_response(
+            zone = shaper.zone_response(
                 file_path, request, intent, dynamic_body=False, url_kwargs=dict(kwargs)
             )
-        response = HttpResponse(page.render(file_path, request, **kwargs))
+            return finish_zone_response(zone, policy, request)
+        prepare_page_render(policy, request)
+        response = HttpResponse(
+            page.render(file_path, request, _dep_cache=dep_cache, **kwargs)
+        )
+        finish_response(response, policy, request, file_path)
         shaper.set_vary(response)
         return response
 
@@ -113,25 +129,35 @@ def _resolving_view(
             error = last_load_error(file_path)
             if error is not None:
                 raise error
-        resolution = page._resolve_page_body(
-            file_path, active_module, request, **kwargs
+        dep_cache = render_dep_cache(request)
+        policy = response_policy(
+            page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
         )
-        if resolution.http_response is not None:
-            return resolution.http_response
         shaper = partial_shaper_slot.get()
         intent = shaper.intent(request)
+        if not intent.zones:
+            prepare_page_render(policy, request)
+        resolution = page._resolve_page_body(
+            file_path, active_module, request, _dep_cache=dep_cache, **kwargs
+        )
+        if resolution.http_response is not None:
+            return finish_response(resolution.http_response, policy, request, file_path)
         if intent.zones:
-            return shaper.zone_response(
+            zone = shaper.zone_response(
                 file_path,
                 request,
                 intent,
                 dynamic_body=resolution.dynamic,
                 url_kwargs=dict(kwargs),
             )
+            return finish_zone_response(zone, policy, request)
         body = resolution.body if resolution.body is not None else ""
         response = HttpResponse(
-            page._render_composed(file_path, body, request, **kwargs)
+            page._render_composed(
+                file_path, body, request, _dep_cache=dep_cache, **kwargs
+            )
         )
+        finish_response(response, policy, request, file_path)
         shaper.set_vary(response)
         return response
 

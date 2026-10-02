@@ -11,7 +11,7 @@ Without one, every page tree copypastes utility classes for buttons, cards, badg
 ```
 examples/_shared/
 ├── _components/
-│   ├── page_head/{component.djx,component.py}   # <head>, Tailwind CDN + inline config, tokens, favicon
+│   ├── page_head/{component.djx}                # <head>, Tailwind CDN + inline config, tokens
 │   ├── app_shell/{component.djx}
 │   ├── button/{component.djx,component.py}
 │   ├── card/{component.djx}
@@ -75,7 +75,7 @@ Each example houses the shared HTML envelope in a project-level page root listed
 ```django
 <!DOCTYPE html>
 <html lang="en">
-{% component "page_head" title="My app" icon="🔗" %}
+{% component "page_head" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="🔗 My app" brand_href="/" %}
     {% #slot "content" %}
@@ -87,7 +87,7 @@ Each example houses the shared HTML envelope in a project-level page root listed
 </html>
 ```
 
-`page_head` owns the entire `<head>`. It pulls in the Tailwind Play CDN, inlines a `tailwind.config` that maps the design tokens to short colour names (`bg-primary`, `text-muted-foreground`, `border-border`, …), and registers `tokens.css`, `base.css` plus `base.mjs` by staticfiles name. Pass `tailwind_plugins="typography"` to add the matching CDN plugin parameter, or use the `extra` slot to inject extra `<link>`/`<meta>`/`<style>` tags. Pass `favicon` to point the tab icon at a staticfiles name from the consuming project's own tree, which `{% asset %}` resolves straight into the `href` without registering anything on the collector. Without it the component draws the `icon` emoji into an inline SVG data URI, so an example ships a tab icon without a binary asset and without a 404 on every page load. The two spellings sit side by side in the same file: the `use_*` tags feed the collector, `{% asset %}` only returns a value.
+`page_head` owns the entire `<head>`. It writes `{% metadata %}` where a hand-rolled head would write `<title>`, so the tab title, the description, the robots directive, the canonical link, the hreflang alternates and the Open Graph tags all come from the metadata chain of the page being rendered: `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in the consuming project's settings, then the `metadata` dict or `@page.metadata` callable of every `page.py` from the root down. The component takes no `title` prop, a page that wants a different tab title declares it in its own `page.py`, and the tag works inside the component because a component render flattens the page context. It pulls in the Tailwind Play CDN, inlines a `tailwind.config` that maps the design tokens to short colour names (`bg-primary`, `text-muted-foreground`, `border-border`, …), and registers `tokens.css`, `base.css` plus `base.mjs` by staticfiles name. Pass `tailwind_plugins="typography"` to add the matching CDN plugin parameter, or use the `extra` slot to inject extra `<link>`/`<meta>`/`<style>` tags. The tab icon and the viewport are not props either. The icon comes from `"icons"` under `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`, and every example points it at an `icon.svg` among its app static files. The viewport comes from `"viewport"` under `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`. The component writes no `{% collect_head %}`, so the head scripts a `scripts.py` declares land right before `</head>`, where the tag places them when a layout names no slot of its own.
 
 To register the project-level root, list it in both backends' `DIRS` when you also want components to live there:
 
@@ -158,7 +158,7 @@ Every entry below is a void call (`{% component "name" prop=value %}`) or a bloc
 
 | Component | Props | Slots |
 | --- | --- | --- |
-| `page_head` | `title`, `tailwind_plugins`, `icon` (emoji drawn as the favicon), `favicon` (staticfiles name resolved through `{% asset %}`) | `extra` (extra `<link>`/`<meta>`/`<style>` injected before `</head>`) |
+| `page_head` | `tailwind_plugins`. The `<title>`, the icon, the viewport and the other head tags come from `{% metadata %}`, not from a prop | `extra` (extra `<link>`/`<meta>`/`<style>` injected before `</head>`) |
 | `button` | `variant` (default/secondary/outline/ghost/destructive/link), `size` (sm/md/lg/icon), `type`, `href`, `target`, `name`/`value`, `disabled`, `text`, `extra` | `content` (falls back to `{{ text }}`) |
 | `card` | `title`, `description`, `extra` | `content`, `footer` |
 | `badge` | `variant` (default/secondary/outline/destructive/success/warning/info/muted), `text`, `extra` | `content` (falls back to `{{ text }}`) |
@@ -219,19 +219,17 @@ Active-state navigation (works with namespaced URL names too):
 {% component "nav_link" url_name="next:page_admin" active_when="page_admin" label="Admin" variant="bar" %}
 ```
 
-Point the tab icon at a real file, or inject an extra tag into the page head:
+Inject an extra tag into the page head:
 
 ```django
-{% component "page_head" title="Dashboard" favicon="site/favicon.svg" %}
-
-{% #component "page_head" title="Dashboard" %}
+{% #component "page_head" %}
   {% #slot "extra" %}
     <meta name="theme-color" content="#0f172a">
   {% /slot %}
 {% /component %}
 ```
 
-The kit ships `shared/css` and `shared/js` and no icon, so `site/favicon.svg` is a name the consuming project owns: it is the one file [`examples/_template`](../_template/) puts in its own `static/` tree, and an example grown from the scaffold keeps it there. A name nothing ships still renders an `href`, so the tab icon 404s on every page load, and under `ManifestStaticFilesStorage` the resolution raises outright. Pass the prop only for a file the project ships, and leave it off to keep the `icon` emoji data URI.
+The kit ships `shared/css` and `shared/js` and no icon. The icon belongs to the consuming project, an `icon.svg` among its app static files declared under `icons` in the metadata defaults, which [`examples/_template`](../_template/) ships and every example grown from the scaffold keeps.
 
 ## Prop / slot naming
 
@@ -253,6 +251,6 @@ When you move an existing project onto the shared kit:
 
 - Wire `SHARED_DIR`, the `sys.path` entry, `STATICFILES_DIRS`, and `COMPONENT_BACKENDS["DIRS"]` once in `settings.py`.
 - Remove any per-app `nav_link` / `stat_card` / `card` that now duplicates a shared component, otherwise `manage.py check` raises `next.E034` (root namespace collision).
-- Replace the `<head>` boilerplate (CDN script, two `{% use_style %}` lines, the `{% use_module %}` line, `{% collect_styles %}`) with `{% component "page_head" title="…" icon="…" %}`.
+- Replace the `<head>` boilerplate (CDN script, two `{% use_style %}` lines, the `{% use_module %}` line, `{% collect_styles %}`) with `{% component "page_head" %}`, move the hand-written `<title>` into `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` as the `title` default, which `{% metadata %}` renders on every page that declares no title of its own, and move the favicon into an app static directory, declared under `icons` in the same defaults.
 - Spell every project-local asset as a staticfiles name rather than a `/static/...` literal. `{% use_style %}`, `{% use_script %}`, `{% use_module %}` and the module-level `styles` and `scripts` lists hand a name to storage, and `{% asset %}` does the same for a bare `href` or `src`. A ready URL such as a CDN `https://` link passes through untouched.
 - Replace bespoke colour classes (`bg-slate-50`, `text-slate-900`, `bg-indigo-600`, …) with the short token aliases (`bg-background`, `text-foreground`, `bg-primary`, …) so per-tenant overrides cascade correctly.

@@ -44,6 +44,9 @@ Subsystems
    * - Partial
      - Zones, patches, SSE streams, partial protocol backend.
      - ``next.partial``
+   * - SEO
+     - Sitemap and robots discovery, the items registry, the sitemap and robots views.
+     - ``next.seo``
    * - Dependencies
      - Parameter resolver, providers, request cache.
      - ``next.deps``
@@ -57,7 +60,7 @@ Subsystems
      - Test client, signal recorder, isolation.
      - ``next.testing``
    * - App
-     - Django ``AppConfig`` that wires autoreload, template-tag builtins, staticfiles integration, component bootstrap, form autodiscovery, and the four ports during ``ready()``.
+     - Django ``AppConfig`` that wires autoreload, template-tag builtins, staticfiles integration, component bootstrap, form autodiscovery, and the eight ports during ``ready()``.
      - ``next.apps``
 
 Bootstrap
@@ -65,10 +68,10 @@ Bootstrap
 
 Django calls ``NextFrameworkConfig.ready()`` once per process after all applications load.
 The hook calls ``register_all()`` to register the framework system checks.
-It then runs eleven startup steps in a fixed order.
-The first connects four ``router_reloaded`` receivers, ``forget_watch_state``, ``forget_page_roots``, ``forget_manager_page_roots``, and ``forget_dep_caches``, so a router rebuild leaves no watch, page-root, or dependency cache holding a stale generation.
+It then runs fourteen startup steps in a fixed order.
+The first connects seven ``router_reloaded`` receivers, ``forget_watch_state``, ``forget_page_roots``, ``forget_manager_page_roots``, ``forget_dep_caches``, ``forget_seo_sources``, ``forget_translated_urls``, and ``forget_scripts``, so a router rebuild leaves no watch, page-root, dependency, SEO-source, hreflang, or scripts cache holding a stale generation.
 The second, ``apply_resolver_setting()``, points the dependency-injection singleton at the configured resolver class, ahead of every step that imports user modules.
-The next four bind the ``next.ports`` slots that the request path, the watcher, and the checks all read, each one taking the implementation from the ``ports`` module of the area that owns it.
+The next seven bind the six ``next.ports`` slots that the request path, the URL patterns, the watcher, and the checks all read, each one taking the implementation from the ``ports`` module of the area that owns it, and move ``seo_routes_version`` right after the SEO routes slot so the lazy urlpatterns rebuild with its routes.
 They run early for the same reason the resolver setting does, so no discovery failure leaves a process behind with an unbound port.
 The next four install autoreload, template-tag builtins, staticfiles integration, and component bootstrap into the Django runtime.
 The last, ``autodiscover_forms()``, registers shared forms before the first request arrives.
@@ -108,6 +111,7 @@ The diagram below shows which subsystem emits each signal and the typical receiv
        Forms["next.forms"]
        Static["next.static"]
        Partial["next.partial"]
+       Seo["next.seo"]
        Deps["next.deps"]
        Server["next.server"]
        Conf["next.conf"]
@@ -115,7 +119,8 @@ The diagram below shows which subsystem emits each signal and the typical receiv
        Cache["Cache invalidation"]
        Watch["Long lived listeners"]
 
-       Pages -- "template_loaded, context_registered, page_rendered" --> Audit
+       Pages -- "template_loaded, context_registered, metadata_registered, page_rendered" --> Audit
+       Seo -- "sitemap_backend_loaded" --> Audit
        Components -- "component_registered, components_registered, component_rendered, component_backend_loaded" --> Audit
        URLs -- "route_registered, router_reloaded, router_backend_loaded" --> Watch
        Forms -- "action_registered, action_dispatched, form_validation_failed, form_access_denied, wizard_step_submitted, wizard_completed, form_backend_loaded, wizard_backend_loaded" --> Audit
@@ -151,6 +156,9 @@ The dependency graph between subsystems is shallow.
 - ``next.partial`` depends on ``next.conf``, ``next.pages``, ``next.static``, and ``next.forms`` to render zones and shape patches, and its system checks add ``next.components.sources``.
   It touches ``next.urls`` only in those checks, under ``TYPE_CHECKING``.
   The form nodes those checks walk come from ``next.forms.nodes`` and the attribute names from ``next.partial.keys``, so no area imports a symbol out of the ``next.templatetags`` tag libraries and the shim layer stays a leaf.
+- ``next.seo`` depends on ``next.conf``, ``next.deps``, ``next.pages``, and ``next.urls``, the router manager it discovers roots through and the reverse helper its locations go through, and the lazy urlpatterns of ``next.urls`` reach its routes back through the ``SeoRoutes`` slot.
+- ``next.site`` depends on ``next.conf`` alone and ``next.csrf`` on ``next.conf`` and ``next.site``, so every area reads them without a cycle.
+- ``next.scripts`` depends on ``next.conf``, ``next.consent``, ``next.pages.watch``, and ``next.static``, and the static injector reaches it back through the ``PageScripts`` slot.
 - ``next.server`` depends on ``next.conf``, ``next.pages``, ``next.urls``, and ``next.components``, the subsystems whose trees it watches.
 - ``next.testing`` depends on the page, component, form, dependency, static, and partial subsystems to drive isolation and rendering helpers.
 - ``next.apps`` depends on every subsystem.
@@ -169,26 +177,38 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - Subsystem
      - Submodules
    * - ``next.pages``
-     - ``manager`` (``templates``, ``views``), ``registry``, ``loaders``, ``context``, ``processors``, ``scan``, ``paths``, ``placeholder``, ``ports``, ``errors``, ``checks`` (``contexts``, ``layouts``, ``loaders``, ``modules``, ``processors``, ``structure``, ``zones``), ``signals``, ``watch``.
+     - ``manager`` (``templates``, ``views``), ``registry``, ``loaders``, ``context``, ``processors``, ``scan``, ``paths``, ``placeholder``, ``visits``, ``metadata`` (``dicts``, ``markers``, ``normalize``, ``scope``, ``titles``, ``fold``, ``chain``, ``registry``, ``resolve``, ``hreflang``, ``ld``, ``head``, ``backends``, ``nodes``), ``responses``, ``ports``, ``errors``, ``checks`` (``composed``, ``contexts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, ``zones``), ``signals``, ``watch``.
    * - ``next.components``
-     - ``manager``, ``registry``, ``scanner``, ``sources``, ``loading``, ``renderers``, ``context``, ``facade``, ``info``, ``backends``, ``watch``, ``checks``, ``signals``.
+     - ``manager``, ``registry``, ``scanner``, ``sources``, ``loading``, ``renderers``, ``context``, ``facade``, ``info``, ``backends``, ``watch``, ``ports``, ``checks``, ``signals``.
    * - ``next.urls``
      - ``manager``, ``ports``, ``backends``, ``dispatcher``, ``parser``, ``resolver``, ``markers``, ``reverse``, ``errors``, ``checks``, ``signals``.
    * - ``next.forms``
-     - ``manager``, ``dispatch`` (``build``, ``permissions``, ``responses``, ``wizard``), ``backends``, ``decorators``, ``base``, ``markers``, ``nodes``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``registration``, ``errors``, ``checks`` (``actions``, ``config``, ``sources``, ``widgets``, ``wizards``), ``signals``.
+     - ``manager``, ``dispatch`` (``build``, ``permissions``, ``responses``, ``wizard``), ``backends``, ``decorators``, ``base``, ``markers``, ``nodes``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``registration``, ``ports``, ``errors``, ``checks`` (``actions``, ``config``, ``sources``, ``widgets``, ``wizards``), ``signals``.
    * - ``next.static``
-     - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``scripts``, ``inject``, ``serializers``, ``defaults``, ``finders``, ``ports``, ``errors``, ``checks``, ``signals``.
+     - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``runtime``, ``nonce``, ``inject``, ``serializers``, ``defaults``, ``finders``, ``ports``, ``errors``, ``checks``, ``signals``.
    * - ``next.partial``
-     - ``manager``, ``registry`` (``ops``, ``zones``), ``backends``, ``zone``, ``render``, ``envelope``, ``errors``, ``patches``, ``shaping`` (``outcomes``, ``validate``, ``scrub``, ``targets``, ``csrf``, ``responses``), ``ports``, ``sse``, ``view``, ``headers``, ``keys``, ``origin``, ``checks`` (``backends``, ``codes``, ``forms``, ``nodes``, ``ops``, ``pages``, ``templates``, ``zones``), ``signals``.
+     - ``manager``, ``registry`` (``ops``, ``zones``), ``backends``, ``zone``, ``render``, ``envelope``, ``errors``, ``patches``, ``shaping`` (``outcomes``, ``validate``, ``scrub``, ``targets``, ``csrf``, ``responses``), ``ports``, ``sse``, ``view``, ``headers``, ``keys``, ``origin``, ``checks`` (``backends``, ``codes``, ``forms``, ``nodes``, ``ops``, ``templates``, ``zones``), ``signals``.
        :doc:`partial-pipeline` walks what each one does on a zone request.
+   * - ``next.seo``
+     - ``manager``, ``backends``, ``discovery``, ``decorators``, ``registry``, ``sitemaps``, ``pagination``, ``robots``, ``origin``, ``routes``, ``views``, ``urls``, ``markers``, ``ports``, ``errors``, ``checks`` (``roots``, ``sources``, ``sitemaps``, ``robots``, ``routes``, ``backends``), ``signals``.
+       :doc:`seo-pipeline` walks the path from a ``page.py`` to the head and from a ``sitemap.py`` to the served document.
+   * - ``next.site``
+     - ``config``, ``headers``, ``middleware``, ``errors``, ``checks``.
+       The site origin and indexability every head tag, response, and crawler document reads.
+   * - ``next.scripts``
+     - ``markers``, ``discovery``, ``registry``, ``manager``, ``render``, ``nodes``, ``ports``, ``errors``, ``checks``, ``signals``.
+   * - ``next.consent``
+     - ``markers``, ``backends``, ``manager``, ``providers``, ``checks``, ``signals``.
+   * - ``next.csrf``
+     - A single flat module deciding where a page puts its CSRF token and serving ``/_next/csrf/``, read by the static, form, partial, and page areas.
    * - ``next.deps``
      - ``resolver``, ``linear``, ``plan``, ``providers``, ``registry``, ``cache``, ``context``, ``markers``, ``introspect``, ``errors``, ``signals``.
    * - ``next.server``
      - ``autoreload``, ``watcher``, ``roots``, ``signals``.
    * - ``next.conf``
-     - ``settings``, ``defaults``, ``merge``, ``frozen``, ``helpers``, ``imports``, ``checks``, ``signals``.
+     - ``settings``, ``defaults``, ``scopes``, ``merge``, ``frozen``, ``helpers``, ``imports``, ``checks``, ``signals``.
    * - ``next.testing``
-     - ``client``, ``capture``, ``isolation``, ``actions``, ``rendering``, ``loaders``, ``html``, ``patching``, ``deps``, ``plugin``.
+     - ``client``, ``capture``, ``isolation``, ``actions``, ``rendering``, ``loaders``, ``html``, ``patching``, ``deps``, ``metadata``, ``seo``, ``plugin``.
        ``plugin`` is the only module in the area that imports pytest, and a suite loads it with ``-p next.testing.plugin``.
    * - ``next.apps``
      - ``config``, ``autoreload``, ``templates``, ``staticfiles``, ``components``, ``checks``.
@@ -196,9 +216,9 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
      - A single flat module that provides ``load_backends``, ``backend_entries``, ``resolve_backend_class``, ``resolve_setting_class``, ``BackendListManager``, ``SingleBackendManager``, and ``BackendRoot`` for every settings-driven backend family.
    * - ``next.ports``
      - A single flat module holding the protocols and slots one subsystem calls another through, each bound in ``AppConfig.ready`` to the implementation its owning area keeps in that area's ``ports`` module.
-       ``PartialShaper`` lets the page and form paths shape partial responses without importing ``next.partial``, ``RouterAccess`` lets the page watcher and the checks build routers without importing ``next.urls``, ``StaticAssets`` lets the render path reach the static manager without importing ``next.static``, and ``PageScan`` lets the checks execute the routed ``page.py`` modules without closing the loop back into ``next.pages.scan``.
+       ``PartialShaper`` lets the page and form paths shape partial responses without importing ``next.partial``, ``RouterAccess`` lets the page watcher and the checks build routers without importing ``next.urls``, ``StaticAssets`` lets the render path reach the static manager without importing ``next.static``, ``PageScan`` lets the checks execute the routed ``page.py`` modules without closing the loop back into ``next.pages.scan``, ``SeoRoutes`` lets the lazy urlpatterns append the SEO routes without importing ``next.seo``, and ``PageScripts`` lets the static injector add the third-party scripts without importing ``next.scripts``.
    * - ``next.utils``
-     - A single flat module holding the path helpers, the ``PageRoot`` value object, and the ``template_edits_watched`` predicate that several subsystems share.
+     - A single flat module holding the path helpers, the ``PageRoot`` value object, the ``template_edits_watched`` predicate, the ``TreeSource`` loader of a file at the top of a page tree, and the ``UNSET`` sentinel that several subsystems share.
    * - ``next.caches``
      - A single flat module holding ``BoundedCache`` and ``LruCache``, so every memo in the framework carries its own bound and eviction policy rather than leaving it to the caller.
    * - ``next.introspect``
@@ -206,7 +226,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.seeding``
      - A single flat module holding the render-context keys every area shares and the ``RenderFrame`` a component render inherits from the page around it.
    * - ``next.diagnostics``
-     - A single flat module holding the guarded read of what a third-party backend reports, logged once per source.
+     - A single flat module holding the containment of user and third-party code that raises: loud under ``DEBUG``, logged once per source otherwise.
    * - ``next.errors``
      - A single flat module holding the exceptions more than one subsystem raises, the ``DIRS`` shape refusal and the six a backend the loader cannot resolve produces.
    * - ``next.signals``
@@ -217,7 +237,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
      - ``__init__`` aggregates system-check registration across every subpackage.
        ``common`` provides shared helpers used by individual ``checks`` modules.
    * - ``next.templatetags``
-     - ``components``, ``forms``, ``next_static``, ``pages``, ``partial``.
+     - ``components``, ``forms``, ``next_static``, ``pages``, ``partial``, ``scripts``.
 
 See also
 --------

@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import functools
 import json
+import logging
 from typing import TYPE_CHECKING, Protocol, override, runtime_checkable
 
 from django.core.serializers.json import DjangoJSONEncoder
 
 from next.conf import import_class_cached, next_framework_settings
+from next.conf.signals import settings_reloaded
+from next.diagnostics import FailureLog
 
 
 if TYPE_CHECKING:
@@ -94,24 +97,75 @@ def _pydantic_encoder(module: ModuleType) -> type[DjangoJSONEncoder]:
     return _PydanticAwareEncoder
 
 
+logger = logging.getLogger(__name__)
+
+_failures = FailureLog(logger)
+
 _default_serializer: JsContextSerializer = JsonJsContextSerializer()
+
+
+class _Configured:
+    """The serializer `JS_CONTEXT_SERIALIZER` names, built once per dotted path."""
+
+    def __init__(self) -> None:
+        """Hold nothing until the first render asks."""
+        self.held: tuple[str, JsContextSerializer] | None = None
+
+    def forget(self, **kwargs: object) -> None:
+        """Drop the held serializer, so a settings reload builds the new one."""
+        self.held = None
+
+
+_configured = _Configured()
+settings_reloaded.connect(_configured.forget)
+
+
+def _instantiate(path: str) -> JsContextSerializer:
+    """Import and instantiate the serializer `path` names, refusing a non-serializer."""
+    instance = import_class_cached(path)()
+    if not isinstance(instance, JsContextSerializer):
+        msg = f"{path!r} does not implement JsContextSerializer"
+        raise TypeError(msg)
+    return instance
+
+
+def _build_serializer(path: str) -> JsContextSerializer:
+    """Import and instantiate the serializer `path` names, the default on a failure.
+
+    A broken serializer would fail every render, so the default stands in, loud under
+    `DEBUG` and logged once otherwise, and `next.W079` to `next.W082` name the cause.
+    """
+    try:
+        instance = _instantiate(path)
+    except Exception as exc:  # noqa: BLE001 - a project serializer may raise anything
+        _failures.contain(
+            exc,
+            path,
+            "JS_CONTEXT_SERIALIZER %r cannot serialize, so the JSON serializer "
+            "stands in. Point it at a class whose instances have a "
+            "dumps(value) -> str method.",
+            path,
+        )
+        return _default_serializer
+    return instance
 
 
 def resolve_serializer() -> JsContextSerializer:
     """Return the configured serializer or the process-wide default.
 
     The dotted path is read on every call, so a settings override takes effect from
-    the call that follows it, and the shipped serializers hold no state to share.
+    the call that follows it, while the instance is built once per path.
     """
     path = getattr(next_framework_settings, "JS_CONTEXT_SERIALIZER", None)
     if not path:
         return _default_serializer
-    cls = import_class_cached(str(path))
-    instance = cls()
-    if not isinstance(instance, JsContextSerializer):
-        msg = f"{path!r} does not implement JsContextSerializer"
-        raise TypeError(msg)
-    return instance
+    path = str(path)
+    held = _configured.held
+    if held is not None and held[0] == path:
+        return held[1]
+    serializer = _build_serializer(path)
+    _configured.held = (path, serializer)
+    return serializer
 
 
 __all__ = [

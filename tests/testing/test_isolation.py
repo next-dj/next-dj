@@ -21,7 +21,9 @@ from next.testing import (
     reset_form_registration_state,
     reset_page_cache,
     reset_registries,
+    reset_scripts,
 )
+from tests.scripts.trees import get, write_tree
 
 
 class TestResetFormActions:
@@ -177,6 +179,21 @@ class TestResetPageCache:
         assert fp not in page._templates.composed
         assert fp not in page._templates.compiled
         assert fp not in page._templates.composed_sources
+
+
+class TestResetScripts:
+    """reset_scripts reads a rewritten `scripts.py` on the next render."""
+
+    def test_a_rewritten_source_shows_after_the_reset(self, tmp_path: Path) -> None:
+        root = write_tree(tmp_path / "pages")
+        assert 'data-next-script="base"' in get(root).content.decode()
+        (root / "scripts.py").write_text(
+            "from next.scripts import Script\nscripts = (Script('new', init='1'),)\n"
+        )
+        reset_scripts()
+        html = get(root).content.decode()
+        assert 'data-next-script="new"' in html
+        assert 'data-next-script="base"' not in html
 
 
 class _StatelessBackend(FormActionBackend):

@@ -4,8 +4,15 @@ from django.middleware.csrf import get_token
 from kanban.models import Board, Card, Column
 from kanban.providers import DBoard
 
-from next import context
+from next import context, page
 from next.forms.manager import form_action_manager
+from next.pages import MetadataDict
+
+
+@page.metadata(inherit=True)
+def board_meta(active_board: DBoard[Board]) -> MetadataDict:
+    """Title the board and its settings page after the resolved board row."""
+    return {"title": active_board.title}
 
 
 @context("board_object", inherit_context=True)

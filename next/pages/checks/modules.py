@@ -1,9 +1,4 @@
-"""System checks for what a routed `page.py` module declares.
-
-The ids are `next.E011` for a walk that fails, `next.E012` and `next.E013` for a
-missing or uncallable body source, `next.W043` for several body sources, and
-`next.E017` for a module that raises while importing.
-"""
+"""System checks for what a routed `page.py` module declares."""
 
 from __future__ import annotations
 
@@ -20,6 +15,7 @@ from django.core.checks import (
 
 from next.checks import NEXT
 from next.checks.common import (
+    WALK_HINT,
     first_visit,
     get_page_roots,
     get_router_manager,
@@ -48,9 +44,9 @@ def check_page_functions(*args, **kwargs) -> list[CheckMessage]:
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
-    router_manager, init_errors = get_router_manager()
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors
+        return []
 
     # One `page.py` reached through several page trees is one page.
     seen: set[Path] = set()
@@ -66,7 +62,11 @@ def check_page_functions(*args, **kwargs) -> list[CheckMessage]:
         except (AttributeError, OSError) as e:
             errors.append(
                 Error(
-                    f"Error checking page functions: {e}", obj=settings, id="next.E011"
+                    f"{type(router).__name__} page trees could not be walked to "
+                    f"check page.py functions: {e}",
+                    hint=WALK_HINT,
+                    obj=settings,
+                    id="next.E011",
                 )
             )
 
@@ -216,9 +216,9 @@ def check_page_module_imports(*args, **kwargs) -> list[CheckMessage]:
     Importing every user module costs a full tree walk, so the check is a deployment
     one and runs under `manage.py check --deploy` instead of on every command.
     """
-    router_manager, init_errors = get_router_manager()
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors
+        return []
     return [
         Error(_page_import_error_message(page_path), obj=str(page_path), id="next.E017")
         for page_path in iter_existing_scanned_pages(router_manager, set())

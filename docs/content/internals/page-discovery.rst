@@ -74,9 +74,16 @@ Modules
 ``next.pages.paths``.
    Memoises the path facts of one ``page.py``, its module path, its template path, and its ancestor chain, in a bounded cache the composition lifecycle clears.
 
+``next.pages.metadata``.
+   Folds the settings tier and the ``metadata`` dicts and ``@page.metadata`` callables of the ancestor chain into one ``Metadata`` value and resolves it per response, see `Metadata resolution`_ below.
+   ``dicts`` holds the input shapes, ``markers`` the frozen values, ``Replace``, and the merge strategy of each field, ``normalize`` the strict normaliser compiled from the ``dicts`` annotations, ``scope`` the memoised read of the ``METADATA`` scope with its options and the settings tier, ``titles`` the safe title template, ``fold`` the strategy-driven merge, ``chain`` the ancestor walk and its memo, ``registry`` the callable per file, ``resolve`` the request-time stage, ``hreflang`` the translated alternates and their memo, ``ld`` the JSON-LD node base and the breadcrumb list, ``head`` the head parser the tests read, ``backends`` the renderer contract and the configured renderer, and ``nodes`` the ``{% metadata %}`` and ``{% breadcrumbs %}`` nodes.
+
+``next.pages.responses``.
+   Reads the ``cache`` and ``headers`` of the chain once per module reload into a ``ResponsePolicy``, settles the CSRF delivery of the render before it runs, and stamps the headers, the cache, and the ``X-Robots-Tag`` on the response, taking a shared cache back to ``private`` when the response turns personal.
+
 ``next.pages.errors``.
-   Defines the two exceptions the area raises.
-   ``PageModuleImportError`` is what a broken ``page.py`` raises on the request path, and ``PageContextShapeError`` is what a keyless ``@context`` answering a non-mapping raises during the context merge.
+   Defines the six exceptions the area raises.
+   ``PageModuleImportError`` is what a broken ``page.py`` raises on the request path, ``PageContextShapeError`` is what a keyless ``@context`` answering a non-mapping raises during the context merge, and the four ``PageMetadata*`` errors name a metadata declaration the schema, the title template, or the one-form rule refuses, and a self URL resolved without a request.
 
 ``next.pages.ports``.
    Holds ``PageScanImpl``, which binds the page-tree scan to the ``PageScan`` port so discovery reaches the scan without an import that would close the cycle.
@@ -160,9 +167,10 @@ Context resolution
 2. ``PageContextRegistry.collect_context`` runs in two sub-steps.
 
    a. Inherited context.
-      Every ``@context(..., inherit_context=True)`` callable registered in ancestor ``page.py`` files, walked from the current page upward through every ancestor directory, bounded at 64 levels.
+      Every ``@context(..., inherit_context=True)`` callable registered in an ancestor ``page.py``, bounded at 64 levels, the outermost file first and each file in declaration order.
+      Each resolves against the inherited context collected so far, a key an outer file owns skips the nearer callable, and the page's own file is left out of this pass.
    b. Page-level context.
-      The ``@context`` callables declared in the current ``page.py``, evaluated after inherited values are in place so the page can shadow any inherited key.
+      The ``@context`` callables declared in the current ``page.py``, its inheritable ones first in declaration order and once, then the keyless one, then the keyed ones by key, evaluated after inherited values are in place so the page can shadow any inherited key.
 
 3. Context processors merge ``OPTIONS.context_processors`` from each page backend entry with ``OPTIONS.context_processors`` from the **first** ``TEMPLATES`` entry.
    The page backend paths are concatenated ahead of the Django paths.
@@ -173,9 +181,17 @@ Context resolution
 The dependency resolver shares one cache between the inherited and page-level sub-steps of a single ``collect_context`` call, so a value resolved at an ancestor is not recomputed for the page.
 On a regular GET that cache does not extend to components, and each component render starts its own cache.
 A cache that spans the page and its components exists only on the form-dispatch re-render after a validation failure, where the dispatcher attaches its cache to the request.
+Within one page view a single cache serves ``render()`` when the page has one, the context build, and the metadata thunk, and it never lands on the request, so a ``Depends`` value resolves once across them.
 
 The canonical description is in :doc:`/content/topics/context`.
 This page focuses on which module performs each step.
+
+Metadata resolution
+-------------------
+
+The render context carries a ``MetadataThunk`` under a reserved key, which ``{% metadata %}`` and ``{% breadcrumbs %}`` read, and the metadata runs in four stages, chain, fold, resolve, and render.
+The chain reads the ``page.py`` modules this page loads, through the same ``AncestorStamps`` the context and the response policy use, so an edit to one ``page.py`` rebuilds only the chains that pass through it.
+:doc:`seo-pipeline` covers the four stages, their memos, and the renderer.
 
 Extension points
 ----------------
@@ -183,6 +199,7 @@ Extension points
 - Register a new template loader in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]``.
 - Subscribe to ``page_rendered`` to observe every render, and to ``template_loaded`` to observe every composed template written to the registry.
 - Add a context processor for global template variables.
+- Name a ``MetadataRenderer`` subclass in ``NEXT_FRAMEWORK["METADATA"]["RENDERER"]`` to change the head markup ``{% metadata %}`` writes.
 
 ``Page`` is not an extension point.
 ``next.pages.manager`` builds the ``page`` singleton at import time and no settings key swaps the class, so a subclass has no registration path and nothing would route requests through it.

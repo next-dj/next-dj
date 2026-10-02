@@ -5,6 +5,7 @@ from django.http import HttpResponse
 from django.test import RequestFactory
 from django.urls import clear_script_prefix, set_script_prefix
 
+from next.deps import REQUEST_DEP_CACHE_ATTR
 from next.pages.loaders import _load_python_module
 from next.pages.visits import visit_request
 from next.testing import NextClient, envelope_of
@@ -70,6 +71,15 @@ class TestVisitRequestPresentsTheOriginUrl:
         dispatch_post.session = {"k": "v"}
         visit = visit_request(dispatch_post, "/notes/")
         assert (visit.user, visit.session) == ("carol", {"k": "v"})
+
+    def test_the_dispatch_cache_stays_with_the_live_request(
+        self, dispatch_post
+    ) -> None:
+        cache = {"board": "origin"}
+        setattr(dispatch_post, REQUEST_DEP_CACHE_ATTR, cache)
+        visit = visit_request(dispatch_post, "/boards/2/")
+        assert not hasattr(visit, REQUEST_DEP_CACHE_ATTR)
+        assert getattr(dispatch_post, REQUEST_DEP_CACHE_ATTR) is cache
 
 
 class TestVisitRequestWithoutAUrl:

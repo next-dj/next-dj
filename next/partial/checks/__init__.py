@@ -1,7 +1,11 @@
 """System checks for the partial-rendering subsystem.
 
-Importing the package registers every check, and each submodule names the ids it owns.
+Importing the package registers every check.
 """
+
+import warnings
+
+from next.checks.common import forget_run_memos
 
 from .backends import (
     check_asset_version_moves_between_deploys,
@@ -32,7 +36,6 @@ from .codes import (
 )
 from .forms import check_form_backend_partial_aware, check_repeated_form_has_key
 from .ops import check_custom_patch_ops_well_formed
-from .pages import reset_composed_pages_memo
 from .templates import check_composed_templates_compile
 from .zones import (
     check_context_zone_names_exist,
@@ -44,6 +47,19 @@ from .zones import (
     check_zone_not_in_if,
     check_zone_not_in_loop,
 )
+
+
+def reset_composed_pages_memo(**kwargs) -> None:
+    """Drop the composed pages every check run shares.
+
+    Deprecated, `next.checks.reset_check_caches` drops this memo with the rest.
+    """
+    warnings.warn(
+        "reset_composed_pages_memo is deprecated, call next.checks.reset_check_caches",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    forget_run_memos()
 
 
 __all__ = [

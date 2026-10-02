@@ -145,7 +145,7 @@ class TestPage:
         assert entry.serialize is False
 
     def test_context_decorator_without_key_inherit_context(self, page_instance) -> None:
-        """A dict-merge ``@context`` registers under the ``None`` key and keeps inheritance."""
+        """A dict-merge ``@context`` registers under ``None``, keeping inheritance."""
 
         @page_instance.context(inherit_context=True)
         def get_context_data():
@@ -163,7 +163,7 @@ class TestPage:
     def test_render_scenarios(
         self, page_instance, test_file_path, case: PageRenderCase
     ) -> None:
-        """``render`` merges registered context functions with the caller keyword arguments."""
+        """``render`` merges the registered context functions with the caller kwargs."""
         page_instance.register_template(test_file_path, case.template)
         for key, func in case.context.items():
             page_instance._context_manager.register_context(test_file_path, key, func)
@@ -338,7 +338,7 @@ class TestPageHasTemplateAndLazyRender:
     def test_render_injects_current_template_path_in_context(
         self, page_instance, tmp_path
     ) -> None:
-        """render() adds current_template_path to template context for component resolution."""
+        """render() puts current_template_path in the context for component lookup."""
         page_file = tmp_path / "page.py"
         page_file.write_text("x = 1")
         (tmp_path / "template.djx").write_text("path={{ current_template_path }}")
@@ -589,7 +589,7 @@ class TestLayoutIntegration:
     def test_render_with_layout_template_detection(
         self, page_instance, tmp_path
     ) -> None:
-        """A body with no layout on disk renders verbatim, with nothing wrapped around it."""
+        """A body with no layout on disk renders verbatim, nothing wrapped around it."""
         page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1>"
         page_instance.register_template(page_file, template_str)
@@ -1111,7 +1111,7 @@ class TestResolvePageBodyWithoutRender:
         page_file.write_text('template = "<p>static</p>"')
 
         module = _load_python_module_memo(page_file)
-        resolution = page_instance._resolve_page_body(page_file, module)
+        resolution = page_instance._resolve_page_body(page_file, module, _dep_cache={})
 
         assert resolution.body == "<p>static</p>"
         assert resolution.http_response is None
@@ -1123,7 +1123,9 @@ class TestResolvePageBodyWithoutRender:
         """A `template.djx`-only page has no module to carry a `render()`."""
         (tmp_path / "template.djx").write_text("<p>virtual</p>")
 
-        resolution = page_instance._resolve_page_body(tmp_path / "page.py", None)
+        resolution = page_instance._resolve_page_body(
+            tmp_path / "page.py", None, _dep_cache={}
+        )
 
         assert resolution.body == "<p>virtual</p>"
         assert resolution.dynamic is False

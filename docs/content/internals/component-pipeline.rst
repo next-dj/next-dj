@@ -122,7 +122,7 @@ Component context resolution
 Each ``@component.context("key")`` function runs once per component render.
 An unkeyed callable's dict is checked before the merge, so a key naming a prop of the rendering ``{% component %}`` call site, a reserved render key, or anything carrying the ``slot_`` prefix raises ``ValueError`` rather than overwriting the entry.
 When a component's ``component.py`` fails to import, the renderer falls back to plain template rendering and the ``@component.context`` callables in that module do not run.
-On the template render path the resolver shares the request-scoped dependency cache through ``get_request_dep_cache``.
+On the template render path the resolver shares the request-scoped dependency cache through ``render_dep_cache``.
 Named ``Depends("name")`` values resolved earlier in the dispatch are reused inside the component callables.
 Only a form dispatch puts that cache on the request, so an ordinary GET leaves each component render building a ``DependencyCache`` of its own and two components asking for one name each pay for it.
 Provider-resolved parameters are recomputed per call.

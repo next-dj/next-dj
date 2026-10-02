@@ -2,14 +2,18 @@
 // resolve top layer down, so a zone inside the modal wins over the same-named
 // page zone underneath. The native modality lives behind an injectable adapter.
 
-import { defaultHistory, defaultPopState } from "./adapters";
-import type { HistoryAdapter } from "./apply";
+import { defaultPopState } from "./adapters";
+import { readHead, writeHead } from "./head";
+import type { Head, HeadPatch } from "./head";
 import { fireRemoved } from "./morph";
+import type { Navigation } from "./navigation";
 import {
   ATTR_ZONE,
   HEADER_ORIGIN,
   HEADER_ZONE,
   cssEscape,
+  fire,
+  pageKey,
   currentUrl as pageUrl,
 } from "./protocol";
 
@@ -49,9 +53,19 @@ interface Layer {
   // The opening page URL, captured at open time. Rides X-Next-Origin so the
   // server resolves the host for an out-of-band render of its zones.
   host: string;
-  // The honest URL pushed on open, absent for a layer that never touched
-  // history. A programmatic close replaces it back to the host.
+  // The head restored on close, kept current by a meta op of a page under the layer.
+  head: Head;
+  // Set once a meta op arrived for this layer's own page, so a meta of a page under
+  // it waits for the close instead of showing over the modal.
+  titled: boolean;
+  // The page key of the honest URL, absent for a layer with no body to fetch.
   pushedUrl?: string;
+  // Set once the body envelope announced the URL, so a close announces its replace.
+  committed: boolean;
+  // The body fetch's queue, aborted on remove so a late body cannot land.
+  key: string;
+  // Drops the push held for the body, so a layer closed early rolls it back unannounced.
+  drop?: () => void;
 }
 
 /** The seams createLayers needs, each defaulting to a platform adapter. */
@@ -61,12 +75,15 @@ export interface LayerDeps {
   fetch: (request: {
     url: string;
     zone: string;
+    queue?: string;
     headers?: Record<string, string>;
   }) => Promise<void>;
+  // Abort a queued fetch, so a closed layer drops its body in flight.
+  abort?: (key: string) => void;
   document?: Document;
   dialog?: DialogAdapter;
-  // The history seam shared with the applier, so open pushes and close replaces.
-  history?: HistoryAdapter;
+  // The address bar shared with the applier, which announces the push a layer holds.
+  navigation: Navigation;
   // The Back-gesture seam, a popstate past the top layer's pushed URL closes it.
   popstate?: PopStateAdapter;
 }
@@ -80,10 +97,14 @@ export interface LayerStack {
   urlFor(el: Element): string;
   /** The host page of the layer owning an element, absent outside every layer. */
   hostFor(el: Element): string | undefined;
+  /** Move the URL of an element's page, answering whether the bar shows that page. */
+  rewrite(el: Element, href: string): boolean;
   /** Open a layer, building the dialog and zone container before the request. */
   open(opener: HTMLElement | null, href?: string, zone?: string): Promise<void>;
   /** Close the top layer, a result accepts and a dismiss rejects with a reason. */
   close(detail: LayerCloseEvent): void;
+  /** Sync a page's head tags, a page under a titled layer shows them once it closes. */
+  head(patch: HeadPatch, page?: string): void;
   /** Append a toast as textContent, never parsed as HTML. */
   toast(text: string, variant: string): void;
   /** The number of open layers. */
@@ -99,9 +120,11 @@ export interface LayerStack {
 export function createLayers(deps: LayerDeps): LayerStack {
   const doc = deps.document ?? document;
   const dialogAdapter = deps.dialog ?? nativeDialog();
-  const history = deps.history ?? defaultHistory();
+
+  const abort = deps.abort ?? ((): void => undefined);
   const popstate = deps.popstate ?? defaultPopState();
   const stack: Layer[] = [];
+  let serial = 0;
   let toastHost: HTMLElement | null = null;
   let detach: (() => void) | null = null;
 
@@ -176,6 +199,17 @@ export function createLayers(deps: LayerDeps): LayerStack {
     return layerOf(el)?.host;
   }
 
+  // A filter inside a layer moves the layer's own URL with the bar, so a close still
+  // finds the bar on it and replaces back to the host. A layer that wrote no URL, and
+  // the base page under one that did, leave the bar to the page it shows.
+  function rewrite(el: Element, href: string): boolean {
+    const layer = layerOf(el);
+    const page = layer?.pushedUrl ?? stack[0]?.host ?? currentUrl();
+    if (layer?.committed === false || page !== currentUrl()) return false;
+    if (layer !== undefined) layer.pushedUrl = href;
+    return true;
+  }
+
   function busy(initiator: Element | null, target: Element | null): () => void {
     const marked = [initiator, target].filter((el): el is Element => el !== null);
     for (const el of marked) {
@@ -212,7 +246,19 @@ export function createLayers(deps: LayerDeps): LayerStack {
     // A browser dismiss gesture (Esc, backdrop, dialog form) reaches the same
     // close path as a server dismiss, so the reason flows through one channel.
     const close = dialogAdapter.open(dialog, (reason) => dismissFrom(dialog, reason));
-    const layer: Layer = { dialog, root, opener, close, returnFocus, host };
+    serial += 1;
+    const layer: Layer = {
+      dialog,
+      root,
+      opener,
+      close,
+      returnFocus,
+      host,
+      head: readHead(doc),
+      titled: false,
+      committed: false,
+      key: `layer:${serial}`,
+    };
     stack.push(layer);
     // Both ends go busy before the request, and the opener's flag is what the
     // double-click guard above reads. Nothing awaits before this line.
@@ -222,22 +268,23 @@ export function createLayers(deps: LayerDeps): LayerStack {
     const seeded = href !== undefined && zone !== undefined;
     try {
       if (seeded) {
-        // Push the honest URL so the modal is shareable and Back closes it. Inside
-        // the try because pushState can throw (Safari rate limit) and must unwind.
-        history.push(href);
-        layer.pushedUrl = currentUrl();
+        // The honest URL makes the modal shareable, and pushed at once Back closes it
+        // even while the body loads. The body envelope announces it, and a layer that
+        // never gets one rolls it back unannounced.
+        const owner = pageKey(href, doc);
+        layer.pushedUrl = owner;
+        layer.drop = deps.navigation.hold(owner, href, () => (layer.committed = true));
       }
       emit("partial:layer-opened", { opener });
       if (seeded) {
         await deps.fetch({
           url: href,
           zone,
+          queue: layer.key,
           headers: { [HEADER_ZONE]: zone, [HEADER_ORIGIN]: host },
         });
       }
     } catch (e) {
-      // remove rolls the URL back to the host only when the push actually
-      // moved it (pushedUrl set), so a failed push rolls back nothing.
       remove(layer);
       throw e;
     } finally {
@@ -281,30 +328,66 @@ export function createLayers(deps: LayerDeps): LayerStack {
     // open's fetch is in flight, then the reject re-enters here. The early return
     // makes the second call a no-op so nothing runs twice.
     if (index === -1) return;
-    stack.splice(index, 1);
-    layer.close();
-    // Fire next:removed on the detaching root so an island inside the modal
-    // unmounts before the subtree leaves the document, the apply verbs' contract.
-    fireRemoved(layer.dialog);
-    layer.dialog.remove();
-    if (layer.returnFocus instanceof HTMLElement) layer.returnFocus.focus();
-    // A programmatic close still sits on the pushed URL, so replace it back to the
-    // host. A Back-driven close already moved the URL, so the guard skips it.
-    if (layer.pushedUrl !== undefined && currentUrl() === layer.pushedUrl) {
-      history.replace(layer.host);
+    const commit = deps.navigation.begin();
+    try {
+      stack.splice(index, 1);
+      layer.drop?.();
+      abort(layer.key);
+      layer.close();
+      // Fire next:removed on the detaching root so an island inside the modal
+      // unmounts before the subtree leaves the document, the apply verbs' contract.
+      fireRemoved(layer.dialog);
+      layer.dialog.remove();
+      if (layer.returnFocus instanceof HTMLElement) layer.returnFocus.focus();
+      // A programmatic close still sits on the pushed URL, so replace it back to the
+      // host. A Back-driven close already moved the URL, so the guard skips it.
+      if (layer.committed && currentUrl() === layer.pushedUrl) {
+        commit.write({ href: layer.host, action: "replace" });
+      }
+      // What lay under the layer now lies under the one above it, or shows.
+      const above = stack[index];
+      if (above !== undefined) above.head = layer.head;
+      else writeHead(doc, layer.head);
+    } finally {
+      commit.end();
     }
+  }
+
+  // A page's tags go into the snapshot of each layer above it up to the first titled
+  // one, and reach the document only when no titled layer covers the page.
+  function head(patch: HeadPatch, page?: string): void {
+    const above = firstLayerAbove(page);
+    if (above === -1) return;
+    const owner = page === undefined ? stack[stack.length - 1] : stack[above - 1];
+    if (owner !== undefined) owner.titled = true;
+    for (const layer of stack.slice(above)) {
+      layer.head = { ...layer.head, ...patch };
+      if (layer.titled) return;
+    }
+    writeHead(doc, patch);
+  }
+
+  // The index of the first layer over a page, -1 for a page no longer on the stack:
+  // its layer closed while the envelope was in flight, and its tags are stale.
+  function firstLayerAbove(page: string | undefined): number {
+    if (page === undefined) return stack.length;
+    const owner = topDown().find((layer) => layer.pushedUrl === page);
+    if (owner !== undefined) return stack.indexOf(owner) + 1;
+    return page === (stack[0]?.host ?? currentUrl()) ? 0 : -1;
   }
 
   // Back past the topmost pushed URL closes that layer and the bare layers above
   // it. Never restores zones or writes history, short of a client router.
   function onPopstate(): void {
-    const layers = Array.from(stack).reverse();
-    const anchor = layers.find((layer) => layer.pushedUrl !== undefined);
-    if (anchor === undefined || anchor.pushedUrl === currentUrl()) return;
-    for (const layer of layers) {
-      dismissFrom(layer.dialog, "popstate");
-      if (layer === anchor) return;
-    }
+    deps.navigation.popped(() => {
+      const layers = topDown();
+      const anchor = layers.find((layer) => layer.pushedUrl !== undefined);
+      if (anchor === undefined || anchor.pushedUrl === currentUrl()) return;
+      for (const layer of layers) {
+        dismissFrom(layer.dialog, "popstate");
+        if (layer === anchor) return;
+      }
+    });
   }
 
   function toast(text: string, variant: string): void {
@@ -328,8 +411,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
   }
 
   function emit(event: string, detail: Record<string, unknown>): void {
-    doc.dispatchEvent(new CustomEvent(event, { detail }));
-    deps.dispatch(event, detail);
+    fire(doc, deps.dispatch, event, detail);
   }
 
   function onClick(event: Event): void {
@@ -365,14 +447,16 @@ export function createLayers(deps: LayerDeps): LayerStack {
     resolveSelector,
     urlFor,
     hostFor,
+    rewrite,
     open,
     close,
+    head,
     toast,
     size: () => stack.length,
     busy,
     install,
     _reset() {
-      for (const layer of [...stack]) remove(layer);
+      for (const layer of topDown()) remove(layer);
       if (toastHost !== null) {
         toastHost.remove();
         toastHost = null;

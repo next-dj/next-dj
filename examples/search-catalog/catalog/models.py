@@ -1,6 +1,7 @@
 from typing import ClassVar
 
 from django.db import models
+from django.urls import reverse
 
 
 class ProductQuerySet(models.QuerySet):
@@ -12,6 +13,7 @@ class ProductQuerySet(models.QuerySet):
 class Category(models.Model):
     slug = models.SlugField(max_length=64, unique=True)
     name = models.CharField(max_length=120)
+    tagline = models.CharField(max_length=160, blank=True)
 
     class Meta:
         ordering: ClassVar = ["name"]
@@ -52,3 +54,26 @@ class Product(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.brand})"
+
+    def get_absolute_url(self) -> str:
+        """Return the detail page, addressed through the category of the product."""
+        return reverse(
+            "next:page_catalog_category_slug",
+            kwargs={"category": self.category.slug, "slug": self.slug},
+        )
+
+
+class Lead(models.Model):
+    """A visitor who left an email on the landing of a category."""
+
+    category = models.ForeignKey(
+        Category, on_delete=models.CASCADE, related_name="leads"
+    )
+    email = models.EmailField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering: ClassVar = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.email} ({self.category})"

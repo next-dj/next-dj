@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from next.introspect import callable_name, defining_file
+from next.introspect import (
+    callable_name,
+    declared_file,
+    defining_file,
+    registering_file,
+)
 from next.pages.loaders import _load_python_module
 from tests.support import attribution, unwrapped_decorator, wraps_decorator
 
@@ -123,6 +128,38 @@ class TestDefiningFile:
 
         with pytest.raises(TypeError, match=r"could not determine the file where"):
             defining_file(module.Declared)
+
+
+class TestRegistrationSite:
+    """A decorator factory learns the file calling it and the file declaring `func`."""
+
+    def test_registering_file_skips_the_factory_frame(self, tmp_path: Path) -> None:
+        factory_file = tmp_path / "factory.py"
+        factory_file.write_text("def factory(read):\n    return read()\n")
+        module = _load_python_module(factory_file)
+        assert module is not None
+        assert module.factory(registering_file) == Path(__file__)
+
+    def test_a_callable_declared_where_it_registers_notes_nothing(self) -> None:
+        notes: list[tuple[object, ...]] = []
+
+        def handler() -> None:
+            pass
+
+        declared = declared_file(handler, Path(__file__), lambda *n: notes.append(n))
+        assert declared == Path(__file__)
+        assert notes == []
+
+    def test_a_callable_declared_elsewhere_is_noted(self, tmp_path: Path) -> None:
+        notes: list[tuple[object, ...]] = []
+        running = tmp_path / "page.py"
+
+        def handler() -> None:
+            pass
+
+        declared = declared_file(handler, running, lambda *n: notes.append(n))
+        assert declared == Path(__file__)
+        assert notes == [(running, Path(__file__), handler)]
 
 
 class TestCallableName:

@@ -1,0 +1,23 @@
+<section data-consent-banner hidden aria-label="Cookie choices"
+         class="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-card p-4 shadow-lg">
+  <div class="mx-auto flex max-w-5xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <p class="text-sm text-muted-foreground">
+      This demo store measures visits with Google Analytics and ads with the Meta Pixel.
+      Neither loads until you choose.
+    </p>
+    <div class="flex flex-wrap gap-2">
+      <button type="button" data-consent-choice="reject"
+              class="rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-accent">
+        Reject all
+      </button>
+      <button type="button" data-consent-choice="analytics"
+              class="rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-accent">
+        Analytics only
+      </button>
+      <button type="button" data-consent-choice="accept"
+              class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+        Accept all
+      </button>
+    </div>
+  </div>
+</section>

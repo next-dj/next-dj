@@ -12,6 +12,7 @@ from shortener.models import Link
 
 from next.testing import (
     assert_has_class,
+    assert_metadata,
     assert_missing_class,
     envelope_of,
     find_anchor,
@@ -380,3 +381,54 @@ class TestResetClicksMorphsForeignBadge:
         assert response.status_code == 303
         assert response["Location"] == f"/admin/links/{link.slug}/"
         assert cache.get(f"{CLICK_PREFIX}hot") is None
+
+
+class TestPageMetadata:
+    """The admin subtree inherits `noindex` from its root `page.py`."""
+
+    def test_home_uses_the_site_default_and_stays_indexable(self, next_client) -> None:
+        assert_metadata(
+            next_client.get("/"), title="next.dj — URL shortener", robots=None
+        )
+
+    @pytest.mark.parametrize(
+        ("path", "title"),
+        [("/admin/", "Admin panel"), ("/admin/stats/", "Stats")],
+        ids=["index", "stats"],
+    )
+    def test_admin_pages_carry_their_title_and_noindex(
+        self, next_client, path: str, title: str
+    ) -> None:
+        assert_metadata(
+            next_client.get(path),
+            title=f"{title} · next.dj shortener",
+            robots="noindex",
+        )
+
+    def test_link_detail_is_titled_after_the_slug(self, next_client, make_link) -> None:
+        make_link("titled", url="https://example.com/t")
+        assert_metadata(
+            next_client.get("/admin/links/titled/"),
+            title="titled · next.dj shortener",
+            robots="noindex",
+        )
+
+
+class TestRobots:
+    """`robots.py` at the page root fences the redirects, no sitemap beside it."""
+
+    def test_robots_renders_the_declared_rules_without_a_sitemap_line(
+        self, next_client
+    ) -> None:
+        response = next_client.get("/robots.txt")
+        assert response.status_code == 200
+        assert response["Content-Type"] == "text/plain; charset=utf-8"
+        assert response.content.decode().splitlines() == [
+            "User-agent: *",
+            "Disallow: /s/",
+        ]
+
+    def test_without_a_sitemap_module_the_route_does_not_exist(
+        self, next_client
+    ) -> None:
+        assert next_client.get("/sitemap.xml").status_code == 404

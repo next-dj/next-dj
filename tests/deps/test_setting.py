@@ -181,7 +181,7 @@ class TestApplyResolverSetting:
         assert not resolver._plan_cache
 
     def test_a_subclass_with_slots_is_built_like_any_other(self) -> None:
-        """Slots of its own are no obstacle once the object is built rather than retyped."""
+        """Own slots are no obstacle once the object is built rather than retyped."""
         apply_with(SLOTTED_PATH)
         assert type(current_resolver()) is SlottedResolver
 

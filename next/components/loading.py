@@ -6,11 +6,11 @@ The cache spares repeated renders the cost of re-executing module top level.
 from __future__ import annotations
 
 import enum
-import importlib.util
 import logging
 from typing import TYPE_CHECKING, Final, Literal
 
 from next.caches import BoundedCache, LruCache
+from next.utils import exec_module_file
 
 
 if TYPE_CHECKING:
@@ -108,14 +108,8 @@ class ModuleLoader:
         A module body runs arbitrary user code, so every failure degrades the
         render to the bare template instead of reaching the browser as a 500.
         """
-        spec = importlib.util.spec_from_file_location(
-            f"component_module_{path.stem}", path
-        )
-        if not spec or not spec.loader:
-            return None
-        module = importlib.util.module_from_spec(spec)
         try:
-            spec.loader.exec_module(module)
+            module = exec_module_file(path, f"component_module_{path.stem}")
         except Exception as exc:
             logger.exception("Could not import component module %s", path)
             _load_errors[path] = _detached(exc)

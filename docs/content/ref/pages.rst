@@ -7,6 +7,8 @@ Module summary
 --------------
 
 ``next.pages`` exposes the ``Page`` coordinator and its ``page`` singleton, the ``@context`` decorator, the ``Context`` and ``ContextResult`` value objects, the ``PageModuleImportError`` raised by a broken ``page.py`` and the ``PageContextShapeError`` raised by a keyless ``@context`` answering no mapping, and the ``checks`` and ``signals`` submodules.
+It also exposes the page metadata surface, the ``Metadata`` and ``ResolvedMetadata`` values, the ``MetadataDict`` and ``SiteMetadataDict`` input shapes, the ``Replace`` and ``RESET`` markers, the ``ld`` nodes, the ``MetadataRenderer`` contract with its ``HtmlMetadataRenderer``, and the four ``PageMetadata*`` errors, see :doc:`metadata`.
+The ``CacheDict`` and ``HeadersDict`` shapes of the ``cache`` and ``headers`` a ``page.py`` declares complete the surface, see `Response policy`_ below.
 
 Public API
 ----------
@@ -35,9 +37,10 @@ Public API
 Cross-area contract
 ~~~~~~~~~~~~~~~~~~~
 
-Nine ``Page`` methods carry no leading underscore because other framework areas call them, not because application code should.
-``composed_template_for``, ``build_render_context``, ``render_with_static_assets``, ``authorization_outcome``, ``has_template``, ``zone_bindings``, ``create_url_pattern``, ``render``, and ``clear_template_caches`` serve ``next.forms``, ``next.partial``, ``next.urls``, and ``next.testing``.
+Fourteen ``Page`` methods carry no leading underscore because other framework areas call them, not because application code should.
+``composed_template_for``, ``build_render_context``, ``render_with_static_assets``, ``authorization_outcome``, ``has_template``, ``zone_bindings``, ``create_url_pattern``, ``render``, ``clear_template_caches``, ``static_metadata``, ``fold_metadata``, ``metadata_chain``, ``metadata_declaration``, and ``metadata_registrations`` serve ``next.forms``, ``next.partial``, ``next.urls``, ``next.testing``, ``next.seo``, the metadata checks, and the ``showmetadata`` command.
 ``next.forms`` and ``next.partial`` read the first six, ``next.urls`` builds every page pattern through ``create_url_pattern``, and ``next.testing`` calls ``render`` and ``clear_template_caches`` from its rendering and isolation helpers.
+``next.partial`` folds the ``meta`` patch verb through ``fold_metadata``, ``next.seo`` and the response policy read ``static_metadata``, and the checks and ``showmetadata`` read the chain through the last three.
 They follow the underscore rule of :doc:`/content/faq/general`, so they are safe from removal without notice.
 They do not carry the application-facing stability of a Stable tier, and their signatures may drift as partial rendering evolves.
 ``register_template`` is called by ``composed_template_for`` on every cache miss and by no other area, so it serves application code seeding a composed body under the same underscore rule, again without the Stable tier's signature guarantee.
@@ -117,7 +120,7 @@ Scan
 
 ``next.pages.scan`` walks the routed page tree for the system checks.
 ``iter_existing_scanned_pages`` yields each existing ``page.py`` once across routers.
-``iter_existing_scanned_page_pairs`` yields the routed URL trail beside each path, for a check that reports a page by its URL.
+``iter_existing_scanned_page_pairs`` yields the route of each ``page.py`` beside its path, for a check that reports a page by its URL.
 ``iter_serialized_page_context_keys`` yields the ``page.py`` path and key of every keyed ``serialize=True`` context function.
 
 .. automodule:: next.pages.scan
@@ -145,6 +148,41 @@ The ``next.E029`` check reports the same mistake statically, from the return ann
 .. autoclass:: next.pages.PageContextShapeError
    :members:
 
+Metadata
+~~~~~~~~
+
+``next.pages.metadata`` merges ``DEFAULTS`` and every ``metadata`` dict or ``@page.metadata`` callable of a page and its ancestors into one ``Metadata`` value, resolves it per response, and renders it through the class ``NEXT_FRAMEWORK["METADATA"]["RENDERER"]`` names.
+:doc:`metadata` is the reference for the dicts, the value objects, ``Replace`` and ``RESET``, the renderer contract, the ``ld`` nodes, and the four ``PageMetadata*`` errors, and :doc:`/content/topics/seo/metadata` the guide.
+
+Response policy
+~~~~~~~~~~~~~~~
+
+``next.pages.responses`` reads the ``cache`` and ``headers`` a ``page.py`` declares and stamps them, with the ``X-Robots-Tag`` the metadata calls for, on the page response.
+``CacheDict`` is the dict form of ``cache`` and ``HeadersDict`` the mapping ``headers`` takes, both exported from ``next.pages``.
+A shared ``cache`` applies to a ``GET`` or a ``HEAD`` alone and goes out ``private`` when the response follows the visitor, through a cookie, a session read, a CSRF cookie, a consent read, a CSP nonce, or an ``Authorization`` header on the request.
+``headers`` may not name a caching header, ``Cache-Control``, ``CDN-Cache-Control``, ``Surrogate-Control``, ``Cloudflare-CDN-Cache-Control``, ``Expires``, ``Age``, or ``Vary``, which ``cache`` owns.
+``SharedCookies`` is the cookie jar a shared response carries in place of Django's, so a cookie a middleware sets after the view, the session and CSRF cookies among them, still takes the cache private, and a post-render callback settles a lazily rendered response the same way.
+A zone response carries the ``headers`` of its page and ``private, no-store``.
+A callable ``cache`` that raises or answers a wrong shape sends the page out ``private, no-store`` and logs once, raising under ``DEBUG``.
+See :doc:`/content/topics/caching` for the rules.
+
+.. autoclass:: next.pages.CacheDict
+   :members:
+
+.. autodata:: next.pages.HeadersDict
+   :no-value:
+
+.. autoclass:: next.pages.responses.CacheControl
+   :members:
+
+.. autoclass:: next.pages.responses.SharedCookies
+   :members: take_private
+
+``next.middleware.SharedCacheGuardMiddleware`` is the opt-in last line behind ``SharedCookies``, for a cookie that reaches a shared response past the page, see *The shared cache guard* in :doc:`/content/topics/caching`.
+
+.. automodule:: next.middleware
+   :members:
+
 Ports
 ~~~~~
 
@@ -164,6 +202,7 @@ Visits
 ``next.pages.visits`` holds ``visit_request``, which copies a live request and restates it as a GET of one page URL.
 ``authorization_outcome`` asks a page through that copy, so a ``render()`` reading the method, the path, or the query string answers an out-of-band caller as it answers a visit.
 The live request is never modified, and the user, the session, and every other attribute a middleware attached come through untouched.
+The copy leaves out the dependency cache of a form dispatch, and ``authorization_outcome`` resolves ``render()`` with a fresh cache, so a guard never reads a value the dispatch resolved.
 See *Render paths and what each one runs* in :doc:`/content/internals/request-lifecycle` for the callers.
 
 System checks
@@ -171,19 +210,39 @@ System checks
 
 ``next.pages.checks`` registers the Django system checks for the pages subsystem.
 They run through ``uv run python manage.py check``, except ``check_page_module_imports``, which is a deployment check and runs under ``manage.py check --deploy``.
-The package splits by subject into ``contexts``, ``layouts``, ``loaders``, ``modules``, ``processors``, ``structure``, and ``zones``, and importing the package registers every one of them.
+The package splits by subject into ``contexts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, and ``zones``, and importing the package registers every one of them.
+``metadata`` is a package of its own, ``scope``, ``titles``, ``shape``, ``head``, ``ld``, ``links``, ``pages``, and ``templates``, and ``responses`` owns the ``cache``, ``headers``, ``CSRF_DELIVERY``, and ``CSRF_USE_SESSIONS`` checks, see :doc:`system-checks` for the codes each one owns.
 
-The package exports twelve check callables.
+The package exports thirty-one check callables.
 
 - ``check_context_functions``.
 - ``check_context_processor_signature``.
 - ``check_context_reads_foreign_zone``.
 - ``check_context_registration_files``.
+- ``check_csrf_delivery``.
+- ``check_csrf_in_session``.
 - ``check_layout_templates``.
+- ``check_metadata_callable_returns_mapping``.
+- ``check_metadata_enum_values``.
+- ``check_metadata_head_literals``.
+- ``check_metadata_head_tags``.
+- ``check_metadata_hreflang_patterns``.
+- ``check_metadata_jsonld``.
+- ``check_metadata_noindex_canonical``.
+- ``check_metadata_parent_parameter``.
+- ``check_metadata_registration_files``.
+- ``check_metadata_settings_scope``.
+- ``check_metadata_social_folds``.
+- ``check_metadata_tag_rendered``.
+- ``check_metadata_title_templates``.
+- ``check_metadata_url_schemes``.
 - ``check_page_functions``.
+- ``check_page_metadata_shape``.
 - ``check_page_module_imports``.
+- ``check_page_response_declarations``.
 - ``check_pages_structure``.
 - ``check_request_in_context``.
+- ``check_shared_page_responses``.
 - ``check_single_keyless_context``.
 - ``check_template_loaders``.
 - ``check_unrouted_working_directory_pages``.
@@ -193,7 +252,7 @@ See :doc:`system-checks` for each check identifier, its condition, and the full 
 Signals
 -------
 
-See :doc:`signals` and :doc:`/content/topics/signals` for the pages signals (``template_loaded``, ``context_registered``, ``page_rendered``).
+See :doc:`signals` and :doc:`/content/topics/signals` for the pages signals (``template_loaded``, ``context_registered``, ``metadata_registered``, ``page_rendered``).
 
 See also
 --------
@@ -201,4 +260,5 @@ See also
 .. seealso::
 
    :doc:`/content/topics/pages` for the topic guide.
+   :doc:`/content/topics/seo/metadata` for the metadata guide.
    :doc:`/content/internals/page-discovery` for the internal pipeline.

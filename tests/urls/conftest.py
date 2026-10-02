@@ -5,7 +5,12 @@ import pytest
 
 from next.testing import override_next_settings
 from next.urls import RouterBackend, RouterManager
-from tests.support import default_page_router_config, file_router, named_temp_py
+from tests.support import (
+    default_page_router_config,
+    file_router,
+    named_temp_py,
+    write_page,
+)
 
 
 PAGE_TREE_ROUTES: tuple[str, ...] = (
@@ -25,13 +30,6 @@ PAGE_TREE_ROUTES: tuple[str, ...] = (
     "num/[str:x]",
     "admin/[str:app_label]/[str:model_name]/[int:pk]/change",
 )
-
-
-def write_page(tree: Path, route: str) -> None:
-    """Write a routed ``page.py`` carrying a body at `route` under `tree`."""
-    directory = tree / route
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "page.py").write_text('template = "ok"\n')
 
 
 @pytest.fixture()

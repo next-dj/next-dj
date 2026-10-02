@@ -6,6 +6,7 @@ Backends load lazily, page-tree roots are held until a reload moves them, and
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, cast, override
 
 from django.contrib.staticfiles.storage import staticfiles_storage
@@ -15,6 +16,7 @@ from django.utils.functional import LazyObject, empty
 from next.backends import BackendListManager, backend_entries, load_backends
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
+from next.diagnostics import FailureLog
 from next.pages.watch import get_pages_directories_for_watch
 
 from .assets import with_version
@@ -22,7 +24,12 @@ from .backends import MANIFEST_SETTINGS, StaticBackend
 from .collector import StaticCollector
 from .discovery import AssetDiscovery, PathResolver
 from .inject import PlaceholderInjector
-from .scripts import NEXT_JS_STATIC_PATH, NextScriptBuilder
+from .runtime import (
+    CHUNK_STATIC_PATHS,
+    NEXT_JS_STATIC_PATH,
+    NextScriptBuilder,
+    ScriptInjectionPolicy,
+)
 from .signals import static_backend_loaded
 
 
@@ -37,7 +44,51 @@ if TYPE_CHECKING:
     from .collector import DedupStrategy, JsContextPolicy
 
 
+logger = logging.getLogger(__name__)
+
+_failures = FailureLog(logger)
+
 _DEFAULT_BACKEND_PATH = "next.static.StaticFilesBackend"
+
+
+def _bundle_url(path: str) -> str | None:
+    """Return the storage URL of a runtime bundle, `None` when the storage lacks it.
+
+    A hashing storage raises for a file `collectstatic` never copied, which would fail
+    every page, so the page goes without the bundle, loud under `DEBUG`.
+    """
+    try:
+        return str(staticfiles_storage.url(path))
+    except ValueError as exc:
+        _failures.contain(
+            exc,
+            path,
+            "The static files storage has no %s, so pages render without it. Build "
+            "the client runtime and run collectstatic.",
+            path,
+        )
+        return None
+
+
+def _script_builder(url: str | None, options: dict[str, object]) -> NextScriptBuilder:
+    """Build the script builder, an unknown policy read as the default one.
+
+    Without a runtime URL nothing is injected, as no tag could load it.
+    """
+    if url is None:
+        options = {**options, "policy": ScriptInjectionPolicy.DISABLED}
+    try:
+        return NextScriptBuilder.from_options(url or "", options)
+    except ValueError as exc:
+        _failures.contain(
+            exc,
+            "policy",
+            "NEXT_JS_OPTIONS['policy'] names no injection policy, so 'auto' applies. "
+            "Write 'auto', 'manual' or 'disabled'.",
+        )
+        return NextScriptBuilder.from_options(
+            url or "", {**options, "policy": ScriptInjectionPolicy.AUTO}
+        )
 
 
 def _rewrites_asset_urls(backend: StaticBackend) -> bool:
@@ -70,6 +121,7 @@ class StaticManager(BackendListManager[StaticBackend]):
         self._discovery: AssetDiscovery | None = None
         self._cached_page_roots: tuple[Path, ...] | None = None
         self._script_builder: NextScriptBuilder | None = None
+        self._chunk_urls: dict[str, str | None] = {}
         self._dedup_factory: Callable[[], DedupStrategy] | None = None
         self._js_policy_factory: Callable[[], JsContextPolicy] | None = None
         self._rewrites_urls: bool = False
@@ -148,12 +200,23 @@ class StaticManager(BackendListManager[StaticBackend]):
     def script_builder(self) -> NextScriptBuilder:
         """Return the builder holding the runtime URL and the tag templates."""
         if self._script_builder is None:
-            url = str(staticfiles_storage.url(NEXT_JS_STATIC_PATH))
             options = next_framework_settings.NEXT_JS_OPTIONS
             if not isinstance(options, dict):  # pragma: no cover
                 options = {}
-            self._script_builder = NextScriptBuilder.from_options(url, options)
+            self._script_builder = _script_builder(
+                _bundle_url(NEXT_JS_STATIC_PATH), options
+            )
         return self._script_builder
+
+    def chunk_url(self, name: str) -> str | None:
+        """Return the URL of the lazy chunk `$chunks` names `name`, once per storage.
+
+        `None` means the storage lacks the chunk, which the runtime then looks for
+        beside itself.
+        """
+        if name not in self._chunk_urls:
+            self._chunk_urls[name] = _bundle_url(CHUNK_STATIC_PATHS[name])
+        return self._chunk_urls[name]
 
     @override
     def reload(self) -> None:
@@ -164,6 +227,7 @@ class StaticManager(BackendListManager[StaticBackend]):
         self._discovery = None
         self._cached_page_roots = None
         self._script_builder = None
+        self._chunk_urls = {}
         self._dedup_factory = None
         self._js_policy_factory = None
         self._backends = load_backends(
@@ -220,6 +284,7 @@ class StaticManager(BackendListManager[StaticBackend]):
         dropped too, and so is the discovery, whose plans hold resolved URLs.
         """
         self._script_builder = None
+        self._chunk_urls = {}
         self._discovery = None
         for backend in self._backends:
             backend.forget_urls()

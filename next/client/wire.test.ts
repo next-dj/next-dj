@@ -1,5 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Wire } from "./wire";
+import { createCsrf } from "./csrf";
+import type { CsrfPayload, CsrfSource } from "./wire";
 import type { SessionStore } from "./assets";
 import {
   ACCEPT,
@@ -8,6 +10,7 @@ import {
   REQUEST_FLAG,
   currentUrl,
 } from "./protocol";
+import { chunkModules } from "./test-doubles";
 
 // Isolated per harness so the navigate-once flag never leaks through jsdom storage.
 function memorySession(): SessionStore {
@@ -40,7 +43,8 @@ function makeWire(
   responder: (url: string, init: RequestInit) => Promise<Response>,
   opts: {
     version?: string;
-    csrf?: { header: string; token: string };
+    csrf?: CsrfPayload;
+    ensure?: CsrfSource["ensure"];
     session?: SessionStore;
   } = {},
 ) {
@@ -63,7 +67,10 @@ function makeWire(
       pages.push(page);
     },
     version: () => opts.version ?? "v1",
-    csrf: () => opts.csrf,
+    csrf: {
+      current: () => opts.csrf,
+      ensure: opts.ensure ?? (async () => opts.csrf),
+    },
   });
   return { wire, dispatched, navigated, envelopes, pages, calls, session };
 }
@@ -541,6 +548,36 @@ describe("Wire abortable validation", () => {
     expect(h.envelopes).toHaveLength(0);
   });
 
+  it("a GET on a named queue is aborted by that bare key", async () => {
+    let signal: AbortSignal | undefined;
+    const h = makeWire((_url, init) => {
+      signal = init.signal ?? undefined;
+      return new Promise<Response>(() => undefined);
+    });
+    void h.wire.fetch({ url: "/photos/1/", zone: "photo", queue: "layer:1" });
+    h.wire.abort("layer:1");
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("a named queue on a locked mutation joins no queue", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({ url: "/f/", method: "POST", uid: "u", queue: "q" });
+    expect(h.calls[0]!.init.signal).toBeUndefined();
+  });
+
+  it("a mutation needing a deferred token that never comes is held back", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), {
+      csrf: { header: "X-CSRFToken", url: "/_next/csrf/" },
+      ensure: async () => ({ header: "X-CSRFToken", url: "/_next/csrf/" }),
+    });
+    await h.wire.fetch({ url: "/f/", method: "POST", uid: "u" });
+    expect(h.calls).toEqual([]);
+    expect(h.dispatched[0]).toMatchObject({
+      event: "partial:error",
+      detail: { kind: "csrf", url: "/f/" },
+    });
+  });
+
   it("stamps the declared zone, not the queue key, on an abortable POST", async () => {
     const h = makeWire(async () => envelopeResponse(ENVELOPE));
     await h.wire.fetch({
@@ -584,6 +621,69 @@ describe("Wire abortable validation", () => {
   });
 });
 
+describe("Wire queue pruning", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("drops the queue of a settled request", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({ url: "/photos/1/", zone: "photo", queue: "layer:1" });
+    const abort = vi.spyOn(AbortController.prototype, "abort");
+    h.wire._reset();
+    expect(abort).not.toHaveBeenCalled();
+    expect(h.calls[0]!.init.signal!.aborted).toBe(false);
+  });
+
+  it("drops the queue abort cancels", () => {
+    const h = makeWire(() => new Promise<Response>(() => undefined));
+    void h.wire.fetch({ url: "/photos/1/", zone: "photo", queue: "layer:1" });
+    h.wire.abort("layer:1");
+    const abort = vi.spyOn(AbortController.prototype, "abort");
+    h.wire._reset();
+    expect(abort).not.toHaveBeenCalled();
+  });
+
+  it("drops the queue of a request its token wait held back", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), {
+      csrf: { header: "X-CSRFToken", url: "/_next/csrf/" },
+      ensure: async () => undefined,
+    });
+    await h.wire.fetch({ url: "/f/", method: "POST", queue: "q", abortable: true });
+    const abort = vi.spyOn(AbortController.prototype, "abort");
+    h.wire._reset();
+    expect(abort).not.toHaveBeenCalled();
+  });
+
+  it("drops a late answer of an aborted request once its key is reused", async () => {
+    const pending: ((r: Response) => void)[] = [];
+    const h = makeWire(() => new Promise<Response>((r) => pending.push(r)));
+    const first = h.wire.fetch({ url: "/f/", zone: "z", queue: "q" });
+    h.wire.abort("q");
+    const second = h.wire.fetch({ url: "/f/", zone: "z", queue: "q" });
+    pending[0]!(envelopeResponse('{"version":"v1","ops":[{"op":"stale"}]}'));
+    await first;
+    pending[1]!(envelopeResponse(ENVELOPE));
+    await second;
+    expect(h.envelopes).toEqual([JSON.parse(ENVELOPE)]);
+  });
+
+  it("keeps the queue of a fresher request when a superseded one settles", async () => {
+    const signals: AbortSignal[] = [];
+    const pending: ((r: Response) => void)[] = [];
+    const h = makeWire((_url, init) => {
+      signals.push(init.signal!);
+      return new Promise<Response>((r) => pending.push(r));
+    });
+    const first = h.wire.fetch({ url: "/f/", zone: "z", queue: "q" });
+    void h.wire.fetch({ url: "/f/", zone: "z", queue: "q" });
+    pending[0]!(envelopeResponse(ENVELOPE));
+    await first;
+    h.wire.abort("q");
+    expect(signals[1]!.aborted).toBe(true);
+  });
+});
+
 describe("Wire before-request", () => {
   it("emits partial:before-request with url, method, intent", async () => {
     const h = makeWire(async () => envelopeResponse(ENVELOPE));
@@ -608,6 +708,7 @@ describe("Wire echo request id", () => {
       navigate: () => undefined,
       dispatch: () => undefined,
       onEnvelope: () => undefined,
+      csrf: createCsrf({ mint: chunkModules.csrf }),
       rememberRequestId: (id) => remembered.push(id),
     });
     return { wire, remembered, calls };

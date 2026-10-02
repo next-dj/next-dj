@@ -136,9 +136,26 @@ Terms used throughout the next.dj documentation.
    page
       A directory under the page root with a ``page.py``, or a virtual route with only a ``template.djx``.
 
+   page metadata
+      The title, the description, and the rest of the head a page declares through a ``metadata`` dict or a ``@page.metadata`` callable in ``page.py``, deep-merged down the page tree, resolved against the request, and rendered by ``{% metadata %}``.
+      Only the pages the file router serves carry it.
+      Distinct from the registry metadata of an action, which is the guard and the dispatch data stored on a registration.
+      See :doc:`/content/topics/seo/metadata`.
+
    page root
       A directory that the router walks for page discovery.
       Comes from ``APP_DIRS`` and ``DIRS`` in ``PAGE_BACKENDS``.
+      A ``sitemap.py``, ``robots.py``, ``robots.txt``, or ``scripts.py`` at its top serves the tree's crawler documents or declares its third-party scripts.
+
+   robots source
+      The one file a site serves ``/robots.txt`` from, a ``robots.py`` declaring ``RobotsRule`` groups or a static ``robots.txt`` served as written.
+      A site has exactly one, and ``manage.py check`` reports a second.
+      See :doc:`/content/topics/seo/robots`.
+
+   sitemap section
+      One Django sitemap served at ``/sitemap-<section>.xml``, the static routes and items of a page root, a route its items move with ``section=``, or a section a sitemap backend adds.
+      ``/sitemap.xml`` is the section itself while there is one, and an index of every section otherwise.
+      See :doc:`/content/topics/seo/sitemaps`.
 
    multi-project layout
       Multiple Django applications or explicit ``DIRS`` entries each contributing page trees while optionally sharing component directories through ``COMPONENT_BACKENDS``.
@@ -161,7 +178,7 @@ Terms used throughout the next.dj documentation.
       Implements ``can_handle`` and ``resolve``.
 
    request cache
-      The dependency cache that lives on the request between context functions, components, and form re-render.
+      The dependency cache a form dispatch attaches to the request, shared by its handler and by the context functions, metadata callables, and components of the re-render.
 
    re-render
       The dispatch path that re-renders the origin page after a failed form validation.
@@ -224,6 +241,23 @@ Terms used throughout the next.dj documentation.
    layout placeholder
       The ``{% template %}`` opening a ``layout.djx`` leaves for the wrapped body.
       Composition fills the first one a layout carries, and a layout that carries none is dropped whole, see :doc:`/content/topics/layouts`.
+
+   consent category
+      A name in ``NEXT_FRAMEWORK["CONSENT"]["CATEGORIES"]`` a script or a ``{% #consented %}`` block waits for, ``necessary`` always granted and every other one denied until the visitor chooses.
+      See :doc:`/content/topics/scripts/consent`.
+
+   RESET
+      The metadata marker that drops an inherited value at any depth, ``Replace()`` with no value.
+      See :doc:`/content/topics/seo/merge`.
+
+   shared page
+      A page whose ``cache`` lets a shared cache such as a CDN keep its response, through ``public`` or ``s_maxage``, so its HTML carries no CSRF token and shows no visitor's consent.
+      A render that shows one visitor anyway, through a cookie, the session, a CSP nonce, or an ``Authorization`` header, goes out private.
+      See :doc:`/content/topics/caching`.
+
+   site indexability
+      The one answer of ``NEXT_FRAMEWORK["SITE"]["INDEXABLE"]`` every robots meta, ``X-Robots-Tag``, sitemap, and robots file follows, ``not DEBUG`` by default.
+      See :doc:`/content/topics/seo/site`.
 
 See also
 --------

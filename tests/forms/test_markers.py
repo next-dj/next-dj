@@ -101,7 +101,7 @@ class TestDFormAndFormProvider:
         assert provider.can_handle(param, context) is True
 
     def test_form_provider_dform_wrong_type_returns_false(self) -> None:
-        """FormProvider.can_handle returns False when DForm type doesn't match form instance."""
+        """FormProvider.can_handle refuses a DForm type the form does not match."""
         provider = FormProvider()
 
         class FormA(Form):

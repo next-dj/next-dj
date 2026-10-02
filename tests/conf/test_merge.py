@@ -4,6 +4,8 @@ from typing import Any
 
 import pytest
 from django.test import override_settings
+from django.utils.functional import Promise
+from django.utils.translation import gettext_lazy
 from pytest_lazy_fixtures import lf
 
 from next.conf import next_framework_settings
@@ -47,8 +49,11 @@ class TestAcceptedValue:
             pytest.param("URL_RESOLVER", "myapp.Resolver", id="str"),
             pytest.param("PAGE_BACKENDS", [{"BACKEND": "myapp.Router"}], id="list"),
             pytest.param("NEXT_JS_OPTIONS", {"policy": "disabled"}, id="dict"),
+            pytest.param("METADATA", {"CANONICAL_QUERY": ["page"]}, id="metadata_dict"),
+            pytest.param("SITE", {"URL": "https://acme.example"}, id="site_dict"),
             pytest.param("JS_CONTEXT_SERIALIZER", "myapp.dumps", id="optional_str"),
             pytest.param("JS_CONTEXT_SERIALIZER", None, id="optional_none"),
+            pytest.param("CSP_NONCE", False, id="nonce_off"),
         ],
     )
     def test_usable_value_is_taken(self, key: str, raw: object) -> None:
@@ -60,6 +65,8 @@ class TestAcceptedValue:
             pytest.param("URL_RESOLVER", 42, id="str"),
             pytest.param("PAGE_BACKENDS", "myapp.Router", id="list"),
             pytest.param("NEXT_JS_OPTIONS", [], id="dict"),
+            pytest.param("METADATA", [], id="metadata_list"),
+            pytest.param("SITE", "https://acme.example", id="site_str"),
             pytest.param("JS_CONTEXT_SERIALIZER", 42, id="optional_str"),
         ],
     )
@@ -69,6 +76,14 @@ class TestAcceptedValue:
     @pytest.mark.parametrize("raw", ["False", 0, [], None], ids=str)
     def test_bool_key_is_coerced_rather_than_refused(self, raw: object) -> None:
         assert accepted_value("STRICT_LOADING", raw) is bool(raw)
+
+    def test_metadata_defaults_freeze_with_their_lazy_text_intact(self) -> None:
+        """A `gettext_lazy` proxy deep-copies to itself, so the freeze keeps it lazy."""
+        site_name = gettext_lazy("Yes")
+        merged = accepted_value("METADATA", {"DEFAULTS": {"site_name": site_name}})
+        assert isinstance(merged, FrozenDict)
+        assert isinstance(merged["DEFAULTS"], FrozenDict)
+        assert isinstance(merged["DEFAULTS"]["site_name"], Promise)
 
     def test_key_outside_every_shape_is_unset(self) -> None:
         """A third-party key added to `DEFAULTS` keeps the default it declared."""

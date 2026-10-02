@@ -75,14 +75,16 @@ Each one carries an explicit ``priority`` value, the resolver consults them from
    A parameter named ``cleaned_data`` receives the merged wizard cleaned data on a wizard ``done()`` handler.
 6. HttpRequest provider (priority 50).
    A parameter annotated ``HttpRequest`` or ``HttpRequest | None`` receives the current request, and one annotated with a concrete subclass receives it only when the request is an instance of that subclass.
-7. URL annotation provider (priority 60).
+7. Consent provider (priority 50).
+   A parameter annotated ``Consent`` receives the visitor's consent, and an undecided visitor on a page a shared cache holds, see :doc:`/content/topics/scripts/consent`.
+8. URL annotation provider (priority 60).
    A parameter annotated ``DUrl[T]`` reads the captured URL segment and coerces it to ``T``.
-8. URL kwargs provider (priority 70).
+9. URL kwargs provider (priority 70).
    A parameter whose name matches a captured URL segment resolves to that value.
    The value is coerced to the parameter annotation when one is present and is left as the captured string otherwise.
    A plain ``note_id: int`` on a ``[note_id]`` route therefore arrives already parsed, so ``DUrl`` is only needed to read a segment under a different name.
-9. Query string provider (priority 80).
-   A parameter annotated ``DQuery[T]`` reads ``request.GET`` by parameter name and coerces to ``T``.
+10. Query string provider (priority 80).
+    A parameter annotated ``DQuery[T]`` reads ``request.GET`` by parameter name and coerces to ``T``.
 
 The order makes the default-driven and marker-driven providers decisive.
 ``Depends`` and ``Context`` look only at the parameter default.
@@ -434,7 +436,7 @@ Import the provider module.
    A class that registers later still joins the provider list by priority, and the plans compiled without it are recompiled.
 
 A custom provider that does not declare ``priority`` inherits the ``RegisteredParameterProvider`` default of ``100``.
-The nine built-in providers occupy the range ``10`` (named dependency) through ``80`` (query string), so the default keeps a custom provider after every built-in.
+The ten built-in providers occupy the range ``10`` (named dependency) through ``80`` (query string), so the default keeps a custom provider after every built-in.
 ``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
 Set ``priority`` on the subclass when the new provider has to claim a parameter the built-ins would otherwise match, for example a value below ``60`` for an annotation that should outrank ``DUrl``.
 
@@ -461,6 +463,7 @@ Resolution cache
 
 Each resolution pass wraps a per-render dependency cache in a fresh ``DependencyCache``.
 The wrapper is new per call, but the backing store is shared across every ``@context`` callable in one page render, so a ``Depends("name")`` value resolved by one callable is reused by the next.
+The page's ``render()`` function fills the same store before the context runs, and the ``@page.metadata`` callables read it after, so a value any of them resolved is reused by the rest.
 The cache memoises ``Depends("name")`` callables only, keyed by the registered name.
 
 A second context function in the same page render that asks for the same ``Depends("name")`` dependency receives the memoised value, not a fresh call.
@@ -474,20 +477,19 @@ Keep a dependency cheap when several components ask for it, or have it read a st
 
 The cache lives for one form dispatch.
 Every stage of that POST, from ``get_initial`` through the validation-failure re-render, shares it, and the ``@component.context`` callables of the re-rendered page join it too rather than each building their own.
-``FormActionDispatch`` attaches its dependency cache to the request, and ``get_request_dep_cache`` reads it back.
-The function returns ``None`` outside a form dispatch, so callers handle the missing case.
+``FormActionDispatch`` attaches its dependency cache to the request, and ``render_dep_cache`` reads it back.
+Outside a form dispatch the function answers a fresh empty dict the request never carries, so a caller never handles a missing cache.
+The earlier ``get_request_dep_cache``, which answered ``None`` outside a dispatch, still imports and raises a ``DeprecationWarning``.
 
 .. code-block:: python
    :caption: reading the cache
 
    from django.http import HttpRequest
 
-   from next.deps import get_request_dep_cache
+   from next.deps import render_dep_cache
 
    def render(request: HttpRequest) -> str:
-       cache = get_request_dep_cache(request)
-       if cache is None:
-           return "No form dispatch cache on this request."
+       cache = render_dep_cache(request)
        return f"Cache has {len(cache)} entries."
 
 The constant ``REQUEST_DEP_CACHE_ATTR`` names the request attribute that holds the cache.

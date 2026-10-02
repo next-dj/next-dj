@@ -96,4 +96,20 @@ NEXT_FRAMEWORK = {
         }
     ],
     "STATIC_VERSION": "v1",
+    "SITE": {"URL": "https://template.example", "NAME": "next.dj template"},
+    "METADATA": {
+        "DEFAULTS": {
+            "viewport": "width=device-width, initial-scale=1",
+            "icons": {
+                "icon": {"url": "/static/myapp/icon.svg", "type": "image/svg+xml"}
+            },
+            "description": (
+                "A next.dj starter with one page root, the shared UI kit and one test."
+            ),
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "Next.dj example template",
+            },
+        }
+    },
 }

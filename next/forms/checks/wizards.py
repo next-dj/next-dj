@@ -1,8 +1,4 @@
-"""System checks for the `FormWizard` subclasses a project registers.
-
-The ids are `next.E050` and `next.E054` for a stepless wizard and a page path with no
-step segment, and `next.W056` to `next.W059` for the runtime hazards.
-"""
+"""System checks for the `FormWizard` subclasses a project registers."""
 
 from pathlib import Path
 

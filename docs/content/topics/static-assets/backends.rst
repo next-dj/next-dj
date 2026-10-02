@@ -145,6 +145,8 @@ Configuring the default backend
 ``module_tag``.
    Format string for ``<script type="module">`` tags.
 
+Every template takes ``{nonce_attr}`` as well, which renders the ``nonce`` attribute of the request's CSP nonce or nothing without one, and a template that leaves it out while a nonce is active draws ``next.W117``.
+
 .. code-block:: python
    :caption: config/settings.py
 
@@ -153,9 +155,9 @@ Configuring the default backend
            {
                "BACKEND": "next.static.StaticFilesBackend",
                "OPTIONS": {
-                   "css_tag": '<link rel="stylesheet" href="{url}" crossorigin>',
-                   "js_tag": '<script src="{url}" defer></script>',
-                   "module_tag": '<script type="module" src="{url}" crossorigin></script>',
+                   "css_tag": '<link rel="stylesheet" href="{url}" crossorigin{nonce_attr}>',
+                   "js_tag": '<script src="{url}" defer{nonce_attr}></script>',
+                   "module_tag": '<script type="module" src="{url}" crossorigin{nonce_attr}></script>',
                },
            }
        ]
@@ -216,7 +218,7 @@ A single constant host in front of the static origin is neither, and belongs in 
 
 :doc:`/content/howto/write-a-static-backend` walks through the attribute and CDN recipes.
 For a complete Subresource Integrity implementation that also computes the ``integrity`` hash, see :doc:`/content/security/static-assets`.
-An ``integrity`` or ``nonce`` override builds the whole tag rather than filling a template, so it carries the escaping obligation above along with the new attribute.
+An ``integrity`` override builds the whole tag rather than filling a template, so it carries the escaping obligation above along with the new attribute, and it writes the ``nonce`` keyword it receives through ``next.static.runtime.nonce_attr``.
 
 Subclass the abstract ``StaticBackend`` directly only when the project resolves assets from a source other than Django staticfiles, such as a build manifest.
 

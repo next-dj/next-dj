@@ -46,15 +46,25 @@ class BackendImportError(ImproperlyConfigured):
         )
 
 
+def _setting_address(setting: str, scope: str | None = None) -> str:
+    """Return how a message names one settings key, nested under `scope` if given."""
+    keys = (setting,) if scope is None else (scope, setting)
+    return "NEXT_FRAMEWORK" + "".join(f"[{key!r}]" for key in keys)
+
+
 class SettingImportError(ImproperlyConfigured):
     """Raised when the class one dotted-path settings key names does not import."""
 
-    def __init__(self, setting: str, dotted: str, exc: object) -> None:
-        """Store the settings key and the dotted path it carries."""
+    def __init__(
+        self, setting: str, dotted: str, exc: object, *, scope: str | None = None
+    ) -> None:
+        """Store the settings key, the scope holding it and the dotted path."""
         self.setting = setting
+        self.scope = scope
         self.dotted = dotted
         super().__init__(
-            f"NEXT_FRAMEWORK[{setting!r}] {dotted!r} could not be imported: {exc}"
+            f"{_setting_address(setting, scope)} {dotted!r} could not be imported: "
+            f"{exc}"
         )
 
 
@@ -71,13 +81,17 @@ class BackendNotSubclassError(ImproperlyConfigured):
 class SettingNotSubclassError(ImproperlyConfigured):
     """Raised when the class one dotted-path key names stands outside its family."""
 
-    def __init__(self, setting: str, dotted: str, base_name: str) -> None:
-        """Store the settings key, the named class and the family root it misses."""
+    def __init__(
+        self, setting: str, dotted: object, base_name: str, *, scope: str | None = None
+    ) -> None:
+        """Store the settings key, its scope, the named value and the family root."""
         self.setting = setting
+        self.scope = scope
         self.dotted = dotted
         self.base_name = base_name
         super().__init__(
-            f"NEXT_FRAMEWORK[{setting!r}] {dotted!r} is not a {base_name} subclass."
+            f"{_setting_address(setting, scope)} {dotted!r} is not a {base_name} "
+            "subclass."
         )
 
 

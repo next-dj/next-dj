@@ -7,8 +7,10 @@ from django.dispatch import Signal
 
 from next import signals as framework_signals
 from next.components import signals as component_signals
+from next.consent import signals as consent_signals
 from next.forms import signals as form_signals
 from next.partial import signals as partial_signals
+from next.seo import signals as seo_signals
 from next.static import signals as static_signals
 from next.static.assets import StaticAsset
 from next.static.manager import default_manager
@@ -19,8 +21,10 @@ from next.urls import signals as url_signals
 
 _SIGNAL_AREAS = (
     component_signals,
+    consent_signals,
     form_signals,
     partial_signals,
+    seo_signals,
     static_signals,
     url_signals,
 )
@@ -46,9 +50,11 @@ CACHED_SIGNALS = frozenset(framework_signals.__all__) - UNCACHED_SIGNALS
 BACKEND_LOADED_SIGNALS = frozenset(
     {
         "component_backend_loaded",
+        "consent_backend_loaded",
         "form_backend_loaded",
         "partial_backend_loaded",
         "router_backend_loaded",
+        "sitemap_backend_loaded",
         "static_backend_loaded",
         "wizard_backend_loaded",
     }
@@ -82,9 +88,7 @@ class _OtherSender:
 class TestFrameworkSignalCaching:
     """`use_caching` is on wherever every sender is a stable weak-referenceable object.
 
-    Caching keys receiver lookup on a `WeakKeyDictionary` entry for the
-    sender, trading a rebuilt-per-send sender for a lock-free `has_listeners`
-    check on render hot paths.
+    Caching keys the receiver lookup per sender, so a render guard asks lock-free.
     """
 
     @pytest.mark.parametrize("name", sorted(CACHED_SIGNALS))

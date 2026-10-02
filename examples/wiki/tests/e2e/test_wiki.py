@@ -2,7 +2,9 @@ import pytest
 from e2e_support.browser import (
     PageProbe,
     applied_count,
+    assert_same_document,
     expect_no_partial_request,
+    mark_document,
     request_baseline,
     wait_for_apply,
     wait_for_runtime,
@@ -78,7 +80,7 @@ def test_typing_narrows_the_search_without_pressing_enter(
     seed_articles()
     page.goto(f"{base_url}/search/")
     wait_for_runtime(page)
-    page.evaluate("() => { window.__stillHere = true; }")
+    mark_document(page)
     expect(page.locator(RESULTS_ZONE)).to_contain_text(
         "Type a query to search file docs and articles."
     )
@@ -93,7 +95,7 @@ def test_typing_narrows_the_search_without_pressing_enter(
     expect(file_hits).to_have_text(["Routing"])
     expect(article_hits).to_have_count(1)
     expect(article_hits).to_have_text(["Routing internals"])
-    assert page.evaluate("() => window.__stillHere") is True
+    assert_same_document(page)
 
 
 def test_a_burst_of_keystrokes_collapses_into_one_zone_request(

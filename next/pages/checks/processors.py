@@ -1,8 +1,4 @@
-"""System checks for the context processors a page render runs.
-
-The ids are `next.E019` for a `TEMPLATES` entry without Django's request processor and
-`next.E040` for a configured processor that takes no `request`.
-"""
+"""System checks for the context processors a page render runs."""
 
 from __future__ import annotations
 

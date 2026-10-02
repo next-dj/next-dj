@@ -2,7 +2,9 @@ import pytest
 from e2e_support.browser import (
     PageProbe,
     applied_count,
+    assert_same_document,
     expect_no_partial_request,
+    mark_document,
     request_baseline,
     wait_for_apply,
     wait_for_runtime,
@@ -36,7 +38,7 @@ def test_creating_a_link_prepends_a_row_without_navigating(
 ) -> None:
     page.goto(base_url)
     wait_for_runtime(page)
-    page.evaluate("() => { window.__stillHere = true; }")
+    mark_document(page)
 
     expect(page.locator(f"{LATEST_LINKS} li")).to_have_count(0)
 
@@ -46,7 +48,7 @@ def test_creating_a_link_prepends_a_row_without_navigating(
     wait_for_apply(page, seen)
 
     expect(page.locator(f"{LATEST_LINKS} li")).to_have_count(1)
-    assert page.evaluate("() => window.__stillHere") is True
+    assert_same_document(page)
     assert Link.objects.count() == 1
 
     posts = [
