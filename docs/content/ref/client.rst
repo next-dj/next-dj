@@ -12,12 +12,14 @@ The runtime applies the patch envelopes the server authors, drives the ``data-ne
 It never invents a target or a swap strategy, so this page records what the runtime accepts rather than what it decides.
 
 The TypeScript sources live in ``next/client/`` and are not part of the installed package.
-``make build-js`` bundles ``next/client/next.ts`` with esbuild into ``next/static/next/next.min.js``, ``next/client/extras.ts`` into ``next/static/next/next.scripts.min.js``, ``next/client/sse-chunk.ts`` into ``next/static/next/next.sse.min.js``, ``next/client/csrf-chunk.ts`` into ``next/static/next/next.csrf.min.js``, ``next/client/poll-chunk.ts`` into ``next/static/next/next.poll.min.js``, and ``next/client/dev.ts`` into ``next/static/next/next.dev.min.js``, the six minified artefacts the wheel ships.
+``make build-js`` bundles, in one esbuild call, ``next/client/next.ts`` into ``next/static/next/next.min.js``, ``next/client/extras.ts`` into ``next/static/next/next.scripts.min.js``, ``next/client/sse-chunk.ts`` into ``next/static/next/next.sse.min.js``, ``next/client/csrf-chunk.ts`` into ``next/static/next/next.csrf.min.js``, ``next/client/poll-chunk.ts`` into ``next/static/next/next.poll.min.js``, and ``next/client/dev.ts`` into ``next/static/next/next.dev.min.js``, the six minified artefacts the wheel ships.
 The scripts chunk carries consent and third-party scripts, and the runtime fetches it only for a page that needs it, see :doc:`client-extras`.
 The sse chunk carries the stream bridge, fetched once a scan finds a ``data-next-sse`` container.
 The csrf chunk carries the fetch of a deferred CSRF token, fetched on the first need of a page that shipped only the endpoint.
 The poll chunk carries the zone poller, fetched once a scan finds a ``data-next-poll`` zone.
 The dev chunk carries the diagnostics of a ``DEBUG`` render, and a production page never fetches it.
+A chunk that fails to load, or has not landed within 15 seconds, fires ``partial:error`` of kind ``asset`` and is fetched again on its next need, so a stalled request holds no ``Next.ready``, form submit, or stream for good.
+``tests/static/test_chunk_sync.py`` holds the chunk lists of ``next.ts``, ``chunks.ts``, ``next/static/runtime.py``, ``package.json``, ``build_hooks.py``, and ``pyproject.toml`` to one another.
 The wheel excludes ``next/client/`` outright, so a project never imports the TypeScript and installs no Node toolchain to serve the runtime.
 The script builder publishes the bundle under the static path ``next/next.min.js``, which the active staticfiles storage fingerprints like any other asset.
 ``next/static`` is the ``next.static`` Python package rather than an application static directory, so ``NextAppDirectoriesFinder`` keeps the framework app out of the app-directories scan and ``NextStaticFilesFinder`` is the finder that serves the bundle, see :doc:`static`.
@@ -39,7 +41,7 @@ Extension.
    See :doc:`/content/topics/partial-rendering/extending` for the server half of both recipes.
 
 Internal.
-   ``Next._init`` is the bootstrap the injected inline payload calls, ``Next._land`` is the handshake every lazy chunk calls as it evaluates, and ``Next.partial._configure`` and ``Next.partial._reset`` are the harness seams the unit suite drives.
+   ``Next._init`` is the bootstrap the injected inline payload calls, ``Next._land`` is the handshake every lazy chunk calls as it evaluates and ignores a key the runtime does not know, and ``Next.partial._configure`` and ``Next.partial._reset`` are the harness seams the unit suite drives.
    ``Next.partial.ready`` carries no underscore because the bootstrap calls it across a module boundary, and a page reaches for it only when it drives the runtime by hand.
    None of the five is an application entry point.
 

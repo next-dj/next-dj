@@ -204,7 +204,8 @@ class Next {
 
   /** A lazy chunk's handshake, handing over the module it carries. */
   static _land<K extends keyof NextModules>(key: K, value: NextModules[K]): void {
-    (Next.#modules[key] as Lazy<NextModules[K]>).land(value);
+    // A stale chunk from another release may name a module this runtime lacks.
+    (Next.#modules[key] as Lazy<NextModules[K]> | undefined)?.land(value);
   }
 
   /** Subscribe to a runtime event, returning an unsubscribe function. */

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createExtras, lazyChunk } from "./chunks";
+import { CHUNK_TIMEOUT, createExtras, lazyChunk } from "./chunks";
 import type { Extras, ExtrasFactory, ExtrasHost, ScriptsChunk } from "./chunks";
 
 interface Dispatched {
@@ -194,6 +194,17 @@ describe("waiting for the scripts chunk", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("configures a chunk with the payload init stored last, not the one it fetched for", async () => {
+    const { loader } = makeLoader();
+    const { factory, calls } = fakeChunk();
+    loader.init({ $scripts: [], page: "first" });
+    const ready = loader.ready();
+    loader.init({ $scripts: [], page: "second" });
+    loader.register(factory);
+    await ready;
+    expect(calls).toEqual([["configure", { $scripts: [], page: "second" }]]);
+  });
+
   it("takes the first chunk that lands and ignores a second copy", async () => {
     const { loader, installed } = makeLoader();
     const first = fakeChunk();
@@ -320,6 +331,31 @@ describe("a single-module chunk", () => {
     expect(await pending).toBeUndefined();
     expect(tags()).toEqual([]);
     expect(errors[0]).toMatchObject({ kind: "asset" });
+  });
+
+  it("fails a fetch that stalls past the timeout, then tries again on the next need", async () => {
+    vi.useFakeTimers();
+    try {
+      const { chunk, errors, tags } = makeDev();
+      const pending = chunk.load();
+      const stalled = tags()[0]!;
+      vi.advanceTimersByTime(CHUNK_TIMEOUT - 1);
+      expect(errors).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(await pending).toBeUndefined();
+      expect(stalled.isConnected).toBe(false);
+      expect(errors).toEqual([expect.objectContaining({ kind: "asset" })]);
+      // The stalled tag reporting late leaves the retry it no longer owns alone.
+      const retry = chunk.load();
+      stalled.dispatchEvent(new Event("error"));
+      expect(errors).toHaveLength(1);
+      chunk.land("diagnostics");
+      vi.advanceTimersByTime(CHUNK_TIMEOUT);
+      expect(await retry).toBe("diagnostics");
+      expect(errors).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps a landed module when its file reports the load", async () => {

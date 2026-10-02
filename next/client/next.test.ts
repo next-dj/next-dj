@@ -297,6 +297,11 @@ describe("window.Next", () => {
   it("exposes a use method", () => {
     expect(typeof win.Next.use).toBe("function");
   });
+
+  it("ignores a chunk handshake naming a module this runtime does not know", () => {
+    const next = win.Next as unknown as { _land(key: string, value: unknown): void };
+    expect(() => next._land("unknown", {})).not.toThrow();
+  });
 });
 
 describe("Next.on", () => {

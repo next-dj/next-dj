@@ -98,6 +98,14 @@ describe("createSse", () => {
     expect(applied).toHaveLength(1);
   });
 
+  it("opens no stream for a container removed before its scan ran", () => {
+    const root = document.createElement("div");
+    root.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    makeSse(adapter, manualVisibility()).scan(root);
+    expect(opened).toEqual([]);
+  });
+
   it("applies each event on behalf of the page the stream subscribed from", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();

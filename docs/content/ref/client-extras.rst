@@ -19,8 +19,9 @@ Next.ready("scripts")
 
 ``Next.ready("scripts")`` returns a ``Promise<ScriptsChunk>`` that resolves with ``{consent, scripts}`` once the chunk has landed and taken the page's init payload.
 It fetches the chunk on a page that did not, and a call made before the init payload arrives waits for it.
-It rejects when the chunk cannot load, and a failed fetch also fires ``partial:error`` of kind ``asset``, so a banner never records a choice nothing keeps.
+It rejects when the chunk cannot load or has not landed within 15 seconds, and a failed fetch also fires ``partial:error`` of kind ``asset``, so a banner never records a choice nothing keeps.
 A later call after a failure fetches the chunk again.
+The chunk takes the latest payload ``Next._init`` received, even one that arrived while it was still loading.
 
 .. code-block:: javascript
    :caption: static/site/banner.js

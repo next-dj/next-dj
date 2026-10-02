@@ -406,6 +406,9 @@ Pass its ``js_context()``, ``js_context_serializers()``, and ``js_context_encode
        )
 
 A payload built this way carries none of the framework's reserved entries, because the static manager both claims and writes those keys only under ``AUTO``, so a page injected by hand runs no consent-gated script and no deferred CSRF.
+Without ``$chunks`` the runtime fetches each lazy chunk as ``next.<name>.min.js`` beside ``next.min.js``, a name a hashing storage such as ``ManifestStaticFilesStorage`` does not serve.
+Add ``"$chunks": {name: staticfiles_storage.url(path) for name, path in CHUNK_STATIC_PATHS.items()}`` to the payload, with ``CHUNK_STATIC_PATHS`` from ``next.static.runtime``, so every chunk resolves through the storage.
+``Next.ready`` waits for ``Next._init``, so a layout that never emits the init script leaves every ``Next.ready`` call pending.
 It does carry a project key of a reserved name, because ``js_context()`` is the unfiltered store and the reserved-key drop lives in the automatic path alone.
 Pass ``RESERVED_PAYLOAD_KEYS`` from ``next.static.runtime`` to ``collector.js_context_payload`` instead, which returns the values, the encoded fragments, and the per-key serializers with every reserved name already dropped.
 
