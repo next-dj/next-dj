@@ -363,18 +363,33 @@ def walk_page_tree(
     )
 
 
-def _route_rank(name: str) -> tuple[int, str]:
-    """Rank a directory among its siblings, static before parameter before catch-all.
+_CONVERTER_RANK: Final[dict[str, int]] = {"int": 0, "uuid": 0, "slug": 1, "path": 3}
+"""How much a converter matches, narrowest first, `str` and the bare form at 2.
 
-    Django tries patterns in order, so a static `about` must precede a `[slug]` that
-    would match it too, whatever order the directory read returned.
+A converter a project registers is read as `slug`, narrower than `str`.
+"""
+
+
+def _route_rank(name: str) -> tuple[int, int, int, str]:
+    """Rank a directory among its siblings, the most specific route first.
+
+    Django tries patterns in order, so a static `about` precedes a `[slug]` that would
+    match it too, whatever order the directory read returned. A static segment comes
+    first, then a parameter, then a catch-all. Within each, the one with more literal
+    text goes first, so `post-[id]` precedes `[slug]`, then the narrower converters,
+    so `[uuid:key]` precedes `[str:key]`, and the name settles the rest.
     """
-    rank = 0
+    param = wildcard = False
+    width = 0
     for match in ROUTE_BRACKET_PATTERN.finditer(name):
-        if match.group("wild") is not None:
-            return 2, name
-        rank = 1
-    return rank, name
+        wild = match.group("wild")
+        param = True
+        wildcard = wildcard or wild is not None
+        label, typed, _name = (wild or match.group("param")).partition(":")
+        converter = label if typed else ("path" if wild is not None else "str")
+        width += _CONVERTER_RANK.get(converter, 2 if converter == "str" else 1)
+    literal = len(ROUTE_BRACKET_PATTERN.sub("", name))
+    return wildcard + param, -literal, width, name
 
 
 def _visit_page_dir(

@@ -118,7 +118,8 @@ A page tree with a root catch-all such as ``[[rest]]`` matches every path, so a 
 The ``next.E149`` system check resolves both addresses and names the pattern that answers them when it is not the framework view, which catches a pattern of the root URLconf listed above the include.
 
 Inside one page tree the walker yields the page of a directory first, real or virtual, and then descends into its subdirectories.
-The subdirectories are ranked by kind, static names first, then names holding a ``[param]`` segment, then names holding a ``[[catch-all]]`` segment, and by name within each kind.
+The subdirectories are ranked by kind, static names first, then names holding a ``[param]`` segment, then names holding a ``[[catch-all]]`` segment.
+Within a kind, a name with more literal text comes first, so ``post-[id]`` precedes ``[slug]``, then the narrower converters, ``int`` and ``uuid`` ahead of ``slug``, ``slug`` and a project converter ahead of ``str``, and ``str`` ahead of ``path``, and the name settles the rest.
 The rank reads a name through ``ROUTE_BRACKET_PATTERN``, the expression the URL parser converts, so ``blog/about`` always precedes ``blog/[slug]``.
 The pattern list is therefore the same on every file system, whatever order ``os.scandir`` returns the entries in.
 
