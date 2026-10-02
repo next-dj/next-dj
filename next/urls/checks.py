@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, Tags, register
+from django.urls import NoReverseMatch, Resolver404, resolve
 
 from next.checks import NEXT, SEO
 from next.checks.common import (
@@ -17,6 +18,8 @@ from next.checks.common import (
 )
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
+from next.csrf import CSRF_URL_NAME, csrf_url
+from next.forms.uid import URL_NAME_FORM_ACTION, reverse_form_action
 
 from .backends import FILE_ROUTER_CONFIG_KEYS, FileRouterBackend, RouterBackend
 from .dispatcher import scan_pages_tree
@@ -25,8 +28,10 @@ from .parser import default_url_parser
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
     from pathlib import Path
+
+    from django.urls import ResolverMatch
 
     from .manager import RouterManager
 
@@ -372,6 +377,64 @@ class _CollectedPatternsMemo:
 
 
 _collected_patterns = _CollectedPatternsMemo()
+
+
+_PROBE_UID = "probe"
+"""A form action uid any `<str:uid>` route accepts, so the address resolves as one."""
+
+
+def _framework_routes() -> tuple[tuple[str, str, Callable[[], str]], ...]:
+    """Return each framework endpoint a page may shadow, by name and how it reverses."""
+    return (
+        ("CSRF token endpoint", CSRF_URL_NAME, csrf_url),
+        (
+            "form action endpoint",
+            URL_NAME_FORM_ACTION,
+            lambda: reverse_form_action(_PROBE_UID),
+        ),
+    )
+
+
+def _answered_by(match: ResolverMatch) -> str:
+    """Name what answers an address, the page file when a page does."""
+    page_path = getattr(match.func, "next_page_path", None)
+    if page_path is not None:
+        return f"the page {page_path} (route {match.route!r})"
+    return f"{match._func_path} (route {match.route!r})"
+
+
+@register(Tags.urls, NEXT)
+def check_framework_routes_reachable(*args, **kwargs) -> list[CheckMessage]:
+    """Report a framework endpoint another pattern answers first (`next.E149`).
+
+    An endpoint that does not reverse is left to the checks of its own setting.
+    """
+    errors: list[CheckMessage] = []
+    for label, url_name, address in _framework_routes():
+        try:
+            url = address()
+        except NoReverseMatch:
+            continue
+        try:
+            match: ResolverMatch | None = resolve(url)
+        except Resolver404:
+            match = None
+        if match is not None and match.url_name == url_name:
+            continue
+        answered = "nothing" if match is None else _answered_by(match)
+        errors.append(
+            Error(
+                f"The {label} reverses to {url}, but ROOT_URLCONF resolves that "
+                f"address to {answered}, so the runtime never reaches the endpoint.",
+                hint=(
+                    "List path('', include('next.urls')) above that pattern in "
+                    "ROOT_URLCONF, or move the page off that route."
+                ),
+                obj=settings,
+                id="next.E149",
+            )
+        )
+    return errors
 
 
 def reset_collected_patterns_cache(**kwargs) -> None:

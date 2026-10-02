@@ -4,6 +4,7 @@ from django.conf import settings
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
 from next.checks import NEXT
+from next.utils import middleware_listed
 
 from .sources import diagnostics, iter_registered_actions
 
@@ -152,7 +153,7 @@ def _declares_success_message(target: object) -> bool:
 def check_success_message_framework(*args, **kwargs) -> list[CheckMessage]:
     """Warn when Meta.success_message is declared without the messages framework."""
     has_app = "django.contrib.messages" in settings.INSTALLED_APPS
-    has_middleware = _MESSAGE_MIDDLEWARE in tuple(settings.MIDDLEWARE or ())
+    has_middleware = middleware_listed(settings.MIDDLEWARE or (), _MESSAGE_MIDDLEWARE)
     if has_app and has_middleware:
         return []
     return [

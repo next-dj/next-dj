@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from django.http import HttpResponse
 from django.test import Client, RequestFactory, override_settings
+from django.urls import NoReverseMatch
 
 from next.conf import next_framework_settings
 from next.csrf import (
@@ -19,7 +20,7 @@ from next.csrf import (
     token_deferred,
 )
 from next.forms.uid import ORIGIN_FIELD_NAME
-from tests.support import isolated_form_registries, routed, write_page
+from tests.support import FEED_URLCONF, isolated_form_registries, routed, write_page
 
 
 RUNTIME = "<html><head></head><body>{% template %}{% collect_scripts %}</body></html>"
@@ -36,6 +37,7 @@ def ping():
     return HttpResponse("pong")
 """
 FLAG = {"HTTP_X_NEXT_REQUEST": "1"}
+NEVER_CACHED = "max-age=0, no-cache, no-store, must-revalidate, private"
 
 
 def _action_tree(tmp_path: Path, source: str = ACTION_PAGE) -> Path:
@@ -124,6 +126,26 @@ class TestPayload:
         with override_settings(ROOT_URLCONF="next.urls"):
             assert csrf_payload(request)["url"] == "/_next/csrf/"
 
+    def test_an_unrouted_endpoint_embeds_the_token_and_logs_once(self, caplog) -> None:
+        with override_settings(ROOT_URLCONF=FEED_URLCONF):
+            for _ in range(2):
+                request = RequestFactory().get("/")
+                defer_token(request)
+                payload = csrf_payload(request)
+                assert set(payload) == {"header", "token"}
+        [record] = [r for r in caplog.records if r.name == "next.csrf"]
+        assert "include('next.urls')" in record.getMessage()
+
+    def test_an_unrouted_endpoint_raises_under_debug(self) -> None:
+        request = RequestFactory().get("/")
+        defer_token(request)
+        with (
+            override_settings(ROOT_URLCONF=FEED_URLCONF, DEBUG=True),
+            pytest.raises(NoReverseMatch) as raised,
+        ):
+            csrf_payload(request)
+        assert "include('next.urls')" in raised.value.__notes__[0]
+
     def test_the_token_payload_ignores_the_deferral(self) -> None:
         request = RequestFactory().get("/")
         defer_token(request)
@@ -139,7 +161,7 @@ class TestEndpoint:
         assert response.status_code == 200
         assert response["Content-Type"] == "application/json"
         assert set(json.loads(response.content)) == {"header", "token"}
-        assert response["Cache-Control"] == "private, no-store"
+        assert response["Cache-Control"] == NEVER_CACHED
         assert response["Vary"] == "Cookie"
         assert response["X-Content-Type-Options"] == "nosniff"
         assert response["Cross-Origin-Resource-Policy"] == "same-origin"
@@ -177,7 +199,7 @@ class TestEndpoint:
         with routed(_action_tree(tmp_path)):
             response = getattr(Client(), method)("/_next/csrf/", **headers)
         assert response.status_code == status
-        assert response["Cache-Control"] == "private, no-store"
+        assert response["Cache-Control"] == NEVER_CACHED
         assert response["Vary"] == "Cookie"
         if status != 200:
             assert response["Content-Type"] != "application/json"

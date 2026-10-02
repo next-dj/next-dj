@@ -1,7 +1,6 @@
 """The CSP nonce every tag the framework writes carries, read once per request."""
 
 import functools
-import importlib
 from collections.abc import Callable
 from typing import Final
 
@@ -10,12 +9,14 @@ from django.http import HttpRequest
 
 from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
-from next.pages.responses import mark_personal_render
-from next.utils import UNSET
+from next.utils import UNSET, middleware_listed
 
 
 NONCE_ATTR: Final = "_next_csp_nonce"
 """The request attribute the nonce of one render is held under."""
+
+CSP_NONCE_ATTR: Final = "_csp_nonce"
+"""Where Django's CSP middleware and django-csp keep the nonce of a request."""
 
 CSP_MIDDLEWARE: Final = (
     "django.middleware.csp.ContentSecurityPolicyMiddleware",
@@ -25,16 +26,11 @@ CSP_MIDDLEWARE: Final = (
 
 type NonceResolver = Callable[[HttpRequest], object]
 
-
-@functools.cache
-def django_get_nonce() -> NonceResolver | None:
-    """Return Django's own `get_nonce`, `None` before Django 6.0 ships one."""
-    try:
-        module = importlib.import_module("django.middleware.csp")
-    except ImportError:
-        return None
-    found = getattr(module, "get_nonce", None)
-    return found if callable(found) else None
+django_get_nonce: NonceResolver | None
+try:
+    from django.middleware.csp import get_nonce as django_get_nonce
+except ImportError:  # pragma: no cover - Django before 6.0 mints no nonce itself
+    django_get_nonce = None
 
 
 def request_nonce(request: HttpRequest) -> str | None:
@@ -43,9 +39,8 @@ def request_nonce(request: HttpRequest) -> str | None:
     Reading it mints it, so the middleware writes it into the header it sends.
     """
     value = getattr(request, "csp_nonce", None)
-    if value is None:
-        get_nonce = django_get_nonce()
-        value = None if get_nonce is None else get_nonce(request)
+    if value is None and django_get_nonce is not None:
+        value = django_get_nonce(request)
     return None if value is None else str(value) or None
 
 
@@ -60,7 +55,7 @@ def nonce_active() -> bool:
     if not nonce_enabled():
         return False
     middleware = getattr(settings, "MIDDLEWARE", None) or ()
-    return any(path in middleware for path in CSP_MIDDLEWARE)
+    return any(middleware_listed(middleware, path) for path in CSP_MIDDLEWARE)
 
 
 def forget_nonce_setting(**kwargs) -> None:
@@ -74,7 +69,7 @@ settings_reloaded.connect(forget_nonce_setting)
 def resolve_nonce(request: HttpRequest | None) -> str | None:
     """Return the nonce of this render, read once per request.
 
-    A nonce is one visitor's, so the render goes personal and no shared cache keeps it.
+    A nonce is one visitor's, so `nonce_minted` takes the response private afterwards.
     """
     if not isinstance(request, HttpRequest):
         return None
@@ -83,19 +78,28 @@ def resolve_nonce(request: HttpRequest | None) -> str | None:
         return held if isinstance(held, str) else None
     nonce = request_nonce(request) if nonce_enabled() else None
     setattr(request, NONCE_ATTR, nonce)
-    if nonce is not None:
-        mark_personal_render(request)
     return nonce
+
+
+def nonce_minted(request: HttpRequest) -> bool:
+    """Whether a nonce was minted for `request`, by a framework tag or anyone else.
+
+    Django's `LazyNonce` is truthy once evaluated, and django-csp stores the string.
+    """
+    return isinstance(getattr(request, NONCE_ATTR, None), str) or bool(
+        getattr(request, CSP_NONCE_ATTR, None)
+    )
 
 
 __all__ = [
     "CSP_MIDDLEWARE",
+    "CSP_NONCE_ATTR",
     "NONCE_ATTR",
     "NonceResolver",
-    "django_get_nonce",
     "forget_nonce_setting",
     "nonce_active",
     "nonce_enabled",
+    "nonce_minted",
     "request_nonce",
     "resolve_nonce",
 ]

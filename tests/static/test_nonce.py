@@ -1,4 +1,3 @@
-from types import ModuleType
 from unittest.mock import patch
 
 import django
@@ -7,13 +6,14 @@ from django.conf import settings
 from django.test import RequestFactory, override_settings
 from django.utils.functional import SimpleLazyObject
 
-from next.pages.responses import personal_render
 from next.static.nonce import (
     CSP_MIDDLEWARE,
+    CSP_NONCE_ATTR,
     NONCE_ATTR,
     django_get_nonce,
     nonce_active,
     nonce_enabled,
+    nonce_minted,
     request_nonce,
     resolve_nonce,
 )
@@ -24,38 +24,17 @@ from tests.support import build_mock_http_request
 DJANGO_6 = django.VERSION >= (6, 0)
 
 
-@pytest.fixture(autouse=True)
-def _fresh_lookup():
-    django_get_nonce.cache_clear()
-    yield
-    django_get_nonce.cache_clear()
-
-
 class TestDjangoGetNonce:
     """Django's own `get_nonce` is used where the installed Django ships it."""
 
     @pytest.mark.skipif(not DJANGO_6, reason="django.middleware.csp is Django 6.0+")
     def test_django_six_ships_it(self) -> None:
-        found = django_get_nonce()
-        assert found is not None
-        request = RequestFactory().get("/")
-        assert found(request) is None
+        assert django_get_nonce is not None
+        assert django_get_nonce(RequestFactory().get("/")) is None
 
     @pytest.mark.skipif(DJANGO_6, reason="Django 6.0+ ships django.middleware.csp")
     def test_django_five_ships_none(self) -> None:
-        assert django_get_nonce() is None
-
-    def test_a_missing_module_answers_none(self) -> None:
-        with patch(
-            "next.static.nonce.importlib.import_module", side_effect=ImportError
-        ):
-            assert django_get_nonce() is None
-
-    def test_a_module_without_the_callable_answers_none(self) -> None:
-        with patch(
-            "next.static.nonce.importlib.import_module", return_value=ModuleType("csp")
-        ):
-            assert django_get_nonce() is None
+        assert django_get_nonce is None
 
 
 class TestRequestNonce:
@@ -69,15 +48,12 @@ class TestRequestNonce:
     def test_django_middleware_mints_it(self) -> None:
         request = RequestFactory().get("/")
         with patch(
-            "next.static.nonce.importlib.import_module", return_value=ModuleType("csp")
-        ) as module:
-            module.return_value.get_nonce = lambda _request: "from-django"
+            "next.static.nonce.django_get_nonce", lambda _request: "from-django"
+        ):
             assert request_nonce(request) == "from-django"
 
     def test_no_middleware_answers_none(self) -> None:
-        with patch(
-            "next.static.nonce.importlib.import_module", side_effect=ImportError
-        ):
+        with patch("next.static.nonce.django_get_nonce", None):
             assert request_nonce(RequestFactory().get("/")) is None
 
     def test_an_empty_nonce_answers_none(self) -> None:
@@ -109,25 +85,29 @@ class TestResolveNonce:
 
     def test_a_request_without_a_nonce_is_held_as_none(self) -> None:
         request = RequestFactory().get("/")
-        with patch(
-            "next.static.nonce.importlib.import_module", side_effect=ImportError
-        ):
+        with patch("next.static.nonce.django_get_nonce", None):
             assert resolve_nonce(request) is None
             assert resolve_nonce(request) is None
         assert getattr(request, NONCE_ATTR) is None
 
-    def test_a_minted_nonce_makes_the_render_personal(self) -> None:
+    def test_a_nonce_a_tag_read_counts_as_minted(self) -> None:
         request = RequestFactory().get("/")
         request.csp_nonce = "n1"
+        assert not nonce_minted(request)
         resolve_nonce(request)
-        assert personal_render(request)
+        assert nonce_minted(request)
 
     def test_no_nonce_leaves_the_render_shareable(self) -> None:
         request = RequestFactory().get("/")
         request.csp_nonce = "n1"
         with override_next_settings(CSP_NONCE=False):
             resolve_nonce(request)
-        assert not personal_render(request)
+        assert not nonce_minted(request)
+
+    def test_a_nonce_the_middleware_minted_counts_whoever_read_it(self) -> None:
+        request = RequestFactory().get("/")
+        setattr(request, CSP_NONCE_ATTR, "n1")
+        assert nonce_minted(request)
 
     def test_only_a_request_is_asked(self) -> None:
         request = build_mock_http_request()

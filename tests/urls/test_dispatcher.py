@@ -133,9 +133,7 @@ class TestRouteOrder:
             "zeta",
         ]
 
-    def test_a_reversed_directory_read_yields_the_same_patterns(
-        self, tmp_path
-    ) -> None:
+    def test_a_reversed_directory_read_yields_the_same_patterns(self, tmp_path) -> None:
         self._tree(tmp_path)
         listed = [str(p.pattern) for p in file_router(dirs=[tmp_path]).generate_urls()]
         real_scandir = os.scandir

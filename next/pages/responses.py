@@ -8,19 +8,23 @@ from __future__ import annotations
 import functools
 import logging
 import re
+import reprlib
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from http.cookies import Morsel, SimpleCookie
 from typing import TYPE_CHECKING, Any, Final, TypedDict, override
 
+from django.core.exceptions import ImproperlyConfigured
 from django.template.response import SimpleTemplateResponse
 from django.utils.cache import patch_cache_control, patch_vary_headers
 
 from next.caches import BoundedCache
+from next.conf.settings import fail_loudly
 from next.conf.signals import settings_reloaded
 from next.csrf import CsrfDelivery, csrf_delivery, defer_token
 from next.deps.cache import render_dep_cache
 from next.deps.resolver import current_resolver
+from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog
 from next.pages.loaders import AncestorStamps
 from next.pages.metadata.markers import NOINDEX_DIRECTIVES, robots_directives
 from next.pages.metadata.resolve import published_metadata, robots_contents
@@ -40,6 +44,8 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+_failures = FailureLog(logger)
 
 
 class CacheDict(TypedDict, total=False):
@@ -116,6 +122,8 @@ _CACHEABLE: Final = frozenset({"GET", "HEAD"})
 _CACHE_SHAPE: Final = (
     "seconds as an int, False, a CacheDict or a callable returning one"
 )
+_ANSWER_SHAPE: Final = "seconds as an int, False, a CacheDict or None"
+"""What a callable `cache` returns, `None` declaring no cache for that response."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,17 +378,56 @@ def response_policy(
     if func is None:
         return held.policy
     cache = render_dep_cache(request) if dep_cache is None else dep_cache
-    resolved = current_resolver().resolve_dependencies(
-        func, request=request, _cache=cache, _stack=[], **url_kwargs
+    return replace(
+        held.policy, cache=_dynamic_cache(func, file_path, request, cache, url_kwargs)
     )
-    return replace(held.policy, cache=cache_control(func(**resolved)))
+
+
+def _dynamic_cache(
+    func: Callable[..., object],
+    file_path: Path,
+    request: HttpRequest,
+    dep_cache: dict[str, object],
+    url_kwargs: Mapping[str, object],
+) -> CacheControl | None:
+    """Answer a callable `cache`, a raising or misshapen one taking the page no-store.
+
+    No cache keeps a response whose policy is unknown, so a failure costs only the copy.
+    """
+    try:
+        resolved = current_resolver().resolve_dependencies(
+            func, request=request, _cache=dep_cache, _stack=[], **url_kwargs
+        )
+        value = func(**resolved)
+    except INTENDED_EXCEPTIONS:
+        raise
+    except Exception as exc:  # noqa: BLE001 - a page's own code may raise anything
+        _failures.contain(
+            exc,
+            ("cache", file_path),
+            "The callable cache in %s raised, so the page goes out no-store. "
+            "Make it return %s.",
+            file_path,
+            _ANSWER_SHAPE,
+        )
+        return NO_STORE
+    problems = cache_problems(value, callable_allowed=False)
+    if not problems:
+        return cache_control(value)
+    message = (
+        f"The callable cache in {file_path} returned {reprlib.repr(value)}, and "
+        f"{', '.join(problems)}, so the page goes out no-store. Make it return "
+        f"{_ANSWER_SHAPE}."
+    )
+    if fail_loudly():
+        raise ImproperlyConfigured(message)
+    _failures.warn(("cache", file_path), message)
+    return NO_STORE
 
 
 _SHARED_RENDER_ATTR: Final = "_next_shared_render"
 _PERSONAL_RENDER_ATTR: Final = "_next_personal_render"
 _COOKIE_VARY_ATTR: Final = "_next_cookie_vary"
-_CSP_NONCE_ATTR: Final = "_csp_nonce"
-"""Where Django's CSP middleware and django-csp keep the nonce of a request."""
 
 
 def prepare_page_render(policy: ResponsePolicy, request: HttpRequest) -> None:
@@ -514,27 +561,22 @@ class SharedCookies(SimpleCookie):
             _take_private(*shared)
 
 
-def _nonce_minted(request: HttpRequest) -> bool:
-    """Whether a CSP middleware minted a nonce for `request`, whoever read it.
-
-    Django's `LazyNonce` is truthy once evaluated, and django-csp stores the string.
-    """
-    return bool(getattr(request, _CSP_NONCE_ATTR, None))
-
-
 def _personal(request: HttpRequest, response: HttpResponseBase) -> bool:
     """Whether the response shows who asked, by a cookie, the session or its HTML.
 
     A request with credentials is personal too, as a shared copy would reach everyone,
     and so is one whose render read the CSP nonce, a template of the project included.
     """
+    # Read here, since `next.static` renders pages and so imports this module first.
+    from next.static.nonce import nonce_minted  # noqa: PLC0415
+
     if (
         response.cookies
         or request.META.get("CSRF_COOKIE_NEEDS_UPDATE")
         or request.META.get("HTTP_AUTHORIZATION")
         or personal_render(request)
         or cookie_varies(request)
-        or _nonce_minted(request)
+        or nonce_minted(request)
     ):
         return True
     session = getattr(request, "session", None)
@@ -588,6 +630,12 @@ def _static_robots(page: Page, file_path: Path) -> str | None:
     return robots_tag(*robots_contents(page.static_metadata(file_path), indexable=True))
 
 
+def _stamp_headers(response: HttpResponseBase, policy: ResponsePolicy) -> None:
+    """Add the `headers` of the page, each one the response already set kept."""
+    for name, value in policy.headers:
+        response.headers.setdefault(name, value)
+
+
 def finish_response[R: HttpResponseBase](
     response: R, policy: ResponsePolicy, request: HttpRequest, file_path: Path
 ) -> R:
@@ -595,8 +643,7 @@ def finish_response[R: HttpResponseBase](
 
     A response `render()` built keeps every header it set, the page filling the gaps.
     """
-    for name, value in policy.headers:
-        response.headers.setdefault(name, value)
+    _stamp_headers(response, policy)
     if policy.cache is not None:
         _apply_cache(response, policy.cache, request, file_path)
     stamp_site_robots(response, request)
@@ -622,8 +669,7 @@ def finish_zone_response[R: HttpResponseBase](
 
     Many CDNs ignore `Vary` and would serve a zone answer as the page, so none is kept.
     """
-    for name, value in policy.headers:
-        response.headers.setdefault(name, value)
+    _stamp_headers(response, policy)
     if not response.has_header("Cache-Control"):
         NO_STORE.apply(response)
     return stamp_site_robots(response, request)

@@ -29,7 +29,7 @@ cache
    * - A ``CacheDict``
      - The directives it names, ``public``, ``max_age``, ``s_maxage``, ``stale_while_revalidate``, ``stale_if_error``, ``immutable``, ``no_store``, ``no_cache``, and ``must_revalidate``, plus the ``vary`` header names.
    * - A callable
-     - Any of the forms above, resolved through dependency injection per request like a ``@context`` callable.
+     - Any of the forms above or ``None``, resolved through dependency injection per request like a ``@context`` callable.
 
 .. code-block:: python
    :caption: shop/pages/lp/[campaign]/page.py
@@ -46,8 +46,12 @@ cache
 The page answers ``Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600``.
 The directives are applied through :func:`~django.utils.cache.patch_cache_control` and :func:`~django.utils.cache.patch_vary_headers`, and only on a successful response to a ``GET`` or a ``HEAD``, so a ``POST`` the page answers itself never carries the page's cache and a callable ``cache`` is not even resolved for it.
 ``manage.py check`` reports an unknown key, a negative age, a flag that is no bool, and ``public`` together with ``no_store``.
+A callable ``cache`` that raises, or returns anything but the forms above, sends the page out ``private, no-store``, since no cache may keep a response whose policy is unknown.
+The failure is logged once per page, and under ``DEBUG`` or ``STRICT_LOADING`` it raises instead, naming the ``page.py`` and the shapes it may return.
+``Http404`` and ``PermissionDenied`` raised from it answer 404 and 403 as from any view.
 
 A page is shared when its cache lets a CDN keep a copy, through ``public`` or ``s_maxage``.
+The checks cannot call a callable ``cache``, so they count its page as one that may be shared and mark it ``(callable cache)`` in the messages.
 A shared page renders so that its HTML is the same for every visitor.
 The CSRF token stays out of the HTML under ``CSRF_DELIVERY="auto"``, see :doc:`/content/security/csrf-and-forms`, a ``Consent`` parameter reads an undecided visitor, and gated scripts ride the runtime manifest, see :doc:`/content/topics/scripts/consent`.
 A render that still puts one visitor into the HTML takes the page private, as `Going private`_ describes.
@@ -121,8 +125,31 @@ A shared page goes out ``private``, with the other directives kept and one warni
 
 The response carries ``SharedCookies`` in place of Django's cookie jar, so the first cookie set on it takes the cache private whenever it lands, and a ``TemplateResponse`` rendered after the view is settled once its content exists.
 ``public`` and ``Set-Cookie`` never leave the server together, provided ``ConditionalGetMiddleware`` sits above every middleware that sets a cookie, because the 304 it answers copies the cache before an outer cookie lands, and ``next.W134`` reports the order that breaks it.
+``next.middleware.SharedCacheGuardMiddleware`` closes that gap and any other one a third-party middleware opens, see `The shared cache guard`_.
 A cookie written through ``update()`` or ``load()`` on the jar takes the response private as well.
 A layout that reads ``request.user`` touches the session and takes every shared page under it private, which the warning makes visible.
+
+The shared cache guard
+~~~~~~~~~~~~~~~~~~~~~~
+
+``SharedCacheGuardMiddleware`` is opt-in and checks the finished response rather than the page.
+A response that sets a cookie while its ``Cache-Control`` carries ``public`` or ``s-maxage`` loses both directives and gains ``private``, its ``CDN-Cache-Control``, ``Cloudflare-CDN-Cache-Control``, and ``Surrogate-Control`` headers go, and ``Vary`` gains ``Cookie``.
+Every other directive stays, and each path is logged once.
+List it first in ``MIDDLEWARE``, or right below ``UpdateCacheMiddleware``, so it sees every cookie the stack sets and the copy Django's cache stores is the private one.
+In either place ``next.W134`` stays silent.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   MIDDLEWARE = [
+       "next.middleware.SharedCacheGuardMiddleware",
+       "django.middleware.security.SecurityMiddleware",
+       "django.contrib.sessions.middleware.SessionMiddleware",
+       "django.middleware.http.ConditionalGetMiddleware",
+       # ...
+   ]
+
+The middleware runs on a sync and an async stack alike.
 
 Two settings take every shared page private at once, and ``manage.py check`` warns about both.
 ``CSRF_USE_SESSIONS = True`` keeps the CSRF token in the session, so every render reads it.

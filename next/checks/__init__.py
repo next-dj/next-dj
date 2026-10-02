@@ -69,6 +69,7 @@ if TYPE_CHECKING:
         check_context_reads_foreign_zone,
         check_context_registration_files,
         check_csrf_delivery,
+        check_csrf_endpoint_reversible,
         check_csrf_in_session,
         check_layout_templates,
         check_metadata_callable_returns_mapping,
@@ -161,6 +162,7 @@ if TYPE_CHECKING:
         check_static_backends,
     )
     from next.urls.checks import (
+        check_framework_routes_reachable,
         check_next_pages_configuration,
         check_reverse_name_collisions,
         check_router_manager,
@@ -220,6 +222,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_context_reads_foreign_zone",
         "check_context_registration_files",
         "check_csrf_delivery",
+        "check_csrf_endpoint_reversible",
         "check_csrf_in_session",
         "check_layout_templates",
         "check_metadata_callable_returns_mapping",
@@ -312,6 +315,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_static_backends",
     ),
     "next.urls.checks": (
+        "check_framework_routes_reachable",
         "check_next_pages_configuration",
         "check_reverse_name_collisions",
         "check_router_manager",
@@ -353,6 +357,7 @@ __all__ = [
     "check_context_zone_names_exist",
     "check_cross_root_component_name_conflicts",
     "check_csrf_delivery",
+    "check_csrf_endpoint_reversible",
     "check_csrf_in_session",
     "check_custom_patch_ops_well_formed",
     "check_django_templates_backend_present",
@@ -366,6 +371,7 @@ __all__ = [
     "check_form_wizard_sessions",
     "check_form_wizard_steps",
     "check_forms_outside_base_dir",
+    "check_framework_routes_reachable",
     "check_gated_blocking_scripts",
     "check_inline_asset_bodies_are_loadable",
     "check_instance_from_url_on_non_model_form",

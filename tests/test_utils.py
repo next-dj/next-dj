@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from django.middleware.locale import LocaleMiddleware
 from django.test import override_settings
 
 from next.errors import InvalidDirsError
@@ -15,7 +16,10 @@ from next.utils import (
     exec_module_file,
     is_dynamic_trail,
     is_int,
+    is_middleware,
     load_tree_source,
+    middleware_index,
+    middleware_listed,
     resolve_base_dir,
     stat_mtime_ns,
     template_edits_watched,
@@ -282,3 +286,39 @@ class TestTreeSource:
         source = TreeSource[Exception](path, stamp=path.stat().st_mtime_ns)
         path.unlink()
         assert source.stale()
+
+
+class _Locale(LocaleMiddleware):
+    """A project subclass of `LocaleMiddleware`."""
+
+
+class TestMiddlewareDetection:
+    """A `MIDDLEWARE` entry matches its class, a subclass, or its exact dotted path."""
+
+    LOCALE = "django.middleware.locale.LocaleMiddleware"
+
+    @pytest.mark.parametrize(
+        ("entry", "matches"),
+        [
+            (LOCALE, True),
+            (f"{__name__}._Locale", True),
+            ("django.middleware.common.CommonMiddleware", False),
+            ("missing.module.Middleware", False),
+            (f"{__name__}.TestMiddlewareDetection.LOCALE", False),
+            (42, False),
+        ],
+        ids=["exact", "subclass", "other", "unimportable", "not_a_class", "not_text"],
+    )
+    def test_is_middleware(self, entry, matches) -> None:
+        assert is_middleware(entry, self.LOCALE) is matches
+
+    def test_a_base_that_does_not_import_matches_by_its_path_alone(self) -> None:
+        assert is_middleware("csp.missing.CSPMiddleware", "csp.missing.CSPMiddleware")
+        assert not is_middleware(self.LOCALE, "csp.missing.CSPMiddleware")
+
+    def test_the_index_is_the_first_match(self) -> None:
+        middleware = ["a.B", f"{__name__}._Locale", self.LOCALE]
+        assert middleware_index(middleware, self.LOCALE) == 1
+        assert middleware_listed(middleware, self.LOCALE)
+        assert middleware_index(["a.B"], self.LOCALE) is None
+        assert not middleware_listed([], self.LOCALE)

@@ -1,16 +1,20 @@
+import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from django.core.checks import Error
+from django.http import HttpRequest, HttpResponse
 from django.test import override_settings
+from django.urls import NoReverseMatch, include, path, re_path
 
 from next.checks import reset_check_caches
 from next.testing import override_next_settings
 from next.urls import PageRoot, RouterBackend
 from next.urls.checks import (
     _collect_url_patterns,
+    check_framework_routes_reachable,
     check_next_pages_configuration,
     check_reverse_name_collisions,
     check_router_manager,
@@ -20,6 +24,7 @@ from tests.support import (
     file_router,
     importable_dir,
     patch_checks_router_manager_with_routers,
+    routed,
     write_page,
 )
 
@@ -426,3 +431,68 @@ class TestPagesConfigurationCodes:
         ):
             errors = check_next_pages_configuration()
         assert [e.id for e in errors] == ["next.E027"]
+
+
+def _urlconf(name: str, *patterns: object) -> str:
+    module = ModuleType(f"{__name__}.{name}")
+    module.urlpatterns = list(patterns)
+    sys.modules[module.__name__] = module
+    return module.__name__
+
+
+def _mine(request: HttpRequest) -> HttpResponse:
+    return HttpResponse("mine")
+
+
+def _page_view(request: HttpRequest) -> HttpResponse:
+    return HttpResponse("page")
+
+
+_page_view.next_page_path = Path("/srv/pages/[[rest]]/page.py")
+
+
+class TestFrameworkRoutesReachable:
+    """`next.E149` names the pattern answering a framework endpoint first."""
+
+    def test_framework_routes_lead_a_root_catch_all_page(self, tmp_path) -> None:
+        root = tmp_path / "pages"
+        write_page(root, "[[rest]]", "template = 'x'\n")
+        with routed(root):
+            assert check_framework_routes_reachable() == []
+
+    def test_a_pattern_above_the_include_is_e149(self) -> None:
+        urlconf = _urlconf(
+            "catch_all", re_path(r"^.*$", _mine), path("", include("next.urls"))
+        )
+        with override_settings(ROOT_URLCONF=urlconf):
+            errors = check_framework_routes_reachable()
+        assert [error.id for error in errors] == ["next.E149", "next.E149"]
+        assert "CSRF token endpoint reverses to /_next/csrf/" in errors[0].msg
+        assert f"{__name__}._mine (route '^.*$')" in errors[0].msg
+        assert "form action endpoint" in errors[1].msg
+        assert "include('next.urls')" in errors[0].hint
+
+    def test_a_page_answering_first_is_named(self) -> None:
+        urlconf = _urlconf(
+            "page_first",
+            path("_next/csrf/", _page_view),
+            path("", include("next.urls")),
+        )
+        with override_settings(ROOT_URLCONF=urlconf):
+            [error] = check_framework_routes_reachable()
+        assert "the page /srv/pages/[[rest]]/page.py (route '_next/csrf/')" in (
+            error.msg
+        )
+
+    def test_an_address_nothing_answers_is_e149(self) -> None:
+        with (
+            override_settings(ROOT_URLCONF=_urlconf("bare", path("", _mine))),
+            patch("next.urls.checks.csrf_url", return_value="/elsewhere/"),
+            patch("next.urls.checks.reverse_form_action", side_effect=NoReverseMatch),
+        ):
+            [error] = check_framework_routes_reachable()
+        assert "resolves that address to nothing" in error.msg
+
+    def test_an_unrouted_endpoint_is_left_to_its_own_check(self) -> None:
+        with override_settings(ROOT_URLCONF=_urlconf("none", path("", _mine))):
+            assert check_framework_routes_reachable() == []
