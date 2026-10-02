@@ -42,7 +42,7 @@ def _posts_bare(node: FormNode, page_path: Path) -> bool:
 
 
 def _eager_csrf(page_path: Path, template: Template) -> CheckMessage | None:
-    """Return `next.W121` for a shared page whose HTML carries the CSRF token."""
+    """Return `next.W112` for a shared page whose HTML carries the CSRF token."""
     if csrf_delivery() is not CsrfDelivery.EAGER:
         return None
     forms = template.nodelist.get_nodes_by_type(FormNode)
@@ -53,7 +53,7 @@ def _eager_csrf(page_path: Path, template: Template) -> CheckMessage | None:
         "CSRF_DELIVERY is 'eager' and it renders a {% form %} or the runtime, so "
         "every response sets the CSRF cookie and goes out private. Set "
         "CSRF_DELIVERY to 'auto'.",
-        "next.W121",
+        "next.W112",
     )
 
 
@@ -73,19 +73,19 @@ def _bare_forms(page_path: Path, template: Template) -> bool:
 
 
 def _deferred_form(page_path: Path, template: Template) -> CheckMessage | None:
-    """Return `next.W124` for a shared page whose forms post without a token field."""
+    """Return `next.W115` for a shared page whose forms post without a token field."""
     if csrf_delivery() is CsrfDelivery.EAGER or not _bare_forms(page_path, template):
         return None
     return shared_warning(
         page_path,
         f"{_BARE_FORM} Keep the page private if it must work without the runtime, "
         f"or {_REQUIRES_RUNTIME}",
-        "next.W124",
+        "next.W115",
     )
 
 
 def _lazy_private_forms(shared: set[Path]) -> list[CheckMessage]:
-    """Return `next.W124` for every private page `CSRF_DELIVERY="lazy"` strips."""
+    """Return `next.W115` for every private page `CSRF_DELIVERY="lazy"` strips."""
     if csrf_delivery() is not CsrfDelivery.LAZY:
         return []
     return [
@@ -94,7 +94,7 @@ def _lazy_private_forms(shared: set[Path]) -> list[CheckMessage]:
             f"CSRF_DELIVERY to 'auto' to keep the token on private pages, or "
             f"{_REQUIRES_RUNTIME}",
             obj=str(page_path),
-            id="next.W124",
+            id="next.W115",
         )
         for page_path, template in iter_composed_pages()
         if page_path not in shared and _bare_forms(page_path, template)

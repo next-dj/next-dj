@@ -101,7 +101,7 @@ def _site_row_pinned() -> bool:
 
 @register(NEXT, SEO, deploy=True)
 def check_site_url_for_deploy(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when a deployed site builds its absolute URLs from `Host` (W119, W132)."""
+    """Warn when a deployed site builds its absolute URLs from `Host` (W110, W122)."""
     scope = raw_scope(_SCOPE) or {}
     if scope.get("URL") is not None or _site_row_pinned():
         return []
@@ -114,7 +114,7 @@ def check_site_url_for_deploy(*args, **kwargs) -> list[CheckMessage]:
                 "everyone. Set the origin, like 'https://acme.example', or list the "
                 "real hosts.",
                 obj=settings,
-                id="next.W132",
+                id="next.W122",
             )
         ]
     return [
@@ -124,7 +124,7 @@ def check_site_url_for_deploy(*args, **kwargs) -> list[CheckMessage]:
             "crawlers and social cards should see, like 'https://acme.example', or "
             "pin a django.contrib.sites row with SITE_ID.",
             obj=settings,
-            id="next.W119",
+            id="next.W110",
         )
     ]
 

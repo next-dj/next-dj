@@ -147,14 +147,14 @@ class TestRuntime:
 
 
 class TestGatedBlocking:
-    """A gated blocking script blocks nothing once the runtime renders it (W125)."""
+    """A gated blocking script blocks nothing once the runtime renders it (W116)."""
 
     def test_it_is_w125(self, tmp_path: Path) -> None:
         scripts = _scripts(
             "Script('a', init='1', category='marketing', strategy=Strategy.BLOCKING)"
         )
         assert check_ids(_run(tmp_path, check_gated_blocking_scripts, scripts)) == [
-            "next.W125"
+            "next.W116"
         ]
 
     def test_an_always_server_render_is_silent(self, tmp_path: Path) -> None:
@@ -171,7 +171,7 @@ class TestGatedBlocking:
 
 
 class TestDeploy:
-    """A deploy loads every script over https (W127)."""
+    """A deploy loads every script over https (W118)."""
 
     def test_plain_http_warns(self, tmp_path: Path) -> None:
         scripts = _scripts(
@@ -180,7 +180,7 @@ class TestDeploy:
             "Script('inline', init='1')",
         )
         messages = _run(tmp_path, check_script_deploy, scripts)
-        assert check_ids(messages) == ["next.W127"]
+        assert check_ids(messages) == ["next.W118"]
         assert "'a'" in messages[0].msg
 
 
@@ -198,14 +198,14 @@ def _consented_run(root: Path, **framework: object):
 
 @pytest.mark.usefixtures("_fresh_run")
 class TestConsentedNeedsConsent:
-    """`{% #consented %}` without a `CONSENT` entry warns (`next.W133`)."""
+    """`{% #consented %}` without a `CONSENT` entry warns (`next.W123`)."""
 
     def test_a_consented_block_without_consent_is_w133(self, tmp_path: Path) -> None:
         root = write_tree(tmp_path / "pages", scripts=None)
         for index in range(4):
             write_page(root, f"p{index}", f"template = {CONSENTED!r}\n")
         [warning] = _consented_run(root)
-        assert warning.id == "next.W133"
+        assert warning.id == "next.W123"
         assert "and 1 more" in warning.msg
         assert "NEXT_FRAMEWORK['CONSENT']" in warning.msg
 
@@ -238,14 +238,14 @@ MARKETING = {"CATEGORIES": ["necessary", "marketing"]}
 
 @pytest.mark.usefixtures("_fresh_run")
 class TestConsentedCategories:
-    """`{% #consented %}` names a listed category (`next.W092`)."""
+    """`{% #consented %}` names a listed category (`next.W091`)."""
 
     def test_an_unlisted_literal_is_w092_once_per_name(self, tmp_path: Path) -> None:
         root = write_tree(
             tmp_path / "pages", scripts=None, page=f"template = {NESTED!r}\n"
         )
         messages = _categories_run(root, CONSENT=MARKETING)
-        assert check_ids(messages) == ["next.W092", "next.W092"]
+        assert check_ids(messages) == ["next.W091", "next.W091"]
         assert "{% #consented 'ads' %}" in messages[0].msg
         assert "'stats'" in messages[1].msg
         assert "page.py" in messages[0].msg

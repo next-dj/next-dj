@@ -94,13 +94,13 @@ class TestSettingsScope:
     ) -> None:
         with override_settings(NEXT_FRAMEWORK=scope(DEFAULTS=defaults)):
             messages = check_metadata_settings_scope()
-        assert check_ids(messages) == ["next.W109"]
+        assert check_ids(messages) == ["next.W104"]
 
     def test_two_jsonld_objects_with_one_id_is_w108(self) -> None:
         defaults = {"jsonld": [{"@id": "#org"}, {"@id": "#org"}, {"@id": "#site"}]}
         with override_settings(NEXT_FRAMEWORK=scope(DEFAULTS=defaults)):
             messages = check_metadata_settings_scope()
-        assert check_ids(messages) == ["next.W108"]
+        assert check_ids(messages) == ["next.W103"]
         assert "'/#org'" in messages[0].msg
         assert "'#site'" not in messages[0].msg
 

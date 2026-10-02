@@ -101,7 +101,7 @@ def check_sitemap_templates(*args, **kwargs) -> list[CheckMessage]:
 
 @register(Tags.urls, NEXT, SEO)
 def check_sitemap_section_labels(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when page trees share one sitemap section label (`next.W104`)."""
+    """Warn when page trees share one sitemap section label (`next.W099`)."""
     roots = loaded_seo_roots()
     warnings: list[CheckMessage] = []
     if not declares_sitemap(roots):
@@ -121,7 +121,7 @@ def check_sitemap_section_labels(*args, **kwargs) -> list[CheckMessage]:
                 "order. Name each tree with section = '<slug>' in its sitemap.py "
                 "for stable section addresses.",
                 obj=str(group[1].path),
-                id="next.W104",
+                id="next.W099",
             )
         )
     return warnings
@@ -129,7 +129,7 @@ def check_sitemap_section_labels(*args, **kwargs) -> list[CheckMessage]:
 
 @register(Tags.urls, NEXT, SEO)
 def check_sitemap_dynamic_routes(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about a dynamic route the sitemap neither lists nor excludes (`next.W097`).
+    """Warn about a dynamic route the sitemap neither lists nor excludes (`next.W092`).
 
     A statically noindex route never reaches the sitemap, so it needs neither.
     """
@@ -151,7 +151,7 @@ def check_sitemap_dynamic_routes(*args, **kwargs) -> list[CheckMessage]:
                     f"@sitemap.items({trail!r}) in {source}, or add a glob covering "
                     "the trail to exclude.",
                     obj=str(page_path),
-                    id="next.W097",
+                    id="next.W092",
                 )
             )
     return warnings
@@ -159,7 +159,7 @@ def check_sitemap_dynamic_routes(*args, **kwargs) -> list[CheckMessage]:
 
 @register(Tags.urls, NEXT, SEO)
 def check_sitemap_noindex_items(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when `@sitemap.items` lists a trail whose page is noindex (`next.W098`).
+    """Warn when `@sitemap.items` lists a trail whose page is noindex (`next.W093`).
 
     Silent on a closed site, where no sitemap is served and every page reads noindex.
     """
@@ -179,7 +179,7 @@ def check_sitemap_noindex_items(*args, **kwargs) -> list[CheckMessage]:
                     f"@sitemap.items({trail!r}) in {source} puts its URLs in the "
                     "sitemap. Drop the entries, or let the page be indexed.",
                     obj=str(page_path),
-                    id="next.W098",
+                    id="next.W093",
                 )
             )
     return warnings
@@ -237,7 +237,7 @@ def _uses_language_prefixes() -> bool:
 
 @register(Tags.urls, NEXT, SEO)
 def check_sitemap_i18n_options(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about i18n options that take no effect or outgrow a page (W105, W106, W086).
+    """Warn about i18n options that take no effect or outgrow a page (W100, W101, W086).
 
     Without `i18n_patterns` every language reverses to one URL, listed once per code.
     """
@@ -247,7 +247,7 @@ def check_sitemap_i18n_options(*args, **kwargs) -> list[CheckMessage]:
         options = SitemapOptions.read(module)
         source = root.sitemap_path
         warnings.extend(
-            DjangoWarning(f"{source}: {problem}.", obj=str(source), id="next.W105")
+            DjangoWarning(f"{source}: {problem}.", obj=str(source), id="next.W100")
             for problem in _i18n_problems(options)
         )
         limit = _limit_warning(source, module)
@@ -259,7 +259,7 @@ def check_sitemap_i18n_options(*args, **kwargs) -> list[CheckMessage]:
                     "i18n_patterns(), so every language lists the same URLs again. "
                     "Mount the pages under i18n_patterns() or drop i18n.",
                     obj=str(source),
-                    id="next.W106",
+                    id="next.W101",
                 )
             )
     return warnings
@@ -267,7 +267,7 @@ def check_sitemap_i18n_options(*args, **kwargs) -> list[CheckMessage]:
 
 @register(Tags.urls, NEXT, SEO)
 def check_sitemap_excluded_items(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when `@sitemap.items` names a trail `exclude` drops (`next.W107`)."""
+    """Warn when `@sitemap.items` names a trail `exclude` drops (`next.W102`)."""
     roots = loaded_seo_roots()
     warnings: list[CheckMessage] = []
     for root, module in sitemap_roots(roots):
@@ -279,7 +279,7 @@ def check_sitemap_excluded_items(*args, **kwargs) -> list[CheckMessage]:
                 "exclude covers, so the sitemap drops all of them. Narrow the "
                 "glob, or drop the declaration.",
                 obj=str(source),
-                id="next.W107",
+                id="next.W102",
             )
             for trail in sorted(items_trails(root))
             if is_excluded(trail, globs)

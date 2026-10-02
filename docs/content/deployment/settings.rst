@@ -166,7 +166,7 @@ Site, CSRF, and consent
 
 Production names its origin in ``SITE["URL"]`` and keeps ``SITE["INDEXABLE"]`` at ``"auto"``, and a staging deployment sharing the settings answers ``INDEXABLE`` through a callable that names the production hosts, see :doc:`/content/topics/seo/site`.
 ``CSRF_DELIVERY`` stays at ``"auto"`` behind a CDN, so a shared page carries no token, see :doc:`/content/howto/cache-pages-on-a-cdn`.
-``CONSENT["OPTIONS"]["secure"]`` stays ``None`` or ``True`` under HTTPS, which ``next.W129`` checks.
+``CONSENT["OPTIONS"]["secure"]`` stays ``None`` or ``True`` under HTTPS, which ``next.W119`` checks.
 
 Template and asset staleness
 ----------------------------

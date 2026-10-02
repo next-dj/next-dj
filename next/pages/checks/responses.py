@@ -195,13 +195,13 @@ def private_pages_warning(cause: str, check_id: str) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_csrf_in_session(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when `CSRF_USE_SESSIONS` takes every shared page private (`next.W131`)."""
+    """Warn when `CSRF_USE_SESSIONS` takes every shared page private (`next.W121`)."""
     if not getattr(settings, "CSRF_USE_SESSIONS", False):
         return []
     return private_pages_warning(
         "CSRF_USE_SESSIONS reads the session on every request. Keep the CSRF token "
         "in its cookie, or drop the shared cache.",
-        "next.W131",
+        "next.W121",
     )
 
 
@@ -219,7 +219,7 @@ def _guarded(middleware: list[object]) -> bool:
 
 @register(NEXT)
 def check_conditional_get_order(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when a cookie may land on a shared 304 (`next.W134`).
+    """Warn when a cookie may land on a shared 304 (`next.W124`).
 
     `ConditionalGetMiddleware` copies the cache of a shared page onto the 304 it
     answers, so a cookie a middleware outside it sets later rides a public response.
@@ -247,7 +247,7 @@ def check_conditional_get_order(*args, **kwargs) -> list[CheckMessage]:
                 f"list {_CACHE_GUARD} first, which sends such a response private."
             ),
             obj=settings,
-            id="next.W134",
+            id="next.W124",
         )
     ]
 
@@ -276,7 +276,7 @@ def shared_warning(page_path: Path, text: str, check_id: str) -> CheckMessage:
 
 
 def _csrf_token_tag(page_path: Path, template: Template) -> CheckMessage | None:
-    """Return `next.W122` for a shared page rendering `{% csrf_token %}`."""
+    """Return `next.W113` for a shared page rendering `{% csrf_token %}`."""
     if not template.nodelist.get_nodes_by_type(CsrfTokenNode):
         return None
     return shared_warning(
@@ -284,7 +284,7 @@ def _csrf_token_tag(page_path: Path, template: Template) -> CheckMessage | None:
         "it renders {% csrf_token %}, which sets the CSRF cookie, so every response "
         "goes out private. Post through {% form %}, which leaves the token to the "
         "runtime.",
-        "next.W122",
+        "next.W113",
     )
 
 
@@ -329,7 +329,7 @@ def check_shared_page_responses(*args, **kwargs) -> list[CheckMessage]:
                     "LocaleMiddleware picks its language per request outside "
                     "i18n_patterns(), so a CDN hands one language to every visitor. "
                     "Route the pages through i18n_patterns().",
-                    "next.W123",
+                    "next.W114",
                 )
             )
     return warnings

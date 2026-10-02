@@ -280,7 +280,7 @@ def _sources_below(root: SeoRoot) -> Iterator[Path]:
 
 @register(Tags.urls, NEXT, SEO)
 def check_seo_sources_below_root(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about an SEO source below the top of its page tree (`next.W102`)."""
+    """Warn about an SEO source below the top of its page tree (`next.W097`)."""
     roots = loaded_seo_roots()
     warnings: list[CheckMessage] = []
     for root in roots:
@@ -289,7 +289,7 @@ def check_seo_sources_below_root(*args, **kwargs) -> list[CheckMessage]:
                 f"{file_path} sits below the top of the page tree {root.path}, "
                 f"where nothing reads it. Move it to {root.path / file_path.name}.",
                 obj=str(file_path),
-                id="next.W102",
+                id="next.W097",
             )
             for file_path in _sources_below(root)
         )
@@ -298,7 +298,7 @@ def check_seo_sources_below_root(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT, SEO, deploy=True)
 def check_seo_sources_on_closed_site(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when a site closed to search still publishes for crawlers (`next.W120`).
+    """Warn when a site closed to search still publishes for crawlers (`next.W111`).
 
     A site private by design serves no sitemap or robots.txt, so it is silent.
     """
@@ -315,7 +315,7 @@ def check_seo_sources_on_closed_site(*args, **kwargs) -> list[CheckMessage]:
             "Remove the key, answer per request through a callable, or drop the "
             "sources if the site is private.",
             obj=settings,
-            id="next.W120",
+            id="next.W111",
         )
     ]
 

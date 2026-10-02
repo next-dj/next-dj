@@ -83,7 +83,7 @@ def check_seo_route_collisions(*args, **kwargs) -> list[CheckMessage]:
 
 @register(Tags.urls, NEXT, SEO)
 def check_seo_routes_at_host_root(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when a declared SEO route is not the framework's at the host root (W099).
+    """Warn when a declared SEO route is not the framework's at the host root (W094).
 
     A `next.urls` include under a prefix or `i18n_patterns()` moves the routes with it.
     """
@@ -105,7 +105,7 @@ def check_seo_routes_at_host_root(*args, **kwargs) -> list[CheckMessage]:
                 "include('next.seo.urls') there when it sits under a prefix or "
                 "i18n_patterns(), ahead of any pattern of your own at that address.",
                 obj=settings,
-                id="next.W099",
+                id="next.W094",
             )
         )
     return warnings

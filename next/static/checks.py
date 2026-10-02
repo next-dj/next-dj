@@ -418,7 +418,7 @@ def _templates() -> Iterable[tuple[str, object]]:
 
 @register(NEXT)
 def check_nonce_templates(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about a custom tag template with no `{nonce_attr}` (`next.W126`)."""
+    """Warn about a custom tag template with no `{nonce_attr}` (`next.W117`)."""
     if not nonce_active():
         return []
     return [
@@ -427,7 +427,7 @@ def check_nonce_templates(*args, **kwargs) -> list[CheckMessage]:
             "active, so the tag it renders is refused by the policy. Add "
             "{nonce_attr} where the attributes go.",
             obj=settings,
-            id="next.W126",
+            id="next.W117",
         )
         for where, template in _templates()
         if isinstance(template, str) and template and "{nonce_attr}" not in template
@@ -436,14 +436,14 @@ def check_nonce_templates(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_nonce_on_shared_pages(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when a CSP nonce takes every page a CDN may hold private (`next.W130`)."""
+    """Warn when a CSP nonce takes every page a CDN may hold private (`next.W120`)."""
     if not nonce_active():
         return []
     return private_pages_warning(
         "a CSP nonce is active and a nonce belongs to one visitor. Set "
         "NEXT_FRAMEWORK['CSP_NONCE'] to False and allow the scripts by hash or "
         "source, or drop the shared cache.",
-        "next.W130",
+        "next.W120",
     )
 
 

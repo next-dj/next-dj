@@ -586,7 +586,7 @@ A page a CDN caches carries no CSRF token in its HTML, so its forms post only th
            requires_runtime = True
 
 The flag changes no dispatch behaviour.
-It tells ``next.W124`` that a shared page rendering this form has accepted the JavaScript requirement, so the warning stays for a shared page whose other forms must still work without the runtime.
+It tells ``next.W115`` that a shared page rendering this form has accepted the JavaScript requirement, so the warning stays for a shared page whose other forms must still work without the runtime.
 Like the guard keys, it survives subclassing through the inherited ``Meta``.
 
 .. _topics-forms-actions-success:

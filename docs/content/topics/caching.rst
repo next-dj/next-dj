@@ -124,7 +124,7 @@ A shared page goes out ``private``, with the other directives kept and one warni
 - Its HTML follows the consent cookie, which ``CONSENT["SERVER_RENDER"] = True`` forces on every page, the shared ones included.
 
 The response carries ``SharedCookies`` in place of Django's cookie jar, so the first cookie set on it takes the cache private whenever it lands, and a ``TemplateResponse`` rendered after the view is settled once its content exists.
-``public`` and ``Set-Cookie`` never leave the server together, provided ``ConditionalGetMiddleware`` sits above every middleware that sets a cookie, because the 304 it answers copies the cache before an outer cookie lands, and ``next.W134`` reports the order that breaks it.
+``public`` and ``Set-Cookie`` never leave the server together, provided ``ConditionalGetMiddleware`` sits above every middleware that sets a cookie, because the 304 it answers copies the cache before an outer cookie lands, and ``next.W124`` reports the order that breaks it.
 ``next.middleware.SharedCacheGuardMiddleware`` closes that gap and any other one a third-party middleware opens, see `The shared cache guard`_.
 A cookie written through ``update()`` or ``load()`` on the jar takes the response private as well.
 A layout that reads ``request.user`` touches the session and takes every shared page under it private, which the warning makes visible.
@@ -136,7 +136,7 @@ The shared cache guard
 A response that sets a cookie while its ``Cache-Control`` carries ``public`` or ``s-maxage`` loses both directives and gains ``private``, its ``CDN-Cache-Control``, ``Cloudflare-CDN-Cache-Control``, and ``Surrogate-Control`` headers go, and ``Vary`` gains ``Cookie``.
 Every other directive stays, and each path is logged once.
 List it first in ``MIDDLEWARE``, or right below ``UpdateCacheMiddleware``, so it sees every cookie the stack sets and the copy Django's cache stores is the private one.
-In either place ``next.W134`` stays silent.
+In either place ``next.W124`` stays silent.
 
 .. code-block:: python
    :caption: config/settings.py

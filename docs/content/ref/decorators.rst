@@ -75,7 +75,7 @@ Decorators
    Pass ``scope="page"`` or ``scope="shared"`` to override the scope derived from the declaring file.
    Any other value is reported as the ``next.E085`` system check and the action is not registered, while the same mistake spelled as ``Meta.scope`` on a form class is reported as ``next.E047``.
    Pass ``login_required=True`` or ``permission_required=`` to guard the dispatch endpoint, see :ref:`topics-forms-actions-guards` for the semantics.
-   Pass ``requires_runtime=True`` for an action that posts only through the client runtime, which silences ``next.W124`` for it, see :ref:`topics-forms-actions-requires-runtime`.
+   Pass ``requires_runtime=True`` for an action that posts only through the client runtime, which silences ``next.W115`` for it, see :ref:`topics-forms-actions-requires-runtime`.
    Applying ``@action`` to a class registers no action and returns the class unchanged.
    The misuse is recorded and reported as the ``next.E053`` system check by ``manage.py check``.
 

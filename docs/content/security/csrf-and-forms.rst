@@ -37,7 +37,7 @@ A token in the HTML sets the CSRF cookie and ``Vary: Cookie``, which keeps a CDN
 A deferred page renders ``{% form %}`` without the hidden field and hands the runtime ``{"header": ..., "url": "/_next/csrf/"}`` in place of the token.
 The runtime fetches ``/_next/csrf/`` once, on the first focus or press inside a form and before the first unsafe request at the latest, and sends the token in the CSRF header, which Django reads when the form field is absent.
 A fetch that fails keeps the mutation from leaving and raises a ``partial:error`` of kind ``csrf``.
-A browser without JavaScript posts no token and gets 403, which ``next.W124`` reports for a shared page that renders a form, unless its action declares ``requires_runtime``, see :ref:`topics-forms-actions-requires-runtime`.
+A browser without JavaScript posts no token and gets 403, which ``next.W115`` reports for a shared page that renders a form, unless its action declares ``requires_runtime``, see :ref:`topics-forms-actions-requires-runtime`.
 
 The token endpoint
 ------------------

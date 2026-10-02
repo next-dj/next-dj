@@ -152,7 +152,7 @@ What the checks read
 
 The system checks run without a request and never call a callable ``INDEXABLE``, which reads as open there so every check runs, and ``"auto"`` reads ``DEBUG`` at check time.
 ``next.E129`` reports a callable that cannot take the request as its one positional argument.
-On a site closed at check time the checks treat every page as ``noindex``, and the two that read the served sitemap, ``next.W098`` and ``next.W100``, stay quiet, since no sitemap is served.
+On a site closed at check time the checks treat every page as ``noindex``, and the two that read the served sitemap, ``next.W093`` and ``next.W095``, stay quiet, since no sitemap is served.
 
 See also
 --------

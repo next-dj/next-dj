@@ -105,7 +105,7 @@ class TestLinks:
         messages = _messages(
             tmp_path, '{"links": [{"rel": "prefetchh", "href": "/f"}]}'
         )
-        assert [code for code, _msg in messages] == ["next.W110"]
+        assert [code for code, _msg in messages] == ["next.W105"]
         assert "'prefetchh'" in messages[0][1]
 
 
@@ -144,7 +144,7 @@ class TestIcons:
 
     def test_a_repeated_icon_is_w111(self, tmp_path: Path) -> None:
         messages = _messages(tmp_path, '{"icons": {"icon": ["/a.png", "/b.png"]}}')
-        assert [code for code, _msg in messages] == ["next.W111"]
+        assert [code for code, _msg in messages] == ["next.W106"]
 
 
 class TestNames:
@@ -213,7 +213,7 @@ class TestViewport:
         self, tmp_path: Path, viewport: str
     ) -> None:
         messages = _messages(tmp_path, f'{{"viewport": {viewport}}}')
-        assert [code for code, _msg in messages] == ["next.W112"]
+        assert [code for code, _msg in messages] == ["next.W107"]
 
     def test_the_pairs_of_either_form(self) -> None:
         assert viewport_pairs(None) == {}
@@ -247,7 +247,7 @@ class TestSocialFolds:
         )
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_metadata_social_folds()
-        assert check_ids(messages) == ["next.W113", "next.W113"]
+        assert check_ids(messages) == ["next.W108", "next.W108"]
         assert "'en-US'" in messages[0].msg
         assert "'fr'" in messages[1].msg
 
@@ -257,7 +257,7 @@ class TestSocialFolds:
         )
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_metadata_social_folds()
-        assert check_ids(messages) == ["next.W113", "next.W113"]
+        assert check_ids(messages) == ["next.W108", "next.W108"]
         assert "Facebook reads ar_AR" in messages[0].msg
         assert "Facebook reads nb_NO" in messages[1].msg
 
@@ -270,7 +270,7 @@ class TestSocialFolds:
         metadata_page(tmp_path / "b", '{"og": {"type": "website"}}')
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_metadata_social_folds()
-        assert check_ids(messages) == ["next.W113"]
+        assert check_ids(messages) == ["next.W108"]
         assert "'ast', 'kab'" in messages[0].msg
 
     @override_settings(**I18N)
@@ -303,7 +303,7 @@ class TestLiterals:
         )
         with override_settings(NEXT_FRAMEWORK=framework(pages)):
             messages = check_metadata_head_literals()
-        assert check_ids(messages) == ["next.W118"]
+        assert check_ids(messages) == ["next.W109"]
         assert '<meta name="viewport">' in messages[0].msg
 
     def test_a_theme_color_literal_is_w118(self, tmp_path: Path) -> None:
@@ -314,7 +314,7 @@ class TestLiterals:
         )
         with patch_checks_router_manager(pages_directory=pages):
             messages = check_metadata_head_literals()
-        assert check_ids(messages) == ["next.W118"]
+        assert check_ids(messages) == ["next.W109"]
         assert "'theme_color'" in messages[0].msg
 
     @pytest.mark.parametrize(

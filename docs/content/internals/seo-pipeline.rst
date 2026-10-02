@@ -69,7 +69,7 @@ The request-time fold replays the tail over the prefix.
 A callable source is resolved through the dependency resolver with the request, the URL kwargs, the dependency cache of the render, and the render context, and the mapping it returns is normalised with the callable and its file as the source name, so a shape error names the function rather than the page.
 ``fold_segment`` merges each segment by the strategy its fields declare, deep for a nested block, by name for ``other`` and ``properties``, by ``@id`` for ``jsonld``, and whole for everything else, a ``Replace`` taking its path whole, see :doc:`/content/topics/seo/merge` for the table.
 The top level, a nested block, and ``merge_segments`` all merge field by field through one ``_merge_values``, and the chain builds its prefix and its static fold through ``fold_segments``.
-The ``@id`` a node is merged by passes through ``node_id``, so ``#org`` and ``/#org`` name one node in the fold, in ``next.W108``, and in ``next.E101``.
+The ``@id`` a node is merged by passes through ``node_id``, so ``#org`` and ``/#org`` name one node in the fold, in ``next.W103``, and in ``next.E101``.
 
 ``fold_metadata`` with an ``overlay`` replaces the page's own callable with the given segment, laid over the page's own dict, and refolds from the settings tier.
 An inherited callable of an ancestor runs as it does in the render, against a context the caller's factory builds only at that point, which is how ``Patches.meta`` runs the guard of the origin page and builds its render context on demand.

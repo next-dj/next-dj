@@ -86,7 +86,7 @@ class TestTextFiles:
         root = write_tree(tmp_path / "pages", sitemap="", robots_txt=b"User-agent: *\n")
         with routed(root):
             messages = check_seo_text_files()
-        assert check_ids(messages) == ["next.W103"]
+        assert check_ids(messages) == ["next.W098"]
         assert "names no Sitemap: line" in messages[0].msg
         assert messages[0].obj == str(root / "robots.txt")
 
@@ -115,7 +115,7 @@ class TestRobotsDisallow:
         )
         with routed(root):
             messages = check_robots_disallow()
-        assert check_ids(messages) == ["next.W100"]
+        assert check_ids(messages) == ["next.W095"]
         assert "covers /sitemap.xml" in messages[0].msg
         assert messages[0].obj == str(root / "robots.py")
 
@@ -136,7 +136,7 @@ class TestRobotsDisallow:
         )
         with routed(root):
             messages = check_robots_disallow()
-        assert check_ids(messages) == (["next.W100"] if warned else [])
+        assert check_ids(messages) == (["next.W095"] if warned else [])
 
     def test_a_disallow_over_a_listed_route_warns(self, tmp_path) -> None:
         root = write_tree(
@@ -147,7 +147,7 @@ class TestRobotsDisallow:
         )
         with routed(root):
             messages = check_robots_disallow()
-        assert check_ids(messages) == ["next.W100", "next.W100"]
+        assert check_ids(messages) == ["next.W095", "next.W095"]
         assert "disallows '/about/', which covers /about/" in messages[0].msg
         assert "disallows '/posts/', which covers /posts/" in messages[1].msg
 
@@ -160,7 +160,7 @@ class TestRobotsDisallow:
         )
         with routed(root, urlconf=PREFIXED_URLCONF):
             messages = check_robots_disallow()
-        assert check_ids(messages) == ["next.W100"]
+        assert check_ids(messages) == ["next.W095"]
         assert "disallows '/prefix/posts/', which covers /prefix/posts/" in (
             messages[0].msg
         )
@@ -181,7 +181,7 @@ class TestRobotsDisallow:
         )
         with routed(root, **({} if urlconf is None else {"urlconf": urlconf})):
             messages = check_robots_disallow()
-        assert check_ids(messages) == ["next.W100"]
+        assert check_ids(messages) == ["next.W095"]
         assert f"disallows {prefix!r}, which covers {prefix}" in messages[0].msg
 
     def test_a_disallow_over_a_dynamic_noindex_page_alone_warns(self, tmp_path) -> None:
@@ -189,7 +189,7 @@ class TestRobotsDisallow:
         write_page(root, "hidden/[int:id]", NOINDEX)
         with routed(root):
             messages = check_robots_disallow()
-        assert check_ids(messages) == ["next.W101"]
+        assert check_ids(messages) == ["next.W096"]
         assert "covers the noindex pages /hidden/" in messages[0].msg
 
     def test_wildcards_and_anchors_read_like_a_crawler(self, tmp_path) -> None:
@@ -201,7 +201,7 @@ class TestRobotsDisallow:
         )
         with routed(root):
             messages = check_robots_disallow()
-        assert check_ids(messages) == ["next.W100", "next.W100"]
+        assert check_ids(messages) == ["next.W095", "next.W095"]
         assert "covers /about/team/," in messages[0].msg
         assert "covers /about/," in messages[1].msg
 
@@ -210,7 +210,7 @@ class TestRobotsDisallow:
         write_page(root, "hidden", NOINDEX)
         with routed(root):
             messages = check_robots_disallow()
-        assert check_ids(messages) == ["next.W101"]
+        assert check_ids(messages) == ["next.W096"]
         assert "covers the noindex pages /hidden/" in messages[0].msg
         assert messages[0].obj == str(root / "robots.py")
 
@@ -230,7 +230,7 @@ class TestRobotsDisallow:
         write_page(root, "hidden", NOINDEX)
         with routed(root):
             messages = check_robots_disallow()
-        assert check_ids(messages) == ["next.W101"]
+        assert check_ids(messages) == ["next.W096"]
         assert "covers the noindex pages /hidden/" in messages[0].msg
 
     def test_a_disallow_over_an_excluded_or_indexed_page_passes(self, tmp_path) -> None:
