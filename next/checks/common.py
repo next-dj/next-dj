@@ -32,6 +32,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+WALK_HINT = (
+    "Every DIRS entry and every app pages folder must be a readable directory, "
+    "and a custom router's page_roots() must answer next.urls.PageRoot entries."
+)
+
+
 class RunMemo[T]:
     """One value a check run builds once, held for as long as its key stays the same.
 
@@ -173,6 +179,7 @@ def _by_paths(record: tuple[Path, Path, str]) -> tuple[str, str, str]:
 
 
 __all__ = [
+    "WALK_HINT",
     "PageRootsError",
     "RegistrationSubject",
     "RunMemo",

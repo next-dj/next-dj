@@ -9,6 +9,7 @@ from django.core.checks import CheckMessage, Error, Tags, register
 
 from next.checks import NEXT, SEO
 from next.checks.common import (
+    WALK_HINT,
     errors_for_unknown_keys,
     get_page_roots,
     get_router_manager,
@@ -300,7 +301,15 @@ def check_url_patterns(*args, **kwargs) -> list[CheckMessage]:
         _check_url_conflicts(all_patterns, errors)
     except (ValueError, TypeError) as e:
         errors.append(
-            Error(f"Error checking URL conflicts: {e}", obj=settings, id="next.E014")
+            Error(
+                f"The URL patterns the routers produced could not be compared: {e}",
+                hint=(
+                    "A router answered a pattern that is not a Django URL pattern. "
+                    "Check the custom router named in PAGE_BACKENDS."
+                ),
+                obj=settings,
+                id="next.E014",
+            )
         )
 
     return errors
@@ -400,7 +409,8 @@ def _collect_all_patterns_uncached(
         except (AttributeError, OSError) as e:
             errors.append(
                 Error(
-                    f"Error collecting patterns from router: {e}",
+                    f"{type(router).__name__} failed to list its URL patterns: {e}",
+                    hint=WALK_HINT,
                     obj=settings,
                     id="next.E016",
                 )

@@ -15,6 +15,7 @@ from django.core.checks import (
 
 from next.checks import NEXT
 from next.checks.common import (
+    WALK_HINT,
     first_visit,
     get_page_roots,
     get_router_manager,
@@ -61,7 +62,11 @@ def check_page_functions(*args, **kwargs) -> list[CheckMessage]:
         except (AttributeError, OSError) as e:
             errors.append(
                 Error(
-                    f"Error checking page functions: {e}", obj=settings, id="next.E011"
+                    f"{type(router).__name__} page trees could not be walked to "
+                    f"check page.py functions: {e}",
+                    hint=WALK_HINT,
+                    obj=settings,
+                    id="next.E011",
                 )
             )
 
