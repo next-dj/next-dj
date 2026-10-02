@@ -282,7 +282,7 @@ class TestProblems:
             ),
             ({"X-A": "a\r\nb"}, f"the value of 'X-A' {UNSENDABLE}"),
             ({"X-A": "a\x00b"}, f"the value of 'X-A' {UNSENDABLE}"),
-            ({"X-A": "caf\u00e9"}, f"the value of 'X-A' {UNSENDABLE}"),
+            ({"X-A": "x\u00e9"}, f"the value of 'X-A' {UNSENDABLE}"),
             ({"X-A": 3}, f"the value of 'X-A' {UNSENDABLE}"),
         ],
     )
