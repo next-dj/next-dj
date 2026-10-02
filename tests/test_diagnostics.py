@@ -1,9 +1,11 @@
 import logging
 
 import pytest
+from django.core.exceptions import PermissionDenied
+from django.http import Http404
 
 from next.conf.signals import settings_reloaded
-from next.diagnostics import BackendReadLog
+from next.diagnostics import INTENDED_EXCEPTIONS, BackendReadLog, FailureLog
 
 
 class _Backend:
@@ -115,3 +117,69 @@ class TestBackendReadLog:
             log.read(_Backend(), "watched trees", _raise, valid=bool, default=[])
 
         assert caplog.text.count("failed to report its watched trees") == 2
+
+
+@pytest.fixture()
+def failures() -> FailureLog:
+    return FailureLog(logging.getLogger("next.tests.diagnostics"))
+
+
+def _contained(failures: FailureLog, key: object) -> str:
+    """Run a failing call through `contain`, answering the caller's fallback."""
+    try:
+        _raise()
+    except RuntimeError as exc:
+        failures.contain(exc, key, "items() in %s raised", "sitemap.py")
+    return "fallback"
+
+
+class TestFailureLog:
+    """User code that raises is loud under DEBUG and logged once otherwise."""
+
+    def test_production_logs_the_first_failure_with_its_traceback(
+        self, failures: FailureLog, caplog: pytest.LogCaptureFixture, settings
+    ) -> None:
+        settings.DEBUG = False
+        with caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"):
+            first = _contained(failures, "items")
+            second = _contained(failures, "items")
+
+        assert first == second == "fallback"
+        assert caplog.text.count("items() in sitemap.py raised") == 1
+        assert caplog.records[0].exc_info is not None
+
+    def test_debug_reraises_with_the_source_as_a_note(
+        self, failures: FailureLog, settings
+    ) -> None:
+        settings.DEBUG = True
+        with pytest.raises(RuntimeError) as info:
+            _contained(failures, "items")
+
+        assert "items() in sitemap.py raised" in info.value.__notes__
+        del info.value.__notes__
+
+    def test_a_reconfigure_rearms_the_report(
+        self, failures: FailureLog, caplog: pytest.LogCaptureFixture, settings
+    ) -> None:
+        settings.DEBUG = False
+        with caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"):
+            _contained(failures, "items")
+            settings_reloaded.send(sender=None)
+            _contained(failures, "items")
+
+        assert caplog.text.count("items() in sitemap.py raised") == 2
+
+    def test_warn_reports_once_per_key(
+        self, failures: FailureLog, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING, logger="next.tests.diagnostics"):
+            failures.warn("a", "missing %s", "x.js")
+            failures.warn("a", "missing %s", "x.js")
+            failures.warn("b", "missing %s", "y.js")
+
+        assert caplog.text.count("missing x.js") == 1
+        assert "missing y.js" in caplog.text
+
+    def test_intended_exceptions_name_the_http_answers(self) -> None:
+        assert Http404 in INTENDED_EXCEPTIONS
+        assert PermissionDenied in INTENDED_EXCEPTIONS

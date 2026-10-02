@@ -1,9 +1,17 @@
-"""Guarded reads of what a third-party backend reports, logged once per source."""
+"""Failures of user and third-party code: raised under DEBUG, else logged once."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from logging import Logger
 
+from django.core.exceptions import PermissionDenied
+from django.http import Http404
+
+from next.conf.settings import fail_loudly
 from next.conf.signals import settings_reloaded
+
+
+# A view raises these on purpose to answer 404 or 403, so they are never contained.
+INTENDED_EXCEPTIONS: tuple[type[BaseException], ...] = (Http404, PermissionDenied)
 
 
 _FAILED = (
@@ -17,30 +25,59 @@ _MALFORMED = (
 )
 
 
-class BackendReadLog:
-    """Read what a backend reports, answering a default when it cannot.
+class FailureLog:
+    """Report each failing source once, re-armed when the framework is reconfigured.
 
-    A backend that keeps raising is read on every reloader tick and static lookup, so
-    a failing source is reported once and re-armed on the reconfigure it subscribes to.
+    User code that keeps raising runs on every request, so a production log would
+    otherwise carry the same traceback per hit and bury the first, useful one.
     """
 
     def __init__(self, logger: Logger) -> None:
         """Report through `logger`, with every diagnostic armed."""
         self._logger = logger
-        self._reported: set[tuple[str, str]] = set()
+        self._reported: set[Hashable] = set()
         settings_reloaded.connect(self.clear)
 
     def clear(self, **kwargs: object) -> None:
         """Re-arm every diagnostic, so a reconfigure is reported afresh."""
         self._reported.clear()
 
-    def first_failure(self, source: str, subject: str) -> bool:
+    def first_failure(self, *key: Hashable) -> bool:
         """Whether this failure is unreported, recording it when it is."""
-        key = (source, subject)
         if key in self._reported:
             return False
         self._reported.add(key)
         return True
+
+    def contain(
+        self, exc: BaseException, key: Hashable, message: str, *args: object
+    ) -> None:
+        """Handle `exc`, the exception in flight: re-raise it when loud, else log once.
+
+        Call it from the `except` block that caught `exc`, then return the caller's
+        fallback. Under `DEBUG` or `STRICT_LOADING` the exception propagates with
+        `message` attached as a note, so the technical page names the source and the
+        fix. Otherwise `message` is logged with the traceback the first time `key`
+        fails.
+        """
+        if fail_loudly():
+            exc.add_note(message % args if args else message)
+            raise  # noqa: PLE0704 - re-raises the exception the caller is handling
+        if self.first_failure(key):
+            self._logger.error(message, *args, exc_info=exc)
+
+    def warn(self, key: Hashable, message: str, *args: object) -> None:
+        """Log `message` once for `key`, for a failure that has no traceback."""
+        if self.first_failure(key):
+            self._logger.warning(message, *args)
+
+
+class BackendReadLog(FailureLog):
+    """Read what a backend reports, answering a default when it cannot.
+
+    A backend that keeps raising is read on every reloader tick and static lookup, so
+    a failing source is reported once and re-armed on the reconfigure it subscribes to.
+    """
 
     def read[T](
         self,
@@ -71,4 +108,4 @@ class BackendReadLog:
         return answer
 
 
-__all__ = ["BackendReadLog"]
+__all__ = ["INTENDED_EXCEPTIONS", "BackendReadLog", "FailureLog"]
