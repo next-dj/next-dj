@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Final, NamedTuple
+from typing import TYPE_CHECKING, Any, Final, NamedTuple, cast
 
 from django.conf import settings
 from django.core.checks import (
@@ -17,8 +17,7 @@ from django.core.checks import (
 from django.core.exceptions import ImproperlyConfigured
 
 from next.checks import NEXT, SEO
-from next.checks.common import RunMemo, errors_for_unknown_keys
-from next.conf.defaults import USER_SETTING
+from next.checks.common import RunMemo, errors_for_unknown_keys, raw_scope
 from next.pages.errors import PageMetadataShapeError
 from next.pages.metadata.backends import configured_renderer_class
 from next.pages.metadata.ld import raw_id
@@ -37,11 +36,7 @@ _SCOPE_PREFIX: Final = "NEXT_FRAMEWORK['METADATA']"
 
 def raw_metadata_scope() -> dict[str, Any] | None:
     """Return the raw `METADATA` scope, or `None` where `next.E076` reports it."""
-    raw = getattr(settings, USER_SETTING, None)
-    if not isinstance(raw, dict):
-        return None
-    scope = raw.get("METADATA")
-    return scope if isinstance(scope, dict) else None
+    return cast("dict[str, Any] | None", raw_scope("METADATA"))
 
 
 type _SiteDefaults = tuple["Segment | None", CheckMessage | None]
@@ -105,7 +100,7 @@ def duplicate_ids(segment: Segment) -> list[str]:
 
 
 def segment_errors(segment: Segment, *, source: str, obj: object) -> list[CheckMessage]:
-    """Return `next.E100`, `next.E105` and `next.W108` for one normalised segment."""
+    """Return `next.E100`, `next.E105` and `next.W103` for one normalised segment."""
     errors: list[CheckMessage] = []
     spec = segment.title
     if spec is not None and spec.template is not None and spec.default is None:
@@ -137,7 +132,7 @@ def segment_errors(segment: Segment, *, source: str, obj: object) -> list[CheckM
                 f"{', '.join(map(repr, duplicates))}, and only the last one "
                 "renders. Merge them into one object.",
                 obj=obj,
-                id="next.W108",
+                id="next.W103",
             )
         )
     return errors
@@ -167,7 +162,7 @@ def renderer_errors() -> list[CheckMessage]:
 def check_metadata_settings_scope(*args, **kwargs) -> list[CheckMessage]:
     """Validate the `METADATA` options, and the `DEFAULTS` tier like a page.
 
-    A `Replace` in `DEFAULTS` has nothing to replace and earns `next.W109`.
+    A `Replace` in `DEFAULTS` has nothing to replace and earns `next.W104`.
     """
     scope = raw_metadata_scope()
     if scope is None:
@@ -186,7 +181,7 @@ def check_metadata_settings_scope(*args, **kwargs) -> list[CheckMessage]:
                     f"{SITE_SOURCE} wraps {keys} in Replace or RESET, which has no "
                     "inherited value to replace there. Write the value itself.",
                     obj=settings,
-                    id="next.W109",
+                    id="next.W104",
                 )
             )
     return errors
