@@ -96,7 +96,7 @@ def _names_sitemap(text: str) -> bool:
 
 @register(Tags.urls, NEXT, SEO)
 def check_seo_text_files(*args, **kwargs) -> list[CheckMessage]:
-    """Read every static `robots.txt` (`next.E117`, `next.W103`).
+    """Read every static `robots.txt` (`next.E117`, `next.W098`).
 
     The files are served byte for byte, so a missing `Sitemap:` line stays missing.
     """
@@ -117,7 +117,7 @@ def check_seo_text_files(*args, **kwargs) -> list[CheckMessage]:
                 "'Sitemap: https://<host>/sitemap.xml', or switch to a robots.py "
                 "that writes the line itself.",
                 obj=str(root.robots_file),
-                id="next.W103",
+                id="next.W098",
             )
         )
     return messages
@@ -240,7 +240,7 @@ def _listed_paths(roots: tuple[SeoRoot, ...]) -> set[str]:
 def check_robots_disallow(*args, **kwargs) -> list[CheckMessage]:
     """Read every static `*` group `Disallow` against the sitemap and noindex pages.
 
-    `next.W100` flags a listed URL, `next.W101` a noindex page whose tag goes unread.
+    `next.W095` flags a listed URL, `next.W096` a noindex page whose tag goes unread.
     """
     roots = loaded_seo_roots()
     warnings: list[CheckMessage] = []
@@ -264,7 +264,7 @@ def check_robots_disallow(*args, **kwargs) -> list[CheckMessage]:
                     "Narrow the Disallow, or drop the URLs from the sitemap through "
                     "exclude.",
                     obj=str(source),
-                    id="next.W100",
+                    id="next.W095",
                 )
             )
         hidden = _covered(prefix, noindex, allows)
@@ -276,7 +276,7 @@ def check_robots_disallow(*args, **kwargs) -> list[CheckMessage]:
                     "noindex, so the page stays indexed from outside links. Let the "
                     "crawler in and keep the noindex.",
                     obj=str(source),
-                    id="next.W101",
+                    id="next.W096",
                 )
             )
     return warnings

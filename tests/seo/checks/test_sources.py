@@ -228,7 +228,7 @@ class TestModuleAttributes:
 
 
 class TestSourcesBelowRoot:
-    """A source below the top of its tree is never served (`next.W102`)."""
+    """A source below the top of its tree is never served (`next.W097`)."""
 
     def test_a_source_below_the_top_warns(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", pages=("", "blog"))
@@ -236,7 +236,7 @@ class TestSourcesBelowRoot:
         (root / "blog" / "robots.txt").write_bytes(b"")
         with routed(root):
             messages = check_seo_sources_below_root()
-        assert check_ids(messages) == ["next.W102"] * 2
+        assert check_ids(messages) == ["next.W097"] * 2
         assert [m.obj for m in messages] == [
             str(root / "blog" / "sitemap.py"),
             str(root / "blog" / "robots.txt"),
@@ -312,7 +312,7 @@ def production() -> Iterator[None]:
 
 @pytest.mark.usefixtures("production")
 class TestSourcesOnAClosedSite:
-    """`next.W120` warns when a site closed to search publishes for crawlers."""
+    """`next.W111` warns when a site closed to search publishes for crawlers."""
 
     @pytest.mark.parametrize(
         ("sources", "named"),
@@ -329,7 +329,7 @@ class TestSourcesOnAClosedSite:
         root = write_tree(tmp_path / "pages", **sources)
         with routed(root, SITE={"INDEXABLE": False}):
             messages = check_seo_sources_on_closed_site()
-        assert check_ids(messages) == ["next.W120"]
+        assert check_ids(messages) == ["next.W111"]
         assert f"publishes {named} for crawlers" in messages[0].msg
 
     def test_a_sitemap_backend_of_its_own_is_a_source(self, tmp_path) -> None:
@@ -345,7 +345,7 @@ class TestSourcesOnAClosedSite:
     def test_debug_does_not_silence_w120(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", sitemap="")
         with routed(root, SITE={"INDEXABLE": False}), override_settings(DEBUG=True):
-            assert check_ids(check_seo_sources_on_closed_site()) == ["next.W120"]
+            assert check_ids(check_seo_sources_on_closed_site()) == ["next.W111"]
 
     def test_a_private_site_without_sources_is_silent(self, tmp_path) -> None:
         with routed(write_tree(tmp_path / "pages"), SITE={"INDEXABLE": False}):

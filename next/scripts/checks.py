@@ -206,7 +206,7 @@ def check_scripts_need_the_runtime(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_gated_blocking_scripts(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about a gated blocking script consent renders on the client (W125)."""
+    """Warn about a gated blocking script consent renders on the client (W116)."""
     if server_render() is True:
         return []
     return [
@@ -215,7 +215,7 @@ def check_gated_blocking_scripts(*args, **kwargs) -> list[CheckMessage]:
             f"category {script.category!r}. On a page the runtime renders consent "
             "for, it loads after the page, so it blocks nothing.",
             obj=str(source.path),
-            id="next.W125",
+            id="next.W116",
         )
         for source in _sources()
         for script in source.scripts
@@ -229,7 +229,7 @@ def _renders_consented(nodelist: NodeList) -> bool:
 
 @register(Tags.templates, NEXT)
 def check_consented_needs_consent(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about `{% #consented %}` while `CONSENT` stays unset (`next.W133`).
+    """Warn about `{% #consented %}` while `CONSENT` stays unset (`next.W123`).
 
     A partial answer never carries the consent, so only the setting reaches every page.
     """
@@ -252,14 +252,14 @@ def check_consented_needs_consent(*args, **kwargs) -> list[CheckMessage]:
             "patch stays hidden there, since that entry is what turns consent on for "
             "every page. Add NEXT_FRAMEWORK['CONSENT'], an empty mapping at least.",
             obj=settings,
-            id="next.W133",
+            id="next.W123",
         )
     ]
 
 
 @register(Tags.templates, NEXT)
 def check_consented_categories(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about `{% #consented %}` naming an unlisted category (`next.W092`).
+    """Warn about `{% #consented %}` naming an unlisted category (`next.W091`).
 
     Only a literal name is read, the first page reaching it named in the message.
     """
@@ -292,7 +292,7 @@ def check_consented_categories(*args, **kwargs) -> list[CheckMessage]:
             f"its else branch. Add {name!r} to the list, or name one of "
             f"{', '.join(categories)}.",
             obj=settings,
-            id="next.W092",
+            id="next.W091",
         )
         for name, first in unknown.items()
     ]
@@ -300,13 +300,13 @@ def check_consented_categories(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT, deploy=True)
 def check_script_deploy(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about a script loaded over plain HTTP (`next.W127`)."""
+    """Warn about a script loaded over plain HTTP (`next.W118`)."""
     return [
         DjangoWarning(
             f"{source.path} loads the script {script.name!r} over plain HTTP, "
             "which a https page blocks as mixed content.",
             obj=str(source.path),
-            id="next.W127",
+            id="next.W118",
         )
         for source in _sources()
         for script in source.scripts

@@ -46,13 +46,13 @@ class TestRouteCollisions:
 
 
 class TestRoutesAtHostRoot:
-    """The SEO routes resolve to the framework at the host root or warn (W099)."""
+    """The SEO routes resolve to the framework at the host root or warn (W094)."""
 
     def test_routes_under_a_prefix_warn(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", sitemap="", robots="")
         with routed(root, urlconf=PREFIX_ONLY_URLCONF):
             messages = check_seo_routes_at_host_root()
-        assert check_ids(messages) == ["next.W099", "next.W099"]
+        assert check_ids(messages) == ["next.W094", "next.W094"]
         assert messages[0].msg.startswith("/sitemap.xml does not resolve")
         assert messages[1].msg.startswith("/robots.txt does not resolve")
         assert "include('next.seo.urls')" in messages[0].msg
@@ -62,7 +62,7 @@ class TestRoutesAtHostRoot:
         root = write_tree(tmp_path / "pages", sitemap="", robots="")
         with routed(root, urlconf=SHADOWED_URLCONF):
             messages = check_seo_routes_at_host_root()
-        assert check_ids(messages) == ["next.W099", "next.W099"]
+        assert check_ids(messages) == ["next.W094", "next.W094"]
         assert "/sitemap.xml resolves to tests.support.sites.mine" in messages[0].msg
         assert "/robots.txt resolves to tests.support.sites.mine" in messages[1].msg
 

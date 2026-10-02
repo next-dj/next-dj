@@ -629,7 +629,7 @@ class TestNonceTemplatesCheck:
             NEXT_FRAMEWORK=_BARE_TEMPLATES, MIDDLEWARE=_CSP_MIDDLEWARE
         ):
             messages = check_nonce_templates()
-        assert check_ids(messages) == ["next.W126", "next.W126"]
+        assert check_ids(messages) == ["next.W117", "next.W117"]
         assert "NEXT_JS_OPTIONS['script_tag_template']" in messages[0].msg
         assert "STATIC_BACKENDS[0]['OPTIONS']['js_tag']" in messages[1].msg
 
@@ -646,7 +646,7 @@ class TestNonceTemplatesCheck:
 
 
 class TestNonceOnSharedPagesCheck:
-    """`next.W130` names an active nonce taking every shared page private."""
+    """`next.W120` names an active nonce taking every shared page private."""
 
     def _root(self, tmp_path):
         root = tmp_path / "pages"
@@ -661,7 +661,7 @@ class TestNonceOnSharedPagesCheck:
             override_settings(MIDDLEWARE=_CSP_MIDDLEWARE),
         ):
             [warning] = check_nonce_on_shared_pages()
-        assert warning.id == "next.W130"
+        assert warning.id == "next.W120"
         assert "shared" in warning.msg
         assert "CSP_NONCE" in warning.msg
 

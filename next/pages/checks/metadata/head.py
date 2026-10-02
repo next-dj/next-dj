@@ -156,7 +156,7 @@ def _origin(href: str) -> bool:
 
 
 def _link_errors(item: DeclaredSegment) -> list[CheckMessage]:
-    """Return `next.E122`, `next.E123` and `next.W110` for the free-form links."""
+    """Return `next.E122`, `next.E123` and `next.W105` for the free-form links."""
     messages: list[CheckMessage] = []
     for index, link in enumerate(item.segment.metadata.links):
         where = f"links[{index}]"
@@ -200,7 +200,7 @@ def _link_errors(item: DeclaredSegment) -> list[CheckMessage]:
                 item,
                 f"{where} with the unknown rel {rel!r}",
                 "Check the spelling, a browser ignores a rel it does not know.",
-                "next.W110",
+                "next.W105",
             )
             for rel in rels
             if rel not in KNOWN_RELS
@@ -209,7 +209,7 @@ def _link_errors(item: DeclaredSegment) -> list[CheckMessage]:
 
 
 def _icon_errors(item: DeclaredSegment) -> list[CheckMessage]:
-    """Return `next.E124` for a malformed icon and `next.W111` for a repeated one."""
+    """Return `next.E124` for a malformed icon and `next.W106` for a repeated one."""
     messages: list[CheckMessage] = []
     icons = item.segment.metadata.icons
     for index, icon in enumerate(icons):
@@ -247,7 +247,7 @@ def _icon_errors(item: DeclaredSegment) -> list[CheckMessage]:
             item,
             f"the icon rel {rel!r} with sizes {sizes!r} and media {media!r} twice",
             "Keep one, the browser picks either at random.",
-            "next.W111",
+            "next.W106",
         )
         for (rel, sizes, media), count in repeated.items()
         if count > 1
@@ -308,7 +308,7 @@ def _scale(value: str) -> float | None:
 
 
 def _viewport_errors(item: DeclaredSegment) -> list[CheckMessage]:
-    """Return `next.E126` for a scale out of range and `next.W112` for no zoom."""
+    """Return `next.E126` for a scale out of range and `next.W107` for no zoom."""
     pairs = viewport_pairs(item.segment.metadata.viewport)
     low, high = _SCALE_RANGE
     messages: list[CheckMessage] = []
@@ -335,7 +335,7 @@ def _viewport_errors(item: DeclaredSegment) -> list[CheckMessage]:
                 "a viewport that keeps the page from zooming",
                 "Drop user_scalable=False and keep maximum_scale at 2 or more, "
                 "readers with low vision rely on zoom.",
-                "next.W112",
+                "next.W107",
             )
         )
     return messages
@@ -345,7 +345,7 @@ def _viewport_errors(item: DeclaredSegment) -> list[CheckMessage]:
 def check_metadata_head_tags(*args, **kwargs) -> list[CheckMessage]:
     """Validate links, icons, names and viewport of every declared segment.
 
-    The ids are `next.E122` to `next.E126` and `next.W110` to `next.W112`.
+    The ids are `next.E122` to `next.E126` and `next.W105` to `next.W107`.
     """
     pages = loaded_metadata_pages()
     messages: list[CheckMessage] = []
@@ -381,7 +381,7 @@ def _underived_languages(og: OpenGraph) -> list[str]:
 
 @register(Tags.templates, NEXT, SEO)
 def check_metadata_social_folds(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about an og locale Open Graph cannot read (`next.W113`).
+    """Warn about an og locale Open Graph cannot read (`next.W108`).
 
     A language with no `ll_CC` form renders no `og:locale`, reported once.
     """
@@ -398,7 +398,7 @@ def check_metadata_social_folds(*args, **kwargs) -> list[CheckMessage]:
                 f"{entry.page_path} folds the og locale {code!r}, which Open Graph "
                 f"does not read. {fix}",
                 obj=str(entry.page_path),
-                id="next.W113",
+                id="next.W108",
             )
             for code, fix in _explicit_locales(og)
         )
@@ -409,7 +409,7 @@ def check_metadata_social_folds(*args, **kwargs) -> list[CheckMessage]:
                 "ll_CC og:locale, so their pages render none. Set og.locale on "
                 "those pages, or list og.locale_alternates explicitly.",
                 obj=settings,
-                id="next.W113",
+                id="next.W108",
             )
         )
     return messages
@@ -429,7 +429,7 @@ def _literal_test(key: str) -> TemplateSearch:
 def check_metadata_head_literals(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a template writes the viewport or theme-color a fold declares.
 
-    The id is `next.W118`, since the head would carry two tags that disagree.
+    The id is `next.W109`, since the head would carry two tags that disagree.
     """
     pages = loaded_metadata_pages()
     warnings: list[CheckMessage] = []
@@ -453,7 +453,7 @@ def check_metadata_head_literals(*args, **kwargs) -> list[CheckMessage]:
                     f'template already writes a literal <meta name="{name}">. Drop '
                     "the literal tag, {% metadata %} renders it.",
                     obj=str(page_path),
-                    id="next.W118",
+                    id="next.W109",
                 )
             )
     return warnings

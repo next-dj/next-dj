@@ -123,7 +123,7 @@ A node a ``@page.metadata`` callable builds with a value JSON cannot hold is lef
 ``jsonld`` merges by ``@id`` along the tree.
 A node whose raw ``@id`` an ancestor declared replaces that node in place, and a node without an ``@id`` appends.
 ``Replace([...])`` takes the list whole and ``RESET`` drops the inherited graph, see :doc:`merge`.
-``manage.py check`` reports a node that does not serialise to JSON (``next.E127``), two nodes with one ``@id`` in one ``page.py`` (``next.W108``), and one ``@id`` declared under two types (``next.E101``).
+``manage.py check`` reports a node that does not serialise to JSON (``next.E127``), two nodes with one ``@id`` in one ``page.py`` (``next.W103``), and one ``@id`` declared under two types (``next.E101``).
 The serialisation check writes the node through the same call the renderer makes, so a node that passes it renders.
 
 See also

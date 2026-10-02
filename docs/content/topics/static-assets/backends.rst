@@ -145,7 +145,7 @@ Configuring the default backend
 ``module_tag``.
    Format string for ``<script type="module">`` tags.
 
-Every template takes ``{nonce_attr}`` as well, which renders the ``nonce`` attribute of the request's CSP nonce or nothing without one, and a template that leaves it out while a nonce is active draws ``next.W126``.
+Every template takes ``{nonce_attr}`` as well, which renders the ``nonce`` attribute of the request's CSP nonce or nothing without one, and a template that leaves it out while a nonce is active draws ``next.W117``.
 
 .. code-block:: python
    :caption: config/settings.py

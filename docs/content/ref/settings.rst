@@ -498,7 +498,7 @@ A callable answering ``None`` falls through to the same fallbacks, and one that 
 ``INDEXABLE`` is ``"auto"``, which follows ``not DEBUG``, a bool, or a callable taking the request or ``None``, and every robots meta, ``X-Robots-Tag``, sitemap, and robots file follows its answer.
 A callable that raises reads as not indexable in production, logged once, and raises under ``DEBUG``.
 Under ``"auto"`` with ``DEBUG`` on, the sitemap and the robots file are still served under ``X-Robots-Tag: noindex, nofollow``.
-A value the scope cannot use is ``next.E129``, and ``manage.py check --deploy`` warns with ``next.W119`` about a missing ``URL`` unless ``SITE_ID`` pins a row, with ``next.W132`` when ``ALLOWED_HOSTS`` also holds ``"*"``, and with ``next.W120`` about ``INDEXABLE`` set to ``False`` on a site that still publishes a sitemap or a robots source.
+A value the scope cannot use is ``next.E129``, and ``manage.py check --deploy`` warns with ``next.W110`` about a missing ``URL`` unless ``SITE_ID`` pins a row, with ``next.W122`` when ``ALLOWED_HOSTS`` also holds ``"*"``, and with ``next.W111`` about ``INDEXABLE`` set to ``False`` on a site that still publishes a sitemap or a robots source.
 See :doc:`/content/topics/seo/site`.
 
 METADATA
@@ -541,7 +541,7 @@ The scope takes three upper-case options, and any other key is reported as ``nex
 
 ``DEFAULTS`` is the outermost segment of every page's metadata chain and takes the lower-case keys a ``metadata`` dict in a ``page.py`` takes, less ``breadcrumb``.
 Its ``title`` is the ``{"template": ..., "default": ...}`` form alone, because the settings tier has no page of its own to title, and its template therefore applies to every page, the root included.
-The value is normalised once per settings reload, a key or a value the schema refuses is reported as ``next.E098`` and at runtime folds the whole ``DEFAULTS`` to nothing with one logged warning rather than failing every render, a template without a default and an empty title draw ``next.E100`` and ``next.E105`` as they do on a page, and a ``Replace`` or ``RESET`` there is a no-op that ``next.W109`` reports.
+The value is normalised once per settings reload, a key or a value the schema refuses is reported as ``next.E098`` and at runtime folds the whole ``DEFAULTS`` to nothing with one logged warning rather than failing every render, a template without a default and an empty title draw ``next.E100`` and ``next.E105`` as they do on a page, and a ``Replace`` or ``RESET`` there is a no-op that ``next.W104`` reports.
 See :doc:`/content/topics/seo/metadata` for the declaration forms and :doc:`/content/topics/seo/merge` for the merge.
 
 ``CANONICAL_QUERY`` is the list or tuple of query parameter names a self canonical keeps, in the order it lists them.
@@ -589,7 +589,7 @@ Boolean that controls whether every tag the framework writes carries the CSP non
 Default value ``True``.
 
 The nonce is the one django-csp or Django's own CSP middleware minted, read without a setting of its own, see :doc:`/content/security/csp-and-nonce`.
-A render that reads a nonce goes out private, so ``manage.py check`` warns with ``next.W130`` while a nonce is active beside a page a shared cache may keep, and ``False`` suits a site that allows its scripts by hash or by source.
+A render that reads a nonce goes out private, so ``manage.py check`` warns with ``next.W120`` while a nonce is active beside a page a shared cache may keep, and ``False`` suits a site that allows its scripts by hash or by source.
 A value that is no bool passes through ``bool()`` and is reported as ``next.W072``.
 
 CONSENT
@@ -619,7 +619,7 @@ The presence of the key switches consent on.
 A project that sets ``CONSENT``, even to an empty dict, gives every page its consent state, so the banner works on pages without a gated script, and a project that leaves it out has no consent at all.
 ``BACKEND`` names a ``next.consent.ConsentBackend`` subclass, ``CATEGORIES`` the categories the project declares with ``necessary`` always among them, and ``SERVER_RENDER`` is ``"auto"``, ``True``, or ``False``.
 ``OPTIONS`` belongs to the backend, and the cookie backend reads the cookie name, lifetime, ``SameSite``, domain, path, and ``secure`` flag from it.
-``next.E135`` reports a category list without ``necessary``, ``next.E146`` a category name the cookie cannot carry, ``next.E137`` an unusable backend, ``next.E145`` an unknown render mode, ``next.W129`` an insecure consent cookie beside a secure session cookie, ``next.W133`` a ``{% #consented %}`` block on a project without ``CONSENT``, and ``next.W092`` one naming a category the list lacks.
+``next.E135`` reports a category list without ``necessary``, ``next.E146`` a category name the cookie cannot carry, ``next.E137`` an unusable backend, ``next.E145`` an unknown render mode, ``next.W119`` an insecure consent cookie beside a secure session cookie, ``next.W123`` a ``{% #consented %}`` block on a project without ``CONSENT``, and ``next.W091`` one naming a category the list lacks.
 See :doc:`/content/topics/scripts/consent`.
 
 Patching defaults

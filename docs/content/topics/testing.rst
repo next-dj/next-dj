@@ -801,7 +801,7 @@ A test suite is the cheapest place to pay that cost, so a second call turns them
 
 That run adds ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
 All three are failures a request would otherwise surface as a 404, a stripped body, or a 500.
-It also adds ``next.W083`` and the site checks, ``next.W119``, ``next.W120``, and ``next.W132``, so a suite that gates on ``fail_level="WARNING"`` runs against settings that name ``SITE["URL"]``, see :doc:`seo/auditing`.
+It also adds ``next.W083`` and the site checks, ``next.W110``, ``next.W111``, and ``next.W122``, so a suite that gates on ``fail_level="WARNING"`` runs against settings that name ``SITE["URL"]``, see :doc:`seo/auditing`.
 See :ref:`ref-system-checks` for the full catalog.
 
 See also

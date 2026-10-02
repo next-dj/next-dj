@@ -97,18 +97,18 @@ class TestCsrfDelivery:
 
 
 class TestSharedPages:
-    """`next.W122` and `next.W123` warn about a page a CDN may hold."""
+    """`next.W113` and `next.W114` warn about a page a CDN may hold."""
 
     def test_a_csrf_token_tag_is_w122(self, tmp_path) -> None:
         source = "template = '{% csrf_token %}'\ncache = {'s_maxage': 60}\n"
         with routed(_tree(tmp_path, source)):
-            assert check_ids(check_shared_page_responses()) == ["next.W122"]
+            assert check_ids(check_shared_page_responses()) == ["next.W113"]
 
     def test_a_callable_cache_counts_as_possibly_shared(self, tmp_path) -> None:
         source = "template = '{% csrf_token %}'\n\ndef cache():\n    return 60\n"
         with routed(_tree(tmp_path, source)):
             [warning] = check_shared_page_responses()
-        assert warning.id == "next.W122"
+        assert warning.id == "next.W113"
         assert "page.py (callable cache) declares" in warning.msg
 
     def test_locale_middleware_outside_i18n_patterns_is_w123(self, tmp_path) -> None:
@@ -116,7 +116,7 @@ class TestSharedPages:
             routed(_tree(tmp_path, "template = 'x'\ncache = 60\n")),
             override_settings(**LOCALE),
         ):
-            assert check_ids(check_shared_page_responses()) == ["next.W123"]
+            assert check_ids(check_shared_page_responses()) == ["next.W114"]
 
     def test_prefixed_pages_mix_no_languages(self, tmp_path) -> None:
         with (
@@ -137,7 +137,7 @@ def _pages(tmp_path: Path, *sources: str) -> Path:
 
 
 class TestCsrfInSession:
-    """`next.W131` names `CSRF_USE_SESSIONS` taking every shared page private."""
+    """`next.W121` names `CSRF_USE_SESSIONS` taking every shared page private."""
 
     def test_csrf_in_its_cookie_is_silent(self, tmp_path) -> None:
         with routed(_pages(tmp_path, "cache = 60\n")):
@@ -149,7 +149,7 @@ class TestCsrfInSession:
             override_settings(CSRF_USE_SESSIONS=True),
         ):
             [warning] = check_csrf_in_session()
-        assert warning.id == "next.W131"
+        assert warning.id == "next.W121"
         assert "p0" in warning.msg
         assert "CSRF_USE_SESSIONS" in warning.msg
 
@@ -194,7 +194,7 @@ class Conditional(ConditionalGetMiddleware):
 
 
 class TestConditionalGetOrder:
-    """`next.W134` names a cookie-setting middleware wrapping `ConditionalGet`."""
+    """`next.W124` names a cookie-setting middleware wrapping `ConditionalGet`."""
 
     @pytest.mark.parametrize(
         "middleware",
@@ -214,7 +214,7 @@ class TestConditionalGetOrder:
             override_settings(MIDDLEWARE=[SECURITY, SESSIONS, CONDITIONAL]),
         ):
             [warning] = check_conditional_get_order()
-        assert warning.id == "next.W134"
+        assert warning.id == "next.W124"
         assert warning.msg.startswith(f"settings.MIDDLEWARE lists {SESSIONS} above")
         assert "p0" in warning.msg
         assert GUARD in warning.hint
@@ -255,7 +255,7 @@ class TestConditionalGetOrder:
             routed(_pages(tmp_path, "cache = 60\n")),
             override_settings(MIDDLEWARE=[SESSIONS, GUARD, CONDITIONAL]),
         ):
-            assert check_ids(check_conditional_get_order()) == ["next.W134"]
+            assert check_ids(check_conditional_get_order()) == ["next.W124"]
 
     def test_no_shared_page_is_silent(self, tmp_path) -> None:
         with (

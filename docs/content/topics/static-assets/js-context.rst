@@ -436,7 +436,7 @@ Use them to add attributes such as ``async`` or ``crossorigin`` without writing 
 A template carries only its own placeholders, ``{url}`` or ``{payload}`` and ``{nonce_attr}``, and no other substitution is supported.
 The templates are formatted with Python ``str.format``, not Django templates.
 A literal ``{`` or ``}`` inside the template body collides with the formatter and must be doubled to ``{{`` or ``}}`` to survive ``str.format``.
-A template without ``{nonce_attr}`` renders a tag the Content Security Policy refuses while a nonce is active, which ``next.W126`` reports, see :doc:`/content/security/csp-and-nonce`.
+A template without ``{nonce_attr}`` renders a tag the Content Security Policy refuses while a nonce is active, which ``next.W117`` reports, see :doc:`/content/security/csp-and-nonce`.
 
 See also
 --------

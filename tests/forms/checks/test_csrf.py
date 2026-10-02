@@ -170,7 +170,7 @@ def _fresh_run():
 
 @pytest.mark.usefixtures("_fresh_run")
 class TestSharedPageForms:
-    """`next.W121` and `next.W124` warn about the forms of a page a CDN may hold."""
+    """`next.W112` and `next.W115` warn about the forms of a page a CDN may hold."""
 
     def test_a_private_page_is_silent(self, tmp_path) -> None:
         source = FORM_PAGE.replace("cache = 60\n", "")
@@ -179,7 +179,7 @@ class TestSharedPageForms:
 
     def test_a_shared_form_without_js_is_w124(self, tmp_path) -> None:
         with routed(_tree(tmp_path, FORM_PAGE)):
-            assert check_ids(check_shared_page_forms()) == ["next.W124"]
+            assert check_ids(check_shared_page_forms()) == ["next.W115"]
 
     @pytest.mark.parametrize(
         "source",
@@ -201,7 +201,7 @@ class TestSharedPageForms:
         )
         with routed(_tree(tmp_path, source)):
             [warning] = check_shared_page_forms()
-        assert warning.id == "next.W124"
+        assert warning.id == "next.W115"
         assert "declare requires_runtime on the action" in warning.msg
 
     @pytest.mark.parametrize(
@@ -213,13 +213,13 @@ class TestSharedPageForms:
         self, tmp_path, source, layout
     ) -> None:
         with routed(_tree(tmp_path, source, layout), CSRF_DELIVERY="eager"):
-            assert check_ids(check_shared_page_forms()) == ["next.W121"]
+            assert check_ids(check_shared_page_forms()) == ["next.W112"]
 
     def test_lazy_delivery_warns_on_a_private_form_page(self, tmp_path) -> None:
         source = FORM_PAGE.replace("cache = 60\n", "")
         with routed(_tree(tmp_path, source), CSRF_DELIVERY="lazy"):
             [warning] = check_shared_page_forms()
-        assert warning.id == "next.W124"
+        assert warning.id == "next.W115"
         assert "renders under CSRF_DELIVERY 'lazy'" in warning.msg
 
     def test_lazy_delivery_names_a_shared_page_once(self, tmp_path) -> None:

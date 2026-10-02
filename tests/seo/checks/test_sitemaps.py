@@ -101,14 +101,14 @@ class TestSitemapTemplates:
 
 
 class TestSectionLabels:
-    """Trees sharing a section label serve numbered sections (`next.W104`)."""
+    """Trees sharing a section label serve numbered sections (`next.W099`)."""
 
     def test_two_trees_with_one_label_warn(self, tmp_path) -> None:
         first = write_tree(tmp_path / "a" / "pages", sitemap="")
         second = write_tree(tmp_path / "b" / "pages")
         with routed(first, second):
             messages = check_sitemap_section_labels()
-        assert check_ids(messages) == ["next.W104"]
+        assert check_ids(messages) == ["next.W099"]
         assert messages[0].level == WARNING
         assert f"{first}, {second} share the sitemap section label 'pages'" in (
             messages[0].msg
@@ -138,13 +138,13 @@ class TestSectionLabels:
 
 
 class TestDynamicRoutes:
-    """A dynamic route the sitemap neither lists nor excludes warns (`next.W097`)."""
+    """A dynamic route the sitemap neither lists nor excludes warns (`next.W092`)."""
 
     def test_an_unlisted_dynamic_route_warns(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", pages=("", "posts/[slug]"), sitemap="")
         with routed(root):
             messages = check_sitemap_dynamic_routes()
-        assert check_ids(messages) == ["next.W097"]
+        assert check_ids(messages) == ["next.W092"]
         assert "@sitemap.items('posts/[slug]')" in messages[0].msg
         assert messages[0].obj == str(root / "posts" / "[slug]" / "page.py")
 
@@ -179,14 +179,14 @@ class TestDynamicRoutes:
 
 
 class TestNoindexItems:
-    """Items listed for a noindex page warn (`next.W098`)."""
+    """Items listed for a noindex page warn (`next.W093`)."""
 
     def test_items_on_a_noindex_page_warn(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", sitemap=POSTS_ITEMS)
         page_path = write_page(root, "posts/[slug]", NOINDEX)
         with routed(root):
             messages = check_sitemap_noindex_items()
-        assert check_ids(messages) == ["next.W098"]
+        assert check_ids(messages) == ["next.W093"]
         assert "is noindex by its static metadata" in messages[0].msg
         assert messages[0].obj == str(page_path)
 
@@ -208,11 +208,11 @@ class TestNoindexItems:
         write_page(root, "posts/[slug]", NOINDEX)
         with routed(root, SITE={"INDEXABLE": refusing_rule}):
             messages = check_sitemap_noindex_items()
-        assert check_ids(messages) == ["next.W098"]
+        assert check_ids(messages) == ["next.W093"]
 
 
 class TestI18nOptions:
-    """i18n options that take no effect warn (`next.W105`, `next.W106`)."""
+    """i18n options that take no effect warn (`next.W100`, `next.W101`)."""
 
     @override_settings(**I18N)
     def test_every_inconsistent_option_is_named(self, tmp_path) -> None:
@@ -221,7 +221,7 @@ class TestI18nOptions:
         )
         with routed(root, urlconf=I18N_URLCONF):
             messages = check_sitemap_i18n_options()
-        assert check_ids(messages) == ["next.W105"] * 3
+        assert check_ids(messages) == ["next.W100"] * 3
         assert "take effect only with i18n = True" in messages[0].msg
         assert "Set i18n = True, or drop alternates and x_default." in messages[0].msg
         assert "only with alternates = True" in messages[1].msg
@@ -233,7 +233,7 @@ class TestI18nOptions:
         root = write_tree(tmp_path / "pages", sitemap="i18n = True\n")
         with routed(root):
             messages = check_sitemap_i18n_options()
-        assert check_ids(messages) == ["next.W106"]
+        assert check_ids(messages) == ["next.W101"]
         assert messages[0].obj == str(root / "sitemap.py")
 
     @override_settings(**I18N)
@@ -285,7 +285,7 @@ class TestLimitUnderAlternates:
 
 
 class TestExcludedItems:
-    """`@sitemap.items` on a trail `exclude` covers lists nothing (`next.W107`)."""
+    """`@sitemap.items` on a trail `exclude` covers lists nothing (`next.W102`)."""
 
     def test_an_excluded_items_trail_warns(self, tmp_path) -> None:
         root = write_tree(
@@ -295,7 +295,7 @@ class TestExcludedItems:
         )
         with routed(root):
             messages = check_sitemap_excluded_items()
-        assert check_ids(messages) == ["next.W107"]
+        assert check_ids(messages) == ["next.W102"]
         assert "@sitemap.items('posts/[slug]')" in messages[0].msg
 
     def test_an_items_trail_outside_exclude_passes(self, tmp_path) -> None:

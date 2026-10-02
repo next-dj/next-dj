@@ -114,7 +114,7 @@ class TestConsentCookieSecure:
             SESSION_COOKIE_SECURE=True,
             NEXT_FRAMEWORK={"CONSENT": {"OPTIONS": {"secure": False}}},
         ):
-            assert check_ids(check_consent_cookie_secure()) == ["next.W129"]
+            assert check_ids(check_consent_cookie_secure()) == ["next.W119"]
 
     @pytest.mark.parametrize(
         ("session", "consent"),

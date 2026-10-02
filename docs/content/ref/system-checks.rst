@@ -27,7 +27,7 @@ Four of them are ``check_page_module_imports`` (``next.E017``), ``check_componen
 The first three import or compile every user module of a tree, which costs a full walk that a routine ``manage.py`` command should not pay.
 The fourth describes a configuration every development checkout has, so reporting it outside a deployment audit would warn every project about nothing.
 ``check_runtime_bundles_deployed`` (``next.W090``) asks the static files a deployment serves for the client runtime, which a source checkout builds only on demand.
-The other four read the settings a deployment runs on, ``check_site_url_for_deploy`` (``next.W119``, ``next.W132``) and ``check_seo_sources_on_closed_site`` (``next.W120``) with the ``seo`` tag, ``check_script_deploy`` (``next.W127``), and ``check_consent_cookie_secure`` (``next.W129``).
+The other four read the settings a deployment runs on, ``check_site_url_for_deploy`` (``next.W110``, ``next.W122``) and ``check_seo_sources_on_closed_site`` (``next.W111``) with the ``seo`` tag, ``check_script_deploy`` (``next.W118``), and ``check_consent_cookie_secure`` (``next.W119``).
 
 Every next.dj check carries the ``next`` tag.
 That tag is the importable string constant ``next.checks.NEXT``, so a project check joins the framework ones by decorating itself with ``@register(NEXT)`` rather than by repeating the literal.
@@ -129,7 +129,7 @@ Scripts and consent
 ~~~~~~~~~~~~~~~~~~~
 
 ``next.scripts.checks`` reads every ``scripts.py``, the consent categories, and the composed pages that render ``{% #consented %}``, and ``next.consent.checks`` the rest of the ``CONSENT`` scope.
-``next.static.checks`` owns ``next.W126`` for the tag templates the nonce reaches and ``next.W130`` for the shared pages a nonce takes private, since the nonce is a static option.
+``next.static.checks`` owns ``next.W117`` for the tag templates the nonce reaches and ``next.W120`` for the shared pages a nonce takes private, since the nonce is a static option.
 It also owns ``next.E130`` for the injection policy, ``next.E139`` for a tag template ``.format`` cannot fill, and ``next.W090`` for a runtime bundle the storage cannot serve.
 
 .. automodule:: next.scripts.checks
@@ -207,6 +207,10 @@ Check code reference
 The codes follow the :doc:`Django convention <django:ref/checks>` ``next.X<NNN>`` where ``X`` is ``E`` for errors and ``W`` for warnings.
 One code stands for one condition, so silencing it through ``SILENCED_SYSTEM_CHECKS`` never takes an unrelated failure down with it.
 The ``Emitted by`` column names the module that builds the message, which for the three check packages is the submodule rather than the package.
+
+A code that a release dropped is retired and never reused, so a silenced code keeps naming the condition it named.
+The retired errors are ``next.E001`` and ``next.E091``.
+The retired warnings are ``next.W003`` through ``next.W029``, ``next.W032`` through ``next.W041``, ``next.W044``, ``next.W045``, ``next.W047`` through ``next.W053``, ``next.W064`` through ``next.W066``, and ``next.W073``.
 
 Errors
 ~~~~~~
@@ -618,7 +622,7 @@ Errors
      - ``next.seo.checks.robots``
    * - ``next.E115``
      - A page directory is named after an address the SEO sources serve, ``sitemap.xml``, ``sitemap-<section>.xml``, or ``robots.txt``, so the page and the framework route shadow each other.
-       A urlpattern of the project answering the address first is ``next.W099``.
+       A urlpattern of the project answering the address first is ``next.W094``.
      - ``next.seo.checks.routes``
    * - ``next.E116``
      - Two sources serve one sitemap section name, two page trees, an ``@sitemap.items(section=...)``, or a backend, and only the first is listed.
@@ -898,127 +902,127 @@ Warnings
        A page renders without the runtime, or without the chunk, and logs it once.
        The check carries ``deploy=True``.
      - ``next.static.checks``
-   * - ``next.W092``
+   * - ``next.W091``
      - A ``{% #consented %}`` block on a composed page, a component it reaches, or a template it includes names by a literal a category ``CONSENT["CATEGORIES"]`` does not list, so no visitor can grant it and the block always renders its ``else`` branch.
        A category named by a variable is not read, and under ``DEBUG`` a render logs such a category once.
-       Silent while ``CONSENT`` is unset, which ``next.W133`` reports, or while ``next.E135`` reports the list.
+       Silent while ``CONSENT`` is unset, which ``next.W123`` reports, or while ``next.E135`` reports the list.
      - ``next.scripts.checks``
-   * - ``next.W097``
+   * - ``next.W092``
      - A dynamic route of a tree with a ``sitemap.py`` has no ``@sitemap.items`` callable, matches no ``exclude`` glob, and is not ``noindex`` by its static metadata, so the sitemap lists no URL for it.
      - ``next.seo.checks.sitemaps``
-   * - ``next.W098``
+   * - ``next.W093``
      - An ``@sitemap.items`` trail names a page whose static metadata is ``noindex``, so the sitemap invites crawlers to a page the tag turns away.
        Silent while the site is closed to search, which serves no sitemap.
      - ``next.seo.checks.sitemaps``
-   * - ``next.W099``
+   * - ``next.W094``
      - A served SEO route, ``/sitemap.xml`` or ``/robots.txt``, does not resolve to the framework view at the host root under ``ROOT_URLCONF``, because ``include("next.urls")`` sits under a prefix or inside ``i18n_patterns``, or a pattern of the project answers the address first.
      - ``next.seo.checks.routes``
-   * - ``next.W100``
+   * - ``next.W095``
      - A ``Disallow`` of ``robots.py`` covers a URL the sitemap lists, or ``/sitemap.xml`` itself.
        A dynamic route counts by its URL cut at the first parameter, reversed with placeholder values, so a tree of dynamic routes alone is checked too, and a trail whose converter takes no placeholder, a custom converter for one, is skipped.
        Only the groups of static ``rules`` that name ``*`` are read, since a crawler named in a group of its own follows that group alone, and the check is silent while the site is closed to search.
      - ``next.seo.checks.robots``
-   * - ``next.W101``
+   * - ``next.W096``
      - A ``Disallow`` of ``robots.py`` covers a ``noindex`` page, whose tag a crawler kept out never reads.
-       Dynamic routes and the groups read count as ``next.W100`` describes.
+       Dynamic routes and the groups read count as ``next.W095`` describes.
      - ``next.seo.checks.robots``
-   * - ``next.W102``
+   * - ``next.W097``
      - A ``sitemap.py``, ``robots.py``, or ``robots.txt`` sits below the top of its page tree, where nothing reads it.
      - ``next.seo.checks.sources``
-   * - ``next.W103``
+   * - ``next.W098``
      - A static ``robots.txt`` names no ``Sitemap:`` line while the project serves a sitemap, and a static file is served as written.
        Silent while the site is closed to search.
      - ``next.seo.checks.robots``
-   * - ``next.W104``
+   * - ``next.W099``
      - Two page roots take the same sitemap section label, so the trees serve as numbered sections in router order, and the message lists the sections actually served.
        Routing them from differently named directories or different apps keeps the section addresses stable.
      - ``next.seo.checks.sitemaps``
-   * - ``next.W105``
+   * - ``next.W100``
      - The i18n options of a ``sitemap.py`` take no effect as written, ``alternates`` or ``x_default`` without ``i18n``, ``x_default`` without ``alternates``, or a ``languages`` code outside ``settings.LANGUAGES``.
        Each problem names its own fix, setting the option it needs or dropping the one not read.
      - ``next.seo.checks.sitemaps``
-   * - ``next.W106``
+   * - ``next.W101``
      - A ``sitemap.py`` sets ``i18n = True`` while ``ROOT_URLCONF`` mounts no ``i18n_patterns()``, so every language lists the same URL.
      - ``next.seo.checks.sitemaps``
-   * - ``next.W107``
+   * - ``next.W102``
      - An ``@sitemap.items`` trail matches an ``exclude`` glob of the same file, so its URLs are dropped.
      - ``next.seo.checks.sitemaps``
-   * - ``next.W108``
+   * - ``next.W103``
      - One segment declares several JSON-LD nodes with the same ``@id``, and only the last renders.
      - ``next.pages.checks.metadata.scope``
-   * - ``next.W109``
+   * - ``next.W104``
      - ``DEFAULTS`` wraps a value in ``Replace`` or ``RESET``, which has no inherited value to replace there.
      - ``next.pages.checks.metadata.scope``
-   * - ``next.W110``
+   * - ``next.W105``
      - A ``links`` entry names a rel no browser knows.
      - ``next.pages.checks.metadata.head``
-   * - ``next.W111``
+   * - ``next.W106``
      - Two icons share their rel, sizes, and media, and the browser picks either.
      - ``next.pages.checks.metadata.head``
-   * - ``next.W112``
+   * - ``next.W107``
      - A viewport keeps the page from zooming, through ``user_scalable=False`` or a ``maximum_scale`` below 2.
      - ``next.pages.checks.metadata.head``
-   * - ``next.W113``
+   * - ``next.W108``
      - A page folds an ``og:locale`` Open Graph cannot read, or ``locale_alternates=True`` meets a language no ``ll_CC`` locale derives from.
      - ``next.pages.checks.metadata.head``
-   * - ``next.W118``
+   * - ``next.W109``
      - A page folds a viewport or a theme color while its composed template writes a literal meta of the same name, so the head carries two that disagree.
      - ``next.pages.checks.metadata.head``
-   * - ``next.W119``
+   * - ``next.W110``
      - ``SITE["URL"]`` is unset and no ``django.contrib.sites`` row is pinned through ``SITE_ID``, so canonical, Open Graph, sitemap, and robots URLs follow the ``Host`` header.
-       ``ALLOWED_HOSTS`` holding ``"*"`` raises it to ``next.W132``.
+       ``ALLOWED_HOSTS`` holding ``"*"`` raises it to ``next.W122``.
        The check carries ``deploy=True`` and the ``seo`` tag.
      - ``next.site.checks``
-   * - ``next.W120``
+   * - ``next.W111``
      - ``SITE["INDEXABLE"]`` is ``False`` while the site still publishes a ``sitemap.py`` or a robots source for crawlers.
        A site private by design serves none of them and draws no warning.
        The check carries ``deploy=True`` and the ``seo`` tag.
      - ``next.seo.checks.sources``
-   * - ``next.W121``
+   * - ``next.W112``
      - A page a shared cache may hold renders a ``{% form %}`` or the runtime while ``CSRF_DELIVERY`` is ``"eager"``, so every response sets the CSRF cookie and goes out private.
      - ``next.forms.checks.csrf``
-   * - ``next.W122``
+   * - ``next.W113``
      - A page a shared cache may hold renders ``{% csrf_token %}``, which sets the CSRF cookie on every response.
-       A page with a callable ``cache`` counts as one a shared cache may hold, here and in ``next.W123``, ``next.W130``, ``next.W131``, and ``next.W134``, and the message marks it ``(callable cache)``.
+       A page with a callable ``cache`` counts as one a shared cache may hold, here and in ``next.W114``, ``next.W120``, ``next.W121``, and ``next.W124``, and the message marks it ``(callable cache)``.
      - ``next.pages.checks.responses``
-   * - ``next.W123``
+   * - ``next.W114``
      - A page a shared cache may hold answers several languages at one URL, ``LocaleMiddleware`` active with more than one language and the pages outside ``i18n_patterns()``.
      - ``next.pages.checks.responses``
-   * - ``next.W124``
+   * - ``next.W115``
      - A page a shared cache may hold, or any page under ``CSRF_DELIVERY="lazy"``, renders a ``{% form %}`` without a CSRF field, so a browser without JavaScript gets 403 on submit.
        A form naming by a literal an action that declares ``requires_runtime`` does not count, while one naming its action through a variable or naming no registered action still does.
      - ``next.forms.checks.csrf``
-   * - ``next.W125``
+   * - ``next.W116``
      - A gated script loads ``BLOCKING`` while consent may render on the client, where it loads after the page and blocks nothing.
      - ``next.scripts.checks``
-   * - ``next.W126``
+   * - ``next.W117``
      - A custom ``NEXT_JS_OPTIONS`` or backend tag template holds no ``{nonce_attr}`` while a CSP nonce is active, so the tag it renders is refused.
      - ``next.static.checks``
-   * - ``next.W127``
+   * - ``next.W118``
      - A script loads its ``src`` over plain HTTP, which a https page blocks as mixed content.
        The check carries ``deploy=True``.
      - ``next.scripts.checks``
-   * - ``next.W129``
+   * - ``next.W119``
      - The consent cookie's ``secure`` option is ``False`` while ``SESSION_COOKIE_SECURE`` is on.
        The check carries ``deploy=True``.
      - ``next.consent.checks``
-   * - ``next.W130``
+   * - ``next.W120``
      - A CSP nonce is active, ``CSP_NONCE`` on and a nonce-minting middleware installed, while pages declare a ``cache`` a CDN may hold.
        A nonce belongs to one visitor, so each of those pages goes out private, and the message lists them.
      - ``next.static.checks``
-   * - ``next.W131``
+   * - ``next.W121``
      - ``CSRF_USE_SESSIONS`` is on while pages declare a ``cache`` a CDN may hold.
        The CSRF middleware then reads the session on every request, so each of those pages goes out private, and the message lists them.
      - ``next.pages.checks.responses``
-   * - ``next.W132``
+   * - ``next.W122``
      - ``SITE["URL"]`` is unset while ``ALLOWED_HOSTS`` holds ``"*"``, so any client picks the host of the canonical, Open Graph, sitemap, and robots URLs, and a CDN may keep them for everyone.
        The check carries ``deploy=True`` and the ``seo`` tag.
      - ``next.site.checks``
-   * - ``next.W133``
+   * - ``next.W123``
      - ``{% #consented %}`` renders on a composed page while ``NEXT_FRAMEWORK`` holds no ``CONSENT`` entry.
        A partial response carries no consent state, so a block that reaches a page only through a patch stays hidden there.
      - ``next.scripts.checks``
-   * - ``next.W134``
+   * - ``next.W124``
      - ``settings.MIDDLEWARE`` lists ``ConditionalGetMiddleware`` below a middleware that may set a cookie, such as ``SessionMiddleware``, while pages declare a ``cache`` a CDN may hold.
        The 304 it answers copies the shared cache before that cookie lands, so the framework cannot take it private, and the message lists the pages.
        A middleware is matched by its class, so a subclass counts as its base, and one that does not import counts as one that may set a cookie.

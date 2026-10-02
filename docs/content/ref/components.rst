@@ -166,7 +166,7 @@ Nodes
 -----
 
 ``next.components.nodes`` holds ``ComponentTagNode``, the base of the node the ``{% component %}`` tag compiles to, apart from the tag library.
-The tag library reaches ``next.static``, which imports ``next.components``, so the checks behind ``next.W085`` and ``next.W118`` find compiled component tags through this base rather than importing the library.
+The tag library reaches ``next.static``, which imports ``next.components``, so the checks behind ``next.W085`` and ``next.W109`` find compiled component tags through this base rather than importing the library.
 
 .. automodule:: next.components.nodes
    :members:
