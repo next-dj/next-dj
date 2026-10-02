@@ -10,9 +10,9 @@ from django.conf import settings
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
 from next.checks import NEXT
-from next.checks.common import errors_for_unknown_keys
+from next.checks.common import errors_for_unknown_keys, raw_scope
 from next.conf import import_class_cached
-from next.conf.defaults import AUTO, USER_SETTING
+from next.conf.defaults import AUTO
 
 from .backends import ConsentBackend
 from .manager import CONSENT_KEYS
@@ -29,21 +29,9 @@ _CATEGORY_NAME: Final = re.compile(r"[A-Za-z0-9_.-]+")
 """
 
 
-def _raw_scope(name: str) -> Mapping[str, object] | None:
-    """Return the raw `NEXT_FRAMEWORK[name]` scope, `None` where it is no mapping.
-
-    `next.E076` reports a scope of the wrong type, so the checks here skip it.
-    """
-    raw = getattr(settings, USER_SETTING, None)
-    if not isinstance(raw, dict):
-        return None
-    scope = raw.get(name)
-    return scope if isinstance(scope, dict) else None
-
-
 def _raw_categories() -> object:
     """Return `CONSENT['CATEGORIES']` as written, `None` where it is not."""
-    scope = _raw_scope("CONSENT")
+    scope = raw_scope("CONSENT")
     return None if scope is None else scope.get("CATEGORIES")
 
 
@@ -138,7 +126,7 @@ def _server_render_errors(scope: Mapping[str, object]) -> list[CheckMessage]:
 @register(NEXT)
 def check_consent_settings(*args, **kwargs) -> list[CheckMessage]:
     """Validate the keys (E035), the render mode (E145) and the backend (E137)."""
-    scope = _raw_scope("CONSENT")
+    scope = raw_scope("CONSENT")
     if scope is None:
         return []
     return [
@@ -156,10 +144,10 @@ def check_consent_categories(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT, deploy=True)
 def check_consent_cookie_secure(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when the session cookie is Secure and the consent cookie is not (W129)."""
+    """Warn when the session cookie is Secure and the consent cookie is not (W119)."""
     if not getattr(settings, "SESSION_COOKIE_SECURE", False):
         return []
-    scope = _raw_scope("CONSENT") or {}
+    scope = raw_scope("CONSENT") or {}
     options = scope.get("OPTIONS")
     if not isinstance(options, Mapping) or options.get("secure") is not False:
         return []
@@ -169,7 +157,7 @@ def check_consent_cookie_secure(*args, **kwargs) -> list[CheckMessage]:
             "True, so the consent cookie also travels over plain HTTP. Leave it None "
             "to follow the scheme, or set it True.",
             obj=settings,
-            id="next.W129",
+            id="next.W119",
         )
     ]
 
