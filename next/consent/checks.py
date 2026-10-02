@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Final
 
@@ -15,18 +16,81 @@ from next.conf.defaults import AUTO, USER_SETTING
 
 from .backends import ConsentBackend
 from .manager import CONSENT_KEYS
+from .markers import NECESSARY
 
 
 _PREFIX: Final = "NEXT_FRAMEWORK['CONSENT']"
 
+_CATEGORY_NAME: Final = re.compile(r"[A-Za-z0-9_.-]+")
+"""A category name the consent cookie `2:<a>|<b>:<seconds>` carries intact.
 
-def _raw_scope() -> Mapping[str, object] | None:
-    """Return the raw `CONSENT` scope, or `None` where `next.E076` reports it."""
+`:` closes the list and `|` separates the names, so neither may appear in one, nor
+`,`, which separated them in the first format the server still reads.
+"""
+
+
+def _raw_scope(name: str) -> Mapping[str, object] | None:
+    """Return the raw `NEXT_FRAMEWORK[name]` scope, `None` where it is no mapping.
+
+    `next.E076` reports a scope of the wrong type, so the checks here skip it.
+    """
     raw = getattr(settings, USER_SETTING, None)
     if not isinstance(raw, dict):
         return None
-    scope = raw.get("CONSENT")
+    scope = raw.get(name)
     return scope if isinstance(scope, dict) else None
+
+
+def _raw_categories() -> object:
+    """Return `CONSENT['CATEGORIES']` as written, `None` where it is not."""
+    scope = _raw_scope("CONSENT")
+    return None if scope is None else scope.get("CATEGORIES")
+
+
+def category_list_problem() -> str | None:
+    """Return what makes `CONSENT['CATEGORIES']` unusable, `None` when nothing does.
+
+    The scripts checks read it too, so a list `next.E135` reports draws no `next.E140`
+    for every script it would otherwise leave out.
+    """
+    listed = _raw_categories()
+    if listed is None:
+        return None
+    if not isinstance(listed, list | tuple) or not all(
+        isinstance(name, str) and name for name in listed
+    ):
+        return "lists no category names. Write names like ['necessary', 'ads']"
+    if NECESSARY not in listed:
+        return (
+            f"does not list {NECESSARY!r}, the category every visitor grants. "
+            f"Add {NECESSARY!r} to the list"
+        )
+    return None
+
+
+def _listed_categories() -> list[CheckMessage]:
+    """Report a `CONSENT['CATEGORIES']` that is no list of names or lacks necessary."""
+    problem = category_list_problem()
+    if problem is None:
+        return []
+    return [Error(f"{_PREFIX}['CATEGORIES'] {problem}.", obj=settings, id="next.E135")]
+
+
+def _unsafe_categories() -> list[CheckMessage]:
+    """Report a category name the consent cookie cannot carry (`next.E146`)."""
+    listed = _raw_categories()
+    names = listed if isinstance(listed, list | tuple) else ()
+    return [
+        Error(
+            f"{_PREFIX}['CATEGORIES'] lists {name!r}, which the consent cookie cannot "
+            "carry, since it writes the granted names between colons, separated by "
+            "'|'. Use only letters, digits, '_', '-' and '.'.",
+            obj=settings,
+            id="next.E146",
+        )
+        for name in names
+        if isinstance(name, str) and name and not _CATEGORY_NAME.fullmatch(name)
+    ]
 
 
 def _backend_errors(scope: Mapping[str, object]) -> list[CheckMessage]:
@@ -48,7 +112,10 @@ def _backend_errors(scope: Mapping[str, object]) -> list[CheckMessage]:
         return []
     return [
         Error(
-            f"{_PREFIX}['BACKEND'] {path!r} {problem}, so no page can read consent.",
+            f"{_PREFIX}['BACKEND'] {path!r} {problem}, so every page treats each "
+            "visitor as undecided and denies every category but necessary. Name a "
+            "next.consent.ConsentBackend subclass by its dotted path, or remove "
+            "BACKEND to read the cookie the runtime writes.",
             obj=settings,
             id="next.E137",
         )
@@ -71,7 +138,7 @@ def _server_render_errors(scope: Mapping[str, object]) -> list[CheckMessage]:
 @register(NEXT)
 def check_consent_settings(*args, **kwargs) -> list[CheckMessage]:
     """Validate the keys (E035), the render mode (E145) and the backend (E137)."""
-    scope = _raw_scope()
+    scope = _raw_scope("CONSENT")
     if scope is None:
         return []
     return [
@@ -81,12 +148,18 @@ def check_consent_settings(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
+@register(NEXT)
+def check_consent_categories(*args, **kwargs) -> list[CheckMessage]:
+    """Report an unusable category list (E135) and a name the cookie cannot carry."""
+    return _listed_categories() + _unsafe_categories()
+
+
 @register(NEXT, deploy=True)
 def check_consent_cookie_secure(*args, **kwargs) -> list[CheckMessage]:
     """Warn when the session cookie is Secure and the consent cookie is not (W129)."""
     if not getattr(settings, "SESSION_COOKIE_SECURE", False):
         return []
-    scope = _raw_scope() or {}
+    scope = _raw_scope("CONSENT") or {}
     options = scope.get("OPTIONS")
     if not isinstance(options, Mapping) or options.get("secure") is not False:
         return []
@@ -101,4 +174,9 @@ def check_consent_cookie_secure(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
-__all__ = ["check_consent_cookie_secure", "check_consent_settings"]
+__all__ = [
+    "category_list_problem",
+    "check_consent_categories",
+    "check_consent_cookie_secure",
+    "check_consent_settings",
+]

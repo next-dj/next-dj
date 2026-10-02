@@ -1,7 +1,11 @@
 import pytest
 from django.test import override_settings
 
-from next.consent.checks import check_consent_cookie_secure, check_consent_settings
+from next.consent.checks import (
+    check_consent_categories,
+    check_consent_cookie_secure,
+    check_consent_settings,
+)
 from tests.support import check_ids
 
 
@@ -48,12 +52,58 @@ class TestConsentSettings:
             messages = check_consent_settings()
         assert check_ids(messages) == ["next.E137"]
         assert fragment in messages[0].msg
+        assert "remove BACKEND" in messages[0].msg
 
     def test_an_unknown_render_mode_is_e145(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"CONSENT": {"SERVER_RENDER": "yes"}}):
             messages = check_consent_settings()
         assert check_ids(messages) == ["next.E145"]
         assert "'SERVER_RENDER'" in messages[0].msg
+
+
+class TestConsentCategories:
+    """A usable category list (`next.E135`) of names the cookie carries (`E146`)."""
+
+    @pytest.mark.parametrize(
+        ("categories", "fragment"),
+        [
+            (["analytics"], "does not list 'necessary'"),
+            ("x", "lists no category"),
+            (["necessary", ""], "lists no category"),
+        ],
+    )
+    def test_an_unusable_list_is_e135(self, categories: object, fragment: str) -> None:
+        with override_settings(NEXT_FRAMEWORK={"CONSENT": {"CATEGORIES": categories}}):
+            messages = check_consent_categories()
+        assert check_ids(messages) == ["next.E135"]
+        assert fragment in messages[0].msg
+
+    def test_a_name_the_cookie_cannot_carry_is_e146(self) -> None:
+        listed = [
+            "necessary",
+            "ad_storage",
+            "web-v2.1",
+            "a,b",
+            "a:b",
+            "a|b",
+            "a;b",
+            "a b",
+            "é",
+        ]
+        with override_settings(NEXT_FRAMEWORK={"CONSENT": {"CATEGORIES": listed}}):
+            messages = check_consent_categories()
+        assert check_ids(messages) == ["next.E146"] * 6
+        assert "'a,b'" in messages[0].msg
+        assert "'|'" in messages[0].msg
+        assert "letters, digits" in messages[0].msg
+
+    @pytest.mark.parametrize(
+        "framework",
+        [{}, {"CONSENT": {}}, {"CONSENT": {"CATEGORIES": ["necessary", "ads"]}}],
+    )
+    def test_a_usable_list_is_silent(self, framework: dict[str, object]) -> None:
+        with override_settings(NEXT_FRAMEWORK=framework):
+            assert check_consent_categories() == []
 
 
 class TestConsentCookieSecure:

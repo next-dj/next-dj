@@ -709,7 +709,7 @@ class TestSitemap:
         }
 
 
-GRANT_ALL = "1:analytics,marketing:1700000000"
+GRANT_ALL = "2:analytics|marketing:1700000000"
 FAQ_NODE = {
     "@type": "FAQPage",
     "mainEntity": [

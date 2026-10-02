@@ -596,13 +596,13 @@ describe("Next.consent and Next.scripts", () => {
     win.Next.consent.update({ marketing: true });
     expect(win.Next.consent.get()).toEqual({ necessary: true, marketing: true });
     expect(win.Next.scripts.status("pixel")).toBe("loaded");
-    expect(document.cookie).toContain("next_consent=1:marketing:");
+    expect(document.cookie).toContain("next_consent=2:marketing:");
   });
 
   it("announces the starting consent once the chunk is configured", () => {
     const seen: Record<string, unknown>[] = [];
     const off = win.Next.on("next:consent", (payload) => seen.push(payload));
-    document.cookie = "next_consent=1:marketing:1700000000; path=/";
+    document.cookie = "next_consent=2:marketing:1700000000; path=/";
     win.Next._init({
       $consent: { categories: ["necessary", "marketing"], decided: false, granted: [] },
     });
@@ -623,7 +623,7 @@ describe("Next.consent and Next.scripts", () => {
   });
 
   it("resolves ready with the installed surfaces once configured", async () => {
-    document.cookie = "next_consent=1:analytics:1700000000; path=/";
+    document.cookie = "next_consent=2:analytics:1700000000; path=/";
     win.Next._init({
       $consent: { categories: ["necessary", "analytics", "marketing"] },
     });
@@ -639,7 +639,7 @@ describe("Next.consent and Next.scripts", () => {
   });
 
   it("reveals consented markup a zone morph brings in", () => {
-    document.cookie = "next_consent=1:marketing:1700000000; path=/";
+    document.cookie = "next_consent=2:marketing:1700000000; path=/";
     win.Next._init({ $consent: { categories: ["necessary", "marketing"] } });
     document.body.innerHTML = '<div data-next-zone="video"></div>';
     win.Next.partial.apply({
@@ -660,7 +660,7 @@ describe("Next.consent and Next.scripts", () => {
   });
 
   it("reveals only inside the nodes a patch touched", () => {
-    document.cookie = "next_consent=1:marketing:1700000000; path=/";
+    document.cookie = "next_consent=2:marketing:1700000000; path=/";
     win.Next._init({ $consent: { categories: ["necessary", "marketing"] } });
     const block =
       '<template data-next-consented="marketing"><b>video</b></template>' +
@@ -678,7 +678,7 @@ describe("Next.consent and Next.scripts", () => {
   });
 
   it("reveals a consented block a replace patch puts in place", () => {
-    document.cookie = "next_consent=1:marketing:1700000000; path=/";
+    document.cookie = "next_consent=2:marketing:1700000000; path=/";
     win.Next._init({ $consent: { categories: ["necessary", "marketing"] } });
     document.body.innerHTML = '<p id="slot"></p>';
     win.Next.partial.apply({
@@ -718,7 +718,7 @@ describe("Next.consent and Next.scripts", () => {
     };
     document.addEventListener("next:mounted", onMounted);
     const off = win.Next.partial.onMount(".embed", (el) => embeds.push(el));
-    document.cookie = "next_consent=1:marketing:1700000000; path=/";
+    document.cookie = "next_consent=2:marketing:1700000000; path=/";
     document.body.innerHTML =
       '<template data-next-consented="marketing"><div class="embed" ' +
       'data-next-zone="player" data-next-lazy="load"></div></template>' +

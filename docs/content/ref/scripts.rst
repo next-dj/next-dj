@@ -28,11 +28,14 @@ The manager
 
 ``scripts_manager`` loads every tree's ``scripts.py`` once, walking the routed page trees of the router manager, and again when its mtime moves under ``DEBUG``, and ``render`` answers the head tags and the reserved payload entries of one render.
 The source loads through ``load_tree_source`` of ``next.utils``, the loader the SEO sources share.
-``forget_scripts`` is the receiver ``settings_reloaded`` and ``router_reloaded`` drop every discovered source through, and ``next.testing.reset_scripts`` calls it for a test.
+A ``ScriptsManager`` built without a registry keeps one of its own.
+``forget_scripts`` is the receiver ``settings_reloaded`` and ``router_reloaded`` drop every discovered tree through, and ``next.testing.reset_scripts`` calls it for a test.
+The next render walks the trees again and executes only the ``scripts.py`` files whose mtime moved, the rest kept as read.
+A client-rendered ``{% #consented %}`` body leaves a ``GatedNote`` for each script it holds back, and ``render`` turns them into manifest entries in the category of the block.
 The static injector reaches it through the ``PageScripts`` port of :doc:`ports`, so ``next.static`` never imports ``next.scripts``.
 
 .. automodule:: next.scripts.manager
-   :members: ScriptsManager, TreeScripts, scripts_manager, forget_scripts
+   :members: ScriptsManager, GatedNote, scripts_manager, forget_scripts
 
 Consent
 -------
@@ -52,8 +55,11 @@ Backends
 ~~~~~~~~
 
 A ``ConsentBackend`` takes its whole ``CONSENT`` entry, exposes ``OPTIONS`` as ``options``, and reads a ``Consent`` off a request, which is the one method a subclass implements.
-``CookieConsentBackend`` reads the ``1:<categories>:<seconds>`` cookie the runtime writes, and ``cookie()`` answers the name, age, and flags the runtime writes it with, the ``cookie`` entry of ``$consent``.
-Under any other backend ``$consent`` carries no ``cookie`` entry, and the runtime keeps its own cookie of the choice under the default name and age.
+``client_config()`` answers the entries the backend adds to ``$consent``, nothing by default, and the categories and the choice win over an entry of the same name.
+The runtime keeps the choice only in its consent cookie, so a backend that reads something else gets nothing back from the browser.
+``CookieConsentBackend`` reads the ``2:<a>|<b>:<seconds>`` cookie the runtime writes, and the ``1:<a>,<b>:<seconds>`` one earlier runtimes wrote, and ``cookie()`` answers the name, age, and flags the runtime writes it with, the ``cookie`` entry its ``client_config()`` adds.
+Under a backend that adds no ``cookie`` entry, the runtime keeps its cookie of the choice under the default name and age.
+A backend that raises or answers anything but a ``Consent`` reads as ``UNDECIDED`` outside ``DEBUG``, logged once, and raises under it.
 
 .. automodule:: next.consent.backends
    :members:
@@ -70,7 +76,7 @@ Where the server keeps off the cookie, a shared page under ``"auto"`` and every 
 Checks
 ------
 
-``next.scripts.checks`` reads every ``scripts.py`` and the category list, and ``next.consent.checks`` the rest of the ``CONSENT`` scope.
+``next.scripts.checks`` reads every ``scripts.py`` and the ``{% #consented %}`` blocks of the composed pages, and ``next.consent.checks`` the ``CONSENT`` scope, the category list included.
 ``next.static.checks`` owns the checks the CSP nonce draws, and :doc:`system-checks` lists every code.
 
 .. automodule:: next.scripts.checks
@@ -82,7 +88,8 @@ Checks
 Signals
 -------
 
-``scripts_registered`` is sent when the manager loads a tree's ``scripts.py``, with the ``root`` and ``scripts`` keyword arguments and the ``ScriptsRegistry`` class as sender.
+``scripts_registered`` is sent when the registry takes a tree's ``scripts.py``, with the ``root``, ``source``, and ``scripts`` keyword arguments and the ``ScriptsRegistry`` class as sender.
+A tree without a ``scripts.py`` sends nothing.
 ``consent_backend_loaded`` is sent when the consent backend is built, with the ``config`` and ``instance`` keyword arguments.
 
 .. automodule:: next.scripts.signals

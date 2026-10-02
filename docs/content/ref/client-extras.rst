@@ -56,7 +56,8 @@ Next.consent
      - ``update`` with every category granted or denied.
 
 The cookie the runtime writes is described by the ``cookie`` entry of ``$consent``, its name, ``max_age``, ``samesite``, ``domain``, ``path``, and ``secure``, which follows the page scheme when ``null``.
-A backend other than ``CookieConsentBackend`` sends no ``cookie`` entry, and the runtime then writes ``next_consent`` with the default age.
+A backend whose ``client_config()`` adds no ``cookie`` entry leaves the runtime writing ``next_consent`` with the default age.
+The runtime writes ``2:<a>|<b>:<seconds>`` and reads that and the ``1:<a>,<b>:<seconds>`` format earlier runtimes wrote.
 
 A revoke stops the manifest scripts still waiting on their strategy, which move to ``blocked`` and reject any ``load()`` waiting on them, and a later grant schedules them again.
 A script that already runs keeps running, and the cookies it set stay until a ``next:consent`` listener clears them, see :doc:`/content/howto/write-a-vendor-adapter`.
@@ -153,7 +154,7 @@ The framework reserves three keys of the ``Next._init`` payload for this surface
    * - ``$scripts``
      - The manifest, one ``{name, src?, init?, strategy, category, attrs, nonce?}`` per script the server did not write, in declaration order.
    * - ``$consent``
-     - ``{categories, decided, granted, cookie?}``, where ``cookie`` comes from ``CookieConsentBackend`` alone.
+     - ``{categories, decided, granted, cookie?}`` and whatever else the backend's ``client_config()`` adds, where ``cookie`` comes from ``CookieConsentBackend``.
 
 A partial response carries neither ``$scripts`` nor ``$consent``, so the chunk loads from the full page alone.
 A project key of one of these names is dropped from the automatic payload, the same as ``$csrf``, and a system check reports it.

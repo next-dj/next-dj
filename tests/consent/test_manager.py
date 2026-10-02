@@ -1,6 +1,9 @@
+import logging
 import re
 
 import pytest
+from django.http import Http404
+from django.test import override_settings
 
 from next.consent import (
     NECESSARY,
@@ -30,8 +33,74 @@ class HeaderConsentBackend(ConsentBackend):
         return UNDECIDED
 
 
+class BrokenInitBackend(ConsentBackend):
+    """A backend that cannot be built."""
+
+    def __init__(self, config: object = None) -> None:
+        """Refuse to be built."""
+        msg = "no init"
+        raise RuntimeError(msg)
+
+    def read(self, request):  # pragma: no cover - never built
+        return UNDECIDED
+
+
+class RaisingReadBackend(ConsentBackend):
+    """A backend whose read raises."""
+
+    def read(self, request):
+        msg = "no read"
+        raise RuntimeError(msg)
+
+
+class NotFoundBackend(ConsentBackend):
+    """A backend that answers 404 on purpose."""
+
+    def read(self, request):
+        raise Http404
+
+
+class WrongTypeBackend(ConsentBackend):
+    """A backend that answers no `Consent`."""
+
+    def read(self, request):
+        return {"analytics": True}
+
+
+class RaisingConfigBackend(ConsentBackend):
+    """A backend whose runtime entries raise."""
+
+    def read(self, request):
+        return UNDECIDED
+
+    def client_config(self):
+        msg = "no config"
+        raise RuntimeError(msg)
+
+
+class WrongConfigBackend(ConsentBackend):
+    """A backend whose runtime entries are no mapping, and try to shadow the choice."""
+
+    def read(self, request):
+        return UNDECIDED
+
+    def client_config(self):
+        return ["cookie"]
+
+
+class ShadowingConfigBackend(ConsentBackend):
+    """A backend naming an entry of its own and one the choice owns."""
+
+    def read(self, request):
+        return Consent(frozenset({NECESSARY}), decided=True)
+
+    def client_config(self):
+        return {"endpoint": "/consent/", "decided": False}
+
+
 # The `storedChoice` pattern of `consent.ts`, matched whole as JS `$` ends the string.
-CLIENT_CHOICE = re.compile(r"1:([^:]*):[^:]*")
+CLIENT_CHOICE = re.compile(r"([12]):([^:]*):[^:]*")
+LOGGER = "next.consent.manager"
 
 
 class TestSettings:
@@ -95,6 +164,11 @@ class TestClientParity:
         [
             "1:analytics:1700",
             "1:analytics,marketing:1",
+            "2:analytics|marketing:1",
+            "2:analytics,marketing:1",
+            "2::1",
+            "2:|analytics|:1",
+            "1:analytics|marketing:1",
             "1::1",
             "1:necessary:1",
             "1:analytics:",
@@ -114,6 +188,9 @@ class TestClientParity:
             "1 :analytics:1",
             "01:analytics:1",
             "2:analytics:1",
+            "3:analytics:1",
+            "02:analytics:1",
+            "2:analytics",
             "::",
             ":",
             "",
@@ -126,7 +203,9 @@ class TestClientParity:
             assert consent == UNDECIDED
             return
         categories = consent_categories()
-        granted = {name for name in match.group(1).split(",") if name in categories}
+        separator = "," if match.group(1) == "1" else "|"
+        listed = match.group(2).split(separator)
+        granted = {name for name in listed if name in categories}
         assert consent == Consent(frozenset({NECESSARY, *granted}), decided=True)
 
 
@@ -149,6 +228,101 @@ class TestPayload:
             payload = consent_payload(UNDECIDED)
         assert "cookie" not in payload
         assert payload["decided"] is False
+
+
+def _consent_of(backend: type, *, debug: bool = False):
+    path = f"{__name__}.{backend.__name__}"
+    with (
+        override_next_settings(CONSENT={"BACKEND": path, "CATEGORIES": ["ads"]}),
+        override_settings(DEBUG=debug),
+    ):
+        return [get_consent(consent_request("2:ads:1")) for _ in range(2)]
+
+
+class TestFailingBackend:
+    """A backend that fails denies every category but necessary, logged once."""
+
+    @pytest.mark.parametrize(
+        ("backend", "fragment"),
+        [
+            (BrokenInitBackend, "failed to load"),
+            (RaisingReadBackend, "RaisingReadBackend.read() of"),
+            (WrongTypeBackend, "answered 'dict', not a next.consent.Consent"),
+        ],
+    )
+    def test_production_reads_undecided_and_logs_once(
+        self, backend: type, fragment: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING, LOGGER):
+            assert _consent_of(backend) == [UNDECIDED, UNDECIDED]
+        assert len(caplog.records) == 1
+        assert fragment in caplog.text
+        assert "NEXT_FRAMEWORK['CONSENT']['BACKEND']" in caplog.text
+
+    def test_an_unimportable_path_reads_undecided(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            override_next_settings(CONSENT={"BACKEND": "no.such.Backend"}),
+            caplog.at_level(logging.ERROR, LOGGER),
+        ):
+            assert get_consent(consent_request("2::1")) == UNDECIDED
+            assert "cookie" not in consent_payload(UNDECIDED)
+        assert caplog.text.count("failed to load") == 1
+
+    @pytest.mark.parametrize(
+        ("backend", "error"),
+        [
+            (BrokenInitBackend, RuntimeError),
+            (RaisingReadBackend, RuntimeError),
+            (WrongTypeBackend, TypeError),
+        ],
+    )
+    def test_debug_raises_naming_the_setting(self, backend: type, error) -> None:
+        with pytest.raises(error) as caught:
+            _consent_of(backend, debug=True)
+        text = str(caught.value) + "".join(getattr(caught.value, "__notes__", []))
+        assert "NEXT_FRAMEWORK['CONSENT']['BACKEND']" in text
+
+    def test_an_intended_answer_passes(self) -> None:
+        with pytest.raises(Http404):
+            _consent_of(NotFoundBackend)
+
+
+class TestClientConfig:
+    """`$consent` carries what the backend adds, the choice winning a clash."""
+
+    def _payload(self, backend: type, *, debug: bool = False):
+        path = f"{__name__}.{backend.__name__}"
+        with (
+            override_next_settings(CONSENT={"BACKEND": path}),
+            override_settings(DEBUG=debug),
+        ):
+            return [consent_payload(UNDECIDED) for _ in range(2)]
+
+    def test_a_backend_entry_joins_the_choice(self) -> None:
+        payload, _again = self._payload(ShadowingConfigBackend)
+        assert payload["endpoint"] == "/consent/"
+        assert payload["decided"] is False
+
+    @pytest.mark.parametrize(
+        ("backend", "fragment"),
+        [(RaisingConfigBackend, "raised"), (WrongConfigBackend, "not a mapping")],
+    )
+    def test_a_failing_backend_entry_adds_nothing_and_logs_once(
+        self, backend: type, fragment: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING, LOGGER):
+            payloads = self._payload(backend)
+        assert all(
+            set(payload) == {"categories", "decided", "granted"} for payload in payloads
+        )
+        assert len(caplog.records) == 1
+        assert fragment in caplog.text
+
+    def test_a_raising_backend_entry_raises_under_debug(self) -> None:
+        with pytest.raises(RuntimeError, match="no config"):
+            self._payload(RaisingConfigBackend, debug=True)
 
 
 class TestRenderMode:

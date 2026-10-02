@@ -616,7 +616,7 @@ The presence of the key switches consent on.
 A project that sets ``CONSENT``, even to an empty dict, gives every page its consent state, so the banner works on pages without a gated script, and a project that leaves it out has no consent at all.
 ``BACKEND`` names a ``next.consent.ConsentBackend`` subclass, ``CATEGORIES`` the categories the project declares with ``necessary`` always among them, and ``SERVER_RENDER`` is ``"auto"``, ``True``, or ``False``.
 ``OPTIONS`` belongs to the backend, and the cookie backend reads the cookie name, lifetime, ``SameSite``, domain, path, and ``secure`` flag from it.
-``next.E135`` reports a category list without ``necessary``, ``next.E146`` a category name the cookie cannot carry, ``next.E137`` an unusable backend, ``next.E145`` an unknown render mode, ``next.W129`` an insecure consent cookie beside a secure session cookie, and ``next.W133`` a ``{% #consented %}`` block on a project without ``CONSENT``.
+``next.E135`` reports a category list without ``necessary``, ``next.E146`` a category name the cookie cannot carry, ``next.E137`` an unusable backend, ``next.E145`` an unknown render mode, ``next.W129`` an insecure consent cookie beside a secure session cookie, ``next.W133`` a ``{% #consented %}`` block on a project without ``CONSENT``, and ``next.W092`` one naming a category the list lacks.
 See :doc:`/content/topics/scripts/consent`.
 
 Patching defaults

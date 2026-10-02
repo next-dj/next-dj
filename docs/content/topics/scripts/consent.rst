@@ -40,17 +40,24 @@ Categories
 The framework knows one category, ``necessary``, which is always granted, since the site does not work without it.
 Every other category is the project's own, and it declares the ones its scripts use in ``CATEGORIES``, ``necessary`` among them.
 Every category but ``necessary`` stays denied until the visitor chooses.
-A category name is a cookie-safe token of letters, digits, ``_``, ``-``, and ``.``, since the cookie joins the granted names with commas between colons.
-The other values shown are the defaults, and ``manage.py check`` reports a list without ``necessary``, a name outside the token, a script in a category the list lacks, a ``BACKEND`` that does not import, and a ``SERVER_RENDER`` outside ``"auto"``, ``True``, and ``False``.
+A category name is a cookie-safe token of letters, digits, ``_``, ``-``, and ``.``, since the cookie writes the granted names between colons, separated by ``|``.
+The other values shown are the defaults, and ``manage.py check`` reports a list without ``necessary``, a name outside the token, a script in a category the list lacks, a ``{% #consented %}`` block naming one by a literal, a ``BACKEND`` that does not import, and a ``SERVER_RENDER`` outside ``"auto"``, ``True``, and ``False``.
 
 The cookie
 ----------
 
-``CookieConsentBackend`` reads a first-party cookie the runtime writes on every choice, ``next_consent=1:analytics,marketing:<seconds>``, the version, the granted categories past ``necessary``, and the time of the decision.
+``CookieConsentBackend`` reads a first-party cookie the runtime writes on every choice, ``next_consent=2:analytics|marketing:<seconds>``, the version, the granted categories past ``necessary``, and the time of the decision.
+The first version, ``1:analytics,marketing:<seconds>``, joined the categories with commas, which RFC 6265 keeps out of a cookie value.
+The server and the runtime still read it, so a visitor who chose under it keeps the choice, and the runtime writes version 2 on the next choice.
 The cookie is not ``HttpOnly``, since the runtime writes it, and no server endpoint is involved.
 ``OPTIONS`` names the cookie, its ``max_age``, ``samesite``, ``domain``, ``path``, and ``secure``, which follows the scheme of the page while it is ``None``.
 
 A consent platform that owns its own banner and cookie plugs in as another backend, see :ref:`howto-vendor-adapter-cmp`.
+The runtime keeps the choice in this cookie alone, whatever the backend.
+A backend tells it the cookie through ``client_config()``, the entries it adds to ``$consent``, and one that adds none leaves the runtime writing ``next_consent`` with the default age.
+
+A backend that fails to import, to build, or to read, or that answers anything but a ``Consent``, never fails the page.
+Under ``DEBUG`` the error is raised with a note naming ``NEXT_FRAMEWORK['CONSENT']['BACKEND']``, and in production every visitor reads as undecided, every category but ``necessary`` stays denied, and the failure is logged once.
 
 Where gated scripts render
 --------------------------
@@ -109,6 +116,14 @@ When the server reads consent it renders the one branch that applies.
 When the runtime decides, the server writes the body inert inside a ``<template data-next-consented="marketing">``, followed by the else branch and an end marker, and the runtime swaps the branch for the body once the category is granted, running the mount pass over it.
 A block a patch brings in is revealed the same way, as long as the page loaded with the consent state.
 A revoke leaves revealed markup in place until the next page load.
+
+The body is gated as markup, and the scripts it registers wait for the category as well.
+When the runtime decides, the body renders against a collector of its own.
+Its stylesheets and the ``serialize=True`` context of its components join the page, since they do nothing until the markup shows.
+A ``{% use_script %}``, ``{% use_module %}``, or ``{% #use_script %}`` in the body, a co-located script of a component it renders, and a ``{% script %}`` naming a declared script all become ``$scripts`` entries in the category of the block, so the runtime loads them once the visitor grants it.
+They load in order after the page, not where the body stands, and a script the rest of the page registers as well loads with the page.
+Any other asset kind the body registers is dropped and logged once, since only a script can wait for the category.
+When the server decides, the body renders in place for a visitor who granted the category, its scripts with it.
 
 The banner
 ----------

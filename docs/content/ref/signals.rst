@@ -159,9 +159,10 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - After the router manager rebuilds its pattern set.
    * - ``scripts_registered``
      - ``ScriptsRegistry``
-     - ``root``, ``scripts``
-     - When the scripts manager registers the ``scripts.py`` of a page tree, on discovery and again when the file changes under ``DEBUG``.
-       ``scripts`` is the tuple of ``Script`` values, empty for a tree without one.
+     - ``root``, ``source``, ``scripts``
+     - When the scripts manager registers the ``scripts.py`` of a page tree, on discovery, after a reload, and again when the file changes under ``DEBUG``.
+       ``source`` is the ``ScriptsSource``, with the ``path`` of the file and any import ``error``, and ``scripts`` its tuple of ``Script`` values.
+       A tree without a ``scripts.py`` sends nothing.
    * - ``settings_reloaded``
      - ``NextFrameworkSettings``
      - none

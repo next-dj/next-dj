@@ -34,7 +34,11 @@ if TYPE_CHECKING:
         check_next_framework_unknown_top_level_keys,
         check_next_framework_value_types,
     )
-    from next.consent.checks import check_consent_cookie_secure, check_consent_settings
+    from next.consent.checks import (
+        check_consent_categories,
+        check_consent_cookie_secure,
+        check_consent_settings,
+    )
     from next.forms.checks import (
         check_action_applied_to_class,
         check_action_guard_permissions,
@@ -112,6 +116,7 @@ if TYPE_CHECKING:
         check_zone_not_in_loop,
     )
     from next.scripts.checks import (
+        check_consented_categories,
         check_consented_needs_consent,
         check_gated_blocking_scripts,
         check_script_categories,
@@ -180,7 +185,11 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_next_framework_unknown_top_level_keys",
         "check_next_framework_value_types",
     ),
-    "next.consent.checks": ("check_consent_cookie_secure", "check_consent_settings"),
+    "next.consent.checks": (
+        "check_consent_categories",
+        "check_consent_cookie_secure",
+        "check_consent_settings",
+    ),
     "next.forms.checks": (
         "check_action_applied_to_class",
         "check_action_guard_permissions",
@@ -258,6 +267,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_zone_not_in_loop",
     ),
     "next.scripts.checks": (
+        "check_consented_categories",
         "check_consented_needs_consent",
         "check_gated_blocking_scripts",
         "check_script_categories",
@@ -331,8 +341,10 @@ __all__ = [
     "check_component_widget_field_types",
     "check_composed_templates_compile",
     "check_conditional_get_order",
+    "check_consent_categories",
     "check_consent_cookie_secure",
     "check_consent_settings",
+    "check_consented_categories",
     "check_consented_needs_consent",
     "check_context_functions",
     "check_context_processor_signature",

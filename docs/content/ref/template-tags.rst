@@ -301,6 +301,7 @@ Scripts and consent
 
    Renders its body for a visitor who granted ``category`` and the optional ``else`` branch for everyone else.
    When the server renders consent it renders one branch, and when the runtime decides it writes the body inert in ``<template data-next-consented="<category>">`` followed by the ``else`` branch and an end marker, and the runtime swaps them once the category is granted.
+   The scripts that body registers then wait in ``$scripts`` for the category, while its stylesheets join the page.
    The category is one argument, a literal or a variable, and any other count raises ``TemplateSyntaxError``.
    A block that reaches a page only through a patch is revealed on a page that loaded with the consent state, which setting ``CONSENT`` guarantees, see :doc:`/content/topics/scripts/consent`.
 

@@ -55,10 +55,12 @@ function strings(value: unknown): string[] {
 }
 
 // The categories a stored decision grants, undefined for a missing or foreign one.
+// Version 2 joins them with "|", and version 1, which browsers still hold, with ",".
 function storedChoice(jar: string, name: string): string[] | undefined {
   const prefix = `${name}=`;
   const pair = jar.split("; ").find((entry) => entry.startsWith(prefix));
-  return /^1:([^:]*):[^:]*$/.exec(pair?.slice(prefix.length) ?? "")?.[1]?.split(",");
+  const match = /^([12]):([^:]*):[^:]*$/.exec(pair?.slice(prefix.length) ?? "");
+  return match?.[2]?.split(match[1] === "1" ? "," : "|");
 }
 
 // The nodes after a consented template up to its end marker, a nested block's own
@@ -91,11 +93,11 @@ export function createConsent(deps: ConsentDeps): Consent {
 
   // Version, the granted categories past necessary, then the decision time in seconds.
   function persist(): void {
-    const list = categories.filter((c) => c !== NECESSARY && granted.has(c)).join(",");
+    const list = categories.filter((c) => c !== NECESSARY && granted.has(c)).join("|");
     const maxAge =
       typeof cookie.max_age === "number" ? cookie.max_age : DEFAULT_MAX_AGE;
     const parts = [
-      `${cookieName()}=1:${list}:${Math.floor(now() / 1000)}`,
+      `${cookieName()}=2:${list}:${Math.floor(now() / 1000)}`,
       `path=${asString(cookie.path) ?? "/"}`,
       `max-age=${maxAge}`,
     ];

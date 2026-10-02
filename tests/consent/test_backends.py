@@ -25,26 +25,39 @@ class TestConsentBackend:
     def test_an_entry_without_options_has_none(self, config) -> None:
         assert _Plain(config).options == {}
 
+    def test_it_adds_nothing_to_the_runtime_entry(self) -> None:
+        assert _Plain().client_config() == {}
+
 
 class TestCookieConsentBackend:
-    """The runtime writes `1:<categories>:<seconds>`, the backend reads it back."""
+    """The runtime writes `2:<a>|<b>:<seconds>`, the backend reads it back."""
 
     def test_a_request_without_the_cookie_is_undecided(self) -> None:
         assert CookieConsentBackend().read(consent_request()) == UNDECIDED
 
-    def test_the_granted_categories_are_read(self) -> None:
-        read = CookieConsentBackend().read(
-            consent_request("1:analytics,marketing:1700")
-        )
+    @pytest.mark.parametrize(
+        "value", ["2:analytics|marketing:1700", "1:analytics,marketing:1700"]
+    )
+    def test_the_granted_categories_are_read_in_either_format(self, value: str) -> None:
+        read = CookieConsentBackend().read(consent_request(value))
         assert read == Consent(
             frozenset({NECESSARY, "analytics", "marketing"}), decided=True
         )
 
-    def test_a_choice_of_nothing_is_decided(self) -> None:
-        read = CookieConsentBackend().read(consent_request("1::1700"))
+    def test_each_format_keeps_its_own_separator(self) -> None:
+        read = CookieConsentBackend().read(consent_request("2:analytics,ads:1"))
+        assert read.granted == frozenset({NECESSARY, "analytics,ads"})
+
+    @pytest.mark.parametrize("value", ["2::1700", "1::1700"])
+    def test_a_choice_of_nothing_is_decided(self, value: str) -> None:
+        read = CookieConsentBackend().read(consent_request(value))
         assert read == Consent(frozenset({NECESSARY}), decided=True)
 
-    @pytest.mark.parametrize("value", ["2:analytics:1", "analytics", "1:a", ""])
+    def test_the_runtime_entry_names_the_cookie(self) -> None:
+        backend = CookieConsentBackend()
+        assert backend.client_config() == {"cookie": backend.cookie()}
+
+    @pytest.mark.parametrize("value", ["3:analytics:1", "analytics", "2:a", ""])
     def test_a_foreign_value_is_undecided(self, value: str) -> None:
         assert CookieConsentBackend().read(consent_request(value)) == UNDECIDED
 

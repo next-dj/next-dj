@@ -5,6 +5,7 @@ import pytest
 
 from next.checks import reset_check_caches
 from next.scripts.checks import (
+    check_consented_categories,
     check_consented_needs_consent,
     check_gated_blocking_scripts,
     check_script_categories,
@@ -62,50 +63,23 @@ class TestNames:
 
 
 class TestCategories:
-    """A usable category list (`next.E135`) holding every script category (`E140`)."""
+    """The category list holds every script category (`next.E140`)."""
 
     def test_an_unlisted_category_is_e140(self, tmp_path: Path) -> None:
         scripts = _scripts("Script('a', init='1', category='ads')")
         messages = _run(tmp_path, check_script_categories, scripts)
         assert check_ids(messages) == ["next.E140"]
         assert "'ads'" in messages[0].msg
+        assert "add 'ads' to the list" in messages[0].msg
 
-    @pytest.mark.parametrize(
-        ("categories", "fragment"),
-        [(["analytics"], "does not list 'necessary'"), ("x", "lists no category")],
-    )
-    def test_a_list_without_necessary_is_e135(
-        self, tmp_path: Path, categories: object, fragment: str
-    ) -> None:
+    def test_a_list_e135_reports_draws_no_e140(self, tmp_path: Path) -> None:
         messages = _run(
             tmp_path,
             check_script_categories,
-            _scripts("Script('a', init='1')"),
-            CONSENT={"CATEGORIES": categories},
+            _scripts("Script('a', init='1', category='ads')"),
+            CONSENT={"CATEGORIES": ["ads"]},
         )
-        assert check_ids(messages) == ["next.E135"]
-        assert fragment in messages[0].msg
-
-    def test_a_name_the_cookie_cannot_carry_is_e146(self, tmp_path: Path) -> None:
-        listed = [
-            "necessary",
-            "ad_storage",
-            "web-v2.1",
-            "a,b",
-            "a:b",
-            "a;b",
-            "a b",
-            "é",
-        ]
-        messages = _run(
-            tmp_path,
-            check_script_categories,
-            _scripts("Script('a', init='1')"),
-            CONSENT={"CATEGORIES": listed},
-        )
-        assert check_ids(messages) == ["next.E146"] * 5
-        assert "'a,b'" in messages[0].msg
-        assert "letters, digits" in messages[0].msg
+        assert messages == []
 
 
 class TestDeclarations:
@@ -244,3 +218,55 @@ class TestConsentedNeedsConsent:
     def test_pages_without_the_block_are_silent(self, tmp_path: Path) -> None:
         root = write_tree(tmp_path / "pages", scripts=None)
         assert _consented_run(root) == []
+
+
+def _categories_run(root: Path, **framework: object):
+    with routed(root, **framework):
+        return check_consented_categories()
+
+
+NESTED = (
+    '{% #consented "marketing" %}<a>'
+    '{% #consented "ads" %}<b>{% else %}{% #consented "stats" %}c{% /consented %}'
+    "{% /consented %}{% /consented %}"
+    '{% #consented "ads" %}<b>{% /consented %}'
+    "{% #consented name %}<d>{% /consented %}"
+    '{% #consented "ads"|lower %}<e>{% /consented %}'
+)
+MARKETING = {"CATEGORIES": ["necessary", "marketing"]}
+
+
+@pytest.mark.usefixtures("_fresh_run")
+class TestConsentedCategories:
+    """`{% #consented %}` names a listed category (`next.W092`)."""
+
+    def test_an_unlisted_literal_is_w092_once_per_name(self, tmp_path: Path) -> None:
+        root = write_tree(
+            tmp_path / "pages", scripts=None, page=f"template = {NESTED!r}\n"
+        )
+        messages = _categories_run(root, CONSENT=MARKETING)
+        assert check_ids(messages) == ["next.W092", "next.W092"]
+        assert "{% #consented 'ads' %}" in messages[0].msg
+        assert "'stats'" in messages[1].msg
+        assert "page.py" in messages[0].msg
+        assert "necessary, marketing" in messages[0].msg
+
+    def test_listed_names_are_silent(self, tmp_path: Path) -> None:
+        root = write_tree(
+            tmp_path / "pages", scripts=None, page=f"template = {CONSENTED!r}\n"
+        )
+        listed = {"CATEGORIES": ["necessary", "ads"]}
+        assert _categories_run(root, CONSENT=listed) == []
+
+    @pytest.mark.parametrize(
+        "framework",
+        [{}, {"CONSENT": {"CATEGORIES": ["marketing"]}}],
+        ids=["unset", "e135"],
+    )
+    def test_another_check_owns_it(
+        self, tmp_path: Path, framework: dict[str, object]
+    ) -> None:
+        root = write_tree(
+            tmp_path / "pages", scripts=None, page=f"template = {CONSENTED!r}\n"
+        )
+        assert _categories_run(root, **framework) == []

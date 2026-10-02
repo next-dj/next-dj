@@ -1,6 +1,8 @@
 """The configured consent backend and the consent each request carries."""
 
 import functools
+import logging
+from collections.abc import Mapping
 from typing import Final
 
 from django.conf import settings
@@ -9,13 +11,25 @@ from django.http import HttpRequest
 from next.backends import SingleBackendManager
 from next.conf.defaults import DEFAULTS, USER_SETTING
 from next.conf.scopes import scope_value
-from next.conf.signals import settings_reloaded
+from next.conf.settings import fail_loudly
+from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog
 from next.pages.responses import shared_render
 
-from .backends import ConsentBackend, CookieConsentBackend
+from .backends import ConsentBackend
 from .markers import NECESSARY, UNDECIDED, Consent
 from .signals import consent_backend_loaded
 
+
+logger = logging.getLogger(__name__)
+
+_failures = FailureLog(logger)
+
+_BACKEND: Final = "NEXT_FRAMEWORK['CONSENT']['BACKEND']"
+
+_FALLBACK: Final = (
+    "every visitor reads as undecided and every category but necessary stays denied "
+    "until it is fixed"
+)
 
 CONSENT_ATTR: Final = "_next_consent"
 """The request attribute the consent of one request is held under."""
@@ -65,9 +79,6 @@ def forget_consent_settings(**kwargs) -> None:
     server_render.cache_clear()
 
 
-settings_reloaded.connect(forget_consent_settings)
-
-
 def get_consent(request: HttpRequest | None) -> Consent:
     """Return the consent `request` carries, read once and kept to the categories.
 
@@ -78,7 +89,8 @@ def get_consent(request: HttpRequest | None) -> Consent:
     held = getattr(request, CONSENT_ATTR, None)
     if isinstance(held, Consent):
         return held
-    read = consent_backend_manager.get().read(request)
+    backend = _backend()
+    read = UNDECIDED if backend is None else _read(backend, request)
     categories = consent_categories()
     consent = Consent(
         frozenset(name for name in read.granted if name in categories) | {NECESSARY},
@@ -86,6 +98,80 @@ def get_consent(request: HttpRequest | None) -> Consent:
     )
     setattr(request, CONSENT_ATTR, consent)
     return consent
+
+
+def _backend() -> ConsentBackend | None:
+    """Return the configured backend, `None` where it cannot be built."""
+    try:
+        return consent_backend_manager.get()
+    except Exception as exc:  # noqa: BLE001 - a backend may raise anything it likes
+        _failures.contain(
+            exc,
+            ("load",),
+            "%s failed to load, so %s. Name a next.consent.ConsentBackend subclass "
+            "that imports and builds from its CONSENT entry.",
+            _BACKEND,
+            _FALLBACK,
+        )
+        return None
+
+
+def _read(backend: ConsentBackend, request: HttpRequest) -> Consent:
+    """Return what `backend` reads off `request`, undecided where it cannot answer."""
+    source = type(backend).__qualname__
+    try:
+        read: object = backend.read(request)
+    except INTENDED_EXCEPTIONS:
+        raise
+    except Exception as exc:  # noqa: BLE001 - a backend may raise anything it likes
+        _failures.contain(
+            exc,
+            ("read", source),
+            "%s.read() of %s raised, so %s.",
+            source,
+            _BACKEND,
+            _FALLBACK,
+        )
+        return UNDECIDED
+    if isinstance(read, Consent):
+        return read
+    message = (
+        f"{source}.read() of {_BACKEND} answered {type(read).__name__!r}, not a "
+        f"next.consent.Consent, so {_FALLBACK}. Return a Consent, UNDECIDED for a "
+        "visitor who has not chosen."
+    )
+    if fail_loudly():
+        raise TypeError(message)
+    _failures.warn(("type", source), message)
+    return UNDECIDED
+
+
+def _client_config(backend: ConsentBackend) -> Mapping[str, object]:
+    """Return what `backend` adds to `$consent`, nothing where it cannot answer."""
+    source = type(backend).__qualname__
+    try:
+        config: object = backend.client_config()
+    except Exception as exc:  # noqa: BLE001 - a backend may raise anything it likes
+        _failures.contain(
+            exc,
+            ("client_config", source),
+            "%s.client_config() of %s raised, so the runtime writes its consent "
+            "cookie under the default name and age.",
+            source,
+            _BACKEND,
+        )
+        return {}
+    if isinstance(config, Mapping):
+        return config
+    _failures.warn(
+        ("client_config", source),
+        "%s.client_config() of %s answered %r, not a mapping, so $consent carries "
+        "none of its entries.",
+        source,
+        _BACKEND,
+        type(config).__name__,
+    )
+    return {}
 
 
 def server_mode(request: HttpRequest | None) -> bool:
@@ -100,16 +186,21 @@ def server_mode(request: HttpRequest | None) -> bool:
 
 
 def consent_payload(consent: Consent) -> dict[str, object]:
-    """Return the `$consent` entry for the runtime, the cookie it writes included."""
+    """Return the `$consent` entry for the runtime, the backend's own entries included.
+
+    The choice wins over a backend entry of the same name, so the runtime always
+    starts from the state the server read.
+    """
     categories = consent_categories()
-    payload: dict[str, object] = {
-        "categories": list(categories),
-        "decided": consent.decided,
-        "granted": [name for name in categories if consent.allows(name)],
-    }
-    backend = consent_backend_manager.get()
-    if isinstance(backend, CookieConsentBackend):
-        payload["cookie"] = backend.cookie()
+    backend = _backend()
+    payload: dict[str, object] = (
+        {} if backend is None else dict(_client_config(backend))
+    )
+    payload.update(
+        categories=list(categories),
+        decided=consent.decided,
+        granted=[name for name in categories if consent.allows(name)],
+    )
     return payload
 
 
