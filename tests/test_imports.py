@@ -1,4 +1,5 @@
 import importlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -30,9 +31,17 @@ _IMPORT_WORKERS = min(4, os.cpu_count() or 1)
 
 
 def _next_module_names() -> list[str]:
+    """Name every module of the imported package, the installed wheel under CI.
+
+    The test matrix checks out no source tree, so the package itself is the list.
+    """
+    spec = importlib.util.find_spec("next")
+    assert spec is not None
+    assert spec.origin is not None
+    package = Path(spec.origin).parent
     names = []
-    for path in sorted((PROJECT_ROOT / "next").rglob("*.py")):
-        parts = path.relative_to(PROJECT_ROOT).with_suffix("").parts
+    for path in sorted(package.rglob("*.py")):
+        parts = ("next", *path.relative_to(package).with_suffix("").parts)
         names.append(".".join(parts[:-1] if parts[-1] == "__init__" else parts))
     return names
 

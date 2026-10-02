@@ -9,6 +9,7 @@ Module summary
 ``next.static`` exposes the asset discovery, the request-scoped collector, and the configured static backends.
 It also exposes the kind and placeholder registries, the ``next.min.js`` script builder, the two staticfiles finders, and the JS context serializer.
 ``next.static.runtime`` holds the script builder and the init payload keys, and ``next.static.nonce`` the CSP nonce every tag carries.
+``next.static.scripts``, its earlier name, still resolves every name with a ``DeprecationWarning``, the two CSRF helpers from ``next.csrf``.
 ``static_name`` covers the reference shape rule, and ``StaticAssetNotFoundError`` and ``StaticAssetTraversalError`` name the two references the pipeline refuses, see :doc:`/content/topics/static-assets/name-resolution`.
 
 Public API

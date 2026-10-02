@@ -803,3 +803,15 @@ class TestComposedPagesMemo:
             checks.check_duplicate_zone_names()
             messages = checks.check_composed_templates_compile()
         assert [m.id for m in messages] == [checks.E_COMPOSED_TEMPLATE_SYNTAX]
+
+
+class TestDeprecatedComposedReset:
+    """`reset_composed_pages_memo` drops the shared run memos behind a warning."""
+
+    def test_it_forgets_the_run_memos_and_warns(self) -> None:
+        with (
+            patch("next.partial.checks.forget_run_memos") as forget,
+            pytest.warns(DeprecationWarning, match="reset_check_caches"),
+        ):
+            checks.reset_composed_pages_memo()
+        forget.assert_called_once_with()

@@ -1,7 +1,15 @@
+from types import SimpleNamespace
+
 import pytest
 from django.http import HttpRequest
 
-from next.deps import REQUEST_DEP_CACHE_ATTR, DependencyResolver, Depends, resolver
+from next.deps import (
+    REQUEST_DEP_CACHE_ATTR,
+    DependencyResolver,
+    Depends,
+    get_request_dep_cache,
+    resolver,
+)
 from next.deps.cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache, render_dep_cache
 from tests.support import bound_dependency, build_mock_http_request
 
@@ -200,3 +208,16 @@ class TestRenderDepCache:
     def test_a_spec_mock_request_gets_a_fresh_dict(self) -> None:
         request = build_mock_http_request()
         assert render_dep_cache(request) is not render_dep_cache(request)
+
+
+class TestDeprecatedAccessor:
+    """`get_request_dep_cache` keeps its old answer behind a deprecation warning."""
+
+    def test_it_answers_the_dispatch_cache_or_none(self) -> None:
+        carrying = SimpleNamespace(**{REQUEST_DEP_CACHE_ATTR: {"a": 1}})
+        with pytest.warns(DeprecationWarning, match="render_dep_cache"):
+            assert get_request_dep_cache(carrying) == {"a": 1}
+        with pytest.warns(DeprecationWarning, match="render_dep_cache"):
+            assert get_request_dep_cache(SimpleNamespace()) is None
+        with pytest.warns(DeprecationWarning, match="render_dep_cache"):
+            assert get_request_dep_cache(None) is None
