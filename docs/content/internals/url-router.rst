@@ -83,8 +83,8 @@ The ``check_reverse_name_collisions`` system check walks every page tree of ever
 Resolution algorithm
 --------------------
 
-``include("next.urls")`` mounts a single ``TrieURLResolver`` that wraps the lazy sequence of router, form-action, and SEO patterns.
-The third source is read through the ``SeoRoutes`` port, because ``next.seo`` imports ``next.urls`` and the manager cannot import it back, and it holds the sitemap routes only while the project serves a sitemap and the robots route only while its source exists at the top of a page root, see :doc:`seo-pipeline`.
+``include("next.urls")`` mounts a single ``TrieURLResolver`` that wraps the lazy sequence of CSRF, form-action, router, and SEO patterns, in that order.
+The SEO source is read through the ``SeoRoutes`` port, because ``next.seo`` imports ``next.urls`` and the manager cannot import it back, and it holds the sitemap routes only while the project serves a sitemap and the robots route only while its source exists at the top of a page root, see :doc:`seo-pipeline`.
 The sequence caches the concatenated pattern list against a three-part version token, one counter bumped by ``router_manager.reload()``, one bumped when form actions register or clear through the form-action manager, and ``seo_routes_version`` for the SEO routes.
 ``seo_routes_version`` lives in ``next.urls.manager``, ``NextFrameworkConfig.ready()`` moves it right after it binds the SEO port and the seo manager moves it on every reset of its sources, so the token is read as a plain attribute and never through the port.
 A sequence read before the port is bound leaves the seo routes out and caches nothing.
@@ -109,6 +109,18 @@ A 404 goes through the fallback, so its ``tried`` is identical to the linear sca
 
 Setting ``URL_RESOLVER`` in ``NEXT_FRAMEWORK`` to ``"django.urls.resolvers.URLResolver"`` replaces the trie resolver with the stock Django class and routes every call through the plain linear scan.
 The resolver is rebuilt on settings reload, so the swap takes effect without a restart.
+
+Route order
+-----------
+
+The lazy sequence lists the framework routes first, the CSRF token endpoint at ``_next/csrf/`` and the form action endpoint at ``_next/form/<uid>/``, then the page routes, then the SEO routes.
+A page tree with a root catch-all such as ``[[rest]]`` matches every path, so a framework route listed after it would never answer, and every deferred token fetch and form post would reach that page instead.
+The ``next.E149`` system check resolves both addresses and names the pattern that answers them when it is not the framework view, which catches a pattern of the root URLconf listed above the include.
+
+Inside one page tree the walker yields the page of a directory first, real or virtual, and then descends into its subdirectories.
+The subdirectories are ranked by kind, static names first, then names holding a ``[param]`` segment, then names holding a ``[[catch-all]]`` segment, and by name within each kind.
+The rank reads a name through ``ROUTE_BRACKET_PATTERN``, the expression the URL parser converts, so ``blog/about`` always precedes ``blog/[slug]``.
+The pattern list is therefore the same on every file system, whatever order ``os.scandir`` returns the entries in.
 
 Reload mechanics
 ----------------

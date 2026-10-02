@@ -194,7 +194,7 @@ _CSRF_PATTERN = path("_next/csrf/", csrf_view, name=CSRF_URL_NAME)
 
 
 class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
-    """Defer expanding router, form, CSRF and SEO patterns until first use.
+    """Defer expanding CSRF, form, router and SEO patterns until first use.
 
     Skips `list` so `include()` defers materialisation, overrides `__reversed__` to
     avoid a per-index list build, and caches the concat against its version token.
@@ -217,10 +217,13 @@ class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
         if cache is not None and cache[0] == self.version_token():
             return cache[1]
         seo_routes = seo_routes_slot.peek()
+        # The pages expand first, since a page module registers its form actions as
+        # it loads, yet the framework routes lead so a root catch-all cannot take them.
+        pages = list(router_manager)
         patterns: list[URLPattern | URLResolver] = [
-            *router_manager,
-            *form_action_manager,
             _CSRF_PATTERN,
+            *form_action_manager,
+            *pages,
             *(() if seo_routes is None else seo_routes.patterns()),
         ]
         if seo_routes is None:
