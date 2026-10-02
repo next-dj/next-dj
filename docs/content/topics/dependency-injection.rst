@@ -479,6 +479,7 @@ The cache lives for one form dispatch.
 Every stage of that POST, from ``get_initial`` through the validation-failure re-render, shares it, and the ``@component.context`` callables of the re-rendered page join it too rather than each building their own.
 ``FormActionDispatch`` attaches its dependency cache to the request, and ``render_dep_cache`` reads it back.
 Outside a form dispatch the function answers a fresh empty dict the request never carries, so a caller never handles a missing cache.
+The earlier ``get_request_dep_cache``, which answered ``None`` outside a dispatch, still imports and raises a ``DeprecationWarning``.
 
 .. code-block:: python
    :caption: reading the cache

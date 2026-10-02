@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Final
 
 
@@ -22,6 +23,20 @@ def render_dep_cache(request: object | None) -> dict[str, Any]:
     """
     cache = None if request is None else getattr(request, REQUEST_DEP_CACHE_ATTR, None)
     return cache if isinstance(cache, dict) else {}
+
+
+def get_request_dep_cache(request: object | None) -> dict[str, Any] | None:
+    """Return the form dispatch cache on `request`, `None` where it carries none.
+
+    Deprecated, `render_dep_cache` answers a fresh dict in place of `None`.
+    """
+    warnings.warn(
+        "next.deps.get_request_dep_cache is deprecated, call render_dep_cache",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    cache = None if request is None else getattr(request, REQUEST_DEP_CACHE_ATTR, None)
+    return cache if isinstance(cache, dict) else None
 
 
 class DependencyCache:
