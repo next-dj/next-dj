@@ -412,10 +412,13 @@ class TestEscaping:
 class TestSparseBlocks:
     """A block renders only the values it carries."""
 
-    def test_an_image_without_a_url_keeps_its_dimensions(self) -> None:
-        og = OpenGraph(images=(OpenGraphImage(width=3),))
+    def test_an_image_renders_its_url_ahead_of_its_dimensions(self) -> None:
+        og = OpenGraph(
+            images=(OpenGraphImage(url="https://cdn.example/a.png", width=3),)
+        )
         assert _lines(_resolved(og=og)) == [
-            '<meta property="og:image:width" content="3">'
+            '<meta property="og:image" content="https://cdn.example/a.png">',
+            '<meta property="og:image:width" content="3">',
         ]
 
     def test_a_sparse_article_renders_only_what_it_carries(self) -> None:

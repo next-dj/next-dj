@@ -16,10 +16,9 @@ from next.pages.loaders import (
     load_page_module,
 )
 from next.pages.responses import (
-    defer_csrf,
     finish_response,
     finish_zone_response,
-    mark_shared,
+    prepare_page_render,
     response_policy,
 )
 from next.ports import partial_shaper_slot
@@ -85,8 +84,6 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
         policy = response_policy(
             page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
         )
-        defer_csrf(policy, request)
-        mark_shared(policy, request)
         shaper = partial_shaper_slot.get()
         intent = shaper.intent(request)
         if intent.zones:
@@ -94,6 +91,7 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
                 file_path, request, intent, dynamic_body=False, url_kwargs=dict(kwargs)
             )
             return finish_zone_response(zone, policy, request)
+        prepare_page_render(policy, request)
         response = HttpResponse(
             page.render(file_path, request, _dep_cache=dep_cache, **kwargs)
         )
@@ -135,15 +133,15 @@ def _resolving_view(
         policy = response_policy(
             page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
         )
-        defer_csrf(policy, request)
-        mark_shared(policy, request)
+        shaper = partial_shaper_slot.get()
+        intent = shaper.intent(request)
+        if not intent.zones:
+            prepare_page_render(policy, request)
         resolution = page._resolve_page_body(
             file_path, active_module, request, _dep_cache=dep_cache, **kwargs
         )
         if resolution.http_response is not None:
             return finish_response(resolution.http_response, policy, request, file_path)
-        shaper = partial_shaper_slot.get()
-        intent = shaper.intent(request)
         if intent.zones:
             zone = shaper.zone_response(
                 file_path,

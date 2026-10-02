@@ -2,7 +2,7 @@ import pytest
 from django.template import Context, Template, TemplateSyntaxError
 from django.test import RequestFactory
 
-from next.pages.responses import SHARED_RENDER_ATTR, cookie_varies
+from next.pages.responses import cookie_varies, mark_shared_render
 from next.scripts.manager import CONSENT_NOTE, SCRIPT_NOTE
 from next.seeding import COLLECTOR_KEY, REQUEST_KEY
 from next.static import StaticCollector
@@ -19,7 +19,7 @@ def _render(source: str, *, cookie: str | None = None, shared: bool = False):
     if cookie is not None:
         request.COOKIES["next_consent"] = cookie
     if shared:
-        setattr(request, SHARED_RENDER_ATTR, True)
+        mark_shared_render(request)
     collector = StaticCollector()
     out = Template(source).render(
         Context({REQUEST_KEY: request, COLLECTOR_KEY: collector})

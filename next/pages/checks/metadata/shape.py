@@ -17,7 +17,7 @@ from django.core.checks import (
     register,
 )
 
-from next.checks import NEXT
+from next.checks import NEXT, SEO
 from next.checks.common import RegistrationSubject, registration_file_errors
 from next.deps.markers import unwrap_annotated
 from next.introspect import callable_name
@@ -124,7 +124,7 @@ def _page_shape_errors(entry: MetadataPage) -> list[CheckMessage]:
     return errors
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_page_metadata_shape(*args, **kwargs) -> list[CheckMessage]:
     """Validate the metadata dict of each routed page (`next.E102` to `next.E105`)."""
     init_errors, pages = loaded_metadata_pages()
@@ -134,7 +134,7 @@ def check_page_metadata_shape(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_metadata_registration_files(*args, **kwargs) -> list[CheckMessage]:
     """Flag a `@page.metadata` no page render collects (`next.E106`)."""
     init_errors, _loaded = load_routed_pages()
@@ -148,7 +148,7 @@ def check_metadata_registration_files(*args, **kwargs) -> list[CheckMessage]:
     )
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_metadata_callable_returns_mapping(*args, **kwargs) -> list[CheckMessage]:
     """Require a `@page.metadata` callable to be annotated dict-like (`next.E108`)."""
     init_errors, pages = loaded_metadata_pages()
@@ -186,7 +186,7 @@ def _parent_parameters(func: Callable[..., Any]) -> list[str]:
     ]
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_metadata_parent_parameter(*args, **kwargs) -> list[CheckMessage]:
     """Flag a `@page.metadata` parameter annotated `Metadata` (`next.E121`).
 
@@ -250,7 +250,7 @@ def _twitter_player_error(page_path: object, meta: Metadata) -> CheckMessage | N
     )
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_metadata_enum_values(*args, **kwargs) -> list[CheckMessage]:
     """Validate the enum values and the player card (`next.E104`).
 
@@ -267,7 +267,7 @@ def check_metadata_enum_values(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_metadata_url_schemes(*args, **kwargs) -> list[CheckMessage]:
     """Flag a URL field whose scheme is neither http nor https (`next.E109`)."""
     init_errors, pages = loaded_metadata_pages()
@@ -289,7 +289,7 @@ def check_metadata_url_schemes(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_metadata_hreflang_patterns(*args, **kwargs) -> list[CheckMessage]:
     """Warn when `alternates.languages=True` has no `i18n_patterns()` (`next.W087`).
 
@@ -320,7 +320,7 @@ def check_metadata_hreflang_patterns(*args, **kwargs) -> list[CheckMessage]:
     return warnings
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_metadata_noindex_canonical(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a noindex page points its canonical at another origin (`next.W088`)."""
     init_errors, pages = loaded_metadata_pages()

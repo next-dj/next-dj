@@ -84,3 +84,7 @@ class TestCookieConsentBackend:
             "domain": ".acme.example",
             "path": "/",
         }
+
+    def test_a_samesite_of_none_leaves_the_attribute_out(self) -> None:
+        cookie = CookieConsentBackend({"OPTIONS": {"samesite": None}}).cookie()
+        assert cookie["samesite"] is None

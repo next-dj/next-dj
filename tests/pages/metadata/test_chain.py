@@ -34,7 +34,7 @@ from next.pages.metadata.chain import (
 from next.pages.metadata.markers import Metadata, Segment, TitleSpec
 from next.pages.metadata.normalize import normalize_metadata
 from next.pages.metadata.registry import PageMetadataRegistry
-from next.pages.metadata.scope import site_segment
+from next.pages.metadata.scope import SITE_NAME_SOURCE, site_segment
 from tests.support import (
     bound_dependency,
     build_page_request,
@@ -820,7 +820,7 @@ class TestOrigins:
             origins = metadata_origins(chain_entry(registry, leaf))
         assert origins == (
             MetadataOrigin("description", str(root)),
-            MetadataOrigin("site_name", site_segment().source),
+            MetadataOrigin("site_name", SITE_NAME_SOURCE),
             MetadataOrigin("title", str(root)),
             MetadataOrigin("*", f"leaf_meta in {leaf}"),
         )

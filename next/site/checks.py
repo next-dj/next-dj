@@ -57,7 +57,7 @@ def _site_error(key: str, value: object, expected: str) -> CheckMessage:
     )
 
 
-@register(NEXT)
+@register(NEXT, SEO)
 def check_site_settings(*args, **kwargs) -> list[CheckMessage]:
     """Validate the `SITE` values (`next.E129`) and its keys (`next.E035`)."""
     scope = _raw_site_scope()

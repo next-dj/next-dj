@@ -64,14 +64,15 @@ Each ``page.py`` from the page root to the page contributes its mapping, names m
    from next.pages import HeadersDict
 
    headers: HeadersDict = {
-       "Content-Security-Policy": "frame-ancestors 'none'",
+       "Cross-Origin-Opener-Policy": "same-origin",
        "Permissions-Policy": "payment=(self)",
    }
 
-Every page under ``/checkout/`` carries both headers, and a value is text on one line.
+Every page under ``/checkout/`` carries both headers, and a value is ASCII text on one line.
 ``headers`` never names a caching header, ``Cache-Control``, ``CDN-Cache-Control``, ``Surrogate-Control``, ``Cloudflare-CDN-Cache-Control``, ``Expires``, ``Age``, or ``Vary``, because ``cache`` owns them and a header set here would outlive the private form a personal response takes.
 The framework owns ``X-Robots-Tag``, ``Set-Cookie``, ``Content-Type``, ``Content-Length``, ``Transfer-Encoding``, and ``Connection`` as well.
-``manage.py check`` reports a forbidden name, pointing a caching one at ``cache``, an invalid header name, and a value with a line break, and the response leaves each of them out.
+``Content-Security-Policy`` and its ``-Report-Only`` form stay with the CSP middleware, since Django's middleware and django-csp skip a response that already carries one, so a page's own would replace the whole site policy and its nonce.
+``manage.py check`` reports a forbidden name, pointing a caching one at ``cache``, an invalid header name, and a value with a line break, another control character, or a character outside ASCII, and the response leaves each of them out.
 
 What passes down the tree
 -------------------------
@@ -115,11 +116,12 @@ A shared page goes out ``private``, with the other directives kept and one warni
 - It sets a cookie, from the view, from ``render()``, or from a middleware after the view, the session and CSRF middleware among them.
 - It reads the session, or needs the CSRF cookie refreshed during its render.
 - It answers a request that carries an ``Authorization`` header, since a shared copy would reach everyone.
-- Its HTML carries a CSP nonce the render minted, which belongs to one response.
+- Its render minted a CSP nonce, through the framework tags or a template reading ``request.csp_nonce``, since a nonce belongs to one response.
 - Its HTML follows the consent cookie, which ``CONSENT["SERVER_RENDER"] = True`` forces on every page, the shared ones included.
 
 The response carries ``SharedCookies`` in place of Django's cookie jar, so the first cookie set on it takes the cache private whenever it lands, and a ``TemplateResponse`` rendered after the view is settled once its content exists.
-``public`` and ``Set-Cookie`` never leave the server together.
+``public`` and ``Set-Cookie`` never leave the server together, provided ``ConditionalGetMiddleware`` sits above every middleware that sets a cookie, because the 304 it answers copies the cache before an outer cookie lands, and ``next.W134`` reports the order that breaks it.
+A cookie written through ``update()`` or ``load()`` on the jar takes the response private as well.
 A layout that reads ``request.user`` touches the session and takes every shared page under it private, which the warning makes visible.
 
 Two settings take every shared page private at once, and ``manage.py check`` warns about both.

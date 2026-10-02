@@ -1,6 +1,7 @@
 """The memoised read of `NEXT_FRAMEWORK["METADATA"]`, its options and settings tier."""
 
 import functools
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Final
@@ -10,6 +11,7 @@ from django.http import HttpRequest
 from next.conf.defaults import DEFAULTS
 from next.conf.scopes import scope_value
 from next.conf.signals import settings_reloaded
+from next.pages.errors import PageMetadataShapeError
 from next.site import site_config, site_indexable
 
 from .markers import Metadata, Segment
@@ -19,8 +21,13 @@ from .normalize import normalize_site_metadata
 SITE_SOURCE: Final = "NEXT_FRAMEWORK['METADATA']['DEFAULTS']"
 """The source name the settings segment reports in its shape errors."""
 
+SITE_NAME_SOURCE: Final = "NEXT_FRAMEWORK['SITE']['NAME']"
+"""The source a `site_name` read off the site scope rather than `DEFAULTS` names."""
+
 METADATA_KEYS: Final = frozenset(DEFAULTS["METADATA"])
 """The keys a `NEXT_FRAMEWORK["METADATA"]` mapping may carry."""
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,18 +55,28 @@ def metadata_options() -> MetadataOptions:
 def site_segment() -> Segment:
     """Return the settings defaults as the outermost segment of every chain.
 
-    The site name falls back to `SITE["NAME"]`, and a malformed scope folds to nothing.
+    The site name falls back to `SITE["NAME"]`, and a malformed scope folds to nothing,
+    logged once per reload, since a shape error would fail every render.
     """
     defaults = scope_value("METADATA", "DEFAULTS")
-    segment = (
-        normalize_site_metadata(defaults, source=SITE_SOURCE)
-        if isinstance(defaults, Mapping)
-        else Segment(SITE_SOURCE)
-    )
+    segment = Segment(SITE_SOURCE)
+    if isinstance(defaults, Mapping):
+        try:
+            segment = normalize_site_metadata(defaults, source=SITE_SOURCE)
+        except PageMetadataShapeError as exc:
+            # `next.E098` names it, so one bad key never takes every page down.
+            logger.warning("%s, so the defaults fold to nothing", exc)
     name = site_config().name
     if segment.metadata.site_name is None and name is not None:
         segment = replace(segment, metadata=replace(segment.metadata, site_name=name))
     return segment
+
+
+def site_name_source() -> str:
+    """Return the setting the `site_name` of the settings tier comes from."""
+    defaults = scope_value("METADATA", "DEFAULTS")
+    declared = isinstance(defaults, Mapping) and defaults.get("site_name") is not None
+    return SITE_SOURCE if declared else SITE_NAME_SOURCE
 
 
 def noindexed(meta: Metadata, *, request: HttpRequest | None = None) -> bool:
@@ -78,10 +95,12 @@ settings_reloaded.connect(forget_metadata_scope)
 
 __all__ = [
     "METADATA_KEYS",
+    "SITE_NAME_SOURCE",
     "SITE_SOURCE",
     "MetadataOptions",
     "forget_metadata_scope",
     "metadata_options",
     "noindexed",
+    "site_name_source",
     "site_segment",
 ]

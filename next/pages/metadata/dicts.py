@@ -48,7 +48,7 @@ class RobotsDict(TypedDict, total=False):
 class OpenGraphImageDict(TypedDict, total=False):
     """One Open Graph image with its optional dimensions and alt text."""
 
-    url: Url
+    url: Required[Url]
     secure_url: Url
     type: str
     width: int

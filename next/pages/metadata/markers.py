@@ -88,7 +88,7 @@ def robots_noindex(robots: Robots | str | None) -> bool:
 class OpenGraphImage:
     """One folded Open Graph image."""
 
-    url: Url | None = None
+    url: Url
     secure_url: Url | None = None
     type: str | None = None
     width: int | None = None

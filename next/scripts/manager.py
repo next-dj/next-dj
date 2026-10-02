@@ -6,9 +6,9 @@ Strategy, category and consent split a render into head tags and manifest entrie
 import logging
 import threading
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
+from urllib.parse import urlsplit
 
 from django.http import HttpRequest
 
@@ -41,20 +41,7 @@ CONSENT_NOTE: Final = "next.scripts.consent"
 _NOTHING: Final[tuple[str, Mapping[str, object]]] = ("", {})
 
 
-@dataclass(frozen=True, slots=True)
-class TreeScripts:
-    """The scripts of one tree in the order its `scripts.py` declares them."""
-
-    scripts: tuple[Script, ...] = ()
-
-
-_NO_SCRIPTS: Final = TreeScripts()
-
-
-def _tree_scripts(source: ScriptsSource | None) -> TreeScripts:
-    if source is None or not source.scripts:
-        return _NO_SCRIPTS
-    return TreeScripts(tuple(source.scripts))
+_NO_SCRIPTS: Final[tuple[Script, ...]] = ()
 
 
 class ScriptsManager:
@@ -68,14 +55,9 @@ class ScriptsManager:
         self._registry = registry if registry is not None else scripts_registry
         self._loaded = False
         self._lock = threading.RLock()
-        self._trees: dict[Path, TreeScripts] = {}
+        self._trees: dict[Path, tuple[Script, ...]] = {}
         self._roots_of: BoundedCache[Path, Path | None] = BoundedCache()
         self._warned: set[tuple[Path, str]] = set()
-
-    @property
-    def registry(self) -> ScriptsRegistry:
-        """Return the registry the sources are held in."""
-        return self._registry
 
     def _load(self) -> None:
         for tree, _skip_names in routed_page_trees(router_manager):
@@ -120,7 +102,7 @@ class ScriptsManager:
         self._roots_of[page_path] = root
         return root
 
-    def tree(self, page_path: Path | None) -> TreeScripts:
+    def tree(self, page_path: Path | None) -> tuple[Script, ...]:
         """Return the scripts of the tree `page_path` belongs to.
 
         A watched process stats the `scripts.py` of that one tree, not of every tree.
@@ -137,7 +119,8 @@ class ScriptsManager:
                 self._refresh_root(root)
         held = self._trees.get(root)
         if held is None:
-            held = _tree_scripts(self._registry.source(root))
+            source = self._registry.source(root)
+            held = _NO_SCRIPTS if source is None else tuple(source.scripts)
             self._trees[root] = held
         return held
 
@@ -151,15 +134,16 @@ class ScriptsManager:
             self._loaded = False
 
     def _selected(
-        self, tree: TreeScripts, requested: Sequence[object], page_path: Path | None
+        self,
+        tree: tuple[Script, ...],
+        requested: Sequence[object],
+        page_path: Path | None,
     ) -> list[Script]:
         names = {name for name in requested if isinstance(name, str)}
-        known = {script.name for script in tree.scripts}
+        known = {script.name for script in tree}
         for name in sorted(names - known):
             self._warn_unknown(page_path, name)
-        return [
-            script for script in tree.scripts if script.auto or script.name in names
-        ]
+        return [script for script in tree if script.auto or script.name in names]
 
     def _warn_unknown(self, page_path: Path | None, name: str) -> None:
         key = (page_path or Path(), name)
@@ -182,18 +166,19 @@ class ScriptsManager:
     ) -> tuple[str, Mapping[str, object]]:
         """Return the head tags and the reserved payload entries of one render."""
         tree = self.tree(page_path)
-        if not (tree.scripts or consent_configured() or collector.notes(CONSENT_NOTE)):
+        if not (tree or consent_configured() or collector.notes(CONSENT_NOTE)):
             return _NOTHING
         selected = self._selected(tree, collector.notes(SCRIPT_NOTE), page_path)
         server = server_mode(request)
         consent = get_consent(request) if server else UNDECIDED
         head, manifest = _split(selected, consent)
-        if server and any(script.gated for script in selected):
+        if server and (consent.decided or any(script.gated for script in selected)):
+            # `$consent` carries a decided visitor's choice whatever the page gates.
             vary_on_cookie(request)
         payload: dict[str, object] = {}
         if manifest:
             payload[SCRIPTS_PAYLOAD_KEY] = [
-                manifest_entry(script, src, nonce)
+                manifest_entry(script, src)
                 for script, src in _sourced(manifest, request)
             ]
         payload[CONSENT_PAYLOAD_KEY] = consent_payload(consent)
@@ -228,7 +213,10 @@ def _sourced(
     paired: list[tuple[Script, str | None]] = []
     for script in scripts:
         src: str | None = None
-        if script.src is not None:
+        if script.src is not None and urlsplit(script.src).netloc:
+            # A vendor URL is the vendor's, so the project version stays off it.
+            src = script.src
+        elif script.src is not None:
             try:
                 src = manager.asset_url(
                     manager.resolve_url(script.src), request=request
@@ -256,7 +244,6 @@ __all__ = [
     "CONSENT_NOTE",
     "SCRIPT_NOTE",
     "ScriptsManager",
-    "TreeScripts",
     "forget_scripts",
     "scripts_manager",
 ]

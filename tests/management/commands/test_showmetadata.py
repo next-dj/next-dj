@@ -41,6 +41,26 @@ class TestShowMetadata:
             f"  *: about_metadata in {leaf}\n"
         )
 
+    @pytest.mark.parametrize(
+        ("metadata", "source"),
+        [
+            ({}, "NEXT_FRAMEWORK['SITE']['NAME']"),
+            (
+                {"DEFAULTS": {"site_name": "Own"}},
+                "NEXT_FRAMEWORK['METADATA']['DEFAULTS']",
+            ),
+        ],
+        ids=["site_scope", "defaults"],
+    )
+    def test_the_site_name_names_the_setting_it_came_from(
+        self, tmp_path, metadata, source
+    ) -> None:
+        root = write_tree(tmp_path / "pages", pages=())
+        write_page(root, "", "metadata = {}\n", body="<p>x</p>")
+        with routed(root, SITE={"NAME": "Acme"}, METADATA=metadata):
+            printed = _show("/")
+        assert f"  site_name: {source}\n" in printed
+
     def test_an_unrouted_path_is_an_error(self, tmp_path) -> None:
         with (
             routed(write_tree(tmp_path / "pages")),

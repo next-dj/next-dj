@@ -5,6 +5,7 @@ from django.test import override_settings
 
 from next.checks import reset_check_caches
 from next.pages.checks import (
+    check_conditional_get_order,
     check_csrf_delivery,
     check_csrf_in_session,
     check_page_response_declarations,
@@ -58,7 +59,7 @@ class TestDeclarations:
             ("headers = {'Vary': 'Cookie'}\n", "Vary follows cache"),
             ("headers = {'Surrogate-Control': 'max-age=9'}\n", "declare the caching"),
             ("headers = {'Set-Cookie': 'a=b'}\n", "Set-Cookie belongs to the"),
-            ("headers = {'X-A': 'a\\nb'}\n", "must be text on one line"),
+            ("headers = {'X-A': 'a\\nb'}\n", "must be ASCII text on one line"),
         ],
         ids=["negative", "contradiction", "vary", "cdn", "forbidden", "break"],
     )
@@ -155,3 +156,41 @@ class TestCsrfInSession:
         ):
             [warning] = check_csrf_in_session()
         assert "and 2 more" in warning.msg
+
+
+CONDITIONAL = "django.middleware.http.ConditionalGetMiddleware"
+SESSIONS = "django.contrib.sessions.middleware.SessionMiddleware"
+SECURITY = "django.middleware.security.SecurityMiddleware"
+
+
+class TestConditionalGetOrder:
+    """`next.W134` names a cookie-setting middleware wrapping `ConditionalGet`."""
+
+    @pytest.mark.parametrize(
+        "middleware",
+        [[SESSIONS], [CONDITIONAL, SESSIONS], [SECURITY, CONDITIONAL, SESSIONS]],
+        ids=["absent", "outermost", "below_security"],
+    )
+    def test_a_safe_order_is_silent(self, tmp_path, middleware) -> None:
+        with (
+            routed(_pages(tmp_path, "cache = 60\n")),
+            override_settings(MIDDLEWARE=middleware),
+        ):
+            assert check_conditional_get_order() == []
+
+    def test_a_cookie_middleware_above_it_is_w134(self, tmp_path) -> None:
+        with (
+            routed(_pages(tmp_path, "cache = 60\n")),
+            override_settings(MIDDLEWARE=[SECURITY, SESSIONS, CONDITIONAL]),
+        ):
+            [warning] = check_conditional_get_order()
+        assert warning.id == "next.W134"
+        assert warning.msg.startswith(f"{SESSIONS} sits above")
+        assert "p0" in warning.msg
+
+    def test_no_shared_page_is_silent(self, tmp_path) -> None:
+        with (
+            routed(_pages(tmp_path, "cache = False\n")),
+            override_settings(MIDDLEWARE=[SESSIONS, CONDITIONAL]),
+        ):
+            assert check_conditional_get_order() == []

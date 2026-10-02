@@ -403,6 +403,28 @@ class TestQuerySetItems:
             [part] = _section().entries().parts[1:]
         assert part.rows.query.order_by == ("pk",)
 
+    def test_a_sliced_queryset_without_an_order_raises(self, tmp_path) -> None:
+        root = write_tree(
+            tmp_path / "pages",
+            pages=("people/[slug]",),
+            sitemap=USERS.replace("User.objects.all()", "User.objects.all()[:5]"),
+        )
+        with routed(root), pytest.raises(TypeError, match="sliced QuerySet"):
+            _section().entries()
+
+    def test_a_queryset_part_without_a_column_reads_no_row_for_the_latest(
+        self, tmp_path, django_assert_max_num_queries
+    ) -> None:
+        root = write_tree(
+            tmp_path / "pages",
+            pages=("people/[slug]",),
+            sitemap=USERS.replace(", lastmod='last_login'", ""),
+        )
+        with routed(root):
+            section = _section()
+            with django_assert_max_num_queries(1):
+                assert section.get_latest_lastmod() is None
+
     def test_an_ordered_queryset_keeps_its_order(self, tmp_path) -> None:
         root = write_tree(
             tmp_path / "pages",

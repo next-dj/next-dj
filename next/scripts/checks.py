@@ -192,7 +192,14 @@ def _script_problems(script: Script) -> list[tuple[str, str]]:
             problems.append((f"loads {script.src!r}, {problem}", "next.E141"))
     if script.init is not None and inline_body(script.init) != script.init:
         problems.append(
-            ("holds </script in its init, which closes the element", "next.E142")
+            (
+                (
+                    "holds </script, <script or <!-- in its init, which the HTML "
+                    "parser reads as markup, so the element closes early or "
+                    "swallows the page"
+                ),
+                "next.E142",
+            )
         )
     strays = sorted(name for name in script.attrs if not allowed_attr(name))
     if strays:

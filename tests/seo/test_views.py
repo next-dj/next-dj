@@ -347,6 +347,14 @@ class TestBrokenSources:
         assert first.content == b"Not found"
         assert caplog.text.count(f"{root / failed} failed to import") == 1
 
+    def test_one_broken_tree_ships_no_partial_sitemap(self, tmp_path) -> None:
+        good = write_tree(tmp_path / "a" / "pages", pages=("about",), sitemap="")
+        broken = write_tree(tmp_path / "b" / "pages", pages=("team",), sitemap="1/0\n")
+        with routed(good, broken, **WITH_BASE):
+            index = Client().get("/sitemap.xml")
+            section = Client().get("/sitemap-pages.xml")
+        assert index.status_code == section.status_code == 404
+
 
 class TestDeclaredItems:
     """`@sitemap.items` fills a dynamic route through the page URL."""

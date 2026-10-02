@@ -12,6 +12,7 @@ from next.pages import ld
 from next.pages.errors import PageMetadataShapeError
 from next.pages.metadata import Metadata, Robots, noindexed
 from next.pages.metadata.markers import Segment, TitleSpec
+from next.pages.metadata.normalize import normalize_site_metadata
 from next.pages.metadata.scope import (
     SITE_SOURCE,
     MetadataOptions,
@@ -104,12 +105,21 @@ class TestSiteSegment:
     def test_the_site_tier_rejects_page_only_title_forms(
         self, defaults: dict[str, object], fragment: str
     ) -> None:
+        with pytest.raises(PageMetadataShapeError, match=fragment) as excinfo:
+            normalize_site_metadata(defaults, source=SITE_SOURCE)
+        assert excinfo.value.source == SITE_SOURCE
+
+    def test_a_refused_scope_folds_to_nothing_and_warns_once(self, caplog) -> None:
+        defaults = {"canonical": "javascript:x", "site_name": "Acme"}
         with (
             override_settings(NEXT_FRAMEWORK={"METADATA": {"DEFAULTS": defaults}}),
-            pytest.raises(PageMetadataShapeError, match=fragment) as excinfo,
+            caplog.at_level("WARNING", logger="next.pages.metadata.scope"),
         ):
-            site_segment()
-        assert excinfo.value.source == SITE_SOURCE
+            first = site_segment()
+            again = site_segment()
+        assert first == Segment(SITE_SOURCE)
+        assert again is first
+        assert caplog.text.count("so the defaults fold to nothing") == 1
 
     def test_the_site_name_falls_back_to_the_site_scope(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"SITE": {"NAME": "Acme"}}):

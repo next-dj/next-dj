@@ -17,7 +17,7 @@ from django.core.checks import (
 )
 from django.template.base import TextNode
 
-from next.checks import NEXT
+from next.checks import NEXT, SEO
 from next.pages.checks.composed import iter_composed_pages
 from next.pages.metadata.resolve import (
     MISSPELT_OG_LOCALES,
@@ -341,7 +341,7 @@ def _viewport_errors(item: DeclaredSegment) -> list[CheckMessage]:
     return messages
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_metadata_head_tags(*args, **kwargs) -> list[CheckMessage]:
     """Validate links, icons, names and viewport of every declared segment.
 
@@ -379,7 +379,7 @@ def _underived_languages(og: OpenGraph) -> list[str]:
     return sorted({code for code in codes if og_locale(code) is None})
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_metadata_social_folds(*args, **kwargs) -> list[CheckMessage]:
     """Warn about an og locale Open Graph cannot read (`next.W113`).
 
@@ -425,7 +425,7 @@ def _literal_test(key: str) -> TemplateSearch:
     return TemplateSearch(test)
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_metadata_head_literals(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a template writes the viewport or theme-color a fold declares.
 

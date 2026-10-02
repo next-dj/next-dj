@@ -10,7 +10,7 @@ def _source(root: Path) -> ScriptsSource:
 
 
 class TestScriptsRegistry:
-    """One source per tree root, in tree order, every write bumping the version."""
+    """One source per tree root, in tree order."""
 
     def test_a_registration_is_held(self, tmp_path: Path) -> None:
         registry = ScriptsRegistry()
@@ -19,7 +19,6 @@ class TestScriptsRegistry:
         assert registry.source(tmp_path) is source
         assert registry.roots() == (tmp_path,)
         assert registry.sources() == (source,)
-        assert registry.version == 1
 
     def test_a_tree_without_a_source_holds_its_place(self, tmp_path: Path) -> None:
         registry = ScriptsRegistry()
@@ -35,4 +34,3 @@ class TestScriptsRegistry:
         registry.register(tmp_path, _source(tmp_path))
         registry.reset()
         assert registry.roots() == ()
-        assert registry.version == 2

@@ -21,7 +21,12 @@ from next.urls.manager import seo_routes_version
 from next.utils import UNSET, Unset, template_edits_watched
 
 from .backends import SitemapBackend, shortest_cache
-from .discovery import SOURCE_NAMES, forget_page_tree_roots, page_tree_roots
+from .discovery import (
+    SOURCE_NAMES,
+    BrokenSource,
+    forget_page_tree_roots,
+    page_tree_roots,
+)
 from .registry import sitemap_items_registry
 from .robots import RobotsSource, robots_candidates
 from .signals import sitemap_backend_loaded
@@ -177,6 +182,20 @@ class SeoManager(BackendListManager[SitemapBackend]):
     def serves_sitemap(self) -> bool:
         """Whether a backend has sections, which routes `/sitemap.xml`."""
         return any(backend.serves() for backend in self.backends)
+
+    def broken_sitemap(self) -> BrokenSource | None:
+        """Return the first `sitemap.py` that failed to import, `None` when all ran.
+
+        One broken tree answers 404 for the whole sitemap, so no partial one ships.
+        """
+        return next(
+            (
+                BrokenSource(root.sitemap_path)
+                for root in self.roots()
+                if root.sitemap is not None and root.sitemap.module is None
+            ),
+            None,
+        )
 
     def sections(self, request: HttpRequest | None) -> dict[str, Sitemap[Any]]:
         """Return the sections of every backend, the first one winning a shared name.

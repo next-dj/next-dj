@@ -105,6 +105,7 @@ Metadata and SEO
 An unknown key raises ``TypeError``, and every mismatch lands in one ``AssertionError``.
 The head is read by ``head_tags(html)`` of ``next.pages.metadata.head``, re-exported from ``next.testing.metadata`` with its ``HeadTags`` result.
 ``parse_sitemap`` answers the ``SitemapUrl`` values of a sitemap or an index response, each with ``loc``, ``lastmod``, and ``alternates``, both exported from ``next.testing``.
+A body that is no well-formed XML raises ``xml.etree.ElementTree.ParseError``, so a malformed sitemap fails the test rather than reading as empty.
 A robots file is plain text, so a test reads ``response.content`` directly.
 ``reset_seo`` in the isolation helpers drops the discovered SEO sources and the ``@sitemap.items`` registrations.
 

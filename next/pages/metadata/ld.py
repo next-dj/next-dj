@@ -8,6 +8,7 @@ from dataclasses import dataclass, field, fields
 from enum import Enum
 from types import MappingProxyType
 from typing import ClassVar, Final
+from weakref import WeakKeyDictionary
 
 from django.utils.functional import Promise
 
@@ -44,7 +45,8 @@ class Ref:
 
 type _Plan = tuple[tuple[str, str, bool, str | None], ...]
 
-_PLANS: dict[type, _Plan] = {}
+# Weak keys, so a node class an autoreloaded page.py defines leaves with its module.
+_PLANS: WeakKeyDictionary[type, _Plan] = WeakKeyDictionary()
 
 
 def plain(value: object, url: UrlMap = _same) -> object:

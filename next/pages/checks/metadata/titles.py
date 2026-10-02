@@ -14,7 +14,7 @@ from django.core.checks import (
 )
 from django.utils import translation
 
-from next.checks import NEXT
+from next.checks import NEXT, SEO
 from next.pages.errors import PageMetadataTemplateError
 from next.pages.metadata.scope import SITE_SOURCE
 from next.pages.metadata.titles import template_has_title
@@ -140,7 +140,7 @@ def _template_message(
     )
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_metadata_title_templates(*args, **kwargs) -> list[CheckMessage]:
     """Parse every title template under every language (`next.E099`, `next.W084`).
 

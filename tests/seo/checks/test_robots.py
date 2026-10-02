@@ -117,6 +117,25 @@ class TestRobotsDisallow:
         assert "covers /sitemap.xml" in messages[0].msg
         assert messages[0].obj == str(root / "robots.py")
 
+    @pytest.mark.parametrize(
+        ("allow", "warned"),
+        [("/about/", False), ("/about", False), ("/a", True)],
+        ids=["longer", "equal", "shorter"],
+    )
+    def test_an_allow_as_long_as_the_disallow_lets_the_url_in(
+        self, tmp_path, allow, warned
+    ) -> None:
+        robots = (
+            "from next.seo import RobotsRule\n\n"
+            f"rules = [RobotsRule(allow={allow!r}, disallow='/about')]\n"
+        )
+        root = write_tree(
+            tmp_path / "pages", pages=("about",), sitemap="", robots=robots
+        )
+        with routed(root):
+            messages = check_robots_disallow()
+        assert check_ids(messages) == (["next.W100"] if warned else [])
+
     def test_a_disallow_over_a_listed_route_warns(self, tmp_path) -> None:
         root = write_tree(
             tmp_path / "pages",

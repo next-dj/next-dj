@@ -16,7 +16,7 @@ The system checks
 
 Every ``manage.py check`` validates the ``METADATA``, ``SITE``, and ``SEO`` scopes, the ``metadata`` of every page, and the ``sitemap.py`` and ``robots.py`` of every tree.
 It reports a declaration the framework cannot serve as intended, a key of the wrong shape, a title template without a default, a route the sitemap cannot reverse, or a ``Disallow`` covering a ``noindex`` page.
-The crawler checks carry the ``seo`` tag beside ``next``, so ``--tag seo`` narrows a run to them.
+The metadata, crawler, and site checks carry the ``seo`` tag beside ``next``, so ``--tag seo`` narrows a run to them.
 
 .. code-block:: bash
    :caption: shell

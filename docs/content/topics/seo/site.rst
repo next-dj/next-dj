@@ -141,7 +141,7 @@ What the checks read
 --------------------
 
 The system checks run without a request, so a callable receives ``None`` and ``"auto"`` reads ``DEBUG`` at check time.
-On a site closed at check time the checks treat every page as ``noindex`` and skip the sitemap checks, since no sitemap is served.
+On a site closed at check time the checks treat every page as ``noindex``, and the two that read the served sitemap, ``next.W098`` and ``next.W100``, stay quiet, since no sitemap is served.
 
 See also
 --------

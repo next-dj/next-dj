@@ -20,7 +20,7 @@ _TEMPLATE = "<h1>{{ request.path }}</h1>" + "".join(
 )
 _POLICY_PAGE = (
     "cache = {'public': True, 'max_age': 60, 's_maxage': 300}\n"
-    "headers = {'Content-Security-Policy': \"frame-ancestors 'none'\"}\n"
+    "headers = {'Cross-Origin-Opener-Policy': 'same-origin'}\n"
 )
 
 

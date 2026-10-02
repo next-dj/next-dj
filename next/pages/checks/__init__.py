@@ -36,6 +36,7 @@ from .processors import (
     check_request_in_context,
 )
 from .responses import (
+    check_conditional_get_order,
     check_csrf_delivery,
     check_csrf_in_session,
     check_page_response_declarations,
@@ -46,6 +47,7 @@ from .zones import check_context_reads_foreign_zone
 
 
 __all__ = [
+    "check_conditional_get_order",
     "check_context_functions",
     "check_context_processor_signature",
     "check_context_reads_foreign_zone",

@@ -170,7 +170,8 @@ Open Graph, Twitter, and JSON-LD stay as first rendered, because the crawlers th
            return Patches(request).morph_zone("note").meta(note.title).response()
 
 An inherited ancestor callable runs as the render would, so ``meta()`` first runs the ``render()`` guard of the origin page, raising ``ForeignPageNotAuthorizedError`` on a denial.
-A builder without an origin page merges the value over ``DEFAULTS`` alone, and a builder without a request sends no ``canonical`` key when the canonical names the page itself, so the client keeps the tag it has.
+A builder without an origin page merges the value over ``DEFAULTS`` alone and sends no ``canonical`` key when the canonical names the page itself, so the client keeps the tag it has rather than pointing it at the action endpoint.
+A ``push_url()`` or ``replace_url()`` queued before ``meta()`` names the address the canonical is built from, so the tag follows the URL the same envelope moves the browser to.
 The tags belong to the page whose envelope carried them, so a ``meta`` for a URL that is neither the page nor an open layer is dropped, see :doc:`/content/topics/partial-rendering/layers`.
 The verb sits beside ``push_url()`` in the verbs table of :doc:`/content/topics/partial-rendering/reference`.
 

@@ -156,6 +156,9 @@ class TestUrlOrigin:
             ("https://", None),
             ("http://[::1", None),
             ("://", None),
+            ("https://user:secret@acme.example", None),
+            ("https://acme.example:99999", None),
+            ("https://bad host.example", None),
         ],
         ids=[
             "origin",
@@ -167,6 +170,9 @@ class TestUrlOrigin:
             "no_host",
             "malformed",
             "schemeless",
+            "credentials",
+            "port_out_of_range",
+            "invalid_host",
         ],
     )
     def test_the_origin_splits(

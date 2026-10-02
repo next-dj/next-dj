@@ -6,7 +6,7 @@ import pytest
 from django.test import Client, override_settings
 
 from next.pages.responses import cookie_varies
-from next.scripts.manager import ScriptsManager, TreeScripts, scripts_manager
+from next.scripts.manager import ScriptsManager, scripts_manager
 from next.scripts.registry import ScriptsRegistry
 from next.static import StaticCollector
 from next.static.errors import StaticAssetNotFoundError
@@ -82,6 +82,20 @@ class TestServerRender:
             root, cookie=MARKETING, CONSENT={**CATEGORIES, "SERVER_RENDER": True}
         )
         assert 'data-next-script="pixel"' in response.content.decode()
+        assert "Cookie" in response["Vary"]
+        assert response["Cache-Control"] == "private, max-age=60"
+
+    def test_true_takes_a_shared_page_private_without_a_gated_script(
+        self, tmp_path: Path
+    ) -> None:
+        scripts = (
+            "from next.scripts import Script\nscripts = (Script('a', src='x/a.js'),)\n"
+        )
+        root = write_tree(tmp_path / "pages", scripts=scripts, page=SHARED)
+        response = get(
+            root, cookie=MARKETING, CONSENT={**CATEGORIES, "SERVER_RENDER": True}
+        )
+        assert payload(response)["$consent"]["decided"] is True
         assert "Cookie" in response["Vary"]
         assert response["Cache-Control"] == "private, max-age=60"
 
@@ -185,9 +199,8 @@ class TestNonce:
         ]
         assert tags
         assert all('nonce="abc123"' in tag for tag in tags)
-        assert all(
-            entry["nonce"] == "abc123" for entry in payload(response)["$scripts"]
-        )
+        assert payload(response)["$scripts"]
+        assert all("nonce" not in entry for entry in payload(response)["$scripts"])
 
     def test_a_nonce_switched_off_carries_none(self, tmp_path: Path) -> None:
         with patch("next.static.nonce.request_nonce", return_value="abc123"):
@@ -228,15 +241,16 @@ class TestDiscovery:
         assert 'data-next-script="base"' not in after
 
     def test_a_page_outside_every_tree_has_no_scripts(self, tmp_path: Path) -> None:
-        manager = ScriptsManager(ScriptsRegistry())
+        registry = ScriptsRegistry()
+        manager = ScriptsManager(registry)
         with patch(
             "next.scripts.manager.routed_page_trees",
             return_value=_trees(tmp_path / "pages"),
         ):
-            assert manager.tree(tmp_path / "elsewhere" / "page.py") == TreeScripts()
-            assert manager.tree(None) == TreeScripts()
+            assert manager.tree(tmp_path / "elsewhere" / "page.py") == ()
+            assert manager.tree(None) == ()
             assert manager.root_of(tmp_path / "elsewhere" / "page.py") is None
-        assert manager.registry.roots() == (tmp_path / "pages",)
+        assert registry.roots() == (tmp_path / "pages",)
 
     def test_a_watched_listing_reads_an_edit_of_every_tree(
         self, tmp_path: Path
@@ -255,13 +269,14 @@ class TestDiscovery:
         assert [script.name for script in after[0].scripts] == ["new"]
 
     def test_no_page_path_reads_no_tree(self, tmp_path: Path) -> None:
-        manager = ScriptsManager(ScriptsRegistry())
+        registry = ScriptsRegistry()
+        manager = ScriptsManager(registry)
         with patch(
             "next.scripts.manager.routed_page_trees",
             return_value=_trees(tmp_path / "pages"),
         ):
-            assert manager.tree(None) == TreeScripts()
-        assert manager.registry.roots() == ()
+            assert manager.tree(None) == ()
+        assert registry.roots() == ()
 
     def test_a_watched_process_stats_only_the_rendered_tree(
         self, tmp_path: Path
@@ -324,6 +339,17 @@ class TestSources:
         html = get(write_tree(tmp_path / "pages", scripts=scripts)).content.decode()
         assert '<script src="/static/x/a.js" async data-next-script="a">' in html
 
+    def test_a_vendor_url_keeps_no_project_version(self, tmp_path: Path) -> None:
+        scripts = (
+            "from next.scripts import Script\n"
+            "scripts = (Script('v', src='https://vendor.example/s.js'),"
+            " Script('own', src='x/a.js'))\n"
+        )
+        root = write_tree(tmp_path / "pages", scripts=scripts)
+        html = get(root, STATIC_VERSION="7").content.decode()
+        assert '<script src="https://vendor.example/s.js" async' in html
+        assert '<script src="/static/x/a.js?v=7" async' in html
+
 
 CONSENTED_ZONE = (
     'template = \'{% zone "media" %}'
@@ -351,16 +377,19 @@ class TestConsentedRuntime:
         assert data["$consent"]["decided"] is False
         assert data["$chunks"]["scripts"].endswith("next.scripts.min.js")
 
-    def test_a_zone_get_ships_the_template_and_its_marker(self, tmp_path: Path) -> None:
+    def test_a_zone_of_a_shared_page_reads_the_visitor_consent(
+        self, tmp_path: Path
+    ) -> None:
         page = CONSENTED_ZONE + "cache = 60\n"
         root = write_tree(tmp_path / "pages", scripts=None, page=page)
-        with routed(root):
-            response = NextClient().get_zones("/", "media")
+        client = NextClient()
+        client.cookies["next_consent"] = MARKETING
+        with routed(root, CONSENT=CATEGORIES):
+            response = client.get_zones("/", "media")
         (morph,) = envelope_of(response).ops
-        assert (
-            '<template data-next-consented="marketing"><video></template>'
-            "<!--/next-consented-->"
-        ) in morph["html"]
+        assert "<video>" in morph["html"]
+        assert "<template" not in morph["html"]
+        assert response["Cache-Control"] == "private, no-store"
 
 
 class TestRenderWithoutPage:

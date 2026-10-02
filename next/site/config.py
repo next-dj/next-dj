@@ -11,6 +11,7 @@ from django.contrib.sites.requests import RequestSite
 from django.contrib.sites.shortcuts import get_current_site
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import HttpRequest
+from django.http.request import split_domain_port
 from django.utils.functional import Promise
 
 from next.conf.defaults import DEFAULTS
@@ -55,15 +56,21 @@ def is_url_literal(value: str) -> bool:
 def url_origin(value: str) -> tuple[str, str] | None:
     """Return the scheme and the host of an http or https origin, `None` for the rest.
 
-    A path, a query or a fragment would leak into every URL built on it, so none passes.
+    A path, a query, a fragment or credentials would leak into every URL built on it,
+    so none passes, and neither does a host Django would refuse or a port out of range.
     """
     try:
         parts = urlsplit(value)
+        # The port is parsed lazily and raises on one out of range.
+        _port = parts.port
     except ValueError:
         return None
     if (
         parts.scheme not in WEB_SCHEMES
         or not parts.netloc
+        or parts.username is not None
+        or parts.password is not None
+        or not split_domain_port(parts.netloc)[0]
         or parts.path not in _ROOT_PATHS
         or parts.query
         or parts.fragment

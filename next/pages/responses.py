@@ -11,7 +11,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from http.cookies import Morsel, SimpleCookie
-from typing import TYPE_CHECKING, Final, TypedDict, override
+from typing import TYPE_CHECKING, Any, Final, TypedDict, override
 
 from django.template.response import SimpleTemplateResponse
 from django.utils.cache import patch_cache_control, patch_vary_headers
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from _typeshed import SupportsItems
     from django.http import HttpRequest
     from django.http.response import HttpResponseBase
 
@@ -80,20 +81,34 @@ CACHE_HEADERS: Final = frozenset(
 One set by `headers` would outlive the private form a personal response takes.
 """
 
-FORBIDDEN_HEADERS: Final = CACHE_HEADERS | {
-    "connection",
-    "content-length",
-    "content-type",
-    "set-cookie",
-    "transfer-encoding",
-    "x-robots-tag",
-}
+CSP_HEADERS: Final = frozenset(
+    {"content-security-policy", "content-security-policy-report-only"}
+)
+"""The policy headers a CSP middleware owns, lower-cased.
+
+Django's middleware and django-csp skip a response carrying one, so a page's own
+would replace the whole site policy, its nonce included.
+"""
+
+FORBIDDEN_HEADERS: Final = (
+    CACHE_HEADERS
+    | CSP_HEADERS
+    | {
+        "connection",
+        "content-length",
+        "content-type",
+        "set-cookie",
+        "transfer-encoding",
+        "x-robots-tag",
+    }
+)
 """The header names a page may not set, lower-cased, since the framework owns them."""
 
 _SHARED: Final = frozenset({"public", "s_maxage"})
 _PERSONAL: Final = _SHARED | {"private"}
 _TOKEN: Final = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
-_BREAKS: Final = re.compile(r"[\r\n]")
+_UNSENDABLE: Final = re.compile(r"[^\t\x20-\x7e]")
+"""What no header value may hold, a control character or one outside ASCII."""
 _BLOCKING: Final = NOINDEX_DIRECTIVES | {"nofollow"}
 _SUCCESS: Final = range(200, 300)
 _CACHEABLE: Final = frozenset({"GET", "HEAD"})
@@ -156,7 +171,7 @@ def _from_mapping(value: Mapping[object, object]) -> CacheControl | None:
         directives = [pair for pair in directives if pair[0] not in _SHARED]
     vary = value.get("vary")
     names = (
-        tuple(name for name in vary if isinstance(name, str))
+        tuple(name for name in vary if is_header_name(name))
         if isinstance(vary, list | tuple)
         else ()
     )
@@ -219,11 +234,16 @@ def is_header_name(value: object) -> bool:
     return isinstance(value, str) and _TOKEN.fullmatch(value) is not None
 
 
+def is_header_value(value: object) -> bool:
+    """Whether `value` is ASCII text a header carries on one line as written."""
+    return isinstance(value, str) and _UNSENDABLE.search(value) is None
+
+
 def _usable_header(name: object, value: object) -> bool:
     return (
         is_header_name(name)
         and str(name).lower() not in FORBIDDEN_HEADERS
-        and (value is None or (isinstance(value, str) and not _BREAKS.search(value)))
+        and (value is None or is_header_value(value))
     )
 
 
@@ -239,12 +259,18 @@ def headers_problems(value: object) -> list[str]:
             problems.append(f"{name!r} is no header name")
         elif name.lower() in CACHE_HEADERS:
             problems.append(f"{name} follows cache, so declare the caching there")
+        elif name.lower() in CSP_HEADERS:
+            problems.append(
+                f"{name} would replace the site policy, so declare it through the "
+                "CSP middleware"
+            )
         elif name.lower() in FORBIDDEN_HEADERS:
             problems.append(f"{name} belongs to the framework")
-        if header is not None and not (
-            isinstance(header, str) and not _BREAKS.search(header)
-        ):
-            problems.append(f"the value of {name!r} must be text on one line")
+        if header is not None and not is_header_value(header):
+            problems.append(
+                f"the value of {name!r} must be ASCII text on one line, with no "
+                "control character"
+            )
     return problems
 
 
@@ -350,59 +376,56 @@ def response_policy(
     return replace(held.policy, cache=cache_control(func(**resolved)))
 
 
-def defer_csrf(policy: ResponsePolicy, request: HttpRequest) -> None:
-    """Keep the CSRF token out of the HTML where `CSRF_DELIVERY` asks it."""
+_SHARED_RENDER_ATTR: Final = "_next_shared_render"
+_PERSONAL_RENDER_ATTR: Final = "_next_personal_render"
+_COOKIE_VARY_ATTR: Final = "_next_cookie_vary"
+_CSP_NONCE_ATTR: Final = "_csp_nonce"
+"""Where Django's CSP middleware and django-csp keep the nonce of a request."""
+
+
+def prepare_page_render(policy: ResponsePolicy, request: HttpRequest) -> None:
+    """Set up the render of a full page its policy lets a shared cache hold.
+
+    The CSRF token leaves the HTML where `CSRF_DELIVERY` asks, and the render learns
+    no visitor may show. A zone answer is private and skips both.
+    """
     mode = csrf_delivery()
     if mode is CsrfDelivery.LAZY or (mode is CsrfDelivery.AUTO and policy.shared):
         defer_token(request)
-
-
-SHARED_RENDER_ATTR: Final = "_next_shared_render"
-"""The request attribute marking a render whose response a shared cache may hold."""
-
-PERSONAL_RENDER_ATTR: Final = "_next_personal_render"
-"""The request attribute marking a render whose HTML holds something of one visitor."""
-
-COOKIE_VARY_ATTR: Final = "_next_cookie_vary"
-"""The request attribute marking a response whose HTML follows a cookie."""
+    if policy.shared:
+        mark_shared_render(request)
 
 
 def mark_shared_render(request: HttpRequest) -> None:
     """Mark a render a shared cache may hold, so its HTML shows no visitor."""
-    setattr(request, SHARED_RENDER_ATTR, True)
+    setattr(request, _SHARED_RENDER_ATTR, True)
 
 
 def shared_render(request: HttpRequest | None) -> bool:
     """Whether a shared cache may hold the response this render builds."""
-    return getattr(request, SHARED_RENDER_ATTR, False) is True
+    return getattr(request, _SHARED_RENDER_ATTR, False) is True
 
 
 def mark_personal_render(request: HttpRequest | None) -> None:
     """Mark a render whose HTML shows one visitor, so no shared cache may keep it."""
     if request is not None:
-        setattr(request, PERSONAL_RENDER_ATTR, True)
+        setattr(request, _PERSONAL_RENDER_ATTR, True)
 
 
 def personal_render(request: HttpRequest | None) -> bool:
     """Whether this render put something of one visitor into its HTML."""
-    return getattr(request, PERSONAL_RENDER_ATTR, False) is True
+    return getattr(request, _PERSONAL_RENDER_ATTR, False) is True
 
 
 def vary_on_cookie(request: HttpRequest | None) -> None:
     """Mark the response of `request` as one whose HTML follows a cookie."""
     if request is not None:
-        setattr(request, COOKIE_VARY_ATTR, True)
+        setattr(request, _COOKIE_VARY_ATTR, True)
 
 
 def cookie_varies(request: HttpRequest | None) -> bool:
     """Whether the HTML of this response follows a cookie."""
-    return getattr(request, COOKIE_VARY_ATTR, False) is True
-
-
-def mark_shared(policy: ResponsePolicy, request: HttpRequest) -> None:
-    """Tell the render a shared cache may hold its response, so no visitor shows."""
-    if policy.shared:
-        mark_shared_render(request)
+    return getattr(request, _COOKIE_VARY_ATTR, False) is True
 
 
 _WARNED: BoundedCache[Path, bool] = BoundedCache()
@@ -463,6 +486,22 @@ class SharedCookies(SimpleCookie):
         self.take_private()
 
     @override
+    def update(self, *args: Any, **kwargs: Any) -> None:
+        """Set every cookie given, then take back the shared-cache permission."""
+        super().update(*args, **kwargs)
+        self._took_cookie()
+
+    @override
+    def load(self, rawdata: str | SupportsItems[str, str | Morsel[Any]]) -> None:
+        """Parse the cookies given, then take back the shared-cache permission."""
+        super().load(rawdata)
+        self._took_cookie()
+
+    def _took_cookie(self) -> None:
+        if self:
+            self.take_private()
+
+    @override
     def __reduce__(self) -> tuple[object, ...]:
         """Pickle as a plain `SimpleCookie`, since a cached copy guards nothing."""
         return (SimpleCookie, (), None, None, iter(self.items()))
@@ -475,10 +514,19 @@ class SharedCookies(SimpleCookie):
             _take_private(*shared)
 
 
+def _nonce_minted(request: HttpRequest) -> bool:
+    """Whether a CSP middleware minted a nonce for `request`, whoever read it.
+
+    Django's `LazyNonce` is truthy once evaluated, and django-csp stores the string.
+    """
+    return bool(getattr(request, _CSP_NONCE_ATTR, None))
+
+
 def _personal(request: HttpRequest, response: HttpResponseBase) -> bool:
     """Whether the response shows who asked, by a cookie, the session or its HTML.
 
-    A request with credentials is personal too, as a shared copy would reach everyone.
+    A request with credentials is personal too, as a shared copy would reach everyone,
+    and so is one whose render read the CSP nonce, a template of the project included.
     """
     if (
         response.cookies
@@ -486,6 +534,7 @@ def _personal(request: HttpRequest, response: HttpResponseBase) -> bool:
         or request.META.get("HTTP_AUTHORIZATION")
         or personal_render(request)
         or cookie_varies(request)
+        or _nonce_minted(request)
     ):
         return True
     session = getattr(request, "session", None)
@@ -585,11 +634,9 @@ __all__ = [
     "CACHE_FLAGS",
     "CACHE_HEADERS",
     "CACHE_KEYS",
-    "COOKIE_VARY_ATTR",
+    "CSP_HEADERS",
     "FORBIDDEN_HEADERS",
     "NO_STORE",
-    "PERSONAL_RENDER_ATTR",
-    "SHARED_RENDER_ATTR",
     "CacheControl",
     "CacheDict",
     "HeadersDict",
@@ -598,16 +645,16 @@ __all__ = [
     "cache_control",
     "cache_problems",
     "cookie_varies",
-    "defer_csrf",
     "finish_response",
     "finish_zone_response",
     "forget_response_policies",
     "headers_problems",
     "is_header_name",
+    "is_header_value",
     "mark_personal_render",
-    "mark_shared",
     "mark_shared_render",
     "personal_render",
+    "prepare_page_render",
     "response_policy",
     "robots_tag",
     "shared_render",

@@ -270,8 +270,7 @@ class HtmlMetadataRenderer(MetadataRenderer):
         lines: list[SafeString] = []
         for prefix, items, details in groups:
             for item in items:
-                if item.url is not None:
-                    lines.append(format_html(_PROPERTY, prefix, item.url))
+                lines.append(format_html(_PROPERTY, prefix, item.url))
                 lines.extend(_properties(prefix, item, details))
         return lines
 

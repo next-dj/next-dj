@@ -12,7 +12,7 @@ from django.template import Engine, Template, TemplateDoesNotExist, TemplateSynt
 from django.template.base import NodeList
 from django.template.loader_tags import IncludeNode
 
-from next.checks import NEXT
+from next.checks import NEXT, SEO
 from next.components.nodes import ComponentTagNode
 from next.components.sources import get_components_manager
 from next.pages.checks.composed import iter_composed_pages
@@ -131,7 +131,7 @@ class TemplateSearch:
         return result
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_metadata_tag_rendered(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a page declares metadata its composition never renders (`next.W085`).
 

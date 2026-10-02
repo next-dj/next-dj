@@ -56,7 +56,8 @@ export interface CsrfSource {
 export interface WireRequest {
   url: string;
   method?: string;
-  // A mutation locks on the form uid, a safe GET queues on url plus queue key.
+  // A mutation locks on the form uid, a safe GET queues on its named queue or on url
+  // plus zone.
   // Absent both, the request runs unqueued and unlocked.
   uid?: string;
   // The X-Next-Zone value, absent when the answer addresses the whole page.
