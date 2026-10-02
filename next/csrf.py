@@ -5,6 +5,7 @@ A token in the HTML sets a cookie, so a page a shared cache holds defers it inst
 
 import enum
 import functools
+import logging
 from typing import Final
 
 from django.conf import settings
@@ -19,11 +20,17 @@ from django.http import (
 from django.http.request import HttpHeaders
 from django.middleware.csrf import get_token
 from django.urls import NoReverseMatch, reverse
-from django.utils.cache import patch_vary_headers
+from django.utils.cache import add_never_cache_headers, patch_vary_headers
 
 from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
+from next.diagnostics import FailureLog
 from next.site.headers import ROBOTS_HEADER
+
+
+logger = logging.getLogger(__name__)
+
+_failures = FailureLog(logger)
 
 
 CSRF_URL_NAME: Final = "csrf"
@@ -102,9 +109,21 @@ def csrf_url() -> str:
 
 
 def csrf_payload(request: HttpRequest) -> dict[str, str]:
-    """Return the `$csrf` payload, the endpoint URL in place of a deferred token."""
+    """Return the `$csrf` payload, the endpoint URL in place of a deferred token.
+
+    Without a routed endpoint the token is embedded after all, so forms still post.
+    """
     if token_deferred(request):
-        return {"header": csrf_header_name(), "url": csrf_url()}
+        try:
+            return {"header": csrf_header_name(), "url": csrf_url()}
+        except NoReverseMatch as exc:
+            _failures.contain(
+                exc,
+                CSRF_URL_NAME,
+                "The CSRF token endpoint does not reverse, so this page embeds its "
+                "token instead of deferring it. Add path('', include('next.urls')) "
+                "to ROOT_URLCONF.",
+            )
     return csrf_token_payload(request)
 
 
@@ -127,7 +146,7 @@ def csrf_view(request: HttpRequest) -> HttpResponse:
     """
     refusal = _refusal(request)
     response = JsonResponse(csrf_token_payload(request)) if refusal is None else refusal
-    response["Cache-Control"] = "private, no-store"
+    add_never_cache_headers(response)
     patch_vary_headers(response, ("Cookie",))
     response["X-Content-Type-Options"] = "nosniff"
     response["Cross-Origin-Resource-Policy"] = _SAME_ORIGIN

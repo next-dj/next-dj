@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 from django.conf import settings
 from django.core.cache import cache
+from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpResponse
 from django.template import engines
 from django.template.response import SimpleTemplateResponse
@@ -375,6 +376,58 @@ class TestPageCache:
             plain = Client().get("/organic/")
         assert paid["Cache-Control"] == "s-maxage=300"
         assert "Cache-Control" not in plain
+
+    @pytest.mark.parametrize(
+        ("body", "fragment"),
+        [
+            ("raise RuntimeError('boom')", "raised"),
+            ("return 'an hour'", "returned 'an hour'"),
+            ("return {'max_age': -1}", "max_age must be seconds"),
+        ],
+        ids=["raises", "wrong_type", "wrong_value"],
+    )
+    def test_a_broken_callable_goes_out_no_store_and_logs_once(
+        self, tmp_path, caplog, body, fragment
+    ) -> None:
+        source = f'template = "x"\n\ndef cache():\n    {body}\n'
+        root = _tree(tmp_path, ("", source))
+        with routed(root):
+            responses = [Client().get("/") for _ in range(2)]
+        assert [r.status_code for r in responses] == [200, 200]
+        assert {r["Cache-Control"] for r in responses} == {"private, no-store"}
+        [record] = [r for r in caplog.records if r.name == "next.pages.responses"]
+        assert fragment in record.getMessage()
+        assert "page.py" in record.getMessage()
+
+    def test_a_raising_callable_raises_under_debug(self, tmp_path) -> None:
+        source = 'template = "x"\n\ndef cache():\n    raise RuntimeError("boom")\n'
+        root = _tree(tmp_path, ("", source))
+        with (
+            routed(root),
+            override_settings(DEBUG=True),
+            pytest.raises(RuntimeError) as raised,
+        ):
+            Client(raise_request_exception=True).get("/")
+        assert "page.py raised" in raised.value.__notes__[0]
+
+    def test_a_misshapen_answer_raises_under_debug(self, tmp_path) -> None:
+        source = 'template = "x"\n\ndef cache():\n    return "soon"\n'
+        root = _tree(tmp_path, ("", source))
+        with (
+            routed(root),
+            override_settings(DEBUG=True),
+            pytest.raises(ImproperlyConfigured, match=r"page\.py returned 'soon'"),
+        ):
+            Client(raise_request_exception=True).get("/")
+
+    def test_an_intended_404_passes_through(self, tmp_path) -> None:
+        source = (
+            "from django.http import Http404\n\n"
+            'template = "x"\n\n'
+            "def cache():\n    raise Http404\n"
+        )
+        root = _tree(tmp_path, ("", source))
+        assert _get(root).status_code == 404
 
 
 class TestPageHeaders:

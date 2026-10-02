@@ -671,7 +671,7 @@ Errors
      - A ``page.py`` declares a ``cache`` or ``headers`` the response cannot carry as written, an unknown key, a negative age, a flag that is no bool, ``public`` with ``no_store``, a forbidden or invalid header name, or a value with a control character or a character outside ASCII.
      - ``next.pages.checks.responses``
    * - ``next.E132``
-     - ``CSRF_DELIVERY`` names no mode, so ``"auto"`` applies.
+     - ``CSRF_DELIVERY`` names no mode, so pages deliver the token as under ``"auto"``.
      - ``next.pages.checks.responses``
    * - ``next.E133``
      - A ``scripts.py`` fails to import, and its tree runs none of its scripts, or its ``scripts`` holds anything but ``Script`` values, and the tree runs only the ``Script`` values it holds.
@@ -720,6 +720,14 @@ Errors
    * - ``next.E147``
      - A registered asset kind renders through a method of the rendering backend, the first ``STATIC_BACKENDS`` entry that loads, which is missing or takes no ``request`` and ``nonce`` keywords, so every page holding such an asset fails to render.
      - ``next.static.checks``
+   * - ``next.E148``
+     - ``CSRF_DELIVERY`` is ``"lazy"``, or ``"auto"`` with a page whose ``cache`` a CDN may hold, while ``ROOT_URLCONF`` does not route the ``_next/csrf/`` endpoint, so ``csrf_url()`` does not reverse.
+       Pages embed the token instead and log it once, and the hint asks for ``include("next.urls")``.
+     - ``next.pages.checks.responses``
+   * - ``next.E149``
+     - The CSRF token endpoint or the form action endpoint reverses, but ``resolve()`` of its address lands on another pattern, a project pattern listed above ``include("next.urls")`` or a page, which the message names by its file.
+       The framework routes lead the patterns of ``next.urls``, so a page tree cannot shadow them from inside the include.
+     - ``next.urls.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -956,6 +964,7 @@ Warnings
      - ``next.forms.checks.csrf``
    * - ``next.W122``
      - A page a shared cache may hold renders ``{% csrf_token %}``, which sets the CSRF cookie on every response.
+       A page with a callable ``cache`` counts as one a shared cache may hold, here and in ``next.W123``, ``next.W130``, ``next.W131``, and ``next.W134``, and the message marks it ``(callable cache)``.
      - ``next.pages.checks.responses``
    * - ``next.W123``
      - A page a shared cache may hold answers several languages at one URL, ``LocaleMiddleware`` active with more than one language and the pages outside ``i18n_patterns()``.
@@ -995,8 +1004,10 @@ Warnings
        A partial response carries no consent state, so a block that reaches a page only through a patch stays hidden there.
      - ``next.scripts.checks``
    * - ``next.W134``
-     - ``ConditionalGetMiddleware`` sits below a middleware that may set a cookie, such as ``SessionMiddleware``, while pages declare a ``cache`` a CDN may hold.
+     - ``settings.MIDDLEWARE`` lists ``ConditionalGetMiddleware`` below a middleware that may set a cookie, such as ``SessionMiddleware``, while pages declare a ``cache`` a CDN may hold.
        The 304 it answers copies the shared cache before that cookie lands, so the framework cannot take it private, and the message lists the pages.
+       A middleware is matched by its class, so a subclass counts as its base, and one that does not import counts as one that may set a cookie.
+       ``next.middleware.SharedCacheGuardMiddleware`` listed first, or right below ``UpdateCacheMiddleware``, silences it, and the hint names it.
      - ``next.pages.checks.responses``
 
 Codes are assigned per check and are not contiguous.

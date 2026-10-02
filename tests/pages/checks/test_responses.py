@@ -1,17 +1,27 @@
 from pathlib import Path
 
 import pytest
+from django.middleware.http import ConditionalGetMiddleware
+from django.middleware.security import SecurityMiddleware
 from django.test import override_settings
 
 from next.checks import reset_check_caches
 from next.pages.checks import (
     check_conditional_get_order,
     check_csrf_delivery,
+    check_csrf_endpoint_reversible,
     check_csrf_in_session,
     check_page_response_declarations,
     check_shared_page_responses,
 )
-from tests.support import I18N, I18N_URLCONF, check_ids, routed, write_page
+from tests.support import (
+    FEED_URLCONF,
+    I18N,
+    I18N_URLCONF,
+    check_ids,
+    routed,
+    write_page,
+)
 
 
 LOCALE = {
@@ -94,10 +104,12 @@ class TestSharedPages:
         with routed(_tree(tmp_path, source)):
             assert check_ids(check_shared_page_responses()) == ["next.W122"]
 
-    def test_a_callable_cache_is_not_judged(self, tmp_path) -> None:
+    def test_a_callable_cache_counts_as_possibly_shared(self, tmp_path) -> None:
         source = "template = '{% csrf_token %}'\n\ndef cache():\n    return 60\n"
         with routed(_tree(tmp_path, source)):
-            assert check_shared_page_responses() == []
+            [warning] = check_shared_page_responses()
+        assert warning.id == "next.W122"
+        assert "page.py (callable cache) declares" in warning.msg
 
     def test_locale_middleware_outside_i18n_patterns_is_w123(self, tmp_path) -> None:
         with (
@@ -142,12 +154,20 @@ class TestCsrfInSession:
         assert "CSRF_USE_SESSIONS" in warning.msg
 
     def test_no_shared_page_is_silent(self, tmp_path) -> None:
-        sources = ("", "cache = False\n", "def cache():\n    return 60\n")
+        sources = ("", "cache = False\n", "cache = {'max_age': 60}\n")
         with (
             routed(_pages(tmp_path, *sources)),
             override_settings(CSRF_USE_SESSIONS=True),
         ):
             assert check_csrf_in_session() == []
+
+    def test_a_callable_cache_is_listed_and_marked(self, tmp_path) -> None:
+        with (
+            routed(_pages(tmp_path, "def cache():\n    return False\n")),
+            override_settings(CSRF_USE_SESSIONS=True),
+        ):
+            [warning] = check_csrf_in_session()
+        assert "page.py (callable cache)" in warning.msg
 
     def test_a_long_list_of_pages_is_counted(self, tmp_path) -> None:
         with (
@@ -161,6 +181,16 @@ class TestCsrfInSession:
 CONDITIONAL = "django.middleware.http.ConditionalGetMiddleware"
 SESSIONS = "django.contrib.sessions.middleware.SessionMiddleware"
 SECURITY = "django.middleware.security.SecurityMiddleware"
+GUARD = "next.middleware.SharedCacheGuardMiddleware"
+UPDATE_CACHE = "django.middleware.cache.UpdateCacheMiddleware"
+
+
+class QuietSecurity(SecurityMiddleware):
+    """A project subclass of a middleware that sets no cookie."""
+
+
+class Conditional(ConditionalGetMiddleware):
+    """A project subclass of `ConditionalGetMiddleware`."""
 
 
 class TestConditionalGetOrder:
@@ -185,8 +215,47 @@ class TestConditionalGetOrder:
         ):
             [warning] = check_conditional_get_order()
         assert warning.id == "next.W134"
-        assert warning.msg.startswith(f"{SESSIONS} sits above")
+        assert warning.msg.startswith(f"settings.MIDDLEWARE lists {SESSIONS} above")
         assert "p0" in warning.msg
+        assert GUARD in warning.hint
+
+    def test_a_subclass_is_read_as_its_base(self, tmp_path) -> None:
+        middleware = [f"{__name__}.QuietSecurity", SESSIONS, f"{__name__}.Conditional"]
+        with (
+            routed(_pages(tmp_path, "cache = 60\n")),
+            override_settings(MIDDLEWARE=middleware),
+        ):
+            [warning] = check_conditional_get_order()
+        assert f"lists {SESSIONS} above" in warning.msg
+
+    def test_an_entry_that_does_not_import_counts_as_cookie_setting(
+        self, tmp_path
+    ) -> None:
+        with (
+            routed(_pages(tmp_path, "cache = 60\n")),
+            override_settings(MIDDLEWARE=["missing.Middleware", CONDITIONAL]),
+        ):
+            [warning] = check_conditional_get_order()
+        assert "missing.Middleware" in warning.msg
+
+    @pytest.mark.parametrize(
+        "middleware",
+        [[GUARD, SESSIONS, CONDITIONAL], [UPDATE_CACHE, GUARD, SESSIONS, CONDITIONAL]],
+        ids=["first", "below_update_cache"],
+    )
+    def test_the_guard_in_front_silences_it(self, tmp_path, middleware) -> None:
+        with (
+            routed(_pages(tmp_path, "cache = 60\n")),
+            override_settings(MIDDLEWARE=middleware),
+        ):
+            assert check_conditional_get_order() == []
+
+    def test_the_guard_further_down_does_not(self, tmp_path) -> None:
+        with (
+            routed(_pages(tmp_path, "cache = 60\n")),
+            override_settings(MIDDLEWARE=[SESSIONS, GUARD, CONDITIONAL]),
+        ):
+            assert check_ids(check_conditional_get_order()) == ["next.W134"]
 
     def test_no_shared_page_is_silent(self, tmp_path) -> None:
         with (
@@ -194,3 +263,34 @@ class TestConditionalGetOrder:
             override_settings(MIDDLEWARE=[SESSIONS, CONDITIONAL]),
         ):
             assert check_conditional_get_order() == []
+
+
+class TestCsrfEndpoint:
+    """`next.E148` names a deferred token whose endpoint ROOT_URLCONF does not route."""
+
+    def test_lazy_delivery_without_the_endpoint_is_e148(self, tmp_path) -> None:
+        with routed(_pages(tmp_path), urlconf=FEED_URLCONF, CSRF_DELIVERY="lazy"):
+            [error] = check_csrf_endpoint_reversible()
+        assert error.id == "next.E148"
+        assert "'lazy'" in error.msg
+        assert "include('next.urls')" in error.hint
+
+    def test_auto_delivery_without_a_shared_page_is_silent(self, tmp_path) -> None:
+        with routed(_pages(tmp_path, "cache = False\n"), urlconf=FEED_URLCONF):
+            assert check_csrf_endpoint_reversible() == []
+
+    def test_auto_delivery_with_a_shared_page_is_e148(self, tmp_path) -> None:
+        with routed(_pages(tmp_path, "cache = 60\n"), urlconf=FEED_URLCONF):
+            assert check_ids(check_csrf_endpoint_reversible()) == ["next.E148"]
+
+    def test_eager_delivery_needs_no_endpoint(self, tmp_path) -> None:
+        with routed(
+            _pages(tmp_path, "cache = 60\n"),
+            urlconf=FEED_URLCONF,
+            CSRF_DELIVERY="eager",
+        ):
+            assert check_csrf_endpoint_reversible() == []
+
+    def test_a_routed_endpoint_is_silent(self, tmp_path) -> None:
+        with routed(_pages(tmp_path, "cache = 60\n"), CSRF_DELIVERY="lazy"):
+            assert check_csrf_endpoint_reversible() == []

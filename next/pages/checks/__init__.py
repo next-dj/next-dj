@@ -38,6 +38,7 @@ from .processors import (
 from .responses import (
     check_conditional_get_order,
     check_csrf_delivery,
+    check_csrf_endpoint_reversible,
     check_csrf_in_session,
     check_page_response_declarations,
     check_shared_page_responses,
@@ -53,6 +54,7 @@ __all__ = [
     "check_context_reads_foreign_zone",
     "check_context_registration_files",
     "check_csrf_delivery",
+    "check_csrf_endpoint_reversible",
     "check_csrf_in_session",
     "check_layout_templates",
     "check_metadata_callable_returns_mapping",

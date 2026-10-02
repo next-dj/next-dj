@@ -21,6 +21,7 @@ from urllib.parse import unquote_to_bytes
 from django.apps import apps
 from django.conf import settings
 from django.utils.encoding import repercent_broken_unicode
+from django.utils.module_loading import import_string
 from django.utils.text import slugify
 
 from next.caches import DEFAULT_CACHE_SIZE
@@ -415,3 +416,40 @@ def _visit_page_dir(
         yield from _visit_page_dir(
             Path(entry.path), tree_root, child_url, skip_dir_names, on_skipped_dir
         )
+
+
+@functools.cache
+def _middleware_class(path: str) -> type | None:
+    """Import a `MIDDLEWARE` entry, `None` when it does not import as a class."""
+    try:
+        found = import_string(path)
+    except Exception:  # noqa: BLE001 - a broken entry is Django's to report at startup
+        return None
+    return found if isinstance(found, type) else None
+
+
+def is_middleware(entry: object, base: str) -> bool:
+    """Whether a `MIDDLEWARE` entry names the class `base` or a subclass of it.
+
+    An entry or a base that does not import still matches by its dotted path.
+    """
+    if not isinstance(entry, str):
+        return False
+    if entry == base:
+        return True
+    found = _middleware_class(entry)
+    parent = _middleware_class(base)
+    return found is not None and parent is not None and issubclass(found, parent)
+
+
+def middleware_index(middleware: Iterable[object], base: str) -> int | None:
+    """Return where the first entry `is_middleware` matches sits, `None` for none."""
+    for index, entry in enumerate(middleware):
+        if is_middleware(entry, base):
+            return index
+    return None
+
+
+def middleware_listed(middleware: Iterable[object], base: str) -> bool:
+    """Whether `middleware` lists the class `base` or a subclass of it."""
+    return middleware_index(middleware, base) is not None

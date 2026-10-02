@@ -4,6 +4,7 @@ import pytest
 from django import forms as django_forms
 from django.contrib.auth.models import Group
 from django.contrib.messages import MessageFailure, get_messages
+from django.contrib.messages.middleware import MessageMiddleware
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.functional import lazy
 
@@ -536,8 +537,21 @@ class TestSuccessMessageFrameworkCheck:
         assert "message_wizard" in flagged
         assert "default_redirect_form" not in flagged
 
+    def test_a_subclass_of_the_middleware_counts(self, settings) -> None:
+        settings.MIDDLEWARE = [
+            f"{__name__}.ProjectMessages"
+            if mw == "django.contrib.messages.middleware.MessageMiddleware"
+            else mw
+            for mw in settings.MIDDLEWARE
+        ]
+        assert check_success_message_framework() == []
+
     def test_missing_app_warns(self, settings) -> None:
         settings.INSTALLED_APPS = [
             app for app in settings.INSTALLED_APPS if app != "django.contrib.messages"
         ]
         assert any(m.id == "next.W061" for m in check_success_message_framework())
+
+
+class ProjectMessages(MessageMiddleware):
+    """A project subclass of Django's `MessageMiddleware`."""
