@@ -133,6 +133,32 @@ class TestRouteOrder:
             "zeta",
         ]
 
+    def test_the_most_specific_sibling_comes_first(self, tmp_path) -> None:
+        # `post-[id]` would be shadowed by `[slug]` and `[uuid:key]` by
+        # `[str:key]`, since Django tries the patterns in order.
+        names = [
+            "[[rest]]",
+            "docs-[[rest]]",
+            "[str:key]",
+            "[slug]",
+            "[uuid:key]",
+            "post-[id]",
+            "[int:n]",
+        ]
+        for name in names:
+            (tmp_path / name).mkdir()
+            (tmp_path / name / "template.djx").write_text("<h1>Page</h1>")
+        trails = [trail for trail, _file in scan_pages_tree(tmp_path)]
+        assert trails == [
+            "post-[id]",
+            "[int:n]",
+            "[uuid:key]",
+            "[slug]",
+            "[str:key]",
+            "docs-[[rest]]",
+            "[[rest]]",
+        ]
+
     def test_a_reversed_directory_read_yields_the_same_patterns(self, tmp_path) -> None:
         self._tree(tmp_path)
         listed = [str(p.pattern) for p in file_router(dirs=[tmp_path]).generate_urls()]
