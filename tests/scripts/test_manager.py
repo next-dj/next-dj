@@ -506,6 +506,27 @@ class TestHeldScripts:
         assert "https://cdn.example/both.js" not in entries
         assert "'nope'" in caplog.text
 
+    def test_a_held_script_waits_for_its_own_category_and_the_block(
+        self, tmp_path: Path
+    ) -> None:
+        # A marketing pixel named inside an analytics block must not load once
+        # analytics alone is granted, so it waits for both.
+        root = write_tree(
+            tmp_path / "pages",
+            scripts=(
+                "from next.scripts import Script\n"
+                "scripts = (Script('tracker', src='https://px.example/t.js', "
+                "category='marketing', auto=False),)\n"
+            ),
+            page=(
+                'template = \'{% #consented "analytics" %}'
+                '{% script "tracker" %}{% /consented %}\'\ncache = 60\n'
+            ),
+        )
+        response = get(root, CONSENT={"CATEGORIES": ["analytics", "marketing"]})
+        entries = {entry["name"]: entry for entry in payload(response)["$scripts"]}
+        assert entries["tracker"]["category"] == "analytics marketing"
+
     def test_a_server_render_writes_a_granted_body_in_place(
         self, tmp_path: Path
     ) -> None:

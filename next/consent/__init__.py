@@ -6,7 +6,7 @@ The framework offers the mechanism, not compliance, denying every category by de
 from . import checks, providers, signals
 from .backends import ConsentBackend, CookieConsentBackend
 from .manager import consent_categories, get_consent
-from .markers import NECESSARY, UNDECIDED, Consent
+from .markers import NECESSARY, UNDECIDED, Consent, joint_category
 
 
 __all__ = [
@@ -18,5 +18,6 @@ __all__ = [
     "checks",
     "consent_categories",
     "get_consent",
+    "joint_category",
     "signals",
 ]

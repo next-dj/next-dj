@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from django.http import HttpRequest
 
 from next.caches import BoundedCache
-from next.consent import UNDECIDED, Consent, get_consent
+from next.consent import UNDECIDED, Consent, get_consent, joint_category
 from next.consent.manager import consent_configured, consent_payload, server_mode
 from next.discovery import routed_page_trees
 from next.pages.responses import vary_on_cookie
@@ -171,9 +171,11 @@ class ScriptsManager:
         collector: StaticCollector,
         page_path: Path | None,
     ) -> list[Script]:
-        """Return the scripts this render runs, a held-back one in its block's category.
+        """Return the scripts this render runs, a held-back one waiting on its block.
 
-        A script `auto` or the rest of the page names is not held back.
+        A script `auto` or the rest of the page names is not held back. A held-back
+        script waits for its own category and the block's, never only the block's,
+        so a `marketing` script named inside an `analytics` block needs both.
         """
         names = {name for name in collector.notes(SCRIPT_NOTE) if isinstance(name, str)}
         held: dict[str, str] = {}
@@ -191,7 +193,9 @@ class ScriptsManager:
         return [
             script
             if script.auto or script.name in names
-            else replace(script, category=held[script.name])
+            else replace(
+                script, category=joint_category(script.category, held[script.name])
+            )
             for script in tree
             if script.auto or script.name in names or script.name in held
         ]

@@ -599,6 +599,27 @@ describe("Next.consent and Next.scripts", () => {
     expect(document.cookie).toContain("next_consent=2:marketing:");
   });
 
+  it("holds a script of a joint category until every name is granted", () => {
+    win.Next._init({
+      $consent: {
+        categories: ["necessary", "analytics", "marketing"],
+        decided: false,
+        granted: ["necessary"],
+      },
+      $scripts: [
+        {
+          name: "joint",
+          init: "window.nextJoint = 1",
+          category: "analytics marketing",
+        },
+      ],
+    });
+    win.Next.consent.update({ analytics: true });
+    expect(win.Next.scripts.status("joint")).toBe("blocked");
+    win.Next.consent.update({ marketing: true });
+    expect(win.Next.scripts.status("joint")).toBe("loaded");
+  });
+
   it("announces the starting consent once the chunk is configured", () => {
     const seen: Record<string, unknown>[] = [];
     const off = win.Next.on("next:consent", (payload) => seen.push(payload));

@@ -122,6 +122,9 @@ When the runtime decides, the body renders against a collector of its own.
 Its stylesheets and the ``serialize=True`` context of its components join the page, since they do nothing until the markup shows.
 A ``{% use_script %}``, ``{% use_module %}``, or ``{% #use_script %}`` in the body, a co-located script of a component it renders, and a ``{% script %}`` naming a declared script all become ``$scripts`` entries in the category of the block, so the runtime loads them once the visitor grants it.
 They load in order after the page, not where the body stands, and a script the rest of the page registers as well loads with the page.
+A gate only tightens.
+A declared script keeps its own category and waits for the block's as well, so a ``marketing`` script named inside a ``{% #consented "analytics" %}`` block needs both, and a block nested in another needs the outer category too.
+The entry names every category it waits for, separated by a space, and both ``Consent.allows`` and the runtime read such a name as all of them.
 Any other asset kind the body registers is dropped and logged once, since only a script can wait for the category.
 When the server decides, the body renders in place for a visitor who granted the category, its scripts with it.
 

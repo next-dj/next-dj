@@ -149,7 +149,7 @@ class TestHeldBody:
         assert list(collector.notes(GATED_NOTE)) == [
             GatedNote("marketing", StaticAsset("https://cdn.example/x.js", "js")),
             GatedNote("marketing", "chat"),
-            GatedNote("stats", "stats"),
+            GatedNote("marketing stats", "stats"),
         ]
 
     def test_a_server_render_registers_the_granted_body_as_it_stands(self) -> None:
