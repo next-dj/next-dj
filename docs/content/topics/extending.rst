@@ -297,8 +297,10 @@ See :doc:`dependency-injection` for the resolver contract and :doc:`/content/ref
 ``COMPONENT_TEMPLATE_LOADER`` names a ``next.components.ComponentTemplateLoader`` subclass, and the components manager builds one instance of it around the shared module loader.
 The loader decides where a component body comes from and how long a compiled template is reused, so the shipped ``CachedComponentTemplateLoader`` is the subclass to start from when only the caching policy changes.
 
-``METADATA["RENDERER"]`` names a ``next.pages.MetadataRenderer`` subclass, whose ``render`` turns the folded ``Metadata`` of a page and the request into the markup ``{% metadata %}`` writes into the head.
-Subclass ``HtmlMetadataRenderer`` and extend the markup its ``render`` answers to add a tag while keeping every stock one, see :doc:`/content/ref/pages` for the contract.
+``METADATA["RENDERER"]`` names a ``next.pages.MetadataRenderer`` subclass, whose ``render(resolved)`` turns the ``ResolvedMetadata`` of one response into the markup ``{% metadata %}`` writes into the head.
+The resolve has already read the request and the settings, so the renderer sees neither and cannot lose a policy.
+Subclass ``HtmlMetadataRenderer`` and extend its ``sections`` or override a ``render_<name>`` hook to add a tag while keeping every stock one, see :doc:`/content/ref/metadata` for the contract.
+A path that does not import or names no concrete subclass is ``next.E107``, and a render with it falls back to ``HtmlMetadataRenderer`` with one logged error.
 
 Signals
 -------

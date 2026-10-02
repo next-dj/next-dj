@@ -1,18 +1,31 @@
-from collections.abc import Mapping
+import math
 from dataclasses import dataclass
-from enum import StrEnum
-from types import MappingProxyType
+from datetime import UTC, datetime, time, timedelta
+from enum import Enum, StrEnum
 from typing import ClassVar
 
 import pytest
+from django.utils import timezone
 from django.utils.translation import gettext_lazy
 
 from next.pages import ld
-from next.pages.metadata.ld import Text, node_type, plain, raw_id
+from next.pages.metadata.ld import (
+    Text,
+    iter_json,
+    json_problem,
+    node_id,
+    node_type,
+    raw_id,
+    to_json,
+)
 
 
 class Availability(StrEnum):
     SOLD_OUT = "https://schema.org/SoldOut"
+
+
+class Rating(Enum):
+    TOP = 5
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -44,16 +57,6 @@ class Article(ld.Node):
     image: tuple[str, ...] = ()
     author: tuple[Person | ld.Ref, ...] = ()
     publisher: ld.Ref | None = None
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class Question(ld.Node):
-    TYPE: ClassVar[str] = "Question"
-    KEYS: ClassVar[Mapping[str, str]] = MappingProxyType({"answer": "acceptedAnswer"})
-    TEXTS: ClassVar[Mapping[str, str]] = MappingProxyType({"answer": "Answer"})
-
-    name: Text
-    answer: Text
 
 
 def _absolute(url: str) -> str:
@@ -98,14 +101,6 @@ class TestNode:
 
     def test_a_bare_node_is_a_thing(self) -> None:
         assert ld.Node(id="#x").as_jsonld() == {"@type": "Thing", "@id": "#x"}
-
-    def test_a_text_property_nests_under_its_type(self) -> None:
-        question = Question(name="Ships to EU?", answer="Yes, in 3 days.")
-        assert question.as_jsonld() == {
-            "@type": "Question",
-            "name": "Ships to EU?",
-            "acceptedAnswer": {"@type": "Answer", "text": "Yes, in 3 days."},
-        }
 
 
 class TestUrls:
@@ -184,13 +179,21 @@ class TestHelpers:
     @pytest.mark.parametrize(
         ("item", "expected"),
         [
-            (Person(id="#a", name="A"), "#a"),
+            (Person(id="#a", name="A"), "/#a"),
             (Person(name="A"), None),
-            ({"@id": "#b"}, "#b"),
+            ({"@id": "#b"}, "/#b"),
+            ({"@id": "/#b"}, "/#b"),
             ({"@id": 1}, None),
             ("text", None),
         ],
-        ids=["node", "node_without_id", "mapping", "mapping_non_str", "other"],
+        ids=[
+            "node",
+            "node_without_id",
+            "mapping",
+            "mapping_rooted",
+            "mapping_non_str",
+            "other",
+        ],
     )
     def test_raw_id(self, item: object, expected: str | None) -> None:
         assert raw_id(item) == expected
@@ -209,9 +212,80 @@ class TestHelpers:
     def test_node_type(self, item: object, expected: str | None) -> None:
         assert node_type(item) == expected
 
-    def test_plain_renders_nested_nodes_in_containers(self) -> None:
+    def test_node_id_roots_a_bare_fragment_only(self) -> None:
+        assert node_id("#org") == "/#org"
+        assert node_id("/#org") == "/#org"
+        assert node_id("https://x.example/#org") == "https://x.example/#org"
+
+
+class TestToJson:
+    """One walk renders nodes, maps ids and refuses what JSON cannot hold."""
+
+    def test_nested_nodes_and_enums_render_in_containers(self) -> None:
         value = {"a": [ld.Ref("#x"), (Availability.SOLD_OUT,)], "b": 1}
-        assert plain(value) == {
+        assert to_json(value) == {
             "a": [{"@id": "#x"}, ["https://schema.org/SoldOut"]],
             "b": 1,
         }
+
+    def test_a_plain_enum_becomes_its_value(self) -> None:
+        assert to_json([Rating.TOP]) == [5]
+
+    def test_every_id_passes_through_the_id_map(self) -> None:
+        value = {"@id": "#a", "knows": [{"@id": "#b"}, {"@id": 3}]}
+        assert to_json(value, ids=_absolute_id) == {
+            "@id": "https://acme.example/#a",
+            "knows": [{"@id": "https://acme.example/#b"}, {"@id": 3}],
+        }
+
+    def test_the_url_map_reads_strings_but_not_mappings(self) -> None:
+        value = ("/a", {"url": "/b"})
+        assert to_json(value, urls=_absolute) == [
+            "https://acme.example/a",
+            {"url": "/b"},
+        ]
+
+    def test_a_naive_datetime_takes_the_current_time_zone(self) -> None:
+        moment = datetime(2026, 1, 2, 3, 4, tzinfo=None)  # noqa: DTZ001
+        with timezone.override("Europe/Berlin"):
+            aware = to_json(moment)
+        assert isinstance(aware, datetime)
+        assert aware.utcoffset() == timedelta(hours=1)
+
+    def test_an_aware_datetime_is_kept(self) -> None:
+        moment = datetime(2026, 1, 2, tzinfo=UTC)
+        assert to_json(moment) is moment
+
+    @pytest.mark.parametrize(
+        ("value", "problem"),
+        [
+            (math.nan, "a finite number"),
+            ({1, 2}, "a JSON value"),
+            (time(1, tzinfo=UTC), "a time without a time zone"),
+        ],
+        ids=["nan", "set", "aware_time"],
+    )
+    def test_a_leaf_json_lacks_raises(self, value: object, problem: str) -> None:
+        assert json_problem(value) == problem
+        with pytest.raises(ValueError, match=problem):
+            to_json({"a": [value]})
+
+    def test_a_node_property_json_lacks_raises(self) -> None:
+        with pytest.raises(ValueError, match="a finite number"):
+            ld.Node(extra={"price": math.inf}).as_jsonld()
+
+    def test_iter_json_walks_every_value_with_its_path(self) -> None:
+        node = Person(name="A")
+        value = {"a": [1, {"b": node}], "c": "x"}
+        assert list(iter_json(value)) == [
+            ("", value),
+            ("a", [1, {"b": node}]),
+            ("a[0]", 1),
+            ("a[1]", {"b": node}),
+            ("a[1].b", node),
+            ("c", "x"),
+        ]
+
+
+def _absolute_id(ident: str) -> str:
+    return _absolute(node_id(ident))

@@ -42,6 +42,7 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "Crumb",
             "Feed",
             "FeedDict",
+            "GooglebotDict",
             "HtmlMetadataRenderer",
             "Icon",
             "IconDict",

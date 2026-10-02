@@ -26,6 +26,7 @@ from next.pages.metadata.chain import (
     MetadataDeclaration,
     MetadataOrigin,
     MetadataThunk,
+    _failures,
     chain_entry,
     declared_metadata,
     fold_chain,
@@ -470,9 +471,13 @@ class TestCallables:
             return ["x"]
 
         registry.register(leaf, bad_meta)
-        with pytest.raises(PageMetadataShapeError, match="expected a mapping") as info:
+        with (
+            override_settings(DEBUG=True),
+            pytest.raises(PageMetadataShapeError, match="expected a mapping") as info,
+        ):
             _fold(registry, leaf)
         assert info.value.source == f"bad_meta in {leaf}"
+        assert f"bad_meta in {leaf} raised" in info.value.__notes__[0]
 
     def test_http404_propagates_untouched(
         self, registry: PageMetadataRegistry, tmp_path: Path
@@ -485,6 +490,85 @@ class TestCallables:
         registry.register(leaf, gone)
         with pytest.raises(Http404):
             _fold(registry, leaf)
+
+
+class TestContainedFailures:
+    """A render leaves a failing callable out, logging it once, loud under DEBUG."""
+
+    @pytest.fixture(autouse=True)
+    def _armed(self) -> None:
+        _failures.clear()
+
+    def test_a_raising_callable_is_left_out_and_logged_once(
+        self,
+        registry: PageMetadataRegistry,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        _root, leaf = write_page_chain(tmp_path, [("root", ROOT), ("leaf", PLAIN)])
+
+        def broken() -> dict[str, str]:
+            raise KeyError(0)
+
+        registry.register(leaf, broken)
+        with caplog.at_level("ERROR", logger="next.pages.metadata.chain"):
+            first = _fold(registry, leaf)
+            second = _fold(registry, leaf)
+        assert first == second
+        assert first.description == "Root"
+        assert len(caplog.records) == 1
+        assert f"broken in {leaf} raised KeyError" in caplog.text
+
+    def test_a_refused_shape_is_left_out(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        _root, leaf = write_page_chain(tmp_path, [("root", ROOT), ("leaf", PLAIN)])
+        registry.register(leaf, lambda: {"title": 3})
+        assert _fold(registry, leaf).description == "Root"
+
+    def test_a_static_fold_skips_the_contained_path(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", LEAF)])
+        assert str(_fold(registry, leaf).title) == "Leaf"
+
+    def test_a_refused_chain_folds_the_site_defaults_alone(
+        self,
+        registry: PageMetadataRegistry,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        root, leaf = write_page_chain(tmp_path, [("root", ROOT), ("leaf", LEAF)])
+        registry.register(root, dict)
+        thunk = MetadataThunk(registry, leaf, None, {}, {})
+        with caplog.at_level("ERROR", logger="next.pages.metadata.chain"):
+            first = thunk.folded()
+            second = thunk.folded()
+        assert first == second
+        assert first is not None
+        assert first.title is None
+        assert len(caplog.records) == 1
+        assert "renders the site defaults alone" in caplog.text
+
+    @override_settings(DEBUG=True)
+    def test_a_refused_chain_fails_loudly_under_debug(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        root, leaf = write_page_chain(tmp_path, [("root", ROOT), ("leaf", LEAF)])
+        registry.register(root, dict)
+        thunk = MetadataThunk(registry, leaf, None, {}, {})
+        with pytest.raises(PageMetadataConflictError) as caught:
+            thunk.folded()
+        assert "Run manage.py check" in caught.value.__notes__[0]
+
+    def test_the_patch_fold_still_raises(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        """`fold_chain` lets the caller decide, so `Patches.meta` can skip its op."""
+        (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
+        registry.register(leaf, lambda: {"title": 3})
+        with pytest.raises(PageMetadataShapeError):
+            fold_chain(registry, leaf, dep_cache={})
 
 
 class TestPrefix:

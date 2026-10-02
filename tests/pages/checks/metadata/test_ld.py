@@ -29,6 +29,13 @@ from datetime import datetime
 
 metadata = {"jsonld": {"@type": "Article", "datePublished": datetime(2026, 1, 2)}}
 """
+AWARE_TIME = """
+from datetime import UTC, time
+
+from next.pages import ld
+
+metadata = {"jsonld": ld.Node(type="Event", extra={"doorTime": time(9, tzinfo=UTC)})}
+"""
 UNSERIALISABLE = """
 from next.pages import ld
 
@@ -47,14 +54,18 @@ class TestNodes:
     def test_a_breadcrumb_list_is_silent(self, tmp_path: Path) -> None:
         assert _messages(tmp_path, TRAIL) == []
 
+    def test_a_naive_datetime_is_silent(self, tmp_path: Path) -> None:
+        """The renderer reads it in the current time zone, as it does an og time."""
+        assert _messages(tmp_path, NAIVE) == []
+
     @pytest.mark.parametrize(
         ("source", "fragment"),
         [
-            (NAIVE, "a datetime without a time zone"),
+            (AWARE_TIME, "a time without a time zone"),
             (UNSERIALISABLE, "does not serialise"),
             (NOT_A_NUMBER, "does not serialise"),
         ],
-        ids=["naive", "object", "nan"],
+        ids=["aware_time", "object", "nan"],
     )
     def test_a_node_that_breaks_is_e127(
         self, tmp_path: Path, source: str, fragment: str
@@ -74,7 +85,7 @@ class TestNodes:
 class TestGraph:
     """One `@id` names one node type across the fold of a page."""
 
-    def test_an_id_under_two_types_is_e127(self, tmp_path: Path) -> None:
+    def test_an_id_under_two_types_is_e101(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"jsonld": {"@id": "#org", "@type": "Organization"}}')
         metadata_page(
             tmp_path / "leaf",
@@ -83,8 +94,29 @@ class TestGraph:
         )
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_metadata_jsonld()
-        assert check_ids(messages) == ["next.E127"]
-        assert "'#org' as Organization, Person" in messages[0].msg
+        assert check_ids(messages) == ["next.E101"]
+        assert "'/#org' as Organization, Person" in messages[0].msg
+
+    def test_a_fragment_and_its_rooted_form_are_one_id(self, tmp_path: Path) -> None:
+        """`#org` and `/#org` render as one `@id`, so they must share one type."""
+        metadata_page(
+            tmp_path,
+            '{"jsonld": [{"@id": "/#org", "@type": "Organization"}, '
+            '{"@type": "WebSite", "publisher": {"@id": "#org", "@type": "Person"}}]}',
+        )
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            messages = check_metadata_jsonld()
+        assert check_ids(messages) == ["next.E101"]
+
+    def test_a_node_e127_reports_stays_out_of_the_graph(self, tmp_path: Path) -> None:
+        metadata_page(
+            tmp_path / "leaf",
+            '{"jsonld": {"@id": "#org", "@type": "Person", "x": {1, 2}}}',
+        )
+        metadata_page(tmp_path, '{"jsonld": {"@id": "#org", "@type": "Organization"}}')
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            messages = check_metadata_jsonld()
+        assert "next.E101" not in check_ids(messages)
 
     def test_an_id_repeated_under_one_type_is_silent(self, tmp_path: Path) -> None:
         metadata_page(

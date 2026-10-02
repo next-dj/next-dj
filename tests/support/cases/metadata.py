@@ -45,9 +45,9 @@ if TYPE_CHECKING:
 
 
 class Size(Enum):
-    """A plain enum, which JSON cannot write."""
+    """A plain enum whose value JSON cannot write."""
 
-    LARGE = "large"
+    LARGE = frozenset({"large"})
 
 
 @dataclass(frozen=True, slots=True)

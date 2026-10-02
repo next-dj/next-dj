@@ -38,6 +38,25 @@ An ancestor's callable joins the chain only when it was registered with ``inheri
 Each segment records its directory below the tree root as its ``trail``, which the breadcrumbs read.
 ``Segment`` composes a ``Metadata`` with the fields only a segment carries, its source name, its title spec, its breadcrumb label, its trail, and the paths a ``Replace`` took whole.
 
+Normalisation
+~~~~~~~~~~~~~
+
+``normalize.py`` compiles the accepted shapes once at import, by reflection over the annotations of ``MetadataDict``, ``SiteMetadataDict``, and every input dict they reach.
+Each annotated key becomes a ``_Kind``, which names itself for a message, says cheaply whether a value fits, and coerces the value or fails with the key path.
+A union becomes an ``_Either`` that coerces through the first option that fits, a ``Sequence`` an ``_Items``, a ``Literal`` a choice leaf, and a nested dict a ``_Block`` that builds its value object.
+``RobotsDict`` reaches ``GooglebotDict`` under ``googlebot`` rather than itself, so the reflection never meets a cycle.
+
+Four hand tables carry what an annotation cannot say.
+
+- ``_LEAVES`` maps each scalar annotation, the ``Text`` and ``Url`` aliases among them, to its leaf shape.
+- ``_BUILDS`` maps each input dict to the value it builds, a marker class or a small builder such as ``_icons`` that flattens the icon groups.
+  The page dicts build a plain dict, which ``_segment`` splits into the segment fields and the ``Metadata``.
+- ``_SHORTHANDS`` names the key a bare string stands for beside a dict, the ``url`` of an image or the ``text`` of a title.
+- ``_PATH_KINDS`` holds the three keys whose shape depends on the value rather than the annotation, ``canonical``, ``jsonld``, and ``alternates.languages``.
+  A shape a path names stands alone, so it fits any value and refuses a wrong one as it coerces.
+
+A new key of an input dict needs no table entry unless it is a new scalar, a new dict, or a shorthand.
+
 The fold
 ~~~~~~~~
 
@@ -49,6 +68,8 @@ The whole fold is kept when no source is a callable, and a request answers with 
 The request-time fold replays the tail over the prefix.
 A callable source is resolved through the dependency resolver with the request, the URL kwargs, the dependency cache of the render, and the render context, and the mapping it returns is normalised with the callable and its file as the source name, so a shape error names the function rather than the page.
 ``fold_segment`` merges each segment by the strategy its fields declare, deep for a nested block, by name for ``other`` and ``properties``, by ``@id`` for ``jsonld``, and whole for everything else, a ``Replace`` taking its path whole, see :doc:`/content/topics/seo/merge` for the table.
+The top level, a nested block, and ``merge_segments`` all merge field by field through one ``_merge_values``, and the chain builds its prefix and its static fold through ``fold_segments``.
+The ``@id`` a node is merged by passes through ``node_id``, so ``#org`` and ``/#org`` name one node in the fold, in ``next.W108``, and in ``next.E101``.
 
 ``fold_metadata`` with an ``overlay`` replaces the page's own callable with the given segment, laid over the page's own dict, and refolds from the settings tier.
 An inherited callable of an ancestor runs as it does in the render, against a context the caller's factory builds only at that point, which is how ``Patches.meta`` runs the guard of the origin page and builds its render context on demand.
@@ -60,6 +81,27 @@ The chain of a page is memoised per path.
 An entry is current while the module version of ``next.pages.loaders`` has not moved, the settings tier is the same object, the ``page.py`` files along the path carry the stamps they were loaded at, and the registry stamps of their callables are unchanged.
 The module version moves only when every memo is dropped, while a single re-executed ``page.py`` moves its own stamp, so an edit rebuilds the chains that pass through that file and no other.
 A ``@page.metadata`` registration that changes its callable or its ``inherit`` flag moves its registry stamp, and a settings reload rebuilds the settings tier.
+
+Failures
+~~~~~~~~
+
+A ``@page.metadata`` callable is user code that runs on every request, so the render contains what it raises through the ``FailureLog`` of ``next.diagnostics``.
+``MetadataThunk.fold`` leaves a callable that raises, or returns a shape the schema refuses, out of the fold and logs it once per file and exception type.
+:exc:`~django.http.Http404` and :exc:`~django.core.exceptions.PermissionDenied` pass through, and under ``DEBUG`` or ``STRICT_LOADING`` every failure raises with a note naming the callable and its file.
+A chain the schema refuses as a whole, a shape error in a ``page.py`` dict or a file declaring both forms, folds to the settings tier alone.
+``fold_metadata``, the call ``Patches.meta`` makes, does not contain, so the caller decides what a failure costs, and ``meta()`` drops its own operation.
+
+The resolve contains two more failures that only a render can meet.
+A lazy URL forced to a scheme outside http and https leaves out the tag carrying it, and the whole hreflang set when it is one of the alternates, since the pairs answer one another.
+A JSON-LD node holding a value JSON cannot write is left out of the graph.
+
+JSON-LD values
+~~~~~~~~~~~~~~
+
+``ld.to_json`` is the one walk from a node or a raw value to its JSON form.
+It renders a nested ``Node`` or ``Ref`` in place, passes every ``@id`` through the ``ids`` map and the strings of a URL property through ``urls``, writes an enum as its value, places a naive datetime in the current time zone, and raises ``ValueError`` for a leaf JSON cannot hold.
+``ld.iter_json`` yields every value of a raw value with its key path, which ``normalize.py`` reads to refuse a bad leaf or key with its path at load time.
+``backends.dump_jsonld`` writes the JSON of one script, ``allow_nan=False`` and the characters that could close it escaped, and ``next.E127`` serialises a declared node through ``to_json`` and ``dump_jsonld`` with the same ``@id`` map, so the check and the renderer cannot disagree.
 
 The render
 ~~~~~~~~~~
@@ -75,6 +117,7 @@ The ``ResolvedMetadata`` is published on the request, and the response layer rep
 The URL name and the parameter names of a crumb's route are memoised per ``trail`` and ``URL_NAME_TEMPLATE``, so a warm render parses no route and reverses only the crumbs it shows.
 
 ``metadata_renderer`` builds the class ``NEXT_FRAMEWORK["METADATA"]["RENDERER"]`` names once, through ``resolve_setting_class``, and again on ``settings_reloaded``.
+A path that does not resolve, or a constructor that raises, leaves the render on ``HtmlMetadataRenderer`` with one logged error, and ``next.E107`` resolves the same path at check time without building the class.
 ``HtmlMetadataRenderer`` walks its ``sections`` in order and joins what each ``render_<name>`` hook answers, which is the seam a subclass reorders or extends, see :doc:`/content/ref/metadata`.
 
 Crawler documents

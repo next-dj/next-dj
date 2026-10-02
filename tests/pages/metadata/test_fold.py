@@ -230,6 +230,11 @@ class TestById:
         )
         assert meta.jsonld == ({"@id": "#org"}, {"@id": "#p", "v": 2})
 
+    def test_a_fragment_replaces_its_rooted_form(self) -> None:
+        """`#org` and `/#org` render as one `@id`, so they fold as one node."""
+        meta = _fold({"jsonld": {"@id": "/#org", "v": 1}}, {"jsonld": {"@id": "#org"}})
+        assert meta.jsonld == ({"@id": "#org"},)
+
     def test_replace_drops_the_inherited_graph(self) -> None:
         meta = _fold({"jsonld": {"@id": "#org"}}, {"jsonld": Replace([{"@id": "#p"}])})
         assert meta.jsonld == ({"@id": "#p"},)
@@ -245,7 +250,7 @@ class TestById:
         origins = trace_origins(
             _chain({"jsonld": [ld.Node(id="#ann"), ld.Node(type="Person")]})
         )
-        assert origins == {"jsonld[#ann]": "segment[0]", "jsonld[0]": "segment[0]"}
+        assert origins == {"jsonld[/#ann]": "segment[0]", "jsonld[0]": "segment[0]"}
 
 
 class TestBreadcrumbs:
@@ -356,6 +361,13 @@ class TestReplaceAndReset:
         )
         assert merge_field(Merge.REPLACE, "older", None, path="x") == "older"
 
+    def test_merge_field_takes_a_set_value_beside_another_replaced_path(self) -> None:
+        replaced = frozenset({"y"})
+        assert (
+            merge_field(Merge.REPLACE, "older", "newer", path="x", replaced=replaced)
+            == "newer"
+        )
+
 
 class TestLaziness:
     """A templated title leaves the fold as a `Promise` nobody has evaluated."""
@@ -434,7 +446,7 @@ class TestTraceOrigins:
             "og.title": "segment[1]",
             "other.a": "segment[0]",
             "other.b": "segment[1]",
-            "jsonld[#org]": "segment[0]",
+            "jsonld[/#org]": "segment[0]",
             "jsonld[0]": "segment[0]",
             "jsonld[1]": "segment[1]",
             "robots.index": "segment[1]",

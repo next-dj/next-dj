@@ -557,6 +557,10 @@ Errors
    * - ``next.E100``
      - A title template is declared without a ``default``, so a page under it with no title of its own renders none.
      - ``next.pages.checks.metadata.scope``, ``next.pages.checks.metadata.shape``
+   * - ``next.E101``
+     - A page folds one JSON-LD ``@id`` under two types, so the graph holds one node under two kinds.
+       A bare fragment such as ``#org`` and the rooted ``/#org`` name one node, since both render on the site root.
+     - ``next.pages.checks.metadata.ld``
    * - ``next.E102``
      - A ``page.py`` declares both a ``metadata`` dict and a ``@page.metadata`` callable.
      - ``next.pages.checks.metadata.shape``
@@ -566,7 +570,8 @@ Errors
    * - ``next.E104``
      - A ``metadata`` dict names a key or a value the schema refuses, at any depth, the key path named in the message.
        This covers a URL with a scheme outside http and https, ``x-default`` given both in ``languages`` and as ``x_default``, a NaN or a non-string key in raw JSON-LD, ``canonical: False``, an ``og.determiner``, ``viewport_fit``, ``interactive_widget``, or ``color_scheme`` outside its values, a ``twitter.card`` outside ``summary``, ``summary_large_image``, ``app``, and ``player``, and a ``player`` card without ``twitter.player``.
-       A lazy URL passes unforced, and a render that forces it to such a scheme raises ``PageMetadataShapeError`` with the same message.
+       A lazy URL passes unforced, and a render that forces it to such a scheme leaves the tag out and logs the ``PageMetadataShapeError`` once.
+       Under ``DEBUG`` or ``STRICT_LOADING`` the render raises it instead.
      - ``next.pages.checks.metadata.shape``
    * - ``next.E105``
      - A title, a title default, or an absolute title is the empty string, which renders an empty ``<title>``.
@@ -574,6 +579,11 @@ Errors
    * - ``next.E106``
      - A ``@page.metadata`` callable is declared in a file no page render collects, an imported helper module or a sibling page.
      - ``next.pages.checks.metadata.shape``
+   * - ``next.E107``
+     - ``NEXT_FRAMEWORK["METADATA"]["RENDERER"]`` does not import or names no concrete ``MetadataRenderer`` subclass.
+       The check imports the dotted path and never builds the class.
+       A render with such a value falls back to ``HtmlMetadataRenderer`` and logs it once, and raises under ``DEBUG`` or ``STRICT_LOADING``.
+     - ``next.pages.checks.metadata.scope``
    * - ``next.E108``
      - A ``@page.metadata`` callable is not annotated as returning a mapping.
        The check is static, because running the callable at check time could reach an unmigrated database.
@@ -640,7 +650,10 @@ Errors
      - A viewport scale is outside 0.1 to 10.
      - ``next.pages.checks.metadata.head``
    * - ``next.E127``
-     - A JSON-LD node does not serialise to JSON or holds a naive datetime, or a page folds one ``@id`` under two types.
+     - A declared JSON-LD node does not serialise to JSON, a ``nan``, an infinity, a set, or a time with a time zone among the causes.
+       The check serialises the node through ``dump_jsonld``, the call the renderer makes, so a node that passes renders.
+       A naive datetime passes, since the renderer gives it the current time zone.
+       One ``@id`` under two types is ``next.E101``.
      - ``next.pages.checks.metadata.ld``
    * - ``next.E129``
      - A ``SITE`` value is unusable, a ``URL`` that is no bare http or https origin, one carrying a path, a query, or a fragment included, or a dotted path that does not import, a ``NAME`` that is no text, or an ``INDEXABLE`` outside ``"auto"``, a bool, and a callable taking the request.

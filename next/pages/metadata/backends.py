@@ -5,6 +5,7 @@ A renderer sees no request, so every policy is settled before it runs.
 
 import functools
 import json
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping
 from itertools import chain
@@ -16,6 +17,7 @@ from django.utils.safestring import SafeString
 
 from next.backends import resolve_setting_class
 from next.conf.signals import settings_reloaded
+from next.diagnostics import FailureLog
 
 from .markers import (
     Article,
@@ -29,6 +31,8 @@ from .markers import (
 )
 from .resolve import CONTEXT
 
+
+_failures: Final = FailureLog(logging.getLogger(__name__))
 
 _TITLE: Final = "<title>{}</title>"
 _NAMED: Final = '<meta name="{}" content="{}">'
@@ -51,6 +55,15 @@ type Lines = Iterable[SafeString]
 type Pairs = Iterable[tuple[str, object]]
 type _Media = OpenGraphImage | OpenGraphVideo | OpenGraphAudio
 type _MediaGroup = tuple[str, tuple[_Media, ...], tuple[str, ...]]
+
+
+def dump_jsonld(obj: object) -> SafeString:
+    """Return `obj` as the JSON a JSON-LD script carries, closed against `</script>`.
+
+    `manage.py check` serialises a declared node through this same call.
+    """
+    text = json.dumps(obj, cls=DjangoJSONEncoder, allow_nan=False)
+    return SafeString(text.translate(_JSONLD_ESCAPES))
 
 
 def _tag(template: str, pairs: Pairs) -> SafeString:
@@ -350,12 +363,15 @@ class HtmlMetadataRenderer(MetadataRenderer):
         return lines
 
     def _jsonld(self, obj: Mapping[str, object]) -> SafeString:
-        text = json.dumps(obj, cls=DjangoJSONEncoder, allow_nan=False)
-        return format_html(_JSONLD, SafeString(text.translate(_JSONLD_ESCAPES)))
+        return format_html(_JSONLD, dump_jsonld(obj))
 
 
-def _configured_renderer_class() -> type[MetadataRenderer]:
-    """Return the class named by `NEXT_FRAMEWORK["METADATA"]["RENDERER"]`."""
+def configured_renderer_class() -> type[MetadataRenderer]:
+    """Return the class named by `NEXT_FRAMEWORK["METADATA"]["RENDERER"]`.
+
+    A path that does not import or names no concrete renderer raises
+    `ImproperlyConfigured`, which `next.E107` reports before a page renders.
+    """
     return resolve_setting_class(
         "RENDERER",
         scope="METADATA",
@@ -367,8 +383,23 @@ def _configured_renderer_class() -> type[MetadataRenderer]:
 
 @functools.cache
 def metadata_renderer() -> MetadataRenderer:
-    """Return the renderer `METADATA["RENDERER"]` names, built once per reload."""
-    return _configured_renderer_class()()
+    """Return the renderer `METADATA["RENDERER"]` names, built once per reload.
+
+    One that cannot be resolved or built gives way to `HtmlMetadataRenderer`, so a
+    typo costs the custom markup, logged once, rather than every page.
+    """
+    try:
+        return configured_renderer_class()()
+    except Exception as exc:  # noqa: BLE001 - the renderer's __init__ is user code
+        _failures.contain(
+            exc,
+            "RENDERER",
+            "NEXT_FRAMEWORK['METADATA']['RENDERER'] could not be built (%s), so the "
+            "head renders through HtmlMetadataRenderer. Name a concrete "
+            "next.pages.MetadataRenderer subclass.",
+            exc,
+        )
+        return HtmlMetadataRenderer()
 
 
 def forget_metadata_renderer(**kwargs) -> None:
@@ -382,6 +413,8 @@ settings_reloaded.connect(forget_metadata_renderer)
 __all__ = [
     "HtmlMetadataRenderer",
     "MetadataRenderer",
+    "configured_renderer_class",
+    "dump_jsonld",
     "forget_metadata_renderer",
     "metadata_renderer",
 ]

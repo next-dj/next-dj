@@ -28,8 +28,7 @@ class TestLoadedMetadataPages:
             override_settings(NEXT_FRAMEWORK=scope(DEFAULTS={"title": "Acme"})),
             patch_checks_router_manager(pages_directory=tmp_path),
         ):
-            init_errors, pages = loaded_metadata_pages()
-        assert init_errors == []
+            pages = loaded_metadata_pages()
         [entry] = pages
         assert entry.static is not None
         assert entry.static.title == "Home"
@@ -39,7 +38,7 @@ class TestLoadedMetadataPages:
         templated_page(tmp_path, INHERITED_CALLABLE)
         metadata_page(tmp_path / "leaf", '{"title": "Leaf"}')
         with patch_checks_router_manager(pages_directory=tmp_path):
-            _init_errors, pages = loaded_metadata_pages()
+            pages = loaded_metadata_pages()
         by_trail = {entry.url_path: entry for entry in pages}
         assert by_trail[""].dynamic is True
         assert by_trail["leaf"].dynamic is True
@@ -50,7 +49,7 @@ class TestLoadedMetadataPages:
         metadata_page(tmp_path, '{"title": "Root"}')
         templated_page(tmp_path / "child", "x = 1\n")
         with patch_checks_router_manager(pages_directory=tmp_path):
-            _init_errors, pages = loaded_metadata_pages()
+            pages = loaded_metadata_pages()
         by_trail = {entry.url_path: entry for entry in pages}
         assert by_trail["child"].declared is True
         assert by_trail["child"].segment is None
@@ -84,25 +83,25 @@ class TestOncePerRun:
                 wraps=metadata_pages.discover_page_registrations,
             ) as discover,
         ):
-            _errors, first = loaded_metadata_pages()
-            assert loaded_metadata_pages()[1] is first
+            first = loaded_metadata_pages()
+            assert loaded_metadata_pages() is first
             assert discover.call_count == 1
             reset_check_caches()
-            assert loaded_metadata_pages()[1] is not first
+            assert loaded_metadata_pages() is not first
             assert discover.call_count == 2
 
     def test_a_new_router_manager_folds_the_pages_again(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"title": "Home"}')
         with patch_checks_router_manager(pages_directory=tmp_path):
-            _errors, first = loaded_metadata_pages()
+            first = loaded_metadata_pages()
         with patch_checks_router_manager(pages_directory=tmp_path):
-            _errors, second = loaded_metadata_pages()
+            second = loaded_metadata_pages()
         assert second is not first
         assert [entry.url_path for entry in second] == [""]
 
-    def test_a_manager_that_fails_to_build_answers_its_errors(self) -> None:
+    def test_a_manager_that_fails_to_build_answers_no_pages(self) -> None:
         error = Error("boom", id="next.E007")
         with patch.object(
             metadata_pages, "get_router_manager", return_value=(None, [error])
         ):
-            assert loaded_metadata_pages() == ([error], [])
+            assert loaded_metadata_pages() == []

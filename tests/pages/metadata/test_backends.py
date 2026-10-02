@@ -8,6 +8,7 @@ from django.utils import translation
 from django.utils.functional import lazy
 from django.utils.safestring import SafeString
 
+import next.pages.metadata.backends as backends_module
 from next.errors import (
     AbstractBackendError,
     SettingImportError,
@@ -34,7 +35,7 @@ from next.pages.metadata import (
     TwitterPlayer,
     resolve_metadata,
 )
-from next.pages.metadata.backends import metadata_renderer
+from next.pages.metadata.backends import configured_renderer_class, metadata_renderer
 from tests.support import BASE
 
 
@@ -321,7 +322,7 @@ class TestConfiguredRenderer:
             override_settings(NEXT_FRAMEWORK=_renderer_setting("next.pages.Metadata")),
             pytest.raises(SettingNotSubclassError) as caught,
         ):
-            metadata_renderer()
+            configured_renderer_class()
         assert caught.value.scope == "METADATA"
         assert "NEXT_FRAMEWORK['METADATA']['RENDERER']" in str(caught.value)
 
@@ -330,14 +331,14 @@ class TestConfiguredRenderer:
             override_settings(NEXT_FRAMEWORK=_renderer_setting(42)),
             pytest.raises(SettingNotSubclassError, match="42 is not a"),
         ):
-            metadata_renderer()
+            configured_renderer_class()
 
     def test_a_path_that_does_not_import_is_refused(self) -> None:
         with (
             override_settings(NEXT_FRAMEWORK=_renderer_setting("nope.Renderer")),
             pytest.raises(SettingImportError) as caught,
         ):
-            metadata_renderer()
+            configured_renderer_class()
         assert caught.value.setting == "RENDERER"
 
     def test_the_abstract_root_is_refused(self) -> None:
@@ -346,7 +347,54 @@ class TestConfiguredRenderer:
             override_settings(NEXT_FRAMEWORK=_renderer_setting(dotted)),
             pytest.raises(AbstractBackendError),
         ):
+            configured_renderer_class()
+
+
+_NO_THEME = RuntimeError("no theme")
+
+
+class BrokenRenderer(HtmlMetadataRenderer):
+    def __init__(self) -> None:
+        """Fail the way a renderer reading a missing theme would."""
+        raise _NO_THEME
+
+
+class TestRendererFallback:
+    """A renderer that cannot be built gives way to the HTML one, logged once."""
+
+    @pytest.fixture(autouse=True)
+    def _armed(self) -> None:
+        backends_module._failures.clear()
+
+    @pytest.mark.parametrize(
+        "dotted",
+        ["nope.Renderer", "next.pages.Metadata", f"{__name__}.BrokenRenderer"],
+        ids=["import", "family", "init"],
+    )
+    def test_the_html_renderer_stands_in(
+        self, dotted: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            override_settings(NEXT_FRAMEWORK=_renderer_setting(dotted)),
+            caplog.at_level("ERROR", logger="next.pages.metadata.backends"),
+        ):
+            first = metadata_renderer()
+            second = metadata_renderer()
+        assert type(first) is HtmlMetadataRenderer
+        assert second is first
+        assert len(caplog.records) == 1
+        assert "renders through HtmlMetadataRenderer" in caplog.text
+
+    def test_a_broken_renderer_is_loud_under_debug(self) -> None:
+        with (
+            override_settings(
+                DEBUG=True,
+                NEXT_FRAMEWORK=_renderer_setting(f"{__name__}.BrokenRenderer"),
+            ),
+            pytest.raises(RuntimeError, match="no theme") as caught,
+        ):
             metadata_renderer()
+        assert "METADATA']['RENDERER']" in caught.value.__notes__[0]
 
 
 class TestSections:

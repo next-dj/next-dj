@@ -3,11 +3,9 @@
 The accepted shapes are compiled once at import from the annotations in `dicts.py`.
 """
 
-import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, fields, is_dataclass, replace
-from datetime import date, time, timedelta
-from decimal import Decimal
+from datetime import date
 from functools import partial
 from types import UnionType
 from typing import (
@@ -25,7 +23,6 @@ from typing import (
     get_type_hints,
 )
 from urllib.parse import urlsplit
-from uuid import UUID
 
 from django.utils.functional import Promise, lazy
 
@@ -37,6 +34,7 @@ from .dicts import (
     ArticleDict,
     BookDict,
     FeedDict,
+    GooglebotDict,
     IconDict,
     IconsDict,
     LinkDict,
@@ -60,7 +58,7 @@ from .dicts import (
     VerificationDict,
     ViewportDict,
 )
-from .ld import Node, Ref
+from .ld import Node, iter_json, json_problem
 from .markers import (
     Alternates,
     Article,
@@ -98,19 +96,7 @@ LINK_ATTRS: Final = tuple(
 ICON_RELS: Final = {"icon": "icon", "apple": "apple-touch-icon"}
 """The rel each named group of `icons` renders under."""
 
-_JSON_SCALARS: Final = (
-    str,
-    int,
-    float,
-    Promise,
-    date,
-    time,
-    timedelta,
-    Decimal,
-    UUID,
-    Ref,
-)
-"""The leaves a raw JSON-LD value holds, the ones `DjangoJSONEncoder` can write."""
+_NO_KEY: Final = object()
 
 
 @dataclass(slots=True)
@@ -125,18 +111,26 @@ class _Walk:
 
 
 class _Kind(Protocol):
-    """One accepted shape of a metadata value."""
+    """One accepted shape of a metadata value, which says cheaply whether one fits."""
 
     @property
     def label(self) -> str: ...
 
+    def accepts(self, value: object) -> bool: ...
+
     def coerce(self, value: object, *, walk: _Walk, path: str) -> object: ...
 
 
-class _Option(_Kind, Protocol):
-    """A shape that can also say cheaply whether a value is its own."""
+class _Whole:
+    """A shape a key path names on its own, never one option of several.
 
-    def accepts(self, value: object) -> bool: ...
+    It takes whatever it is given and refuses a wrong value as it coerces.
+    """
+
+    __slots__ = ()
+
+    def accepts(self, _value: object) -> bool:
+        return True
 
 
 def _is_text(value: object) -> bool:
@@ -256,7 +250,7 @@ class _Url:
 class _Then:
     """A shape whose checked value is converted once more, a bare form to its block."""
 
-    kind: _Option
+    kind: _Kind
     convert: Callable[[Any], object]
 
     @property
@@ -296,11 +290,14 @@ class _Items:
 class _Either:
     """The first of several shapes the value fits."""
 
-    options: tuple[_Option, ...]
+    options: tuple[_Kind, ...]
 
     @property
     def label(self) -> str:
         return " or ".join(option.label for option in self.options)
+
+    def accepts(self, value: object) -> bool:
+        return any(option.accepts(value) for option in self.options)
 
     def coerce(self, value: object, *, walk: _Walk, path: str) -> object:
         for option in self.options:
@@ -398,46 +395,38 @@ class _Named(_Mapped):
         return tuple(pairs)
 
 
-def _json_copy(value: object, *, walk: _Walk, path: str) -> object:
-    """Copy one JSON-LD value into plain dicts and lists, refusing what JSON lacks."""
-    if isinstance(value, Node):
-        return value
-    if isinstance(value, Mapping):
-        copied: dict[str, object] = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
+def _json_value(value: object, *, walk: _Walk, path: str) -> object:
+    """Return one raw JSON-LD value once every leaf and key in it is one JSON holds.
+
+    A typed node inside is checked when it renders, since a callable builds it late.
+    """
+    for where, item in iter_json(value, path):
+        if isinstance(item, Mapping):
+            key = next((key for key in item if not isinstance(key, str)), _NO_KEY)
+            if key is not _NO_KEY:
                 walk.fail(
-                    f"declares {_key_phrase(path)} with the key {key!r}, expected "
+                    f"declares {_key_phrase(where)} with the key {key!r}, expected "
                     "string keys"
                 )
-            copied[key] = _json_copy(item, walk=walk, path=f"{path}.{key}")
-        return copied
-    if isinstance(value, float) and not math.isfinite(value):
-        walk.fail(
-            f"declares {_key_phrase(path)} as {value!r}, expected a finite number"
-        )
-    if isinstance(value, Sequence) and not isinstance(value, str | bytes):
-        return [
-            _json_copy(item, walk=walk, path=f"{path}[{index}]")
-            for index, item in enumerate(value)
-        ]
-    if value is not None and not isinstance(value, _JSON_SCALARS):
-        walk.fail(
-            f"declares {_key_phrase(path)} as {type(value).__name__!r}, expected a "
-            "JSON value"
-        )
+        elif isinstance(item, str | bytes) or not isinstance(item, Sequence):
+            problem = json_problem(item)
+            if problem is not None:
+                shown = item if isinstance(item, float) else type(item).__name__
+                walk.fail(
+                    f"declares {_key_phrase(where)} as {shown!r}, expected {problem}"
+                )
     return value
 
 
 @dataclass(frozen=True, slots=True)
-class _JsonLd:
+class _JsonLd(_Whole):
     """One JSON-LD node or a sequence of them, a raw mapping copied into plain ones."""
 
     label: ClassVar[str] = "a node, a mapping or a sequence of them"
 
     def coerce(self, value: object, *, walk: _Walk, path: str) -> object:
         if isinstance(value, Mapping | Node):
-            return (_json_copy(value, walk=walk, path=path),)
+            return (_json_value(value, walk=walk, path=path),)
         if not isinstance(value, Sequence) or isinstance(value, str | bytes):
             _wrong_type(self, value, walk=walk, path=path)
         objects: list[object] = []
@@ -448,12 +437,12 @@ class _JsonLd:
                     f"declares {_key_phrase(item_path)} as "
                     f"{type(item).__name__!r}, expected a node or a mapping"
                 )
-            objects.append(_json_copy(item, walk=walk, path=item_path))
+            objects.append(_json_value(item, walk=walk, path=item_path))
         return tuple(objects)
 
 
 @dataclass(frozen=True, slots=True)
-class _Canonical:
+class _Canonical(_Whole):
     """The canonical URL, or `True` for the page itself."""
 
     label: ClassVar[str] = "a URL string or True"
@@ -472,7 +461,7 @@ class _Canonical:
 
 
 @dataclass(frozen=True, slots=True)
-class _Languages:
+class _Languages(_Whole):
     """The hreflang switch, or a mapping of language codes to URLs."""
 
     label: ClassVar[str] = "a bool or a mapping of language codes to URLs"
@@ -541,7 +530,7 @@ def _link(rel: str, href: str, **attrs: Text | bool) -> Link:
     return Link(rel, href, pairs)
 
 
-_LEAVES: Final[Mapping[object, _Option]] = {
+_LEAVES: Final[Mapping[object, _Kind]] = {
     str: _Leaf("a string", _is_str),
     Text: _Leaf("text", _is_text),
     Url: _Url(),
@@ -558,6 +547,7 @@ _BUILDS: Final[Mapping[object, Callable[..., object]]] = {
     TitleDict: TitleSpec,
     SiteTitleDict: TitleSpec,
     RobotsDict: Robots,
+    GooglebotDict: Robots,
     OpenGraphDict: OpenGraph,
     OpenGraphImageDict: OpenGraphImage,
     OpenGraphVideoDict: OpenGraphVideo,
@@ -616,15 +606,7 @@ def _options(hint: object) -> tuple[object, ...]:
     return (hint,)
 
 
-def _nests(hint: object, block: object) -> bool:
-    """Whether `block` appears anywhere inside `hint`."""
-    return any(
-        option is block or any(_nests(arg, block) for arg in get_args(option))
-        for option in _options(hint)
-    )
-
-
-def _kind(hint: object, path: str, outer: frozenset[object]) -> _Kind:
+def _kind(hint: object, path: str) -> _Kind:
     """Compile the shape of one annotated key.
 
     A bare value beside a sequence of such values stands for a sequence of one.
@@ -638,15 +620,15 @@ def _kind(hint: object, path: str, outer: frozenset[object]) -> _Kind:
     short = next(
         (option for option in (*options, *items) if option in _SHORTHANDS), None
     )
-    kinds: list[_Option] = []
+    kinds: list[_Kind] = []
     for option in options:
         stands = short if short is not None and option in _BARE else option
-        kind = _shape(option, path, outer) if stands is option else _shorthand(stands)
+        kind = _shape(option, path) if stands is option else _shorthand(stands)
         kinds.append(_Then(kind, _one) if stands in items else kind)
     return kinds[0] if len(kinds) == 1 else _Either(tuple(kinds))
 
 
-def _shorthand(block: object) -> _Option:
+def _shorthand(block: object) -> _Kind:
     """Return the shape of a bare value that stands for one key of `block`.
 
     A key the dict does not declare, the text of a title, takes text.
@@ -656,7 +638,7 @@ def _shorthand(block: object) -> _Option:
     return _Then(kind, partial(_keyword, _BUILDS[block], key))
 
 
-def _shape(option: object, path: str, outer: frozenset[object]) -> _Option:
+def _shape(option: object, path: str) -> _Kind:
     """Compile one option of a union, a scalar, a sequence, a mapping or a dict."""
     leaf = _LEAVES.get(option)
     if leaf is not None:
@@ -666,25 +648,19 @@ def _shape(option: object, path: str, outer: frozenset[object]) -> _Option:
         choices = get_args(option)
         return _Leaf(" or ".join(map(repr, choices)), partial(_is_choice, choices))
     if origin is Sequence:
-        return _Items(_kind(get_args(option)[0], f"{path}[]", outer))
+        return _Items(_kind(get_args(option)[0], f"{path}[]"))
     if origin is Mapping:
         return _Named()
-    return _block(cast("type[Any]", option), path, outer)
+    return _block(cast("type[Any]", option), path)
 
 
-def _block(block: type[Any], path: str, outer: frozenset[object]) -> _Option:
-    """Compile an input dict, its keys, the value it builds and what it requires.
-
-    A dict nested in itself drops the key that nests it, so it goes one level deep.
-    """
+def _block(block: type[Any], path: str) -> _Kind:
+    """Compile an input dict, its keys, the value it builds and what it requires."""
     hints = get_type_hints(block)
-    if block in outer:
-        hints = {key: hint for key, hint in hints.items() if not _nests(hint, block)}
-    inner = outer | {block}
     build = _BUILDS[block]
     order = [item.name for item in fields(build)] if is_dataclass(build) else hints
     compiled = _Block(
-        {key: _kind(hint, _child(path, key), inner) for key, hint in hints.items()},
+        {key: _kind(hint, _child(path, key)) for key, hint in hints.items()},
         build,
         resettable=any(
             get_origin(arg) is Replace
@@ -696,8 +672,8 @@ def _block(block: type[Any], path: str, outer: frozenset[object]) -> _Option:
     return _AlternatesBlock(compiled) if block is AlternatesDict else compiled
 
 
-_PAGE: Final = _block(MetadataDict, "", frozenset())
-_SITE: Final = _block(SiteMetadataDict, "", frozenset())
+_PAGE: Final = _block(MetadataDict, "")
+_SITE: Final = _block(SiteMetadataDict, "")
 _OWN: Final = frozenset(get_type_hints(MetadataDict)).intersection(
     item.name for item in fields(Segment)
 )

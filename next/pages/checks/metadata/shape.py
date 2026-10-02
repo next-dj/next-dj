@@ -127,8 +127,8 @@ def _page_shape_errors(entry: MetadataPage) -> list[CheckMessage]:
 @register(Tags.templates, NEXT, SEO)
 def check_page_metadata_shape(*args, **kwargs) -> list[CheckMessage]:
     """Validate the metadata dict of each routed page (`next.E102` to `next.E105`)."""
-    init_errors, pages = loaded_metadata_pages()
-    errors = list(init_errors)
+    pages = loaded_metadata_pages()
+    errors: list[CheckMessage] = []
     for entry in pages:
         errors.extend(_page_shape_errors(entry))
     return errors
@@ -150,8 +150,8 @@ def check_metadata_registration_files(*args, **kwargs) -> list[CheckMessage]:
 @register(Tags.templates, NEXT, SEO)
 def check_metadata_callable_returns_mapping(*args, **kwargs) -> list[CheckMessage]:
     """Require a `@page.metadata` callable to be annotated dict-like (`next.E108`)."""
-    init_errors, pages = loaded_metadata_pages()
-    errors = list(init_errors)
+    pages = loaded_metadata_pages()
+    errors: list[CheckMessage] = []
     for entry in pages:
         if entry.entry is None:
             continue
@@ -191,8 +191,8 @@ def check_metadata_parent_parameter(*args, **kwargs) -> list[CheckMessage]:
 
     The fold of the ancestors is no longer injected, the chain merges it instead.
     """
-    init_errors, pages = loaded_metadata_pages()
-    errors = list(init_errors)
+    pages = loaded_metadata_pages()
+    errors: list[CheckMessage] = []
     for entry in pages:
         if entry.entry is None:
             continue
@@ -255,8 +255,8 @@ def check_metadata_enum_values(*args, **kwargs) -> list[CheckMessage]:
 
     The settings tier and each page's own dict are read, the player card on the fold.
     """
-    init_errors, pages = loaded_metadata_pages()
-    errors = list(init_errors)
+    pages = loaded_metadata_pages()
+    errors: list[CheckMessage] = []
     for item in declared_segments(pages):
         errors.extend(_enum_errors(item))
     for entry, meta in folded_pages(pages):
@@ -269,8 +269,8 @@ def check_metadata_enum_values(*args, **kwargs) -> list[CheckMessage]:
 @register(Tags.templates, NEXT, SEO)
 def check_metadata_url_schemes(*args, **kwargs) -> list[CheckMessage]:
     """Flag a URL field whose scheme is neither http nor https (`next.E109`)."""
-    init_errors, pages = loaded_metadata_pages()
-    errors = list(init_errors)
+    pages = loaded_metadata_pages()
+    errors: list[CheckMessage] = []
     for entry, meta in folded_pages(pages):
         for field, url in url_fields(meta):
             scheme = urlsplit(url).scheme
@@ -294,8 +294,8 @@ def check_metadata_hreflang_patterns(*args, **kwargs) -> list[CheckMessage]:
 
     Without a language prefix every code translates to the same URL.
     """
-    init_errors, pages = loaded_metadata_pages()
-    warnings = list(init_errors)
+    pages = loaded_metadata_pages()
+    warnings: list[CheckMessage] = []
     urlconf = str(getattr(settings, "ROOT_URLCONF", ""))
     prefixed: bool | None = None
     for entry, meta in folded_pages(pages):
@@ -322,8 +322,8 @@ def check_metadata_hreflang_patterns(*args, **kwargs) -> list[CheckMessage]:
 @register(Tags.templates, NEXT, SEO)
 def check_metadata_noindex_canonical(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a noindex page points its canonical at another origin (`next.W088`)."""
-    init_errors, pages = loaded_metadata_pages()
-    warnings = list(init_errors)
+    pages = loaded_metadata_pages()
+    warnings: list[CheckMessage] = []
     for entry, meta in folded_pages(pages):
         canonical = meta.canonical
         if not isinstance(canonical, str) or not noindexed(meta):

@@ -37,7 +37,11 @@ from next.pages.metadata import (
 )
 from next.pages.metadata.backends import metadata_renderer
 from next.pages.metadata.markers import Segment, TitleSpec
-from next.pages.metadata.normalize import normalize_metadata, normalize_site_metadata
+from next.pages.metadata.normalize import (
+    _kind,
+    normalize_metadata,
+    normalize_site_metadata,
+)
 from next.testing import override_next_settings
 from tests.support import (
     METADATA_SHAPE_CASES,
@@ -209,6 +213,12 @@ class TestRobots:
     ) -> None:
         assert _meta({"robots": robots}).robots == expected
 
+    def test_googlebot_does_not_nest_in_itself(self) -> None:
+        with pytest.raises(
+            PageMetadataShapeError, match=r"robots\.googlebot\.googlebot"
+        ):
+            _meta({"robots": {"googlebot": {"googlebot": "noindex"}}})
+
 
 class TestOpenGraph:
     """The `og` block builds images and the article sub-block."""
@@ -352,24 +362,12 @@ class TestOtherBlocks:
     ) -> None:
         assert _meta({"jsonld": jsonld}).jsonld == expected
 
-    def test_jsonld_is_copied_into_plain_dicts_and_lists(self) -> None:
-        name = gettext_lazy("Yes")
+    def test_jsonld_keeps_the_declared_mapping_for_the_resolve(self) -> None:
         raw = MappingProxyType(
-            {
-                "@type": "Thing",
-                "sameAs": ("https://a.example", "https://b.example"),
-                "offers": MappingProxyType({"price": 1.5, "name": name}),
-            }
+            {"@type": "Thing", "offers": MappingProxyType({"price": 1.5})}
         )
-        (copied,) = _meta({"jsonld": raw}).jsonld
-        assert type(copied) is dict
-        assert copied == {
-            "@type": "Thing",
-            "sameAs": ["https://a.example", "https://b.example"],
-            "offers": {"price": 1.5, "name": name},
-        }
-        assert type(copied["offers"]) is dict
-        assert copied["offers"]["name"] is name
+        (kept,) = _meta({"jsonld": raw}).jsonld
+        assert kept is raw
 
     @override_next_settings(**WITH_BASE)
     def test_jsonld_keeps_every_value_the_encoder_writes(self) -> None:
@@ -748,3 +746,15 @@ class TestReplace:
     def test_the_site_tier_records_a_replace_too(self) -> None:
         segment = _segment({"description": RESET}, site=True)
         assert segment.replaced == {"description"}
+
+
+class TestKinds:
+    """Every compiled shape says whether a value fits, the ones a path names too."""
+
+    def test_a_union_accepts_what_one_option_accepts(self) -> None:
+        either = _kind(str | bool, "x")
+        assert either.accepts(True)
+        assert not either.accepts(1.5)
+
+    def test_a_shape_a_path_names_accepts_anything(self) -> None:
+        assert _kind(object, "canonical").accepts(object())

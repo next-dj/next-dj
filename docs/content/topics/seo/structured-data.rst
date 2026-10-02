@@ -40,8 +40,10 @@ A node is a mapping in the JSON-LD shape, ``@type`` and ``@id`` included.
 A schema.org ``@context`` on a mapping is dropped, since the graph carries one, and a mapping with a foreign ``@context`` renders as its own ``<script>`` beside the graph.
 Every ``@id`` in a schema.org mapping, nested ones included, resolves against the site as `@id and URLs`_ describes, while every other value renders as written.
 A mapping under a foreign ``@context`` keeps every ``@id`` as written, and a ``Node`` or ``Ref`` inside it renders in place with its own ``@id`` unresolved.
-Values are copied into plain dicts and lists when the metadata loads, so a ``MappingProxyType`` or a tuple serialises, and a value JSON cannot hold, a ``set`` among them, is a ``PageMetadataShapeError``.
-A :class:`~datetime.datetime`, a :class:`~datetime.date`, a :class:`~decimal.Decimal`, and a UUID pass, since :class:`~django.core.serializers.json.DjangoJSONEncoder` writes them.
+Every value is checked when the metadata loads and written as plain dicts and lists when the page renders, so a ``MappingProxyType`` or a tuple serialises.
+A value JSON cannot hold in a ``metadata`` dict, a ``set``, ``nan``, or a time with a time zone among them, is a ``PageMetadataShapeError``.
+A :class:`~datetime.datetime`, a :class:`~datetime.date`, a :class:`~decimal.Decimal`, a UUID, and an enum member pass, the enum written as its value.
+A naive datetime takes the current time zone as it renders, so the page and ``manage.py check`` agree on it.
 
 The ld nodes
 ------------
@@ -63,6 +65,7 @@ The ld nodes
 
 A subclass of ``Node`` types the node a site repeats, so a missing required property is a ``TypeError`` where the node is built, at import for a module-level node, and a type error under mypy.
 ``TYPE`` names the schema.org type, and ``URLS`` the fields resolved the way an ``@id`` is.
+``KEYS`` maps a field to the property it renders under when the camel case of its name is not the schema.org spelling, as ``BreadcrumbList`` renders ``items`` under ``itemListElement``.
 ``None`` and an empty tuple are left out, a nested node or a ``Ref`` renders in place, and ``extra`` adds verbatim properties last.
 
 .. code-block:: python
@@ -108,17 +111,20 @@ The Product renders ``{"@type": "Product", "@id": "https://acme.example/products
 An ``@id`` that is a bare fragment such as ``#org`` resolves against the root of the site URL, ``https://acme.example/#org``, so one id names one node on every page.
 Any other ``@id``, and every field a ``Node`` subclass lists in ``URLS``, resolves through the same ``absolute_url`` the canonical link uses.
 A ``Ref("#org")`` or a plain ``{"@id": "#org"}`` therefore points at the Organization ``DEFAULTS`` declared, from any page.
+``#org`` and ``/#org`` name the same node, so the merge by ``@id`` and the checks treat them as one.
 
 The graph
 ---------
 
 Every node renders into a single ``<script type="application/ld+json">`` carrying ``{"@context": "https://schema.org", "@graph": [...]}``.
 The JSON is written by :class:`~django.core.serializers.json.DjangoJSONEncoder` with ``allow_nan=False``, and ``<``, ``>``, and ``&`` are escaped so a value can never close the script.
+A node a ``@page.metadata`` callable builds with a value JSON cannot hold is left out of the graph and logged once, and under ``DEBUG`` the render raises.
 
 ``jsonld`` merges by ``@id`` along the tree.
 A node whose raw ``@id`` an ancestor declared replaces that node in place, and a node without an ``@id`` appends.
 ``Replace([...])`` takes the list whole and ``RESET`` drops the inherited graph, see :doc:`merge`.
-``manage.py check`` reports a node that does not serialise to JSON, two nodes with one ``@id`` in one ``page.py``, and one ``@id`` declared under two types.
+``manage.py check`` reports a node that does not serialise to JSON (``next.E127``), two nodes with one ``@id`` in one ``page.py`` (``next.W108``), and one ``@id`` declared under two types (``next.E101``).
+The serialisation check writes the node through the same call the renderer makes, so a node that passes it renders.
 
 See also
 --------

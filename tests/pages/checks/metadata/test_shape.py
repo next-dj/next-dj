@@ -177,7 +177,7 @@ class TestPageShape:
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_page_metadata_shape()
         assert check_ids(messages) == ["next.W108"]
-        assert "'#p'" in messages[0].msg
+        assert "'/#p'" in messages[0].msg
 
     def test_an_ancestor_error_is_reported_on_the_ancestor_only(
         self, tmp_path: Path
