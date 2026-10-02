@@ -161,9 +161,12 @@ class _MappedSourceStorage(Storage):
 
     @override
     def exists(self, name: str) -> bool:
-        """Return True when the logical name has a mapping and the file exists."""
+        """Return True when the logical name maps to a regular file.
+
+        The same rule the bundle lookups apply, so a directory never counts as present.
+        """
         source = self._mapping.get(name)
-        return source is not None and source.exists()
+        return source is not None and source.is_file()
 
     @override
     def open(self, name: str, mode: str = "rb") -> File:

@@ -12,7 +12,7 @@ import next.static.checks as checks_module
 from next.apps.staticfiles import _APP_DIRECTORIES_PATH
 from next.checks import NEXT
 from next.components import FileComponentsBackend
-from next.static import KindRegistry, StaticFilesBackend
+from next.static import KindRegistry, ScriptInjectionPolicy, StaticFilesBackend
 from next.static.checks import (
     check_app_directories_finder,
     check_asset_kinds_are_loadable,
@@ -22,7 +22,10 @@ from next.static.checks import (
     check_nonce_on_shared_pages,
     check_nonce_templates,
     check_reserved_js_context_keys,
+    check_runtime_bundles_deployed,
+    check_script_policy,
     check_static_backends,
+    check_tag_templates_format,
 )
 from tests.support import (
     APP_FINDER_CASES,
@@ -670,3 +673,102 @@ class TestNonceOnSharedPagesCheck:
             override_settings(MIDDLEWARE=_CSP_MIDDLEWARE),
         ):
             assert check_nonce_on_shared_pages() == []
+
+
+class TestScriptPolicyCheck:
+    """`next.E130` names a `NEXT_JS_OPTIONS["policy"]` no injection policy matches."""
+
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"policy": "manual"}, {"policy": ScriptInjectionPolicy.DISABLED}],
+        ids=["unset", "string", "member"],
+    )
+    def test_a_known_policy_is_silent(self, options) -> None:
+        with override_settings(NEXT_FRAMEWORK={"NEXT_JS_OPTIONS": options}):
+            assert check_script_policy() == []
+
+    def test_an_unknown_policy_is_e130(self) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={"NEXT_JS_OPTIONS": {"policy": "sometimes"}}
+        ):
+            [error] = check_script_policy()
+        assert error.id == "next.E130"
+        assert "'sometimes'" in error.msg
+        assert "'auto', 'disabled', 'manual'" in error.msg
+
+    def test_options_of_the_wrong_shape_are_left_to_the_type_check(self) -> None:
+        with patch.object(checks_module, "next_framework_settings") as framework:
+            framework.NEXT_JS_OPTIONS = []
+            assert check_script_policy() == []
+
+
+class TestTagTemplatesFormatCheck:
+    """`next.E139` names a custom tag template `.format` cannot fill."""
+
+    def test_formattable_templates_are_silent(self) -> None:
+        with override_settings(NEXT_FRAMEWORK=_BARE_TEMPLATES):
+            assert check_tag_templates_format() == []
+
+    def test_every_broken_template_is_named(self) -> None:
+        framework = {
+            "NEXT_JS_OPTIONS": {
+                "init_template": "<script>{payload}{</script>",
+                "preload_template": "<link {rel} href='{url}'>",
+                "script_tag_template": "",
+            },
+            "STATIC_BACKENDS": [
+                {"OPTIONS": {"css_tag": "<link href='{0}'>", "js_tag": None}}
+            ],
+        }
+        with override_settings(NEXT_FRAMEWORK=framework):
+            errors = check_tag_templates_format()
+        assert check_ids(errors) == ["next.E139"] * 3
+        assert "NEXT_JS_OPTIONS['preload_template']" in errors[0].msg
+        assert "{url}, {nonce_attr}" in errors[0].msg
+        assert "KeyError: 'rel'" in errors[0].msg
+        assert "NEXT_JS_OPTIONS['init_template']" in errors[1].msg
+        assert "{payload}, {nonce_attr}" in errors[1].msg
+        assert "STATIC_BACKENDS[0]['OPTIONS']['css_tag']" in errors[2].msg
+        assert "Double every literal brace" in errors[0].hint
+
+
+class TestRuntimeBundlesDeployedCheck:
+    """`next.W090` names a runtime bundle the deployed storage cannot serve."""
+
+    def test_it_is_a_deployment_check(self) -> None:
+        assert check_runtime_bundles_deployed in registry.get_checks(
+            include_deployment_checks=True
+        )
+        assert check_runtime_bundles_deployed not in registry.get_checks()
+
+    def test_built_and_collected_bundles_are_silent(self) -> None:
+        with (
+            patch.object(checks_module.finders, "find", return_value="/src/x.js"),
+            patch.object(
+                checks_module.staticfiles_storage, "url", return_value="/s/x.js"
+            ),
+        ):
+            assert check_runtime_bundles_deployed() == []
+
+    def test_an_unbuilt_runtime_is_w090_and_the_dev_chunk_is_not_asked(self) -> None:
+        with patch.object(checks_module.finders, "find", return_value=[]) as find:
+            warnings = check_runtime_bundles_deployed()
+        assert check_ids(warnings) == ["next.W090"] * 5
+        assert warnings[0].msg.startswith("next/next.min.js: no static files finder")
+        assert "collectstatic" in warnings[0].hint
+        asked = [call.args[0] for call in find.call_args_list]
+        assert "next/next.dev.min.js" not in asked
+
+    def test_an_uncollected_chunk_is_w090(self) -> None:
+        def url(name: str) -> str:
+            if name == "next/next.sse.min.js":
+                msg = "Missing staticfiles manifest entry"
+                raise ValueError(msg)
+            return f"/static/{name}"
+
+        with (
+            patch.object(checks_module.finders, "find", return_value="/src/x.js"),
+            patch.object(checks_module.staticfiles_storage, "url", side_effect=url),
+        ):
+            [warning] = check_runtime_bundles_deployed()
+        assert warning.msg.startswith("next/next.sse.min.js: the static files storage")

@@ -9,6 +9,7 @@ from __future__ import annotations
 import enum
 import functools
 import json
+import logging
 import re
 from html import escape
 from types import MappingProxyType
@@ -16,17 +17,22 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from next.caches import DEFAULT_CACHE_SIZE
 from next.csrf import csrf_payload
+from next.diagnostics import FailureLog
 
 from .serializers import resolve_serializer
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
     from django.http import HttpRequest
 
     from .serializers import JsContextSerializer
 
+
+logger = logging.getLogger(__name__)
+
+_failures = FailureLog(logger)
 
 NEXT_JS_STATIC_PATH: Final = "next/next.min.js"
 
@@ -112,6 +118,45 @@ def csrf_payload_for(request: HttpRequest | None) -> dict[str, str] | None:
     return csrf_payload(request)
 
 
+TAG_FIELDS: Final = ("url", "nonce_attr")
+"""The fields a tag template naming an asset is formatted with."""
+
+INIT_FIELDS: Final = ("payload", "nonce_attr")
+"""The fields the init script template is formatted with."""
+
+TEMPLATE_ERRORS: Final = (KeyError, IndexError, ValueError, AttributeError)
+"""What `str.format` raises for a stray brace or a field it is not given."""
+
+
+def dry_run_template(template: str, fields: Iterable[str]) -> None:
+    """Format `template` with a blank value per field, raising what a render would."""
+    template.format(**dict.fromkeys(fields, ""))
+
+
+def usable_template(
+    template: str, default: str, fields: Iterable[str], where: str
+) -> str:
+    """Return `template` when it formats with `fields`, else `default`.
+
+    A template that cannot format would fail every render that reaches it, so the
+    default stands in, loud under `DEBUG` and logged once otherwise.
+    """
+    try:
+        dry_run_template(template, fields)
+    except TEMPLATE_ERRORS as exc:
+        _failures.contain(
+            exc,
+            where,
+            "%s %r does not format with the fields %s, so the default tag renders "
+            "instead. Double every literal brace as {{ or }} and name no other field.",
+            where,
+            template,
+            ", ".join(f"{{{name}}}" for name in fields),
+        )
+        return default
+    return template
+
+
 class ScriptInjectionPolicy(enum.Enum):
     """Controls whether `next.min.js` is automatically injected.
 
@@ -146,11 +191,29 @@ class NextScriptBuilder:
         init_template: str | None = None,
         policy: ScriptInjectionPolicy = ScriptInjectionPolicy.AUTO,
     ) -> None:
-        """Store the URL, tag templates, and injection policy."""
+        """Store the URL, tag templates, and injection policy.
+
+        A template that cannot format gives way to the default, see `usable_template`.
+        """
         self._url = next_js_url
-        self._preload_template = preload_template or self.DEFAULT_PRELOAD
-        self._script_tag_template = script_tag_template or self.DEFAULT_SCRIPT_TAG
-        self._init_template = init_template or self.DEFAULT_INIT
+        self._preload_template = usable_template(
+            preload_template or self.DEFAULT_PRELOAD,
+            self.DEFAULT_PRELOAD,
+            TAG_FIELDS,
+            "NEXT_JS_OPTIONS['preload_template']",
+        )
+        self._script_tag_template = usable_template(
+            script_tag_template or self.DEFAULT_SCRIPT_TAG,
+            self.DEFAULT_SCRIPT_TAG,
+            TAG_FIELDS,
+            "NEXT_JS_OPTIONS['script_tag_template']",
+        )
+        self._init_template = usable_template(
+            init_template or self.DEFAULT_INIT,
+            self.DEFAULT_INIT,
+            INIT_FIELDS,
+            "NEXT_JS_OPTIONS['init_template']",
+        )
         self._policy = policy
 
     @property

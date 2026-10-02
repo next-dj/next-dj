@@ -71,6 +71,7 @@ Manifest storage
 
 For projects that use Django ``ManifestStaticFilesStorage`` the framework cooperates without extra configuration.
 ``collectstatic`` writes the manifest, the framework reads it at runtime, and the rendered HTML uses the manifested filenames.
+A runtime bundle the manifest lacks costs no page, as the page renders without the runtime, or without that chunk, and logs it once, while ``manage.py check --deploy`` reports it as ``next.W090``.
 
 The shipped ``next.min.js`` carries no ``sourceMappingURL`` comment, so manifest post-processing finds no reference to rewrite and no map a wheel install leaves out.
 ``collectstatic`` under manifest storage therefore completes on a wheel install with no ignore pattern and no post-processing exclusion.

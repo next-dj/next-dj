@@ -6,7 +6,9 @@ import inspect
 from typing import TYPE_CHECKING, Any, Final
 
 from django.conf import settings
+from django.contrib.staticfiles import finders
 from django.contrib.staticfiles.finders import AppDirectoriesFinder
+from django.contrib.staticfiles.storage import staticfiles_storage
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
 from next.checks import NEXT
@@ -20,7 +22,18 @@ from .assets import default_kinds
 from .backends import StaticBackend, StaticFilesBackend
 from .finders import NextAppDirectoriesFinder
 from .nonce import nonce_active
-from .runtime import RESERVED_PAYLOAD_KEYS
+from .runtime import (
+    CHUNK_STATIC_PATHS,
+    DEV_CHUNK_STATIC_PATH,
+    INIT_FIELDS,
+    NEXT_JS_STATIC_PATH,
+    RESERVED_PAYLOAD_KEYS,
+    TAG_FIELDS,
+    TEMPLATE_ERRORS,
+    NextScriptBuilder,
+    ScriptInjectionPolicy,
+    dry_run_template,
+)
 from .serializers import JsContextSerializer
 
 
@@ -432,3 +445,96 @@ def check_nonce_on_shared_pages(*args, **kwargs) -> list[CheckMessage]:
         "source, or drop the shared cache.",
         "next.W130",
     )
+
+
+@register(NEXT)
+def check_script_policy(*args, **kwargs) -> list[CheckMessage]:
+    """Require `NEXT_JS_OPTIONS["policy"]` to name an injection policy (`next.E130`).
+
+    The builder reads it the way a render does, so the two cannot disagree.
+    """
+    options = next_framework_settings.NEXT_JS_OPTIONS
+    if not isinstance(options, dict):
+        return []
+    policy = options.get("policy", ScriptInjectionPolicy.AUTO)
+    try:
+        NextScriptBuilder.from_options("", {"policy": policy})
+    except ValueError:
+        allowed = ", ".join(repr(member.value) for member in ScriptInjectionPolicy)
+        return [
+            Error(
+                f"NEXT_JS_OPTIONS['policy'] is {policy!r}, which names no injection "
+                f"policy, so pages inject the runtime as under 'auto'. Write one of "
+                f"{allowed}.",
+                obj=settings,
+                id="next.E130",
+            )
+        ]
+    return []
+
+
+def _template_fields(where: str) -> tuple[str, ...]:
+    return INIT_FIELDS if "init_template" in where else TAG_FIELDS
+
+
+@register(NEXT)
+def check_tag_templates_format(*args, **kwargs) -> list[CheckMessage]:
+    """Require every custom tag template to format with its fields (`next.E139`)."""
+    errors: list[CheckMessage] = []
+    for where, template in _templates():
+        if not isinstance(template, str) or not template:
+            continue
+        fields = _template_fields(where)
+        try:
+            dry_run_template(template, fields)
+        except TEMPLATE_ERRORS as exc:
+            listed = ", ".join(f"{{{name}}}" for name in fields)
+            errors.append(
+                Error(
+                    f"{where} is {template!r}, which does not format with {listed} "
+                    f"({type(exc).__name__}: {exc}), so the default tag renders "
+                    "instead.",
+                    hint="Double every literal brace as {{ or }} and name no other "
+                    "field.",
+                    obj=settings,
+                    id="next.E139",
+                )
+            )
+    return errors
+
+
+_DEPLOYED_BUNDLES: Final = (
+    NEXT_JS_STATIC_PATH,
+    *(path for path in CHUNK_STATIC_PATHS.values() if path != DEV_CHUNK_STATIC_PATH),
+)
+"""The runtime bundles a production page may load, the dev chunk left out."""
+
+
+def _bundle_problem(path: str) -> str | None:
+    """Say why the storage cannot serve a runtime bundle, `None` when it can."""
+    if not finders.find(path):
+        return "no static files finder answers it, so the client runtime is unbuilt"
+    try:
+        staticfiles_storage.url(path)
+    except ValueError:
+        return "the static files storage holds no entry for it"
+    return None
+
+
+@register(NEXT, deploy=True)
+def check_runtime_bundles_deployed(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about a runtime bundle the deployed storage cannot serve (`next.W090`)."""
+    return [
+        DjangoWarning(
+            f"{path}: {problem}. Pages render without the runtime, or without the "
+            "feature the chunk carries.",
+            hint=(
+                "Build the client runtime (npm run build:next in a source checkout) "
+                "and run manage.py collectstatic."
+            ),
+            obj=settings,
+            id="next.W090",
+        )
+        for path in _DEPLOYED_BUNDLES
+        if (problem := _bundle_problem(path)) is not None
+    ]
