@@ -16,7 +16,9 @@ def _response(cache_control: str | None, *, cookie: bool = True) -> HttpResponse
     response["CDN-Cache-Control"] = "max-age=600"
     response["Surrogate-Control"] = "max-age=600"
     if cookie:
-        response.set_cookie("sessionid", "abc")
+        response.set_cookie(
+            "sessionid", "abc", secure=True, httponly=True, samesite="Lax"
+        )
     return response
 
 
