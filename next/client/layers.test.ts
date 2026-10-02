@@ -1103,13 +1103,20 @@ describe("layer intercepting URL lifecycle", () => {
   });
 });
 
-describe("layer open is single-flight and writes history only once the body lands", () => {
+describe("layer open is single-flight and pushes as it opens", () => {
   function makeHistory() {
     const pushed: string[] = [];
     const replaced: string[] = [];
+    // The bar moves as well, so a rollback finds the push it undoes.
     const history = {
-      push: (href: string) => pushed.push(href),
-      replace: (href: string) => replaced.push(href),
+      push: (href: string) => {
+        pushed.push(href);
+        window.history.pushState(null, "", href);
+      },
+      replace: (href: string) => {
+        replaced.push(href);
+        window.history.replaceState(null, "", href);
+      },
     };
     return { history, pushed, replaced };
   }
@@ -1142,21 +1149,21 @@ describe("layer open is single-flight and writes history only once the body land
   function makeHeld(dialog: DialogAdapter = mockDialog().adapter) {
     const { history, pushed, replaced } = makeHistory();
     const aborted: string[] = [];
-    const navigation = createNavigation({
-      dispatch: () => undefined,
-      document,
-      history,
-    });
+    const navigated: Record<string, unknown>[] = [];
+    const dispatch = (event: string, detail: Record<string, unknown>): void => {
+      if (event === "next:navigated") navigated.push(detail);
+    };
+    const navigation = createNavigation({ dispatch, document, history });
     const { fetch, pending } = heldFetch(navigation);
     const layers = createTrackedLayers({
-      dispatch: () => undefined,
+      dispatch,
       fetch,
       abort: (key) => aborted.push(key),
       document,
       dialog,
       navigation,
     });
-    return { layers, pushed, replaced, aborted, pending };
+    return { layers, pushed, replaced, aborted, pending, navigated };
   }
 
   beforeEach(() => {
@@ -1164,8 +1171,8 @@ describe("layer open is single-flight and writes history only once the body land
     window.history.replaceState(null, "", "/feed/");
   });
 
-  it("a double click opens one dialog and pushes once the body lands", () => {
-    const { layers, pushed, pending } = makeHeld();
+  it("a double click opens one dialog, pushing at once and announcing on the body", () => {
+    const { layers, pushed, pending, navigated } = makeHeld();
     const opener = document.createElement("a");
     opener.setAttribute("href", "/photos/1/");
     opener.setAttribute("data-next-layer", "photo");
@@ -1174,9 +1181,13 @@ describe("layer open is single-flight and writes history only once the body land
     opener.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     opener.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     expect(document.querySelectorAll("[data-next-dialog]")).toHaveLength(1);
-    expect(pushed).toEqual([]);
+    expect(pushed).toEqual(["/photos/1/"]);
+    expect(navigated).toEqual([]);
     pending[0]!.settle();
     expect(pushed).toEqual(["/photos/1/"]);
+    expect(navigated).toEqual([
+      expect.objectContaining({ path: "/photos/1/", action: "push" }),
+    ]);
     expect(layers.size()).toBe(1);
   });
 
@@ -1211,8 +1222,8 @@ describe("layer open is single-flight and writes history only once the body land
     await opening;
   });
 
-  it("a fetch failure tears down the orphan and leaves history untouched", async () => {
-    const { layers, pushed, replaced, pending } = makeHeld();
+  it("a fetch failure tears down the orphan and rolls its push back unannounced", async () => {
+    const { layers, pushed, replaced, pending, navigated } = makeHeld();
     const opener = document.createElement("a");
     opener.setAttribute("href", "/photos/1/");
     document.body.append(opener);
@@ -1221,8 +1232,10 @@ describe("layer open is single-flight and writes history only once the body land
     await expect(opening).rejects.toThrow("boom");
     expect(document.querySelector("[data-next-dialog]")).toBeNull();
     expect(layers.size()).toBe(0);
-    expect(pushed).toEqual([]);
-    expect(replaced).toEqual([]);
+    expect(pushed).toEqual(["/photos/1/"]);
+    expect(replaced).toEqual(["/feed/"]);
+    expect(navigated).toEqual([]);
+    expect(window.location.pathname).toBe("/feed/");
     expect(opener.hasAttribute("data-next-busy")).toBe(false);
     expect(opener.hasAttribute("aria-busy")).toBe(false);
   });
@@ -1239,21 +1252,51 @@ describe("layer open is single-flight and writes history only once the body land
     pending[0]!.settle(new Error("boom"));
     await expect(opening).rejects.toThrow("boom");
     // The catch arm hands remove the already-spliced layer, so the second
-    // teardown is a no-op: one abort, and no entry was ever written.
+    // teardown is a no-op: one abort, and one rollback of the push.
     expect(aborted).toEqual(["layer:1"]);
-    expect(pushed).toEqual([]);
-    expect(replaced).toEqual([]);
+    expect(pushed).toEqual(["/photos/1/"]);
+    expect(replaced).toEqual(["/feed/"]);
     expect(document.querySelector("[data-next-dialog]")).toBeNull();
     expect(opener.hasAttribute("aria-busy")).toBe(false);
   });
 
-  it("a body landing after its layer closed writes no entry", async () => {
-    const { layers, pushed, pending } = makeHeld();
+  it("a body landing after its layer closed announces nothing", async () => {
+    const { layers, pushed, replaced, pending, navigated } = makeHeld();
     const opening = layers.open(null, "/photos/1/", "photo");
     layers.close({ dismiss: true, reason: "escape" });
     pending[0]!.settle();
     await opening;
-    expect(pushed).toEqual([]);
+    expect(pushed).toEqual(["/photos/1/"]);
+    expect(replaced).toEqual(["/feed/"]);
+    expect(navigated).toEqual([]);
+  });
+
+  it("Back while the body loads closes the layer and leaves the bar alone", async () => {
+    const { layers, replaced, pending, navigated } = makeHeld();
+    layers.install(document);
+    const opening = layers.open(null, "/photos/1/", "photo");
+    window.history.replaceState(null, "", "/feed/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(layers.size()).toBe(0);
+    pending[0]!.settle();
+    await opening;
+    expect(replaced).toEqual([]);
+    expect(navigated).toEqual([]);
+  });
+
+  it("a push the browser refuses holds nothing to roll back", async () => {
+    const navigation = createNavigation({
+      dispatch: () => undefined,
+      history: {
+        push: () => {
+          throw new Error("rate limited");
+        },
+        replace: () => undefined,
+      },
+    });
+    const drop = navigation.hold("/photos/1/", "/photos/1/", () => undefined);
+    drop();
+    expect(window.location.pathname).toBe("/feed/");
   });
 });
 
@@ -1371,7 +1414,7 @@ describe("layer head scoping from the audit", () => {
     window.history.replaceState(null, "", "/");
   });
 
-  it("Esc before the body lands keeps the host title and writes no entry", async () => {
+  it("Esc before the body lands keeps the host title and announces nothing", async () => {
     const pushed: string[] = [];
     const aborted: string[] = [];
     const { adapter, dismissed } = mockDialog();
@@ -1402,7 +1445,7 @@ describe("layer head scoping from the audit", () => {
     await opening;
     expect(document.title).toBe("Feed");
     expect(aborted).toEqual(["layer:1"]);
-    expect(pushed).toEqual([]);
+    expect(pushed).toEqual(["/photos/1/"]);
   });
 
   it("a host title rendered with stray whitespace restores normalised", async () => {

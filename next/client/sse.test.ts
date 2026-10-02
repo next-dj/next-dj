@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSse } from "./sse";
 import type { EventSourceAdapter, SourceControl, VisibilityAdapter } from "./sse";
-import { manualVisibility } from "./test-doubles";
+import { manualVisibility, chunkModules } from "./test-doubles";
 import { Wire } from "./wire";
 import { createCsrf } from "./csrf";
 import { CONTENT_TYPE, HEADER_REQUEST_ID } from "./protocol";
@@ -45,6 +45,18 @@ function envelope(ops: unknown[], requestId?: string): string {
   if (requestId !== undefined) body.request_id = requestId;
   return JSON.stringify(body);
 }
+
+it("falls back to the platform seams and resets twice harmlessly", () => {
+  const sse = createSse({
+    apply: () => undefined,
+    fetch: () => undefined,
+    dispatch: () => undefined,
+  });
+  expect(sse.size()).toBe(0);
+  sse._reset();
+  sse._reset();
+  expect(sse.size()).toBe(0);
+});
 
 describe("createSse", () => {
   let applied: unknown[];
@@ -195,7 +207,7 @@ describe("createSse", () => {
       navigate: () => undefined,
       dispatch: () => undefined,
       onEnvelope: () => undefined,
-      csrf: createCsrf(),
+      csrf: createCsrf({ mint: chunkModules.csrf }),
       rememberRequestId: (id) => sse.remember(id),
     });
     await wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createCsrf, readCsrf } from "./csrf";
+import { createCsrf, mintCsrf, readCsrf } from "./csrf";
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
+import { chunkModules, landed } from "./test-doubles";
 
 const CSRF_URL = "/_next/csrf/";
 const ENVELOPE_TYPE = "application/vnd.next.patches+json";
@@ -47,7 +48,7 @@ describe("readCsrf", () => {
 describe("the deferred token", () => {
   it("mints once for concurrent callers, with the request flag and no cache", async () => {
     const { fetch, calls, release } = minting();
-    const csrf = createCsrf({ fetch });
+    const csrf = createCsrf({ mint: chunkModules.csrf, fetch });
     csrf.set({ header: "X-CSRFToken", url: CSRF_URL });
     const first = csrf.ensure();
     const second = csrf.ensure();
@@ -68,7 +69,7 @@ describe("the deferred token", () => {
 
   it("answers an eager token or an absent payload without a request", async () => {
     const { fetch, calls } = minting();
-    const csrf = createCsrf({ fetch });
+    const csrf = createCsrf({ mint: chunkModules.csrf, fetch });
     expect(await csrf.ensure()).toBeUndefined();
     csrf.set({ header: "X-CSRFToken", token: "eager" });
     expect(await csrf.ensure()).toEqual({ header: "X-CSRFToken", token: "eager" });
@@ -79,6 +80,7 @@ describe("the deferred token", () => {
     let status = 403;
     let calls = 0;
     const csrf = createCsrf({
+      mint: chunkModules.csrf,
       fetch: async () => {
         calls += 1;
         return json({ header: "X-CSRFToken", token: "second" }, status);
@@ -93,11 +95,13 @@ describe("the deferred token", () => {
 
   it("a network failure or a body without a token is a refusal", async () => {
     const thrown = createCsrf({
+      mint: chunkModules.csrf,
       fetch: () => Promise.reject(new TypeError("offline")),
     });
     thrown.set({ header: "X-CSRFToken", url: CSRF_URL });
     expect(await thrown.ensure()).toBeUndefined();
     const tokenless = createCsrf({
+      mint: chunkModules.csrf,
       fetch: async () => json({ header: "X-CSRFToken" }),
     });
     tokenless.set({ header: "X-CSRFToken", url: CSRF_URL });
@@ -106,7 +110,7 @@ describe("the deferred token", () => {
 
   it("never sends the request off the page's origin", async () => {
     const { fetch, calls } = minting();
-    const csrf = createCsrf({ fetch });
+    const csrf = createCsrf({ mint: chunkModules.csrf, fetch });
     csrf.set({ header: "X-CSRFToken", url: "https://attacker.example/csrf/" });
     expect(await csrf.ensure()).toBeUndefined();
     expect(calls).toEqual([]);
@@ -114,7 +118,7 @@ describe("the deferred token", () => {
 
   it("a token rotated in while the mint is in flight wins", async () => {
     const { fetch, release } = minting("stale");
-    const csrf = createCsrf({ fetch });
+    const csrf = createCsrf({ mint: chunkModules.csrf, fetch });
     csrf.set({ header: "X-CSRFToken", url: CSRF_URL });
     const pending = csrf.ensure();
     csrf.set({ header: "X-CSRFToken", token: "rotated" });
@@ -125,7 +129,7 @@ describe("the deferred token", () => {
 
   it("_reset drops the token and the mint in flight", async () => {
     const { fetch, calls, release } = minting();
-    const csrf = createCsrf({ fetch });
+    const csrf = createCsrf({ mint: chunkModules.csrf, fetch });
     csrf.set({ header: "X-CSRFToken", url: CSRF_URL });
     const pending = csrf.ensure();
     csrf._reset();
@@ -137,11 +141,37 @@ describe("the deferred token", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("fetches the csrf chunk first when it has not landed yet", async () => {
+    const { fetch, calls, release } = minting();
+    const csrf = createCsrf({
+      mint: { get: () => undefined, load: () => landed(mintCsrf).load() },
+      fetch,
+    });
+    csrf.set({ header: "X-CSRFToken", url: CSRF_URL });
+    const pending = csrf.ensure();
+    await Promise.resolve();
+    release();
+    expect(await pending).toEqual({ header: "X-CSRFToken", token: "minted" });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("a csrf chunk that cannot load is a refusal the next need retries", async () => {
+    const { fetch, calls } = minting();
+    const csrf = createCsrf({
+      mint: { get: () => undefined, load: () => Promise.resolve(undefined) },
+      fetch,
+    });
+    csrf.set({ header: "X-CSRFToken", url: CSRF_URL });
+    expect(await csrf.ensure()).toBeUndefined();
+    expect(calls).toEqual([]);
+    expect(csrf.current()).toEqual({ header: "X-CSRFToken", url: CSRF_URL });
+  });
+
   it("prefetches on the first focus inside an action form, then stops listening", () => {
     document.body.innerHTML =
       '<p><input id="plain"></p><form data-next-action="u1"><input id="field"></form>';
     const { fetch, calls } = minting();
-    const csrf = createCsrf({ fetch });
+    const csrf = createCsrf({ mint: chunkModules.csrf, fetch });
     csrf.set({ header: "X-CSRFToken", url: CSRF_URL });
     const detach = csrf.install(document);
     document
@@ -168,6 +198,7 @@ describe("a mutation on a page with a deferred token", () => {
     errors = [];
     mint = () => json({ header: "X-CSRFToken", token: "minted" });
     partial = createPartial({
+      ...chunkModules,
       dispatch: (event, detail) => {
         if (event === "partial:error") errors.push(detail);
       },

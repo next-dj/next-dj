@@ -32,4 +32,4 @@ export function createExtrasChunk(host: ExtrasHost): Extras {
   };
 }
 
-window.Next._register(createExtrasChunk);
+window.Next._land("scripts", createExtrasChunk);

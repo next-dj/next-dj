@@ -11,6 +11,7 @@ import functools
 import json
 import re
 from html import escape
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from next.caches import DEFAULT_CACHE_SIZE
@@ -34,6 +35,26 @@ SCRIPTS_CHUNK_STATIC_PATH: Final = "next/next.scripts.min.js"
 
 DEV_CHUNK_STATIC_PATH: Final = "next/next.dev.min.js"
 """The diagnostics chunk the runtime fetches only when the payload carries `$dev`."""
+
+SSE_CHUNK_STATIC_PATH: Final = "next/next.sse.min.js"
+"""The server-sent events bridge, fetched once a page marks an element to stream."""
+
+CSRF_CHUNK_STATIC_PATH: Final = "next/next.csrf.min.js"
+"""The deferred CSRF minter, fetched once a page that carries no token posts."""
+
+POLL_CHUNK_STATIC_PATH: Final = "next/next.poll.min.js"
+"""The zone poller, fetched once a page marks a zone to poll."""
+
+CHUNK_STATIC_PATHS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "scripts": SCRIPTS_CHUNK_STATIC_PATH,
+        "sse": SSE_CHUNK_STATIC_PATH,
+        "csrf": CSRF_CHUNK_STATIC_PATH,
+        "poll": POLL_CHUNK_STATIC_PATH,
+        "dev": DEV_CHUNK_STATIC_PATH,
+    }
+)
+"""Every lazy chunk by the `$chunks` key the runtime fetches it under."""
 
 CSRF_PAYLOAD_KEY: Final = "$csrf"
 

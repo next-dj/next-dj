@@ -4,6 +4,7 @@ import logging
 from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
 from django.test import RequestFactory, override_settings
 from django.utils.functional import empty
 
@@ -364,31 +365,21 @@ class TestBackendsLoadedOnce:
 
 
 class TestChunkUrlMemo:
-    """The chunk URLs are resolved once per storage and again after a rebuild."""
+    """Each chunk URL is resolved once per storage and again after a rebuild."""
 
+    @pytest.mark.parametrize("name", ["scripts", "sse", "csrf", "poll", "dev"])
     def test_a_rebuilt_storage_resolves_it_again(
-        self, fresh_manager: StaticManager
+        self, fresh_manager: StaticManager, name: str
     ) -> None:
         with mock.patch(
             "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
         ) as url:
-            fresh_manager.scripts_chunk_url()
-            fresh_manager.scripts_chunk_url()
+            first = fresh_manager.chunk_url(name)
+            fresh_manager.chunk_url(name)
             fresh_manager.forget_backend_urls()
-            fresh_manager.scripts_chunk_url()
+            fresh_manager.chunk_url(name)
         assert url.call_count == 2
-
-    def test_a_rebuilt_storage_resolves_the_dev_chunk_again(
-        self, fresh_manager: StaticManager
-    ) -> None:
-        with mock.patch(
-            "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
-        ) as url:
-            fresh_manager.dev_chunk_url()
-            fresh_manager.dev_chunk_url()
-            fresh_manager.forget_backend_urls()
-            fresh_manager.dev_chunk_url()
-        assert url.call_count == 2
+        assert first == f"/static/next/next.{name}.min.js"
 
 
 class TestAssetUrlHook:

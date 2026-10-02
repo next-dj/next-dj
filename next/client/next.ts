@@ -4,10 +4,13 @@
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
 import type { Envelope } from "./apply";
-import { chunkLoader, createExtras } from "./chunks";
-import type { ExtrasFactory, ScriptsChunk } from "./chunks";
+import { createExtras, lazyChunk } from "./chunks";
+import type { ChunkDeps, ExtrasFactory, Lazy, ScriptsChunk } from "./chunks";
 import type { ConsentChange } from "./consent";
 import { readCsrf } from "./csrf";
+import type { CsrfMint } from "./csrf";
+import type { SseFactory } from "./sse";
+import type { PollFactory } from "./poll";
 import type { NavigatedDetail, NavigationState } from "./navigation";
 import { scriptNonce } from "./protocol";
 import type { Diagnostics, PartialError } from "./protocol";
@@ -22,6 +25,15 @@ export type { Asset, AssetLoad, Envelope, FormMeta, Patch } from "./apply";
 export type { ConsentChange } from "./consent";
 export type { ScriptsChunk } from "./chunks";
 export type { ScriptStatus } from "./scripts";
+
+/** The modules the single-module chunks hand over through Next._land. */
+interface NextModules {
+  scripts: ExtrasFactory;
+  sse: SseFactory;
+  csrf: CsrfMint;
+  poll: PollFactory;
+  dev: Diagnostics;
+}
 
 /** The lazily fetched chunks Next.ready awaits, keyed by name. */
 export interface NextChunks {
@@ -98,12 +110,29 @@ class Next {
   static #bus = new NextBus();
   static #ready = false;
 
-  static partial: PartialSurface = createPartial({
+  // What every chunk fetch reads, the base its URL resolves against.
+  static #chunk: ChunkDeps = {
     dispatch: (event, payload) => Next.#bus.emit(event, payload),
-    mergeContext: (data) => Next.#mergeContext(data),
-  });
+    runtime: RUNTIME,
+    nonce: NONCE,
+    context: () => Next.#context,
+  };
 
-  static #diagnosed = false;
+  // The dev chunk is fetched only for a page rendered under $dev.
+  static #modules = Object.fromEntries(
+    ["scripts", "sse", "csrf", "poll", "dev"].map((key) => [
+      key,
+      lazyChunk(Next.#chunk, key),
+    ]),
+  ) as { [K in keyof NextModules]: Lazy<NextModules[K]> };
+
+  static partial: PartialSurface = createPartial({
+    dispatch: Next.#chunk.dispatch,
+    mergeContext: (data) => Next.#mergeContext(data),
+    sse: Next.#modules.sse,
+    csrf: Next.#modules.csrf,
+    poll: Next.#modules.poll,
+  });
 
   /** Consent per category, set once the scripts chunk lands. */
   static consent: ScriptsChunk["consent"] | undefined;
@@ -111,32 +140,21 @@ class Next {
   /** Third-party scripts, set once the scripts chunk lands. */
   static scripts: ScriptsChunk["scripts"] | undefined;
 
-  static #extras = createExtras({
-    dispatch: (event, payload) => Next.#bus.emit(event, payload),
-    runtime: RUNTIME,
-    nonce: NONCE,
-    mount: (nodes) => Next.partial.mount(nodes),
-    install: (chunk) => {
-      Next.consent = chunk.consent;
-      Next.scripts = chunk.scripts;
+  static #extras = createExtras(
+    {
+      ...Next.#chunk,
+      mount: (nodes) => Next.partial.mount(nodes),
+      install: (chunk) => {
+        Next.consent = chunk.consent;
+        Next.scripts = chunk.scripts;
+      },
     },
-  });
+    Next.#modules.scripts,
+  );
 
   static #chunks: { [K in keyof NextChunks]: () => Promise<NextChunks[K]> } = {
     scripts: () => Next.#extras.ready(),
   };
-
-  // The dev chunk, fetched only for a page rendered under $dev.
-  static #devtools = chunkLoader(
-    {
-      dispatch: (event, payload) => Next.#bus.emit(event, payload),
-      runtime: RUNTIME,
-      nonce: NONCE,
-    },
-    "dev",
-    "next.dev.min.js",
-    () => undefined,
-  );
 
   static navigation = {
     current: (): NavigationState => Next.partial._current(),
@@ -148,25 +166,23 @@ class Next {
 
   /** Bootstrap called once per page, seeding context and mounting before ready runs. */
   static _init(context: Record<string, unknown>): void {
+    // Seeded first, the payload the chunk fetches below resolve against.
+    Next.#context = context;
     // Only the literal true opens the dev channel, so a stray "true" string
-    // leaves production quiet. Runs before the initial trigger scan.
-    const dev = context.$dev === true;
-    if (dev) {
+    // leaves production quiet. Runs before the initial trigger scan, and the
+    // diagnostics the dev chunk carries join once it lands.
+    if (context.$dev === true) {
       Next.partial._configure({ dev: true });
-      Next.#devtools(context);
+      void Next.#modules.dev.load().then((diagnostics) => {
+        if (diagnostics !== undefined)
+          Next.partial._configure({ dev: true, diagnostics });
+      });
     }
     // A page without a mintable token carries no $csrf, so an absent key keeps
     // whatever an envelope already rotated in rather than clearing it.
+    // A malformed one is warned about by the dev chunk once it lands.
     const csrf = readCsrf(context.$csrf);
-    if (csrf !== undefined) {
-      Next.partial.setCsrf(csrf);
-    } else if (dev && context.$csrf !== undefined) {
-      // Otherwise the only symptom is a 403 on every programmatic mutation.
-      console.warn(
-        "[next] ignored a malformed $csrf payload, unsafe requests send no header",
-      );
-    }
-    Next.#context = context;
+    if (csrf !== undefined) Next.partial.setCsrf(csrf);
     Next.#ready = true;
     // The initial seed is one big delta, so every seeded key is changed.
     Next.#bus.emit("context-updated", { context, changed: Object.keys(context) });
@@ -186,17 +202,9 @@ class Next {
     return Next.#chunks[chunk]();
   }
 
-  /** The dev chunk's handshake, opening the diagnostics it carries. */
-  static _diagnostics(diagnostics: Diagnostics): void {
-    // First wins, a second copy of the chunk would report everything twice.
-    if (Next.#diagnosed) return;
-    Next.#diagnosed = true;
-    Next.partial._configure({ dev: true, diagnostics });
-  }
-
-  /** The scripts chunk's handshake, called once as it evaluates. */
-  static _register(factory: ExtrasFactory): void {
-    Next.#extras.register(factory);
+  /** A lazy chunk's handshake, handing over the module it carries. */
+  static _land<K extends keyof NextModules>(key: K, value: NextModules[K]): void {
+    (Next.#modules[key] as Lazy<NextModules[K]>).land(value);
   }
 
   /** Subscribe to a runtime event, returning an unsubscribe function. */

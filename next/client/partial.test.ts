@@ -3,8 +3,9 @@ import { createPartial } from "./partial";
 import { createDiagnostics } from "./diagnostics";
 import type { PartialAdapters, PartialSurface } from "./partial";
 import type { DialogAdapter } from "./layers";
-import type { EventSourceAdapter, SourceControl } from "./sse";
-import { manualPollClock, manualVisibility } from "./test-doubles";
+import { createSse } from "./sse";
+import type { EventSourceAdapter, SourceControl, SseFactory } from "./sse";
+import { manualPollClock, manualVisibility, chunkModules } from "./test-doubles";
 
 // A patches response the fetch returns so the wire resolves without a server.
 function patchesResponse(body = '{"version":"v1","ops":[],"assets":[],"form":null}') {
@@ -38,6 +39,7 @@ function makeSurface() {
   const dispatched: { event: string; detail: Record<string, unknown> }[] = [];
   const merged: Record<string, unknown>[] = [];
   const partial = createPartial({
+    ...chunkModules,
     dispatch: (event, detail) => dispatched.push({ event, detail }),
     mergeContext: (data) => merged.push(data),
   });
@@ -553,6 +555,43 @@ describe("createPartial surface", () => {
     await Promise.resolve();
     // The submit ran without throwing, so the wire's abort seam fired.
     expect(calls.length).toBeGreaterThan(0);
+  });
+
+  it("fetches the sse chunk only once a scan finds a stream, then opens it", async () => {
+    let factory: SseFactory | undefined;
+    const loads: number[] = [];
+    const lazy = createPartial({
+      ...chunkModules,
+      sse: {
+        get: () => factory,
+        load: async () => {
+          loads.push(1);
+          factory = createSse;
+          return factory;
+        },
+      },
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    const source = mockSource();
+    lazy._configure({
+      document,
+      source: source.adapter,
+      visibility: manualVisibility(),
+    });
+    document.body.innerHTML = '<div data-next-zone="z"></div>';
+    lazy.sse.scan(document);
+    expect(loads).toEqual([]);
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    lazy.sse.scan(document);
+    lazy.sse.remember("early");
+    expect(lazy.sse.size()).toBe(0);
+    expect(loads).toEqual([1]);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(source.opened).toHaveLength(1);
+    expect(lazy.sse.size()).toBe(1);
+    lazy._reset();
   });
 
   it("an SSE event applies through the same pipeline as a response", () => {

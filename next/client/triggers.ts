@@ -10,15 +10,18 @@ import {
   defaultVisibility,
 } from "./adapters";
 import type { HistoryAdapter } from "./apply";
+import type { LazyModule } from "./chunks";
+import type { PollFactory, Poller } from "./poll";
 import {
   ATTR_ACTION,
+  ATTR_POLL,
   ATTR_KEY,
   ATTR_ZONE,
   HEADER_MERGE,
   HEADER_ORIGIN,
+  addZone,
   currentUrl,
   matching,
-  pollInterval,
 } from "./protocol";
 import type { Diagnostics } from "./protocol";
 import type { VisibilityAdapter } from "./sse";
@@ -30,18 +33,10 @@ const DEBOUNCE_ATTR = "data-next-debounce";
 export const MERGE_ATTR = "data-next-merge";
 const CONFIRM_ATTR = "data-next-confirm";
 export const LAZY_ATTR = "data-next-lazy";
-export const POLL_ATTR = "data-next-poll";
+export const POLL_ATTR = ATTR_POLL;
 const VALIDATE_ATTR = "data-next-validate";
 // X-Next-Validate is local to inline validation, not shared protocol vocabulary.
 const HEADER_VALIDATE = "X-Next-Validate";
-
-// One interval group of the poller, where every zone on the cadence rides one timer
-// chain and one batched GET. lastFire anchors the resume, a null handle sleeps.
-interface PollGroup {
-  handle: number | null;
-  lastFire: number;
-  elements: Set<Element>;
-}
 
 /** The geometry seam over IntersectionObserver, which jsdom does not model. */
 export interface IntersectionAdapter {
@@ -72,6 +67,8 @@ export interface TriggerDeps {
   observer?: IntersectionAdapter;
   // The tab-visibility seam the SSE bridge shares, a hidden tab holds no poll timers.
   visibility?: VisibilityAdapter;
+  // The zone poller, held by the poll chunk.
+  poll: LazyModule<PollFactory>;
   // The owning page of an element. Absent, lazy and poll GETs read the address bar.
   pageUrl?: (el: Element) => string;
   // The host page of the layer an element sits in, answered by the layer stack. Absent,
@@ -100,13 +97,6 @@ export interface Triggers {
   _reset(): void;
 }
 
-// Add a zone to the per-page batch, one comma-joined GET per owning page.
-function addZone(batches: Map<string, string[]>, url: string, zone: string): void {
-  const zones = batches.get(url);
-  if (zones === undefined) batches.set(url, [zone]);
-  else zones.push(zone);
-}
-
 /** Build the trigger handlers over the given seams. */
 export function createTriggers(deps: TriggerDeps): Triggers {
   const doc = deps.document ?? document;
@@ -126,10 +116,6 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   // A form's pending validation: the debounce timer and the POST it would fire ride
   // one controller, so a submit cancels the half that is live, whichever it is.
   const validations = new WeakMap<HTMLFormElement, AbortController>();
-  // Poll groups by interval, with each element's group so a re-scan arms no new timer.
-  const groups = new Map<number, PollGroup>();
-  // Membership only answers "already polling", so the elements are held weakly.
-  let membership = new WeakSet<Element>();
   let detach: (() => void) | null = null;
 
   function here(): string {
@@ -375,92 +361,16 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     observed.set(el, stop);
   }
 
-  function pollMs(el: Element): number | null {
-    return pollInterval(el.getAttribute(POLL_ATTR));
-  }
+  // The poller once its chunk landed, built on first need.
+  let poller: Poller | undefined;
 
-  // Chained setTimeout, not setInterval, so tests drive ticks one by one.
-  function joinPoll(el: Element, interval: number): void {
-    membership.add(el);
-    const group = groups.get(interval);
-    if (group !== undefined) {
-      group.elements.add(el);
-      return;
-    }
-    groups.set(interval, {
-      handle: visibility.hidden()
-        ? null
-        : clock.setTimeout(() => pollTick(interval), interval),
-      lastFire: clock.now(),
-      elements: new Set([el]),
-    });
-  }
-
-  function startPoll(el: Element): void {
-    if (membership.has(el)) return;
-    if (el.getAttribute(ATTR_ZONE) === null) return;
-    const ms = pollMs(el);
-    if (ms === null) return;
-    joinPoll(el, ms);
-  }
-
-  // Each element is re-read live, a wrapper missing either attribute was morphed
-  // away and tears down, a changed interval migrates, a vanished group returns.
-  function pollTick(interval: number): void {
-    const group = groups.get(interval);
-    if (group === undefined) return;
-    if (visibility.hidden()) {
-      // Safety net for a missed visibilitychange, the visible flip wakes the group.
-      group.handle = null;
-      return;
-    }
-    const batches = new Map<string, string[]>();
-    for (const el of Array.from(group.elements)) {
-      const zone = el.getAttribute(ATTR_ZONE);
-      const ms = pollMs(el);
-      if (!el.isConnected || zone === null || ms === null) {
-        group.elements.delete(el);
-        membership.delete(el);
-        continue;
-      }
-      addZone(batches, pageUrl(el), zone);
-      if (ms !== interval) {
-        group.elements.delete(el);
-        membership.delete(el);
-        joinPoll(el, ms);
-      }
-    }
-    flushBatches(batches);
-    group.lastFire = clock.now();
-    if (group.elements.size === 0) {
-      groups.delete(interval);
-      return;
-    }
-    group.handle = clock.setTimeout(() => pollTick(interval), interval);
-  }
-
-  // On hidden, live timers are silenced and the groups sleep. On visible, elapsed
-  // against lastFire runs due ticks at once and resumes the rest with the time left.
-  function onVisibility(): void {
-    if (visibility.hidden()) {
-      for (const group of groups.values()) {
-        if (group.handle !== null) clock.clearTimeout(group.handle);
-        group.handle = null;
-      }
-      return;
-    }
-    for (const [interval, group] of Array.from(groups.entries())) {
-      if (group.handle !== null) {
-        clock.clearTimeout(group.handle);
-        group.handle = null;
-      }
-      const elapsed = clock.now() - group.lastFire;
-      if (elapsed >= interval) {
-        pollTick(interval);
-      } else {
-        group.handle = clock.setTimeout(() => pollTick(interval), interval - elapsed);
-      }
-    }
+  // Arm the elements on the landed poller, false while its chunk has not landed.
+  function startPolls(els: Element[]): boolean {
+    const factory = deps.poll.get();
+    if (factory === undefined) return false;
+    poller ??= factory({ clock, visibility, pageUrl, fetch: zoneGet });
+    for (const el of els) poller.start(el);
+    return true;
   }
 
   // Batch the load zones into one comma-joined GET per owning page. Grouping by
@@ -487,8 +397,10 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       // Only marked sentinels arm an observer, plain pagination links stay clicks.
       if (el.hasAttribute(LAZY_ATTR)) activate(el);
     }
-    for (const el of matching(root, `[${POLL_ATTR}]`)) {
-      startPoll(el);
+    // A page with no poll zone never fetches the poller.
+    const polled = matching(root, `[${POLL_ATTR}]`);
+    if (polled.length > 0 && !startPolls(polled)) {
+      void deps.poll.load().then(() => startPolls(polled));
     }
   }
 
@@ -506,7 +418,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     target.addEventListener("click", onClick, { capture: true, signal });
     // The visibility subscription pauses and resumes the poll timers. It hands back
     // its own teardown, so the signal carries it and a second detach stays a no-op.
-    const stopVisibility = visibility.onChange(onVisibility);
+    const stopVisibility = visibility.onChange(() => poller?.wake());
     signal.addEventListener("abort", stopVisibility, { once: true });
     detach = () => controller.abort();
     return detach;
@@ -524,11 +436,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     _reset() {
       for (const stop of observed.values()) stop();
       observed.clear();
-      for (const group of groups.values()) {
-        if (group.handle !== null) clock.clearTimeout(group.handle);
-      }
-      groups.clear();
-      membership = new WeakSet();
+      poller?._reset();
       // Drop the listeners install bound too, so a reset stack answers no event.
       detach?.();
       detach = null;

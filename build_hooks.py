@@ -9,7 +9,14 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 
 _SOURCEMAP_REFERENCE = "//# sourceMappingURL="
-_BUNDLES = ("next.min.js", "next.scripts.min.js", "next.dev.min.js")
+_BUNDLES = (
+    "next.min.js",
+    "next.scripts.min.js",
+    "next.sse.min.js",
+    "next.csrf.min.js",
+    "next.poll.min.js",
+    "next.dev.min.js",
+)
 
 
 def _verify_no_sourcemap_reference(bundle: Path) -> None:

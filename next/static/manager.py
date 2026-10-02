@@ -22,12 +22,7 @@ from .backends import MANIFEST_SETTINGS, StaticBackend
 from .collector import StaticCollector
 from .discovery import AssetDiscovery, PathResolver
 from .inject import PlaceholderInjector
-from .runtime import (
-    DEV_CHUNK_STATIC_PATH,
-    NEXT_JS_STATIC_PATH,
-    SCRIPTS_CHUNK_STATIC_PATH,
-    NextScriptBuilder,
-)
+from .runtime import CHUNK_STATIC_PATHS, NEXT_JS_STATIC_PATH, NextScriptBuilder
 from .signals import static_backend_loaded
 
 
@@ -75,8 +70,7 @@ class StaticManager(BackendListManager[StaticBackend]):
         self._discovery: AssetDiscovery | None = None
         self._cached_page_roots: tuple[Path, ...] | None = None
         self._script_builder: NextScriptBuilder | None = None
-        self._chunk_url: str | None = None
-        self._dev_chunk_url: str | None = None
+        self._chunk_urls: dict[str, str] = {}
         self._dedup_factory: Callable[[], DedupStrategy] | None = None
         self._js_policy_factory: Callable[[], JsContextPolicy] | None = None
         self._rewrites_urls: bool = False
@@ -162,17 +156,13 @@ class StaticManager(BackendListManager[StaticBackend]):
             self._script_builder = NextScriptBuilder.from_options(url, options)
         return self._script_builder
 
-    def scripts_chunk_url(self) -> str:
-        """Return the URL of the optional scripts chunk, resolved once per storage."""
-        if self._chunk_url is None:
-            self._chunk_url = str(staticfiles_storage.url(SCRIPTS_CHUNK_STATIC_PATH))
-        return self._chunk_url
-
-    def dev_chunk_url(self) -> str:
-        """Return the URL of the diagnostics chunk, resolved once per storage."""
-        if self._dev_chunk_url is None:
-            self._dev_chunk_url = str(staticfiles_storage.url(DEV_CHUNK_STATIC_PATH))
-        return self._dev_chunk_url
+    def chunk_url(self, name: str) -> str:
+        """Return the URL of the lazy chunk `$chunks` names `name`, once per storage."""
+        url = self._chunk_urls.get(name)
+        if url is None:
+            url = str(staticfiles_storage.url(CHUNK_STATIC_PATHS[name]))
+            self._chunk_urls[name] = url
+        return url
 
     @override
     def reload(self) -> None:
@@ -183,8 +173,7 @@ class StaticManager(BackendListManager[StaticBackend]):
         self._discovery = None
         self._cached_page_roots = None
         self._script_builder = None
-        self._chunk_url = None
-        self._dev_chunk_url = None
+        self._chunk_urls = {}
         self._dedup_factory = None
         self._js_policy_factory = None
         self._backends = load_backends(
@@ -241,8 +230,7 @@ class StaticManager(BackendListManager[StaticBackend]):
         dropped too, and so is the discovery, whose plans hold resolved URLs.
         """
         self._script_builder = None
-        self._chunk_url = None
-        self._dev_chunk_url = None
+        self._chunk_urls = {}
         self._discovery = None
         for backend in self._backends:
             backend.forget_urls()

@@ -148,7 +148,7 @@ The framework reserves three keys of the ``Next._init`` payload for this surface
    * - Key
      - Value
    * - ``$chunks``
-     - ``{scripts: <url>}``, the URL of ``next.scripts.min.js`` through the staticfiles storage, in every payload, and under ``DEBUG`` ``dev: <url>`` too, the URL of ``next.dev.min.js``.
+     - ``{scripts, sse, csrf, poll}``, the URLs of ``next.scripts.min.js``, ``next.sse.min.js``, ``next.csrf.min.js``, and ``next.poll.min.js`` through the staticfiles storage, in every payload, and under ``DEBUG`` ``dev`` too, the URL of ``next.dev.min.js``.
    * - ``$scripts``
      - The manifest, one ``{name, src?, init?, strategy, category, attrs, nonce?}`` per script the server did not write, in declaration order.
    * - ``$consent``

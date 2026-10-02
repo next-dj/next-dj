@@ -3,10 +3,9 @@
 // own request ids drops self-echoes, and a background tab pauses then resumes.
 
 import { defaultEventSource, defaultVisibility } from "./adapters";
-import { asString, currentUrl, isRecord, matching } from "./protocol";
+import { ATTR_SSE, asString, currentUrl, isRecord, matching } from "./protocol";
 import type { PartialError } from "./protocol";
 
-const SSE_ATTR = "data-next-sse";
 // A visibility flip shorter than this reconnects the stream but skips the zone
 // re-GETs, so flicking between tabs does not storm the server.
 const RESUME_REVALIDATE_MS = 3000;
@@ -77,6 +76,9 @@ interface Connection {
   // The zones this stream addressed since subscribing, re-GET on resume.
   bound: Set<string>;
 }
+
+/** The bridge builder the sse chunk hands the runtime. */
+export type SseFactory = (deps: SseDeps) => Sse;
 
 /** Build the SSE bridge over the given seams. */
 export function createSse(deps: SseDeps): Sse {
@@ -181,8 +183,8 @@ export function createSse(deps: SseDeps): Sse {
   }
 
   function scan(root: ParentNode): void {
-    for (const el of matching(root, `[${SSE_ATTR}]`)) {
-      const url = el.getAttribute(SSE_ATTR);
+    for (const el of matching(root, `[${ATTR_SSE}]`)) {
+      const url = el.getAttribute(ATTR_SSE);
       if (url !== null && url !== "") openConnection(url, pageUrl(el));
     }
   }

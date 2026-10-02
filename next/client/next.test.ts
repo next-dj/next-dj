@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "./next";
 // The scripts chunk registers on evaluation, as it does once the runtime fetches it.
 import "./extras";
+// The single-module chunks land the same way.
+import "./sse-chunk";
+import "./csrf-chunk";
+import "./poll-chunk";
 
 interface Consent {
   get(): Readonly<Record<string, boolean>>;
@@ -225,20 +229,15 @@ describe("Next._init csrf seed", () => {
     expect(win.Next.context.$csrf).toEqual(payload);
   });
 
-  it("warns about a malformed payload only in dev", () => {
+  it("leaves a malformed payload to the dev chunk, warning about nothing itself", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     // _configure is stubbed so the shared runtime does not stay wired for dev.
     const configure = vi
       .spyOn(win.Next.partial, "_configure")
       .mockImplementation(() => undefined);
-    win.Next._init({ $csrf: { header: "X-CSRFToken" } });
-    expect(warn).not.toHaveBeenCalled();
     win.Next._init({ $dev: true, $csrf: { header: "X-CSRFToken" } });
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("$csrf"));
-    warn.mockClear();
-    win.Next._init({ $dev: true, $csrf: { header: "X-CSRFToken", token: "ok" } });
     expect(warn).not.toHaveBeenCalled();
-    expect(configure).toHaveBeenCalledTimes(2);
+    expect(configure).toHaveBeenCalledTimes(1);
   });
 });
 

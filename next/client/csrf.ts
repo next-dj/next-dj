@@ -1,9 +1,18 @@
 // The CSRF token a mutation stamps. A page cached for everyone ships only the minting
 // endpoint, so the token is fetched once on first need and kept for the page's life.
+// The fetch itself ships in next.csrf.min.js, which only such a page ever loads.
 
 import { defaultFetch } from "./adapters";
+import type { LazyModule } from "./chunks";
 import { ATTR_ACTION, REQUEST_FLAG, asString, isRecord, sameOrigin } from "./protocol";
 import type { CsrfPayload, CsrfSource, FetchAdapter } from "./wire";
+
+/** Fetch a token from its minting endpoint, undefined on any refusal. */
+export type CsrfMint = (
+  url: string,
+  fetch: FetchAdapter,
+  doc: Document,
+) => Promise<CsrfPayload | undefined>;
 
 export interface Csrf extends CsrfSource {
   set(payload: CsrfPayload | undefined): void;
@@ -15,6 +24,8 @@ export interface Csrf extends CsrfSource {
 export interface CsrfDeps {
   fetch?: FetchAdapter;
   document?: Document;
+  // The mint, held by the csrf chunk.
+  mint: LazyModule<CsrfMint>;
 }
 
 /** Narrow a wire payload to either form, a half-filled one read as absent. */
@@ -28,7 +39,30 @@ export function readCsrf(value: unknown): CsrfPayload | undefined {
   return url === undefined ? undefined : { header, url };
 }
 
-export function createCsrf(deps: CsrfDeps = {}): Csrf {
+/** The mint the csrf chunk carries. */
+export async function mintCsrf(
+  url: string,
+  fetch: FetchAdapter,
+  doc: Document,
+): Promise<CsrfPayload | undefined> {
+  const target = sameOrigin(url, doc);
+  try {
+    if (target !== undefined) {
+      const response = await fetch(target, {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { [REQUEST_FLAG]: "1" },
+      });
+      if (response.ok) return readCsrf(await response.json());
+    }
+  } catch {
+    // A network failure or a non-JSON body is a refusal like any other.
+  }
+  return undefined;
+}
+
+export function createCsrf(deps: CsrfDeps): Csrf {
   const fetch = deps.fetch ?? defaultFetch();
   const doc = deps.document ?? document;
   let payload: CsrfPayload | undefined;
@@ -38,21 +72,9 @@ export function createCsrf(deps: CsrfDeps = {}): Csrf {
 
   async function mint(url: string): Promise<CsrfPayload | undefined> {
     const started = epoch;
-    const target = sameOrigin(url, doc);
-    let minted: CsrfPayload | undefined;
-    try {
-      if (target !== undefined) {
-        const response = await fetch(target, {
-          method: "GET",
-          credentials: "same-origin",
-          cache: "no-store",
-          headers: { [REQUEST_FLAG]: "1" },
-        });
-        if (response.ok) minted = readCsrf(await response.json());
-      }
-    } catch {
-      // A network failure or a non-JSON body is a refusal like any other.
-    }
+    // A chunk that cannot load is a refusal too, already reported as an asset error.
+    const mintWith = deps.mint.get() ?? (await deps.mint.load());
+    const minted = await mintWith?.(url, fetch, doc);
     // A token rotated in by an envelope while this was in flight is the fresher one.
     if (started !== epoch) return payload;
     if (minted?.token === undefined) {

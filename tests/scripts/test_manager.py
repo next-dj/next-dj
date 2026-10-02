@@ -22,6 +22,12 @@ NEW_SCRIPTS = "from next.scripts import Script\nscripts = (Script('new', init='1
 MARKETING = "1:marketing:1700000000"
 CATEGORIES = {"CATEGORIES": ["marketing"]}
 SHARED = 'template = "<p>x</p>"\ncache = 60\n'
+LAZY_CHUNKS = {
+    "scripts": "/static/next/next.scripts.min.js",
+    "sse": "/static/next/next.sse.min.js",
+    "csrf": "/static/next/next.csrf.min.js",
+    "poll": "/static/next/next.poll.min.js",
+}
 
 
 class TestServerRender:
@@ -48,7 +54,7 @@ class TestServerRender:
         assert data["$consent"]["granted"] == ["necessary"]
         assert set(data["$consent"]) == {"categories", "cookie", "decided", "granted"}
         assert all("order" not in entry for entry in data["$scripts"])
-        assert data["$chunks"] == {"scripts": "/static/next/next.scripts.min.js"}
+        assert data["$chunks"] == LAZY_CHUNKS
         assert cookie_varies(response.wsgi_request)
 
     def test_a_granted_category_renders_its_head_script(self, tmp_path: Path) -> None:
@@ -168,7 +174,7 @@ class TestPlacement:
         assert "data-next-script" not in html
         data = payload(response)
         assert not {"$scripts", "$consent"} & set(data)
-        assert data["$chunks"] == {"scripts": "/static/next/next.scripts.min.js"}
+        assert data["$chunks"] == LAZY_CHUNKS
 
     def test_a_configured_consent_reaches_a_page_without_scripts(
         self, tmp_path: Path
