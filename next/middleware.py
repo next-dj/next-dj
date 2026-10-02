@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _SHARED_DIRECTIVES: Final = frozenset({"public", "s-maxage"})
+_PRIVATE_DIRECTIVES: Final = frozenset({"private", "no-store"})
 _DROPPED_DIRECTIVES: Final = _SHARED_DIRECTIVES | {"private"}
 _CDN_HEADERS: Final = (
     "CDN-Cache-Control",
@@ -43,13 +44,30 @@ def _directive_name(directive: str) -> str:
     return directive.split("=", 1)[0].strip().lower()
 
 
+def _shared(response: HttpResponseBase, names: set[str]) -> bool:
+    """Whether a shared cache may keep `response` as its headers stand.
+
+    `public` and `s-maxage` say so outright, and a CDN header speaks to the CDN
+    alone. Without `private` or `no-store`, a freshness lifetime from `max-age` or
+    `Expires` lets a shared cache store it too, as `cache_page` emits it.
+    """
+    if not _SHARED_DIRECTIVES.isdisjoint(names):
+        return True
+    if any(name in response for name in _CDN_HEADERS):
+        return True
+    if not _PRIVATE_DIRECTIVES.isdisjoint(names):
+        return False
+    return "max-age" in names or "Expires" in response
+
+
 def guard_shared_cache(
     request: HttpRequest, response: HttpResponseBase
 ) -> HttpResponseBase:
     """Take `response` private when it sets a cookie a shared cache would hand out.
 
-    `public` and `s-maxage` leave `Cache-Control`, the CDN headers go, and `Vary`
-    gains `Cookie`. A path is reported once, since every hit repeats the same cause.
+    `public` and `s-maxage` leave `Cache-Control`, `private` leads it, the CDN
+    headers go, and `Vary` gains `Cookie`. A path is reported once, since every hit
+    repeats the same cause.
     """
     if not response.cookies:
         return response
@@ -58,7 +76,8 @@ def guard_shared_cache(
         for part in response.get("Cache-Control", "").split(",")
         if part.strip()
     ]
-    if _SHARED_DIRECTIVES.isdisjoint(map(_directive_name, directives)):
+    names = {_directive_name(part) for part in directives}
+    if not _shared(response, names):
         return response
     kept = [
         part for part in directives if _directive_name(part) not in _DROPPED_DIRECTIVES
@@ -83,7 +102,7 @@ class SharedCacheGuardMiddleware(MiddlewareMixin):
 
     A page takes its own cache private when a cookie lands, but a third-party
     middleware or a 304 answered above the page can still pair the two. List it first
-    in `MIDDLEWARE`, or right below `UpdateCacheMiddleware`, so it sees every cookie.
+    in `MIDDLEWARE`, below `UpdateCacheMiddleware` alone, so it sees every cookie.
     """
 
     def process_response(

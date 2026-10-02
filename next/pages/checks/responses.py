@@ -208,13 +208,17 @@ def check_csrf_in_session(*args, **kwargs) -> list[CheckMessage]:
 def _guarded(middleware: list[object]) -> bool:
     """Whether `SharedCacheGuardMiddleware` sees every response a cookie lands on.
 
-    It must be outermost, or sit right below `UpdateCacheMiddleware` so the copy that
-    middleware stores is the private one.
+    Only `UpdateCacheMiddleware` may sit above it, so the copy that middleware
+    stores is the private one. Listed above `UpdateCacheMiddleware`, the guard runs
+    after the public copy is already stored and replayed.
     """
     index = middleware_index(middleware, _CACHE_GUARD)
-    if index == 0:
-        return True
-    return index == 1 and is_middleware(middleware[0], _UPDATE_CACHE)
+    if index is None:
+        return False
+    update = middleware_index(middleware, _UPDATE_CACHE)
+    if update is not None and update > index:
+        return False
+    return all(is_middleware(entry, _UPDATE_CACHE) for entry in middleware[:index])
 
 
 @register(NEXT)

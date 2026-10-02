@@ -250,10 +250,17 @@ class TestConditionalGetOrder:
         ):
             assert check_conditional_get_order() == []
 
-    def test_the_guard_further_down_does_not(self, tmp_path) -> None:
+    @pytest.mark.parametrize(
+        "middleware",
+        [[SESSIONS, GUARD, CONDITIONAL], [GUARD, UPDATE_CACHE, SESSIONS, CONDITIONAL]],
+        ids=["below_a_cookie", "above_update_cache"],
+    )
+    def test_the_guard_further_down_does_not(self, tmp_path, middleware) -> None:
+        # Above `UpdateCacheMiddleware` the guard runs after the public copy is
+        # stored, so the cache replays the cookie to everyone.
         with (
             routed(_pages(tmp_path, "cache = 60\n")),
-            override_settings(MIDDLEWARE=[SESSIONS, GUARD, CONDITIONAL]),
+            override_settings(MIDDLEWARE=middleware),
         ):
             assert check_ids(check_conditional_get_order()) == ["next.W124"]
 

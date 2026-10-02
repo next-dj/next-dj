@@ -135,7 +135,9 @@ The shared cache guard
 ``SharedCacheGuardMiddleware`` is opt-in and checks the finished response rather than the page.
 A response that sets a cookie while its ``Cache-Control`` carries ``public`` or ``s-maxage`` loses both directives and gains ``private``, its ``CDN-Cache-Control``, ``Cloudflare-CDN-Cache-Control``, and ``Surrogate-Control`` headers go, and ``Vary`` gains ``Cookie``.
 Every other directive stays, and each path is logged once.
-List it first in ``MIDDLEWARE``, or right below ``UpdateCacheMiddleware``, so it sees every cookie the stack sets and the copy Django's cache stores is the private one.
+List it first in ``MIDDLEWARE``, so it sees every cookie the stack sets.
+A project that uses ``UpdateCacheMiddleware`` lists the guard right below it, never above it, so the copy Django's cache stores is the private one.
+A response that sets a cookie loses its ``public`` and ``s-maxage`` directives and its CDN headers, and so does one whose bare ``max-age`` or ``Expires`` a shared cache would read as a lifetime.
 In either place ``next.W124`` stays silent.
 
 .. code-block:: python

@@ -1026,7 +1026,7 @@ Warnings
      - ``settings.MIDDLEWARE`` lists ``ConditionalGetMiddleware`` below a middleware that may set a cookie, such as ``SessionMiddleware``, while pages declare a ``cache`` a CDN may hold.
        The 304 it answers copies the shared cache before that cookie lands, so the framework cannot take it private, and the message lists the pages.
        A middleware is matched by its class, so a subclass counts as its base, and one that does not import counts as one that may set a cookie.
-       ``next.middleware.SharedCacheGuardMiddleware`` listed first, or right below ``UpdateCacheMiddleware``, silences it, and the hint names it.
+       ``next.middleware.SharedCacheGuardMiddleware`` listed first, or with only ``UpdateCacheMiddleware`` above it, silences it, and the hint names it.
      - ``next.pages.checks.responses``
 
 Codes are assigned per check and are not contiguous.
