@@ -336,6 +336,21 @@ class TestPageCache:
         assert response["Cross-Origin-Opener-Policy"] == "same-origin"
         assert "Content-Security-Policy" not in response
 
+    def test_a_degraded_render_keeps_every_cache_away(self, tmp_path) -> None:
+        # The failing callable may have held a noindex, so the page that lacks
+        # it must not sit in a CDN for its declared lifetime.
+        source = (
+            "from next.pages import page\n"
+            'template = "x"\n'
+            "cache = 60\n"
+            "@page.metadata\n"
+            "def broken():\n"
+            "    raise KeyError(0)\n"
+        )
+        response = _get(_tree(tmp_path, ("", source)))
+        assert response.status_code == 200
+        assert response["Cache-Control"] == "private, no-store"
+
     def test_false_keeps_every_cache_away(self, tmp_path) -> None:
         response = _get(_tree(tmp_path, ("", 'template = "x"\ncache = False\n')))
         assert response["Cache-Control"] == "private, no-store"
@@ -676,6 +691,19 @@ class TestLateCookies:
             response = _get(root)
         assert response["Cache-Control"] == "private, max-age=60"
         assert "goes out private" in caplog.text
+
+    def test_a_degrade_while_the_template_renders_keeps_caches_away(
+        self, tmp_path
+    ) -> None:
+        # The containment lands after the cache was stamped, so the late hook
+        # replaces it.
+        before = (
+            "import logging, next.diagnostics as d; "
+            "request.boom = type('B', (), {'__str__': lambda s: d.FailureLog("
+            "logging.getLogger('t')).contain(RuntimeError('x'), 'k', 'm') or ''})()"
+        )
+        response = _get(self._root(tmp_path, "{{ request.boom }}", before=before))
+        assert response["Cache-Control"] == "private, no-store"
 
     def test_a_template_of_nobody_in_particular_stays_public(self, tmp_path) -> None:
         response = _get(self._root(tmp_path, "<p>{{ 1 }}</p>"))
