@@ -1,4 +1,5 @@
 import dataclasses
+import json
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from typing import cast
@@ -133,6 +134,21 @@ class TestAbsoluteUrl:
         self,
     ) -> None:
         assert absolute_url("//cdn.example/x.png") == "https://cdn.example/x.png"
+
+    @pytest.mark.parametrize(
+        ("url", "expected"),
+        [
+            ("https://a.example/\u00fc x", "https://a.example/%C3%BC%20x"),
+            ("https://a.example/%C3%BC", "https://a.example/%C3%BC"),
+            ("//cdn.example/\u00fc", "https://cdn.example/%C3%BC"),
+        ],
+        ids=["absolute", "already_encoded", "protocol_relative"],
+    )
+    @override_next_settings(**WITH_BASE)
+    def test_a_url_with_a_host_is_encoded_like_a_relative_one(
+        self, url: str, expected: str
+    ) -> None:
+        assert absolute_url(url) == expected
 
     def test_a_protocol_relative_url_needs_a_site_or_a_request(self) -> None:
         with pytest.raises(SiteOriginError) as info:
@@ -425,14 +441,17 @@ class TestOpenGraph:
     def test_urls_are_made_absolute(self) -> None:
         og = OpenGraph(
             url="/u/",
-            images=(OpenGraphImage(url="/a.png", width=1), OpenGraphImage(width=3)),
+            images=(
+                OpenGraphImage(url="/a.png", width=1),
+                OpenGraphImage(url="https://cdn.example/b.png", width=3),
+            ),
         )
         resolved = resolve_metadata(Metadata(og=og), request=None).og
         assert resolved is not None
         assert resolved.url == f"{BASE}/u/"
         assert resolved.images == (
             OpenGraphImage(url=f"{BASE}/a.png", width=1),
-            OpenGraphImage(width=3),
+            OpenGraphImage(url="https://cdn.example/b.png", width=3),
         )
 
     def test_the_locale_comes_from_the_active_language(self) -> None:
@@ -878,6 +897,22 @@ class TestGraph:
         assert resolve_metadata(Metadata(jsonld=(node,)), request=None).jsonld == (
             node,
         )
+
+    def test_a_typed_value_in_a_foreign_context_renders_its_id_as_written(self) -> None:
+        node = {
+            "@context": "https://example.org/vocab",
+            "about": ld.Ref("#org"),
+            "parts": [ld.Ref("#a")],
+        }
+        resolved = resolve_metadata(Metadata(jsonld=(node,)), request=None).jsonld
+        assert resolved == (
+            {
+                "@context": "https://example.org/vocab",
+                "about": {"@id": "#org"},
+                "parts": [{"@id": "#a"}],
+            },
+        )
+        assert json.dumps(resolved)
 
 
 class TestBreadcrumbUrls:

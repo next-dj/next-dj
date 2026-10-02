@@ -51,12 +51,6 @@ class SitemapItemsRegistry:
         self._entries: list[SitemapItemsEntry] = []
         self._index: dict[tuple[Path, str], SitemapItemsEntry] = {}
         self._conflicts: list[SitemapItemsConflict] = []
-        self._version = 0
-
-    @property
-    def version(self) -> int:
-        """Monotonic counter bumped on every write."""
-        return self._version
 
     def register(self, entry: SitemapItemsEntry) -> None:
         """Bind the callable of `entry` to its trail, replacing an earlier binding.
@@ -79,7 +73,6 @@ class SitemapItemsRegistry:
                     )
                 )
         self._index[key] = entry
-        self._version += 1
         sitemap_items_registered.send(
             sender=SitemapItemsRegistry,
             file=entry.file,
@@ -95,7 +88,6 @@ class SitemapItemsRegistry:
             return
         self._entries = kept
         self._index = {(entry.file, entry.trail): entry for entry in kept}
-        self._version += 1
 
     def registered_names(self) -> dict[Path, tuple[str, ...]]:
         """Return the callable names registered per registering file, for the checks."""
@@ -117,7 +109,6 @@ class SitemapItemsRegistry:
         self._entries.clear()
         self._index.clear()
         self._conflicts.clear()
-        self._version += 1
 
 
 sitemap_items_registry = SitemapItemsRegistry()

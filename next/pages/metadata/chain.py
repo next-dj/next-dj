@@ -20,7 +20,7 @@ from .fold import (
 )
 from .markers import Metadata, Segment
 from .normalize import normalize_metadata
-from .scope import site_segment
+from .scope import SITE_SOURCE, site_name_source, site_segment
 
 
 if TYPE_CHECKING:
@@ -284,10 +284,10 @@ def metadata_origins(entry: ChainEntry) -> tuple[MetadataOrigin, ...]:
     A callable answers only per request, so it is listed under `*`, whatever it sets.
     """
     segments = (entry.site, *(source.segment for source in entry.sources))
-    origins = [
-        MetadataOrigin(key, source)
-        for key, source in sorted(trace_origins(segments).items())
-    ]
+    traced = trace_origins(segments)
+    if traced.get("site_name") == SITE_SOURCE:
+        traced["site_name"] = site_name_source()
+    origins = [MetadataOrigin(key, source) for key, source in sorted(traced.items())]
     origins.extend(
         MetadataOrigin("*", f"{callable_name(source.func)} in {source.file_path}")
         for source in entry.sources

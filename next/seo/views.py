@@ -156,6 +156,9 @@ def _urlset(
 def _sitemap(request: HttpRequest, section: str | None = None) -> HttpResponse:
     """Answer one section, the only one, or the index when the set needs one."""
     _refuse_copy(request)
+    broken = seo_manager.broken_sitemap()
+    if broken is not None:
+        raise _broken(broken)
     sections = seo_manager.sections(request)
     if not sections:
         msg = "No backend lists a sitemap, or the site is closed to search"

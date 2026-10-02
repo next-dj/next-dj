@@ -23,12 +23,11 @@ def _entry(file: Path, trail: str, func=_one, **extra) -> SitemapItemsEntry:
 
 
 class TestSitemapItemsRegistry:
-    """The registry scopes entries by file, keeps their order and moves its version."""
+    """The registry scopes entries by file and keeps their order."""
 
     def test_starts_empty(self) -> None:
         registry = SitemapItemsRegistry()
         assert registry.entries_for(SITEMAP) == ()
-        assert registry.version == 0
 
     def test_register_keeps_order_and_scopes_by_file(self) -> None:
         registry = SitemapItemsRegistry()
@@ -71,31 +70,28 @@ class TestSitemapItemsRegistry:
         registry.reset()
         assert registry.conflicts() == ()
 
-    def test_forget_drops_one_file_and_moves_the_version(self) -> None:
+    def test_forget_drops_one_file(self) -> None:
         registry = SitemapItemsRegistry()
         registry.register(_entry(SITEMAP, "posts/[slug]"))
         kept = _entry(Path("/b/sitemap.py"), "posts/[slug]")
         registry.register(kept)
-        before = registry.version
         registry.forget(SITEMAP)
         assert registry.entries_for(SITEMAP) == ()
         assert registry.entries_for(Path("/b/sitemap.py")) == (kept,)
-        assert registry.version == before + 1
         registry.register(_entry(SITEMAP, "posts/[slug]", _two))
         assert registry.entries_for(SITEMAP)[0].func is _two
 
-    def test_forgetting_a_file_that_registered_nothing_moves_nothing(self) -> None:
+    def test_forgetting_a_file_that_registered_nothing_keeps_the_rest(self) -> None:
         registry = SitemapItemsRegistry()
-        registry.register(_entry(SITEMAP, "posts/[slug]"))
-        before = registry.version
+        kept = _entry(SITEMAP, "posts/[slug]")
+        registry.register(kept)
         registry.forget(Path("/c/sitemap.py"))
-        assert registry.version == before
+        assert registry.entries_for(SITEMAP) == (kept,)
 
-    def test_a_reset_drops_everything_and_moves_the_version(self) -> None:
+    def test_a_reset_drops_everything(self) -> None:
         registry = SitemapItemsRegistry()
         registry.register(_entry(SITEMAP, "posts/[slug]"))
         registry.reset()
-        assert registry.version == 2
         assert registry.entries_for(SITEMAP) == ()
 
     def test_registered_names_group_by_registering_file(self) -> None:

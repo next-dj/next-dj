@@ -20,7 +20,9 @@ from tests.support import file_router_config_entry, patch_checks_router_manager
 class TestLoadedMetadataPages:
     """`loaded_metadata_pages` folds each routed page and carries its own segment."""
 
-    def test_a_broken_chain_folds_to_nothing(self, tmp_path: Path) -> None:
+    def test_refused_defaults_fold_the_page_as_the_runtime_does(
+        self, tmp_path: Path
+    ) -> None:
         metadata_page(tmp_path, '{"title": "Home"}')
         with (
             override_settings(NEXT_FRAMEWORK=scope(DEFAULTS={"title": "Acme"})),
@@ -28,9 +30,10 @@ class TestLoadedMetadataPages:
         ):
             init_errors, pages = loaded_metadata_pages()
         assert init_errors == []
-        assert [entry.static for entry in pages] == [None]
-        assert [entry.declared for entry in pages] == [False]
-        assert pages[0].segment is not None
+        [entry] = pages
+        assert entry.static is not None
+        assert entry.static.title == "Home"
+        assert entry.segment is not None
 
     def test_a_callable_marks_the_page_dynamic(self, tmp_path: Path) -> None:
         templated_page(tmp_path, INHERITED_CALLABLE)

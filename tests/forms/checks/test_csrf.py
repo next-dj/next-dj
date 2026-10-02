@@ -214,3 +214,15 @@ class TestSharedPageForms:
     ) -> None:
         with routed(_tree(tmp_path, source, layout), CSRF_DELIVERY="eager"):
             assert check_ids(check_shared_page_forms()) == ["next.W121"]
+
+    def test_lazy_delivery_warns_on_a_private_form_page(self, tmp_path) -> None:
+        source = FORM_PAGE.replace("cache = 60\n", "")
+        with routed(_tree(tmp_path, source), CSRF_DELIVERY="lazy"):
+            [warning] = check_shared_page_forms()
+        assert warning.id == "next.W124"
+        assert "renders under CSRF_DELIVERY 'lazy'" in warning.msg
+
+    def test_lazy_delivery_names_a_shared_page_once(self, tmp_path) -> None:
+        with routed(_tree(tmp_path, FORM_PAGE), CSRF_DELIVERY="lazy"):
+            [warning] = check_shared_page_forms()
+        assert "declares a cache a CDN may hold" in warning.msg

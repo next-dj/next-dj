@@ -116,7 +116,8 @@ class TestPublicSurface:
         modules = list(_LAZY_SOURCES_BY_MODULE)
         assert modules == sorted(modules)
         assert all(
-            list(names) == sorted(names) for names in _LAZY_SOURCES_BY_MODULE.values()
+            list(names) == sorted(set(names))
+            for names in _LAZY_SOURCES_BY_MODULE.values()
         )
 
     def test_all_lists_no_private_name(self) -> None:

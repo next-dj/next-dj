@@ -539,7 +539,7 @@ The scope takes three upper-case options, and any other key is reported as ``nex
 
 ``DEFAULTS`` is the outermost segment of every page's metadata chain and takes the lower-case keys a ``metadata`` dict in a ``page.py`` takes, less ``breadcrumb``.
 Its ``title`` is the ``{"template": ..., "default": ...}`` form alone, because the settings tier has no page of its own to title, and its template therefore applies to every page, the root included.
-The value is normalised once per settings reload, a key or a value the schema refuses is reported as ``next.E098``, a template without a default and an empty title draw ``next.E100`` and ``next.E105`` as they do on a page, and a ``Replace`` or ``RESET`` there is a no-op that ``next.W109`` reports.
+The value is normalised once per settings reload, a key or a value the schema refuses is reported as ``next.E098`` and at runtime folds the whole ``DEFAULTS`` to nothing with one logged warning rather than failing every render, a template without a default and an empty title draw ``next.E100`` and ``next.E105`` as they do on a page, and a ``Replace`` or ``RESET`` there is a no-op that ``next.W109`` reports.
 See :doc:`/content/topics/seo/metadata` for the declaration forms and :doc:`/content/topics/seo/merge` for the merge.
 
 ``CANONICAL_QUERY`` is the list or tuple of query parameter names a self canonical keeps, in the order it lists them.

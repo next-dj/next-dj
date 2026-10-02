@@ -459,6 +459,12 @@ METADATA_SHAPE_CASES: tuple[MetadataShapeCase, ...] = (
         "declares metadata key 'alternates.feeds[0]' without 'type'",
     ),
     MetadataShapeCase(
+        "og_image_without_url",
+        {"og": {"images": [{"alt": "x", "width": 5}]}},
+        False,
+        "declares metadata key 'og.images[0]' without 'url'",
+    ),
+    MetadataShapeCase(
         "og_video_without_url",
         {"og": {"videos": [{"type": "video/mp4"}]}},
         False,
@@ -552,7 +558,7 @@ URL_SCHEME_CASES: tuple[UrlSchemeCase, ...] = (
     ),
     UrlSchemeCase(
         "og_image_secure_url",
-        lambda url: {"og": {"images": [{"secure_url": url}]}},
+        lambda url: {"og": {"images": [{"url": "/i", "secure_url": url}]}},
         "og.images[0].secure_url",
     ),
     UrlSchemeCase("og_video", lambda url: {"og": {"videos": [url]}}, "og.videos[0]"),
@@ -964,7 +970,7 @@ SCHEMA_PARITY_CASES: tuple[SchemaParityCase, ...] = (
         "og_image",
         OpenGraphImageDict,
         normalize_metadata,
-        lambda b: {"og": {"images": [b]}},
+        lambda b: {"og": {"images": [{**b, "url": "/i.png"}]}},
     ),
     SchemaParityCase(
         "article", ArticleDict, normalize_metadata, lambda b: {"og": {"article": b}}

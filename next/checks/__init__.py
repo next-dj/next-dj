@@ -59,6 +59,7 @@ if TYPE_CHECKING:
         check_wizard_url_param_route,
     )
     from next.pages.checks import (
+        check_conditional_get_order,
         check_context_functions,
         check_context_processor_signature,
         check_context_reads_foreign_zone,
@@ -196,7 +197,6 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_invalid_form_meta_scope",
         "check_shared_action_name_collisions",
         "check_shared_page_forms",
-        "check_shared_page_forms",
         "check_success_message_framework",
         "check_wizard_step_actions",
         "check_wizard_step_field_collisions",
@@ -204,6 +204,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_wizard_url_param_route",
     ),
     "next.pages.checks": (
+        "check_conditional_get_order",
         "check_context_functions",
         "check_context_processor_signature",
         "check_context_reads_foreign_zone",
@@ -276,7 +277,6 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_seo_single_sources",
         "check_seo_sources_below_root",
         "check_seo_sources_on_closed_site",
-        "check_seo_sources_on_closed_site",
         "check_seo_text_files",
         "check_sitemap_dynamic_routes",
         "check_sitemap_excluded_items",
@@ -328,6 +328,7 @@ __all__ = [
     "check_component_widget_components",
     "check_component_widget_field_types",
     "check_composed_templates_compile",
+    "check_conditional_get_order",
     "check_consent_cookie_secure",
     "check_consent_settings",
     "check_consented_needs_consent",

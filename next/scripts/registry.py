@@ -7,28 +7,18 @@ from .signals import scripts_registered
 
 
 class ScriptsRegistry:
-    """Hold the `scripts.py` of every page tree in tree order, one per root.
-
-    Every write bumps `version`, so a memo built over the registry can tell.
-    """
+    """Hold the `scripts.py` of every page tree in tree order, one per root."""
 
     def __init__(self) -> None:
         """Start empty."""
         self._roots: list[Path] = []
         self._index: dict[Path, ScriptsSource | None] = {}
-        self._version = 0
-
-    @property
-    def version(self) -> int:
-        """Monotonic counter bumped on every write."""
-        return self._version
 
     def register(self, root: Path, source: ScriptsSource | None) -> None:
         """Bind the source of the tree at `root`, `None` for a tree without one."""
         if root not in self._index:
             self._roots.append(root)
         self._index[root] = source
-        self._version += 1
         scripts_registered.send(
             sender=ScriptsRegistry,
             root=root,
@@ -53,7 +43,6 @@ class ScriptsRegistry:
         """Drop every tree, so the next read discovers them again."""
         self._roots.clear()
         self._index.clear()
-        self._version += 1
 
 
 scripts_registry = ScriptsRegistry()

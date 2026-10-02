@@ -33,8 +33,8 @@ That tag is the importable string constant ``next.checks.NEXT``, so a project ch
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
 A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the eight deployment checks to it.
-The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check and the site deployment check.
-``manage.py check --tag seo`` runs the crawler-document checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.
+The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check, every page metadata check, and the site checks.
+``manage.py check --tag seo`` runs the metadata, crawler-document, and site checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.
 Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
 
 ``next.checks.reset_check_caches`` drops every per-run check cache so the next run rebuilds from the current sources.
@@ -645,7 +645,7 @@ Errors
      - A ``SITE`` value is unusable, a ``URL`` that is no bare http or https origin, one carrying a path, a query, or a fragment included, or a dotted path that does not import, a ``NAME`` that is no text, or an ``INDEXABLE`` outside ``"auto"``, a bool, and a callable taking the request.
      - ``next.site.checks``
    * - ``next.E131``
-     - A ``page.py`` declares a ``cache`` or ``headers`` the response cannot carry as written, an unknown key, a negative age, a flag that is no bool, ``public`` with ``no_store``, a forbidden or invalid header name, or a value with a line break.
+     - A ``page.py`` declares a ``cache`` or ``headers`` the response cannot carry as written, an unknown key, a negative age, a flag that is no bool, ``public`` with ``no_store``, a forbidden or invalid header name, or a value with a control character or a character outside ASCII.
      - ``next.pages.checks.responses``
    * - ``next.E132``
      - ``CSRF_DELIVERY`` names no mode, so ``"auto"`` applies.
@@ -675,7 +675,7 @@ Errors
      - A script ``src`` is neither an http or https URL nor a staticfiles name a finder answers, such as another scheme, a scheme-relative URL, an absolute path, or a name that climbs out of the static root.
      - ``next.scripts.checks``
    * - ``next.E142``
-     - A script ``init`` holds ``</script``, which closes the element it sits in.
+     - A script ``init`` holds ``</script``, ``<script``, or ``<!--``, which the HTML parser reads as markup, so the element closes early or swallows the rest of the page.
      - ``next.scripts.checks``
    * - ``next.E143``
      - A script carries an attribute outside ``integrity``, ``crossorigin``, ``referrerpolicy``, and the ``data-*`` names.
@@ -919,7 +919,7 @@ Warnings
      - A page a shared cache may hold answers several languages at one URL, ``LocaleMiddleware`` active with more than one language and the pages outside ``i18n_patterns()``.
      - ``next.pages.checks.responses``
    * - ``next.W124``
-     - A page a shared cache may hold renders a ``{% form %}`` without a CSRF field, so a browser without JavaScript gets 403 on submit.
+     - A page a shared cache may hold, or any page under ``CSRF_DELIVERY="lazy"``, renders a ``{% form %}`` without a CSRF field, so a browser without JavaScript gets 403 on submit.
        A form naming by a literal an action that declares ``requires_runtime`` does not count, while one naming its action through a variable or naming no registered action still does.
      - ``next.forms.checks.csrf``
    * - ``next.W125``
@@ -952,6 +952,10 @@ Warnings
      - ``{% #consented %}`` renders on a composed page while ``NEXT_FRAMEWORK`` holds no ``CONSENT`` entry.
        A partial response carries no consent state, so a block that reaches a page only through a patch stays hidden there.
      - ``next.scripts.checks``
+   * - ``next.W134``
+     - ``ConditionalGetMiddleware`` sits below a middleware that may set a cookie, such as ``SessionMiddleware``, while pages declare a ``cache`` a CDN may hold.
+       The 304 it answers copies the shared cache before that cookie lands, so the framework cannot take it private, and the message lists the pages.
+     - ``next.pages.checks.responses``
 
 Codes are assigned per check and are not contiguous.
 

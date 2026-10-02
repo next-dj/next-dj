@@ -150,7 +150,7 @@ def discover_seo_roots(manager: RouterManager) -> tuple[SeoRoot, ...]:
             root=root,
             label=label,
             section=section,
-            trails=dict(walk_page_tree(root.path, skip_names)),
+            trails=dict(sorted(walk_page_tree(root.path, skip_names))),
             sitemap=sitemap,
             robots=load_source(root.path / ROBOTS_MODULE),
             robots_file=_file(root.path / ROBOTS_FILE),

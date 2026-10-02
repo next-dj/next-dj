@@ -25,6 +25,7 @@ from next.introspect import describe_callable
 from next.pages import page
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.metadata.hreflang import x_default_url
+from next.pages.metadata.normalize import X_DEFAULT
 from next.pages.responses import cache_control
 from next.urls.reverse import page_reverse
 from next.utils import is_dynamic_trail, is_int
@@ -56,7 +57,6 @@ logger = logging.getLogger(__name__)
 MAX_LIMIT: Final = 50000
 """The most URLs one sitemap document may list, by the sitemap protocol."""
 
-X_DEFAULT: Final = "x-default"
 _GLOB_WILDCARDS: Final = {"*": ".*", "?": "."}
 
 
@@ -180,7 +180,15 @@ def _rows(value: object, func: Callable[..., Any]) -> Rows:
     A `QuerySet` stays lazy and gains an order, and an iterator is read to a list.
     """
     if isinstance(value, QuerySet):
-        return value if value.ordered else value.order_by("pk")
+        if value.ordered:
+            return value
+        if value.query.is_sliced:
+            msg = (
+                f"{describe_callable(func)} answered a sliced QuerySet with no order, "
+                "which pages differently on every query. Order it before the slice."
+            )
+            raise TypeError(msg)
+        return value.order_by("pk")
     if isinstance(value, str | bytes | Mapping) or not isinstance(value, Iterable):
         msg = (
             f"{describe_callable(func)} answered {type(value).__name__} instead of "
@@ -371,6 +379,9 @@ class PageTreeSitemap(_SitemapBase):
         if field is not None and isinstance(part.rows, QuerySet):
             value = part.rows.aggregate(latest=Max(field))["latest"]
             return value if value is None else lastmod_datetime(value)
+        if field is None and isinstance(part.rows, QuerySet):
+            # A row of a model only reaches a lastmod through the column it names.
+            return None
         if part.count() > self.limit:
             return None
         stamps = [item.entry.lastmod for item in part.slice(0, part.count())]

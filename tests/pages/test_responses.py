@@ -10,6 +10,7 @@ from django.http import HttpResponse
 from django.template import engines
 from django.template.response import SimpleTemplateResponse
 from django.test import Client, RequestFactory, override_settings
+from django.utils.functional import SimpleLazyObject
 
 from next.csrf import token_deferred
 from next.pages import CacheDict, HeadersDict, page
@@ -22,11 +23,11 @@ from next.pages.responses import (
     cache_control,
     cache_problems,
     cookie_varies,
-    defer_csrf,
     finish_response,
     headers_problems,
     mark_personal_render,
     personal_render,
+    prepare_page_render,
     response_policy,
     robots_tag,
     vary_on_cookie,
@@ -45,6 +46,9 @@ from tests.support import (
     write_page,
     write_page_chain,
 )
+
+
+UNSENDABLE = "must be ASCII text on one line, with no control character"
 
 
 HEAD = "<html><head>{% metadata %}</head><body>{% template %}</body></html>"
@@ -103,6 +107,20 @@ def csp_nonce(get_response):
     return middleware
 
 
+def lazy_csp_nonce(get_response):
+    """Mint the nonce the way django-csp does, only once something reads it."""
+
+    def middleware(request):
+        def mint() -> str:
+            request._csp_nonce = "lazy123"
+            return "lazy123"
+
+        request.csp_nonce = SimpleLazyObject(mint)
+        return get_response(request)
+
+    return middleware
+
+
 def _tree(tmp_path: Path, *pages: tuple[str, str], layout: str = HEAD) -> Path:
     root = tmp_path / "pages"
     root.mkdir()
@@ -119,6 +137,11 @@ def _get(root: Path, path: str = "/", **framework: object):
 
 class TestCacheControl:
     """A `cache` value normalises to directives, a wrong shape to nothing."""
+
+    def test_a_vary_name_no_header_carries_is_dropped(self) -> None:
+        control = cache_control({"max_age": 60, "vary": ["Cookie\nX", "Accept", 3]})
+        assert control is not None
+        assert control.vary == ("Accept",)
 
     @pytest.mark.parametrize(
         ("value", "header"),
@@ -234,8 +257,8 @@ class TestProblems:
 
     def test_valid_headers_have_no_problem(self) -> None:
         assert headers_problems(None) == []
-        csp = {"Content-Security-Policy": "frame-ancestors 'none'"}
-        assert headers_problems(csp) == []
+        coop = {"Cross-Origin-Opener-Policy": "same-origin", "X-Gone": None}
+        assert headers_problems(coop) == []
 
     @pytest.mark.parametrize(
         ("value", "problem"),
@@ -250,8 +273,17 @@ class TestProblems:
                 "CDN-Cache-Control follows cache, so declare the caching there",
             ),
             ({"expires": "0"}, "expires follows cache, so declare the caching there"),
-            ({"X-A": "a\r\nb"}, "the value of 'X-A' must be text on one line"),
-            ({"X-A": 3}, "the value of 'X-A' must be text on one line"),
+            (
+                {"Content-Security-Policy": "frame-ancestors 'none'"},
+                (
+                    "Content-Security-Policy would replace the site policy, so "
+                    "declare it through the CSP middleware"
+                ),
+            ),
+            ({"X-A": "a\r\nb"}, f"the value of 'X-A' {UNSENDABLE}"),
+            ({"X-A": "a\x00b"}, f"the value of 'X-A' {UNSENDABLE}"),
+            ({"X-A": "caf\u00e9"}, f"the value of 'X-A' {UNSENDABLE}"),
+            ({"X-A": 3}, f"the value of 'X-A' {UNSENDABLE}"),
         ],
     )
     def test_each_header_problem_is_named(self, value, problem) -> None:
@@ -293,13 +325,15 @@ class TestPageCache:
             'template = "x"\n'
             "cache = {'public': True, 'max_age': 60, 's_maxage': 300, "
             "'stale_while_revalidate': 600}\n"
-            "headers = {'Content-Security-Policy': \"frame-ancestors 'none'\"}\n"
+            "headers = {'Cross-Origin-Opener-Policy': 'same-origin', "
+            "'Content-Security-Policy': \"frame-ancestors 'none'\"}\n"
         )
         response = _get(_tree(tmp_path, ("", source)))
         assert response["Cache-Control"] == (
             "public, max-age=60, s-maxage=300, stale-while-revalidate=600"
         )
-        assert response["Content-Security-Policy"] == "frame-ancestors 'none'"
+        assert response["Cross-Origin-Opener-Policy"] == "same-origin"
+        assert "Content-Security-Policy" not in response
 
     def test_false_keeps_every_cache_away(self, tmp_path) -> None:
         response = _get(_tree(tmp_path, ("", 'template = "x"\ncache = False\n')))
@@ -543,6 +577,15 @@ class TestSharedDowngrade:
         assert "nonce=" not in response.content.decode()
         assert response["Cache-Control"] == "public, max-age=60"
 
+    def test_a_template_reading_the_nonce_goes_private(self, tmp_path) -> None:
+        source = "template = '<i>{{ request.csp_nonce }}</i>'\ncache = 60\n"
+        root = _tree(tmp_path, ("", source))
+        middleware = [*settings.MIDDLEWARE, f"{__name__}.lazy_csp_nonce"]
+        with routed(root, CSP_NONCE=False), override_settings(MIDDLEWARE=middleware):
+            response = Client().get("/")
+        assert "<i>lazy123</i>" in response.content.decode()
+        assert response["Cache-Control"] == "private, max-age=60"
+
     def test_a_private_page_ignores_its_cookies(self) -> None:
         response = HttpResponse("x")
         response.set_cookie("a", "1")
@@ -623,6 +666,31 @@ class TestLateCookies:
         assert type(copy.cookies) is SimpleCookie
         assert copy.cookies["kept"].value == "1"
         assert copy["Cache-Control"] == "private, max-age=60"
+
+    @pytest.mark.parametrize(
+        "write",
+        [
+            lambda jar: jar.update({"sid": "2"}),
+            lambda jar: jar.load("sid=2"),
+            lambda jar: jar.load({"sid": "2"}),
+        ],
+        ids=["update", "load_text", "load_mapping"],
+    )
+    def test_every_write_to_the_jar_takes_it_private(self, tmp_path, write) -> None:
+        file_path = write_page(tmp_path, "", "template = 'x'\n")
+        response = HttpResponse("x")
+        policy = ResponsePolicy(cache_control(60))
+        finish_response(response, policy, RequestFactory().get("/"), file_path)
+        write(response.cookies)
+        assert response["Cache-Control"] == "private, max-age=60"
+
+    def test_an_empty_write_keeps_the_page_shared(self, tmp_path) -> None:
+        file_path = write_page(tmp_path, "", "template = 'x'\n")
+        response = HttpResponse("x")
+        policy = ResponsePolicy(cache_control(60))
+        finish_response(response, policy, RequestFactory().get("/"), file_path)
+        response.cookies.update({})
+        assert response["Cache-Control"] == "public, max-age=60"
 
 
 class TestCacheMethods:
@@ -830,7 +898,7 @@ class TestCsrfDeferral:
         request = RequestFactory().get("/")
         policy = ResponsePolicy(cache_control(cache))
         with override_settings(NEXT_FRAMEWORK={"CSRF_DELIVERY": delivery}):
-            defer_csrf(policy, request)
+            prepare_page_render(policy, request)
         assert token_deferred(request) is deferred
 
     def test_a_shared_page_ships_the_endpoint_and_sets_no_cookie(

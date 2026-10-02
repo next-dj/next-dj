@@ -36,6 +36,18 @@ if TYPE_CHECKING:
 
 
 _LOCALE_MIDDLEWARE: Final = "django.middleware.locale.LocaleMiddleware"
+_CONDITIONAL_GET: Final = "django.middleware.http.ConditionalGetMiddleware"
+_COOKIELESS_MIDDLEWARE: Final = frozenset(
+    {
+        "django.middleware.security.SecurityMiddleware",
+        "django.middleware.gzip.GZipMiddleware",
+        "django.middleware.common.CommonMiddleware",
+        "django.middleware.clickjacking.XFrameOptionsMiddleware",
+        "django.middleware.csp.ContentSecurityPolicyMiddleware",
+        "next.site.middleware.RobotsHeaderMiddleware",
+    }
+)
+"""Middleware known to set no cookie, so it may wrap `ConditionalGetMiddleware`."""
 _RUNTIME_TAG: Final = "collect_scripts"
 _MIN_LANGUAGES: Final = 2
 _NAMED_PAGES: Final = 3
@@ -147,6 +159,36 @@ def check_csrf_in_session(*args, **kwargs) -> list[CheckMessage]:
     )
 
 
+@register(NEXT)
+def check_conditional_get_order(*args, **kwargs) -> list[CheckMessage]:
+    """Warn when a cookie may land on a shared 304 (`next.W134`).
+
+    `ConditionalGetMiddleware` copies the cache of a shared page onto the 304 it
+    answers, so a cookie a middleware outside it sets later rides a public response.
+    """
+    middleware = list(getattr(settings, "MIDDLEWARE", None) or ())
+    if _CONDITIONAL_GET not in middleware:
+        return []
+    outer = [
+        name
+        for name in middleware[: middleware.index(_CONDITIONAL_GET)]
+        if name not in _COOKIELESS_MIDDLEWARE
+    ]
+    pages = shared_page_paths() if outer else []
+    if not pages:
+        return []
+    return [
+        DjangoWarning(
+            f"{', '.join(outer)} sits above ConditionalGetMiddleware and may set a "
+            "cookie on the 304 it answers, after the page took its cache private, so "
+            "a public 304 could carry Set-Cookie into a shared cache. List "
+            f"ConditionalGetMiddleware above it. Pages affected: {_listed(pages)}.",
+            obj=settings,
+            id="next.W134",
+        )
+    ]
+
+
 def shared_pages() -> Iterator[tuple[Path, Template]]:
     """Yield each page whose static `cache` lets a shared cache hold it."""
     for page_path, template in iter_composed_pages():
@@ -231,6 +273,7 @@ def check_shared_page_responses(*args, **kwargs) -> list[CheckMessage]:
 
 
 __all__ = [
+    "check_conditional_get_order",
     "check_csrf_delivery",
     "check_csrf_in_session",
     "check_page_response_declarations",

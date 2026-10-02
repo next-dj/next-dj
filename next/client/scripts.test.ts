@@ -67,9 +67,9 @@ describe("the scripts manifest", () => {
     expect(scripts.status("gtag")).toBe("loading");
   });
 
-  it("prefers the entry's own nonce over the bootstrap one", () => {
+  it("stamps the bootstrap nonce whatever nonce an entry names", () => {
     scripts._configure([{ name: "a", init: "/* a */", nonce: "own" }]);
-    expect(inserted("a")[0]!.nonce).toBe("own");
+    expect(inserted("a")[0]!.nonce).toBe("boot");
   });
 
   it("keeps a deferred head script in order with the others", () => {

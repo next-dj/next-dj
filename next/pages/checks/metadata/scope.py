@@ -15,7 +15,7 @@ from django.core.checks import (
     register,
 )
 
-from next.checks import NEXT
+from next.checks import NEXT, SEO
 from next.checks.common import errors_for_unknown_keys
 from next.conf.defaults import USER_SETTING
 from next.pages.errors import PageMetadataShapeError
@@ -132,7 +132,7 @@ def segment_errors(segment: Segment, *, source: str, obj: object) -> list[CheckM
     return errors
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_metadata_settings_scope(*args, **kwargs) -> list[CheckMessage]:
     """Validate the `METADATA` options, and the `DEFAULTS` tier like a page.
 

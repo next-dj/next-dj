@@ -188,22 +188,29 @@ def _sitemap_paths(root: SeoRoot, module: types.ModuleType) -> set[str]:
     return {path for trail, path in route_paths(root).items() if trail in listed}
 
 
-def _disallows(module: types.ModuleType) -> list[str]:
-    """Return every `Disallow` value of the static groups that apply to `*`, in order.
+def _star_rules(module: types.ModuleType) -> tuple[list[str], list[str]]:
+    """Return the `Allow` and `Disallow` values of the static groups that apply to `*`.
 
     A crawler named in a group of its own follows that group alone and skips `*`.
     """
-    return [
-        prefix
-        for rule in declared_rules(module)
-        if "*" in rule.user_agents
-        for prefix in rule.disallow
-    ]
+    rules = [rule for rule in declared_rules(module) if "*" in rule.user_agents]
+    allows = [prefix for rule in rules for prefix in rule.allow]
+    disallows = [prefix for rule in rules for prefix in rule.disallow]
+    return allows, disallows
 
 
-def _covered(prefix: str, paths: set[str]) -> list[str]:
+def _covered(prefix: str, paths: set[str], allows: list[str]) -> list[str]:
+    """Return the paths `prefix` blocks, an `Allow` as long or longer letting one in.
+
+    RFC 9309 picks the longest matching rule, and `Allow` wins a tie.
+    """
     regex = rule_pattern(prefix)
-    return sorted(path for path in paths if regex.match(path))
+    rivals = [rule_pattern(allow) for allow in allows if len(allow) >= len(prefix)]
+    return sorted(
+        path
+        for path in paths
+        if regex.match(path) and not any(rival.match(path) for rival in rivals)
+    )
 
 
 def _noindex_paths(roots: tuple[SeoRoot, ...]) -> set[str]:
@@ -235,16 +242,17 @@ def check_robots_disallow(*args, **kwargs) -> list[CheckMessage]:
     init_errors, roots = loaded_seo_roots()
     warnings = list(init_errors)
     disallowed = [
-        (path, prefix)
+        (path, prefix, allows)
         for path, module in robots_modules(roots)
-        for prefix in _disallows(module)
+        for allows, disallows in (_star_rules(module),)
+        for prefix in disallows
     ]
     if not disallowed:
         return warnings
     listed = _listed_paths(roots)
     noindex = _noindex_paths(roots)
-    for source, prefix in disallowed:
-        invited = _covered(prefix, listed)
+    for source, prefix, allows in disallowed:
+        invited = _covered(prefix, listed, allows)
         if invited:
             warnings.append(
                 DjangoWarning(
@@ -256,7 +264,7 @@ def check_robots_disallow(*args, **kwargs) -> list[CheckMessage]:
                     id="next.W100",
                 )
             )
-        hidden = _covered(prefix, noindex)
+        hidden = _covered(prefix, noindex, allows)
         if hidden:
             warnings.append(
                 DjangoWarning(

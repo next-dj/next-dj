@@ -77,10 +77,11 @@ class CookieConsentBackend(ConsentBackend):
         secure = self._option("secure")
         domain = self._option("domain")
         max_age = self._option("max_age")
+        samesite = self._option("samesite")
         return {
             "name": self.cookie_name,
             "max_age": max_age if is_int(max_age) else _COOKIE_DEFAULTS["max_age"],
-            "samesite": str(self._option("samesite")),
+            "samesite": samesite if isinstance(samesite, str) and samesite else None,
             "secure": secure if isinstance(secure, bool) else None,
             "domain": domain if isinstance(domain, str) and domain else None,
             "path": str(self._option("path") or "/"),

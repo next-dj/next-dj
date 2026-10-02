@@ -13,6 +13,8 @@ class TestInlineBody:
             ("a('</script>')", "a('<\\/script>')"),
             ("a('</SCRIPT')", "a('<\\/SCRIPT')"),
             ("a('</div>')", "a('</div>')"),
+            ("a('<!--')", "a('<\\!--')"),
+            ("a('<script>')", "a('<\\script>')"),
         ],
     )
     def test_a_closing_tag_is_broken(self, body: str, safe: str) -> None:
@@ -67,19 +69,18 @@ class TestManifestEntry:
             category="marketing",
             attrs={"data-id": "7", "src": "x"},
         )
-        assert manifest_entry(script, "https://p.example/p.js", "n0") == {
+        assert manifest_entry(script, "https://p.example/p.js") == {
             "name": "pixel",
             "src": "https://p.example/p.js",
             "init": "p()",
             "strategy": "idle",
             "category": "marketing",
             "attrs": {"data-id": "7"},
-            "nonce": "n0",
         }
 
     def test_the_minimal_entry(self) -> None:
         script = Script("a", init="a()", strategy=Strategy.MANUAL)
-        assert manifest_entry(script, None, None) == {
+        assert manifest_entry(script, None) == {
             "name": "a",
             "init": "a()",
             "strategy": "manual",

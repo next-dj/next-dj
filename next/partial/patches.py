@@ -5,6 +5,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
+from urllib.parse import urljoin, urlsplit
 
 from django.http import HttpRequest, HttpResponse
 from django.utils.functional import Promise
@@ -103,6 +104,12 @@ def _requestless(folded: "Metadata") -> "Metadata":
         links=(),
         jsonld=(),
     )
+
+
+def _local_url(base: str | None, href: str) -> str:
+    """Return the path and query `href` names, read against the page at `base`."""
+    parts = urlsplit(urljoin(base or "/", href))
+    return f"{parts.path}?{parts.query}" if parts.query else parts.path
 
 
 def _is_reserved_event(name: str) -> bool:
@@ -474,7 +481,8 @@ class Patches:
     def meta(self, metadata: "Text | MetadataDict") -> "Patches":
         """Sync the head the origin page renders with `metadata` as its own segment.
 
-        Text is the title alone. Without an origin page only `DEFAULTS` sits under it.
+        Text is the title alone. Without an origin page only `DEFAULTS` sits under it,
+        and a URL operation queued before names the address the canonical reads.
         """
         raw = {"title": metadata} if isinstance(metadata, str | Promise) else metadata
         segment = normalize_metadata(raw, source=_META_SOURCE)
@@ -482,6 +490,9 @@ class Patches:
         request = self._request
         if match is None or match.page_path is None:
             folded = fold_metadata((site_segment(), segment))
+            # The request is the action endpoint, which is no page to point at.
+            self_canonical = folded.canonical is True
+            folded = _requestless(folded)
         else:
             folded = page_manager.fold_metadata(
                 match.page_path,
@@ -490,10 +501,12 @@ class Patches:
                 url_kwargs=dict(match.url_kwargs),
                 context_data=self._metadata_context,
             )
-            request = visit_request(self._require_request(), match.origin)
-        self_canonical = request is None and folded.canonical is True
-        if request is None:
-            folded = _requestless(folded)
+            queued = self._queued_url()
+            address = (
+                match.origin if queued is None else _local_url(match.origin, queued)
+            )
+            request = visit_request(self._require_request(), address)
+            self_canonical = False
         resolved = resolve_metadata(folded, request=request)
         extras: dict[str, object] = {
             "title": _plain(resolved.title),
@@ -624,6 +637,17 @@ class Patches:
             msg = "This builder operation needs a request-bound Patches(request)."
             raise RuntimeError(msg)
         return self._request
+
+    def _queued_url(self) -> str | None:
+        """Return the href of the last URL operation queued so far, if any."""
+        return next(
+            (
+                str(patch.extras["href"])
+                for patch in reversed(self._ops)
+                if patch.op == "url"
+            ),
+            None,
+        )
 
     def _origin_match(self) -> "OriginMatch | None":
         """Resolve the request's posted origin once, memoised on the builder."""

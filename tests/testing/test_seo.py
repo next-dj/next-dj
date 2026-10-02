@@ -1,3 +1,6 @@
+import xml.etree.ElementTree as ET
+
+import pytest
 from django.http import HttpResponse, StreamingHttpResponse
 from django.test import Client
 
@@ -52,8 +55,13 @@ class TestParseSitemap:
         ]
 
     def test_stray_tags_outside_an_entry_are_ignored(self) -> None:
-        response = HttpResponse("<urlset><loc>x</loc><xhtml:link/></urlset>")
+        response = HttpResponse("<urlset><loc>x</loc><lastmod/></urlset>")
         assert parse_sitemap(response) == []
+
+    def test_a_body_that_is_no_xml_fails_the_test(self) -> None:
+        response = HttpResponse("<urlset><url><loc>x</url></urlset>")
+        with pytest.raises(ET.ParseError):
+            parse_sitemap(response)
 
     def test_a_streamed_body_reads_to_its_end(self) -> None:
         response = StreamingHttpResponse(

@@ -148,13 +148,14 @@ def _plain_url(url: Url) -> str:
 def absolute_url(url: str, *, request: HttpRequest | None = None) -> str:
     """Return `url` absolute on the site origin, the one the sitemap lists on.
 
-    A URL with a scheme stays as given, and a protocol-relative one takes only a scheme.
+    A URL with a scheme keeps its origin, and a protocol-relative one takes a scheme,
+    each encoded the way a relative one is.
     """
     parts = urlsplit(url)
     if parts.scheme:
-        return url
+        return iri_to_uri(url)
     if parts.netloc:
-        return f"{_origin(request, url)[0]}:{url}"
+        return f"{_origin(request, url)[0]}:{iri_to_uri(url)}"
     if not url.startswith("/"):
         if request is None:
             raise SiteOriginError(url)
@@ -514,13 +515,21 @@ def _graph_value(value: object, url: IdMap) -> object:
     return value
 
 
+def _verbatim(value: str) -> str:
+    return value
+
+
 def _raw_node(item: Mapping[str, object], url: IdMap) -> Mapping[str, object]:
-    """Resolve a raw mapping into the graph, one under a foreign context kept whole."""
+    """Resolve a raw mapping into the graph, one under a foreign context kept whole.
+
+    A typed value inside a foreign context still renders, its `@id` as written.
+    """
     context = item.get(CONTEXT)
     if context is not None and not (
         isinstance(context, str) and context in SCHEMA_CONTEXTS
     ):
-        return item
+        kept = _graph_value(item, _verbatim)
+        return kept if isinstance(kept, dict) else {}
     graphed = _graph_value({k: v for k, v in item.items() if k != CONTEXT}, url)
     return graphed if isinstance(graphed, dict) else {}
 

@@ -461,7 +461,18 @@ class TestMeta:
             envelope = builder().meta("Wallets").envelope()
         assert envelope.ops[0].as_dict() == {"op": "meta", **_meta("Wallets | Acme")}
 
-    def test_a_builder_without_a_request_leaves_a_self_canonical_alone(self) -> None:
+    @pytest.mark.parametrize(
+        "builder",
+        [
+            lambda: Patches.versioned("v1"),
+            lambda: Patches(partial_request(origin=None)),
+            lambda: Patches(partial_request("/_next/form/x/")),
+        ],
+        ids=["no_request", "no_origin", "foreign_origin"],
+    )
+    def test_a_builder_without_an_origin_page_leaves_a_self_canonical_alone(
+        self, builder: Callable[[], Patches]
+    ) -> None:
         defaults = {
             "canonical": True,
             "alternates": {"languages": True},
@@ -473,7 +484,7 @@ class TestMeta:
             "jsonld": [ld.Node(id="#org", type="Organization", extra={"url": "/"})],
         }
         with override_next_settings(METADATA={"DEFAULTS": defaults}):
-            extras = Patches.versioned("v1").meta("Wallets").envelope().ops[0].extras
+            extras = builder().meta("Wallets").envelope().ops[0].extras
         assert extras == {"title": "Wallets", "description": None, "robots": None}
 
     def test_a_builder_without_a_request_ships_a_declared_canonical(self) -> None:
@@ -529,6 +540,31 @@ class TestMeta:
         with _routed(tmp_path):
             envelope = _builder_for(tmp_path, leaf).meta("Post").envelope()
         assert envelope.ops[0].extras == _meta("Post | Static")
+
+    @pytest.mark.parametrize(
+        ("push", "canonical"),
+        [
+            ("/titled/leaf/?sort=x&page=2", "/titled/leaf/?page=2"),
+            ("?page=4", "/titled/leaf/?page=4"),
+            ("/titled/leaf/", "/titled/leaf/"),
+        ],
+        ids=["path", "relative_query", "no_query"],
+    )
+    def test_a_queued_url_names_the_address_of_the_canonical(
+        self, push: str, canonical: str
+    ) -> None:
+        with override_next_settings(
+            SITE={"URL": "https://acme.example"},
+            METADATA={"DEFAULTS": {"canonical": True}, "CANONICAL_QUERY": ["page"]},
+        ):
+            envelope = (
+                Patches(partial_request("/titled/leaf/?page=3"))
+                .push_url(push)
+                .toast("Saved")
+                .meta("W")
+                .envelope()
+            )
+        assert envelope.ops[2].extras["canonical"] == f"https://acme.example{canonical}"
 
     def test_meta_chains_in_order(self) -> None:
         envelope = (

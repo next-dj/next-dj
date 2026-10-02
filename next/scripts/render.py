@@ -9,13 +9,18 @@ from next.static.runtime import nonce_attr
 from .markers import SCRIPT_ATTR, Script, Strategy
 
 
-_SCRIPT_CLOSE: Final = re.compile(r"</(script)", re.IGNORECASE)
+_SCRIPT_MARKUP: Final = re.compile(r"<(/?script|!--)", re.IGNORECASE)
+"""What the HTML parser reads inside a script element, see the HTML spec's advice."""
 _LOAD_ATTRS: Final = {Strategy.ASYNC: " async", Strategy.DEFER: " defer"}
 
 
 def inline_body(init: str) -> str:
-    """Return an `init` body that cannot close the element it sits in."""
-    return _SCRIPT_CLOSE.sub(r"<\/\1", init)
+    """Return an `init` body that cannot close or swallow the element it sits in.
+
+    `</script` closes it, while `<!--` before `<script` keeps the real close from
+    closing it, so each gains a backslash a string literal reads through.
+    """
+    return _SCRIPT_MARKUP.sub(r"<\\\1", init)
 
 
 def _attrs(pairs: dict[str, str]) -> str:
@@ -42,10 +47,11 @@ def head_tags(script: Script, src: str | None, nonce: str | None) -> str:
     return "\n".join(tags)
 
 
-def manifest_entry(
-    script: Script, src: str | None, nonce: str | None
-) -> dict[str, object]:
-    """Return the `$scripts` entry the runtime loads a script from."""
+def manifest_entry(script: Script, src: str | None) -> dict[str, object]:
+    """Return the `$scripts` entry the runtime loads a script from.
+
+    The runtime stamps the nonce the page booted with, the one its policy names.
+    """
     entry: dict[str, object] = {"name": script.name}
     if src is not None:
         entry["src"] = src
@@ -54,8 +60,6 @@ def manifest_entry(
     entry["strategy"] = str(script.strategy)
     entry["category"] = script.category
     entry["attrs"] = script.allowed_attrs()
-    if nonce:
-        entry["nonce"] = nonce
     return entry
 
 

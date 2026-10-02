@@ -11,7 +11,7 @@ from django.core.checks import CheckMessage, Error, Tags, register
 from django.core.serializers.json import DjangoJSONEncoder
 from django.utils.timezone import is_naive
 
-from next.checks import NEXT
+from next.checks import NEXT, SEO
 from next.pages.metadata.ld import ID, TYPE, plain
 
 from .pages import folded_pages, loaded_metadata_pages
@@ -81,7 +81,7 @@ def _id_types(graph: list[object]) -> dict[str, set[str]]:
     return found
 
 
-@register(Tags.templates, NEXT)
+@register(Tags.templates, NEXT, SEO)
 def check_metadata_jsonld(*args, **kwargs) -> list[CheckMessage]:
     """Validate every declared JSON-LD node and the graph each page folds."""
     init_errors, pages = loaded_metadata_pages()

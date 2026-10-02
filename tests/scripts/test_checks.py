@@ -120,6 +120,7 @@ class TestDeclarations:
             ("Script('a', src='../a.js')", "next.E141", "outside the static root"),
             ("Script('a', src='missing/a.js')", "next.E141", "no finder answers"),
             ("Script('a', init='x(\"</script>\")')", "next.E142", "holds </script"),
+            ("Script('a', init='x(\"<!--\")')", "next.E142", "<!-- in its init"),
             (
                 "Script('a', init='1', attrs={'onload': 'x'})",
                 "next.E143",

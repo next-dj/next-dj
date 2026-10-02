@@ -31,7 +31,7 @@ export interface ScriptsDeps {
   idle?: IdleAdapter;
   // Where the first interaction is listened for. Absent, the window.
   events?: EventTarget;
-  // The bootstrap nonce, used when an entry carries none of its own.
+  // The nonce the page booted with, the one its policy names, stamped on every entry.
   nonce?: string | undefined;
 }
 
@@ -42,7 +42,6 @@ interface Entry {
   strategy: string;
   category: string;
   attrs: [string, string][];
-  nonce: string | undefined;
 }
 
 interface Waiter {
@@ -81,7 +80,6 @@ function readEntry(value: unknown): Entry | undefined {
     strategy: asString(value.strategy) ?? "async",
     category: asString(value.category) ?? "necessary",
     attrs,
-    nonce: asString(value.nonce),
   };
 }
 
@@ -126,8 +124,7 @@ export function createScripts(deps: ScriptsDeps): Scripts {
   function element(entry: Entry): HTMLScriptElement {
     const el = doc.createElement("script");
     for (const [key, value] of entry.attrs) el.setAttribute(key, value);
-    const nonce = entry.nonce ?? deps.nonce;
-    if (nonce !== undefined) el.nonce = nonce;
+    if (deps.nonce !== undefined) el.nonce = deps.nonce;
     el.setAttribute(ATTR_SCRIPT, entry.name);
     return el;
   }

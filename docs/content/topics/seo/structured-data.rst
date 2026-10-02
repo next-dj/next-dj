@@ -38,7 +38,8 @@ A node is a mapping in the JSON-LD shape, ``@type`` and ``@id`` included.
    }
 
 A schema.org ``@context`` on a mapping is dropped, since the graph carries one, and a mapping with a foreign ``@context`` renders as its own ``<script>`` beside the graph.
-Every ``@id`` in a mapping, nested ones included, resolves against the site as `@id and URLs`_ describes, while every other value renders as written.
+Every ``@id`` in a schema.org mapping, nested ones included, resolves against the site as `@id and URLs`_ describes, while every other value renders as written.
+A mapping under a foreign ``@context`` keeps every ``@id`` as written, and a ``Node`` or ``Ref`` inside it renders in place with its own ``@id`` unresolved.
 Values are copied into plain dicts and lists when the metadata loads, so a ``MappingProxyType`` or a tuple serialises, and a value JSON cannot hold, a ``set`` among them, is a ``PageMetadataShapeError``.
 A :class:`~datetime.datetime`, a :class:`~datetime.date`, a :class:`~decimal.Decimal`, and a UUID pass, since :class:`~django.core.serializers.json.DjangoJSONEncoder` writes them.
 
@@ -60,7 +61,7 @@ The ld nodes
    * - ``BreadcrumbList``
      - ``items``, a tuple of ``ListItem(name=..., position=..., item=...)``.
 
-A subclass of ``Node`` types the node a site repeats, so a missing required property is a ``TypeError`` at import and a type error under mypy.
+A subclass of ``Node`` types the node a site repeats, so a missing required property is a ``TypeError`` where the node is built, at import for a module-level node, and a type error under mypy.
 ``TYPE`` names the schema.org type, and ``URLS`` the fields resolved the way an ``@id`` is.
 ``None`` and an empty tuple are left out, a nested node or a ``Ref`` renders in place, and ``extra`` adds verbatim properties last.
 
