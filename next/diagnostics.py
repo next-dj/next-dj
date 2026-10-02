@@ -3,15 +3,21 @@
 from collections.abc import Callable, Hashable
 from logging import Logger
 
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import BadRequest, PermissionDenied, SuspiciousOperation
 from django.http import Http404
 
 from next.conf.settings import fail_loudly
 from next.conf.signals import settings_reloaded
 
 
-# A view raises these on purpose to answer 404 or 403, so they are never contained.
-INTENDED_EXCEPTIONS: tuple[type[BaseException], ...] = (Http404, PermissionDenied)
+# A view raises these on purpose to answer 400, 403 or 404, and Django turns each into
+# its own response and its own log, `django.security` for a suspicious operation.
+INTENDED_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    Http404,
+    PermissionDenied,
+    SuspiciousOperation,
+    BadRequest,
+)
 
 
 _FAILED = (

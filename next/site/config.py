@@ -21,7 +21,7 @@ from next.conf.imports import import_callable
 from next.conf.scopes import scope_value
 from next.conf.settings import fail_loudly
 from next.conf.signals import settings_reloaded
-from next.diagnostics import FailureLog
+from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog
 from next.introspect import describe_callable
 from next.utils import UNSET, WEB_SCHEMES, Unset
 
@@ -150,6 +150,8 @@ def _answered_origin(rule: SiteUrlRule, request: HttpRequest | None) -> _Declare
     """Return the origin a callable `URL` answers, `None` when it declines one."""
     try:
         value = rule(request)
+    except INTENDED_EXCEPTIONS:
+        raise
     except Exception as exc:  # noqa: BLE001 - the callable is project code
         return _url_failed(
             "raised",

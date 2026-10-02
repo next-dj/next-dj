@@ -1,7 +1,7 @@
 import logging
 
 import pytest
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import BadRequest, PermissionDenied, SuspiciousOperation
 from django.http import Http404
 
 from next.conf.signals import settings_reloaded
@@ -181,5 +181,9 @@ class TestFailureLog:
         assert "missing y.js" in caplog.text
 
     def test_intended_exceptions_name_the_http_answers(self) -> None:
-        assert Http404 in INTENDED_EXCEPTIONS
-        assert PermissionDenied in INTENDED_EXCEPTIONS
+        assert set(INTENDED_EXCEPTIONS) == {
+            Http404,
+            PermissionDenied,
+            SuspiciousOperation,
+            BadRequest,
+        }

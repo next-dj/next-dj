@@ -1,8 +1,8 @@
 import logging
 
 import pytest
-from django.core.exceptions import ImproperlyConfigured
-from django.http import HttpRequest
+from django.core.exceptions import BadRequest, DisallowedHost, ImproperlyConfigured
+from django.http import Http404, HttpRequest
 from django.test import RequestFactory, override_settings
 
 from next.conf import next_framework_settings
@@ -306,6 +306,17 @@ class TestFailingSiteUrl:
         [record] = _records(caplog)
         assert "NEXT_FRAMEWORK['SITE']['URL']" in record.getMessage()
         assert f'"{rule.__name__}"' in record.getMessage()
+
+    @pytest.mark.parametrize(
+        "exc", [DisallowedHost("bad host"), BadRequest("bad"), Http404("gone")]
+    )
+    def test_an_intended_exception_reaches_django(self, exc) -> None:
+        # A bad Host answers Django's 400 and its security log, not a 503.
+        def rule(request):
+            raise exc
+
+        with site_settings(URL=rule), pytest.raises(type(exc)):
+            site_url(_get("testserver"))
 
     def test_a_request_calls_the_rule_once(self) -> None:
         request = _get("testserver")
