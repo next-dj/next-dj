@@ -7,6 +7,7 @@ and caches the mapping until the same freshness token discovery uses goes stale.
 from __future__ import annotations
 
 import os
+import posixpath
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, NamedTuple, override
@@ -102,6 +103,7 @@ def discover_colocated_static_assets() -> dict[str, Path]:
 
 
 _RUNTIME_BUNDLE_ROOT: Final = Path(__file__).parent
+_RUNTIME_BUNDLE_DIR: Final = posixpath.dirname(NEXT_JS_STATIC_PATH)
 _RUNTIME_BUNDLE_PATHS: Final = (
     NEXT_JS_STATIC_PATH,
     f"{NEXT_JS_STATIC_PATH}.map",
@@ -129,11 +131,18 @@ def _runtime_bundle_static_files() -> dict[str, Path]:
     """Map the built runtime, its chunks and their sourcemaps into `next/`.
 
     A source checkout carries no build output, so a missing file is left unmapped.
+    One directory read answers every bundle, however many chunks the runtime ships.
     """
+    folder = _RUNTIME_BUNDLE_ROOT / _RUNTIME_BUNDLE_DIR
+    try:
+        with os.scandir(folder) as scan:
+            present = {entry.name for entry in scan if entry.is_file()}
+    except OSError:
+        return {}
     return {
-        logical_path: source
+        logical_path: _RUNTIME_BUNDLE_ROOT / logical_path
         for logical_path in _RUNTIME_BUNDLE_PATHS
-        if (source := _runtime_bundle_source(logical_path)) is not None
+        if posixpath.basename(logical_path) in present
     }
 
 

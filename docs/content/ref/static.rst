@@ -135,7 +135,7 @@ Asset URLs themselves come from ``staticfiles_storage.url``, not from the finder
 Staticfiles asks the finder once per referenced asset, so the mapping is held rather than walked again for every lookup.
 It is rebuilt when a stem or kind registration changes which filenames count, when the page or component trees the routers report change, and, while ``DEBUG`` is true, when the mtime of any directory inside those trees moves.
 That last check is what picks up an asset added at runtime, and it is skipped when ``DEBUG`` is false, where only a reconfiguration moves what the walk finds.
-The ``next.min.js``, ``next.scripts.min.js``, ``next.sse.min.js``, ``next.csrf.min.js``, ``next.poll.min.js``, and ``next.dev.min.js`` bundles and their sourcemaps sit outside that held mapping and are stat'd on each lookup, so a checkout that builds the runtime while the server runs serves it without a restart.
+The ``next.min.js``, ``next.scripts.min.js``, ``next.sse.min.js``, ``next.csrf.min.js``, ``next.poll.min.js``, and ``next.dev.min.js`` bundles and their sourcemaps sit outside that held mapping and are read from disk on each lookup, one stat for a find and one read of their folder for a listing, so a checkout that builds the runtime while the server runs serves it without a restart.
 
 ``NextAppDirectoriesFinder`` replaces Django's ``AppDirectoriesFinder`` in the same list.
 The framework ships its runtime bundle inside ``next/static``, which is also the ``next.static`` Python package, so the stock finder treats every framework module as an app static file and ``collectstatic`` copies them into ``STATIC_ROOT``.

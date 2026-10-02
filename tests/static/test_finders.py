@@ -618,6 +618,21 @@ class TestRuntimeBundleMapping:
         with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
             assert _runtime_bundle_static_files() == {}
 
+    def test_an_install_without_the_bundle_folder_maps_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", tmp_path):
+            assert _runtime_bundle_static_files() == {}
+
+    def test_a_folder_named_like_a_bundle_is_left_out(self, tmp_path: Path) -> None:
+        root = _bundle_root(tmp_path, "next.min.js")
+        (root / "next" / "next.dev.min.js").mkdir()
+
+        with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
+            mapping = _runtime_bundle_static_files()
+
+        assert mapping == {"next/next.min.js": root / "next" / "next.min.js"}
+
     def test_a_colocated_asset_wins_a_collision_with_a_bundle_path(
         self, tmp_path: Path, watched_tree: Path
     ) -> None:
