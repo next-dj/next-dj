@@ -16,8 +16,10 @@ from next.static import (
     default_kinds,
 )
 from next.static.collector import HEAD_CLOSE
+from next.static.manager import _failures as manager_failures
 from next.static.runtime import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY
 from next.static.serializers import JsonJsContextSerializer
+from next.testing import override_next_settings
 from tests.support import (
     PREFIXED_BACKENDS,
     REQUEST_RECORDING_BACKENDS,
@@ -695,3 +697,86 @@ class TestBackendRewritesEveryAssetUrl:
         ]
         assert f'<script src="/pfx{NEXT_JS_URL}"></script>' in out
         assert f'<link rel="preload" as="script" href="/pfx{NEXT_JS_URL}">' in out
+
+
+def _hashed_without(*missing: str):
+    def url(name: str) -> str:
+        if name in missing:
+            msg = f"Missing staticfiles manifest entry for '{name}'"
+            raise ValueError(msg)
+        return f"/static/{name}"
+
+    return url
+
+
+def _records(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == "next.static.manager"]
+
+
+class TestBrokenRuntimeConfiguration:
+    """A runtime the storage lacks or a policy no member names costs no page."""
+
+    PAGE = f"<head></head><body>{SCRIPTS_PLACEHOLDER}</body>"
+
+    @pytest.fixture(autouse=True)
+    def _rearmed(self):
+        manager_failures.clear()
+        yield
+        manager_failures.clear()
+
+    def test_an_uncollected_runtime_renders_without_it_logged_once(
+        self, caplog
+    ) -> None:
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url",
+            side_effect=_hashed_without("next/next.min.js"),
+        ):
+            pages = [
+                StaticManager().inject(self.PAGE, StaticCollector()) for _ in range(2)
+            ]
+        assert all(
+            "next.min.js" not in page and "Next._init" not in page for page in pages
+        )
+        [message] = _records(caplog)
+        assert "has no next/next.min.js" in message
+        assert "collectstatic" in message
+
+    def test_an_uncollected_runtime_raises_under_debug(self) -> None:
+        with (
+            override_settings(DEBUG=True),
+            mock.patch(
+                "next.static.manager.staticfiles_storage.url",
+                side_effect=_hashed_without("next/next.min.js"),
+            ),
+            pytest.raises(ValueError, match="manifest") as raised,
+        ):
+            StaticManager().inject(self.PAGE, StaticCollector())
+        assert "collectstatic" in raised.value.__notes__[0]
+
+    def test_an_uncollected_chunk_is_left_to_the_runtime(self, caplog) -> None:
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url",
+            side_effect=_hashed_without("next/next.sse.min.js"),
+        ):
+            page = StaticManager().inject(self.PAGE, StaticCollector())
+        assert '"sse"' not in page
+        assert '"poll":"/static/next/next.poll.min.js"' in page
+        [message] = _records(caplog)
+        assert "next/next.sse.min.js" in message
+
+    def test_an_unknown_policy_injects_as_auto_logged_once(self, caplog) -> None:
+        with override_next_settings(NEXT_JS_OPTIONS={"policy": "sometimes"}):
+            pages = [
+                StaticManager().inject(self.PAGE, StaticCollector()) for _ in range(2)
+            ]
+        assert all(NEXT_JS_URL in page for page in pages)
+        [message] = _records(caplog)
+        assert "NEXT_JS_OPTIONS['policy']" in message
+
+    def test_an_unknown_policy_raises_under_debug(self) -> None:
+        with (
+            override_settings(DEBUG=True),
+            override_next_settings(NEXT_JS_OPTIONS={"policy": "sometimes"}),
+            pytest.raises(ValueError, match="Invalid NextScriptBuilder policy"),
+        ):
+            StaticManager().inject(self.PAGE, StaticCollector())

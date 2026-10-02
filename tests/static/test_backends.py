@@ -17,6 +17,7 @@ from next.static import (
     static_name,
 )
 from next.static.backends import StaticBackend as _StaticBackendDirect
+from next.static.runtime import _failures as runtime_failures
 from tests.support import static_names_resolved_by
 
 
@@ -485,3 +486,27 @@ class TestTagTemplatesEscapeTheUrl:
 
         assert "<script>alert(1)</script>" not in rendered
         assert rendered.startswith('<link rel="stylesheet" crossorigin href="')
+
+
+class TestUnformattableTagTemplates:
+    """A backend tag template `.format` cannot fill gives way to the default."""
+
+    @pytest.fixture(autouse=True)
+    def _rearmed(self):
+        runtime_failures.clear()
+        yield
+        runtime_failures.clear()
+
+    def test_the_default_tag_renders_logged_once(self, caplog) -> None:
+        config = {"OPTIONS": {"css_tag": "<link {rel} href='{url}'>"}}
+        backends = [StaticFilesBackend(config) for _ in range(2)]
+        assert backends[1].render_link_tag("/a.css") == (
+            '<link rel="stylesheet" href="/a.css">'
+        )
+        [record] = [r for r in caplog.records if r.name == "next.static.runtime"]
+        assert "OPTIONS['css_tag'] of StaticFilesBackend" in record.getMessage()
+
+    def test_a_broken_tag_raises_under_debug(self, settings) -> None:
+        settings.DEBUG = True
+        with pytest.raises(ValueError, match="Single '}'"):
+            StaticFilesBackend({"OPTIONS": {"js_tag": "<script src='{url}'>}"}})

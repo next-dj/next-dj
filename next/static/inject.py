@@ -71,8 +71,8 @@ class InjectionProvider(Protocol):
         """Return the builder holding the runtime URL and the tag templates."""
         raise NotImplementedError
 
-    def chunk_url(self, name: str) -> str:
-        """Return the URL of the lazy chunk `$chunks` names `name`."""
+    def chunk_url(self, name: str) -> str | None:
+        """Return the URL of the lazy chunk `$chunks` names `name`, if stored."""
         raise NotImplementedError
 
 
@@ -199,12 +199,13 @@ class PlaceholderInjector:
         """Return the `$chunks` entry and its encoding, reused while its URLs hold.
 
         Only `DEBUG` adds the dev chunk, while a later patch may need any other one.
+        A chunk the storage lacks is left out, the runtime looking beside itself.
         """
         provider = self._provider
         urls = {
-            name: provider.asset_url(provider.chunk_url(name), request=request)
+            name: provider.asset_url(url, request=request)
             for name in CHUNK_STATIC_PATHS
-            if dev or name != DEV_CHUNK
+            if (dev or name != DEV_CHUNK) and (url := provider.chunk_url(name))
         }
         serializer = resolve_serializer()
         held = self._chunks

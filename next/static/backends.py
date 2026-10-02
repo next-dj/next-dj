@@ -16,7 +16,7 @@ from next.caches import BoundedCache
 
 from .assets import StaticNamespace, static_name
 from .errors import StaticAssetNotFoundError
-from .runtime import nonce_attr
+from .runtime import TAG_FIELDS, nonce_attr, usable_template
 
 
 if TYPE_CHECKING:
@@ -97,12 +97,18 @@ class StaticFilesBackend(StaticBackend):
     )
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
-        """Read the tag templates from the OPTIONS mapping."""
+        """Read the tag templates from the OPTIONS mapping, a broken one as default."""
         super().__init__(config)
         opts = dict(self._config.get("OPTIONS") or {})
-        self._css_tag = str(opts.get("css_tag") or self._DEFAULT_CSS_TAG)
-        self._js_tag = str(opts.get("js_tag") or self._DEFAULT_JS_TAG)
-        self._module_tag = str(opts.get("module_tag") or self._DEFAULT_MODULE_TAG)
+        self._css_tag = self._template(opts, "css_tag", self._DEFAULT_CSS_TAG)
+        self._js_tag = self._template(opts, "js_tag", self._DEFAULT_JS_TAG)
+        self._module_tag = self._template(opts, "module_tag", self._DEFAULT_MODULE_TAG)
+
+    def _template(self, opts: Mapping[str, Any], key: str, default: str) -> str:
+        where = f"STATIC_BACKENDS OPTIONS[{key!r}] of {type(self).__name__}"
+        return usable_template(
+            str(opts.get(key) or default), default, TAG_FIELDS, where
+        )
 
     def _logical_static_path(self, logical_name: str, suffix: str) -> str:
         return f"{StaticNamespace.NEXT}/{logical_name}{suffix}"

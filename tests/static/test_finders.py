@@ -403,9 +403,10 @@ class TestMappedSourceStorage:
     def test_exists(self, tmp_path: Path) -> None:
         src = tmp_path / "a.css"
         src.write_text("")
-        storage = _MappedSourceStorage({"next/a.css": src})
+        storage = _MappedSourceStorage({"next/a.css": src, "next/dir.css": tmp_path})
         assert storage.exists("next/a.css")
         assert not storage.exists("next/missing.css")
+        assert not storage.exists("next/dir.css")
 
     def test_open_reads_source(self, tmp_path: Path) -> None:
         src = tmp_path / "a.css"

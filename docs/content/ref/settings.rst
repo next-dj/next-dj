@@ -314,6 +314,7 @@ NEXT_JS_OPTIONS
 
 Dict passed to ``NextScriptBuilder.from_options`` for the bundled ``next.min.js`` runtime.
 Keys are the injection ``policy`` (``auto``, ``disabled``, or ``manual``) and the optional string templates ``preload_template``, ``script_tag_template``, and ``init_template``.
+A ``policy`` no member names reads as ``auto``, and a template ``.format`` cannot fill gives way to the default one, each logged once and raised under ``DEBUG``, and ``next.E130`` and ``next.E139`` report both at startup.
 
 Default value ``{}`` (automatic injection with default templates).
 

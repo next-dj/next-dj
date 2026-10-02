@@ -788,7 +788,7 @@ Pytest can run ``manage.py check`` as part of the suite.
 ``call_command("check")`` on its own raises only when a check reports an error, so a framework warning such as a shadowed component name passes silently.
 A suite that wants the warnings gated too passes ``fail_level="WARNING"``.
 
-Eight framework checks are registered with ``deploy=True`` and stay out of that run, three because each one imports or compiles the whole page tree, one because it describes every development checkout, and four because they are the opt-in SEO audits.
+Nine framework checks are registered with ``deploy=True`` and stay out of that run, three because each one imports or compiles the whole page tree, two because they describe every development checkout, and four because they are the opt-in SEO audits.
 A test suite is the cheapest place to pay that cost, so a second call turns them on.
 
 .. code-block:: python

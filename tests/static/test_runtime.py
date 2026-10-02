@@ -15,6 +15,7 @@ from next.static.runtime import (
     DEV_PAYLOAD_KEY,
     NEXT_JS_STATIC_PATH,
     RESERVED_PAYLOAD_KEYS,
+    _failures as runtime_failures,
     csrf_payload_for,
     nonce_attr,
 )
@@ -429,3 +430,45 @@ class TestCsrfPayload:
             META = object()
 
         assert csrf_payload_for(FakeRequest()) is None  # type: ignore[arg-type]
+
+
+class TestUnformattableTemplates:
+    """A template `.format` cannot fill gives way to the default, logged once."""
+
+    @pytest.fixture(autouse=True)
+    def _rearmed(self):
+        runtime_failures.clear()
+        yield
+        runtime_failures.clear()
+
+    @pytest.mark.parametrize(
+        ("option", "template", "rendered"),
+        [
+            ("preload_template", "<link {rel} href='{url}'>", "preload_link"),
+            ("script_tag_template", "<script src='{url}'>{</script>", "script_tag"),
+            ("init_template", "<script>{0}({payload})</script>", "init_script"),
+        ],
+    )
+    def test_the_default_renders_and_the_template_is_named(
+        self, caplog, option, template, rendered
+    ) -> None:
+        builders = [NextScriptBuilder("/n.js", **{option: template}) for _ in range(2)]
+        default = NextScriptBuilder("/n.js")
+        if rendered == "init_script":
+            assert builders[1].init_script({}) == default.init_script({})
+        else:
+            assert getattr(builders[1], rendered)() == getattr(default, rendered)()
+        [record] = [r for r in caplog.records if r.name == "next.static.runtime"]
+        assert f"NEXT_JS_OPTIONS['{option}']" in record.getMessage()
+
+    def test_a_broken_template_raises_under_debug(self, settings) -> None:
+        settings.DEBUG = True
+        with pytest.raises(KeyError) as raised:
+            NextScriptBuilder("/n.js", preload_template="<link {rel}>")
+        assert "Double every literal brace" in raised.value.__notes__[0]
+
+    def test_doubled_braces_format(self) -> None:
+        builder = NextScriptBuilder(
+            "/n.js", script_tag_template="<script data-x='{{}}' src='{url}'></script>"
+        )
+        assert builder.script_tag() == "<script data-x='{}' src='/n.js'></script>"

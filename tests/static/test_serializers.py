@@ -85,14 +85,42 @@ class TestResolveSerializer:
         pytest.importorskip("pydantic")
         assert isinstance(resolve_serializer(), PydanticJsContextSerializer)
 
-    @override_settings(
-        NEXT_FRAMEWORK={
-            "JS_CONTEXT_SERIALIZER": "tests.static.test_serializers._BadCls"
-        }
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "tests.static.test_serializers._BadCls",
+            "tests.static.test_serializers._Raising",
+            "tests.static.test_serializers._Missing",
+        ],
+        ids=["no_protocol", "raises", "missing"],
     )
-    def test_raises_when_class_does_not_implement_protocol(self) -> None:
-        with pytest.raises(TypeError, match="JsContextSerializer"):
+    def test_a_broken_serializer_gives_way_to_json_logged_once(
+        self, caplog, path
+    ) -> None:
+        with override_settings(NEXT_FRAMEWORK={"JS_CONTEXT_SERIALIZER": path}):
+            answers = [resolve_serializer() for _ in range(2)]
+        assert all(isinstance(answer, JsonJsContextSerializer) for answer in answers)
+        [record] = [r for r in caplog.records if r.name == "next.static.serializers"]
+        assert path in record.getMessage()
+
+    def test_a_broken_serializer_raises_under_debug(self) -> None:
+        path = "tests.static.test_serializers._BadCls"
+        with (
+            override_settings(
+                DEBUG=True, NEXT_FRAMEWORK={"JS_CONTEXT_SERIALIZER": path}
+            ),
+            pytest.raises(TypeError, match="JsContextSerializer") as raised,
+        ):
             resolve_serializer()
+        assert "JS_CONTEXT_SERIALIZER" in raised.value.__notes__[0]
+
+    def test_one_instance_serves_every_render_until_a_reload(self) -> None:
+        path = "next.static.serializers.JsonJsContextSerializer"
+        with override_settings(NEXT_FRAMEWORK={"JS_CONTEXT_SERIALIZER": path}):
+            first = resolve_serializer()
+            assert resolve_serializer() is first
+        with override_settings(NEXT_FRAMEWORK={"JS_CONTEXT_SERIALIZER": path}):
+            assert resolve_serializer() is not first
 
 
 class TestCollectorUsesSerializer:
@@ -116,6 +144,14 @@ class TestCollectorUsesSerializer:
         collector = StaticCollector(js_serializer=TagSerializer())
         collector.add_js_context("a", 1)
         assert collector.js_context() == {"a": 1}
+
+
+class _Raising:
+    """A serializer whose constructor fails."""
+
+    def __init__(self) -> None:
+        msg = "no encoder"
+        raise RuntimeError(msg)
 
 
 class _BadCls:

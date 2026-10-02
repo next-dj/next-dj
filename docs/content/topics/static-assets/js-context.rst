@@ -63,8 +63,10 @@ Set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` to the dotted path of a serializ
        "JS_CONTEXT_SERIALIZER": "next.static.PydanticJsContextSerializer",
    }
 
-``resolve_serializer`` reads the setting on every call.
+``resolve_serializer`` reads the setting on every call and builds one instance per dotted path, which every render shares until the settings reload.
 When the key is absent or set to an empty string the framework uses ``JsonJsContextSerializer``.
+A path that does not import, a class whose constructor raises, or an instance without ``dumps`` gives way to ``JsonJsContextSerializer`` too, so no page fails over it.
+The failure is logged once, and under ``DEBUG`` or ``STRICT_LOADING`` it raises instead, naming the setting.
 
 System checks
 ~~~~~~~~~~~~~
@@ -143,7 +145,7 @@ A serializer is any class with a ``dumps`` method.
            )
 
 Point ``JS_CONTEXT_SERIALIZER`` at the dotted path of the class.
-The framework instantiates it through ``resolve_serializer``.
+The framework instantiates it once through ``resolve_serializer``, so the instance keeps no state of one render.
 
 Key conflict policy
 -------------------

@@ -8,7 +8,7 @@ Module summary
 
 next.dj contributes Django system checks for every subsystem.
 Run them through ``uv run python manage.py check`` and the framework reports configuration mistakes with a code and a hint.
-Eight of them are deployment checks and answer only to ``uv run python manage.py check --deploy``, see `Check registration`_ for which eight and why.
+Nine of them are deployment checks and answer only to ``uv run python manage.py check --deploy``, see `Check registration`_ for which nine and why.
 
 Check registration
 ------------------
@@ -22,17 +22,18 @@ Each of these modules registers checks.
 ``next.pages.checks.metadata`` is a package inside the pages one and splits the same way.
 The address a project imports stays the same either way, and the tables under `Check code reference`_ name the submodule behind each code.
 
-Eight checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
+Nine checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
 Four of them are ``check_page_module_imports`` (``next.E017``), ``check_component_module_imports`` (``next.E084``), ``check_composed_templates_compile`` (``next.E072``), and ``check_asset_version_moves_between_deploys`` (``next.W083``).
 The first three import or compile every user module of a tree, which costs a full walk that a routine ``manage.py`` command should not pay.
 The fourth describes a configuration every development checkout has, so reporting it outside a deployment audit would warn every project about nothing.
+``check_runtime_bundles_deployed`` (``next.W090``) asks the static files a deployment serves for the client runtime, which a source checkout builds only on demand.
 The other four read the settings a deployment runs on, ``check_site_url_for_deploy`` (``next.W119``, ``next.W132``) and ``check_seo_sources_on_closed_site`` (``next.W120``) with the ``seo`` tag, ``check_script_deploy`` (``next.W127``), and ``check_consent_cookie_secure`` (``next.W129``).
 
 Every next.dj check carries the ``next`` tag.
 That tag is the importable string constant ``next.checks.NEXT``, so a project check joins the framework ones by decorating itself with ``@register(NEXT)`` rather than by repeating the literal.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
-A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the eight deployment checks to it.
+A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the nine deployment checks to it.
 The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check, every page metadata check, and the site checks.
 ``manage.py check --tag seo`` runs the metadata, crawler-document, and site checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.
 Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
@@ -129,6 +130,7 @@ Scripts and consent
 
 ``next.scripts.checks`` reads every ``scripts.py``, the consent categories, and the composed pages that render ``{% #consented %}``, and ``next.consent.checks`` the rest of the ``CONSENT`` scope.
 ``next.static.checks`` owns ``next.W126`` for the tag templates the nonce reaches and ``next.W130`` for the shared pages a nonce takes private, since the nonce is a static option.
+It also owns ``next.E130`` for the injection policy, ``next.E139`` for a tag template ``.format`` cannot fill, and ``next.W090`` for a runtime bundle the storage cannot serve.
 
 .. automodule:: next.scripts.checks
    :members:
@@ -667,6 +669,10 @@ Errors
      - A ``SITE`` value is unusable, a ``URL`` that is no bare http or https origin, one carrying a path, a query, or a fragment included, or a dotted path that does not import, a ``NAME`` that is no text, or an ``INDEXABLE`` outside ``"auto"``, a bool, and a callable.
        A callable ``URL`` or ``INDEXABLE`` that cannot be called with the request as its one positional argument is reported too, read from its signature alone, since the check never calls it.
      - ``next.site.checks``
+   * - ``next.E130``
+     - ``NEXT_JS_OPTIONS["policy"]`` names no ``ScriptInjectionPolicy``, read through ``NextScriptBuilder.from_options`` as a render reads it.
+       Pages inject the runtime as under ``"auto"``, and log the fallback once.
+     - ``next.static.checks``
    * - ``next.E131``
      - A ``page.py`` declares a ``cache`` or ``headers`` the response cannot carry as written, an unknown key, a negative age, a flag that is no bool, ``public`` with ``no_store``, a forbidden or invalid header name, or a value with a control character or a character outside ASCII.
      - ``next.pages.checks.responses``
@@ -695,6 +701,10 @@ Errors
    * - ``next.E138``
      - A script loads through the runtime, by a gated category or an ``IDLE``, ``INTERACTION``, or ``MANUAL`` strategy, while ``NEXT_JS_OPTIONS["policy"]`` keeps the runtime off every page.
      - ``next.scripts.checks``
+   * - ``next.E139``
+     - A custom ``preload_template``, ``script_tag_template``, or ``init_template`` in ``NEXT_JS_OPTIONS``, or a ``css_tag``, ``js_tag``, or ``module_tag`` in a ``STATIC_BACKENDS`` entry, does not format with its fields, ``{url}`` or ``{payload}`` and ``{nonce_attr}``, through a stray brace or another field.
+       The check formats each with blank values, and a render uses the default tag in its place and logs it once.
+     - ``next.static.checks``
    * - ``next.E140``
      - A script names a category ``CONSENT["CATEGORIES"]`` does not list, so no visitor can grant it.
        Silent while ``next.E135`` reports the list.
@@ -883,6 +893,11 @@ Warnings
      - A ``SITEMAP_BACKENDS`` backend raises from ``sections(None)``, which the checks call without a request to compare its section names with the others, so ``next.E116`` cannot read its sections.
        The message names the dotted backend class and what it raised, and the fix is to make ``sections()`` answer without a request.
      - ``next.seo.checks.sitemaps``
+   * - ``next.W090``
+     - The client runtime ``next/next.min.js`` or a lazy chunk other than the dev one is unbuilt, so no static files finder answers it, or the static files storage, a hashing one such as ``ManifestStaticFilesStorage``, holds no entry for it.
+       A page renders without the runtime, or without the chunk, and logs it once.
+       The check carries ``deploy=True``.
+     - ``next.static.checks``
    * - ``next.W092``
      - A ``{% #consented %}`` block on a composed page, a component it reaches, or a template it includes names by a literal a category ``CONSENT["CATEGORIES"]`` does not list, so no visitor can grant it and the block always renders its ``else`` branch.
        A category named by a variable is not read, and under ``DEBUG`` a render logs such a category once.
