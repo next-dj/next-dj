@@ -3,6 +3,7 @@
 // next.dev.min.js, which the runtime fetches only for a page rendered under $dev.
 
 import { assetLoad, isPatch, isWellFormedAsset } from "./apply";
+import { readCsrf } from "./csrf";
 import {
   ATTR_KEY,
   ATTR_ZONE,
@@ -150,6 +151,16 @@ function validateAttrs(root: ParentNode): void {
     const value = attrOf(el, POLL_ATTR);
     if (pollInterval(value) === null) warnPoll(value);
     else if (el.getAttribute(ATTR_ZONE) === null) warnPollZone(value);
+  }
+}
+
+/** Warn on a $csrf payload the runtime ignored, read off the seeded context. */
+export function warnCsrf(context: Readonly<Record<string, unknown>>): void {
+  // Otherwise the only symptom is a 403 on every programmatic mutation.
+  if (context.$csrf !== undefined && readCsrf(context.$csrf) === undefined) {
+    console.warn(
+      "[next] ignored a malformed $csrf payload, unsafe requests send no header",
+    );
   }
 }
 

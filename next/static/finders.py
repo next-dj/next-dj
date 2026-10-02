@@ -29,11 +29,7 @@ from next.utils import stat_mtime_ns, template_edits_watched
 
 from .assets import StaticNamespace, default_kinds
 from .discovery import PathResolver, default_stems, find_role_files
-from .runtime import (
-    DEV_CHUNK_STATIC_PATH,
-    NEXT_JS_STATIC_PATH,
-    SCRIPTS_CHUNK_STATIC_PATH,
-)
+from .runtime import CHUNK_STATIC_PATHS, NEXT_JS_STATIC_PATH
 
 
 if TYPE_CHECKING:
@@ -109,10 +105,11 @@ _RUNTIME_BUNDLE_ROOT: Final = Path(__file__).parent
 _RUNTIME_BUNDLE_PATHS: Final = (
     NEXT_JS_STATIC_PATH,
     f"{NEXT_JS_STATIC_PATH}.map",
-    SCRIPTS_CHUNK_STATIC_PATH,
-    f"{SCRIPTS_CHUNK_STATIC_PATH}.map",
-    DEV_CHUNK_STATIC_PATH,
-    f"{DEV_CHUNK_STATIC_PATH}.map",
+    *(
+        path
+        for chunk in CHUNK_STATIC_PATHS.values()
+        for path in (chunk, f"{chunk}.map")
+    ),
 )
 
 

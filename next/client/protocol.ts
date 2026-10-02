@@ -48,6 +48,8 @@ export interface Diagnostics {
 export const ATTR_ZONE = "data-next-zone";
 export const ATTR_ACTION = "data-next-action";
 export const ATTR_KEY = "data-next-key";
+export const ATTR_SSE = "data-next-sse";
+export const ATTR_POLL = "data-next-poll";
 
 /** A partial:error, a discriminated union so a listener branches on kind. */
 export type PartialError =
@@ -145,4 +147,15 @@ export function matching(root: ParentNode, selector: string): Element[] {
   const found = Array.from(root.querySelectorAll(selector));
   if (root instanceof Element && root.matches(selector)) found.push(root);
   return found;
+}
+
+// Add a zone to the per-page batch, one comma-joined GET per owning page.
+export function addZone(
+  batches: Map<string, string[]>,
+  url: string,
+  zone: string,
+): void {
+  const zones = batches.get(url);
+  if (zones === undefined) batches.set(url, [zone]);
+  else zones.push(zone);
 }

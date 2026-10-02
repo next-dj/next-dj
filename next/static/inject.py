@@ -6,7 +6,7 @@ static manager, and owns everything that turns a collector into markup.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from django.conf import settings
 
@@ -16,6 +16,7 @@ from .assets import default_kinds
 from .collector import HEAD_CLOSE, default_placeholders
 from .nonce import resolve_nonce
 from .runtime import (
+    CHUNK_STATIC_PATHS,
     CHUNKS_PAYLOAD_KEY,
     CSRF_PAYLOAD_KEY,
     DEV_PAYLOAD_KEY,
@@ -38,6 +39,10 @@ if TYPE_CHECKING:
     from .backends import StaticBackend
     from .collector import PlaceholderSlot, StaticCollector
     from .runtime import NextScriptBuilder
+
+
+DEV_CHUNK: Final = "dev"
+"""The `$chunks` key of the diagnostics chunk, named only under `DEBUG`."""
 
 
 _RUNTIME_SLOT_NAME = "scripts"
@@ -66,12 +71,8 @@ class InjectionProvider(Protocol):
         """Return the builder holding the runtime URL and the tag templates."""
         raise NotImplementedError
 
-    def scripts_chunk_url(self) -> str:
-        """Return the URL of the optional scripts chunk the runtime fetches."""
-        raise NotImplementedError
-
-    def dev_chunk_url(self) -> str:
-        """Return the URL of the diagnostics chunk the runtime fetches under `DEBUG`."""
+    def chunk_url(self, name: str) -> str:
+        """Return the URL of the lazy chunk `$chunks` names `name`."""
         raise NotImplementedError
 
 
@@ -197,14 +198,14 @@ class PlaceholderInjector:
     ) -> tuple[dict[str, str], str]:
         """Return the `$chunks` entry and its encoding, reused while its URLs hold.
 
-        Only `DEBUG` adds the dev chunk, while a later patch may need the scripts one.
+        Only `DEBUG` adds the dev chunk, while a later patch may need any other one.
         """
         provider = self._provider
         urls = {
-            "scripts": provider.asset_url(provider.scripts_chunk_url(), request=request)
+            name: provider.asset_url(provider.chunk_url(name), request=request)
+            for name in CHUNK_STATIC_PATHS
+            if dev or name != DEV_CHUNK
         }
-        if dev:
-            urls["dev"] = provider.asset_url(provider.dev_chunk_url(), request=request)
         serializer = resolve_serializer()
         held = self._chunks
         if held is not None and held[0] == urls and held[1] is type(serializer):

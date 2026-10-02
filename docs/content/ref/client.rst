@@ -12,8 +12,11 @@ The runtime applies the patch envelopes the server authors, drives the ``data-ne
 It never invents a target or a swap strategy, so this page records what the runtime accepts rather than what it decides.
 
 The TypeScript sources live in ``next/client/`` and are not part of the installed package.
-``make build-js`` bundles ``next/client/next.ts`` with esbuild into ``next/static/next/next.min.js``, ``next/client/extras.ts`` into ``next/static/next/next.scripts.min.js``, and ``next/client/dev.ts`` into ``next/static/next/next.dev.min.js``, the three minified artefacts the wheel ships.
+``make build-js`` bundles ``next/client/next.ts`` with esbuild into ``next/static/next/next.min.js``, ``next/client/extras.ts`` into ``next/static/next/next.scripts.min.js``, ``next/client/sse-chunk.ts`` into ``next/static/next/next.sse.min.js``, ``next/client/csrf-chunk.ts`` into ``next/static/next/next.csrf.min.js``, ``next/client/poll-chunk.ts`` into ``next/static/next/next.poll.min.js``, and ``next/client/dev.ts`` into ``next/static/next/next.dev.min.js``, the six minified artefacts the wheel ships.
 The scripts chunk carries consent and third-party scripts, and the runtime fetches it only for a page that needs it, see :doc:`client-extras`.
+The sse chunk carries the stream bridge, fetched once a scan finds a ``data-next-sse`` container.
+The csrf chunk carries the fetch of a deferred CSRF token, fetched on the first need of a page that shipped only the endpoint.
+The poll chunk carries the zone poller, fetched once a scan finds a ``data-next-poll`` zone.
 The dev chunk carries the diagnostics of a ``DEBUG`` render, and a production page never fetches it.
 The wheel excludes ``next/client/`` outright, so a project never imports the TypeScript and installs no Node toolchain to serve the runtime.
 The script builder publishes the bundle under the static path ``next/next.min.js``, which the active staticfiles storage fingerprints like any other asset.
@@ -36,7 +39,7 @@ Extension.
    See :doc:`/content/topics/partial-rendering/extending` for the server half of both recipes.
 
 Internal.
-   ``Next._init`` is the bootstrap the injected inline payload calls, ``Next._register`` is the handshake the scripts chunk calls as it evaluates, and ``Next.partial._configure`` and ``Next.partial._reset`` are the harness seams the unit suite drives.
+   ``Next._init`` is the bootstrap the injected inline payload calls, ``Next._land`` is the handshake every lazy chunk calls as it evaluates, and ``Next.partial._configure`` and ``Next.partial._reset`` are the harness seams the unit suite drives.
    ``Next.partial.ready`` carries no underscore because the bootstrap calls it across a module boundary, and a page reaches for it only when it drives the runtime by hand.
    None of the five is an application entry point.
 
@@ -467,7 +470,7 @@ None of these modules is reachable from application code, so the names serve rea
    * - ``layers.ts``
      - Modal layers over the native ``<dialog>``, top-down target resolution, and the toast tray.
    * - ``triggers.ts``
-     - The delegated ``data-next-*`` handlers, lazy zone activation, the pollers, and inline validation.
+     - The delegated ``data-next-*`` handlers, lazy zone activation, the fetch of the poll chunk, and inline validation.
    * - ``sse.ts``
      - The Server-Sent Events bridge, its echo ring of own request ids, and the pause and resume on tab visibility.
    * - ``assets.ts``
@@ -479,15 +482,20 @@ None of these modules is reachable from application code, so the names serve rea
    * - ``protocol.ts``
      - The wire vocabulary shared with the server, the content type, the headers, the ``PartialError`` union, and ``pageKey``, the same-origin path and query a layer and a zone are keyed by.
    * - ``navigation.ts``
-     - The history writes held until an envelope commits, and the one ``next:navigated`` per commit.
+     - The history writes of a commit and the one ``next:navigated`` it fires, a layer's push written as it opens and announced once its body commits.
    * - ``head.ts``
      - The four URL-bound head tags a ``meta`` operation syncs and a layer snapshots and restores.
    * - ``csrf.ts``
      - The token store, the single-flight fetch of a deferred token, and the prefetch on the first focus in a form.
+       The fetch itself ships in the csrf chunk.
    * - ``chunks.ts``
-     - The core side of the scripts chunk, which fetches it on demand and answers ``Next.ready("scripts")`` once it lands.
+     - The core side of the lazy chunks, which fetches each on demand, and of the scripts chunk, which answers ``Next.ready("scripts")`` once it lands.
    * - ``extras.ts``, ``consent.ts``, ``scripts.ts``
      - The scripts chunk itself, consent and the script manifest loader.
+   * - ``poll.ts``
+     - The zone poller, its interval groups, and the pause and resume on tab visibility, shipped in the poll chunk.
+   * - ``sse-chunk.ts``, ``csrf-chunk.ts``, ``poll-chunk.ts``, ``dev.ts``
+     - The entries of the sse, csrf, poll, and dev chunks.
 
 Configuration
 -------------

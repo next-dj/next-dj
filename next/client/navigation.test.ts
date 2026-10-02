@@ -7,6 +7,7 @@ import { createNavigation } from "./navigation";
 import type { Navigation } from "./navigation";
 import { pageKey } from "./protocol";
 import { createTriggers } from "./triggers";
+import { chunkModules } from "./test-doubles";
 
 interface Dispatched {
   event: string;
@@ -293,21 +294,35 @@ describe("the commit phase", () => {
     ]);
   });
 
-  it("dropping a superseded hold leaves the newer one to commit", () => {
-    const drop = navigation.hold(
-      "/photos/2/",
-      { href: "/photos/2/", action: "push" },
-      () => undefined,
+  it("dropping a superseded hold leaves the newer one to announce", () => {
+    const committed: string[] = [];
+    const drop = navigation.hold("/photos/2/", "/photos/2/", () =>
+      committed.push("old"),
     );
-    const again = navigation.hold(
-      "/photos/2/",
-      { href: "/photos/2/", action: "push" },
-      () => undefined,
+    const again = navigation.hold("/photos/2/", "/photos/2/", () =>
+      committed.push("new"),
     );
     drop();
+    expect(location.pathname).toBe("/photos/2/");
     applier.apply(envelope([]), { page: "/photos/2/" });
-    expect(writes).toEqual([{ action: "push", href: "/photos/2/", title: "Feed" }]);
+    expect(committed).toEqual(["new"]);
     again();
+  });
+
+  it("a hold pushes at once and its drop rolls back, neither announced", () => {
+    const drop = navigation.hold("/photos/2/", "/photos/2/", () => undefined);
+    expect(location.pathname).toBe("/photos/2/");
+    drop();
+    expect(location.pathname).toBe("/feed/");
+    expect(writes.map((w) => w.action)).toEqual(["push", "replace"]);
+    expect(navigated()).toEqual([]);
+  });
+
+  it("a drop after the bar moved on leaves it where it is", () => {
+    const drop = navigation.hold("/photos/2/", "/photos/2/", () => undefined);
+    window.history.replaceState(null, "", "/elsewhere/");
+    drop();
+    expect(location.pathname).toBe("/elsewhere/");
   });
 
   it("current answers where the page stands", () => {
@@ -336,6 +351,7 @@ describe("a filter submit replaces the URL through the navigation", () => {
       fetch: () => undefined,
       abort: () => undefined,
       history: navigation.asHistory(),
+      poll: chunkModules.poll,
     });
     const detach = triggers.install(document);
     const input = document.querySelector("input")!;

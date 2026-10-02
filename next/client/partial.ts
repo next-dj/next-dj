@@ -24,20 +24,25 @@ import { createAssets } from "./assets";
 import type { LinkLoader, SessionStore } from "./assets";
 import { createTriggers } from "./triggers";
 import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
-import { createSse } from "./sse";
-import type { EventSourceAdapter, Sse, VisibilityAdapter } from "./sse";
+import type { EventSourceAdapter, Sse, SseFactory, VisibilityAdapter } from "./sse";
 import { createCsrf } from "./csrf";
-import type { Csrf } from "./csrf";
+import type { Csrf, CsrfMint } from "./csrf";
+import type { LazyModule } from "./chunks";
+import type { PollFactory } from "./poll";
 import { createNavigation } from "./navigation";
 import type { NavigationState } from "./navigation";
 import { defaultHistory, defaultNavigate } from "./adapters";
-import { currentUrl, fire, matching } from "./protocol";
+import { ATTR_SSE, currentUrl, fire, matching } from "./protocol";
 import type { Diagnostics } from "./protocol";
 
 /** The core seams the applier and the fetch layer read from. */
 export interface PartialDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   mergeContext: (data: Record<string, unknown>) => void;
+  // The stream bridge, the CSRF mint, and the poller, each held by its own lazy chunk.
+  sse: LazyModule<SseFactory>;
+  csrf: LazyModule<CsrfMint>;
+  poll: LazyModule<PollFactory>;
 }
 
 /** The injectable platform seams, each overridable by the test harness. */
@@ -83,12 +88,6 @@ export interface PartialSurface {
   _reset(): void;
 }
 
-// An absent adapter contributes no key, so the deps object never carries an
-// explicit undefined that exactOptionalPropertyTypes would reject.
-function opt<K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> {
-  return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
-}
-
 // A dev-only adapter object swaps nothing in, so it must not cost a rebuild.
 const DEV_KEYS = new Set(["dev", "diagnostics"]);
 
@@ -124,19 +123,43 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   let assets = createAssets(assetsDeps());
   let history: HistoryAdapter = defaultHistory();
   let navigate: Navigate = defaultNavigate();
-  let csrf: Csrf = createCsrf();
+  let csrf: Csrf = createCsrf({ mint: deps.csrf });
   let navigation = createNavigation(navigationDeps());
   let layers = createLayers(layerDeps());
   let triggers = createTriggers(triggerDeps());
-  let sse = createSse(sseDeps());
+  // The bridge once its chunk landed, built over the adapters configured last.
+  let bridge: Sse | undefined;
+  let sseAdapters: PartialAdapters | undefined;
+  const live = (): Sse | undefined => {
+    const factory = deps.sse.get();
+    if (bridge === undefined && factory !== undefined) {
+      bridge = factory(sseDeps(sseAdapters));
+    }
+    return bridge;
+  };
+  // A page with no stream never fetches the bridge. An id remembered before it lands
+  // answers a mutation no stream it opens was subscribed for, so none is kept.
+  const sse: Sse = {
+    scan(root) {
+      if (matching(root, `[${ATTR_SSE}]`).length === 0) return;
+      const landed = live();
+      if (landed !== undefined) landed.scan(root);
+      else void deps.sse.load().then(() => live()?.scan(root));
+    },
+    remember: (id) => bridge?.remember(id),
+    size: () => bridge?.size() ?? 0,
+    _reset: () => bridge?._reset(),
+  };
   let applier = new Applier(applyDeps());
   let wire = new Wire(wireDeps());
   let detachLayers = layers.install(document);
   let detachTriggers = triggers.install(document);
   let detachCsrf = csrf.install(document);
 
+  // Each deps object spreads the adapters first, since a module reads only the seams
+  // it names, and the runtime's own keys follow so an adapter cannot shadow them.
   function navigationDeps(adapters?: PartialAdapters) {
-    return { dispatch: deps.dispatch, history, ...opt("document", adapters?.document) };
+    return { ...adapters, dispatch: deps.dispatch, history };
   }
 
   // Every runtime event fires on the document and the bus alike. The wire, assets and
@@ -148,22 +171,14 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   }
 
   function assetsDeps(adapters?: PartialAdapters) {
-    return {
-      dispatch: announce(adapters),
-      ...opt("document", adapters?.document),
-      ...opt("clock", adapters?.clock),
-      ...opt("loadLink", adapters?.loadLink),
-      ...opt("navigate", adapters?.navigate),
-      ...opt("session", adapters?.session),
-      ...opt("cssTimeoutMs", adapters?.cssTimeoutMs),
-    };
+    return { ...adapters, dispatch: announce(adapters) };
   }
 
   function applyDeps(adapters?: PartialAdapters): ApplyDeps {
     return {
       dispatch: deps.dispatch,
       mergeContext: deps.mergeContext,
-      ...opt("document", adapters?.document),
+      ...adapters,
       dev: readDev,
       diagnostics: readDiagnostics,
       dirtySince: (snapshot) => dirty.isDirtySince(snapshot),
@@ -183,12 +198,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
 
   function layerDeps(adapters?: PartialAdapters) {
     return {
+      ...adapters,
       dispatch: deps.dispatch,
-      ...opt("document", adapters?.document),
-      ...opt("dialog", adapters?.dialog),
       // Shares the applier's navigation, whose commit writes the push a layer holds.
       navigation,
-      ...opt("popstate", adapters?.popstate),
       fetch: (request: WireRequest) => wire.fetch(request),
       abort: (key: string) => wire.abort(key),
     };
@@ -196,6 +209,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
 
   function triggerDeps(adapters?: PartialAdapters) {
     return {
+      ...adapters,
       fetch: (request: WireRequest) => void wire.fetch(request),
       abort: (key: string) => wire.abort(key),
       // The owning page of an element, so a base-page zone keeps GETting the
@@ -205,38 +219,30 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       // modal stamps the origin the server resolves its zones against.
       layerHost: (el: Element) => layers.hostFor(el),
       rewrite: (el: Element, href: string) => layers.rewrite(el, href),
-      ...opt("document", adapters?.document),
-      ...opt("clock", adapters?.clock),
-      ...opt("observer", adapters?.observer),
-      ...opt("visibility", adapters?.visibility),
-      ...opt("confirm", adapters?.confirm),
       // A filter submit syncs the address bar through the navigation, so it
       // announces like any other write and never goes behind the runtime's back.
       history: navigation.asHistory(),
       diagnostics: readDiagnostics,
+      poll: deps.poll,
     };
   }
 
   function sseDeps(adapters?: PartialAdapters) {
     return {
+      ...adapters,
       // A stream event carries no dirty snapshot, so the server value wins.
       apply: (raw: unknown, page: string) => void applier.apply(raw, { owner: page }),
       fetch: (request: WireRequest) => void wire.fetch(request),
       dispatch: announce(adapters),
       pageUrl: (el: Element) => layers.urlFor(el),
-      ...opt("document", adapters?.document),
-      ...opt("source", adapters?.source),
-      ...opt("visibility", adapters?.visibility),
     };
   }
 
   function wireDeps(adapters?: PartialAdapters) {
     return {
-      ...opt("fetch", adapters?.fetch),
-      ...opt("document", adapters?.document),
-      ...opt("navigate", adapters?.navigate),
-      // The same reload-once store the asset guard uses.
-      ...opt("session", adapters?.session),
+      // The fetch, document, navigate, and the same reload-once store the asset
+      // guard uses.
+      ...adapters,
       dispatch: announce(adapters),
       onEnvelope: (
         raw: unknown,
@@ -326,20 +332,19 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       sse._reset();
       // The token outlives the rebuild, only the fetch seam it mints through changes.
       const token = csrf.current();
-      csrf = createCsrf({
-        ...opt("fetch", adapters.fetch),
-        ...opt("document", adapters.document),
-      });
+      csrf = createCsrf({ ...adapters, mint: deps.csrf });
       csrf.set(token);
       navigation = createNavigation(navigationDeps(adapters));
       layers = createLayers(layerDeps(adapters));
       triggers = createTriggers(triggerDeps(adapters));
-      sse = createSse(sseDeps(adapters));
+      bridge = undefined;
+      sseAdapters = adapters;
       applier = new Applier(applyDeps(adapters));
       wire = new Wire(wireDeps(adapters));
-      detachLayers = layers.install(adapters.document ?? document);
-      detachTriggers = triggers.install(adapters.document ?? document);
-      detachCsrf = csrf.install(adapters.document ?? document);
+      const doc = adapters.document ?? document;
+      detachLayers = layers.install(doc);
+      detachTriggers = triggers.install(doc);
+      detachCsrf = csrf.install(doc);
     },
     _reset() {
       wire._reset();

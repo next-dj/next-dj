@@ -37,16 +37,28 @@ SCRIPTS_PLACEHOLDER = "<!-- next:scripts -->"
 CSS_URL = "https://cdn.example.com/a.css"
 JS_URL = "https://cdn.example.com/a.js"
 NEXT_JS_URL = "/static/next/next.min.js"
-CHUNKS = '"$chunks":{"scripts":"/static/next/next.scripts.min.js"}'
-DEV_CHUNKS = (
-    '"$chunks":{"scripts":"/static/next/next.scripts.min.js",'
-    '"dev":"/static/next/next.dev.min.js"}'
+LAZY_CHUNKS = (
+    '"scripts":"/static/next/next.scripts.min.js",'
+    '"sse":"/static/next/next.sse.min.js",'
+    '"csrf":"/static/next/next.csrf.min.js",'
+    '"poll":"/static/next/next.poll.min.js"'
 )
+CHUNKS = f'"$chunks":{{{LAZY_CHUNKS}}}'
+DEV_CHUNKS = f'"$chunks":{{{LAZY_CHUNKS},"dev":"/static/next/next.dev.min.js"}}'
 HASHED = {
     "next/next.min.js": "/static/next/next.min.1a2b.js",
     "next/next.scripts.min.js": "/static/next/next.scripts.min.3c4d.js",
+    "next/next.sse.min.js": "/static/next/next.sse.min.7a8b.js",
+    "next/next.csrf.min.js": "/static/next/next.csrf.min.9c0d.js",
+    "next/next.poll.min.js": "/static/next/next.poll.min.1e2f.js",
     "next/next.dev.min.js": "/static/next/next.dev.min.5e6f.js",
 }
+HASHED_CHUNKS = (
+    '"$chunks":{"scripts":"/static/next/next.scripts.min.3c4d.js",'
+    '"sse":"/static/next/next.sse.min.7a8b.js",'
+    '"csrf":"/static/next/next.csrf.min.9c0d.js",'
+    '"poll":"/static/next/next.poll.min.1e2f.js"'
+)
 COMPOSED_BACKENDS = {
     "STATIC_BACKENDS": [{"BACKEND": "tests.static.test_inject.ComposedStaticBackend"}]
 }
@@ -198,10 +210,8 @@ class TestScriptsChunkUrl:
             first = fresh_manager.inject(html, StaticCollector())
             second = fresh_manager.inject(html, StaticCollector())
         assert first == second
-        assert (
-            'Next._init({"$chunks":{"scripts":"/static/next/next.scripts.min.3c4d.js"}})'
-        ) in first
-        assert url.call_count == 2
+        assert f"Next._init({{{HASHED_CHUNKS}}}}})" in first
+        assert url.call_count == 5
 
     def test_debug_names_the_hashed_dev_chunk_too(
         self, fresh_manager: StaticManager
@@ -215,10 +225,7 @@ class TestScriptsChunkUrl:
             ),
         ):
             out = fresh_manager.inject(html, StaticCollector())
-        assert (
-            '"$chunks":{"scripts":"/static/next/next.scripts.min.3c4d.js",'
-            '"dev":"/static/next/next.dev.min.5e6f.js"}'
-        ) in out
+        assert f'{HASHED_CHUNKS},"dev":"/static/next/next.dev.min.5e6f.js"}}' in out
 
 
 class _SpacedSerializer(JsonJsContextSerializer):
@@ -273,7 +280,7 @@ class TestChunksEncoding:
             side_effect=HASHED.__getitem__,
         ):
             out = fresh_manager.inject(self.HTML, StaticCollector())
-        assert '"$chunks":{"scripts":"/static/next/next.scripts.min.3c4d.js"}' in out
+        assert f"{HASHED_CHUNKS}}}" in out
 
     def test_another_serializer_encodes_it_again(
         self, fresh_manager: StaticManager
@@ -283,7 +290,7 @@ class TestChunksEncoding:
             "next.static.inject.resolve_serializer", return_value=_SpacedSerializer()
         ):
             out = self.inject(fresh_manager)
-        assert '"$chunks":{"scripts": "/static/next/next.scripts.min.js"}' in out
+        assert '"$chunks":{"scripts": "/static/next/next.scripts.min.js", ' in out
 
 
 class TestInjectDevPayload:
@@ -682,6 +689,9 @@ class TestBackendRewritesEveryAssetUrl:
         assert asset_url.call_args_list == [
             mock.call(NEXT_JS_URL, request=mock.ANY),
             mock.call("/static/next/next.scripts.min.js", request=mock.ANY),
+            mock.call("/static/next/next.sse.min.js", request=mock.ANY),
+            mock.call("/static/next/next.csrf.min.js", request=mock.ANY),
+            mock.call("/static/next/next.poll.min.js", request=mock.ANY),
         ]
         assert f'<script src="/pfx{NEXT_JS_URL}"></script>' in out
         assert f'<link rel="preload" as="script" href="/pfx{NEXT_JS_URL}">' in out

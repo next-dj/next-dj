@@ -94,7 +94,7 @@ Every builder method takes a ``nonce`` keyword, and the three templates take ``{
    :exclude-members: csrf_payload_for
 
 The init payload reserves ``$csrf``, ``$dev``, ``$chunks``, ``$scripts``, and ``$consent`` for the framework, so an automatically injected payload drops a project key of any of these names before it reaches ``window.Next.context``.
-``$chunks`` names ``next.scripts.min.js``, the second bundle the finder serves beside ``next.min.js``, and ``$scripts`` and ``$consent`` feed it, see :doc:`client-extras`.
+``$chunks`` names ``next.scripts.min.js``, ``next.sse.min.js``, ``next.csrf.min.js``, and ``next.poll.min.js``, the chunks the finder serves beside ``next.min.js``, and ``$scripts`` and ``$consent`` feed the first, see :doc:`client-extras`.
 Under ``DEBUG`` it also names ``next.dev.min.js``, the diagnostics bundle the runtime loads only when ``$dev`` is true, so a production payload carries neither key.
 The CSRF payload and the header name are built by ``next.csrf``, see :doc:`site`.
 See :doc:`/content/topics/static-assets/js-context` for the ownership rule and the ``next.W075`` check that reports a collision.
@@ -135,11 +135,11 @@ Asset URLs themselves come from ``staticfiles_storage.url``, not from the finder
 Staticfiles asks the finder once per referenced asset, so the mapping is held rather than walked again for every lookup.
 It is rebuilt when a stem or kind registration changes which filenames count, when the page or component trees the routers report change, and, while ``DEBUG`` is true, when the mtime of any directory inside those trees moves.
 That last check is what picks up an asset added at runtime, and it is skipped when ``DEBUG`` is false, where only a reconfiguration moves what the walk finds.
-The ``next.min.js``, ``next.scripts.min.js``, and ``next.dev.min.js`` bundles and their sourcemaps sit outside that held mapping and are stat'd on each lookup, so a checkout that builds the runtime while the server runs serves it without a restart.
+The ``next.min.js``, ``next.scripts.min.js``, ``next.sse.min.js``, ``next.csrf.min.js``, ``next.poll.min.js``, and ``next.dev.min.js`` bundles and their sourcemaps sit outside that held mapping and are stat'd on each lookup, so a checkout that builds the runtime while the server runs serves it without a restart.
 
 ``NextAppDirectoriesFinder`` replaces Django's ``AppDirectoriesFinder`` in the same list.
 The framework ships its runtime bundle inside ``next/static``, which is also the ``next.static`` Python package, so the stock finder treats every framework module as an app static file and ``collectstatic`` copies them into ``STATIC_ROOT``.
-The subclass drops the framework app from the scan, and ``NextStaticFilesFinder`` serves ``next/next.min.js``, ``next/next.scripts.min.js``, ``next/next.dev.min.js``, and their sourcemaps instead.
+The subclass drops the framework app from the scan, and ``NextStaticFilesFinder`` serves ``next/next.min.js``, ``next/next.scripts.min.js``, ``next/next.sse.min.js``, ``next/next.csrf.min.js``, ``next/next.poll.min.js``, ``next/next.dev.min.js``, and their sourcemaps instead.
 A project with its own app-directories finder subclasses ``NextAppDirectoriesFinder`` rather than Django's class, and ``manage.py check`` refuses one that does not as ``next.E083``.
 
 The finder is appended to ``STATICFILES_FINDERS`` automatically by ``NextFrameworkConfig.ready`` through ``next.apps.staticfiles.install``.

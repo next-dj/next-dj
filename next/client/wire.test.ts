@@ -10,6 +10,7 @@ import {
   REQUEST_FLAG,
   currentUrl,
 } from "./protocol";
+import { chunkModules } from "./test-doubles";
 
 // Isolated per harness so the navigate-once flag never leaks through jsdom storage.
 function memorySession(): SessionStore {
@@ -707,7 +708,7 @@ describe("Wire echo request id", () => {
       navigate: () => undefined,
       dispatch: () => undefined,
       onEnvelope: () => undefined,
-      csrf: createCsrf(),
+      csrf: createCsrf({ mint: chunkModules.csrf }),
       rememberRequestId: (id) => remembered.push(id),
     });
     return { wire, remembered, calls };

@@ -60,11 +60,11 @@ interface Layer {
   titled: boolean;
   // The page key of the honest URL, absent for a layer with no body to fetch.
   pushedUrl?: string;
-  // Set once the body envelope wrote the URL, so a programmatic close replaces it.
+  // Set once the body envelope announced the URL, so a close announces its replace.
   committed: boolean;
   // The body fetch's queue, aborted on remove so a late body cannot land.
   key: string;
-  // Drops the push held for the body, so a layer closed early writes no entry.
+  // Drops the push held for the body, so a layer closed early rolls it back unannounced.
   drop?: () => void;
 }
 
@@ -82,7 +82,7 @@ export interface LayerDeps {
   abort?: (key: string) => void;
   document?: Document;
   dialog?: DialogAdapter;
-  // The address bar shared with the applier, which commits the push a layer holds.
+  // The address bar shared with the applier, which announces the push a layer holds.
   navigation: Navigation;
   // The Back-gesture seam, a popstate past the top layer's pushed URL closes it.
   popstate?: PopStateAdapter;
@@ -268,15 +268,12 @@ export function createLayers(deps: LayerDeps): LayerStack {
     const seeded = href !== undefined && zone !== undefined;
     try {
       if (seeded) {
-        // The honest URL makes the modal shareable and Back closes it. It is held for
-        // the body envelope, so a layer that never gets one leaves no entry.
+        // The honest URL makes the modal shareable, and pushed at once Back closes it
+        // even while the body loads. The body envelope announces it, and a layer that
+        // never gets one rolls it back unannounced.
         const owner = pageKey(href, doc);
         layer.pushedUrl = owner;
-        layer.drop = deps.navigation.hold(
-          owner,
-          { href, action: "push" },
-          () => (layer.committed = true),
-        );
+        layer.drop = deps.navigation.hold(owner, href, () => (layer.committed = true));
       }
       emit("partial:layer-opened", { opener });
       if (seeded) {

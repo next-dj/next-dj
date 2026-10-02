@@ -46,7 +46,8 @@ An adapter that should not count the return to the host compares ``path`` with t
 Commits
 -------
 
-The history write of a patch envelope waits for the envelope to commit, so a layer whose body never arrives, or one the visitor closes first, leaves no history entry and fires no event.
+A layer pushes its URL as it opens, so Back closes it while the body loads, but the push is announced only once the body envelope commits.
+A layer whose body never arrives, or one the visitor closes first, rolls its push back and fires no event.
 All the writes of one envelope fold into one event, in whatever order the envelope lists its ``url`` and ``meta`` operations, and the title in the event is the one the page shows.
 
 Vendor tags that watch history

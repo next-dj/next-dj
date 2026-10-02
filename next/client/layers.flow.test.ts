@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
 import type { DialogAdapter } from "./layers";
+import { chunkModules } from "./test-doubles";
 
 interface Dispatched {
   event: string;
@@ -71,6 +72,7 @@ describe("layer flow through the partial surface", () => {
     dismissers = made.dismissers;
     respond = () => envelopeResponse(zoneMorphBody("none", "<div></div>"));
     partial = createPartial({
+      ...chunkModules,
       dispatch: (event, detail) => dispatched.push({ event, detail }),
       mergeContext: () => undefined,
     });

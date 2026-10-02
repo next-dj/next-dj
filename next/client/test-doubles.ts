@@ -3,6 +3,10 @@
 
 import { vi } from "vitest";
 import type { LayerBridge } from "./apply";
+import type { LazyModule } from "./chunks";
+import { mintCsrf } from "./csrf";
+import { createPoller } from "./poll";
+import { createSse } from "./sse";
 import type { VisibilityAdapter } from "./sse";
 import type { Clock } from "./wire";
 
@@ -80,3 +84,15 @@ export function stubBridge(overrides: Partial<LayerBridge> = {}): LayerBridge {
     ...overrides,
   };
 }
+
+// A chunk module as already landed, so a suite drives the core synchronously.
+export function landed<T>(value: T): LazyModule<T> {
+  return { get: () => value, load: () => Promise.resolve(value) };
+}
+
+// The modules of the sse, csrf, and poll chunks, as createPartial takes them.
+export const chunkModules = {
+  sse: landed(createSse),
+  csrf: landed(mintCsrf),
+  poll: landed(createPoller),
+};

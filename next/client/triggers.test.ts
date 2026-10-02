@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { manualPollClock, manualVisibility } from "./test-doubles";
+import { createPoller } from "./poll";
+import type { PollFactory } from "./poll";
+import { chunkModules, manualPollClock, manualVisibility } from "./test-doubles";
 import { createTriggers } from "./triggers";
 import { createDiagnostics } from "./diagnostics";
 import type { IntersectionAdapter, TriggerDeps, Triggers } from "./triggers";
@@ -56,6 +58,7 @@ function makeTriggers(over: Partial<Parameters<typeof createTriggers>[0]> = {}):
     clock: manualClock(),
     observer: manualObserver(),
     confirm: () => true,
+    poll: chunkModules.poll,
     ...over,
   });
   return { triggers, requests, aborted };
@@ -789,6 +792,36 @@ describe("zone polling", () => {
     expect(requests[0]!.headers).toBeUndefined();
     clock.tick();
     expect(requests).toHaveLength(2);
+  });
+
+  it("fetches the poll chunk only once a scan finds a poll zone, then arms it", async () => {
+    const clock = manualPollClock();
+    let factory: PollFactory | undefined;
+    let loads = 0;
+    const { triggers, requests } = makeTriggers({
+      clock,
+      poll: {
+        get: () => factory,
+        load: async () => {
+          loads += 1;
+          factory = createPoller;
+          return factory;
+        },
+      },
+    });
+    detach = triggers.install(document);
+    document.body.innerHTML = '<div data-next-zone="t"></div>';
+    triggers.scan(document.body);
+    expect(loads).toBe(0);
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    triggers.scan(document.body);
+    expect(loads).toBe(1);
+    expect(clock.pending()).toBe(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(clock.pending()).toBe(1);
+    clock.tick();
+    expect(requests.map((r) => r.zone)).toEqual(["t"]);
   });
 
   it("batches same-interval zones into one comma-joined GET per tick", () => {
