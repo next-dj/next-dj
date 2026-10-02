@@ -9,12 +9,15 @@ from next.middleware import SharedCacheGuardMiddleware, guard_shared_cache
 from next.testing import override_next_settings
 
 
-def _response(cache_control: str | None, *, cookie: bool = True) -> HttpResponse:
+def _response(
+    cache_control: str | None, *, cookie: bool = True, cdn: bool = True
+) -> HttpResponse:
     response = HttpResponse("x")
     if cache_control is not None:
         response["Cache-Control"] = cache_control
-    response["CDN-Cache-Control"] = "max-age=600"
-    response["Surrogate-Control"] = "max-age=600"
+    if cdn:
+        response["CDN-Cache-Control"] = "max-age=600"
+        response["Surrogate-Control"] = "max-age=600"
     if cookie:
         response.set_cookie(
             "sessionid", "abc", secure=True, httponly=True, samesite="Lax"
@@ -55,15 +58,44 @@ class TestGuardSharedCache:
         assert response["Vary"] == "Cookie"
 
     @pytest.mark.parametrize(
-        ("cache_control", "cookie"),
-        [("public, max-age=60", False), ("private, max-age=60", True), (None, True)],
-        ids=["no_cookie", "private", "no_cache_control"],
+        ("before", "after"),
+        [
+            ("private, max-age=60", "private, max-age=60"),
+            (None, "private"),
+            ("max-age=600", "private, max-age=600"),
+        ],
+        ids=["private_beside_a_cdn_header", "cdn_header_alone", "bare_max_age"],
     )
-    def test_anything_else_passes_untouched(self, cache_control, cookie) -> None:
-        response = _response(cache_control, cookie=cookie)
+    def test_any_lifetime_a_shared_cache_reads_goes_private(
+        self, before, after
+    ) -> None:
+        response = _response(before, cdn=before != "max-age=600")
+        guard_shared_cache(RequestFactory().get("/"), response)
+        assert response["Cache-Control"] == after
+        assert "CDN-Cache-Control" not in response
+        assert "Surrogate-Control" not in response
+
+    def test_an_expires_header_counts_as_a_lifetime(self) -> None:
+        response = _response(None, cdn=False)
+        response["Expires"] = "Thu, 01 Jan 2099 00:00:00 GMT"
+        guard_shared_cache(RequestFactory().get("/"), response)
+        assert response["Cache-Control"] == "private"
+
+    @pytest.mark.parametrize(
+        ("cache_control", "cookie", "cdn"),
+        [
+            ("public, max-age=60", False, True),
+            ("private, max-age=60", True, False),
+            ("no-store, max-age=60", True, False),
+            (None, True, False),
+        ],
+        ids=["no_cookie", "private", "no_store", "no_lifetime"],
+    )
+    def test_anything_else_passes_untouched(self, cache_control, cookie, cdn) -> None:
+        response = _response(cache_control, cookie=cookie, cdn=cdn)
         guard_shared_cache(RequestFactory().get("/"), response)
         assert response.get("Cache-Control") == cache_control
-        assert response["CDN-Cache-Control"] == "max-age=600"
+        assert ("CDN-Cache-Control" in response) is cdn
         assert "Vary" not in response
 
     def test_each_path_is_reported_once(self, caplog) -> None:
