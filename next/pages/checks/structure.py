@@ -12,6 +12,7 @@ from django.urls.converters import get_converters
 
 from next.checks import NEXT
 from next.checks.common import (
+    WALK_HINT,
     PageRootsError,
     first_visit,
     get_page_roots,
@@ -72,7 +73,13 @@ def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
                 )
         except (AttributeError, OSError) as e:
             errors.append(
-                Error(f"Error checking router pages: {e}", obj=settings, id="next.E088")
+                Error(
+                    f"{type(router).__name__} page trees could not be walked to "
+                    f"check their structure: {e}",
+                    hint=WALK_HINT,
+                    obj=settings,
+                    id="next.E088",
+                )
             )
 
     return errors
