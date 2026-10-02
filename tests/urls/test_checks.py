@@ -13,6 +13,7 @@ from next.urls.checks import (
     _collect_url_patterns,
     check_next_pages_configuration,
     check_reverse_name_collisions,
+    check_router_manager,
     check_url_patterns,
 )
 from tests.support import (
@@ -330,16 +331,18 @@ class TestCheckReverseNameCollisions:
         assert '"next-foo_bar"' in messages[0].msg
         assert "page_foo_bar" not in messages[0].msg
 
-    def test_init_errors_returned_when_manager_missing(self) -> None:
-        """A failed manager initialisation short-circuits into its own errors."""
+    def test_init_errors_are_left_to_the_router_check(self) -> None:
+        """A failed manager initialisation skips quietly, `next.E007` reports it."""
         init_error = Error("router manager unavailable", id="next.E007")
 
         with patch(
             "next.urls.checks.get_router_manager", return_value=(None, [init_error])
         ):
             messages = check_reverse_name_collisions(None)
+            owned = check_router_manager(None)
 
-        assert messages == [init_error]
+        assert messages == []
+        assert owned == [init_error]
 
     def test_a_failing_tree_listing_leaves_the_url_checks_silent(self) -> None:
         """A router that cannot list its trees contributes none, and raises nothing.

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, Tags, register
 
-from next.checks import NEXT
+from next.checks import NEXT, SEO
 from next.checks.common import (
     errors_for_unknown_keys,
     get_page_roots,
@@ -276,12 +276,23 @@ def check_next_pages_configuration(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
+@register(Tags.urls, Tags.templates, NEXT, SEO)
+def check_router_manager(*args, **kwargs) -> list[CheckMessage]:
+    """Report a router that fails to initialise (`next.E007`), once per check run.
+
+    Every check that walks the routers skips quietly on the same failure, and this
+    one carries each tag those checks run under, so any `--tag` selection sees it.
+    """
+    _router_manager, init_errors = get_router_manager()
+    return init_errors
+
+
 @register(Tags.urls, NEXT)
 def check_url_patterns(*args, **kwargs) -> list[CheckMessage]:
     """Collect patterns from routers and flag duplicate Django path strings."""
-    router_manager, init_errors = get_router_manager()
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors
+        return []
 
     all_patterns, errors = _collect_all_patterns(router_manager)
 
@@ -300,9 +311,9 @@ def check_reverse_name_collisions(*args, **kwargs) -> list[CheckMessage]:
     """Fail when two distinct routes collapse to the same reverse URL name."""
     errors: list[CheckMessage] = []
 
-    router_manager, init_errors = get_router_manager()
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors
+        return []
 
     # Collection errors surface through check_url_patterns already, so
     # they are dropped here instead of being reported twice.

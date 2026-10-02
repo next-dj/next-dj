@@ -41,9 +41,8 @@ def check_context_reads_foreign_zone(*args, **kwargs) -> list[CheckMessage]:
     A zone request that does not name the bound zone skips the provider,
     while the reader still runs and receives `None` for the parameter.
     """
-    init_errors, pages = loaded_page_contexts()
-    warnings = list(init_errors)
-    for entry in pages:
+    warnings: list[CheckMessage] = []
+    for entry in loaded_page_contexts():
         warnings.extend(
             _foreign_zone_reads(entry.page_path, entry.url_path, entry.bindings)
         )

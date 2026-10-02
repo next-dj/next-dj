@@ -158,6 +158,7 @@ if TYPE_CHECKING:
     from next.urls.checks import (
         check_next_pages_configuration,
         check_reverse_name_collisions,
+        check_router_manager,
         check_url_patterns,
     )
 
@@ -303,6 +304,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
     "next.urls.checks": (
         "check_next_pages_configuration",
         "check_reverse_name_collisions",
+        "check_router_manager",
         "check_url_patterns",
     ),
 }
@@ -394,6 +396,7 @@ __all__ = [
     "check_reserved_js_context_keys",
     "check_reverse_name_collisions",
     "check_robots_disallow",
+    "check_router_manager",
     "check_script_categories",
     "check_script_declarations",
     "check_script_deploy",

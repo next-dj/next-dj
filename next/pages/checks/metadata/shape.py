@@ -137,9 +137,8 @@ def check_page_metadata_shape(*args, **kwargs) -> list[CheckMessage]:
 @register(Tags.templates, NEXT, SEO)
 def check_metadata_registration_files(*args, **kwargs) -> list[CheckMessage]:
     """Flag a `@page.metadata` no page render collects (`next.E106`)."""
-    init_errors, _loaded = load_routed_pages()
-    if init_errors:
-        return init_errors
+    if load_routed_pages() is None:
+        return []
     registrations = page.metadata_registrations()
     return registration_file_errors(
         _METADATA_SUBJECT,
