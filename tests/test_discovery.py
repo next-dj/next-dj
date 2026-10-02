@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
-from django.core.checks import Error
+from django.core.checks import Error, run_checks
 from django.test import override_settings
 
 from next.conf.signals import settings_reloaded
@@ -219,6 +219,15 @@ class TestRouterManagerCache:
         assert errors is second_errors
         assert errors[0].id == "next.E007"
         assert access.built == 1
+
+    def test_a_full_check_run_reports_one_failure_once(self) -> None:
+        # Every check that walks the routers skips on the same failure, so one
+        # broken router is one message however many checks would have read it.
+        reset_router_manager_cache()
+        with _counting_router_access(ImportError("boom")):
+            messages = run_checks(include_deployment_checks=True)
+
+        assert [m.id for m in messages].count("next.E007") == 1
 
 
 @contextmanager
