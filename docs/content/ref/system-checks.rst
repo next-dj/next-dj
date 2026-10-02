@@ -241,8 +241,8 @@ Errors
      - ``next.urls.checks``
    * - ``next.E007``
      - The routers ``PAGE_BACKENDS`` lists fail to initialize.
-       It is reported once per check run, under every tag the router checks carry, and each check that walks the routers skips without a message of its own.
-     - ``next.urls.checks``
+       It is reported once per check run, by ``check_router_manager`` in ``next.urls.checks`` under every tag the router checks carry, and each check that walks the routers skips without a message of its own.
+     - ``next.discovery``
    * - ``next.E008``
      - A ``[param]`` directory uses invalid parameter syntax, names a converter Django has no registration for, or names a parameter that is no Python identifier.
      - ``next.pages.checks.structure``
