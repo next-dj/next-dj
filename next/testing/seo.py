@@ -49,7 +49,7 @@ def _entry(entry: ET.Element) -> SitemapUrl:
     )
 
 
-def _response_text(response: HttpResponseBase) -> str:
+def response_text(response: HttpResponseBase) -> str:
     """Return the body of a response as text, a streamed one read to its end."""
     if getattr(response, "streaming", False):
         body = b"".join(getattr(response, "streaming_content", ()))
@@ -64,7 +64,7 @@ def parse_sitemap(response: HttpResponseBase) -> list[SitemapUrl]:
     A body that is no well-formed XML raises `ET.ParseError`, failing the test.
     """
     # A test reads the response of its own site, so the stdlib parser is fine here.
-    root = ET.fromstring(_response_text(response))  # noqa: S314
+    root = ET.fromstring(response_text(response))  # noqa: S314
     return [_entry(entry) for entry in root if _local(entry.tag) in _ENTRIES]
 
 
