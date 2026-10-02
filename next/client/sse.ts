@@ -184,6 +184,9 @@ export function createSse(deps: SseDeps): Sse {
 
   function scan(root: ParentNode): void {
     for (const el of matching(root, `[${ATTR_SSE}]`)) {
+      // A container a later patch removed, while the chunk was still loading for the
+      // scan that found it, opens no stream.
+      if (!el.isConnected) continue;
       const url = el.getAttribute(ATTR_SSE);
       if (url !== null && url !== "") openConnection(url, pageUrl(el));
     }

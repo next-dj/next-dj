@@ -172,8 +172,8 @@ The five chunks carry no budget of their own, since a page that never asks for t
 Growth past the budget calls for a lazily loaded chunk rather than a larger single file.
 The job finishes with the vitest run and its coverage thresholds.
 
-``next/client/next.ts`` is the entry point that mounts ``window.Next`` and pulls in the morph, apply, wire, layer, trigger, asset, and stream modules, and the two chunk entry points hand themselves to it when they evaluate.
-``make build-js`` runs the same esbuild passes locally, minifying each bundle into ``next/static/next/`` with a source map beside it and targeting ES2022.
+``next/client/next.ts`` is the entry point that mounts ``window.Next`` and pulls in the morph, apply, wire, layer, trigger, asset, and stream modules, and each chunk entry point hands itself to it when it evaluates.
+``make build-js`` runs the same single esbuild call locally, minifying each bundle into ``next/static/next/`` with a source map beside it and targeting ES2022.
 The map is external and the bundle carries no ``sourceMappingURL`` comment, so browser devtools load the map only when a developer points them at it, while manifest storage finds no reference to rewrite at ``collectstatic`` time.
 ``build_hooks.py`` reads all six bundles before packaging and raises on a missing one or one that carries the comment, and ``NEXT_DJ_SKIP_JS_BUILD=1`` skips the npm run and packages the bundle already on disk.
 The compiled files are build products rather than tracked source files, and the packaging configuration lists them as build artefacts so a distribution carries them.

@@ -126,9 +126,14 @@ export function fire(
   dispatch(event, detail);
 }
 
-/** The bootstrap nonce, read at module evaluation since currentScript is null later. */
+/**
+ * The bootstrap nonce, read at module evaluation since currentScript is null later.
+ *
+ * A module runtime has no currentScript either, so it takes the nonce of the first
+ * nonced script, which a policy issuing one nonce per response shares with it.
+ */
 export function scriptNonce(doc: Document): string | undefined {
-  const current = doc.currentScript;
+  const current = doc.currentScript ?? doc.querySelector("script[nonce]");
   const value = current instanceof HTMLElement ? current.nonce : "";
   return value === "" ? undefined : value;
 }

@@ -9,6 +9,8 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 
 _SOURCEMAP_REFERENCE = "//# sourceMappingURL="
+# The outputs of `npm run build:next`, held to every other list of the chunks by
+# tests/static/test_chunk_sync.py.
 _BUNDLES = (
     "next.min.js",
     "next.scripts.min.js",

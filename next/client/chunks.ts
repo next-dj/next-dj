@@ -11,6 +11,10 @@ import type { Scripts } from "./scripts";
 // The payload keys that need the chunk on this page.
 const CHUNK_KEYS = ["$scripts", "$consent"];
 
+// How long a chunk fetch may stall before it counts as failed, so a hung request
+// cannot hold Next.ready, a deferred CSRF mint, or a stream open for good.
+export const CHUNK_TIMEOUT = 15e3;
+
 /** What the core lends the chunk. */
 export interface ExtrasHost {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
@@ -80,7 +84,8 @@ export interface Lazy<T> extends LazyModule<T> {
  * The URL is the `$chunks` key of the seeded payload, or next.<key>.min.js beside the
  * runtime. The payload key wins, since a hashed storage renames the runtime but not
  * the sibling. An unaddressable or failed fetch answers undefined, and a failed one
- * is fetched again on the next need. A file that loads without landing has failed.
+ * is fetched again on the next need. A file that loads without landing has failed,
+ * and so has one that has not landed within CHUNK_TIMEOUT.
  */
 export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
   const doc = deps.document ?? document;
@@ -103,6 +108,8 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
       const el = doc.createElement("script");
       if (deps.nonce !== undefined) el.nonce = deps.nonce;
       const fail = (): void => {
+        // A landed chunk, or an attempt already failed, has nothing left to fail.
+        if (value !== undefined || !el.isConnected) return;
         // A retry appends its own tag, so the failed one leaves rather than piling up.
         el.remove();
         pending = undefined;
@@ -115,11 +122,10 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
       };
       el.onerror = fail;
       // A file that ran without handing its module over fails too, or the need hangs.
-      el.onload = () => {
-        if (value === undefined) fail();
-      };
+      el.onload = fail;
       el.src = url;
       doc.head.append(el);
+      setTimeout(fail, CHUNK_TIMEOUT);
       pending = new Promise((resolve) => (settle = resolve));
       return pending;
     },
@@ -136,11 +142,13 @@ export function createExtras(
   chunk: LazyModule<ExtrasFactory>,
 ): ExtrasLoader {
   let extras: Extras | undefined;
-  let context: Record<string, unknown> | undefined;
+  // Set by the first init, from when the latest payload lives in deps.context.
+  let seeded = false;
   // The ready calls made before init, which fetches for them once the payload is known.
   const early: ((landing: Promise<ScriptsChunk>) => void)[] = [];
 
-  async function land(seed: Record<string, unknown>): Promise<ScriptsChunk> {
+  // Called only once init has stored a payload, the latest of which seeds the chunk.
+  async function land(): Promise<ScriptsChunk> {
     // A landed chunk builds at once, so its surfaces exist as the payload seeds them.
     const factory = chunk.get() ?? (await chunk.load());
     if (factory === undefined)
@@ -149,21 +157,22 @@ export function createExtras(
     if (extras === undefined) {
       extras = factory(deps);
       deps.install(extras);
-      extras.configure(seed);
+      // The payload read after the await, since init may have replaced it meanwhile.
+      extras.configure(deps.context());
     }
     return extras;
   }
 
   return {
     ready() {
-      if (context !== undefined) return land(context);
+      if (seeded) return land();
       return new Promise((resolve) => early.push(resolve));
     },
     init(next) {
-      context = next;
+      seeded = true;
       if (extras !== undefined) extras.configure(next);
       else if (early.length > 0 || CHUNK_KEYS.some((key) => next[key] !== undefined)) {
-        const landing = land(next);
+        const landing = land();
         // A failure nobody awaits is already reported as an asset error.
         landing.catch(() => undefined);
         for (const resolve of early.splice(0)) resolve(landing);

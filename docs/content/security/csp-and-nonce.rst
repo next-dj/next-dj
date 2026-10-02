@@ -53,7 +53,7 @@ A custom template without ``{nonce_attr}`` renders a tag the policy refuses whil
 The runtime carries it on
 -------------------------
 
-The runtime remembers the nonce of the script that bootstrapped it, read from ``document.currentScript.nonce``, and copies it onto every element it injects for a co-located asset delta, a script, a module, a ``<link rel="stylesheet">``, and an inline ``<style>`` alike, and onto the scripts chunk and, under ``DEBUG``, the dev chunk it fetches.
+The runtime remembers the nonce of the script that bootstrapped it, read from ``document.currentScript.nonce``, or, for a ``type="module"`` runtime that has no ``currentScript``, from the first ``<script nonce>`` in the document, and copies it onto every element it injects for a co-located asset delta, a script, a module, a ``<link rel="stylesheet">``, and an inline ``<style>`` alike, and onto the scripts chunk and, under ``DEBUG``, the dev chunk it fetches.
 The nonce is the only attribute the runtime carries over from the page.
 An element it builds for a patch-inserted asset takes a fixed attribute set, so an ``integrity`` or ``crossorigin`` attribute a backend writes into its tag templates reaches the browser on a full render alone, see :doc:`/content/topics/partial-rendering/limitations`.
 
