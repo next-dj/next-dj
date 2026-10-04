@@ -32,7 +32,7 @@ This policy applies to the **next.dj** library and its documented usage with sup
 
 ## Safe Harbor
 
-We appreciate responsible disclosure. If you act in good faith—avoiding privacy violations, destruction of data, or interruption of service—we will not pursue legal action for research that follows this policy.
+We appreciate responsible disclosure. If you act in good faith, avoiding privacy violations, destruction of data, or interruption of service, we will not pursue legal action for research that follows this policy.
 
 ---
 

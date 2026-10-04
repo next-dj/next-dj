@@ -42,7 +42,7 @@ class TestURLPatternParser:
     def test_parse_url_pattern_variations(
         self, url_parser, url_pattern, expected_pattern, expected_params
     ) -> None:
-        """Each bracket form maps to its Django converter and a normalised parameter name."""
+        """Each bracket form maps to its Django converter and a normalised name."""
         pattern, params = url_parser.parse_url_pattern(url_pattern)
         assert pattern == expected_pattern
         assert params == expected_params
@@ -155,7 +155,7 @@ class TestURLPatternParser:
         assert ":" not in clean_name
 
     def test_scan_pages_directory_virtual_view_detection(self, tmp_path) -> None:
-        """A directory holding only ``template.djx`` routes to a synthesised ``page.py``."""
+        """A lone ``template.djx`` routes to a synthesised ``page.py``."""
         backend = file_router()
 
         virtual_dir = tmp_path / "virtual"

@@ -2,6 +2,10 @@ from notes.models import Note
 from notes.providers import DTenant
 
 from next import context
+from next.pages import MetadataDict
+
+
+metadata: MetadataDict = {"title": "Notes"}
 
 
 @context("notes")

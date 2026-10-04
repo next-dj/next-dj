@@ -252,13 +252,25 @@ class PollProvider(RegisteredParameterProvider):
 
 `static_can_handle` reads the verdict off the annotation, so the plan compiler hands the parameter to `PollProvider` once per callable rather than polling every provider on each request, and `compile_resolve` unpacks the model out of `DPoll[Poll]` once per plan so a vote pays for the query alone. Both the filler and `resolve` call `_by_url_or_post`, so the two paths cannot drift apart.
 
-Page and component modules that use `DPoll[Poll]` never start with `from __future__ import annotations` and import both names at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate — a marker or a model imported only under `if TYPE_CHECKING` — drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
+Page and component modules that use `DPoll[Poll]` never start with `from __future__ import annotations` and import both names at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate, such as a marker or a model imported only under `if TYPE_CHECKING`, drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
 
 ### 9. Two composites at two scopes
 
 `poll_card` is the index list composite. It has no `component.py` and no Vue, only markup and a stylesheet, and it sits in `polls/_widgets/` at the section root because the index template is what renders it. `poll_chart` is the detail composite that owns the Vue layer, and it sits in `polls/[int:id]/_widgets/` because only the poll page renders it.
 
 Component visibility follows the directory tree. A component is in scope for every template at or below its scope root, so the detail template can call `poll_card` but the index template cannot call `poll_chart`. Placing a composite at the narrowest scope that uses it keeps the name from leaking into pages that have no data to feed it.
+
+### 10. A vote tab titled after its question
+
+[`studio/layout.djx`](studio/layout.djx) calls the shared `page_head` component without a title, and the builtin `{% metadata %}` tag inside it folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with what the page tree declares. [`polls/page.py`](polls/screens/polls/page.py) titles the index with the one-line `metadata: MetadataDict = {"title": "Polls"}`, and [`[int:id]/page.py`](polls/screens/polls/[int:id]/page.py) registers a callable beside the `poll` context of section 7:
+
+```python
+@page.metadata
+def poll_meta(poll: Poll) -> MetadataDict:
+    return {"title": poll.question}
+```
+
+The parameter is named after the context key, so the callable receives the row that context resolved through `DPoll[Poll]` and the tab reads `Tabs or spaces? · next.dj polls`. The index dict still reaches the vote page as a parent, and the callable's title overrides it. The bare root is a redirect and the stream endpoint hands its response back verbatim from `render()`, so neither renders a head. Every poll is public, so no page carries a robots directive. One parametrized integration test pins both titles.
 
 ## Gotchas
 
@@ -272,15 +284,16 @@ Vite hashes the filenames it builds, so the asset URLs need no `v` parameter and
 
 ## Further reading
 
-- [`polls/apps.py`](polls/apps.py) — `PollsConfig.ready()` with the two registry calls.
-- [`polls/signals.py`](polls/signals.py) — `broadcast_vote` receiver plus the dev-mode Vite injector.
-- [`polls/broker.py`](polls/broker.py) — `PollBroker`, `Snapshot`, and the `Change` value object.
-- [`polls/backends.py`](polls/backends.py) — `ViteManifestBackend` dev/prod URL routing.
-- [`polls/screens/polls/[int:id]/stream/page.py`](polls/screens/polls/[int:id]/stream/page.py) — the `PatchEventStream` page module.
-- [`polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue`](polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue) — the chart Vue SFC.
-- [`next/partial/sse.py`](../../next/partial/sse.py) — `PatchEventStream`, the politeness headers, and the heartbeat contract.
-- [`next/partial/patches.py`](../../next/partial/patches.py) — the `Patches` builder and the `refresh` verb.
-- [`next/forms/signals.py`](../../next/forms/signals.py) — `action_dispatched` payload contract used by the receiver.
-- [`next/static/signals.py`](../../next/static/signals.py) — `collector_finalized` signal that drives the Vite dev preamble.
-- [`next/components/context.py`](../../next/components/context.py) — `@component.context` and the `serialize=True` flag.
-- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.W074` for a kind with no insertion verb.
+- [`polls/apps.py`](polls/apps.py): `PollsConfig.ready()` with the two registry calls.
+- [`polls/signals.py`](polls/signals.py): `broadcast_vote` receiver plus the dev-mode Vite injector.
+- [`polls/broker.py`](polls/broker.py): `PollBroker`, `Snapshot`, and the `Change` value object.
+- [`polls/backends.py`](polls/backends.py): `ViteManifestBackend` dev/prod URL routing.
+- [`polls/screens/polls/[int:id]/stream/page.py`](polls/screens/polls/[int:id]/stream/page.py): the `PatchEventStream` page module.
+- [`polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue`](polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue): the chart Vue SFC.
+- [`next/partial/sse.py`](../../next/partial/sse.py): `PatchEventStream`, the politeness headers, and the heartbeat contract.
+- [`next/partial/patches.py`](../../next/partial/patches.py): the `Patches` builder and the `refresh` verb.
+- [`next/forms/signals.py`](../../next/forms/signals.py): `action_dispatched` payload contract used by the receiver.
+- [`next/static/signals.py`](../../next/static/signals.py): `collector_finalized` signal that drives the Vite dev preamble.
+- [`next/components/context.py`](../../next/components/context.py): `@component.context` and the `serialize=True` flag.
+- [`next/pages/metadata/`](../../next/pages/metadata/): the metadata chain behind the index dict and the `@page.metadata` callable of section 10.
+- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst): `next.W074` for a kind with no insertion verb.

@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Final
 
 from .frozen import freeze
+from .sentinels import UNSET
 
 
 if TYPE_CHECKING:
@@ -26,10 +27,13 @@ LIST_KEYS: Final[frozenset[str]] = frozenset(
         "FORM_ANCHOR_FILES",
     }
 )
-DICT_KEYS: Final[frozenset[str]] = frozenset({"NEXT_JS_OPTIONS", "FORM_WIZARD_BACKEND"})
+DICT_KEYS: Final[frozenset[str]] = frozenset(
+    {"NEXT_JS_OPTIONS", "FORM_WIZARD_BACKEND", "METADATA", "SITE", "SEO", "CONSENT"}
+)
 STR_KEYS: Final[frozenset[str]] = frozenset(
     {
         "COMPONENT_TEMPLATE_LOADER",
+        "CSRF_DELIVERY",
         "DEPENDENCY_RESOLVER",
         "URL_NAME_TEMPLATE",
         "URL_RESOLVER",
@@ -45,11 +49,9 @@ BOOL_KEYS: Final[frozenset[str]] = frozenset(
         "LAZY_COMPONENT_MODULES",
         "FORM_AUTODISCOVER",
         "STATIC_DISCOVERY_CACHE",
+        "CSP_NONCE",
     }
 )
-
-# Distinguishes "the key holds None" from "the merge keeps the default".
-UNSET: Final[object] = object()
 
 
 def accepted_value(key: str, raw: object) -> object:

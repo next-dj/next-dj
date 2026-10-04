@@ -19,7 +19,7 @@ def _envelope_response(
 ) -> PatchResponse:
     """Serialise the builder's envelope into a partial response.
 
-    A rotated CSRF token is stamped here so every outcome carries it, not just validate.
+    A rotated CSRF token is stamped here so every outcome carries it, not only validate.
     """
     if request is not None and rotated:
         _stamp_csrf(request, patches, rotated=rotated)

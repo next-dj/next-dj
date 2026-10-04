@@ -65,7 +65,7 @@ def drain_messages(request: "HttpRequest", patches: Patches) -> Patches:
     """Drain pending contrib.messages into toast patches.
 
     Iterating `get_messages` marks the messages read, so a later full navigation does
-    not replay them. The success message of an action becomes a toast for free.
+    not replay them. The success message of an action becomes a toast without code.
     """
     for message in get_messages(request):
         variant = _MESSAGE_VARIANTS.get(message.level_tag, "info")
@@ -82,7 +82,7 @@ def _shape_invalid(
 ) -> HttpResponse:
     """Shape an invalid submission as a patch addressing only the failed form.
 
-    A named zone re-renders just that zone with the bound form in overrides. Without
+    A named zone re-renders only that zone with the bound form in overrides. Without
     one, the patch carries `extract: true` so the client trims the failed form by uid.
     """
     patches = Patches(request)

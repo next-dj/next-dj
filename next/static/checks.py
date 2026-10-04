@@ -1,34 +1,44 @@
-"""System checks for the static subsystem.
-
-The ids are `next.E036` to `next.E038`, `next.E092`, `next.E093` and `next.W030`,
-`next.W031` for `STATIC_BACKENDS`, `next.W042` and `next.W079` to `next.W082` for the
-JS context serializer, `next.E083` for a finder that publishes the framework package,
-and `next.W074` to `next.W076` for asset kinds and context keys.
-"""
+"""System checks for the static subsystem."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import inspect
+from typing import TYPE_CHECKING, Any, Final
 
 from django.conf import settings
+from django.contrib.staticfiles import finders
 from django.contrib.staticfiles.finders import AppDirectoriesFinder
+from django.contrib.staticfiles.storage import staticfiles_storage
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
 from next.checks import NEXT
 from next.checks.common import import_backend_class
 from next.components.sources import iter_serialized_component_context_keys
 from next.conf import import_class_cached, next_framework_settings
+from next.pages.checks.responses import private_pages_warning
 from next.pages.scan import iter_serialized_page_context_keys
 
 from .assets import default_kinds
-from .backends import StaticBackend
+from .backends import DEFAULT_STATIC_BACKEND, StaticBackend, StaticFilesBackend
 from .finders import NextAppDirectoriesFinder
-from .scripts import RESERVED_PAYLOAD_KEYS
+from .nonce import nonce_active
+from .runtime import (
+    CHUNK_STATIC_PATHS,
+    DEV_CHUNK_KEY,
+    INIT_FIELDS,
+    NEXT_JS_STATIC_PATH,
+    RESERVED_PAYLOAD_KEYS,
+    TAG_FIELDS,
+    TEMPLATE_ERRORS,
+    NextScriptBuilder,
+    ScriptInjectionPolicy,
+    dry_run_template,
+)
 from .serializers import JsContextSerializer
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
     from pathlib import Path
 
 
@@ -64,7 +74,7 @@ def _check_single_backend(
             )
         )
         return messages
-    backend_path = config.get("BACKEND", "next.static.StaticFilesBackend")
+    backend_path = config.get("BACKEND", DEFAULT_STATIC_BACKEND)
     if not isinstance(backend_path, str):
         messages.append(
             Error(
@@ -127,7 +137,7 @@ def check_static_backends(**kwargs) -> list[CheckMessage]:
         messages.append(
             DjangoWarning(
                 "NEXT_FRAMEWORK['STATIC_BACKENDS'] is empty. The "
-                "framework falls back to next.static.StaticFilesBackend.",
+                f"framework falls back to {DEFAULT_STATIC_BACKEND}.",
                 obj=settings,
                 id="next.W030",
             )
@@ -155,6 +165,86 @@ def check_asset_kinds_are_loadable(*args, **kwargs) -> list[CheckMessage]:
         )
         for kind in default_kinds.kinds()
         if default_kinds.load(kind) is None
+    ]
+
+
+_RENDER_KEYWORDS: Final = frozenset({"request", "nonce"})
+_NAMED: Final = frozenset(
+    {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
+)
+
+
+def _rendering_backend() -> tuple[str, type[StaticBackend]]:
+    """Return the backend every render takes its tags from, the first one that loads."""
+    configs = next_framework_settings.STATIC_BACKENDS
+    for config in configs if isinstance(configs, list) else ():
+        if not isinstance(config, dict):
+            continue
+        path = config.get("BACKEND", DEFAULT_STATIC_BACKEND)
+        if not isinstance(path, str):
+            continue
+        try:
+            backend = import_class_cached(path)
+        except ImportError:
+            continue
+        if isinstance(backend, type) and issubclass(backend, StaticBackend):
+            return path, backend
+    return DEFAULT_STATIC_BACKEND, StaticFilesBackend
+
+
+def _missing_render_keywords(method: Callable[..., object]) -> frozenset[str]:
+    """Return the render keywords a renderer cannot accept, empty when it takes both.
+
+    Every render passes `request`, and a render whose request carries a nonce passes
+    `nonce` too.
+    """
+    try:
+        parameters = inspect.signature(method).parameters.values()
+    except (TypeError, ValueError):
+        return frozenset()
+    if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters):
+        return frozenset()
+    named = {param.name for param in parameters if param.kind in _NAMED}
+    return _RENDER_KEYWORDS - named
+
+
+def _renderer_problem(backend: type[StaticBackend], name: str) -> str | None:
+    """Return why renderer `name` fails a render, `None` when no render fails."""
+    method = getattr(backend, name, None)
+    if not callable(method):
+        return (
+            f"has no {name} method, so every page holding such an asset fails to render"
+        )
+    missing = _missing_render_keywords(method)
+    if "request" in missing:
+        return (
+            f"defines {name} without the request keyword, so every page holding "
+            "such an asset fails to render"
+        )
+    if missing:
+        return (
+            f"defines {name} without the nonce keyword, so a page holding such an "
+            "asset fails to render whenever its request carries a CSP nonce"
+        )
+    return None
+
+
+@register(NEXT)
+def check_asset_renderers(*args, **kwargs) -> list[CheckMessage]:
+    """Report a kind whose renderer the rendering backend cannot call (`next.E147`)."""
+    path, backend = _rendering_backend()
+    return [
+        Error(
+            f"Asset kind {kind!r} renders through {path}, which {problem}.",
+            hint=(
+                "Define the renderer as (self, url, *, request=None, nonce=None) and "
+                "give the tag it returns a nonce attribute whenever nonce is set."
+            ),
+            obj=settings,
+            id="next.E147",
+        )
+        for kind in default_kinds.kinds()
+        if (problem := _renderer_problem(backend, default_kinds.renderer(kind)))
     ]
 
 
@@ -284,7 +374,7 @@ def _js_context_serializer_instance_message(path: str) -> CheckMessage | None:
 
 
 def _publishes_framework_package(path: object) -> bool:
-    """Whether a configured finder walks app static dirs without skipping our own."""
+    """Return whether a finder walks app static dirs without skipping this package."""
     if not isinstance(path, str):
         return False
     try:
@@ -303,7 +393,7 @@ def check_app_directories_finder(*args, **kwargs) -> list[CheckMessage]:
     """Refuse an app-directories finder that publishes the framework package.
 
     An error rather than a warning, because a warning leaves `collectstatic` free to
-    copy the framework's own sources into a directory the web server hands out.
+    copy the framework's own sources into a directory the web server serves.
     """
     return [
         Error(
@@ -319,4 +409,146 @@ def check_app_directories_finder(*args, **kwargs) -> list[CheckMessage]:
         )
         for path in getattr(settings, "STATICFILES_FINDERS", [])
         if _publishes_framework_package(path)
+    ]
+
+
+_RUNTIME_TEMPLATES: Final = ("preload_template", "script_tag_template", "init_template")
+_BACKEND_TEMPLATES: Final = ("css_tag", "js_tag", "module_tag")
+
+
+def _templates() -> Iterable[tuple[str, object]]:
+    """Yield every configured tag template with the setting that holds it."""
+    options = next_framework_settings.NEXT_JS_OPTIONS
+    if isinstance(options, dict):
+        for key in _RUNTIME_TEMPLATES:
+            yield f"NEXT_JS_OPTIONS[{key!r}]", options.get(key)
+    configs = next_framework_settings.STATIC_BACKENDS
+    for index, config in enumerate(configs if isinstance(configs, list) else ()):
+        opts = config.get("OPTIONS") if isinstance(config, dict) else None
+        if isinstance(opts, dict):
+            for key in _BACKEND_TEMPLATES:
+                yield f"STATIC_BACKENDS[{index}]['OPTIONS'][{key!r}]", opts.get(key)
+
+
+@register(NEXT)
+def check_nonce_templates(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about a custom tag template with no `{nonce_attr}` (`next.W117`)."""
+    if not nonce_active():
+        return []
+    return [
+        DjangoWarning(
+            f"{where} holds no {{nonce_attr}} placeholder while a CSP nonce is "
+            "active, so the tag it renders is refused by the policy. Add "
+            "{nonce_attr} where the attributes go.",
+            obj=settings,
+            id="next.W117",
+        )
+        for where, template in _templates()
+        if isinstance(template, str) and template and "{nonce_attr}" not in template
+    ]
+
+
+@register(NEXT)
+def check_nonce_on_shared_pages(*args, **kwargs) -> list[CheckMessage]:
+    """Warn that an active CSP nonce makes shared-cache pages private (`next.W120`)."""
+    if not nonce_active():
+        return []
+    return private_pages_warning(
+        "a CSP nonce is active and a nonce belongs to one visitor. Set "
+        "NEXT_FRAMEWORK['CSP_NONCE'] to False and allow the scripts by hash or "
+        "source, or drop the shared cache.",
+        "next.W120",
+    )
+
+
+@register(NEXT)
+def check_script_policy(*args, **kwargs) -> list[CheckMessage]:
+    """Require `NEXT_JS_OPTIONS["policy"]` to name an injection policy (`next.E130`).
+
+    The builder reads it the way a render does, so the two cannot disagree.
+    """
+    options = next_framework_settings.NEXT_JS_OPTIONS
+    if not isinstance(options, dict):
+        return []
+    policy = options.get("policy", ScriptInjectionPolicy.AUTO)
+    try:
+        NextScriptBuilder.from_options("", {"policy": policy})
+    except ValueError:
+        allowed = ", ".join(repr(member.value) for member in ScriptInjectionPolicy)
+        return [
+            Error(
+                f"NEXT_JS_OPTIONS['policy'] is {policy!r}, which names no injection "
+                f"policy, so pages inject the runtime as under 'auto'. Write one of "
+                f"{allowed}.",
+                obj=settings,
+                id="next.E130",
+            )
+        ]
+    return []
+
+
+def _template_fields(where: str) -> tuple[str, ...]:
+    return INIT_FIELDS if "init_template" in where else TAG_FIELDS
+
+
+@register(NEXT)
+def check_tag_templates_format(*args, **kwargs) -> list[CheckMessage]:
+    """Require every custom tag template to format with its fields (`next.E139`)."""
+    errors: list[CheckMessage] = []
+    for where, template in _templates():
+        if not isinstance(template, str) or not template:
+            continue
+        fields = _template_fields(where)
+        try:
+            dry_run_template(template, fields)
+        except TEMPLATE_ERRORS as exc:
+            listed = ", ".join(f"{{{name}}}" for name in fields)
+            errors.append(
+                Error(
+                    f"{where} is {template!r}, which does not format with {listed} "
+                    f"({type(exc).__name__}: {exc}), so the default tag renders "
+                    "instead.",
+                    hint="Double every literal brace as {{ or }} and name no other "
+                    "field.",
+                    obj=settings,
+                    id="next.E139",
+                )
+            )
+    return errors
+
+
+_DEPLOYED_BUNDLES: Final = (
+    NEXT_JS_STATIC_PATH,
+    *(path for key, path in CHUNK_STATIC_PATHS.items() if key != DEV_CHUNK_KEY),
+)
+"""The runtime bundles a production page may load, the dev chunk left out."""
+
+
+def _bundle_problem(path: str) -> str | None:
+    """Return why the storage cannot serve a runtime bundle, `None` when it can."""
+    if not finders.find(path):
+        return "no static files finder answers it, so the client runtime is unbuilt"
+    try:
+        staticfiles_storage.url(path)
+    except ValueError:
+        return "the static files storage holds no entry for it"
+    return None
+
+
+@register(NEXT, deploy=True)
+def check_runtime_bundles_deployed(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about a runtime bundle the deployed storage cannot serve (`next.W090`)."""
+    return [
+        DjangoWarning(
+            f"{path}: {problem}. Pages render without the runtime, or without the "
+            "feature the chunk carries.",
+            hint=(
+                "Build the client runtime (npm run build:next in a source checkout) "
+                "and run manage.py collectstatic."
+            ),
+            obj=settings,
+            id="next.W090",
+        )
+        for path in _DEPLOYED_BUNDLES
+        if (problem := _bundle_problem(path)) is not None
     ]

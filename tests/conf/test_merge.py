@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from typing import Any
 
 import pytest
 from django.test import override_settings
+from django.utils.functional import Promise
+from django.utils.translation import gettext_lazy
 from pytest_lazy_fixtures import lf
 
+from next import utils
 from next.conf import next_framework_settings
 from next.conf.frozen import FrozenDict, FrozenList
 from next.conf.merge import (
@@ -18,7 +23,9 @@ from next.conf.merge import (
     accepted_value,
     merge_user_settings,
 )
+from next.conf.sentinels import Unset
 from next.conf.settings import NextFrameworkSettings
+from tests.django_setup import PROJECT_ROOT
 
 
 DEFAULTS: dict[str, Any] = NextFrameworkSettings.DEFAULTS
@@ -47,8 +54,11 @@ class TestAcceptedValue:
             pytest.param("URL_RESOLVER", "myapp.Resolver", id="str"),
             pytest.param("PAGE_BACKENDS", [{"BACKEND": "myapp.Router"}], id="list"),
             pytest.param("NEXT_JS_OPTIONS", {"policy": "disabled"}, id="dict"),
+            pytest.param("METADATA", {"CANONICAL_QUERY": ["page"]}, id="metadata_dict"),
+            pytest.param("SITE", {"URL": "https://acme.example"}, id="site_dict"),
             pytest.param("JS_CONTEXT_SERIALIZER", "myapp.dumps", id="optional_str"),
             pytest.param("JS_CONTEXT_SERIALIZER", None, id="optional_none"),
+            pytest.param("CSP_NONCE", False, id="nonce_off"),
         ],
     )
     def test_usable_value_is_taken(self, key: str, raw: object) -> None:
@@ -60,6 +70,8 @@ class TestAcceptedValue:
             pytest.param("URL_RESOLVER", 42, id="str"),
             pytest.param("PAGE_BACKENDS", "myapp.Router", id="list"),
             pytest.param("NEXT_JS_OPTIONS", [], id="dict"),
+            pytest.param("METADATA", [], id="metadata_list"),
+            pytest.param("SITE", "https://acme.example", id="site_str"),
             pytest.param("JS_CONTEXT_SERIALIZER", 42, id="optional_str"),
         ],
     )
@@ -69,6 +81,14 @@ class TestAcceptedValue:
     @pytest.mark.parametrize("raw", ["False", 0, [], None], ids=str)
     def test_bool_key_is_coerced_rather_than_refused(self, raw: object) -> None:
         assert accepted_value("STRICT_LOADING", raw) is bool(raw)
+
+    def test_metadata_defaults_freeze_with_their_lazy_text_intact(self) -> None:
+        """A `gettext_lazy` proxy deep-copies to itself, so the freeze keeps it lazy."""
+        site_name = gettext_lazy("Yes")
+        merged = accepted_value("METADATA", {"DEFAULTS": {"site_name": site_name}})
+        assert isinstance(merged, FrozenDict)
+        assert isinstance(merged["DEFAULTS"], FrozenDict)
+        assert isinstance(merged["DEFAULTS"]["site_name"], Promise)
 
     def test_key_outside_every_shape_is_unset(self) -> None:
         """A third-party key added to `DEFAULTS` keeps the default it declared."""
@@ -147,8 +167,37 @@ class TestReplacementIsWhole:
         assert merged[key] == user_value
 
     def test_wizard_backend_keeps_no_default_backend_path(self) -> None:
-        """The one key whose merge used to fill `BACKEND` in now replaces whole."""
+        """A user `FORM_WIZARD_BACKEND` replaces the default whole, `BACKEND` included."""
         merged = merge_user_settings(
             DEFAULTS, {"FORM_WIZARD_BACKEND": {"OPTIONS": {"TIMEOUT": 60}}}
         )
         assert "BACKEND" not in merged["FORM_WIZARD_BACKEND"]
+
+
+class TestSentinelHome:
+    """The configuration layer defines the sentinel and imports no area helper."""
+
+    def test_the_utils_sentinel_is_the_configuration_one(self) -> None:
+        assert utils.UNSET is UNSET
+        assert utils.Unset is Unset
+
+    def test_the_merge_imports_no_framework_helper(self) -> None:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys\n"
+                    "from django.conf import settings\n"
+                    "from tests.django_setup import build_test_settings\n"
+                    "settings.configure(**build_test_settings())\n"
+                    "import next.conf.merge\n"
+                    "print('next.utils' in sys.modules)\n"
+                ),
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert completed.stdout.strip() == "False"

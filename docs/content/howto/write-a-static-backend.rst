@@ -35,15 +35,15 @@ Bake the attributes into the tag format strings.
            {
                "BACKEND": "next.static.StaticFilesBackend",
                "OPTIONS": {
-                   "css_tag": '<link rel="stylesheet" href="{url}" crossorigin>',
-                   "js_tag": '<script src="{url}" defer crossorigin></script>',
-                   "module_tag": '<script type="module" src="{url}" crossorigin></script>',
+                   "css_tag": '<link rel="stylesheet" href="{url}" crossorigin{nonce_attr}>',
+                   "js_tag": '<script src="{url}" defer crossorigin{nonce_attr}></script>',
+                   "module_tag": '<script type="module" src="{url}" crossorigin{nonce_attr}></script>',
                },
            }
        ]
    }
 
-The format string must contain the ``{url}`` placeholder.
+The format string must contain the ``{url}`` placeholder, and ``{nonce_attr}`` carries the CSP nonce of the request where the attributes go.
 
 Subclass for URL rewriting
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -65,6 +65,7 @@ When the URL itself must change per request, subclass ``StaticFilesBackend`` and
 ``asset_url`` receives the URL and an optional ``request`` keyword.
 One override covers ``.css``, ``.js``, and ``.mjs`` assets plus the ``next.min.js`` runtime bundle and its preload hint, in a full-page render and in the asset manifest of a partial patch envelope alike.
 The configured tag templates still shape the markup around the rewritten URL.
+A subclass that overrides a renderer such as ``render_script_tag`` keeps its signature, ``(self, url, *, request=None, nonce=None)``, since the injector always passes ``request`` and passes ``nonce`` whenever the request carries a CSP nonce, and ``manage.py check`` reports a renderer without them.
 
 Register the backend.
 

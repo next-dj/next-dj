@@ -5,7 +5,9 @@ from e2e_support.browser import (
     CDN_URL_PATTERN,
     PageProbe,
     applied_count,
+    assert_same_document,
     expect_no_partial_request,
+    mark_document,
     wait_for_apply,
     wait_for_runtime,
 )
@@ -130,7 +132,7 @@ def test_voting_repaints_the_zone_through_the_very_same_vue_instance(
 ) -> None:
     open_poll(page, base_url, tabs_or_spaces)
     tabs = tabs_or_spaces.choices.get(text="Tabs")
-    page.evaluate("() => { window.__stillHere = true; }")
+    mark_document(page)
     page.evaluate(TAG_VUE_APP)
 
     vote_for(page, tabs)
@@ -141,7 +143,7 @@ def test_voting_repaints_the_zone_through_the_very_same_vue_instance(
     expect(row_of(page, tabs)).to_have_attribute("data-just-updated", "true")
     assert bar_of(page, tabs).evaluate("element => element.style.width") == "100%"
     assert page.evaluate(READ_VUE_APP) == 1
-    assert page.evaluate("() => window.__stillHere") is True
+    assert_same_document(page)
     assert [response.status for response in vote_posts(next_probe)] == [200]
     tabs.refresh_from_db()
     assert tabs.votes == 1

@@ -1,6 +1,10 @@
 from obs import metrics
 
 from next import context
+from next.pages import MetadataDict
+
+
+metadata: MetadataDict = {"title": "Form actions"}
 
 
 @context("dispatched")

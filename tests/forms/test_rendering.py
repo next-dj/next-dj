@@ -11,6 +11,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, QueryDi
 from django.middleware.csrf import get_token
 from django.template import Context, TemplateSyntaxError
 
+from next.csrf import defer_token
 from next.forms import (
     ActionRegistration,
     ComponentFileWidget,
@@ -259,7 +260,7 @@ class TestFormTagRender:
         assert "</form>" in html
 
     def test_renders_enctype_attribute(self, form_engine, csrf_request) -> None:
-        """An enctype attribute lands on the opening form element."""
+        """An enctype attribute is set on the opening form element."""
         t = form_engine.from_string(
             '{% form "simple_form" enctype="multipart/form-data" %}x{% endform %}'
         )
@@ -388,6 +389,24 @@ class TestFormTagRender:
             )
         )
         assert "csrfmiddlewaretoken" in html
+
+    def test_a_deferred_token_is_left_out_and_never_minted(self, form_engine) -> None:
+        """A render that defers the token omits the field and sets no CSRF cookie."""
+        request = HttpRequest()
+        request.method = "GET"
+        defer_token(request)
+        t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
+        html = t.render(
+            Context(
+                {
+                    "request": request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+        assert "csrfmiddlewaretoken" not in html
+        assert "/_next/form/" in html
+        assert "CSRF_COOKIE_NEEDS_UPDATE" not in request.META
 
     def test_emits_no_page_path_hidden_field(self, form_engine, csrf_request) -> None:
         """The form never leaks the page source path into the markup."""

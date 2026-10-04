@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import posixpath
+from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 from urllib.parse import urlsplit
 
@@ -28,7 +29,6 @@ from .signals import asset_registered
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from pathlib import Path
 
     from next.components import ComponentInfo
 
@@ -39,9 +39,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Every cache below catches a caller naming paths without end rather than working
-# as an eviction policy, because a project holds far fewer pages and components
-# than the bound allows. So the stalest insert goes and a hit reorders nothing.
+# Every cache below bounds a caller that names unbounded paths and is not an eviction
+# policy, because a project holds far fewer pages and components than the bound
+# allows. The oldest insert is evicted first, and a hit does not reorder entries.
 
 # What identifies the component a plan was built for. The folder it reads comes
 # from one of the two paths, and the logical name comes from the component name.
@@ -59,7 +59,7 @@ class FoundAsset(NamedTuple):
 class _AssetPlan(NamedTuple):
     """What one page or component contributes, and where it was read from.
 
-    The registry generation rides along separately from directory mtimes, since a
+    The registry generation is stored apart from directory mtimes, since a
     registration changes what counts as an asset without touching any file mtime.
     """
 
@@ -119,7 +119,7 @@ def _resolved_parent(path: Path) -> Path:
     """Return the resolved directory holding `path`, or its own spelling.
 
     A relative path resolves through the working directory, which an atomic deploy
-    removes under a live worker, and a render is no place to raise.
+    removes under a live worker, and a render must not raise for it.
     """
     parent = path.parent
     try:
@@ -163,7 +163,7 @@ class StemRegistry:
 
     @property
     def version(self) -> int:
-        """Return a counter every registration bumps, so a cached answer can tell."""
+        """Return the registration counter, which a memo compares to detect a change."""
         return self._version
 
     def register(self, role: str, stem: str) -> None:
@@ -309,8 +309,8 @@ class AssetDiscovery:
     def _registry_generation(self) -> tuple[int, int, int]:
         """Return the generation of every registry a plan reads while it is built.
 
-        Read before the plan probes anything, so a registration landing mid-probe
-        leaves the plan stale rather than falsely stamped as up to date.
+        Read before the plan probes anything, so a registration made during the probe
+        leaves the plan stale rather than wrongly marked as up to date.
         """
         return (
             self._stems.version,
@@ -427,8 +427,8 @@ class AssetDiscovery:
         module_dir = None if module_path is None else _resolved_parent(module_path)
         if module_dir is not None and module_dir != component_dir:
             directories.append(module_dir)
-        # Stat before the probe, so a file landing between the two reads leaves
-        # the plan stale rather than invisible until a restart.
+        # Stat before the probe, so a file created between the two reads leaves the
+        # plan stale rather than invisible until a restart.
         mtimes = _directory_mtimes(directories)
         files = tuple(
             find_role_files(
@@ -541,8 +541,8 @@ class AssetDiscovery:
         inside_a_tree = page_root is not None
         current_dir = file_path.parent
         for depth in range(MAX_ANCESTOR_WALK_DEPTH):
-            # Stat first so a file landing between the two reads leaves the
-            # plan stale rather than invisible until a restart.
+            # Stat first, so a file created between the two reads leaves the plan
+            # stale rather than invisible until a restart.
             mtime = stat_mtime_ns(current_dir)
             holds_layout = (current_dir / "layout.djx").exists()
             if holds_layout:

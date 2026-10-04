@@ -12,7 +12,7 @@ This page covers how CSRF protection works through the next.dj dispatch path and
 Standard path
 -------------
 
-The ``{% form %}`` tag emits a CSRF token automatically.
+The ``{% form %}`` tag emits a CSRF token automatically on a page no shared cache holds.
 A bound page renders ``<input type="hidden" name="csrfmiddlewaretoken" value="...">`` inside the form element.
 
 Django's :doc:`CsrfViewMiddleware <django:ref/csrf>` validates the token on every POST to ``/_next/form/<uid>/``.
@@ -21,6 +21,24 @@ A missing or stale token returns HTTP 403.
 The tag also depends on ``request`` existing in the template context so Django can render the CSRF field.
 If ``manage.py check`` reports a missing ``request`` context processor, add ``django.template.context_processors.request`` to the ``OPTIONS.context_processors`` list of your Django ``TEMPLATES`` entry.
 An equivalent processor that supplies ``request`` works as well, so layouts receive ``request``.
+
+Token delivery
+--------------
+
+A token in the HTML sets the CSRF cookie and ``Vary: Cookie``, which keeps a CDN from caching the page, and a token baked into a cached copy goes stale.
+``NEXT_FRAMEWORK["CSRF_DELIVERY"]`` decides where a rendered page puts it, and its default ``"auto"`` defers the token on a page whose ``cache`` lets a shared cache keep it, see :doc:`/content/ref/settings` for the three modes.
+
+A deferred page renders ``{% form %}`` without the hidden field and hands the runtime ``{"header": ..., "url": "/_next/csrf/"}`` in place of the token.
+The runtime fetches ``/_next/csrf/`` once, on the first focus or press inside a form and before the first unsafe request at the latest, and sends the token in the CSRF header, which Django reads when the form field is absent.
+A fetch that fails keeps the mutation from leaving and raises a ``partial:error`` of kind ``csrf``.
+A browser without JavaScript posts no token and gets 403, which ``next.W115`` reports for a shared page that renders a form, unless its action declares ``requires_runtime``, see :ref:`topics-forms-actions-requires-runtime`.
+
+The token endpoint
+------------------
+
+``/_next/csrf/`` requires ``X-Next-Request: 1``, a custom header no cross-site form can send and a cross-site ``fetch`` cannot send without a CORS preflight the endpoint never grants.
+:doc:`/content/ref/csrf` lists its answers and response headers.
+A project that loosens CORS for the site keeps the endpoint out of it, since a CORS policy that admits another origin with credentials hands that origin a token.
 
 Origin validation
 -----------------
@@ -87,7 +105,7 @@ AJAX submissions
 
 JavaScript that posts to the dispatch URL must supply the CSRF token, in the ``X-CSRFToken`` header or the ``csrfmiddlewaretoken`` body field, and the ``_next_form_origin`` value in the request body.
 Hand-written code takes the standard Django approach and reads the token from the cookie or from a meta tag.
-The bundled client runtime needs neither, because it takes its token from the ``$csrf`` init payload the page emits and never touches the cookie.
+The bundled client runtime needs neither, because it takes its token from the ``$csrf`` init payload the page emits, or fetches it from the endpoint the payload names, and never touches the cookie.
 
 The simplest way to obtain the origin is to read the hidden ``_next_form_origin`` field that the rendered ``{% form %}`` tag already emits.
 
@@ -156,10 +174,12 @@ Use these cookie flags in production.
    CSRF_COOKIE_SAMESITE = "Lax"
 
 ``CSRF_COOKIE_HTTPONLY`` keeps the cookie itself out of reach of page scripts, which narrows the ways a token is stolen from the browser, and it does not put the token out of reach of a script on the page.
-Every ``{% form %}`` block renders the token into a hidden input and the page's inline ``Next._init`` payload carries it under ``$csrf``, so any script running on the page reads it from the document whatever the flag says.
+An eager page renders the token into every ``{% form %}`` and its inline ``Next._init`` payload, and a deferred page lets any same-origin script fetch it from ``/_next/csrf/``, so a script running on the page reaches it whatever the flag says.
 The value of the flag is that an attacker who can read cookies through another channel still does not get this one.
 
-The bundled runtime takes its token from that ``$csrf`` payload rather than from the cookie, so a project that leaves unsafe requests to the runtime keeps the flag on with nothing to change.
+The bundled runtime takes its token from the ``$csrf`` payload or the endpoint rather than from the cookie, so a project that leaves unsafe requests to the runtime keeps the flag on with nothing to change.
+The endpoint reads the token through Django, so ``CSRF_USE_SESSIONS`` works as well.
+It reads the session on every request, though, which makes every page a CDN may hold private, and ``manage.py check`` warns about it while such pages exist.
 
 .. code-block:: python
    :caption: config/settings.py, when project JavaScript reads the cookie directly
@@ -181,9 +201,9 @@ Language switch between render and submit.
    A user who changes the language in between posts an origin whose prefix no longer resolves, so a failing validation answers HTTP 400 instead of re-rendering.
    The success path is unaffected, because an origin that does not resolve names no page to re-render and none to authorize.
 
-Stale token after deploy.
-   Cached page renders carry the previous token.
-   Set short cache lifetimes on HTML or warm the cache after a deploy.
+Stale token in a cached page.
+   A page served from a cache with the token in its HTML posts a token that may no longer match the visitor's cookie.
+   Declare the page's ``cache`` so ``CSRF_DELIVERY="auto"`` defers its token, see :doc:`/content/howto/cache-pages-on-a-cdn`.
 
 Token rotation on a partial response.
    A login inside a partial flow rotates the CSRF token, and Django flags the rotation on the request as ``CSRF_COOKIE_NEEDS_UPDATE``.

@@ -1,8 +1,8 @@
-"""Reading the CSRF rotation marker and stamping the refreshed payload."""
+"""Detection of a rotated CSRF token and the new payload a patch carries for it."""
 
 from typing import TYPE_CHECKING
 
-from next.static.scripts import csrf_payload
+from next.csrf import csrf_token_payload
 
 
 if TYPE_CHECKING:
@@ -17,8 +17,8 @@ _CSRF_ROTATED_FLAG = "CSRF_COOKIE_NEEDS_UPDATE"
 def _csrf_rotated(request: "HttpRequest") -> bool:
     """Return True when the request rotated its CSRF token.
 
-    Django flags a rotated token on `request.META`, so the marker is read before a
-    fresh render mints one. A META that is no mapping reads unrotated.
+    Django sets the flag in `request.META`, so it is read before a render creates a
+    new token. A `META` that is not a dict reads as not rotated.
     """
     meta = getattr(request, "META", None)
     if not isinstance(meta, dict):
@@ -29,4 +29,4 @@ def _csrf_rotated(request: "HttpRequest") -> bool:
 def _stamp_csrf(request: "HttpRequest", patches: "Patches", *, rotated: bool) -> None:
     """Attach the rotated CSRF payload when the request rotated its token."""
     if rotated:
-        patches.set_csrf(csrf_payload(request))
+        patches.set_csrf(csrf_token_payload(request))

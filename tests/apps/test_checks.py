@@ -11,14 +11,11 @@ from next.apps.checks import (
     check_django_templates_backend_present,
 )
 from next.apps.templates import _BUILTIN_MODULES
+from tests.support import check_ids
 
 
 _DJANGO_BACKEND = "django.template.backends.django.DjangoTemplates"
 _JINJA_BACKEND = "django.template.backends.jinja2.Jinja2"
-
-
-def _ids(messages: list) -> list[str]:
-    return [m.id for m in messages]
 
 
 class TestDjangoTemplatesBackendCheck:
@@ -27,13 +24,13 @@ class TestDjangoTemplatesBackendCheck:
     def test_missing_backend_emits_w062(self) -> None:
         with override_settings(TEMPLATES=[{"BACKEND": _JINJA_BACKEND}]):
             messages = check_django_templates_backend_present(app_configs=None)
-        assert _ids(messages) == ["next.W062"]
+        assert check_ids(messages) == ["next.W062"]
         assert isinstance(messages[0], DjangoWarning)
 
     def test_empty_templates_emits_w062(self) -> None:
         with override_settings(TEMPLATES=[]):
             messages = check_django_templates_backend_present(app_configs=None)
-        assert _ids(messages) == ["next.W062"]
+        assert check_ids(messages) == ["next.W062"]
 
     def test_present_backend_emits_nothing(self) -> None:
         with override_settings(TEMPLATES=[{"BACKEND": _DJANGO_BACKEND}]):
@@ -62,7 +59,7 @@ class TestBuiltinTagLibrariesComplete:
     def test_unregistered_library_emits_w063(self) -> None:
         with patch.object(checks, "_BUILTIN_MODULES", ("next.templatetags.forms",)):
             messages = check_builtin_tag_libraries_complete(app_configs=None)
-        assert _ids(messages) == ["next.W063"] * (len(_BUILTIN_MODULES) - 1)
+        assert check_ids(messages) == ["next.W063"] * (len(_BUILTIN_MODULES) - 1)
         assert all(isinstance(m, DjangoWarning) for m in messages)
         objs = {m.obj for m in messages}
         assert "next.templatetags.forms" not in objs

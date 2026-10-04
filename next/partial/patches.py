@@ -1,19 +1,31 @@
 """The request-bound patch envelope builder and its PatchResponse."""
 
+import html
 import json
+import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
+from urllib.parse import urljoin, urlsplit
 
 from django.http import HttpRequest, HttpResponse
+from django.utils.functional import Promise
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.safestring import SafeData
 
+from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog
 from next.forms.origin import resolve_origin, resolve_url_to_page
 from next.forms.uid import redirect_or_fallback, validated_origin_path
 from next.pages import page as page_manager
+from next.pages.metadata import resolve_metadata
+from next.pages.metadata.fold import fold_metadata
+from next.pages.metadata.normalize import normalize_metadata
+from next.pages.metadata.scope import contain_site_refusal, site_segment
+from next.pages.visits import visit_request
 from next.seeding import JS_CONTEXT_KEY
 from next.static.assets import default_kinds
 from next.static.manager import default_manager
-from next.static.scripts import RESERVED_PAYLOAD_KEYS
+from next.static.runtime import RESERVED_PAYLOAD_KEYS
 from next.static.serializers import resolve_serializer
 
 from . import keys
@@ -47,11 +59,23 @@ if TYPE_CHECKING:
     from django.http import HttpResponseBase
 
     from next.forms.origin import OriginMatch
+    from next.pages.metadata import Metadata, MetadataDict, ResolvedMetadata, Text
+    from next.pages.metadata.dicts import Url
+    from next.pages.metadata.markers import Segment
 
     from .render import ZoneRenderResult
 
 
+_failures = FailureLog(logging.getLogger(__name__))
+# A guard denial or an intended HTTP error of an inherited callable propagates unlogged.
+_META_PASSES: tuple[type[BaseException], ...] = (
+    *INTENDED_EXCEPTIONS,
+    ForeignPageNotAuthorizedError,
+)
+
 _SEE_OTHER = 303
+_NO_STORE = "private, no-store"
+_META_SOURCE = "Patches.meta"
 
 # Framework-owned bus events, refused to event() so an app cannot forge one.
 _RESERVED_EVENT_NAMES: frozenset[str] = frozenset({"ready", "context-updated"})
@@ -64,6 +88,51 @@ _FOREIGN_ZONE_UNUSED: tuple[str, ...] = ("target", "html", "form", "overrides")
 _ZONE_UNUSED: tuple[str, ...] = ("target", "html", "form", "url_kwargs")
 _FORM_UNUSED: tuple[str, ...] = ("target", "overrides", "page", "url_kwargs")
 _TARGET_UNUSED: tuple[str, ...] = ("overrides", "page", "url_kwargs")
+
+
+def _plain(text: "Text | None") -> str | None:
+    """Return head text as a plain string, decoding the entities of a safe string."""
+    if text is None:
+        return None
+    value = str(text)
+    return html.unescape(value) if isinstance(value, SafeData) else value
+
+
+def _head_fields(
+    folded: "Metadata", canonical: "Url | Literal[True] | None"
+) -> "Metadata":
+    """Return the fold with `canonical` and without the blocks a meta operation omits.
+
+    The cleared blocks are never resolved, so their URLs and JSON-LD cost nothing.
+    """
+    return replace(
+        folded,
+        canonical=canonical,
+        alternates=None,
+        og=None,
+        twitter=None,
+        icons=(),
+        manifest=None,
+        links=(),
+        jsonld=(),
+        breadcrumbs=(),
+    )
+
+
+def _head_extras(resolved: "ResolvedMetadata") -> dict[str, object]:
+    """Return the wire keys of a meta operation in envelope order."""
+    return {
+        "title": _plain(resolved.title),
+        "description": _plain(resolved.description),
+        "canonical": resolved.canonical,
+        "robots": resolved.robots,
+    }
+
+
+def _local_url(base: str | None, href: str) -> str:
+    """Return the path and query of `href` resolved relative to `base`."""
+    parts = urlsplit(urljoin(base or "/", href))
+    return f"{parts.path}?{parts.query}" if parts.query else parts.path
 
 
 def _is_reserved_event(name: str) -> bool:
@@ -206,7 +275,8 @@ class Patches:
         self._authorize_origin()
         result = self._render_zone(zone, overrides)
         self._collect_zone_assets(result)
-        return self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
+        self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
+        return self
 
     def morph_foreign_zone(
         self,
@@ -233,7 +303,8 @@ class Patches:
             raise DynamicForeignPageError(foreign_path)
         result = self._render_foreign_zone(foreign_path, zone, request, kwargs)
         self._collect_zone_assets(result)
-        return self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
+        self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
+        return self
 
     def _foreign_page_path(self, page: "Path | str") -> "Path":
         """Return the page path named by a path or a URL of the foreign page."""
@@ -356,8 +427,8 @@ class Patches:
     ) -> "Patches":
         """Open a server-initiated layer, optionally seeding a zone or href.
 
-        A seeded href needs a zone to load into and must be same-site, else
-        `LayerHrefWithoutZoneError` or `CrossSiteHrefError`.
+        An href without a zone raises `LayerHrefWithoutZoneError`, and a cross-site
+        href raises `CrossSiteHrefError`.
         """
         if href is not None and zone is None:
             raise LayerHrefWithoutZoneError(href)
@@ -387,7 +458,7 @@ class Patches:
         return self
 
     def toast(self, text: str, variant: str = "info") -> "Patches":
-        """Show a toast, sugar over an event with a built-in container."""
+        """Show a toast, an event the runtime displays in a built-in container."""
         self._ops.append(Patch(op="toast", extras={"text": text, "variant": variant}))
         return self
 
@@ -406,8 +477,7 @@ class Patches:
     def push_url(self, href: str) -> "Patches":
         """Push the validated href onto the browser history.
 
-        The href must be same-site, a cross-site value raises
-        `CrossSiteHrefError` rather than being masked as the origin path.
+        A cross-site href raises `CrossSiteHrefError`, never falling back to the origin.
         """
         self._ops.append(
             Patch(
@@ -416,6 +486,98 @@ class Patches:
             )
         )
         return self
+
+    def replace_url(self, href: str) -> "Patches":
+        """Replace the current browser history entry with the validated href.
+
+        The href must be same-site, as for `push_url`. No history entry is added.
+        """
+        self._ops.append(
+            Patch(
+                op="url",
+                extras={"action": "replace", "href": self._require_same_site(href)},
+            )
+        )
+        return self
+
+    def meta(self, metadata: "Text | MetadataDict") -> "Patches":
+        """Queue a head update that folds `metadata` over the origin page as its own.
+
+        A text value sets the title only. The operation carries the title, the
+        description, the canonical and the robots. The origin chain folds and resolves
+        against a GET visit of the address the head describes, which is the last URL
+        operation queued so far or the origin. Without an origin page the value folds
+        over the site `DEFAULTS` alone and an unset field is left out, so the client
+        keeps the tag it has. A malformed `metadata` raises. A failing inherited
+        callable is logged at the `FailureLog` rate and drops this operation only.
+        """
+        raw = {"title": metadata} if isinstance(metadata, str | Promise) else metadata
+        segment = normalize_metadata(raw, source=_META_SOURCE)
+        match = None if self._request is None else self._origin_match()
+        page_path = None if match is None else match.page_path
+        if match is None or page_path is None:
+            contain_site_refusal()
+            folded = fold_metadata((site_segment(), segment))
+            # The action endpoint is not a page, so a self canonical names no address.
+            canonical = None if folded.canonical is True else folded.canonical
+            resolved = resolve_metadata(
+                _head_fields(folded, canonical), request=self._request
+            )
+            extras = {
+                key: value
+                for key, value in _head_extras(resolved).items()
+                if value is not None
+            }
+        else:
+            visit = visit_request(self._require_request(), self._head_address(match))
+            origin_fold = self._fold_origin_metadata(page_path, match, segment, visit)
+            if origin_fold is None:
+                return self
+            resolved = resolve_metadata(
+                _head_fields(origin_fold, origin_fold.canonical), request=visit
+            )
+            extras = _head_extras(resolved)
+        self._ops.append(Patch(op="meta", extras=extras))
+        return self
+
+    def _fold_origin_metadata(
+        self,
+        page_path: "Path",
+        match: "OriginMatch",
+        segment: "Segment",
+        visit: "HttpRequest",
+    ) -> "Metadata | None":
+        """Fold the origin chain under `segment`, or None when an inherited one failed.
+
+        The inherited callables read `visit`, the request the origin view would see.
+        The failure is logged per page and exception type at the `FailureLog` rate.
+        """
+        try:
+            return page_manager.fold_metadata(
+                page_path,
+                overlay=segment,
+                request=visit,
+                url_kwargs=dict(match.url_kwargs),
+                context_data=self._metadata_context,
+            )
+        except _META_PASSES:
+            raise
+        except Exception as exc:  # noqa: BLE001 - an inherited callable may raise anything
+            _failures.contain(
+                exc,
+                (page_path, type(exc)),
+                "The metadata that %s inherits raised %s in Patches.meta(). The head "
+                "is left unchanged and the rest of the patch applies. Fix the "
+                "@page.metadata callable or the metadata it returns.",
+                page_path,
+                type(exc).__name__,
+            )
+            return None
+
+    def _head_address(self, match: "OriginMatch") -> str:
+        """Return the address the head describes, the last queued URL if any."""
+        queued = self._queued_url()
+        return match.origin if queued is None else _local_url(match.origin, queued)
 
     def redirect(self, href: str, *, external: bool = False) -> "Patches":
         """Drive a full client navigation to a server-authored href.
@@ -537,6 +699,17 @@ class Patches:
             raise RuntimeError(msg)
         return self._request
 
+    def _queued_url(self) -> str | None:
+        """Return the href of the last URL operation queued so far, if any."""
+        return next(
+            (
+                str(patch.extras["href"])
+                for patch in reversed(self._ops)
+                if patch.op == "url"
+            ),
+            None,
+        )
+
     def _origin_match(self) -> "OriginMatch | None":
         """Resolve the request's posted origin once, memoised on the builder."""
         if not self._origin_resolved:
@@ -547,10 +720,11 @@ class Patches:
     def _resolve_page_path(self) -> "Path":
         """Return the origin page path of the request, raising when it has none."""
         match = self._origin_match()
-        if match is None or match.page_path is None:
+        page_path = None if match is None else match.page_path
+        if page_path is None:
             msg = "The request origin does not resolve to a page."
             raise RuntimeError(msg)
-        return match.page_path
+        return page_path
 
     def _authorize_origin(self) -> None:
         """Re-run the origin page's authorization once per builder.
@@ -570,6 +744,14 @@ class Patches:
         if denial is not None:
             raise ForeignPageNotAuthorizedError(page_path, denial.status_code)
         self._origin_authorized = True
+
+    def _metadata_context(self) -> dict[str, object]:
+        """Return the origin render context for an inherited metadata callable.
+
+        The callable reads the origin page context, so the origin guard runs first.
+        """
+        self._authorize_origin()
+        return self._origin_render_context()
 
     def _origin_url_kwargs(self) -> dict[str, object]:
         """Return the URL kwargs of the origin page for a zone or component render."""
@@ -623,7 +805,7 @@ class Patches:
         return self
 
     def absorb_zone_result(self, result: "ZoneRenderResult") -> "Patches":
-        """Record a zone render's assets and js-context delta on the envelope.
+        """Record a zone render's assets and js-context delta.
 
         A reserved init-payload key is dropped rather than raised, since the delta is a
         render by-product rather than a handler naming the key.
@@ -671,7 +853,8 @@ class Patches:
 class PatchResponse(HttpResponse):
     """HTTP response that carries a serialized patch envelope.
 
-    Subclasses `HttpResponse` to satisfy the handler's rich-return-type contract.
+    It is sent with `Cache-Control: private, no-store`, since many CDNs ignore `Vary`
+    and would serve a stored envelope in place of the page.
     """
 
     def __init__(
@@ -686,6 +869,7 @@ class PatchResponse(HttpResponse):
         super().__init__(content=body, content_type=content_type, status=status)
         if version is not None:
             self[RESPONSE_VERSION] = version
+        self["Cache-Control"] = _NO_STORE
         set_partial_vary(self)
 
 

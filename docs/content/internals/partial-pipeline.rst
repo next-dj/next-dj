@@ -69,7 +69,7 @@ Modules
 
 ``next.partial.patches``.
    The ``Patches`` builder and the ``PatchResponse`` it serialises into.
-   Every verb is a method, from ``morph``, ``replace``, ``inner``, ``append``, ``prepend``, and ``remove`` to ``toast``, ``event``, ``layer_open``, ``layer_close``, ``push_url``, ``redirect``, and ``context``, plus ``morph_zone`` and ``morph_foreign_zone`` which render before they record, ``add_asset`` for an asset the render did not collect, and ``op`` for a verb the project registered.
+   Every verb is a method, from ``morph``, ``replace``, ``inner``, ``append``, ``prepend``, and ``remove`` to ``toast``, ``event``, ``layer_open``, ``layer_close``, ``push_url``, ``redirect``, ``context``, and ``meta``, plus ``morph_zone`` and ``morph_foreign_zone`` which render before they record, ``add_asset`` for an asset the render did not collect, and ``op`` for a verb the project registered.
 
 ``next.partial.envelope``.
    ``Patch``, ``Asset``, ``FormMeta``, and ``Envelope``, the value objects of the wire form.
@@ -150,8 +150,9 @@ A recompiled page is a different object, so it gets a fresh entry and the old on
 The first read of a template announces each zone through ``zone_registered``, which is why the signal fires on a render rather than at startup.
 
 ``ops`` is an ordinary registry.
-``BUILTIN_OPS`` is the frozen set of fourteen verbs the client already understands, and ``PatchOpRegistry`` records the ones a project adds through ``register_patch_op``.
-Membership is what ``Patches.op`` consults, and the recorded names are what the checks read, so a registration that shadows a built-in verb is kept on record rather than dropped, which is how ``next.E066`` can report it.
+``BUILTIN_OPS`` is the frozen set of fifteen verbs the client already understands, and ``PatchOpRegistry`` records the ones a project adds through ``register_patch_op``.
+Membership is what ``Patches.op`` consults, and the recorded names are what ``next.E090`` reads.
+``register`` raises ``BuiltinPatchOpError`` for a built-in verb before anything is recorded or announced.
 The registry carries a ``version`` counter bumped on each new name.
 
 Caches
@@ -170,14 +171,14 @@ It is cleared on ``settings_reloaded`` and on a ``setting_changed`` naming ``STO
 
 The partial intent is memoised on the request object, so the page view, the dispatcher, and a template tag all read one parse.
 
-The checks add a fifth, the composed-pages memo in ``next.partial.checks.pages``, which keeps one compile per page for a whole check run and is dropped by ``reset_composed_pages_memo``.
+The checks add a fifth, the composed-pages memo in ``next.pages.checks.composed``, a ``RunMemo`` that keeps one compile per page for a whole check run and is dropped by ``forget_run_memos`` through ``reset_check_caches``.
 
 Signals
 -------
 
 ``zone_registered`` fires the first time a compiled template is indexed, once per zone, with the template, the name, and the lazy and poll options.
 ``zone_rendered`` fires once per rendered zone of a batch, with the page path, the request, and the duration.
-``patch_op_registered`` fires on every ``register_patch_op`` call, including one that names a verb already on record.
+``patch_op_registered`` fires on every ``register_patch_op`` call that succeeds, including one that names a verb already on record.
 ``sse_stream_opened`` and ``sse_stream_closed`` bracket a patch stream, the second carrying the duration and the number of envelopes sent.
 ``partial_backend_loaded`` fires when the protocol backend is built from settings.
 

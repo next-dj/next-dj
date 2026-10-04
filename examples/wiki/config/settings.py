@@ -15,6 +15,7 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    "django.contrib.sitemaps",
     "django.contrib.staticfiles",
     "next",
     "wiki",
@@ -96,4 +97,14 @@ NEXT_FRAMEWORK = {
         }
     ],
     "STATIC_VERSION": "v1",
+    "SITE": {"URL": "https://wiki.example", "NAME": "next.dj Wiki", "INDEXABLE": True},
+    "METADATA": {
+        "DEFAULTS": {
+            "viewport": "width=device-width, initial-scale=1",
+            "icons": {
+                "icon": {"url": "/static/wiki/icon.svg", "type": "image/svg+xml"}
+            },
+            "title": {"template": "{title} · {site_name}", "default": "next.dj — Wiki"},
+        }
+    },
 }

@@ -1,17 +1,16 @@
-// The SSE bridge opens an EventSource for each data-next-sse container and rides
-// its events through the same apply pipeline as an HTTP response. An echo ring of
-// own request ids drops self-echoes, and a background tab pauses then resumes.
+// The SSE bridge opens an EventSource for each data-next-sse container and applies
+// its events through the same pipeline as an HTTP response. A ring of the client's
+// own request ids drops their echoes, and a background tab pauses the streams.
 
 import { defaultEventSource, defaultVisibility } from "./adapters";
-import { asString, currentUrl, isRecord, matching } from "./protocol";
+import { ATTR_SSE, asString, currentUrl, isRecord, matching } from "./protocol";
 import type { PartialError } from "./protocol";
 
-const SSE_ATTR = "data-next-sse";
 // A visibility flip shorter than this reconnects the stream but skips the zone
 // re-GETs, so flicking between tabs does not storm the server.
 const RESUME_REVALIDATE_MS = 3000;
 // The last 25 own request ids, matching the server-side echo window. Overflow is
-// safe: a dropped id yields an extra refresh, not a break.
+// safe, since a dropped id only causes an extra refresh.
 const ECHO_LIMIT = 25;
 // The cap on zones a connection tracks, so a long background sleep does not make
 // resume re-GET an unbounded backlog at once. A plain cap, not an LRU.
@@ -44,8 +43,8 @@ export interface VisibilityAdapter {
 
 /** The seams the bridge draws on, injectable so jsdom-blind pieces stay testable. */
 export interface SseDeps {
-  // A parsed envelope rides the same apply pipeline as an HTTP response.
-  apply: (raw: unknown) => void;
+  // A parsed envelope goes through the same apply pipeline as an HTTP response.
+  apply: (raw: unknown, page: string) => void;
   // The zone re-GET that revalidates bound zones on resume, intent not headers.
   fetch: (request: { url: string; zone: string }) => void;
   dispatch: (event: string, detail: Record<string, unknown>) => void;
@@ -77,6 +76,9 @@ interface Connection {
   // The zones this stream addressed since subscribing, re-GET on resume.
   bound: Set<string>;
 }
+
+/** The bridge builder the sse chunk hands the runtime. */
+export type SseFactory = (deps: SseDeps) => Sse;
 
 /** Build the SSE bridge over the given seams. */
 export function createSse(deps: SseDeps): Sse {
@@ -128,7 +130,7 @@ export function createSse(deps: SseDeps): Sse {
       if (isEcho(asString(raw.request_id))) return;
       recordBound(connection, raw);
     }
-    deps.apply(raw);
+    deps.apply(raw, connection.pageUrl);
   }
 
   // Register every zone the stream addressed, the set re-GET on resume.
@@ -181,8 +183,10 @@ export function createSse(deps: SseDeps): Sse {
   }
 
   function scan(root: ParentNode): void {
-    for (const el of matching(root, `[${SSE_ATTR}]`)) {
-      const url = el.getAttribute(SSE_ATTR);
+    for (const el of matching(root, `[${ATTR_SSE}]`)) {
+      // A container a patch removed while the chunk was loading opens no stream.
+      if (!el.isConnected) continue;
+      const url = el.getAttribute(ATTR_SSE);
       if (url !== null && url !== "") openConnection(url, pageUrl(el));
     }
   }

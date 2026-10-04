@@ -3,6 +3,7 @@
 import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, override
 from weakref import WeakSet
@@ -139,6 +140,7 @@ class ActionMeta(_ActionIdentity, total=False):
     form_class: "type[django_forms.Form] | Callable[..., Any] | None"
     wizard_class: "type[FormWizard] | None"
     guard: ActionGuard | None
+    requires_runtime: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,14 +167,16 @@ class ActionRegistration:
     form_class: "type[django_forms.Form] | Callable[..., Any] | None" = None
     wizard_class: "type[FormWizard] | None" = None
     guard: ActionGuard | None = None
+    requires_runtime: bool = False
+    """Whether every form posting here submits through the client runtime."""
     claims_name_binding: bool = False
     """Whether this registration takes over lookups that carry no page scope.
 
     Registrations are first-wins on a bare name, so an action declared later
     under an already-registered name stays reachable only through its own
     page scope. A registration that claims the binding rebinds the name to
-    itself instead, which is how a test override displaces the action it
-    stands in for."""
+    itself instead, so a test override displaces the action it replaces.
+    """
 
 
 class FormActionBackend(ABC):
@@ -193,7 +197,11 @@ class FormActionBackend(ABC):
 
     @abstractmethod
     def generate_urls(self) -> "list[URLPattern]":
-        """Return URLconf entries for this backend."""
+        """Return URLconf entries for this backend.
+
+        Each call returns the same view objects, because `next.E149` identifies the
+        form action endpoint by the view that `resolve()` returns for it.
+        """
 
     @abstractmethod
     def dispatch(self, request: "HttpRequest", uid: str) -> "HttpResponseBase":
@@ -273,6 +281,30 @@ def _make_uid_for_action(scope_key: str, name: str) -> str:
 
 
 _url_caching_backends: "WeakSet[RegistryFormActionBackend]" = WeakSet()
+
+
+def _action_meta(registration: ActionRegistration, uid: str) -> ActionMeta:
+    """Return the registry entry of one registration, its unset keys omitted.
+
+    Every reader goes through `.get()`, and a slim meta keeps teardown proportional.
+    """
+    meta: ActionMeta = {
+        "name": registration.name,
+        "uid": uid,
+        "file_path": registration.file_path,
+        "scope": registration.scope,
+    }
+    if registration.handler is not None:
+        meta["handler"] = registration.handler
+    if registration.form_class is not None:
+        meta["form_class"] = registration.form_class
+    if registration.wizard_class is not None:
+        meta["wizard_class"] = registration.wizard_class
+    if registration.guard is not None:
+        meta["guard"] = registration.guard
+    if registration.requires_runtime:
+        meta["requires_runtime"] = True
+    return meta
 
 
 def _on_setting_changed(*, setting: str, **kwargs) -> None:
@@ -371,23 +403,7 @@ class RegistryFormActionBackend(FormActionBackend):
             if old_obj is not None and new_obj is not None:
                 record_possible_collision(f"{scope_key}:{name}", old_obj, new_obj)
 
-        # None-valued target and guard keys are omitted, because every reader
-        # goes through .get() and a slim meta keeps teardown proportional.
-        meta: ActionMeta = {
-            "name": name,
-            "uid": uid,
-            "file_path": file_path,
-            "scope": scope,
-        }
-        if handler is not None:
-            meta["handler"] = handler
-        if form_class is not None:
-            meta["form_class"] = form_class
-        if wizard_class is not None:
-            meta["wizard_class"] = wizard_class
-        if registration.guard is not None:
-            meta["guard"] = registration.guard
-        self._registry[key] = meta
+        self._registry[key] = _action_meta(registration, uid)
         if registration.claims_name_binding:
             bound_key = self._name_index.get(name, key)
             self._name_index[name] = key
@@ -460,8 +476,14 @@ class RegistryFormActionBackend(FormActionBackend):
         """Return one catch-all route when at least one action is registered."""
         if not self._registry:
             return []
-        view = require_http_methods(["GET", "POST"])(self.dispatch)
-        return [path("_next/form/<str:uid>/", view, name=URL_NAME_FORM_ACTION)]
+        return [
+            path("_next/form/<str:uid>/", self._action_view, name=URL_NAME_FORM_ACTION)
+        ]
+
+    @cached_property
+    def _action_view(self) -> "Callable[..., HttpResponseBase]":
+        """Return the dispatch view, built once so every URL build shares it."""
+        return require_http_methods(["GET", "POST"])(self.dispatch)
 
     @override
     def dispatch(self, request: "HttpRequest", uid: str) -> "HttpResponseBase":

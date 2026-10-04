@@ -44,7 +44,7 @@ def iter_existing_scanned_pages(
 
 
 def load_scanned_page_modules(router_manager: RouterManager) -> list[tuple[str, Path]]:
-    """Execute every existing routed `page.py`, answering the ones that loaded.
+    """Execute every existing routed `page.py` and return the ones that loaded.
 
     A page-scoped registration exists only once its `page.py` has run.
     """
@@ -60,8 +60,8 @@ def load_scanned_page_modules(router_manager: RouterManager) -> list[tuple[str, 
 def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
     """Yield the `page.py` path and key of every keyed `serialize=True` context.
 
-    A keyless callable spreads its keys only at render time, so those never travel
-    through here, and a page reached through two spellings yields its keys once.
+    A keyless callable produces its keys only at render time, so those are not listed,
+    and a page reached through two path spellings yields its keys once.
     """
     router_manager, _errors = get_router_manager()
     if router_manager is None:

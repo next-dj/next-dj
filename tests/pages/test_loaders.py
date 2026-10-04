@@ -13,6 +13,7 @@ import next.pages.loaders as loaders_module
 from next.caches import BoundedCache
 from next.conf import next_framework_settings
 from next.pages.loaders import (
+    AncestorStamps,
     DjxTemplateLoader,
     LayoutTemplateLoader,
     PageModuleImportError,
@@ -25,6 +26,10 @@ from next.pages.loaders import (
     has_load_errors,
     last_load_error,
     load_page_module,
+    module_generation,
+    module_stamps,
+    module_version,
+    page_tree_depth,
     read_module_string_lists,
     reset_module_memo,
 )
@@ -39,6 +44,7 @@ from tests.support import (
     TemplatePriorityCase,
     default_page_router_config,
     file_router_config_entry,
+    touch_later,
 )
 
 
@@ -62,7 +68,7 @@ class TestPythonTemplateLoader:
         expected_can_load,
         expected_load_result,
     ) -> None:
-        """Only a ``page.py`` defining ``template`` loads, a broken or bare one does not."""
+        """Only a ``page.py`` defining ``template`` loads, never a bare one."""
         page_file = tmp_path / "page.py"
         page_file.write_text(file_content)
 
@@ -238,7 +244,7 @@ class TestLayoutTemplateLoader:
     def test_can_load_with_layout_files(
         self, tmp_path, create_layout, create_template, expected_can_load
     ) -> None:
-        """An ancestor ``layout.djx`` alone makes the page loadable, a lone template does not."""
+        """An ancestor ``layout.djx`` alone makes the page loadable."""
         loader = LayoutTemplateLoader()
 
         sub_dir = tmp_path / "sub" / "nested"
@@ -296,7 +302,7 @@ class TestLayoutTemplateLoader:
     def test_get_pages_dirs_for_config_scenarios(
         self, tmp_path, case: PagesDirsConfigCase
     ) -> None:
-        """Only existing ``DIRS`` paths become page roots, ``APP_DIRS`` alone yields none."""
+        """Only existing ``DIRS`` become page roots, ``APP_DIRS`` alone gives none."""
         config = file_router_config_entry(
             app_dirs=case.app_dirs,
             dirs=[str(tmp_path)] if case.roots_the_tree else None,
@@ -434,7 +440,7 @@ class TestLayoutTemplateLoader:
     def test_find_layout_files_with_different_additional_layouts(
         self, tmp_path
     ) -> None:
-        """A configured root outside the page hierarchy adds its own layout to the chain."""
+        """A configured root outside the page tree adds its own layout to the chain."""
         loader = LayoutTemplateLoader()
 
         local_layout = tmp_path / "layout.djx"
@@ -695,6 +701,33 @@ class TestLayoutTemplateLoader:
         finally:
             forget_page_roots()
 
+    def test_the_tree_depth_is_measured_once_per_set_of_roots(self, tmp_path) -> None:
+        """A second ask resolves nothing, and new page trees measure the depth again."""
+        (tmp_path / "a" / "b").mkdir(parents=True)
+        # Repointed after the first ask, the link would measure 2 if resolved again.
+        page_dir = tmp_path / "link"
+        page_dir.symlink_to(tmp_path / "a" / "b")
+        forget_page_roots()
+        try:
+            with patch.object(
+                loaders_module,
+                "get_pages_directories_for_watch",
+                return_value=[tmp_path.resolve()],
+            ):
+                assert page_tree_depth(page_dir) == 3
+                page_dir.unlink()
+                page_dir.symlink_to(tmp_path / "a")
+                assert page_tree_depth(page_dir) == 3
+            forget_page_roots()
+            with patch.object(
+                loaders_module,
+                "get_pages_directories_for_watch",
+                return_value=[tmp_path.resolve()],
+            ):
+                assert page_tree_depth(page_dir) == 2
+        finally:
+            forget_page_roots()
+
     @pytest.mark.parametrize(
         "layouts",
         [[], ["."], [".."], [".", "..", "../.."]],
@@ -706,7 +739,7 @@ class TestLayoutTemplateLoader:
     def test_filled_skeleton_equals_a_direct_compose(
         self, tmp_path, layouts, body
     ) -> None:
-        """Filling the cached skeleton reproduces `compose_body` character for character."""
+        """Filling the cached skeleton reproduces `compose_body` to the character."""
         loader = LayoutTemplateLoader()
 
         page_dir = tmp_path / "a" / "b"
@@ -844,7 +877,7 @@ class TestContextProcessors:
 
         next_pages_config = [file_router_config_entry(app_dirs=True)]
 
-        with patch("next.pages.processors.import_string") as mock_import:
+        with patch("next.pages.processors.import_callable") as mock_import:
             mock_import.side_effect = [test_processor, auth_processor]
 
             with override_settings(
@@ -859,7 +892,7 @@ class TestContextProcessors:
     def test_get_context_processors_merges_next_pages_and_templates(
         self, page_instance
     ) -> None:
-        """When both routers and TEMPLATES set context_processors, merge (routers first)."""
+        """Router and TEMPLATES context_processors merge, the router ones first."""
 
         def template_processor(request):
             return {"template_var": "template_value"}
@@ -888,7 +921,7 @@ class TestContextProcessors:
             )
         ]
 
-        with patch("next.pages.processors.import_string") as mock_import:
+        with patch("next.pages.processors.import_callable") as mock_import:
             mock_import.side_effect = [next_pages_processor, template_processor]
             with override_settings(
                 TEMPLATES=templates_config,
@@ -918,7 +951,9 @@ class TestContextProcessors:
             )
         ]
         with (
-            patch("next.pages.processors.import_string", return_value=shared_processor),
+            patch(
+                "next.pages.processors.import_callable", return_value=shared_processor
+            ),
             override_settings(
                 TEMPLATES=templates_config,
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": next_pages_config},
@@ -959,7 +994,7 @@ class TestContextProcessors:
         def another_processor(request):
             return {"another_var": "another_value"}
 
-        with patch("next.pages.processors.import_string") as mock_import:
+        with patch("next.pages.processors.import_callable") as mock_import:
             mock_import.side_effect = [test_processor, another_processor]
 
             config = [
@@ -998,13 +1033,10 @@ class TestContextProcessors:
 
         with (
             override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}),
-            patch("next.pages.processors.import_string") as mock_import,
+            patch("next.pages.processors.import_callable") as mock_import,
             patch("next.pages.processors.logger.warning") as mock_warning,
         ):
-            mock_import.side_effect = [
-                ImportError("No module named 'invalid'"),
-                lambda request: {"request": request},
-            ]
+            mock_import.side_effect = [None, lambda request: {"request": request}]
             processors = _get_context_processors()
             real_processors = [
                 p for p in processors if callable(p) and not hasattr(p, "_mock_name")
@@ -1013,12 +1045,8 @@ class TestContextProcessors:
             mock_warning.assert_called_once()
 
     def test_import_context_processor_non_callable(self, page_instance) -> None:
-        """A dotted path resolving to a non-callable yields ``None``."""
-        with patch("next.pages.processors.import_string") as mock_import:
-            mock_import.return_value = "not a callable"
-
-            processor = _import_context_processor("some.module.path")
-            assert processor is None
+        """A dotted path naming no callable yields ``None``."""
+        assert _import_context_processor("os.path.sep") is None
 
     def test_render_with_context_processors(self, page_instance, tmp_path) -> None:
         """Processor output reaches the template alongside the render keyword arguments."""
@@ -1370,7 +1398,7 @@ class TestPageModuleImportErrors:
         assert isinstance(error.__cause__, cause_type)
 
     def test_an_absent_file_is_never_executed(self, tmp_path, monkeypatch) -> None:
-        """A file that does not stat answers `None` without reaching the loader."""
+        """A file that does not stat returns `None` without reaching the loader."""
         missing = tmp_path / "page.py"
         executed: list[Path] = []
         monkeypatch.setattr(loaders_module, "_load_python_module", executed.append)
@@ -1507,7 +1535,7 @@ class TestPageModuleImportErrors:
 
     def test_a_record_the_file_outlived_stops_arming_the_probe(self, tmp_path) -> None:
         """A dead record is dropped, so the per-request gate goes quiet again."""
-        # The gate reads a process-wide store, so it answers for this file alone.
+        # The gate reads a process-wide store, so the assertion covers this file alone.
         reset_module_memo()
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
@@ -1531,12 +1559,12 @@ class TestPageModuleImportErrors:
         page_file.unlink()
         assert _load_python_module_memo(page_file) is None
         assert has_load_errors() is False
-        assert page_file not in loaders_module._MODULE_MEMO
+        assert module_stamps((page_file,)) == (None,)
 
     def test_an_evicted_failure_still_answers_for_its_file(
         self, tmp_path, monkeypatch
     ) -> None:
-        """A path the bound evicted is loaded again rather than read as healthy."""
+        """A path the bound evicted is loaded again rather than read as loadable."""
         monkeypatch.setattr(loaders_module, "_MODULE_MEMO", BoundedCache(1))
         reset_module_memo()
         broken = tmp_path / "broken.py"
@@ -1558,7 +1586,7 @@ class TestPageModuleImportErrors:
     def test_a_stale_absent_stat_cannot_split_a_failure_from_its_module(
         self, tmp_path, monkeypatch
     ) -> None:
-        """A load landing between a stale absent stat and its drop stays reported.
+        """A load completed between a stale absent stat and its drop stays reported.
 
         The broken load runs inside the patched stat, the way two threads interleave.
         """
@@ -1624,8 +1652,7 @@ class TestPageModuleImportErrors:
 
         reset_module_memo()
 
-        assert not loaders_module._FAILED_PATHS
-        assert page_file not in loaders_module._MODULE_MEMO
+        assert module_stamps((page_file,)) == (None,)
         assert has_load_errors() is False
 
     def test_last_load_error_returns_fresh_instance_per_call(self, tmp_path) -> None:
@@ -1661,7 +1688,7 @@ class TestTheModuleMemoIsBounded:
     def test_a_new_page_past_the_bound_drops_the_stalest(
         self, tmp_path, monkeypatch
     ) -> None:
-        """A project with more pages than the bound holds the ones it just read."""
+        """A project with more pages than the bound holds the ones it read last."""
         monkeypatch.setattr(loaders_module, "_MODULE_MEMO", BoundedCache(2))
         reset_module_memo()
         pages = self._write_pages(tmp_path, ("first", "second", "third"))
@@ -1674,7 +1701,7 @@ class TestTheModuleMemoIsBounded:
     def test_a_warm_read_neither_executes_nor_writes(
         self, tmp_path, monkeypatch
     ) -> None:
-        """A hit answers from the memo, so the entries keep the order they landed in."""
+        """A hit reads the memo, so the entries keep the order they were stored in."""
         monkeypatch.setattr(loaders_module, "_MODULE_MEMO", BoundedCache(2))
         reset_module_memo()
         first, second = self._write_pages(tmp_path, ("first", "second"))
@@ -1694,7 +1721,7 @@ class TestTheModuleMemoIsBounded:
         assert list(loaders_module._MODULE_MEMO) == [first, second]
 
     def test_a_file_that_does_not_stat_leaves_no_entry(self, tmp_path) -> None:
-        """A page that vanished answers `None` and drops the entry it left behind."""
+        """A deleted page returns `None` and drops the entry it left behind."""
         reset_module_memo()
         page_file = tmp_path / "page.py"
         page_file.write_text('template = "gone soon"\n')
@@ -1702,4 +1729,239 @@ class TestTheModuleMemoIsBounded:
         page_file.unlink()
 
         assert _load_python_module_memo(page_file) is None
-        assert page_file not in loaders_module._MODULE_MEMO
+        assert module_stamps((page_file,)) == (None,)
+
+
+class TestModuleVersion:
+    """The version moves on a memo reset and a page tree reload, not on a load."""
+
+    def test_a_load_leaves_it_alone(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1\n")
+        before = module_version()
+        _load_python_module_memo(page_file)
+        assert module_version() == before
+
+    def test_reset_module_memo_moves_it(self) -> None:
+        before = module_version()
+        reset_module_memo()
+        assert module_version() == before + 1
+
+    def test_forgetting_the_page_trees_moves_it(self) -> None:
+        before = module_version()
+        forget_page_roots()
+        assert module_version() == before + 1
+
+
+class TestModuleGeneration:
+    """The generation moves with every stamp, so an unmoved one vouches for them all."""
+
+    def test_a_load_moves_it(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1\n")
+        before = module_generation()
+        _load_python_module_memo(page_file)
+        assert module_generation() > before
+
+    def test_a_memoised_read_leaves_it_alone(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1\n")
+        _load_python_module_memo(page_file)
+        before = module_generation()
+        _load_python_module_memo(page_file)
+        assert module_generation() == before
+
+    def test_a_removed_file_moves_it(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1\n")
+        _load_python_module_memo(page_file)
+        page_file.unlink()
+        before = module_generation()
+        _load_python_module_memo(page_file)
+        assert module_generation() > before
+
+    def test_reset_module_memo_moves_it(self) -> None:
+        before = module_generation()
+        reset_module_memo()
+        assert module_generation() > before
+
+
+class TestModuleStamps:
+    """Each path keeps the mtime of its live load, success or failure."""
+
+    def test_a_path_never_loaded_has_no_stamp(self, tmp_path) -> None:
+        assert module_stamps((tmp_path / "page.py",)) == (None,)
+
+    def test_a_load_stamps_its_mtime(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1\n")
+        _load_python_module_memo(page_file)
+        assert module_stamps((page_file,)) == (page_file.stat().st_mtime_ns,)
+
+    def test_a_failed_load_stamps_its_mtime_too(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        _load_python_module_memo(page_file)
+        assert module_stamps((page_file,)) == (page_file.stat().st_mtime_ns,)
+
+    def test_an_edit_moves_the_stamp_once_it_loads(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1\n")
+        _load_python_module_memo(page_file)
+        before = module_stamps((page_file,))
+        touch_later(page_file, "x = 2\n")
+        assert module_stamps((page_file,)) == before
+        _load_python_module_memo(page_file)
+        assert module_stamps((page_file,)) != before
+
+    def test_a_load_the_file_moved_past_is_not_remembered(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1\n")
+        run = loaders_module._load_python_module
+
+        def edited_while_running(path: Path) -> object:
+            module = run(path)
+            touch_later(path, "x = 2\n")
+            return module
+
+        before = module_generation()
+        with patch.object(loaders_module, "_load_python_module", edited_while_running):
+            module, _error = load_page_module(page_file)
+        assert module is not None
+        assert module.x == 1
+        assert module_stamps((page_file,)) == (None,)
+        assert module_generation() == before
+        module, _error = load_page_module(page_file)
+        assert module is not None
+        assert module.x == 2
+        assert module_stamps((page_file,)) == (page_file.stat().st_mtime_ns,)
+
+    def test_an_eviction_keeps_the_stamp(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(loaders_module, "_MODULE_MEMO", BoundedCache(maxsize=1))
+        first = tmp_path / "a.py"
+        second = tmp_path / "b.py"
+        first.write_text("x = 1\n")
+        second.write_text("x = 2\n")
+        _load_python_module_memo(first)
+        _load_python_module_memo(second)
+        assert first not in loaders_module._MODULE_MEMO
+        assert module_stamps((first,)) == (first.stat().st_mtime_ns,)
+
+    def test_a_removed_file_drops_its_stamp_even_after_an_eviction(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(loaders_module, "_MODULE_MEMO", BoundedCache(maxsize=1))
+        first = tmp_path / "a.py"
+        second = tmp_path / "b.py"
+        first.write_text("x = 1\n")
+        second.write_text("x = 2\n")
+        _load_python_module_memo(first)
+        _load_python_module_memo(second)
+        first.unlink()
+        _load_python_module_memo(first)
+        assert module_stamps((first,)) == (None,)
+
+    def test_reset_module_memo_drops_every_stamp(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1\n")
+        _load_python_module_memo(page_file)
+        reset_module_memo()
+        assert module_stamps((page_file,)) == (None,)
+
+
+def _ancestor_tree(tmp_path: Path) -> tuple[Path, Path]:
+    root = tmp_path / "site"
+    leaf = root / "shop"
+    leaf.mkdir(parents=True)
+    (root / "page.py").write_text("x = 1\n")
+    (leaf / "page.py").write_text("x = 2\n")
+    return root / "page.py", leaf / "page.py"
+
+
+class TestAncestorStamps:
+    """The ancestors of a page vouch for a memo until one of them loads again."""
+
+    def test_the_walk_runs_root_first_inside_the_page_tree(self, tmp_path) -> None:
+        top, leaf = _ancestor_tree(tmp_path)
+        config = default_page_router_config(top.parent)
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            ancestors = AncestorStamps.begin(leaf)
+        assert ancestors.paths == (top, leaf)
+        assert ancestors.stamps == ()
+
+    def test_loaded_hands_back_each_load_with_its_stamp(self, tmp_path) -> None:
+        top, leaf = _ancestor_tree(tmp_path)
+        top.unlink()
+        config = default_page_router_config(top.parent)
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            taken, modules = AncestorStamps.begin(leaf).loaded()
+        assert taken.stamps == (None, leaf.stat().st_mtime_ns)
+        assert taken.generation == module_generation()
+        assert modules[0] is None
+        assert modules[1] is not None
+        assert modules[1].x == 2
+
+    def test_nothing_moved_keeps_the_same_stamps(self, tmp_path) -> None:
+        _top, leaf = _ancestor_tree(tmp_path)
+        taken, _modules = AncestorStamps.begin(leaf).loaded()
+        assert taken.revalidated() is taken
+
+    def test_a_load_elsewhere_moves_only_the_generation(self, tmp_path) -> None:
+        _top, leaf = _ancestor_tree(tmp_path)
+        taken, _modules = AncestorStamps.begin(leaf).loaded()
+        other = tmp_path / "other.py"
+        other.write_text("x = 3\n")
+        load_page_module(other)
+        kept = taken.revalidated()
+        assert kept is not None
+        assert kept.stamps == taken.stamps
+        assert kept.generation == module_generation()
+
+    def test_an_ancestor_loaded_again_invalidates(self, tmp_path) -> None:
+        top, leaf = _ancestor_tree(tmp_path)
+        taken, _modules = AncestorStamps.begin(leaf).loaded()
+        touch_later(top)
+        load_page_module(top)
+        assert taken.revalidated() is None
+
+    def test_a_load_landing_during_the_walk_is_not_vouched_for(self, tmp_path) -> None:
+        top, leaf = _ancestor_tree(tmp_path)
+        config = default_page_router_config(top.parent)
+        page_load = loaders_module._page_load
+
+        def edited_before_the_leaf(path: Path) -> object:
+            if path == leaf:
+                touch_later(top, "x = 10\n")
+                load_page_module(top)
+            return page_load(path)
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            ancestors = AncestorStamps.begin(leaf)
+            with patch.object(loaders_module, "_page_load", edited_before_the_leaf):
+                taken, modules = ancestors.loaded()
+        assert modules[0] is not None
+        assert modules[0].x == 1
+        assert taken.generation != module_generation()
+        assert taken.revalidated() is None
+
+    def test_a_memo_reset_invalidates(self, tmp_path) -> None:
+        _top, leaf = _ancestor_tree(tmp_path)
+        taken, _modules = AncestorStamps.begin(leaf).loaded()
+        reset_module_memo()
+        assert taken.revalidated() is None
+
+    def test_turning_the_watch_on_or_off_invalidates(self, tmp_path) -> None:
+        _top, leaf = _ancestor_tree(tmp_path)
+        taken, _modules = AncestorStamps.begin(leaf).loaded()
+        with override_settings(DEBUG=True):
+            assert taken.revalidated() is None
+            watched, _modules = AncestorStamps.begin(leaf).loaded()
+        assert watched.watched
+        assert watched.revalidated() is None
+
+    def test_a_watch_loads_an_edited_ancestor_at_once(self, tmp_path) -> None:
+        top, leaf = _ancestor_tree(tmp_path)
+        with override_settings(DEBUG=True):
+            taken, _modules = AncestorStamps.begin(leaf).loaded()
+            touch_later(top)
+            assert taken.revalidated() is None

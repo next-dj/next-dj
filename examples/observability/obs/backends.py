@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.http import HttpRequest
+from django.utils.html import escape, format_html
 
 from next.components import FileComponentsBackend
 from next.static import StaticFilesBackend
@@ -34,7 +35,8 @@ class BabelJsxBackend(StaticFilesBackend):
     """
 
     _DEFAULT_BABEL_TAG: ClassVar[str] = (
-        '<script type="text/babel" data-presets="env,react" src="{url}"></script>'
+        '<script type="text/babel" data-presets="env,react" src="{url}"{nonce_attr}>'
+        "</script>"
     )
 
     def __init__(self, config: "Mapping[str, Any] | None" = None) -> None:
@@ -44,7 +46,13 @@ class BabelJsxBackend(StaticFilesBackend):
         self._babel_tag = str(opts.get("babel_tag") or self._DEFAULT_BABEL_TAG)
 
     def render_babel_script_tag(
-        self, url: str, *, request: HttpRequest | None = None
+        self, url: str, *, request: HttpRequest | None = None, nonce: str | None = None
     ) -> str:
-        """Return a `<script type="text/babel">` tag pointing at `url`."""
-        return self._babel_tag.format(url=url)
+        """Return a `<script type="text/babel">` tag pointing at `url`.
+
+        Babel-standalone copies the nonce onto the script it injects, so the compiled
+        JSX runs under a nonce CSP.
+        """
+        del request
+        nonce_attr = format_html(' nonce="{}"', nonce) if nonce else ""
+        return self._babel_tag.format(url=escape(url), nonce_attr=nonce_attr)

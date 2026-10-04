@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Final
 
 
@@ -15,14 +16,26 @@ _CACHE_MISS: object = object()
 REQUEST_DEP_CACHE_ATTR: Final[str] = "_next_dep_cache"
 
 
-def get_request_dep_cache(request: object | None) -> dict[str, Any] | None:
-    """Return the dispatch-scoped dep cache attached to `request`, or `None`.
+def render_dep_cache(request: object | None) -> dict[str, Any]:
+    """Return the form dispatch cache on `request`, or a new dict that stays off it.
 
-    `FormActionDispatch.dispatch` attaches this so a re-render can rejoin the DI cache.
+    A cache stored on the request would be shared with every component on the page.
     """
-    if request is None:
-        return None
-    cache = getattr(request, REQUEST_DEP_CACHE_ATTR, None)
+    cache = None if request is None else getattr(request, REQUEST_DEP_CACHE_ATTR, None)
+    return cache if isinstance(cache, dict) else {}
+
+
+def get_request_dep_cache(request: object | None) -> dict[str, Any] | None:
+    """Return the form dispatch cache on `request`, `None` where it carries none.
+
+    Deprecated. `render_dep_cache` returns a new dict where this returns `None`.
+    """
+    warnings.warn(
+        "next.deps.get_request_dep_cache is deprecated, call render_dep_cache",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    cache = None if request is None else getattr(request, REQUEST_DEP_CACHE_ATTR, None)
     return cache if isinstance(cache, dict) else None
 
 

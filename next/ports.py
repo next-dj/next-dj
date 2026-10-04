@@ -8,10 +8,12 @@ from django.core.exceptions import ImproperlyConfigured
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from django.forms import BaseForm, BaseFormSet
     from django.http import HttpRequest, HttpResponse
+    from django.urls import URLPattern
 
     from next.components.info import ComponentInfo
     from next.forms.backends import FormActionBackend
@@ -46,6 +48,10 @@ class PortSlot[T]:
             raise ImproperlyConfigured(self._unbound_message())
         return self._impl
 
+    def peek(self) -> T | None:
+        """Return the bound implementation, `None` before the app is ready."""
+        return self._impl
+
     def _unbound_message(self) -> str:
         """Spell the failure of a slot read before the app finished starting."""
         return (
@@ -58,7 +64,7 @@ class PartialShaper(Protocol):
     """Shapes page and form responses for partial requests.
 
     The caller decides through `intent` whether a request is partial, and that
-    intent travels on as an argument so no shape method re-reads the request.
+    intent is passed as an argument so no shape method re-reads the request.
     """
 
     def intent(self, request: HttpRequest) -> PartialIntent:
@@ -171,20 +177,58 @@ class StaticAssets(Protocol):
         ...
 
 
+class SeoRoutes(Protocol):
+    """The routes the seo area adds to the lazy urlpatterns.
+
+    `next.seo` imports `next.urls`, so `next.urls` reads the SEO routes through this.
+    """
+
+    def patterns(self) -> list[URLPattern]:
+        """Return the SEO routes whose source exists, placed after every page route."""
+        ...
+
+
+class PageScripts(Protocol):
+    """The third-party scripts one page render adds to its head and init payload.
+
+    `next.scripts` imports the static manager, so the injector reads it through this.
+    """
+
+    def render(
+        self,
+        collector: StaticCollector,
+        *,
+        page_path: Path | None,
+        request: HttpRequest | None,
+        nonce: Callable[[], str | None],
+    ) -> tuple[str, Mapping[str, object]]:
+        """Return the head tags and the reserved payload entries of one render.
+
+        `nonce` mints the request nonce, so it is called only when a tag is written.
+        """
+        ...
+
+
 page_scan_slot = PortSlot["PageScan"]("page scan port")
 partial_shaper_slot = PortSlot["PartialShaper"]("partial shaper")
 router_access_slot = PortSlot["RouterAccess"]("router access port")
+page_scripts_slot = PortSlot["PageScripts"]("page scripts port")
+seo_routes_slot = PortSlot["SeoRoutes"]("seo routes port")
 static_assets_slot = PortSlot["StaticAssets"]("static assets port")
 
 
 __all__ = [
     "PageScan",
+    "PageScripts",
     "PartialShaper",
     "PortSlot",
     "RouterAccess",
+    "SeoRoutes",
     "StaticAssets",
     "page_scan_slot",
+    "page_scripts_slot",
     "partial_shaper_slot",
     "router_access_slot",
+    "seo_routes_slot",
     "static_assets_slot",
 ]

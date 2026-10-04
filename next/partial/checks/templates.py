@@ -1,6 +1,6 @@
 """System check that every composed page template compiles.
 
-The id is `next.E072`, and compiling the whole tree makes it a deployment check.
+Compiling the whole tree makes it a deployment check.
 """
 
 from typing import TYPE_CHECKING
@@ -11,6 +11,7 @@ from django.template import TemplateDoesNotExist, TemplateSyntaxError
 from next.checks import NEXT
 from next.checks.common import first_visit, get_router_manager, iter_scanned_page_pairs
 from next.pages import page
+from next.pages.checks.composed import is_templated
 
 from .codes import E_COMPOSED_TEMPLATE_SYNTAX
 
@@ -33,7 +34,7 @@ def check_composed_templates_compile(*args, **kwargs) -> list[CheckMessage]:
     seen: set[Path] = set()
     for router in router_manager.backends:
         for _url_path, page_path in iter_scanned_page_pairs(router):
-            if not first_visit(page_path, seen) or not page.has_template(page_path):
+            if not first_visit(page_path, seen) or not is_templated(page_path):
                 continue
             try:
                 page.composed_template_for(page_path)

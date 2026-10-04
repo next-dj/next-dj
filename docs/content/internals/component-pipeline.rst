@@ -122,8 +122,8 @@ Component context resolution
 Each ``@component.context("key")`` function runs once per component render.
 An unkeyed callable's dict is checked before the merge, so a key naming a prop of the rendering ``{% component %}`` call site, a reserved render key, or anything carrying the ``slot_`` prefix raises ``ValueError`` rather than overwriting the entry.
 When a component's ``component.py`` fails to import, the renderer falls back to plain template rendering and the ``@component.context`` callables in that module do not run.
-On the template render path the resolver shares the request-scoped dependency cache through ``get_request_dep_cache``.
-Named ``Depends("name")`` values resolved earlier in the dispatch are reused inside the component callables.
+On the template render path each component instance resolves against a copy of the request-scoped dependency cache that ``render_dep_cache`` returns.
+Named ``Depends("name")`` values resolved earlier in the dispatch are reused inside the component callables, and what one instance resolves never reaches another instance or a later ``@page.metadata`` callable.
 Only a form dispatch puts that cache on the request, so an ordinary GET leaves each component render building a ``DependencyCache`` of its own and two components asking for one name each pay for it.
 Provider-resolved parameters are recomputed per call.
 Page context values reach the component through the template scope, not through the DI cache.
@@ -137,7 +137,7 @@ Ambient render frame
 The ``{% component %}`` tag builds its child context from ``context.flatten()``, so the ambient keys of the surrounding render come along untouched.
 A caller that builds its context from scratch carries a ``RenderFrame`` instead and seeds it, which is what ``ComponentWidget`` and ``render_component_by_name`` do.
 The seed writes the anchor the lookup ran from, the path of the page module, the anchor the actions of the enclosing form resolve against, and the static collector, and it leaves the request to the render strategies that stamp it themselves.
-The frame is plain data, so ``bind_component_widgets`` settles the anchor once and a render reuses the frame it was handed rather than copying it.
+The frame is plain data, so ``bind_component_widgets`` computes the anchor once and a render reuses the frame it was handed rather than copying it.
 A widget no bind reached asks for the frame the ``{% form %}`` tag publishes around its body, which is what carries the anchors into the widgets of ``formset.empty_form``, and falls back to a synthetic name under ``BASE_DIR``, then under the working directory, so the walk starts at the project root rather than above it.
 The four seeded keys are reserved render keys, so an unkeyed ``@component.context`` that returns one raises ``ValueError`` under either caller.
 ``render_component_by_name`` applies its ``context`` and ``props`` mappings over the seed, so a caller naming a seeded key replaces the seeded value.

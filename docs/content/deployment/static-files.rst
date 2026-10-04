@@ -71,6 +71,8 @@ Manifest storage
 
 For projects that use Django ``ManifestStaticFilesStorage`` the framework cooperates without extra configuration.
 ``collectstatic`` writes the manifest, the framework reads it at runtime, and the rendered HTML uses the manifested filenames.
+When the manifest lacks a runtime bundle, the page still renders, without the runtime or without that chunk.
+The missing file is logged at most once every ten minutes, and ``manage.py check --deploy`` reports it as ``next.W090``.
 
 The shipped ``next.min.js`` carries no ``sourceMappingURL`` comment, so manifest post-processing finds no reference to rewrite and no map a wheel install leaves out.
 ``collectstatic`` under manifest storage therefore completes on a wheel install with no ignore pattern and no post-processing exclusion.
@@ -160,7 +162,7 @@ Run ``uv run python manage.py check --deploy`` before shipping.
 
 The framework static checks validate the backend chain, the registered asset kinds, the inline asset bodies, the JS context serializer, and the finder wiring.
 None of them is a deployment check, so they already run on every ``manage.py check`` and the build catches a malformed backend long before the deploy step.
-What ``--deploy`` adds is Django's own hardening pass over ``STATIC_ROOT`` and ``STATIC_URL``, plus the three framework deployment checks that import or compile the whole page tree, see :doc:`checklist`.
+What ``--deploy`` adds is Django's own hardening pass over ``STATIC_ROOT`` and ``STATIC_URL``, plus the framework deployment checks that import or compile the whole page tree and read the site scope, see :doc:`checklist`.
 
 See also
 --------

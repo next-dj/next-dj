@@ -1,7 +1,10 @@
 from obs import metrics
 
 from next import context
+from next.pages import MetadataDict
 
+
+metadata: MetadataDict = {"robots": {"index": False}}
 
 scripts = [
     "https://unpkg.com/react@18/umd/react.production.min.js",

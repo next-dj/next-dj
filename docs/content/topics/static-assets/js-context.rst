@@ -63,8 +63,10 @@ Set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` to the dotted path of a serializ
        "JS_CONTEXT_SERIALIZER": "next.static.PydanticJsContextSerializer",
    }
 
-``resolve_serializer`` reads the setting on every call.
+``resolve_serializer`` reads the setting on every call and builds one instance per dotted path, which every render shares until the settings reload.
 When the key is absent or set to an empty string the framework uses ``JsonJsContextSerializer``.
+A path that does not import, a class whose constructor raises, or an instance without ``dumps`` gives way to ``JsonJsContextSerializer`` too, so no page fails over it.
+The failure is logged at most once every ten minutes, and under ``DEBUG`` or ``STRICT_LOADING`` it raises instead, naming the setting.
 
 System checks
 ~~~~~~~~~~~~~
@@ -143,7 +145,7 @@ A serializer is any class with a ``dumps`` method.
            )
 
 Point ``JS_CONTEXT_SERIALIZER`` at the dotted path of the class.
-The framework instantiates it through ``resolve_serializer``.
+The framework instantiates it once through ``resolve_serializer``, so the instance keeps no state of one render.
 
 Key conflict policy
 -------------------
@@ -189,20 +191,22 @@ Pick distinct keys when both registrations live in the same module.
 Reserved payload keys
 ~~~~~~~~~~~~~~~~~~~~~
 
-The framework owns two ``$``-prefixed keys of the init payload, ``$csrf`` and ``$dev``, and claims them after the conflict policy has run.
-A project key of either name is dropped from the collected context on every automatically injected payload, whichever way the project registered it, together with the pre-encoded fragment and the per-key serializer that key recorded.
+The framework owns five ``$``-prefixed keys of the init payload, ``$csrf``, ``$dev``, ``$chunks``, ``$scripts``, and ``$consent``, and claims them after the conflict policy has run.
+A project key of any of these names is dropped from the collected context on every automatically injected payload, whichever way the project registered it, together with the pre-encoded fragment and the per-key serializer that key recorded.
 The framework then writes its own value where it has one, ``$csrf`` on a payload whose request can mint a CSRF token and ``$dev`` on a payload built while ``DEBUG`` is on.
 The runtime reads ``$csrf`` at bootstrap and seeds the header it stamps on every unsafe request, so a programmatic ``Next.partial.fetch`` carries a token without a form field.
+On a page whose CSRF token is deferred, ``$csrf`` names the token endpoint instead of a token, see :doc:`/content/security/csrf-and-forms`.
+``$chunks`` is part of every payload and names the scripts chunk ``next.scripts.min.js`` under ``scripts``, the stream bridge ``next.sse.min.js`` under ``sse``, the CSRF mint ``next.csrf.min.js`` under ``csrf``, the zone poller ``next.poll.min.js`` under ``poll``, and, while ``DEBUG`` is on, the diagnostics chunk ``next.dev.min.js`` under ``dev``, which the runtime fetches only when ``$dev`` is true, and ``$scripts`` and ``$consent`` carry the script manifest and the consent state, see :doc:`/content/ref/client-extras`.
 A render with no value to write leaves the key out of the payload altogether, so a production page carries no ``$dev`` key at all and an automatically injected payload carries the registered value in no environment.
 A payload the project assembles itself under the ``MANUAL`` policy answers for its own filtering, see `Manual injection`_.
 
 A partial render honours the same ownership.
-``Patches.context()`` refuses ``$csrf`` and ``$dev`` with ``ReservedContextKeyError``, and the js-context delta of a zone render drops them before it becomes a ``context`` patch, so no patch updates either key.
+``Patches.context()`` refuses every reserved key with ``ReservedContextKeyError``, and the js-context delta of a zone render drops them before it becomes a ``context`` patch, so no patch updates one.
 
 Reporting a collision
 ~~~~~~~~~~~~~~~~~~~~~
 
-The ``next.W075`` system check reports a ``$csrf`` or ``$dev`` registration at ``manage.py check`` and names the ``page.py`` or ``component.py`` that declares it, so the declaring module keeps its value by renaming the key.
+The ``next.W075`` system check reports a registration under a reserved key at ``manage.py check`` and names the ``page.py`` or ``component.py`` that declares it, so the declaring module keeps its value by renaming the key.
 The check walks the keyed registrations only.
 A keyless ``serialize=True`` provider spreads the keys of the dict it returns at render time, so a collision hidden inside such a dict is invisible to ``manage.py check`` and surfaces on the client as a value that never arrives.
 
@@ -335,7 +339,7 @@ An absent or empty ``NEXT_JS_OPTIONS`` uses the ``AUTO`` policy and the default 
      - Pages where you control placement of the script tags in a layout template.
 
 The runtime rides the ``scripts`` slot, so a layout without ``{% collect_scripts %}`` gets no ``next.min.js`` and no ``window.Next`` even under ``AUTO``, while the preload hint is still injected and points at a script the page never loads.
-The preload hint needs a ``</head>``, and a fragment rendered without one carries none.
+The preload hint needs a ``</head>`` and the ``{% collect_scripts %}`` placeholder the runtime loads from, and a page without either carries none.
 The hint is inserted before the first ``</head>`` in the document.
 
 Set the policy through the ``NEXT_JS_OPTIONS`` dict.
@@ -364,7 +368,7 @@ Manual injection
 ~~~~~~~~~~~~~~~~
 
 Under ``MANUAL`` the static manager skips both the preload hint and the ``Next._init`` wrap, exactly like ``DISABLED``, and the script builder stays available for a template tag of your own.
-Resolve the runtime URL with ``staticfiles_storage.url(NEXT_JS_STATIC_PATH)`` from ``next.static.scripts``, then build one ``NextScriptBuilder`` from the same options the framework reads.
+Resolve the runtime URL with ``staticfiles_storage.url(NEXT_JS_STATIC_PATH)`` from ``next.static.runtime``, then build one ``NextScriptBuilder`` from the same options the framework reads.
 
 Emit ``builder.preload_link()`` and ``builder.script_tag()`` from a custom template tag or middleware.
 Read the collector from the template context under the ``_static_collector`` key.
@@ -378,7 +382,8 @@ Pass its ``js_context()``, ``js_context_serializers()``, and ``js_context_encode
    from django.utils.safestring import mark_safe
 
    from next.conf import next_framework_settings
-   from next.static.scripts import NEXT_JS_STATIC_PATH, NextScriptBuilder
+   from next.static.nonce import resolve_nonce
+   from next.static.runtime import NEXT_JS_STATIC_PATH, NextScriptBuilder
 
    register = Library()
 
@@ -390,43 +395,48 @@ Pass its ``js_context()``, ``js_context_serializers()``, and ``js_context_encode
            url, next_framework_settings.NEXT_JS_OPTIONS
        )
        collector = context["_static_collector"]
+       nonce = resolve_nonce(context.get("request"))
        return mark_safe(
-           builder.preload_link()
-           + builder.script_tag()
+           builder.preload_link(nonce=nonce)
+           + builder.script_tag(nonce=nonce)
            + builder.init_script(
                collector.js_context(),
                key_serializers=collector.js_context_serializers(),
                encoded=collector.js_context_encoded(),
+               nonce=nonce,
            )
        )
 
-A payload built this way carries no framework ``$csrf`` or ``$dev`` entry, because the static manager both claims and writes those keys only under ``AUTO``.
-It does carry a project key named ``$csrf`` or ``$dev``, because ``js_context()`` is the unfiltered store and the reserved-key drop lives in the automatic path alone.
-Pass ``RESERVED_PAYLOAD_KEYS`` from ``next.static.scripts`` to ``collector.js_context_payload`` instead, which returns the values, the encoded fragments, and the per-key serializers with every reserved name already dropped.
+A payload built this way carries none of the framework's reserved entries, because the static manager both claims and writes those keys only under ``AUTO``, so a page injected by hand runs no consent-gated script and no deferred CSRF.
+Without ``$chunks`` the runtime has no URL for any lazy chunk, so ``Next.ready("scripts")`` rejects and the stream, CSRF, poll, and diagnostics chunks never load.
+Add ``"$chunks": {name: staticfiles_storage.url(path) for name, path in CHUNK_STATIC_PATHS.items()}`` to the payload, with ``CHUNK_STATIC_PATHS`` from ``next.static.runtime``, so every chunk resolves through the storage.
+``Next.ready`` waits for ``Next._init``, so a layout that never emits the init script leaves every ``Next.ready`` call pending.
+It does carry a project key of a reserved name, because ``js_context()`` is the unfiltered store and the reserved-key drop lives in the automatic path alone.
+Pass ``RESERVED_PAYLOAD_KEYS`` from ``next.static.runtime`` to ``collector.js_context_payload`` instead, which returns the values, the encoded fragments, and the per-key serializers with every reserved name already dropped.
 
 Runtime script templates
 ------------------------
 
 The ``NEXT_JS_OPTIONS`` dict also accepts ``preload_template``, ``script_tag_template``, and ``init_template`` keys.
-Each is an HTML string with a single placeholder.
+Each is an HTML string with its placeholders.
 The ``preload_template`` and ``script_tag_template`` use the ``{url}`` placeholder.
 The ``init_template`` uses the ``{payload}`` placeholder, which receives the serialized JS context.
-Use them to add attributes such as ``nonce``, ``async``, or ``crossorigin`` without writing a custom backend.
+All three take ``{nonce_attr}``, which renders a ``nonce="..."`` attribute with the CSP nonce of the request, or nothing without one.
+Use them to add attributes such as ``async`` or ``crossorigin`` without writing a custom backend.
 
 .. code-block:: python
    :caption: config/settings.py, adding a crossorigin attribute
 
    NEXT_FRAMEWORK = {
        "NEXT_JS_OPTIONS": {
-           "script_tag_template": '<script src="{url}" crossorigin="anonymous"></script>',
+           "script_tag_template": '<script src="{url}" crossorigin="anonymous"{nonce_attr}></script>',
        }
    }
 
-A template carries only its own placeholder, ``{url}`` or ``{payload}``, and no other substitution is supported.
+A template carries only its own placeholders, ``{url}`` or ``{payload}`` and ``{nonce_attr}``, and no other substitution is supported.
 The templates are formatted with Python ``str.format``, not Django templates.
 A literal ``{`` or ``}`` inside the template body collides with the formatter and must be doubled to ``{{`` or ``}}`` to survive ``str.format``.
-A per-request value such as a CSP nonce cannot travel through these templates, because the framework formats them once per process.
-Switch to the ``MANUAL`` policy and emit the three fragments from a template tag that reads the nonce off the request, as described under :ref:`Runtime script options <topics-static-js-runtime-script-options>`.
+A template without ``{nonce_attr}`` renders a tag the Content Security Policy refuses while a nonce is active, which ``next.W117`` reports, see :doc:`/content/security/csp-and-nonce`.
 
 See also
 --------

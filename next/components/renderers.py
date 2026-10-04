@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, override
 
 from django.http import HttpResponse
@@ -17,7 +18,7 @@ from django.template import Context as DjangoTemplateContext, Template
 from django.utils.functional import SimpleLazyObject
 
 from next.caches import DEFAULT_CACHE_SIZE, LruCache
-from next.deps import get_request_dep_cache
+from next.deps import render_dep_cache
 from next.deps.cache import DependencyCache
 from next.deps.resolver import current_resolver
 from next.seeding import (
@@ -35,7 +36,6 @@ from .context import component
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
-    from pathlib import Path
 
     from django.http import HttpRequest
 
@@ -140,8 +140,8 @@ def _stat_ns(path: Path) -> int | None:
 def _source_mtimes(info: ComponentInfo) -> dict[Path, int]:
     """Stat every file a load may read for `info`, before any of them is read.
 
-    Reading first and stat-ing after would file the old text under the mtime of
-    a save that landed in between, hiding that edit until the next one.
+    Reading first and stat-ing after would store the old text under the mtime of a
+    save made in between, hiding that edit until the next one.
     """
     mtimes: dict[Path, int] = {}
     for candidate in (info.template_path, info.module_path):
@@ -156,7 +156,7 @@ def _source_mtimes(info: ComponentInfo) -> dict[Path, int]:
 class CachedComponentTemplateLoader(ComponentTemplateLoader):
     """Reuse a compiled template until the file it was read from changes.
 
-    A render then pays at most one `stat` instead of a read plus a full parse, and a
+    A render then costs at most one `stat` instead of a read plus a full parse, and a
     `component` string picks up its own edits through the `component.py` autoreload.
     """
 
@@ -257,7 +257,7 @@ def _guarded_keys(context_data: dict[str, Any]) -> frozenset[str]:
 
 
 def _is_slot_key(key: object) -> bool:
-    """Report whether a key lands in the slot namespace, non-strings included."""
+    """Report whether a key of any type is in the slot namespace."""
     return isinstance(key, str) and key.startswith(SLOT_KEY_PREFIX)
 
 
@@ -291,8 +291,8 @@ def _inject_component_context(
     collector: StaticCollector | None = context_data.get(COLLECTOR_KEY)
     guarded = _guarded_keys(context_data)
 
-    shared = get_request_dep_cache(request)
-    cache = DependencyCache(backing_dict=shared) if shared else DependencyCache()
+    # A copy, so a value one instance resolves from its props never reaches the next.
+    cache = DependencyCache(backing_dict=dict(render_dep_cache(request)))
     stack: list[str] = []
 
     for ctx_func in ctx_funcs:

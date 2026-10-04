@@ -46,6 +46,9 @@ JS_CONTEXT_KEY: Final = "_next_js_context"
 JS_SERIALIZERS_KEY: Final = "_next_js_context_serializers"
 """Context key carrying the serializer chosen per `JS_CONTEXT_KEY` entry."""
 
+METADATA_KEY: Final = "_next_metadata"
+"""Context key carrying the metadata thunk the `{% metadata %}` tag resolves."""
+
 
 @dataclass(frozen=True, slots=True)
 class RenderFrame:
@@ -126,6 +129,7 @@ __all__ = [
     "EMPTY_FRAME",
     "JS_CONTEXT_KEY",
     "JS_SERIALIZERS_KEY",
+    "METADATA_KEY",
     "PAGE_MODULE_PATH_KEY",
     "REQUEST_KEY",
     "TEMPLATE_PATH_KEY",

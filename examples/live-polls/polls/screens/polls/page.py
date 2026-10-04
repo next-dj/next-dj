@@ -3,6 +3,10 @@ from django.db.models.functions import Coalesce
 from polls.models import Poll
 
 from next import context
+from next.pages import MetadataDict
+
+
+metadata: MetadataDict = {"title": "Polls"}
 
 
 @context("polls")

@@ -90,7 +90,7 @@ A ``pages`` directory beside the working directory that no router routes is neit
 Every read of a router here is guarded, and the guard drops a value of the wrong type instead of passing it on.
 ``runserver`` boots, ``collectstatic`` runs, and the staticfiles finder answers even when a backend raises from ``page_roots`` or ``components_folder_name``, and equally when it answers the wrong shape.
 The failure costs that backend its trees and nothing else.
-It is logged once per backend and subject rather than per tick, and again once the framework is reconfigured.
+It is logged once per backend and subject rather than per tick, again after a quiet period of ten minutes with the number of suppressed occurrences, and again once the framework is reconfigured.
 
 - Each page root contributes a ``**/page.py`` spec.
 - Each page root paired with the name its router returns from ``components_folder_name`` contributes a ``**/<components-folder>/**/component.py`` spec, ``_components`` by default.
@@ -99,6 +99,8 @@ It is logged once per backend and subject rather than per tick, and again once t
 
 Only Python entrypoints are watched.
 ``.djx`` templates and co-located assets are deliberately omitted from the specs.
+The tree-top sources, ``sitemap.py``, ``robots.py``, ``robots.txt``, and ``scripts.py``, are omitted as well, because they reload in process without restarting ``runserver``.
+While ``DEBUG`` is on, every SEO route compares the modification times of the SEO sources with the ones they were loaded at, every page render does the same for ``scripts.py``, and a file that appeared, went, or moved is read again on that request, see :doc:`seo-pipeline`.
 
 ``iter_all_autoreload_watch_specs`` appends the specs registered through ``register_autoreload_watch_spec``.
 It deduplicates the combined list by resolved path and glob, then emits ``watch_specs_ready`` with the final list.

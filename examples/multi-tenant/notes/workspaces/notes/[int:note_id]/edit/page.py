@@ -6,8 +6,9 @@ from notes.access import get_active_tenant
 from notes.models import Note
 from notes.providers import DTenant
 
-from next import context
+from next import context, page
 from next.forms import ComponentWidget, ModelForm, PermissionOutcome
+from next.pages import MetadataDict
 from next.urls import page_reverse
 
 
@@ -55,3 +56,9 @@ class NoteEditForm(ModelForm):
 def note(active_tenant: DTenant, note_id: int) -> Note:
     """Return the note iff it belongs to the active tenant."""
     return get_owned_note(active_tenant, note_id)
+
+
+@page.metadata
+def note_meta(note: Note) -> MetadataDict:
+    """Title the editor after the note the `note` context above scoped to the tenant."""
+    return {"title": note.title}

@@ -321,6 +321,14 @@ class TestRegistryFormActionBackend:
         empty_backend = RegistryFormActionBackend()
         assert empty_backend.generate_urls() == []
 
+    def test_generate_urls_hands_out_one_view(self) -> None:
+        """Every URL build routes to the same view object, which E149 compares."""
+        backend = form_action_manager.default_backend
+        assert isinstance(backend, RegistryFormActionBackend)
+        [first] = backend.generate_urls()
+        [second] = backend.generate_urls()
+        assert first.callback is second.callback
+
     def test_register_action_stores_handler(self) -> None:
         """Handler is stored under (scope_key, name) key."""
         backend = RegistryFormActionBackend()
@@ -1049,10 +1057,10 @@ class TestFormActionManagerLoadedFlag:
 
 
 class TestGetActionUrlNoReverseMatchFallback:
-    """get_action_url falls back to URL_NAME_FORM_ACTION when FORM_ACTION_REVERSE_NAME fails."""
+    """get_action_url falls back to URL_NAME_FORM_ACTION if the reverse fails."""
 
     def test_fallback_when_named_url_fails(self, tmp_path) -> None:
-        """When FORM_ACTION_REVERSE_NAME raises NoReverseMatch, falls back to URL_NAME_FORM_ACTION."""
+        """A NoReverseMatch on the named reverse falls back to URL_NAME_FORM_ACTION."""
         backend = RegistryFormActionBackend()
         page_path = str(tmp_path / "page.py")
 
@@ -1164,8 +1172,7 @@ class TestManagerClearRegistries:
 class TestFormActionManagerVersion:
     """The `version` cache token moves on every registry mutation.
 
-    The counter behind it is process-wide, so a test pins that the token moved
-    rather than what it landed on.
+    The counter is process-wide, so a test pins that the token moved, not its value.
     """
 
     def test_register_action_bumps_version(self) -> None:
@@ -1244,7 +1251,7 @@ class TestFileToDottedModule:
     """file_to_dotted_module returns dotted module path for files inside packages."""
 
     def test_standalone_file_returns_stem(self, tmp_path) -> None:
-        """File not in a package returns just the file stem."""
+        """File not in a package returns only the file stem."""
         f = tmp_path / "mymodule.py"
         f.write_text("")
         assert file_to_dotted_module(str(f)) == "mymodule"

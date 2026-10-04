@@ -223,7 +223,7 @@ class TestDependencyResolverConstruction:
         assert instance._providers[1] is p2
 
     def test_resolver_empty_uses_lazy_registry(self) -> None:
-        """DependencyResolver() with no args loads providers from registry on first resolve."""
+        """A bare DependencyResolver() loads registry providers on first resolve."""
         instance = DependencyResolver()
 
         def fn(unknown: str) -> None:
@@ -541,7 +541,7 @@ class TestResolveWithTemplateContext:
         assert result["form"] is form
 
     def test_uses_dependency_cache_instance_when_passed(self) -> None:
-        """When _cache is a DependencyCache, that instance is used (values land in backing)."""
+        """A DependencyCache passed as _cache is used and stores into its backing."""
         r = DependencyResolver()
 
         def provide() -> str:
@@ -660,7 +660,7 @@ class TestDependencyCycleError:
     def test_resolve_callable_dependency_raises_when_cache_has_in_progress(
         self,
     ) -> None:
-        """When cache has name with _IN_PROGRESS but name not in stack, cycle is detected."""
+        """A name _IN_PROGRESS in the cache but off the stack is a cycle."""
         r = DependencyResolver()
         r.register_dependency("a", lambda: None)
         cache = {"a": _IN_PROGRESS_SENTINEL}
@@ -1041,7 +1041,7 @@ class TestCallableObjectHints:
         }
 
     def test_a_class_without_an_init_is_described_by_its_new(self) -> None:
-        """A NamedTuple carries its parameters on `__new__`, which is what signature reads."""
+        """A NamedTuple carries its parameters on `__new__`, which signature reads."""
         assert cached_type_hints(_Point)["x"] is int
         assert DependencyResolver().resolve_dependencies(_Point, x="7") == {"x": 7}
 

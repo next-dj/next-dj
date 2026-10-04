@@ -74,7 +74,7 @@ Modules
    An abstract intermediate base is skipped by that rebuild, because it is a legitimate class to register and no instance of it exists to place.
 
 ``next.deps.cache``.
-   ``DependencyCache`` accumulator, the ``REQUEST_DEP_CACHE_ATTR`` constant, and the ``get_request_dep_cache`` accessor.
+   ``DependencyCache`` accumulator, the ``REQUEST_DEP_CACHE_ATTR`` constant, and ``render_dep_cache``, which hands a render the dispatch cache when the request carries one and a fresh dict the request never sees otherwise, so it never answers ``None``.
 
 ``next.deps.errors``.
    ``DependencyCycleError`` and ``UnknownDependencyError``, the two exceptions a graph the resolver cannot serve raises.
@@ -99,12 +99,12 @@ Provider order
 --------------
 
 Providers are ordered by ascending ``priority``, and the first one that claims a parameter produces its value.
-Each provider claims a parameter through ``can_handle`` at resolve time, or settles it ahead of time through ``static_can_handle``.
+Each provider claims a parameter through ``can_handle`` at resolve time, or claims it ahead of time through ``static_can_handle``.
 The compiled plan keeps that order, but a static verdict removes the check from every parameter the provider provably never owns.
 
 Every ``RegisteredParameterProvider`` subclass carries a ``priority`` class attribute, and the resolver sorts the registry by it.
-The nine built-in providers pin the values ``10`` through ``80``, which yields ``DependsProvider``, ``ContextByDefaultProvider``, ``ContextByNameProvider``, ``FormProvider``, ``CleanedDataProvider``, ``HttpRequestProvider``, ``UrlByAnnotationProvider``, ``UrlKwargsProvider``, and ``QueryParamProvider``.
-``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
+The ten built-in providers pin the values ``10`` through ``80``, which yields ``DependsProvider``, ``ContextByDefaultProvider``, ``ContextByNameProvider``, ``FormProvider``, ``CleanedDataProvider``, ``HttpRequestProvider``, ``ConsentProvider``, ``UrlByAnnotationProvider``, ``UrlKwargsProvider``, and ``QueryParamProvider``.
+``FormProvider`` and ``CleanedDataProvider`` share priority ``40``, and ``HttpRequestProvider`` and ``ConsentProvider`` share ``50``.
 
 See :doc:`/content/topics/dependency-injection` for the single source of truth on this order and what each provider matches.
 
@@ -188,8 +188,9 @@ The cache key is the dependency name string alone, with no type component.
 
 ``FormActionDispatch.dispatch`` creates a fresh dispatch cache dict on every POST and attaches it to the request under the attribute named ``REQUEST_DEP_CACHE_ATTR``.
 The cache is shared across each stage of the dispatch, from ``get_initial`` and the factory resolution to the handler call and any re-render after validation failure.
-On a re-render the page context and component context renderers read it back through ``get_request_dep_cache`` and rejoin the same cache.
+On a re-render the page context and component context renderers read it back through ``render_dep_cache`` and rejoin the same cache.
 An ordinary page request that does not pass through the form dispatcher never sees this attribute.
+Its page view still shares one cache between ``render()``, the ``@context`` callables, and the metadata callables of that render, passed along the render rather than attached to the request, so the components on the page keep a cache of their own.
 
 Two consequences flow from the cache.
 

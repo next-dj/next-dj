@@ -3,13 +3,14 @@
 It lives here so the partial checks reach it without importing the tag shim.
 """
 
-from typing import TYPE_CHECKING, cast, override
+from typing import TYPE_CHECKING, Final, cast, override
 
 from django import template
 from django.core.exceptions import ImproperlyConfigured
 from django.middleware.csrf import get_token
 from django.utils.html import format_html
 
+from next.csrf import token_deferred
 from next.forms.errors import FormActionNotFoundError
 from next.forms.manager import (
     _build_form_namespace_from_meta,
@@ -33,6 +34,9 @@ from next.seeding import (
     RenderFrame,
     ambient_frame,
 )
+
+
+_CSRF_INPUT: Final = '<input type="hidden" name="csrfmiddlewaretoken" value="{}">'
 
 
 if TYPE_CHECKING:
@@ -115,13 +119,13 @@ class FormNode(template.Node):
     def _build_hidden_inputs(
         self, context: template.Context, request: "HttpRequest"
     ) -> str:
-        """Build the CSRF and origin hidden inputs."""
-        inputs = [
-            format_html(
-                '<input type="hidden" name="csrfmiddlewaretoken" value="{}">',
-                get_token(request),
-            )
-        ]
+        """Build the CSRF and origin hidden inputs, omitting a deferred CSRF token.
+
+        Without the field Django reads the token from the header the runtime sends.
+        """
+        inputs: list[str] = []
+        if not token_deferred(request):
+            inputs.append(format_html(_CSRF_INPUT, get_token(request)))
         origin = self._origin_path(context, request)
         if origin:
             inputs.append(

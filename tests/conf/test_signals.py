@@ -39,7 +39,7 @@ class TestSettingsReloadedSignal:
     def test_fires_on_override_settings(
         self, capture_settings_reloaded: SignalRecorder
     ) -> None:
-        """``override_settings(NEXT_FRAMEWORK=...)`` triggers reload via ``setting_changed``."""
+        """Overriding ``NEXT_FRAMEWORK`` reloads through ``setting_changed``."""
         with override_settings(NEXT_FRAMEWORK={}):
             pass
         assert len(capture_settings_reloaded) >= 1
@@ -94,7 +94,7 @@ class TestSettingsReloadedSignal:
     def test_does_not_fire_for_unrelated_setting(
         self, capture_settings_reloaded: SignalRecorder
     ) -> None:
-        """``override_settings`` for a non-framework key does not emit ``settings_reloaded``."""
+        """Overriding a non-framework key does not emit ``settings_reloaded``."""
         with override_settings(DEBUG=True):
             pass
         assert len(capture_settings_reloaded) == 0

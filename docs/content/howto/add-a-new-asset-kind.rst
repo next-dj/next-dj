@@ -65,12 +65,15 @@ When the new kind needs a tag shape that the bundled methods do not produce, add
    from django.utils.html import escape
 
    from next.static import StaticFilesBackend
+   from next.static.runtime import nonce_attr
 
    class BabelBackend(StaticFilesBackend):
-       def render_babel_tag(self, url: str, *, request=None) -> str:
-           return f'<script type="text/babel" src="{escape(url)}"></script>'
+       def render_babel_tag(self, url: str, *, request=None, nonce=None) -> str:
+           return f'<script type="text/babel" src="{escape(url)}"{nonce_attr(nonce)}></script>'
 
 A renderer method builds markup the template engine never sees, so an override escapes the URL itself rather than relying on the engine to do it.
+The injector calls every renderer with ``request`` and ``nonce`` keywords, and ``nonce_attr(nonce)`` writes the CSP nonce of the request, or nothing without one.
+A renderer that leaves either keyword out raises ``TypeError`` on every page holding such an asset, and ``manage.py check`` reports it as an error before the first render.
 
 Register the kind against the new method and register the backend.
 Replace the ``ready`` registration from the walkthrough with this one, keeping a single registration per kind.
@@ -104,7 +107,7 @@ A repeated ``register`` call with the same parameters is idempotent, but registe
    }
 
 A custom renderer costs the kind its client insertion verb, so its assets render on a full page render and are skipped on a partial render.
-The ``next.W074`` check reports the kind for that reason.
+``manage.py check`` warns about the kind for that reason.
 Keep ``render_module_tag`` from the walkthrough when the assets must also arrive through a patch envelope.
 
 Verification
@@ -114,7 +117,7 @@ Reload the page and inspect the HTML source.
 A script tag points at the JSX file.
 
 Run ``uv run python manage.py check``.
-The walkthrough registration reports no warnings, and the custom-renderer variant reports ``next.W074`` for the ``jsx`` kind.
+The walkthrough registration reports no warnings, and the custom-renderer variant reports one warning for the ``jsx`` kind, the missing insertion verb.
 
 See also
 --------

@@ -5,7 +5,7 @@ import pytest
 from django.urls import reverse
 from kanban.models import Board, Card, Column
 
-from next.testing import NextClient, init_payload
+from next.testing import NextClient, assert_metadata, init_payload
 
 
 pytestmark = pytest.mark.django_db
@@ -503,3 +503,24 @@ def test_index_page_renders_at_the_reversed_root(next_client: NextClient) -> Non
     response = next_client.get(reverse("next:page_"))
     assert response.status_code == 200
     assert "Boards" in response.content.decode()
+
+
+class TestPageMetadata:
+    """The board callable titles the board and, through `inherit`, its settings."""
+
+    def test_index_uses_the_site_default(self, next_client: NextClient) -> None:
+        assert_metadata(next_client.get("/"), title="next.dj — Kanban")
+
+    def test_board_title_comes_from_the_board_provider(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        assert_metadata(
+            _board_html(next_client, board), title="Roadmap · next.dj Kanban"
+        )
+
+    def test_settings_inherits_the_board_title(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        assert_metadata(
+            _settings_html(next_client, board), title="Roadmap · next.dj Kanban"
+        )

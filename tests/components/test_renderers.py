@@ -17,10 +17,51 @@ from next.components.renderers import (
     COMPONENT_PROPS_CONTEXT_KEY,
     _inject_component_context,
 )
+from next.deps.cache import REQUEST_DEP_CACHE_ATTR
+from next.pages import page
+from tests.support import (
+    bound_dependency,
+    build_page_request,
+    unified_view,
+    write_page_chain,
+)
 from tests.support.components import build_composite_component
 
 
 RESERVED_KEYS = sorted(_RESERVED_CONTEXT_KEYS)
+
+LOOPING_PAGE = """
+from next.deps import Depends
+from next.pages import context
+
+
+@context("title")
+def title(value=Depends("site_label")):
+    return value
+
+
+@context("items")
+def items():
+    return ["alpha", "beta", "gamma"]
+"""
+LOOP_TEMPLATE = '{% for x in items %}{% component "badge" label=x %}{% endfor %}'
+UPPER_COMPONENT = """
+from next.components import context
+from next.deps import Depends
+
+
+@context("upper")
+def upper(value=Depends("label_upper")):
+    return value
+"""
+RENDERING_PAGE = (
+    LOOPING_PAGE
+    + f"""
+
+def render(value=Depends("site_label")):
+    return {LOOP_TEMPLATE!r}
+"""
+)
 
 # The inventory as the docs publish it, pinned so a core-set change is deliberate.
 PINNED_RESERVED_KEYS = frozenset(
@@ -44,6 +85,39 @@ def _inject(
     """Run the injection step with `manager` standing in for the global one."""
     with patch("next.components.renderers.component", manager):
         _inject_component_context(info, context_data, None)
+
+
+class TestNamedDependenciesPerInstance:
+    """Every component instance keeps its own named-dependency resolutions."""
+
+    @pytest.mark.parametrize("dispatch", [False, True], ids=["get", "dispatch"])
+    @pytest.mark.parametrize(
+        "source", [LOOPING_PAGE, RENDERING_PAGE], ids=["template", "render"]
+    )
+    def test_looped_instances_resolve_their_own_value(
+        self, tmp_path: Path, source: str, *, dispatch: bool
+    ) -> None:
+        """A form dispatch re-render shares its cache, but not one instance's values."""
+        _mgr, info, module_path = build_composite_component(
+            tmp_path / "badge", name="badge", template="<b>{{ label }}={{ upper }}</b>"
+        )
+        module_path.write_text(UPPER_COMPONENT)
+        ModuleLoader().load(module_path)
+        (leaf,) = write_page_chain(tmp_path, [("items", source)])
+        (leaf.parent / "template.djx").write_text(LOOP_TEMPLATE)
+        view = unified_view(page, leaf)
+        with (
+            bound_dependency("site_label", lambda: "SITE"),
+            bound_dependency("label_upper", lambda label: label.upper()),
+            patch.object(components_manager, "get_component", return_value=info),
+        ):
+            request = build_page_request()
+            if dispatch:
+                setattr(request, REQUEST_DEP_CACHE_ATTR, {})
+            response = view(request)
+        assert response.content.decode().count("<b>") == 3
+        for label in ("alpha", "beta", "gamma"):
+            assert f"<b>{label}={label.upper()}</b>" in response.content.decode()
 
 
 class TestKeylessContextCollisions:
@@ -121,7 +195,7 @@ class TestKeylessContextMerges:
     """Names outside the guarded domain keep merging silently."""
 
     def test_non_conflicting_keys_merge(self, tmp_path: Path) -> None:
-        """A dict touching nothing guarded lands in the context."""
+        """A dict that sets no guarded key is merged into the context."""
         mgr, info, module_path = build_composite_component(tmp_path)
         mgr._registry.register(module_path, None, lambda: {"env": "prod"})
         context_data = {COMPONENT_PROPS_CONTEXT_KEY: frozenset({"title"})}
@@ -293,7 +367,7 @@ class TestCallerContextOwnership:
     def test_simple_render_leaves_the_caller_dict_untouched(
         self, tmp_path: Path
     ) -> None:
-        """The request and csrf keys land in the render copy, not in the argument."""
+        """The request and csrf keys are set on the render copy, not on the argument."""
         (tmp_path / "card.djx").write_text("<div>{{ title }} {{ csrf_token }}</div>")
         info = ComponentInfo(
             name="card",

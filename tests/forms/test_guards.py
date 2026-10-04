@@ -40,7 +40,7 @@ from next.forms.dispatch.permissions import (
 from next.forms.manager import form_action_manager
 from next.forms.signals import action_dispatched, form_access_denied
 from tests.support import GuardedTenantForm, bound_dependency, build_post_request
-from tests.support.cases import (
+from tests.support.cases.forms import (
     PERMISSION_HOOK_BAD_TYPE,
     PERMISSION_HOOK_RAISE,
     PERMISSION_OUTCOME_CASES,
@@ -181,7 +181,7 @@ class TestBuildActionGuard:
 
 
 class TestGuardRegistration:
-    """Guard config declared on Meta or @action lands in ActionMeta."""
+    """Guard config declared on Meta or @action is stored in ActionMeta."""
 
     @pytest.mark.parametrize(
         ("action_name", "expected"),

@@ -1,0 +1,129 @@
+"""The paths and names of the SEO routes, and the lazy patterns filtered by source.
+
+A route without a source is not mounted, so a project view at that path answers.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Final, overload, override
+
+from next.diagnostics import FailureLog
+
+from .manager import seo_manager
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Iterator
+
+    from django.urls import URLPattern
+
+
+SITEMAP_ROUTE: Final = "sitemap.xml"
+SECTION_ROUTE: Final = "sitemap-<slug:section>.xml"
+ROBOTS_ROUTE: Final = "robots.txt"
+
+SITEMAP_NAME: Final = "sitemap"
+SECTION_NAME: Final = "sitemap_section"
+ROBOTS_NAME: Final = "robots"
+
+DEFAULT_NAMESPACE: Final = "next"
+"""The namespace the routes answer under when `next.urls` serves them."""
+
+HOST_ROOT_NAMESPACE: Final = "next_seo"
+"""The namespace of `next.seo.urls`, mounted at the host root."""
+
+
+logger = logging.getLogger(__name__)
+_failures = FailureLog(logger)
+
+
+def _served(route: str, probe: Callable[[], bool]) -> bool:
+    """Whether `probe` mounts `route`, a probe that raises keeping the route.
+
+    It runs during URL resolution, outside any view, so an intended exception such as
+    `Http404` is contained like any other. A failure fails the request under `DEBUG`
+    or `STRICT_LOADING`, and otherwise keeps the route, whose view answers 503 for the
+    same failure while the other routes still resolve.
+    """
+    try:
+        return probe()
+    except Exception as exc:  # noqa: BLE001 - contained, the probe runs project code
+        _failures.contain(
+            exc,
+            route,
+            "Deciding whether to mount /%s raised, so the route stays mounted "
+            "and answers 503 until its source loads.",
+            route,
+            pass_through=(),
+        )
+        return True
+
+
+def served_names() -> frozenset[str]:
+    """Return the names of the routes whose source a page tree or a backend has."""
+    names: set[str] = set()
+    if _served(SITEMAP_ROUTE, seo_manager.serves_sitemap):
+        names.update((SITEMAP_NAME, SECTION_NAME))
+    if _served(ROBOTS_ROUTE, lambda: seo_manager.robots_source() is not None):
+        names.add(ROBOTS_NAME)
+    return frozenset(names)
+
+
+def served_patterns(patterns: Iterable[URLPattern]) -> list[URLPattern]:
+    """Return the patterns among `patterns` whose source exists."""
+    names = served_names()
+    return [pattern for pattern in patterns if pattern.name in names]
+
+
+class SeoPatterns(Sequence["URLPattern"]):
+    """The SEO patterns filtered by source, filtered again after a manager reset."""
+
+    def __init__(self, patterns: Iterable[URLPattern]) -> None:
+        """Store every pattern without filtering."""
+        self.patterns = tuple(patterns)
+        self._held: tuple[int, tuple[URLPattern, ...]] | None = None
+
+    def _served(self) -> tuple[URLPattern, ...]:
+        seo_manager.refresh()
+        version = seo_manager.version
+        held = self._held
+        if held is not None and held[0] == version:
+            return held[1]
+        served = tuple(served_patterns(self.patterns))
+        self._held = (version, served)
+        return served
+
+    @override
+    def __iter__(self) -> Iterator[URLPattern]:
+        return iter(self._served())
+
+    @override
+    def __len__(self) -> int:
+        return len(self._served())
+
+    @overload
+    def __getitem__(self, key: int, /) -> URLPattern: ...
+
+    @overload
+    def __getitem__(self, key: slice, /) -> tuple[URLPattern, ...]: ...
+
+    @override
+    def __getitem__(self, key: int | slice, /) -> URLPattern | tuple[URLPattern, ...]:
+        return self._served()[key]
+
+
+__all__ = [
+    "DEFAULT_NAMESPACE",
+    "HOST_ROOT_NAMESPACE",
+    "ROBOTS_NAME",
+    "ROBOTS_ROUTE",
+    "SECTION_NAME",
+    "SECTION_ROUTE",
+    "SITEMAP_NAME",
+    "SITEMAP_ROUTE",
+    "SeoPatterns",
+    "served_names",
+    "served_patterns",
+]

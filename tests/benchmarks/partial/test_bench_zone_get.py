@@ -41,7 +41,7 @@ def _zone_get(zones: str) -> HttpRequest:
 
 
 def _cheap_provider() -> str:
-    """Context provider priced near zero, so the tick overhead stays visible."""
+    """Context provider of negligible cost, so the tick overhead stays visible."""
     return "v"
 
 

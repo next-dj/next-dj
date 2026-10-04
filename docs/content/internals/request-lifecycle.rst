@@ -26,7 +26,8 @@ Pipeline
        Django --> Resolver["Django URL resolver"]
        Resolver -- form dispatch path --> FormDispatch["Form dispatcher"]
        Resolver -- file routed path --> PageView["Page view"]
-       PageView --> Loader["Page loader"]
+       PageView --> Policy["Response policy<br/>cache, headers, CSRF delivery"]
+       Policy --> Loader["Page loader"]
        Loader --> BodySource{"Body source"}
        BodySource -- "render() function" --> RenderFn["Call render(), resolve its arguments"]
        BodySource -- "template / template.djx" --> StaticBody["Read static body string"]
@@ -36,9 +37,11 @@ Pipeline
        ZoneResp --> Response
        ZoneIntent -- "full page" --> LayoutChain["Compose layout chain"]
        LayoutChain --> ContextCtx["Run context functions"]
-       ContextCtx --> CollectAssets["Static collector"]
+       ContextCtx --> Metadata["Fold page metadata as the head renders"]
+       Metadata --> CollectAssets["Static collector"]
        CollectAssets --> InjectTags["Emit collected tags"]
-       InjectTags --> Response(["HTTP response"])
+       InjectTags --> Stamp["Stamp headers, cache, X-Robots-Tag"]
+       Stamp --> Response(["HTTP response"])
        FormDispatch --> Validation{"Form valid"}
        Validation -- yes --> Handler["Run handler"]
        Handler --> Response
@@ -64,18 +67,22 @@ A match on ``/_next/form/<str:uid>/`` dispatches to the form dispatcher instead.
 Page view
 ~~~~~~~~~
 
-The page view loads the page module and resolves the body source first.
+The page view first reads the response policy of the page, the ``cache`` of its ``page.py`` and the ``headers`` of every ``page.py`` along its chain, memoised per module reload, with a callable ``cache`` resolved through the render's dependency cache.
+A policy that lets a shared cache keep the response defers the CSRF token under ``CSRF_DELIVERY="auto"`` and marks the render shared, so the forms carry no token and a ``Consent`` parameter reads an undecided visitor.
+The view then loads the page module and resolves the body source.
 When the module exposes a ``render`` function the view calls it before context runs, resolving its arguments through the dependency resolver.
 ``render`` may return a string body or an ``HttpResponseBase`` that short-circuits the layout and static pipelines.
 When the body comes from the ``template`` attribute or a ``template.djx`` file the view reads that source as a plain string.
 After the body is in hand the view builds the render context and runs every ``@context`` function in order.
 Captured URL kwargs from the matched route are seeded into the context dict before any ``@context`` function runs.
+The render context also carries a deferred fold of the page metadata, which ``{% metadata %}`` in the root layout resolves as the composed template renders, so a ``@page.metadata`` callable runs after every ``@context`` function and reads the same dependency cache.
 
 Zone requests
 ~~~~~~~~~~~~~
 
 After the body source resolves, the view inspects the request for a partial intent.
 A request that targets named zones receives a zone response instead of the full page render.
+A zone body carries no head, so the metadata chain of the page is never folded and a ``@page.metadata`` callable never runs on this path.
 See :doc:`/content/topics/partial-rendering/how-it-works` for the zone request wire format and the patch envelope.
 
 Layout chain
@@ -95,14 +102,28 @@ The collector finalises before the template tags emit their slot.
 Tag injection
 ~~~~~~~~~~~~~
 
-``{% collect_styles %}`` and ``{% collect_scripts %}`` emit placeholder tokens during template rendering.
-After the layout chain finishes, the static manager replaces every placeholder token with the rendered tags accumulated by the request-scoped ``StaticCollector``.
-The framework injects the ``Next`` JS context script before any other script in the page.
+``{% collect_styles %}``, ``{% collect_head %}``, and ``{% collect_scripts %}`` emit placeholder tokens during template rendering.
+After the layout chain finishes, the static manager replaces every placeholder token with the rendered tags accumulated by the request-scoped ``StaticCollector``, each carrying the CSP nonce of the request.
+The head slot receives the ``scripts.py`` scripts the visitor may run at once, before ``</head>`` when the layout carries no ``{% collect_head %}``.
+The framework injects the ``Next`` JS context script before any other script in the page, its payload carrying ``$csrf``, ``$chunks``, and, when the page has any, ``$scripts`` and ``$consent``.
+
+Response headers
+~~~~~~~~~~~~~~~~
+
+The view stamps what the policy declares on the response.
+The ``headers`` go on first, then the ``cache`` of a successful ``GET`` or ``HEAD``, taken back to ``private`` when the render set a cookie, read the session, minted a CSRF cookie, read the consent cookie, or minted a CSP nonce, or when the request carries ``Authorization``.
+A final step then sets ``X-Robots-Tag`` and ``Vary: Cookie`` and, last, sends a response whose render contained a failure with ``private, no-store``, so a callable ``SITE["INDEXABLE"]`` that first runs for the robots header and fails still keeps the response out of every cache.
+A shared cache swaps the response's cookie jar for ``SharedCookies``, which makes the response private as soon as a middleware sets a cookie after the view, and a lazily rendered ``TemplateResponse`` runs the final step in a post-render callback, so the robots its head published reach the header.
+On a site closed to search the header is ``noindex, nofollow``, and otherwise it repeats the robots directives the ``{% metadata %}`` resolve published on the request when they block, or those of the static fold when no head rendered.
+``Vary: Cookie`` joins when the HTML followed the consent cookie.
+A ``render()`` that returns its own response passes the same stamping, its own headers winning.
+A zone response goes through ``finish_zone_response``, which stamps the page ``headers``, ``private, no-store`` where the response names no ``Cache-Control`` of its own, and the site-level robots header, so a CDN that ignores ``Vary`` never keeps it.
+A zone request reads the page ``headers`` alone, so a callable ``cache`` is never called for it.
 
 Both routed views then stamp the partial ``Vary`` set on the finished response, whether or not the project declares a single zone.
 The header names ``X-Next-Request``, ``X-Next-Zone``, ``X-Next-Merge``, and ``X-Next-Version``, because a full page and a zone envelope answer the same URL and a shared cache that ignores those headers would serve one where the other belongs.
 A project using no partial rendering therefore still ships the four names on every file-routed HTML response, which narrows what a shared cache may reuse across clients that send different values.
-The one response that escapes the stamp is the one a ``render`` function returns itself, because that branch leaves the view before the port is reached.
+A response a ``render`` function returns itself receives the stamp only when it succeeds and carries ``Cache-Control``, because a browser could otherwise serve a stored copy in place of a zone fetch, while a redirect or an uncached answer is left alone.
 See :doc:`/content/topics/partial-rendering/reference` for the request headers behind that set and what a shared cache does with them.
 
 Form submission path
@@ -114,7 +135,7 @@ It then resolves the posted origin and asks the page that origin names to author
 On valid form the handler runs and returns a response that goes back to the browser.
 On invalid form the dispatcher loads the origin page and re-renders it through the same pipeline used for a fresh page request, with the bound form in the template scope.
 
-The dependency cache is reused across the failure path so context functions and providers run at most once per request.
+The dependency cache is reused across the failure path, so a named dependency the dispatch already resolved is not resolved again by the re-render.
 
 .. _internals-request-lifecycle-render-paths:
 
@@ -184,6 +205,9 @@ A row that does not run the routed view builds that request with ``next.pages.vi
 A ``render()`` keyed on identity, on ``request.GET``, on ``request.method``, or on a canonical-URL comparison therefore answers the same on every row as it does on a visit.
 The one gap is a foreign morph whose caller named the page by file path, which carries no URL to present and leaves the live path in place, see :doc:`/content/topics/pages`.
 
+The head is rendered on the two rows that compose the whole document, the full page GET and the form re-render, so a ``@page.metadata`` callable runs on those two and on no zone row.
+``Patches.meta`` is the one caller outside the head, and it runs the inherited callables of the origin chain only after the origin ``render()`` has authorized the request.
+
 The ``@context`` column hides one difference worth naming.
 The form re-render and the origin zone morph build the context with no zone batch, so every page-level callable runs, ``zone=``-tagged ones included.
 The zone GET, the wizard step morph, and the foreign morph pass the requested batch, so a callable bound to another zone is skipped before its dependencies resolve.
@@ -226,7 +250,7 @@ Asset plans.
 
 The caches hold structures and compilations, never a rendered answer.
 Every request still runs each ``@context`` function in order, resolves the parameters the compiled plan left as runtime candidates, renders the body and the layout chain against a freshly assembled scope, and fills a ``StaticCollector`` created for that request alone.
-The dependency cache lives for a single resolution pass, and the form dispatch path shares one such cache across the stages of a single POST.
+The dependency cache lives for a single page render, shared by its ``render()``, ``@context``, and metadata callables, and the form dispatch path shares one such cache across the stages of a single POST.
 
 An edit to a source file reaches the next request rather than the next restart.
 The module memo compares mtimes on every load, the version counters behind the route index, the component registry, and the asset plans are compared on every read, and under ``DEBUG`` the composition, component-template, and asset-plan caches re-stat their sources before a hit counts.

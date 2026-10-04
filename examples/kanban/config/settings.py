@@ -115,4 +115,20 @@ NEXT_FRAMEWORK = {
     "PARTIAL_BACKENDS": extend_default_backend(
         "PARTIAL_BACKENDS", OPTIONS={"VERSION": "v1"}
     ),
+    "SITE": {"URL": "https://kanban.example", "NAME": "next.dj Kanban"},
+    "METADATA": {
+        "DEFAULTS": {
+            "viewport": "width=device-width, initial-scale=1",
+            "icons": {
+                "icon": {"url": "/static/kanban/icon.svg", "type": "image/svg+xml"}
+            },
+            "description": (
+                "A Kanban board on next.dj with React components and co-located assets."
+            ),
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "next.dj — Kanban",
+            },
+        }
+    },
 }

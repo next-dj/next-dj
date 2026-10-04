@@ -5,7 +5,7 @@ import pytest
 from django.test import Client
 
 import next.partial.render as render_module
-from next.pages.loaders import _MODULE_MEMO, _load_python_module_memo
+from next.pages.loaders import load_page_module
 from next.partial.headers import CONTENT_TYPE
 from next.testing import NextClient, envelope_of, override_next_settings
 from tests.site_pages.counted import probe
@@ -18,12 +18,11 @@ COUNTED_PAGE = SITE_PAGES / "counted" / "page.py"
 
 @pytest.fixture(autouse=True)
 def counted_page():
-    """Re-register the counted page and zero its counters before each test.
+    """Execute the counted page afresh and zero its counters before each test.
 
-    Dropping the memo re-executes the module so its providers outlive a neighbour.
+    The per-test memo reset makes this load re-register its providers.
     """
-    _MODULE_MEMO.pop(COUNTED_PAGE)
-    _load_python_module_memo(COUNTED_PAGE)
+    load_page_module(COUNTED_PAGE)
     probe.reset_counters()
     return probe
 

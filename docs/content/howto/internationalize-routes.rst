@@ -105,6 +105,32 @@ A ``@context`` callable returns the already-translated string.
        """Return the localized page heading."""
        return _("Featured products")
 
+Translate page titles
+~~~~~~~~~~~~~~~~~~~~~
+
+Page titles and descriptions live in the ``metadata`` dict of a ``page.py``, and a lazy translation stays lazy until ``{% metadata %}`` renders it under the language of the request.
+Wrap the texts in :func:`~django.utils.translation.gettext_lazy`, the settings tier included, and add ``alternates`` so every variant of a page links to the others.
+
+.. code-block:: python
+   :caption: shop/routes/page.py
+
+   from django.utils.translation import gettext_lazy as _
+
+   metadata = {
+       "title": _("Featured products"),
+       "description": _("The products the shop features this week."),
+       "canonical": True,
+       "alternates": {"languages": True},
+   }
+
+``alternates.languages`` set to ``True`` walks ``LANGUAGES`` and translates the canonical URL through :func:`~django.urls.translate_url`, which is why the router include has to sit inside ``i18n_patterns`` and ``next.W087`` warns when it does not.
+The page renders one ``<link rel="alternate" hreflang="...">`` per language and an ``x-default`` pointing at the ``LANGUAGE_CODE`` variant.
+See :doc:`/content/topics/seo/social-and-canonical` for the mapping form and the ``x_default`` override.
+
+The sitemap follows the same languages.
+``i18n = True`` in the ``sitemap.py`` at the top of the page root lists every URL once per language with the prefix in the path, and ``alternates = True`` adds the hreflang block to each entry, see :doc:`/content/topics/seo/sitemaps`.
+Because the router include sits inside ``i18n_patterns``, the sitemap and robots routes it carries sit under the prefix too, so ``path("", include("next.seo.urls"))`` goes in the plain ``urlpatterns`` list ahead of the language block to mount them at the host root, see :ref:`topics-seo-host-root`.
+
 Compile the catalogs
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -142,3 +168,4 @@ See also
 
    :doc:`/content/topics/file-router` for how the router include is mounted.
    :doc:`/content/howto/reverse-urls` for building prefixed URLs from code.
+   :doc:`/content/topics/seo/metadata` for the title template and lazy texts.

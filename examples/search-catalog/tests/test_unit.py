@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from catalog.demo import seed_demo
 from catalog.forms import PRESETS, PresetFilterForm
-from catalog.models import Category, Product
+from catalog.models import Category, Lead, Product
 from catalog.providers import (
     DFilters,
     DPage,
@@ -69,6 +69,13 @@ class TestModelStr:
             category=cat, slug="p", name="Widget", brand="Acme", price=Decimal("1.00")
         )
         assert str(product) == "Widget (Acme)"
+
+    @pytest.mark.django_db()
+    def test_lead_str(self) -> None:
+        """Return the email and the category of a lead from `__str__`."""
+        cat = Category.objects.create(slug="x", name="Things")
+        lead = Lead.objects.create(category=cat, email="ada@example.com")
+        assert str(lead) == "ada@example.com (Things)"
 
 
 class TestFiltersDataclass:

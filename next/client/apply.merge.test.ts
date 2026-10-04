@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Applier } from "./apply";
 import type { ApplyDeps, AssetBridge, Asset, MountRegistry, ZoneFetch } from "./apply";
+import { STUB_OWNER, stubBridge } from "./test-doubles";
 
 interface Dispatched {
   event: string;
@@ -783,17 +784,9 @@ describe("refresh verb", () => {
   it("refresh targets the zone's owning page, not the address bar", () => {
     document.body.innerHTML = '<div data-next-zone="feed">x</div>';
     const refresh = vi.fn<ZoneFetch>();
-    const el = document.querySelector('[data-next-zone="feed"]')!;
     // A modal holds the address bar (here), so a base-page zone must refresh
     // against the page the layer stack says owns it, not the modal route.
-    const layers = {
-      resolveZone: () => el,
-      resolveSelector: () => null,
-      urlFor: () => "/owner/",
-      open: () => undefined,
-      close: () => undefined,
-      toast: () => undefined,
-    };
+    const layers = stubBridge();
     const { applier } = makeApplier({
       refresh,
       layers: () => layers,
@@ -801,7 +794,7 @@ describe("refresh verb", () => {
     });
     applier.apply(envelope([{ op: "refresh", zone: "feed" }]));
     expect(refresh).toHaveBeenCalledWith({
-      url: "/owner/",
+      url: STUB_OWNER,
       zone: "feed",
       headers: { "X-Next-Zone": "feed" },
     });
@@ -809,14 +802,7 @@ describe("refresh verb", () => {
 
   it("refresh falls back to the current URL when the zone is absent", () => {
     const refresh = vi.fn<ZoneFetch>();
-    const layers = {
-      resolveZone: () => null,
-      resolveSelector: () => null,
-      urlFor: () => "/owner/",
-      open: () => undefined,
-      close: () => undefined,
-      toast: () => undefined,
-    };
+    const layers = stubBridge({ resolveZone: () => null });
     const { applier } = makeApplier({
       refresh,
       layers: () => layers,

@@ -125,7 +125,7 @@ class TestActionRegisteredSignal:
     """``action_registered`` signal can be connected to and receives kwargs."""
 
     def test_signal_is_importable(self) -> None:
-        """``action_registered`` is a Django Signal exported from ``next.forms.signals``."""
+        """``next.forms.signals`` exports ``action_registered`` as a Django Signal."""
         assert isinstance(action_registered, Signal)
 
     def test_listener_receives_sent_event(
@@ -176,7 +176,7 @@ class TestActionDispatchedSignal:
     """``action_dispatched`` signal can be connected to and receives kwargs."""
 
     def test_signal_is_importable(self) -> None:
-        """``action_dispatched`` is a Django Signal exported from ``next.forms.signals``."""
+        """``next.forms.signals`` exports ``action_dispatched`` as a Django Signal."""
         assert isinstance(action_dispatched, Signal)
 
     def test_listener_receives_sent_event(
@@ -227,7 +227,7 @@ class TestFormValidationFailedSignal:
     """``form_validation_failed`` signal can be connected to and receives kwargs."""
 
     def test_signal_is_importable(self) -> None:
-        """``form_validation_failed`` is a Django Signal exported from ``next.forms.signals``."""
+        """``form_validation_failed`` is a Django Signal of ``next.forms``."""
         assert isinstance(form_validation_failed, Signal)
 
     def test_listener_receives_sent_event(

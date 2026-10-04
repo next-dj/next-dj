@@ -1,0 +1,115 @@
+"""Registry of the `@sitemap.items` callables, keyed by registering file and trail."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any, NamedTuple
+
+from next.introspect import callable_name
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+type KwargsOf = Callable[[Any], Mapping[str, object]]
+
+
+class SitemapItemsEntry(NamedTuple):
+    """One callable registered for a trail by the file running `@sitemap.items`.
+
+    `kwargs` and `lastmod` extract the URL kwargs and the date from each listed row.
+    """
+
+    file: Path
+    trail: str
+    func: Callable[..., Any]
+    section: str | None = None
+    kwargs: KwargsOf | None = None
+    lastmod: str | None = None
+
+
+class SitemapItemsConflict(NamedTuple):
+    """Two callables one file registered for the same trail, the later one kept."""
+
+    file: Path
+    trail: str
+    replaced: str
+    kept: str
+
+
+class SitemapItemsRegistry:
+    """Store the items callables in registration order, the last one per key kept.
+
+    A second callable for one trail of one file is recorded as a conflict.
+    """
+
+    def __init__(self) -> None:
+        """Create an empty registry."""
+        self._entries: list[SitemapItemsEntry] = []
+        self._index: dict[tuple[Path, str], SitemapItemsEntry] = {}
+        self._conflicts: list[SitemapItemsConflict] = []
+
+    def register(self, entry: SitemapItemsEntry) -> None:
+        """Bind the callable of `entry` to its trail, replacing an earlier binding.
+
+        A re-executed `sitemap.py` is forgotten first, so a repeat is a conflict.
+        """
+        key = (entry.file, entry.trail)
+        existing = self._index.get(key)
+        if existing is None:
+            self._entries.append(entry)
+        else:
+            self._entries[self._entries.index(existing)] = entry
+            if existing.func is not entry.func:
+                self._conflicts.append(
+                    SitemapItemsConflict(
+                        entry.file,
+                        entry.trail,
+                        callable_name(existing.func),
+                        callable_name(entry.func),
+                    )
+                )
+        self._index[key] = entry
+
+    def forget(self, file: Path) -> None:
+        """Remove every entry and conflict that `file` registered."""
+        self._conflicts = [item for item in self._conflicts if item.file != file]
+        kept = [entry for entry in self._entries if entry.file != file]
+        if len(kept) == len(self._entries):
+            return
+        self._entries = kept
+        self._index = {(entry.file, entry.trail): entry for entry in kept}
+
+    def registered_names(self) -> dict[Path, tuple[str, ...]]:
+        """Return the callable names registered per registering file, for the checks."""
+        names: dict[Path, list[str]] = {}
+        for entry in self._entries:
+            names.setdefault(entry.file, []).append(callable_name(entry.func))
+        return {file: tuple(found) for file, found in names.items()}
+
+    def conflicts(self) -> tuple[SitemapItemsConflict, ...]:
+        """Return every trail that one file registered twice, for the checks."""
+        return tuple(self._conflicts)
+
+    def entries_for(self, file: Path) -> tuple[SitemapItemsEntry, ...]:
+        """Return every entry the module at `file` registered, in order."""
+        return tuple(entry for entry in self._entries if entry.file == file)
+
+    def reset(self) -> None:
+        """Remove every registration and conflict."""
+        self._entries.clear()
+        self._index.clear()
+        self._conflicts.clear()
+
+
+sitemap_items_registry = SitemapItemsRegistry()
+
+
+__all__ = [
+    "KwargsOf",
+    "SitemapItemsConflict",
+    "SitemapItemsEntry",
+    "SitemapItemsRegistry",
+    "sitemap_items_registry",
+]

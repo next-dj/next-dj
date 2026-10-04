@@ -135,9 +135,14 @@ Modules
 
 ``next.static.inject``.
    ``PlaceholderInjector`` renders what a collector holds into the placeholder tokens of a finished page, and the manager delegates its ``inject`` to one.
+   It asks the ``page_scripts_slot`` port for the head scripts and the ``$scripts`` and ``$consent`` entries of the render, placing the head scripts at ``{% collect_head %}`` or before ``</head>``.
 
-``next.static.scripts``.
-   ``NextScriptBuilder`` and ``ScriptInjectionPolicy`` for the ``Next`` runtime script.
+``next.static.runtime``.
+   ``NextScriptBuilder`` and ``ScriptInjectionPolicy`` for the ``Next`` runtime script, and the reserved init payload keys.
+
+``next.static.nonce``.
+   ``resolve_nonce`` reads the CSP nonce of a render once while ``CSP_NONCE`` is on, and marks the render personal when a nonce was minted.
+   The injector resolves it on the first tag it writes and hands it to the script builder and to every backend renderer as the ``nonce`` keyword, so a render that writes no tag mints no nonce and stays shareable.
 
 ``next.static.serializers``.
    ``JsContextSerializer`` protocol plus ``JsonJsContextSerializer`` and ``PydanticJsContextSerializer``.
@@ -162,7 +167,7 @@ Dedup
 
 The collector holds one dedup strategy for the request.
 The strategy is selected by the dotted path under the ``DEDUP_STRATEGY`` key of the first static backend ``OPTIONS``, instantiated once per request, defaulting to ``UrlDedup`` when the key is absent.
-One render holds one collector, so it holds one strategy and one JS context policy, and the first entry of ``STATIC_BACKENDS`` settles both for the whole pipeline.
+One render holds one collector, so it holds one strategy and one JS context policy, and the first entry of ``STATIC_BACKENDS`` selects both for the whole pipeline.
 ``StaticManager.default_backend`` is the first entry, and it is the only one the render path uses.
 A later entry is built and receives ``static_backend_loaded`` and ``forget_urls``, and renders nothing.
 :doc:`/content/topics/static-assets/deduplication` covers the bundled strategies and the custom-strategy protocol.
@@ -185,7 +190,7 @@ A standalone zone render runs the same discovery but ships the collected assets 
 Extension points
 ----------------
 
-- Subclass ``StaticFilesBackend`` to change the rendered output.
+- Subclass ``StaticFilesBackend`` to change the rendered output, keeping each renderer's ``request`` and ``nonce`` keywords, which ``manage.py check`` verifies.
 - Override ``StaticBackend.resolve_url`` to look an authored reference up somewhere other than Django staticfiles, and keep core's reading of a reference with ``next.static.static_name``.
 - Override ``StaticBackend.forget_urls`` when a backend memoises resolved URLs somewhere other than the base memo, and the manager drives it over every configured backend whenever ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` changes.
 - Implement the ``DedupStrategy`` protocol and point ``DEDUP_STRATEGY`` at it.

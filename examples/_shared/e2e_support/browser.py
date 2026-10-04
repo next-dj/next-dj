@@ -10,7 +10,15 @@ from dataclasses import dataclass, field
 from typing import NamedTuple
 
 import pytest
-from playwright.sync_api import ConsoleMessage, Error, Page, Request, Response, Route
+from playwright.sync_api import (
+    ConsoleMessage,
+    Error,
+    Page,
+    Request,
+    Response,
+    Route,
+    TimeoutError as PlaywrightTimeoutError,
+)
 
 
 CDN_URL_PATTERN = re.compile(
@@ -28,6 +36,9 @@ IGNORED_CONSOLE = (
 )
 
 HTTP_ERROR_STATUS = 400
+
+# How long teardown waits for the requests a page still has in flight to finish.
+SETTLE_TIMEOUT_MS = 2_000
 
 # A superseded GET is aborted on purpose by the latest-wins queue in wire.ts.
 BENIGN_FAILURES = ("net::ERR_ABORTED",)
@@ -244,6 +255,18 @@ def pytest_runtest_call(item: pytest.Item) -> Generator[None, object, object]:
     return outcome
 
 
+def _settle(page: Page) -> None:
+    """Let the requests the page still has in flight finish before the test ends.
+
+    Django closes its database connections in `request_finished`, after the browser
+    already holds the response, so a flush in teardown would race that close on the
+    live server thread. A page holding an event stream never goes idle, and the wait
+    gives up after a short while instead.
+    """
+    with suppress(PlaywrightTimeoutError):
+        page.wait_for_load_state("networkidle", timeout=SETTLE_TIMEOUT_MS)
+
+
 @pytest.fixture()
 def next_probe(request: pytest.FixtureRequest) -> Iterator[PageProbe]:
     """Stub the CDN, bridge the runtime events, and collect browser noise."""
@@ -259,6 +282,7 @@ def next_probe(request: pytest.FixtureRequest) -> Iterator[PageProbe]:
     collected.detach(page)
 
     if not _test_failed(request):
+        _settle(page)
         # Closing here releases any SSE stream still parked in a server thread. A
         # failed test keeps its page open instead, because pytest-playwright shoots
         # the failure screenshot off `context.pages` when the context tears down.
@@ -279,6 +303,17 @@ def wait_for_runtime(page: Page, timeout: int = 10_000) -> None:
         "() => window.Next !== undefined && window.Next.context !== undefined",
         timeout=timeout,
     )
+
+
+def mark_document(page: Page) -> None:
+    """Tag the live document so `assert_same_document` can tell a reload apart."""
+    page.evaluate("() => { window.__stillHere = true; }")
+
+
+def assert_same_document(page: Page) -> None:
+    """Fail when the page reloaded since `mark_document` tagged it."""
+    if page.evaluate("() => window.__stillHere") is not True:
+        pytest.fail("the page reloaded, the marked document is gone")
 
 
 def applied_count(page: Page) -> int:

@@ -1,9 +1,17 @@
+from types import SimpleNamespace
+
 import pytest
 from django.http import HttpRequest
 
-from next.deps import DependencyResolver, Depends, resolver
-from next.deps.cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache
-from tests.support import bound_dependency
+from next.deps import (
+    REQUEST_DEP_CACHE_ATTR,
+    DependencyResolver,
+    Depends,
+    get_request_dep_cache,
+    resolver,
+)
+from next.deps.cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache, render_dep_cache
+from tests.support import bound_dependency, build_mock_http_request
 
 
 class TestDependencyCache:
@@ -162,3 +170,54 @@ class TestDependencyCacheLayout:
         cache = DependencyCache()
         with pytest.raises(AttributeError):
             cache.extra = 1
+
+
+class TestRenderDepCache:
+    """The dispatch cache on a request when there is one, a private dict otherwise."""
+
+    def test_a_request_without_one_gets_a_fresh_dict_it_never_carries(self) -> None:
+        request = HttpRequest()
+        cache = render_dep_cache(request)
+        assert cache == {}
+        assert not hasattr(request, REQUEST_DEP_CACHE_ATTR)
+        assert render_dep_cache(request) is not cache
+
+    def test_the_dict_already_on_the_request_is_returned(self) -> None:
+        request = HttpRequest()
+        attached: dict[str, object] = {"wallet": "w"}
+        setattr(request, REQUEST_DEP_CACHE_ATTR, attached)
+        assert render_dep_cache(request) is attached
+
+    def test_an_empty_dispatch_cache_is_shared_rather_than_replaced(self) -> None:
+        request = HttpRequest()
+        attached: dict[str, object] = {}
+        setattr(request, REQUEST_DEP_CACHE_ATTR, attached)
+        assert render_dep_cache(request) is attached
+
+    def test_without_a_request_every_ask_is_a_fresh_dict(self) -> None:
+        first = render_dep_cache(None)
+        assert first == {}
+        assert render_dep_cache(None) is not first
+
+    def test_a_non_dict_attribute_is_ignored(self) -> None:
+        request = HttpRequest()
+        setattr(request, REQUEST_DEP_CACHE_ATTR, "junk")
+        assert render_dep_cache(request) == {}
+        assert getattr(request, REQUEST_DEP_CACHE_ATTR) == "junk"
+
+    def test_a_spec_mock_request_gets_a_fresh_dict(self) -> None:
+        request = build_mock_http_request()
+        assert render_dep_cache(request) is not render_dep_cache(request)
+
+
+class TestDeprecatedAccessor:
+    """`get_request_dep_cache` keeps its old answer behind a deprecation warning."""
+
+    def test_it_answers_the_dispatch_cache_or_none(self) -> None:
+        carrying = SimpleNamespace(**{REQUEST_DEP_CACHE_ATTR: {"a": 1}})
+        with pytest.warns(DeprecationWarning, match="render_dep_cache"):
+            assert get_request_dep_cache(carrying) == {"a": 1}
+        with pytest.warns(DeprecationWarning, match="render_dep_cache"):
+            assert get_request_dep_cache(SimpleNamespace()) is None
+        with pytest.warns(DeprecationWarning, match="render_dep_cache"):
+            assert get_request_dep_cache(None) is None

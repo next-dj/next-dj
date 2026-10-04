@@ -103,4 +103,17 @@ NEXT_FRAMEWORK = {
     ],
     "STATIC_BACKENDS": [{"BACKEND": "notes.backends.TenantPrefixStaticBackend"}],
     "STATIC_VERSION": ASSET_BUILD_ID,
+    "SITE": {"URL": "https://notes.example", "NAME": "next.dj notes"},
+    "METADATA": {
+        "DEFAULTS": {
+            "viewport": "width=device-width, initial-scale=1",
+            "icons": {
+                "icon": {"url": "/static/notes/icon.svg", "type": "image/svg+xml"}
+            },
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "next.dj — Multi-tenant notes",
+            },
+        }
+    },
 }

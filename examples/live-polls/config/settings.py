@@ -125,4 +125,20 @@ NEXT_FRAMEWORK = {
     "PARTIAL_BACKENDS": extend_default_backend(
         "PARTIAL_BACKENDS", OPTIONS={"VERSION": "v1"}
     ),
+    "SITE": {"URL": "https://polls.example", "NAME": "next.dj polls"},
+    "METADATA": {
+        "DEFAULTS": {
+            "viewport": "width=device-width, initial-scale=1",
+            "icons": {
+                "icon": {"url": "/static/polls/icon.svg", "type": "image/svg+xml"}
+            },
+            "description": (
+                "Live polls on next.dj, every vote streamed to each open tab over SSE."
+            ),
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "next.dj — Live polls",
+            },
+        }
+    },
 }

@@ -144,8 +144,8 @@ The URL subsystem emits ``route_registered`` for each route discovered during a 
 Inventory the loaded backends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Each of the six settings-driven backend families announces what it built through a signal of its own.
-Every one of them carries the same two keyword arguments, ``config``, a copy of the settings entry that named the class, and ``instance``, the object the loader built from it, so one receiver serves all six.
+Each of the eight settings-driven backend families announces what it built through a signal of its own.
+Every one of them carries the same two keyword arguments, ``config``, a copy of the settings entry that named the class, and ``instance``, the object the loader built from it, so one receiver serves all eight.
 
 .. code-block:: python
    :caption: obs/receivers.py
@@ -155,9 +155,11 @@ Every one of them carries the same two keyword arguments, ``config``, a copy of 
 
    from next.signals import (
        component_backend_loaded,
+       consent_backend_loaded,
        form_backend_loaded,
        partial_backend_loaded,
        router_backend_loaded,
+       sitemap_backend_loaded,
        static_backend_loaded,
        wizard_backend_loaded,
    )
@@ -166,9 +168,11 @@ Every one of them carries the same two keyword arguments, ``config``, a copy of 
 
    BACKEND_LOADED = {
        "components": component_backend_loaded,
+       "consent": consent_backend_loaded,
        "forms": form_backend_loaded,
        "partial": partial_backend_loaded,
        "urls": router_backend_loaded,
+       "sitemap": sitemap_backend_loaded,
        "static": static_backend_loaded,
        "wizard": wizard_backend_loaded,
    }
@@ -206,6 +210,44 @@ The sender is the resolved backend class rather than the manager, so ``sender=``
        incr("backends.components", "default")
 
 ``router_backend_loaded`` and ``component_backend_loaded`` are skipped by a reload that passes ``notify=False``, so a count taken from them is a count of announced loads rather than of every rebuild.
+
+Audit the vendor origins of each tree
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A Content Security Policy lists every origin a page loads scripts from, and ``scripts.py`` is where a tree names its vendors.
+``scripts_registered`` fires each time the registry takes a tree's ``scripts.py``, so a receiver can keep the origins of every tree current and compare them with the policy.
+
+.. code-block:: python
+   :caption: obs/receivers.py
+
+   import logging
+   from pathlib import Path
+   from urllib.parse import urlsplit
+
+   from django.dispatch import receiver
+
+   from next.signals import scripts_registered
+
+   logger = logging.getLogger("obs.csp")
+
+   VENDOR_ORIGINS: dict[Path, frozenset[str]] = {}
+   ALLOWED_ORIGINS = frozenset({"https://www.googletagmanager.com"})
+
+   @receiver(scripts_registered, dispatch_uid="obs.csp.vendor_origins")
+   def on_scripts_registered(root: Path, source, scripts, **kwargs) -> None:
+       origins = frozenset(
+           f"{parts.scheme}://{parts.netloc}"
+           for script in scripts
+           if script.src is not None and (parts := urlsplit(script.src)).netloc
+       )
+       VENDOR_ORIGINS[root] = origins
+       for origin in sorted(origins - ALLOWED_ORIGINS):
+           logger.warning("%s loads %s, which script-src does not list", source.path, origin)
+
+``root`` keys the tree, ``source.path`` names the file to fix, and ``scripts`` holds the ``Script`` values it declares.
+A staticfiles name has no origin of its own and loads from ``'self'``, so the receiver skips it.
+The signal fires again after a settings or router reload and, under ``DEBUG``, after an edit of the file, so the mapping follows the tree.
+A tree without a ``scripts.py`` sends nothing, and a file that fails to import arrives with ``source.error`` set and no scripts.
 
 Invalidate a cache on a settings reload
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

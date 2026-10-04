@@ -8,37 +8,41 @@ from django.core.checks import Error, Warning as DjangoWarning
 from django.core.checks.registry import registry
 from django.test import override_settings
 
-import next.pages.loaders as loaders_module
 import next.static.checks as checks_module
 from next.apps.staticfiles import _APP_DIRECTORIES_PATH
 from next.checks import NEXT
 from next.components import FileComponentsBackend
-from next.static import KindRegistry
+from next.static import KindRegistry, ScriptInjectionPolicy, StaticFilesBackend
 from next.static.checks import (
     check_app_directories_finder,
     check_asset_kinds_are_loadable,
+    check_asset_renderers,
     check_inline_asset_bodies_are_loadable,
     check_js_context_serializer,
+    check_nonce_on_shared_pages,
+    check_nonce_templates,
     check_reserved_js_context_keys,
+    check_runtime_bundles_deployed,
+    check_script_policy,
     check_static_backends,
+    check_tag_templates_format,
 )
 from tests.support import (
     APP_FINDER_CASES,
     PROJECT_APP_DIRECTORIES_FINDER,
     AppFinderCase,
+    check_ids,
     patch_checks_router_manager,
+    routed,
+    write_page,
 )
-
-
-def _ids(messages: list) -> list[str]:
-    return [m.id for m in messages]
 
 
 class TestEmptyConfig:
     def test_empty_list_emits_w030(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}):
             messages = check_static_backends(app_configs=None)
-        assert _ids(messages) == ["next.W030"]
+        assert check_ids(messages) == ["next.W030"]
         assert isinstance(messages[0], DjangoWarning)
 
     def test_non_list_falls_back_to_defaults(self) -> None:
@@ -80,27 +84,27 @@ class TestBadEntries:
     def test_non_dict_entry_emits_e037(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": ["not-a-dict"]}):
             messages = check_static_backends(app_configs=None)
-        assert _ids(messages) == ["next.E037"]
+        assert check_ids(messages) == ["next.E037"]
         assert isinstance(messages[0], Error)
 
     def test_non_string_backend_emits_e092(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": 123}]}):
             messages = check_static_backends(app_configs=None)
-        assert _ids(messages) == ["next.E092"]
+        assert check_ids(messages) == ["next.E092"]
 
     def test_missing_module_emits_e036(self) -> None:
         with override_settings(
             NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": "does.not.exist.Backend"}]}
         ):
             messages = check_static_backends(app_configs=None)
-        assert _ids(messages) == ["next.E036"]
+        assert check_ids(messages) == ["next.E036"]
 
     def test_not_subclass_emits_e093(self) -> None:
         with override_settings(
             NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": "builtins.dict"}]}
         ):
             messages = check_static_backends(app_configs=None)
-        assert _ids(messages) == ["next.E093"]
+        assert check_ids(messages) == ["next.E093"]
 
     def test_duplicate_backend_emits_e038(self) -> None:
         with override_settings(
@@ -112,7 +116,7 @@ class TestBadEntries:
             }
         ):
             messages = check_static_backends(app_configs=None)
-        assert "next.E038" in _ids(messages)
+        assert "next.E038" in check_ids(messages)
 
 
 class TestOptionsWarnings:
@@ -128,7 +132,7 @@ class TestOptionsWarnings:
             }
         ):
             messages = check_static_backends(app_configs=None)
-        assert "next.W031" in _ids(messages)
+        assert "next.W031" in check_ids(messages)
 
     def test_js_tag_without_placeholder_emits_w031(self) -> None:
         with override_settings(
@@ -142,7 +146,7 @@ class TestOptionsWarnings:
             }
         ):
             messages = check_static_backends(app_configs=None)
-        assert "next.W031" in _ids(messages)
+        assert "next.W031" in check_ids(messages)
 
     def test_module_tag_without_placeholder_emits_w031(self) -> None:
         with override_settings(
@@ -156,7 +160,7 @@ class TestOptionsWarnings:
             }
         ):
             messages = check_static_backends(app_configs=None)
-        assert "next.W031" in _ids(messages)
+        assert "next.W031" in check_ids(messages)
 
     def test_non_string_tag_template_is_ignored(self) -> None:
         with override_settings(
@@ -170,7 +174,7 @@ class TestOptionsWarnings:
             }
         ):
             messages = check_static_backends(app_configs=None)
-        assert "next.W031" not in _ids(messages)
+        assert "next.W031" not in check_ids(messages)
 
     def test_options_that_are_no_mapping_name_no_tag(self) -> None:
         with override_settings(
@@ -184,7 +188,7 @@ class TestOptionsWarnings:
             }
         ):
             messages = check_static_backends(app_configs=None)
-        assert "next.W031" not in _ids(messages)
+        assert "next.W031" not in check_ids(messages)
 
 
 class TestChecksRegistered:
@@ -198,6 +202,7 @@ class TestChecksRegistered:
             check_asset_kinds_are_loadable,
             check_inline_asset_bodies_are_loadable,
             check_reserved_js_context_keys,
+            check_nonce_templates,
         ],
     )
     def test_registered_under_next_tag(self, check) -> None:
@@ -317,10 +322,108 @@ class TestAssetKindLoadableCheck:
         )
         monkeypatch.setattr(checks_module, "default_kinds", mixed)
         messages = check_asset_kinds_are_loadable()
-        assert _ids(messages) == ["next.W074"]
+        assert check_ids(messages) == ["next.W074"]
         assert isinstance(messages[0], DjangoWarning)
         assert "'jsx'" in messages[0].msg
         assert "'render_babel_script_tag'" in messages[0].msg
+
+
+class OldSignatureBackend(StaticFilesBackend):
+    """A backend whose renderer takes neither the request nor the nonce."""
+
+    def render_link_tag(self, url):
+        """Render the tag from the URL alone."""
+        return f'<link rel="stylesheet" href="{url}">'
+
+
+class RequestOnlyBackend(StaticFilesBackend):
+    """A backend whose renderer takes the request but not the nonce."""
+
+    def render_link_tag(self, url, *, request=None):
+        """Render the tag without a nonce."""
+        return f'<link rel="stylesheet" href="{url}">'
+
+
+class OptionsBackend(StaticFilesBackend):
+    """A backend whose custom renderer takes every keyword it is given."""
+
+    def render_babel_script_tag(self, url, **options):
+        """Render a babel script tag."""
+        return f'<script type="text/babel" src="{url}"></script>'
+
+
+_HERE = "tests.static.test_checks"
+_OLD = {"STATIC_BACKENDS": [{"BACKEND": f"{_HERE}.OldSignatureBackend"}]}
+_REQUEST_ONLY = {"STATIC_BACKENDS": [{"BACKEND": f"{_HERE}.RequestOnlyBackend"}]}
+
+
+def _babel_kind() -> KindRegistry:
+    kinds = KindRegistry()
+    kinds.register(
+        "jsx", extension=".jsx", slot="scripts", renderer="render_babel_script_tag"
+    )
+    return kinds
+
+
+class TestAssetRenderersCheck:
+    """check_asset_renderers refuses a renderer the rendering backend cannot call."""
+
+    def test_builtin_kinds_on_the_default_backend_are_silent(self) -> None:
+        assert check_asset_renderers() == []
+
+    def test_an_old_signature_names_the_migration(self) -> None:
+        with override_settings(NEXT_FRAMEWORK=_OLD):
+            messages = check_asset_renderers()
+        assert check_ids(messages) == ["next.E147"]
+        assert isinstance(messages[0], Error)
+        assert "'css'" in messages[0].msg
+        assert "render_link_tag without the request keyword" in messages[0].msg
+        assert "every page holding such an asset fails" in messages[0].msg
+        assert "nonce=None" in messages[0].hint
+
+    def test_a_renderer_without_the_nonce_fails_only_under_a_nonce(self) -> None:
+        with override_settings(NEXT_FRAMEWORK=_REQUEST_ONLY):
+            [message] = check_asset_renderers()
+        assert message.id == "next.E147"
+        assert "render_link_tag without the nonce keyword" in message.msg
+        assert "whenever its request carries a CSP nonce" in message.msg
+
+    def test_a_renderer_the_backend_lacks_is_named(self, monkeypatch) -> None:
+        monkeypatch.setattr(checks_module, "default_kinds", _babel_kind())
+        [message] = check_asset_renderers()
+        assert message.id == "next.E147"
+        assert "has no render_babel_script_tag method" in message.msg
+
+    def test_a_renderer_taking_every_keyword_is_silent(self, monkeypatch) -> None:
+        monkeypatch.setattr(checks_module, "default_kinds", _babel_kind())
+        backends = {"STATIC_BACKENDS": [{"BACKEND": f"{_HERE}.OptionsBackend"}]}
+        with override_settings(NEXT_FRAMEWORK=backends):
+            assert check_asset_renderers() == []
+
+    def test_the_first_backend_that_loads_renders(self) -> None:
+        entries = [
+            "not a dict",
+            {"BACKEND": 3},
+            {"BACKEND": "x.Y"},
+            {"BACKEND": "django.http.HttpResponse"},
+            *_OLD["STATIC_BACKENDS"],
+        ]
+        with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": entries}):
+            assert check_ids(check_asset_renderers()) == ["next.E147"]
+        with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": entries[:4]}):
+            assert check_asset_renderers() == []
+
+    def test_backends_of_the_wrong_shape_fall_back_to_staticfiles(self) -> None:
+        with patch.object(checks_module, "next_framework_settings") as framework:
+            framework.STATIC_BACKENDS = {}
+            assert check_asset_renderers() == []
+
+    def test_a_renderer_without_a_signature_is_given_the_benefit(self) -> None:
+        with (
+            override_settings(NEXT_FRAMEWORK=_OLD),
+            patch.object(checks_module.inspect, "signature", side_effect=ValueError),
+        ):
+            assert check_asset_renderers() == []
 
 
 class TestInlineAssetBodyLoadableCheck:
@@ -367,7 +470,7 @@ class TestInlineAssetBodyLoadableCheck:
         )
         monkeypatch.setattr(checks_module, "default_kinds", mismatched)
         messages = check_inline_asset_bodies_are_loadable()
-        assert _ids(messages) == ["next.W076"]
+        assert check_ids(messages) == ["next.W076"]
         assert isinstance(messages[0], DjangoWarning)
         assert "'tpl'" in messages[0].msg
         assert "'render_link_tag'" in messages[0].msg
@@ -384,7 +487,7 @@ class TestInlineAssetBodyLoadableCheck:
             inline_tag="script",
         )
         monkeypatch.setattr(checks_module, "default_kinds", wrapped_module)
-        assert _ids(check_inline_asset_bodies_are_loadable()) == ["next.W076"]
+        assert check_ids(check_inline_asset_bodies_are_loadable()) == ["next.W076"]
 
 
 class TestReservedJsContextKeyCheck:
@@ -410,10 +513,9 @@ class TestReservedJsContextKeyCheck:
             "def unread():\n"
             "    return 3\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file)
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
-        assert _ids(messages) == ["next.W075"]
+        assert check_ids(messages) == ["next.W075"]
         assert "'$csrf'" in messages[0].msg
         assert "Rename the key." in messages[0].msg
 
@@ -428,10 +530,9 @@ class TestReservedJsContextKeyCheck:
             "def provider():\n"
             "    return False\n"
         )
-        loaders_module._MODULE_MEMO.pop(page_file)
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
-        assert _ids(messages) == ["next.W075"]
+        assert check_ids(messages) == ["next.W075"]
         assert f"'{key}'" in messages[0].msg
         assert f"The framework owns {key} on every render" in messages[0].msg
         assert (
@@ -460,7 +561,7 @@ class TestReservedJsContextKeyCheck:
             "next.components.sources.get_components_manager", return_value=manager
         ):
             messages = check_reserved_js_context_keys()
-        assert _ids(messages) == ["next.W075"]
+        assert check_ids(messages) == ["next.W075"]
         assert messages[0].msg.startswith("Component context key '$csrf'")
         assert messages[0].obj == str(comp_dir / "component.py")
 
@@ -472,14 +573,13 @@ class TestReservedJsContextKeyCheck:
             "def csrf_token():\n"
             '    return {"token": "app"}\n'
         )
-        loaders_module._MODULE_MEMO.pop(page_file)
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
         assert messages == []
 
 
 class TestAppDirectoriesFinderCheck:
-    """Which configured finder entry earns ``next.E083`` and which stays silent."""
+    """Which configured finder entry raises ``next.E083`` and which raises nothing."""
 
     @pytest.mark.parametrize("case", APP_FINDER_CASES, ids=lambda case: case.id)
     def test_entry_is_refused_only_when_it_publishes_the_package(
@@ -488,7 +588,7 @@ class TestAppDirectoriesFinderCheck:
         with override_settings(STATICFILES_FINDERS=[case.path]):
             messages = check_app_directories_finder(app_configs=None)
 
-        assert _ids(messages) == (["next.E083"] if case.refused else [])
+        assert check_ids(messages) == (["next.E083"] if case.refused else [])
 
     def test_the_refusal_names_the_entry_and_the_replacement(self) -> None:
         with override_settings(STATICFILES_FINDERS=[PROJECT_APP_DIRECTORIES_FINDER]):
@@ -505,3 +605,187 @@ class TestAppDirectoriesFinderCheck:
 
         assert _APP_DIRECTORIES_PATH not in configured
         assert messages == []
+
+
+_CSP_MIDDLEWARE = [
+    *settings.MIDDLEWARE,
+    "django.middleware.csp.ContentSecurityPolicyMiddleware",
+]
+_BARE_TEMPLATES = {
+    "NEXT_JS_OPTIONS": {
+        "script_tag_template": '<script src="{url}"></script>',
+        "init_template": "<script{nonce_attr}>Next._init({payload});</script>",
+    },
+    "STATIC_BACKENDS": [
+        {
+            "BACKEND": "next.static.StaticFilesBackend",
+            "OPTIONS": {"js_tag": '<script src="{url}"></script>', "css_tag": 3},
+        },
+        "not a dict",
+        {"BACKEND": "x.Y", "OPTIONS": "not a dict"},
+    ],
+}
+
+
+class TestNonceTemplatesCheck:
+    """A custom tag template without `{nonce_attr}` warns while a nonce is active."""
+
+    def test_the_default_resolver_without_csp_middleware_is_silent(self) -> None:
+        with override_settings(NEXT_FRAMEWORK=_BARE_TEMPLATES):
+            assert check_nonce_templates() == []
+
+    def test_a_switched_off_resolver_is_silent(self) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={**_BARE_TEMPLATES, "CSP_NONCE": False},
+            MIDDLEWARE=_CSP_MIDDLEWARE,
+        ):
+            assert check_nonce_templates() == []
+
+    def test_csp_middleware_names_every_bare_template(self) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK=_BARE_TEMPLATES, MIDDLEWARE=_CSP_MIDDLEWARE
+        ):
+            messages = check_nonce_templates()
+        assert check_ids(messages) == ["next.W117", "next.W117"]
+        assert "NEXT_JS_OPTIONS['script_tag_template']" in messages[0].msg
+        assert "STATIC_BACKENDS[0]['OPTIONS']['js_tag']" in messages[1].msg
+
+    def test_the_default_templates_are_silent(self) -> None:
+        with override_settings(MIDDLEWARE=_CSP_MIDDLEWARE):
+            assert check_nonce_templates() == []
+
+    def test_options_of_the_wrong_shape_hold_no_template(self) -> None:
+        with patch.object(checks_module, "next_framework_settings") as framework:
+            framework.NEXT_JS_OPTIONS = []
+            framework.STATIC_BACKENDS = {}
+            with override_settings(MIDDLEWARE=_CSP_MIDDLEWARE):
+                assert check_nonce_templates() == []
+
+
+class TestNonceOnSharedPagesCheck:
+    """`next.W120` names an active nonce taking every shared page private."""
+
+    def _root(self, tmp_path):
+        root = tmp_path / "pages"
+        root.mkdir(parents=True)
+        write_page(root, "shared", "template = 'x'\ncache = 60\n")
+        write_page(root, "own", "template = 'x'\n")
+        return root
+
+    def test_an_active_nonce_is_w130(self, tmp_path) -> None:
+        with (
+            routed(self._root(tmp_path)),
+            override_settings(MIDDLEWARE=_CSP_MIDDLEWARE),
+        ):
+            [warning] = check_nonce_on_shared_pages()
+        assert warning.id == "next.W120"
+        assert "shared" in warning.msg
+        assert "CSP_NONCE" in warning.msg
+
+    def test_no_nonce_is_silent(self, tmp_path) -> None:
+        with routed(self._root(tmp_path)):
+            assert check_nonce_on_shared_pages() == []
+        with (
+            routed(self._root(tmp_path / "off"), CSP_NONCE=False),
+            override_settings(MIDDLEWARE=_CSP_MIDDLEWARE),
+        ):
+            assert check_nonce_on_shared_pages() == []
+
+
+class TestScriptPolicyCheck:
+    """`next.E130` names a `NEXT_JS_OPTIONS["policy"]` no injection policy matches."""
+
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"policy": "manual"}, {"policy": ScriptInjectionPolicy.DISABLED}],
+        ids=["unset", "string", "member"],
+    )
+    def test_a_known_policy_is_silent(self, options) -> None:
+        with override_settings(NEXT_FRAMEWORK={"NEXT_JS_OPTIONS": options}):
+            assert check_script_policy() == []
+
+    def test_an_unknown_policy_is_e130(self) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={"NEXT_JS_OPTIONS": {"policy": "sometimes"}}
+        ):
+            [error] = check_script_policy()
+        assert error.id == "next.E130"
+        assert "'sometimes'" in error.msg
+        assert "'auto', 'disabled', 'manual'" in error.msg
+
+    def test_options_of_the_wrong_shape_are_left_to_the_type_check(self) -> None:
+        with patch.object(checks_module, "next_framework_settings") as framework:
+            framework.NEXT_JS_OPTIONS = []
+            assert check_script_policy() == []
+
+
+class TestTagTemplatesFormatCheck:
+    """`next.E139` names a custom tag template `.format` cannot fill."""
+
+    def test_formattable_templates_are_silent(self) -> None:
+        with override_settings(NEXT_FRAMEWORK=_BARE_TEMPLATES):
+            assert check_tag_templates_format() == []
+
+    def test_every_broken_template_is_named(self) -> None:
+        framework = {
+            "NEXT_JS_OPTIONS": {
+                "init_template": "<script>{payload}{</script>",
+                "preload_template": "<link {rel} href='{url}'>",
+                "script_tag_template": "",
+            },
+            "STATIC_BACKENDS": [
+                {"OPTIONS": {"css_tag": "<link href='{0}'>", "js_tag": None}}
+            ],
+        }
+        with override_settings(NEXT_FRAMEWORK=framework):
+            errors = check_tag_templates_format()
+        assert check_ids(errors) == ["next.E139"] * 3
+        assert "NEXT_JS_OPTIONS['preload_template']" in errors[0].msg
+        assert "{url}, {nonce_attr}" in errors[0].msg
+        assert "KeyError: 'rel'" in errors[0].msg
+        assert "NEXT_JS_OPTIONS['init_template']" in errors[1].msg
+        assert "{payload}, {nonce_attr}" in errors[1].msg
+        assert "STATIC_BACKENDS[0]['OPTIONS']['css_tag']" in errors[2].msg
+        assert "Double every literal brace" in errors[0].hint
+
+
+class TestRuntimeBundlesDeployedCheck:
+    """`next.W090` names a runtime bundle the deployed storage cannot serve."""
+
+    def test_it_is_a_deployment_check(self) -> None:
+        assert check_runtime_bundles_deployed in registry.get_checks(
+            include_deployment_checks=True
+        )
+        assert check_runtime_bundles_deployed not in registry.get_checks()
+
+    def test_built_and_collected_bundles_are_silent(self) -> None:
+        with (
+            patch.object(checks_module.finders, "find", return_value="/src/x.js"),
+            patch.object(
+                checks_module.staticfiles_storage, "url", return_value="/s/x.js"
+            ),
+        ):
+            assert check_runtime_bundles_deployed() == []
+
+    def test_an_unbuilt_runtime_is_w090_and_the_dev_chunk_is_not_asked(self) -> None:
+        with patch.object(checks_module.finders, "find", return_value=[]) as find:
+            warnings = check_runtime_bundles_deployed()
+        assert check_ids(warnings) == ["next.W090"] * 5
+        assert warnings[0].msg.startswith("next/next.min.js: no static files finder")
+        assert "collectstatic" in warnings[0].hint
+        asked = [call.args[0] for call in find.call_args_list]
+        assert "next/next.dev.min.js" not in asked
+
+    def test_an_uncollected_chunk_is_w090(self) -> None:
+        def url(name: str) -> str:
+            if name == "next/next.sse.min.js":
+                msg = "Missing staticfiles manifest entry"
+                raise ValueError(msg)
+            return f"/static/{name}"
+
+        with (
+            patch.object(checks_module.finders, "find", return_value="/src/x.js"),
+            patch.object(checks_module.staticfiles_storage, "url", side_effect=url),
+        ):
+            [warning] = check_runtime_bundles_deployed()
+        assert warning.msg.startswith("next/next.sse.min.js: the static files storage")

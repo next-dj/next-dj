@@ -26,11 +26,14 @@ from tests.support import (
     file_router_config_entry,
     importable_dir,
 )
-from tests.support.cases import WATCHED_BACKENDS_CASES, WatchedBackendsCase
+from tests.support.cases.watch import WATCHED_BACKENDS_CASES, WatchedBackendsCase
 
 
 # The promise every watcher diagnostic ends on, which a reload then keeps.
-_RECONFIGURE_PROMISE = "until the framework is reconfigured."
+_RECONFIGURE_PROMISE = (
+    "The same failure is not logged again for 600 seconds or until the framework is "
+    "reconfigured."
+)
 
 
 def _write_app(root: Path, name: str) -> Path:
@@ -143,7 +146,7 @@ class TestIterPageBackendsForWatch:
     def test_construction_failure_costs_only_its_own_entry(
         self, tmp_path, caplog
     ) -> None:
-        """An entry that cannot be built is skipped, the healthy one still answers."""
+        """An entry that cannot be built is skipped, and the working one is still read."""
         root = tmp_path / "shell"
         root.mkdir()
         with (
@@ -256,7 +259,7 @@ class TestRouterFailuresNeverReachTheWatcher:
     """`runserver`, `collectstatic` and the finder all read through these helpers."""
 
     def test_a_raising_tree_listing_costs_only_its_own_backend(self, tmp_path) -> None:
-        """One backend that raises leaves the healthy one watched."""
+        """One backend that raises leaves the working one watched."""
         root = tmp_path / "shell"
         root.mkdir()
         build = RouterFactory.create_backend
@@ -563,7 +566,7 @@ class TestTheRoutersOutliveOneTick:
         """A relative `DIRS` entry follows `BASE_DIR`, whose change reloads nothing.
 
         The routers read the base directory while they are built, so holding them
-        across a change to it alone would answer for the previous project root.
+        across a change to it alone would report the previous project root.
         """
         first_base = tmp_path / "a"
         (first_base / "site").mkdir(parents=True)
@@ -578,8 +581,8 @@ class TestTheRoutersOutliveOneTick:
                 first = get_pages_directories_for_watch()
             with override_settings(BASE_DIR=second_base):
                 second = get_pages_directories_for_watch()
-                # The resolutions outlive the routers, because only a
-                # reconfigure can re-point a tree one of them names.
+                # The resolutions survive the routers, because only a
+                # reconfiguration can change the tree one of them names.
                 held = resolved_tree.cache_info().currsize
 
         assert first == [(first_base / "site").resolve()]
@@ -610,8 +613,8 @@ class TestTheRoutersOutliveOneTick:
     def test_the_memo_answers_what_a_rebuild_answers(self, tmp_path, case) -> None:
         """Across the configured shapes, held routers read like rebuilt ones.
 
-        A settings reload is what drops the held routers, so the comparison is
-        against the answer routers built for a fresh generation give.
+        A settings reload drops the held routers, so the comparison is against the
+        result of routers built for a fresh generation.
         """
         backends = _watched_backends(case, tmp_path)
         settings_value = {"PAGE_BACKENDS": backends}
@@ -631,7 +634,7 @@ class TestTheRoutersOutliveOneTick:
 
 
 class TestAWatchingProcessHoldsNoRouter:
-    """Under `DEBUG` a router answers about trees it probed once, so none is held.
+    """Under `DEBUG` a router reports trees it probed once, so none is held.
 
     A page tree created, moved, or removed under the development server has to
     reach the very next read, whichever of the three shapes names it.

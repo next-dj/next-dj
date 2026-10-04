@@ -1,7 +1,11 @@
 """System checks for the partial-rendering subsystem.
 
-Importing the package registers every check, and each submodule names the ids it owns.
+Importing the package registers every check.
 """
+
+import warnings
+
+from next.checks.common import forget_run_memos
 
 from .backends import (
     check_asset_version_moves_between_deploys,
@@ -19,7 +23,6 @@ from .codes import (
     E_LAZY_WITHOUT_PLACEHOLDER,
     E_NON_ASCII_ZONE,
     E_OP_BAD_NAME,
-    E_OP_SHADOWS_BUILTIN,
     E_ZONE_IN_COMPONENT,
     E_ZONE_IN_FOR,
     E_ZONE_IN_IF,
@@ -32,7 +35,6 @@ from .codes import (
 )
 from .forms import check_form_backend_partial_aware, check_repeated_form_has_key
 from .ops import check_custom_patch_ops_well_formed
-from .pages import reset_composed_pages_memo
 from .templates import check_composed_templates_compile
 from .zones import (
     check_context_zone_names_exist,
@@ -46,6 +48,19 @@ from .zones import (
 )
 
 
+def reset_composed_pages_memo(**kwargs) -> None:
+    """Drop the run memos of the checks, the composed pages among them.
+
+    Deprecated. Call `next.checks.reset_check_caches`, which also drops these memos.
+    """
+    warnings.warn(
+        "reset_composed_pages_memo is deprecated, call next.checks.reset_check_caches",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    forget_run_memos()
+
+
 __all__ = [
     "E_BACKENDS_NOT_A_LIST",
     "E_BACKEND_WITHOUT_PATH",
@@ -55,7 +70,6 @@ __all__ = [
     "E_LAZY_WITHOUT_PLACEHOLDER",
     "E_NON_ASCII_ZONE",
     "E_OP_BAD_NAME",
-    "E_OP_SHADOWS_BUILTIN",
     "E_ZONE_IN_COMPONENT",
     "E_ZONE_IN_FOR",
     "E_ZONE_IN_IF",

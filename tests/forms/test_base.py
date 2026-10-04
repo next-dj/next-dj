@@ -275,7 +275,7 @@ class TestAutoRegistration:
     def test_duplicate_name_same_scope_records_collision(
         self, settings, tmp_path
     ) -> None:
-        """Two registrations of the same name with different handlers produce a collision."""
+        """Two registrations of one name with different handlers are a collision."""
         settings.BASE_DIR = tmp_path
         app_dir = tmp_path / "myapp"
         app_dir.mkdir()
@@ -551,7 +551,7 @@ class TestModelFormFactoryAttribution:
         meta = backend.get_meta("user_form")
         assert meta is not None
         assert meta["file_path"] == str(module_file.resolve())
-        # Plain attribution lands in Django, so registration used the stack fallback.
+        # Plain attribution resolves into Django, so registration used the stack.
         assert (
             Path(defining_file(form_class)).resolve().is_relative_to(_DJANGO_FORMS_ROOT)
         )

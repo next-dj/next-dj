@@ -39,8 +39,8 @@ _POLL_DIGITS = re.compile(r"[0-9]+")
 def _literal(raw: str, subject: str) -> str:
     """Return the text of a quoted tag literal, refusing anything unquoted.
 
-    The tag reads literals only, so an unquoted bit is a template variable whose
-    name would silently stand in for the value it never resolves to.
+    The tag reads literals only. An unquoted value is a template variable, and its
+    name would be used in place of its value without an error.
     """
     try:
         return unescape_string_literal(raw).strip()

@@ -7,16 +7,15 @@ from __future__ import annotations
 
 import contextlib
 import functools
-import importlib.util
 import logging
 import threading
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, ClassVar, override
 
 from django.core.signals import setting_changed
 
-from next.caches import BoundedCache
+from next.caches import PageCache
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
 from next.conf.signals import settings_reloaded
@@ -24,10 +23,13 @@ from next.pages.errors import PageModuleImportError
 from next.utils import (
     MAX_ANCESTOR_WALK_DEPTH,
     classify_dirs_entries,
+    exec_module_file,
     resolve_base_dir,
     stat_mtime_ns,
+    template_edits_watched,
 )
 
+from .paths import page_path_info
 from .placeholder import PLACEHOLDER_CLOSE, PLACEHOLDER_OPEN, placeholder_spans
 from .watch import get_pages_directories_for_watch
 
@@ -41,15 +43,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# A token no real template source carries, so refilling the slot is unambiguous.
+# A token no template source contains, so filling the slot is unambiguous.
 _BODY_SLOT = "\x00next-page-body\x00"
 
 
 @dataclass(frozen=True, slots=True)
 class _PageLoad:
-    """One execution of a `page.py`, pinned to the nanosecond mtime it ran against.
+    """One execution of a `page.py`, recorded with the nanosecond mtime it read.
 
-    The module and the failure share one entry, so no racing load can pair them apart.
+    The module and the failure share one entry, so a concurrent load cannot split them.
     """
 
     mtime_ns: int
@@ -57,15 +59,116 @@ class _PageLoad:
     error: Exception | None
 
 
-_MODULE_MEMO: BoundedCache[Path, _PageLoad] = BoundedCache()
+_MODULE_MEMO: PageCache[Path, _PageLoad] = PageCache()
 _FAILED_PATHS: set[Path] = set()
 _MEMO_WRITE_LOCK = threading.Lock()
+
+# The mtime of the current load per path, successful or failed. An eviction from the
+# memo keeps it, since re-executing a file at the same mtime changes nothing.
+_stamps: dict[Path, int] = {}
+
+
+@dataclass(slots=True)
+class _Version:
+    """A monotonic counter of the module memo."""
+
+    value: int = 0
+
+
+_version = _Version()
+"""Incremented only by a whole-memo reset and a page tree reload."""
+
+_generation = _Version()
+"""Incremented by every load, forget and reset, after the stamps it covers change."""
+
+
+def module_version() -> int:
+    """Return the version of the module memo, incremented by a reset and a reload."""
+    return _version.value
+
+
+def module_generation() -> int:
+    """Return a counter that every load, forget and reset increments.
+
+    A memo holding stamps compares it first and reads the stamps only after it changed.
+    """
+    return _generation.value
+
+
+def module_stamps(paths: tuple[Path, ...]) -> tuple[int | None, ...]:
+    """Return the mtime each path was last loaded at, `None` for one never loaded.
+
+    A chain memo compares them, so a load elsewhere in the tree leaves it valid.
+    """
+    return tuple(map(_stamps.get, paths))
+
+
+def _load_stamps(loads: Iterable[_PageLoad | None]) -> tuple[int | None, ...]:
+    """Return the mtime each load ran against, `None` for a file that did not stat."""
+    return tuple(None if load is None else load.mtime_ns for load in loads)
+
+
+@dataclass(frozen=True, slots=True)
+class AncestorStamps:
+    """The `page.py` files above one page, root first, and the load stamps a memo read.
+
+    A memo over them rebuilds once one of them reloads, and a load of another file
+    leaves it valid.
+    """
+
+    paths: tuple[Path, ...]
+    version: int
+    watched: bool
+    generation: int = -1
+    stamps: tuple[int | None, ...] = ()
+
+    @classmethod
+    def begin(cls, file_path: Path) -> AncestorStamps:
+        """Walk the ancestors of `file_path` inside its page tree, before any load."""
+        depth = page_tree_depth(file_path.parent)
+        return cls(
+            paths=tuple(reversed(page_path_info(file_path).ancestors[:depth])),
+            version=_version.value,
+            watched=template_edits_watched(),
+        )
+
+    def loaded(self) -> tuple[AncestorStamps, tuple[types.ModuleType | None, ...]]:
+        """Load each ancestor once, returning the stamps of those loads and the modules.
+
+        A build reads only these modules, so a later load invalidates the stamps.
+        """
+        loads = tuple(map(_page_load, self.paths))
+        stamps = _load_stamps(loads)
+        generation = _generation.value
+        if module_stamps(self.paths) != stamps:
+            generation = -1
+        modules = tuple(None if load is None else load.module for load in loads)
+        return replace(self, generation=generation, stamps=stamps), modules
+
+    def revalidated(self) -> AncestorStamps | None:
+        """Return the stamps while no ancestor has reloaded, otherwise `None`.
+
+        While template edits are watched each ancestor loads again, so an edit on disk
+        takes effect at once.
+        """
+        watched = template_edits_watched()
+        if self.version != _version.value or self.watched is not watched:
+            return None
+        if watched:
+            loads = tuple(map(_page_load, self.paths))
+            return self if _load_stamps(loads) == self.stamps else None
+        generation = _generation.value
+        if self.generation == generation:
+            return self
+        if module_stamps(self.paths) != self.stamps:
+            return None
+        return replace(self, generation=generation)
 
 
 def has_load_errors() -> bool:
     """Whether the latest load of any `page.py` failed.
 
-    Asked first by the per-request fail-loud probe, so a healthy site pays no `stat`.
+    The per-request fail-loud check calls it first, so a site without one runs no stat.
     """
     return bool(_FAILED_PATHS)
 
@@ -73,7 +176,7 @@ def has_load_errors() -> bool:
 def last_load_error(file_path: Path) -> PageModuleImportError | None:
     """Return the import failure of the `page.py` at `file_path`, loading it when stale.
 
-    Wrapped afresh per call, since a re-raised instance grows its traceback per request.
+    A new wrapper is built per call, since a re-raised instance grows its traceback.
     """
     return load_page_module(file_path)[1]
 
@@ -83,7 +186,7 @@ def load_page_module(
 ) -> tuple[types.ModuleType | None, PageModuleImportError | None]:
     """Return the module now at `file_path` and its import failure from one load.
 
-    A guard reading both in two calls could pair a failure with a later fixed module.
+    A caller reading both in two calls could combine a failure with a later fix.
     """
     load = _page_load(file_path)
     if load is None or load.error is None:
@@ -94,30 +197,27 @@ def load_page_module(
 
 
 def _load_python_module(file_path: Path) -> types.ModuleType | None:
-    """Execute `file_path` as a fresh module, raising whatever its body raises.
-
-    `None` means importlib knows no loader for the suffix of `file_path`.
-    """
-    spec = importlib.util.spec_from_file_location("page_module", file_path)
-    if spec is None or spec.loader is None:
-        return None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    """Execute `file_path` as a fresh page module, raising whatever its body raises."""
+    return exec_module_file(file_path, "page_module")
 
 
 def _remember(file_path: Path, load: _PageLoad) -> None:
-    """Store `load` and keep the failure index in step with it.
+    """Store `load` and the failure index, unless the file changed since its stat.
 
-    Ordered so a lock-free read never finds a memoised failure missing from the index.
+    A slower load of an older mtime would otherwise overwrite the load that replaced it.
     """
     with _MEMO_WRITE_LOCK:
+        if stat_mtime_ns(file_path) != load.mtime_ns:
+            return
+        # Ordered so a lock-free read never finds a failure missing from the index.
         if load.error is None:
             _MODULE_MEMO[file_path] = load
             _FAILED_PATHS.discard(file_path)
         else:
             _FAILED_PATHS.add(file_path)
             _MODULE_MEMO[file_path] = load
+        _stamps[file_path] = load.mtime_ns
+        _generation.value += 1
 
 
 def _forget(file_path: Path) -> None:
@@ -125,6 +225,8 @@ def _forget(file_path: Path) -> None:
     with _MEMO_WRITE_LOCK:
         _MODULE_MEMO.pop(file_path)
         _FAILED_PATHS.discard(file_path)
+        _stamps.pop(file_path, None)
+        _generation.value += 1
 
 
 def _page_load(file_path: Path) -> _PageLoad | None:
@@ -134,21 +236,26 @@ def _page_load(file_path: Path) -> _PageLoad | None:
     """
     mtime_ns = stat_mtime_ns(file_path)
     if mtime_ns is None:
-        if file_path in _MODULE_MEMO or file_path in _FAILED_PATHS:
+        # The stamp survives an eviction, so it also records that the path was loaded.
+        if (
+            file_path in _stamps
+            or file_path in _MODULE_MEMO
+            or file_path in _FAILED_PATHS
+        ):
             _forget(file_path)
         return None
 
     cached = _MODULE_MEMO.get(file_path)
     if cached is not None and cached.mtime_ns == mtime_ns:
-        # Left where it sits, because this answers up to three times per URL
-        # dispatch and the bound is there to cap memory, not to rank pages.
+        # Not reordered, because this runs up to three times per URL dispatch and the
+        # bound limits memory rather than ranking pages.
         return cached
 
     try:
         module = _load_python_module(file_path)
     except Exception as exc:
         if stat_mtime_ns(file_path) is None:
-            # Removed between the stat and the exec, so absent rather than broken.
+            # Removed between the stat and the execution, so absent rather than broken.
             _forget(file_path)
             return None
         logger.exception("Could not import page module %s", file_path)
@@ -168,11 +275,14 @@ def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
 def reset_module_memo() -> None:
     """Drop every memoised load so the next one re-executes from disk.
 
-    A rewrite landing on the same mtime tick would otherwise return the stale module.
+    A rewrite within the same mtime tick would otherwise return the stale module.
     """
     with _MEMO_WRITE_LOCK:
         _MODULE_MEMO.clear()
         _FAILED_PATHS.clear()
+        _stamps.clear()
+        _version.value += 1
+        _generation.value += 1
 
 
 def _pages_dirs_for_config(config: dict) -> list[Path]:
@@ -212,7 +322,7 @@ settings_reloaded.connect(_reset_additional_layouts_cache)
 def _page_roots() -> tuple[Path, ...]:
     """Return the resolved page trees the routers report, memoised.
 
-    Reading them probes the trees of every router, too much work per walk.
+    Reading them probes the trees of every router, which is too costly per walk.
     """
     return tuple(get_pages_directories_for_watch())
 
@@ -220,6 +330,8 @@ def _page_roots() -> tuple[Path, ...]:
 def forget_page_roots(**kwargs) -> None:
     """Drop the memoised page trees so the next walk asks the routers again."""
     _page_roots.cache_clear()
+    with _MEMO_WRITE_LOCK:
+        _version.value += 1
 
 
 def _on_setting_changed(*, setting: str, **kwargs) -> None:
@@ -234,6 +346,31 @@ def _on_setting_changed(*, setting: str, **kwargs) -> None:
 
 settings_reloaded.connect(forget_page_roots)
 setting_changed.connect(_on_setting_changed)
+
+
+_TREE_DEPTHS: PageCache[Path, tuple[tuple[Path, ...], int]] = PageCache()
+
+
+def page_tree_depth(start_dir: Path) -> int:
+    """Return the number of directories from `start_dir` up to its page tree root.
+
+    A directory outside every tree returns the walk cap. The result is memoised per set
+    of trees.
+    """
+    roots = _page_roots()
+    held = _TREE_DEPTHS.get(start_dir)
+    if held is not None and held[0] is roots:
+        return held[1]
+    resolved = start_dir.resolve()
+    depths = [
+        len(resolved.relative_to(root).parts) + 1
+        for root in roots
+        if resolved.is_relative_to(root)
+    ]
+    depths.append(MAX_ANCESTOR_WALK_DEPTH)
+    depth = min(depths)
+    _TREE_DEPTHS[start_dir] = (roots, depth)
+    return depth
 
 
 def _read_string_list(module: types.ModuleType, attr: str) -> list[str]:
@@ -338,7 +475,8 @@ def _as_placeholder_fallback(body: str) -> str:
 class LayoutTemplateLoader:
     """Compose nested `layout.djx` wrappers around the page template.
 
-    No `TemplateLoader`, because the chain supplies a body and this wraps one.
+    It is not a `TemplateLoader`, because the loader chain supplies a body and this
+    class wraps it.
     """
 
     def can_load(self, file_path: Path) -> bool:
@@ -377,9 +515,7 @@ class LayoutTemplateLoader:
         A `layout.djx` appearing or disappearing moves the mtime of its directory and of
         no tracked file, so a caller detecting change needs the directories too.
         """
-        return self._walk_ancestors(
-            file_path, self._watched_ancestor_depth(file_path.parent)
-        )
+        return self._walk_ancestors(file_path, page_tree_depth(file_path.parent))
 
     def _walk_ancestors(
         self, file_path: Path, watched_depth: int
@@ -405,26 +541,11 @@ class LayoutTemplateLoader:
 
         return layout_files, watched_dirs
 
-    def _watched_ancestor_depth(self, start_dir: Path) -> int:
-        """Return how many ancestors of `start_dir` are worth watching for change.
-
-        The walk climbs past the page tree because a layout above it still
-        joins the chain, but a directory up there moves for reasons no page shares.
-        """
-        resolved = start_dir.resolve()
-        depths = [
-            len(resolved.relative_to(root).parts) + 1
-            for root in _page_roots()
-            if resolved.is_relative_to(root)
-        ]
-        depths.append(MAX_ANCESTOR_WALK_DEPTH)
-        return min(depths)
-
     def _find_layout_files(self, file_path: Path) -> list[Path]:
         """Return `layout.djx` paths from near to far plus global layouts.
 
-        The watched directories cost a `resolve` of the page trees, and no
-        caller down this path reads them, so the walk skips them.
+        The walk skips the watched directories, which cost a `resolve` of the page trees
+        and which no caller of this method reads.
         """
         layout_files, _ = self._walk_ancestors(file_path, 0)
         return layout_files
@@ -440,9 +561,10 @@ class LayoutTemplateLoader:
     def _compose_layout_hierarchy(
         self, template_content: str, layout_files: list[Path]
     ) -> str:
-        """Return layouts wrapped outermost last, with the page in the first slot.
+        """Wrap the content in each layout from the nearest to the outermost.
 
-        A layout carrying more than one placeholder is what `next.W078` reports.
+        Each layout receives the content in its first placeholder, and `next.W078`
+        reports a layout that carries more than one.
         """
         result = template_content
 
@@ -452,7 +574,7 @@ class LayoutTemplateLoader:
                 spans = placeholder_spans(layout_content)
                 if spans:
                     start, end = spans[0]
-                    # Sliced in, because a substitution would read escapes in the body.
+                    # Sliced, since a substitution would interpret escapes in the body.
                     result = layout_content[:start] + result + layout_content[end:]
         return result
 

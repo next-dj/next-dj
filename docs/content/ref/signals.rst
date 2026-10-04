@@ -29,8 +29,8 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
 ``uid`` is the registry identity of the action, the value the dispatch URL and the ``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores no uid in its meta.
 ``request`` is the live ``HttpRequest`` being dispatched and must not be retained past the receiver call.
 
-Six signals announce a backend the shared loader built, one per settings-driven family.
-``component_backend_loaded``, ``form_backend_loaded``, ``partial_backend_loaded``, ``router_backend_loaded``, ``static_backend_loaded``, and ``wizard_backend_loaded`` all send the resolved backend class as the sender and carry ``config``, a copy of the settings entry, and ``instance``, the object the loader built from it.
+Eight signals announce a backend the shared loader built, one per settings-driven family.
+``component_backend_loaded``, ``consent_backend_loaded``, ``form_backend_loaded``, ``partial_backend_loaded``, ``router_backend_loaded``, ``sitemap_backend_loaded``, ``static_backend_loaded``, and ``wizard_backend_loaded`` all send the resolved backend class as the sender and carry ``config``, a copy of the settings entry, and ``instance``, the object the loader built from it.
 Each family owns its own signal rather than sharing one, so a receiver connected with ``sender=`` does not have to sort one family's classes out of another's.
 ``router_backend_loaded`` and ``component_backend_loaded`` are skipped on a reload that asks not to notify, which is what a caller reloading from inside a receiver passes.
 
@@ -86,6 +86,10 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``infos``
      - After a batch of components is registered.
        ``infos`` is the tuple of added components.
+   * - ``consent_backend_loaded``
+     - The consent backend class
+     - ``config``, ``instance``
+     - After the single ``CONSENT`` backend is built, on the first read of it and again after a settings reload drops the cached one.
    * - ``context_registered``
      - ``PageContextRegistry``
      - ``file_path``, ``key``
@@ -116,6 +120,11 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - After placeholder replacement completes.
        ``placeholders_replaced`` is the tuple of replaced slot names.
        ``injected_bytes`` is the length delta.
+   * - ``metadata_registered``
+     - ``PageMetadataRegistry``
+     - ``file_path``, ``inherit``
+     - After a ``@page.metadata`` callable is attached to a page module.
+       ``inherit`` is the flag the registration carried.
    * - ``page_rendered``
      - ``Page``
      - ``file_path``, ``duration_ms``, ``styles_count``, ``scripts_count``, ``context_keys``
@@ -148,12 +157,22 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - The router manager class
      - none
      - After the router manager rebuilds its pattern set.
+   * - ``scripts_registered``
+     - ``ScriptsRegistry``
+     - ``root``, ``source``, ``scripts``
+     - When the scripts manager registers the ``scripts.py`` of a page tree, on discovery, after a reload, and again when the file changes under ``DEBUG``.
+       ``source`` is the ``ScriptsSource``, with the ``path`` of the file and any import ``error``, and ``scripts`` its tuple of ``Script`` values.
+       A tree without a ``scripts.py`` sends nothing.
    * - ``settings_reloaded``
      - ``NextFrameworkSettings``
      - none
      - After ``NextFrameworkSettings.reload`` drops its caches.
        Every receiver runs even when one raises, so a receiver that validates a settings value never leaves the managers behind it holding state built from the settings that reload discarded.
        The first error reaches the caller that asked for the reload once the chain is done.
+   * - ``sitemap_backend_loaded``
+     - The sitemap backend class
+     - ``config``, ``instance``
+     - After one ``SEO["SITEMAP_BACKENDS"]`` entry is instantiated, once per entry on every manager reload.
    * - ``sse_stream_closed``
      - ``PatchEventStream``
      - ``request``, ``duration_ms``, ``envelopes_sent``
@@ -241,6 +260,24 @@ Partial rendering
 ~~~~~~~~~~~~~~~~~
 
 .. automodule:: next.partial.signals
+   :members:
+
+SEO
+~~~
+
+.. automodule:: next.seo.signals
+   :members:
+
+Scripts
+~~~~~~~
+
+.. automodule:: next.scripts.signals
+   :members:
+
+Consent
+~~~~~~~
+
+.. automodule:: next.consent.signals
    :members:
 
 Dependencies

@@ -31,7 +31,7 @@ export function defaultNavigate(): Navigate {
   return (url) => globalThis.location.assign(url);
 }
 
-/** The history seam for the url verb, push and replace map onto the History global. */
+/** The history seam the navigation writes through, over the History global. */
 export function defaultHistory(): HistoryAdapter {
   return {
     push: (href) =>
@@ -86,8 +86,8 @@ export function defaultSession(): SessionStore {
 
 /** The one-shot reveal geometry, jsdom fires no IntersectionObserver callbacks. */
 export function defaultObserver(): IntersectionAdapter {
-  // One shared observer for every watched element, not one each: an infinite scroll
-  // arms a sentinel per page, and a per-element observer would outlive its target.
+  // One shared observer for every watched element. An infinite scroll arms a
+  // sentinel per page, and a per-element observer would outlive its target.
   const callbacks = new WeakMap<Element, () => void>();
   let shared: IntersectionObserver | undefined;
   const observer = (): IntersectionObserver =>

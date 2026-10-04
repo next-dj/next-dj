@@ -1,6 +1,6 @@
 """System check for a `@context` reading a key another callable binds to a zone.
 
-The id is `next.W077`, raised for the reader, which is what silently receives `None`.
+It warns on the reader, which is what silently receives `None`.
 """
 
 from __future__ import annotations
@@ -41,9 +41,8 @@ def check_context_reads_foreign_zone(*args, **kwargs) -> list[CheckMessage]:
     A zone request that does not name the bound zone skips the provider,
     while the reader still runs and receives `None` for the parameter.
     """
-    init_errors, pages = loaded_page_contexts()
-    warnings = list(init_errors)
-    for entry in pages:
+    warnings: list[CheckMessage] = []
+    for entry in loaded_page_contexts():
         warnings.extend(
             _foreign_zone_reads(entry.page_path, entry.url_path, entry.bindings)
         )
@@ -79,8 +78,8 @@ def _foreign_zone_reads(
 def _zone_request_context(url_path: str) -> ResolutionContext:
     """Build the resolution context of a zone request that carries no context data.
 
-    The `context_data` is empty on purpose, a parameter some provider still
-    fills is not waiting on the zone-bound `@context`.
+    The `context_data` is empty, so a parameter that another provider fills does not
+    depend on the zone-bound `@context`.
     """
     return ResolutionContext(
         request=HttpRequest(),
@@ -107,8 +106,8 @@ def _zone_bound_providers(
 def _context_parameters(func: Callable[..., Any]) -> list[inspect.Parameter]:
     """Return the parameters of a context callable that the context alone fills.
 
-    A parameter carrying a default is left out, because the resolver falls
-    back to that default and a `Depends` or `Context` marker travels as one.
+    A parameter with a default is left out, because the resolver falls back to that
+    default, and a `Depends` or `Context` marker is passed as a default.
     """
     try:
         parameters = inspect.signature(func).parameters
@@ -126,7 +125,8 @@ def _context_parameters(func: Callable[..., Any]) -> list[inspect.Parameter]:
 def _url_parameter_names(url_path: str) -> list[str]:
     """Return the URL kwarg names the route captures, as the router parses them.
 
-    A route the parser refuses captures nothing, because `next.E011` reports it.
+    A route the parser refuses captures nothing, since `next.E008` or `next.E009`
+    reports it.
     """
     parser = _url_parser()
     try:

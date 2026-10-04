@@ -43,6 +43,31 @@ next.dj settings
 Tune ``NEXT_FRAMEWORK`` using :doc:`settings` (production-oriented commentary and patterns).
 Canonical semantics for each key live in :doc:`/content/ref/settings`.
 
+Page metadata
+-------------
+
+- ``NEXT_FRAMEWORK["SITE"]["URL"]`` names the public origin, so the canonical links, the social images, the sitemap locations, and the ``Sitemap:`` line of the robots file stop following the request host, and ``next.W110`` reports it missing.
+- ``SITE["INDEXABLE"]`` keeps its ``"auto"`` default in production, where ``DEBUG`` is off, and a staging or preview deployment that shares the production settings answers through a callable that names the production hosts, see :doc:`/content/topics/seo/site`.
+- Add ``next.site.middleware.RobotsHeaderMiddleware`` when the form dispatch, the streams, the admin, an API, or the media files must carry ``noindex`` on a closed host too.
+- Run ``uv run python manage.py check --deploy --tag seo`` and resolve every warning, and keep a test per key page that pins its head with ``assert_metadata``.
+
+See :doc:`/content/topics/seo/auditing` for the checks and the test helpers.
+
+Sitemap and robots
+------------------
+
+Review these when a page root carries a ``sitemap.py``, a ``robots.py``, or a ``robots.txt``.
+
+- ``django.contrib.sitemaps`` is in ``INSTALLED_APPS`` and the Django template backend keeps ``APP_DIRS``, otherwise ``next.E112`` reports the missing templates.
+- ``SITE["URL"]`` is set on every deployment that installs ``django.contrib.sites``, because without it the canonical links, the sitemap, and the robots file all take their origin from the ``Site`` row, and the row ships as ``example.com``.
+- ``include("next.seo.urls")`` sits at the root of the URLconf when ``include("next.urls")`` is under a prefix or inside ``i18n_patterns``, otherwise ``next.W094`` reports the unreachable routes.
+- Fetch ``/sitemap.xml`` and ``/robots.txt`` on the deployed host and read the first ``<loc>`` and the ``Sitemap:`` line for the public origin.
+- A sitemap over a large table answers a ``QuerySet`` from its items callable, declares ``cache``, and the default cache is shared across every worker.
+- A page a CDN caches declares ``cache`` with ``public`` or ``s_maxage``, and the CDN bypasses requests that carry ``X-Next-Request``, see :doc:`/content/howto/cache-pages-on-a-cdn`.
+- ``CSRF_USE_SESSIONS`` stays off and no CSP nonce is active beside shared pages, since either makes every one of them private, which ``next.W121`` and ``next.W120`` report.
+
+See :doc:`/content/topics/seo/sitemaps` and :doc:`/content/topics/seo/robots` for the two files.
+
 Wizard drafts
 -------------
 
@@ -121,9 +146,10 @@ Run the framework system checks as part of CI and as part of the deployment scri
 
 A clean exit is required for the deployment to proceed.
 
-The ``--deploy`` flag is what matters here, because three framework checks are registered as deployment checks and a plain ``check`` never runs them.
-They report ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
+The ``--deploy`` flag is what matters here, because eight framework checks are registered as deployment checks and a plain ``check`` never runs them.
+Three report ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
 Each one costs a full walk of the page tree, which is why it is paid once per deploy rather than on every management command, and each one names a failure a visitor would otherwise meet as a 404, a silently stripped body, or a 500.
+``next.W083`` reports an asset version that never moves, ``next.W110`` and ``next.W122`` a missing ``SITE["URL"]``, ``next.W111`` a closed site that still publishes crawler documents, ``next.W118`` a script over plain HTTP, and ``next.W119`` an insecure consent cookie.
 
 See :ref:`ref-system-checks` for the full catalog.
 

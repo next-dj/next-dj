@@ -139,7 +139,7 @@ class TestPageContextRegistry:
         assert entry.serialize is False
 
     def test_collect_inherited_context(self, context_manager, tmp_path) -> None:
-        """A child page picks up an inheritable value from the layout directory above it."""
+        """A child page picks up an inheritable value from the layout above."""
         layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
@@ -327,7 +327,7 @@ class TestPageContextRegistry:
 
 
 class TestKeylessContextShape:
-    """A keyless ``@context`` that answers no mapping names itself before failing."""
+    """A keyless ``@context`` that returns no mapping names itself before failing."""
 
     def test_keyless_context_returning_a_list_names_the_callable(
         self, context_manager, test_file_path
@@ -553,7 +553,7 @@ class TestContextMarker:
     def test_context_provider_resolve_returns_none_when_default_not_context(
         self,
     ) -> None:
-        """``ContextByDefaultProvider.resolve`` yields ``None`` for a non-``Context`` default."""
+        """``ContextByDefaultProvider.resolve`` returns ``None`` for another default."""
         provider = ContextByDefaultProvider(DependencyResolver())
         param = inspect_parameter("x", int, default=123)
         ctx = MagicMock()
@@ -613,7 +613,7 @@ class TestPageContextRegistrySerialize:
     def test_serialize_dict_merge_wins_over_later_keyed_same_jskey(
         self, registry, tmp_path
     ) -> None:
-        """Dict-merge runs before keyed functions, so it wins when both share a js_context key."""
+        """Dict-merge runs first, so it wins a js_context key both share."""
         path = tmp_path / "page.py"
         registry.register_context(
             path, None, lambda: {"shared": "from_dict"}, serialize=True
@@ -961,3 +961,244 @@ class TestZoneBatchWithInheritedChain:
         assert builds == [child]
         assert first.context_data == {"shared": "inherited", "table": "rows"}
         assert second.context_data == {"shared": "inherited"}
+
+
+class _Category:
+    """A resolved row standing in for a model instance."""
+
+    def __init__(self, slug: str) -> None:
+        self.slug = slug
+
+
+def _write_tree(tmp_path: Path, *dirs: str) -> list[Path]:
+    """Return a `page.py` path per directory, each one nested in the one before."""
+    paths: list[Path] = []
+    directory = tmp_path
+    for name in dirs:
+        directory = directory / name
+        paths.append(directory / "page.py")
+    return paths
+
+
+class TestInheritedResolution:
+    """What an inherited callable resolves against and how often it runs."""
+
+    def test_an_inherited_callable_reads_the_value_its_sibling_published(
+        self, context_manager, tmp_path
+    ) -> None:
+        """`offers` gets the row `category` resolved, not the URL slug of that name."""
+        shop, offer = _write_tree(tmp_path, "shop", "offer")
+        seen: list[object] = []
+
+        def category(category: str) -> _Category:
+            return _Category(category)
+
+        def offers(category: _Category) -> list[str]:
+            seen.append(category)
+            return [f"{category.slug}-1"]
+
+        context_manager.register_context(
+            shop, "category", category, inherit_context=True
+        )
+        context_manager.register_context(shop, "offers", offers, inherit_context=True)
+
+        result = context_manager.collect_context(offer, category="shoes")
+
+        assert [type(value) for value in seen] == [_Category]
+        assert result.context_data["offers"] == ["shoes-1"]
+
+    def test_a_nearer_file_reads_what_an_outer_file_published(
+        self, context_manager, tmp_path
+    ) -> None:
+        """The outer file runs first, so the tree above feeds the tree below."""
+        root, workspace, note = _write_tree(tmp_path, "root", "ws", "note")
+        context_manager.register_context(
+            root, "tenant", lambda: "acme", inherit_context=True
+        )
+
+        def label(tenant: str) -> str:
+            return f"{tenant}/ws"
+
+        context_manager.register_context(
+            workspace, "label", label, inherit_context=True
+        )
+
+        result = context_manager.collect_context(note)
+
+        assert result.context_data == {"tenant": "acme", "label": "acme/ws"}
+
+    def test_the_declaring_page_runs_its_inherited_callable_once(
+        self, context_manager, tmp_path
+    ) -> None:
+        """Its own merge runs the callable, so the inherited pass leaves it out."""
+        (shop,) = _write_tree(tmp_path, "shop")
+        received: list[object] = []
+
+        def category(category: str) -> _Category:
+            received.append(category)
+            return _Category(category)
+
+        context_manager.register_context(
+            shop, "category", category, inherit_context=True
+        )
+
+        result = context_manager.collect_context(shop, category="shoes")
+
+        assert received == ["shoes"]
+        assert result.context_data["category"].slug == "shoes"
+
+    def test_a_descendant_runs_the_inherited_callable_once(
+        self, context_manager, tmp_path
+    ) -> None:
+        """One render of a child calls the ancestor callable exactly once."""
+        shop, offer = _write_tree(tmp_path, "shop", "offer")
+        calls: list[str] = []
+
+        def category(category: str) -> _Category:
+            calls.append(category)
+            return _Category(category)
+
+        context_manager.register_context(
+            shop, "category", category, inherit_context=True
+        )
+
+        context_manager.collect_context(offer, category="shoes")
+
+        assert calls == ["shoes"]
+
+    def test_the_outermost_file_keeps_a_shared_key(
+        self, context_manager, tmp_path
+    ) -> None:
+        """A nearer callable under the same key is shadowed and never called."""
+        root, section, leaf = _write_tree(tmp_path, "root", "section", "leaf")
+        calls: list[str] = []
+
+        def nearer() -> str:
+            calls.append("nearer")
+            return "section"
+
+        context_manager.register_context(
+            root, "brand", lambda: "root", inherit_context=True
+        )
+        context_manager.register_context(section, "brand", nearer, inherit_context=True)
+
+        result = context_manager.collect_context(leaf)
+
+        assert result.context_data == {"brand": "root"}
+        assert calls == []
+
+    def test_a_nearer_dict_merge_keeps_the_keys_an_outer_file_owns(
+        self, context_manager, tmp_path
+    ) -> None:
+        """Only the keys no outer file published join the inherited context."""
+        root, section, leaf = _write_tree(tmp_path, "root", "section", "leaf")
+        context_manager.register_context(
+            root, "brand", lambda: "root", inherit_context=True
+        )
+        context_manager.register_context(
+            section,
+            None,
+            lambda: {"brand": "section", "tagline": "t"},
+            inherit_context=True,
+        )
+
+        result = context_manager.collect_context(leaf)
+
+        assert result.context_data == {"brand": "root", "tagline": "t"}
+
+    @pytest.mark.parametrize("first", ["keyed", "keyless"])
+    def test_a_keyed_callable_wins_over_the_merge_of_its_own_file(
+        self, context_manager, tmp_path, first: str
+    ) -> None:
+        """Within one file a dict merge never overwrites a keyed value."""
+        section, leaf = _write_tree(tmp_path, "section", "leaf")
+        registrations = [
+            ("brand", lambda: "keyed"),
+            (None, lambda: {"brand": "merged", "tagline": "t"}),
+        ]
+        for key, func in registrations if first == "keyed" else registrations[::-1]:
+            context_manager.register_context(section, key, func, inherit_context=True)
+
+        result = context_manager.collect_context(leaf)
+
+        assert result.context_data["brand"] == "keyed"
+        assert result.context_data["tagline"] == "t"
+
+    @pytest.mark.parametrize("page", ["declaring", "descendant"])
+    def test_inheritable_callables_run_as_the_file_declares_them(
+        self, context_manager, tmp_path, page: str
+    ) -> None:
+        """`live_stats` sorts ahead of `window` yet reads the window declared above."""
+        stats, detail = _write_tree(tmp_path, "stats", "detail")
+
+        def live_stats(window: str = "5m") -> str:
+            return f"stats over {window}"
+
+        context_manager.register_context(
+            stats, "window", lambda: "1m", inherit_context=True
+        )
+        context_manager.register_context(
+            stats, "live_stats", live_stats, inherit_context=True
+        )
+
+        target = stats if page == "declaring" else detail
+        result = context_manager.collect_context(target)
+
+        assert result.context_data["live_stats"] == "stats over 1m"
+
+    def test_the_page_shadows_an_outer_value_only_for_itself(
+        self, context_manager, tmp_path
+    ) -> None:
+        """The declaring page wins on its own render, descendants get the outer one."""
+        root, section, leaf = _write_tree(tmp_path, "root", "section", "leaf")
+        context_manager.register_context(
+            root, "brand", lambda: "root", inherit_context=True
+        )
+        context_manager.register_context(
+            section, "brand", lambda: "section", inherit_context=True
+        )
+
+        own = context_manager.collect_context(section)
+        below = context_manager.collect_context(leaf)
+
+        assert own.context_data == {"brand": "section"}
+        assert below.context_data == {"brand": "root"}
+
+    def test_the_declaring_page_reads_its_inherited_value_first(
+        self, context_manager, tmp_path
+    ) -> None:
+        """A page callable sorting ahead of an inheritable one still reads its value."""
+        (polls,) = _write_tree(tmp_path, "polls")
+        calls: list[str] = []
+
+        def poll(pk: str) -> _Category:
+            calls.append(pk)
+            return _Category(pk)
+
+        def live_results(poll: _Category) -> str:
+            return f"results of {poll.slug}"
+
+        context_manager.register_context(polls, "poll", poll, inherit_context=True)
+        context_manager.register_context(polls, "live_results", live_results)
+
+        result = context_manager.collect_context(polls, pk="7")
+
+        assert calls == ["7"]
+        assert result.context_data["live_results"] == "results of 7"
+
+    def test_a_page_dict_merge_spares_its_inherited_keyed_value(
+        self, context_manager, tmp_path
+    ) -> None:
+        """The page keeps the rule that a dict merge never overwrites a keyed value."""
+        (section,) = _write_tree(tmp_path, "section")
+        context_manager.register_context(
+            section, "brand", lambda: "keyed", inherit_context=True, serialize=True
+        )
+        context_manager.register_context(
+            section, None, lambda: {"brand": "merged", "tagline": "t"}, serialize=True
+        )
+
+        result = context_manager.collect_context(section)
+
+        assert result.context_data == {"brand": "keyed", "tagline": "t"}
+        assert result.js_context == {"brand": "keyed", "tagline": "t"}

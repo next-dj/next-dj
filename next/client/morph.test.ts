@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireRemoved, morph } from "./morph";
+import { createDiagnostics } from "./diagnostics";
 
 function mount(html: string): Element {
   document.body.innerHTML = html;
@@ -392,7 +393,7 @@ describe("morph hooks and events", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const target = mount('<ul id="l"><li id="x" data-next-key="x">x</li></ul>');
     morph(target, '<ul id="l"><li id="x" data-next-key="x">y</li></ul>', {
-      dev: true,
+      keyed: createDiagnostics().keyed,
     });
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
@@ -401,17 +402,19 @@ describe("morph hooks and events", () => {
   it("stays silent in dev on a keyed node carrying no id", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const target = mount('<ul id="l"><li data-next-key="x">x</li></ul>');
-    morph(target, '<ul id="l"><li data-next-key="x">y</li></ul>', { dev: true });
+    morph(target, '<ul id="l"><li data-next-key="x">y</li></ul>', {
+      keyed: createDiagnostics().keyed,
+    });
     expect(warn).not.toHaveBeenCalled();
     expect(target.textContent).toBe("y");
   });
 
-  it("stays silent on key and id together without dev", () => {
+  it("stays silent on key and id together without the dev channel", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const target = mount('<ul id="l"><li id="x" data-next-key="x">x</li></ul>');
     morph(target, '<ul id="l"><li id="x" data-next-key="x">y</li></ul>');
     morph(target, '<ul id="l"><li id="x" data-next-key="x">z</li></ul>', {
-      dev: false,
+      keyed: undefined,
     });
     expect(warn).not.toHaveBeenCalled();
     expect(target.textContent).toBe("z");

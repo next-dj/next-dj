@@ -55,8 +55,8 @@ def _with_query_param(url: str, key: str, value: str) -> str:
 def with_version(url: str, version: object) -> str:
     """Return the URL carrying a `v` query parameter naming the given version.
 
-    An opaque URI such as `data:` or `blob:` owns no query, so a pair welded on
-    would land inside its payload and it passes through untouched instead.
+    An opaque URI such as `data:` or `blob:` has no query, so an appended pair would
+    end up inside its payload. Such a URL is returned unchanged.
     """
     value = "" if version is None else str(version)
     if not value:
@@ -123,7 +123,7 @@ class KindRegistry:
 
     @property
     def version(self) -> int:
-        """Return a counter every registration bumps, so a cached answer can tell."""
+        """Return the registration counter, which a memo compares to detect a change."""
         return self._version
 
     def register(

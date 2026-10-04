@@ -1,3 +1,4 @@
+import os
 import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -536,7 +537,7 @@ class TestComponentsManagerLoading:
         assert DummyComponentsBackend({}).discover() is None
 
     def test_manager_skips_non_list_config_and_non_dict_entries(self) -> None:
-        """If ``COMPONENT_BACKENDS`` is not a list, return early. Non-dict entries are skipped."""
+        """A ``COMPONENT_BACKENDS`` of the wrong shape loads nothing it cannot read."""
         mgr = ComponentsManager()
         mock_ns = _stand_in(COMPONENT_BACKENDS="bad")
         with patch("next.backends.next_framework_settings", mock_ns):
@@ -678,28 +679,6 @@ class TestModuleLoader:
         assert ModuleLoader(ModuleCache()).load(path) is not None
         assert last_load_error(path) is None
 
-    def test_load_returns_none_when_spec_missing(self, tmp_path: Path) -> None:
-        """_load_from_disk returns None when spec_from_file_location returns None."""
-        path = tmp_path / "empty.py"
-        path.write_text("pass\n")
-        with patch(
-            "next.components.loading.importlib.util.spec_from_file_location",
-            return_value=None,
-        ):
-            loader = ModuleLoader(ModuleCache())
-            assert loader.load(path) is None
-
-    def test_load_returns_none_when_spec_has_no_loader(self, tmp_path: Path) -> None:
-        """_load_from_disk returns None when spec.loader is missing."""
-        path = tmp_path / "m.py"
-        path.write_text("pass\n")
-        spec = types.SimpleNamespace(loader=None)
-        with patch(
-            "next.components.loading.importlib.util.spec_from_file_location",
-            return_value=spec,
-        ):
-            assert ModuleLoader(ModuleCache()).load(path) is None
-
 
 class TestModuleLoaderDisk:
     """ModuleLoader loads from disk the same way the old helper did."""
@@ -717,12 +696,19 @@ class TestModuleLoaderDisk:
         bad.write_text("def x(\n")
         assert loader.load(bad) is None
 
-    def test_no_spec_returns_none(self, tmp_path: Path) -> None:
-        """Missing import spec yields ``None``."""
-        p = tmp_path / "x.py"
+    def test_a_suffix_without_a_loader_returns_none(self, tmp_path: Path) -> None:
+        """A file importlib has no loader for yields ``None``."""
+        p = tmp_path / "component.txt"
         p.write_text("pass\n")
-        with patch(
-            "next.components.loading.importlib.util.spec_from_file_location",
-            return_value=None,
-        ):
-            assert ModuleLoader(ModuleCache()).load(p) is None
+        assert ModuleLoader(ModuleCache()).load(p) is None
+
+    def test_a_same_second_rewrite_runs_the_new_code(self, tmp_path: Path) -> None:
+        """A same-size rewrite within one second is not served stale bytecode."""
+        p = tmp_path / "component.py"
+        p.write_text("VALUE = 1\n")
+        stamp = p.stat().st_mtime_ns
+        first = ModuleLoader(ModuleCache()).load(p)
+        p.write_text("VALUE = 2\n")
+        os.utime(p, ns=(stamp + 1, stamp + 1))
+        second = ModuleLoader(ModuleCache()).load(p)
+        assert (first.VALUE, second.VALUE) == (1, 2)

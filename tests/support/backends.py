@@ -281,15 +281,21 @@ class RequestRecordingStaticBackend(StaticFilesBackend):
         """Return what the tag reports for `request`."""
         return self.NO_REQUEST if request is None else request.path
 
-    def render_link_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+    def render_link_tag(
+        self, url: str, *, request: HttpRequest | None = None, nonce: str | None = None
+    ) -> str:
         """Return a link tag naming the URL and the request behind it."""
         return f'<link href="{url}" data-request="{self._mark(request)}">'
 
-    def render_script_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+    def render_script_tag(
+        self, url: str, *, request: HttpRequest | None = None, nonce: str | None = None
+    ) -> str:
         """Return a script tag naming the URL and the request behind it."""
         return f'<script src="{url}" data-request="{self._mark(request)}"></script>'
 
-    def render_module_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+    def render_module_tag(
+        self, url: str, *, request: HttpRequest | None = None, nonce: str | None = None
+    ) -> str:
         """Return a module tag naming the URL and the request behind it."""
         return (
             f'<script type="module" src="{url}" '

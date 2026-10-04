@@ -8,12 +8,14 @@ from unittest.mock import Mock, patch
 import pytest
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
-from django.test import RequestFactory, override_settings
+from django.test import Client, RequestFactory, override_settings
 from django.urls import Resolver404, URLResolver, include, path
 
+from next.caches import PAGE_HEADROOM, PageCache
 from next.forms import ActionRegistration, RegistryFormActionBackend
-from next.forms.manager import FormActionManager
+from next.forms.manager import FormActionManager, form_action_manager
 from next.pages import page
+from next.seo.manager import seo_manager
 from next.testing import capture_signals, override_next_settings
 from next.urls import (
     FileRouterBackend,
@@ -24,10 +26,12 @@ from next.urls import (
     urlpatterns,
 )
 from next.urls.manager import (
+    SeoRoutesVersion,
     _build_url_resolver,
     _LazyResolverSlot,
     _LazyUrlPatterns,
     _on_settings_reloaded,
+    seo_routes_version,
 )
 from next.urls.signals import router_reloaded
 from tests.support import (
@@ -36,6 +40,8 @@ from tests.support import (
     file_router_config_entry,
     importable_dir,
     named_temp_py,
+    routed,
+    write_tree,
 )
 
 
@@ -472,7 +478,7 @@ class TestGlobalInstances:
         assert response.content == b"success"
 
     def test_view_wrapper_render_returning_non_str_raises(self, tmp_path) -> None:
-        """`render()` returning a dict (or any non-str non-HttpResponse) raises TypeError."""
+        """A `render()` returning neither text nor an HttpResponse raises TypeError."""
         router = file_router()
         render_module_path = tmp_path / "page.py"
         render_module_path.write_text(
@@ -676,6 +682,21 @@ class TestLazyUrlPatterns:
         lazy_urlpatterns._cache = None
         urlpatterns[0]._index_cache = None
 
+    @pytest.fixture()
+    def _csrf_marker(self):
+        """Stand one marker in for the CSRF endpoint, mounted after the actions."""
+        with patch("next.urls.manager._CSRF_PATTERN", "c1"):
+            yield
+
+    @pytest.fixture()
+    def _one_seo_route(self):
+        """Stand one marker in for the SEO routes, which close the concat."""
+        routes = SimpleNamespace(patterns=lambda: ["s1"])
+        port = SimpleNamespace(peek=lambda: routes)
+        with patch("next.urls.manager.seo_routes_slot", port):
+            yield
+
+    @pytest.mark.usefixtures("_one_seo_route", "_csrf_marker")
     def test_sequence_protocol_without_list_inheritance(self) -> None:
         """Iteration, len, indexing, slicing, and reversed work without list."""
         with (
@@ -684,12 +705,77 @@ class TestLazyUrlPatterns:
         ):
             lazy = _LazyUrlPatterns()
             assert not isinstance(lazy, list)
-            assert list(lazy) == ["r1", "r2", "f1"]
-            assert len(lazy) == 3
-            assert lazy[0] == "r1"
-            assert lazy[-1] == "f1"
-            assert lazy[1:] == ["r2", "f1"]
-            assert list(reversed(lazy)) == ["f1", "r2", "r1"]
+            assert list(lazy) == ["c1", "f1", "r1", "r2", "s1"]
+            assert len(lazy) == 5
+            assert lazy[0] == "c1"
+            assert lazy[-1] == "s1"
+            assert lazy[1:] == ["f1", "r1", "r2", "s1"]
+            assert list(reversed(lazy)) == ["s1", "r2", "r1", "f1", "c1"]
+
+    @pytest.mark.usefixtures("_csrf_marker")
+    def test_an_early_build_leaves_the_seo_routes_out_and_caches_nothing(self) -> None:
+        """A resolve before the app is ready builds, and the bound port joins later."""
+        unbound = SimpleNamespace(peek=lambda: None)
+        routes = SimpleNamespace(patterns=lambda: ["s1"])
+        bound = SimpleNamespace(peek=lambda: routes)
+        with (
+            patch("next.urls.manager.router_manager", _StubManager(["r1"])),
+            patch("next.urls.manager.form_action_manager", _StubManager(["f1"])),
+        ):
+            lazy = _LazyUrlPatterns()
+            with patch("next.urls.manager.seo_routes_slot", unbound):
+                assert list(lazy) == ["c1", "f1", "r1"]
+            with patch("next.urls.manager.seo_routes_slot", bound):
+                assert list(lazy) == ["c1", "f1", "r1", "s1"]
+
+    def test_the_token_is_the_router_form_action_and_seo_versions(self) -> None:
+        assert lazy_urlpatterns.version_token() == (
+            router_manager.version,
+            form_action_manager.version,
+            seo_routes_version.value,
+        )
+
+    def test_a_reset_of_the_seo_sources_moves_the_token(self) -> None:
+        """The routes follow the sources, so the reset pushes a version no read saw."""
+        before = lazy_urlpatterns.version_token()
+        seo_manager.reset()
+        after = lazy_urlpatterns.version_token()
+        assert after[:2] == before[:2]
+        assert after[2] not in {0, before[2]}
+
+    @pytest.mark.usefixtures("_csrf_marker")
+    def test_an_seo_reset_rebuilds_the_concat(self) -> None:
+        """The routes a source backs join or leave on the next read after a reset."""
+        served = [["s1"]]
+        routes = SimpleNamespace(patterns=lambda: served[0])
+        version = SeoRoutesVersion()
+        with (
+            patch("next.urls.manager.router_manager", _StubManager(["r1"])),
+            patch("next.urls.manager.form_action_manager", _StubManager(["f1"])),
+            patch(
+                "next.urls.manager.seo_routes_slot",
+                SimpleNamespace(peek=lambda: routes),
+            ),
+            patch("next.urls.manager.seo_routes_version", version),
+        ):
+            lazy = _LazyUrlPatterns()
+            assert list(lazy) == ["c1", "f1", "r1", "s1"]
+            served[0] = []
+            assert list(lazy) == ["c1", "f1", "r1", "s1"]
+            version.move()
+            assert list(lazy) == ["c1", "f1", "r1"]
+
+    def test_routes_no_area_published_read_as_version_zero(self) -> None:
+        """Before the SEO port binds no source is known, so nothing is versioned."""
+        with patch("next.urls.manager.seo_routes_version", SeoRoutesVersion()):
+            assert lazy_urlpatterns.version_token()[2] == 0
+
+    def test_each_move_takes_a_version_never_seen(self) -> None:
+        version = SeoRoutesVersion()
+        version.move()
+        first = version.value
+        version.move()
+        assert 0 < first < version.value
 
     def test_reversed_override_builds_patterns_once(self) -> None:
         """Explicit ``__reversed__`` walks one ``_patterns()`` build, not one per index."""
@@ -720,6 +806,7 @@ class TestLazyUrlPatterns:
             list(lazy_urlpatterns)
         assert mock_iter.call_count == 2
 
+    @pytest.mark.usefixtures("_one_seo_route", "_csrf_marker")
     def test_late_action_appears_after_forms_version_bump(self) -> None:
         """A bumped forms version rebuilds the concat, so late actions appear."""
         router = _StubManager([])
@@ -729,12 +816,12 @@ class TestLazyUrlPatterns:
             patch("next.urls.manager.form_action_manager", forms),
         ):
             lazy = _LazyUrlPatterns()
-            assert list(lazy) == ["f1"]
-            assert list(lazy) == ["f1"]
+            assert list(lazy) == ["c1", "f1", "s1"]
+            assert list(lazy) == ["c1", "f1", "s1"]
             assert forms.builds == 1
             forms.items.append("f2")
             forms.version += 1
-            assert list(lazy) == ["f1", "f2"]
+            assert list(lazy) == ["c1", "f1", "f2", "s1"]
             assert forms.builds == 2
 
     def test_invalidated_by_register_action(self) -> None:
@@ -775,6 +862,7 @@ class TestLazyUrlPatterns:
             list(lazy)
             assert router.builds == 2
 
+    @pytest.mark.usefixtures("_one_seo_route", "_csrf_marker")
     def test_registration_during_build_keeps_cache_valid(self) -> None:
         """Actions registered while pages expand do not stale the cache."""
         forms = _StubManager(["f1"])
@@ -789,11 +877,12 @@ class TestLazyUrlPatterns:
             patch("next.urls.manager.form_action_manager", forms),
         ):
             lazy = _LazyUrlPatterns()
-            assert list(lazy) == ["r1", "f1", "f2"]
-            assert list(lazy) == ["r1", "f1", "f2"]
+            assert list(lazy) == ["c1", "f1", "f2", "r1", "s1"]
+            assert list(lazy) == ["c1", "f1", "f2", "r1", "s1"]
             assert router.builds == 1
             assert forms.builds == 1
 
+    @pytest.mark.usefixtures("_one_seo_route", "_csrf_marker")
     def test_sequence_reads_share_one_cached_build(self) -> None:
         """reversed, len, indexing, and slicing all read the cached concat."""
         router = _StubManager(["r1", "r2"])
@@ -803,11 +892,11 @@ class TestLazyUrlPatterns:
             patch("next.urls.manager.form_action_manager", forms),
         ):
             lazy = _LazyUrlPatterns()
-            assert list(reversed(lazy)) == ["f1", "r2", "r1"]
-            assert len(lazy) == 3
-            assert lazy[0] == "r1"
-            assert lazy[1:] == ["r2", "f1"]
-            assert list(lazy) == ["r1", "r2", "f1"]
+            assert list(reversed(lazy)) == ["s1", "r2", "r1", "f1", "c1"]
+            assert len(lazy) == 5
+            assert lazy[0] == "c1"
+            assert lazy[1:] == ["f1", "r1", "r2", "s1"]
+            assert list(lazy) == ["c1", "f1", "r1", "r2", "s1"]
             assert router.builds == 1
             assert forms.builds == 1
 
@@ -826,6 +915,30 @@ class TestLazyUrlPatterns:
                 resolver.resolve("lazy/miss/")
             mock_iter.assert_called_once()
         assert patterns is urlpatterns
+
+
+class TestPageCacheBound:
+    """Each URL build sizes the page caches by the pages it mounts, in both directions."""
+
+    @pytest.fixture(autouse=True)
+    def _small_default(self, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+        monkeypatch.setattr("next.caches.DEFAULT_CACHE_SIZE", 1)
+        yield
+        monkeypatch.undo()
+        PageCache.fit(0)
+
+    def test_the_bound_follows_the_routed_pages(self, tmp_path: Path) -> None:
+        many = write_tree(tmp_path / "many", pages=("", "a", "b"))
+        few = write_tree(tmp_path / "few", pages=("",))
+        with routed(many):
+            Client().get("/")
+            assert PageCache._bound == 3 * PAGE_HEADROOM
+            lazy_urlpatterns._cache = None
+            list(lazy_urlpatterns)
+            assert PageCache._bound == 3 * PAGE_HEADROOM
+        with routed(few):
+            Client().get("/")
+            assert PageCache._bound == PAGE_HEADROOM
 
 
 class TestBuildUrlResolver:

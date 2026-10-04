@@ -10,8 +10,10 @@ import pytest
 from django.http import Http404, HttpRequest
 from django.template import Template
 from django.test import override_settings
+from django.urls import path as url_path
 
 import next.pages.loaders as loaders_module
+from next.caches import PageCache
 from next.pages import Page, context, page
 from next.pages.loaders import (
     LayoutTemplateLoader,
@@ -21,6 +23,7 @@ from next.pages.loaders import (
     _load_python_module_memo,
     build_registered_loaders,
 )
+from next.pages.manager.views import fit_page_caches
 from next.pages.registry import PageContextRegistry
 from next.static import default_manager as static_default_manager
 from tests.support import (
@@ -145,7 +148,7 @@ class TestPage:
         assert entry.serialize is False
 
     def test_context_decorator_without_key_inherit_context(self, page_instance) -> None:
-        """A dict-merge ``@context`` registers under the ``None`` key and keeps inheritance."""
+        """A dict-merge ``@context`` registers under ``None``, keeping inheritance."""
 
         @page_instance.context(inherit_context=True)
         def get_context_data():
@@ -163,7 +166,7 @@ class TestPage:
     def test_render_scenarios(
         self, page_instance, test_file_path, case: PageRenderCase
     ) -> None:
-        """``render`` merges registered context functions with the caller keyword arguments."""
+        """``render`` merges the registered context functions with the caller kwargs."""
         page_instance.register_template(test_file_path, case.template)
         for key, func in case.context.items():
             page_instance._context_manager.register_context(test_file_path, key, func)
@@ -338,7 +341,7 @@ class TestPageHasTemplateAndLazyRender:
     def test_render_injects_current_template_path_in_context(
         self, page_instance, tmp_path
     ) -> None:
-        """render() adds current_template_path to template context for component resolution."""
+        """render() puts current_template_path in the context for component lookup."""
         page_file = tmp_path / "page.py"
         page_file.write_text("x = 1")
         (tmp_path / "template.djx").write_text("path={{ current_template_path }}")
@@ -419,7 +422,7 @@ class TestGlobalPageInstance:
         assert context == page.context
 
     def test_global_page_template_registration(self, global_file_path) -> None:
-        """A template registered on the singleton lands in its registry."""
+        """A template registered on the singleton is stored in its registry."""
         template_str = "Global template: {{ message }}"
         page.register_template(global_file_path, template_str)
 
@@ -427,7 +430,7 @@ class TestGlobalPageInstance:
         assert page._templates.composed[global_file_path] == template_str
 
     def test_global_page_context_registration(self) -> None:
-        """A context function registered on the singleton lands in its registry."""
+        """A context function registered on the singleton is stored in its registry."""
 
         @page.context("global_key")
         def get_global_value() -> str:
@@ -525,6 +528,26 @@ class TestContextMisattribution:
         assert instance._context_manager.misattributed() == ()
 
 
+class TestFitPageCaches:
+    """The page caches are sized by the distinct pages a list of patterns mounts."""
+
+    def test_each_page_is_counted_once(
+        self, page_instance, tmp_path, url_parser, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        patterns: list[object] = [url_path("plain/", HttpRequest), "marker"]
+        for name in ("a", "b"):
+            (tmp_path / name).mkdir()
+            (tmp_path / name / "template.djx").write_text("x")
+            file_path = tmp_path / name / "page.py"
+            patterns.append(
+                page_instance.create_url_pattern(name, file_path, url_parser)
+            )
+        patterns.append(patterns[-1])
+        with patch.object(PageCache, "fit") as fit:
+            fit_page_caches(patterns)
+        fit.assert_called_once_with(2)
+
+
 class TestLayoutIntegration:
     """``Page`` composing page bodies through the ``layout.djx`` chain."""
 
@@ -589,7 +612,7 @@ class TestLayoutIntegration:
     def test_render_with_layout_template_detection(
         self, page_instance, tmp_path
     ) -> None:
-        """A body with no layout on disk renders verbatim, with nothing wrapped around it."""
+        """A body with no layout on disk renders verbatim, nothing wrapped around it."""
         page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1>"
         page_instance.register_template(page_file, template_str)
@@ -926,7 +949,7 @@ class TestBrokenPageImportView:
     def test_broken_page_returns_404_in_prod(
         self, page_instance, tmp_path, url_parser, broken_source
     ) -> None:
-        """With both flags off the broken page answers 404, never a sibling body."""
+        """With both flags off the broken page returns 404, never a sibling body."""
         (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
         _page_file, pattern = self._broken_pattern(
             page_instance, tmp_path, url_parser, broken_source
@@ -1019,7 +1042,7 @@ class TestBrokenPageImportView:
         monkeypatch.setattr(loaders_module, "_load_python_module", counting)
 
         page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
-        # The build probes once, every later request answers 404 off the memo.
+        # The build probes once, and every later request returns 404 from the memo.
         with pytest.raises(Http404):
             pattern.callback(build_page_request())
         first_pass = calls.count(page_file)
@@ -1083,7 +1106,7 @@ class TestAuthorizationOutcomeVirtualPage:
     def test_a_page_without_render_never_loads_its_body(
         self, page_instance, tmp_path, monkeypatch
     ) -> None:
-        """A page with no guard of its own pays no body load to authorize."""
+        """A page with no guard of its own loads no body to authorize."""
         (tmp_path / "template.djx").write_text("<p>virtual</p>")
         calls: list[Path] = []
 
@@ -1111,7 +1134,7 @@ class TestResolvePageBodyWithoutRender:
         page_file.write_text('template = "<p>static</p>"')
 
         module = _load_python_module_memo(page_file)
-        resolution = page_instance._resolve_page_body(page_file, module)
+        resolution = page_instance._resolve_page_body(page_file, module, _dep_cache={})
 
         assert resolution.body == "<p>static</p>"
         assert resolution.http_response is None
@@ -1123,7 +1146,9 @@ class TestResolvePageBodyWithoutRender:
         """A `template.djx`-only page has no module to carry a `render()`."""
         (tmp_path / "template.djx").write_text("<p>virtual</p>")
 
-        resolution = page_instance._resolve_page_body(tmp_path / "page.py", None)
+        resolution = page_instance._resolve_page_body(
+            tmp_path / "page.py", None, _dep_cache={}
+        )
 
         assert resolution.body == "<p>virtual</p>"
         assert resolution.dynamic is False

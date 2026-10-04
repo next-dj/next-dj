@@ -12,7 +12,14 @@ The runtime applies the patch envelopes the server authors, drives the ``data-ne
 It never invents a target or a swap strategy, so this page records what the runtime accepts rather than what it decides.
 
 The TypeScript sources live in ``next/client/`` and are not part of the installed package.
-``make build-js`` bundles ``next/client/next.ts`` with esbuild into ``next/static/next/next.min.js``, the single minified artefact the wheel ships.
+``make build-js`` bundles, in one esbuild call, ``next/client/next.ts`` into ``next/static/next/next.min.js``, ``next/client/extras.ts`` into ``next/static/next/next.scripts.min.js``, ``next/client/sse-chunk.ts`` into ``next/static/next/next.sse.min.js``, ``next/client/csrf-chunk.ts`` into ``next/static/next/next.csrf.min.js``, ``next/client/poll-chunk.ts`` into ``next/static/next/next.poll.min.js``, and ``next/client/dev.ts`` into ``next/static/next/next.dev.min.js``, the six minified artefacts the wheel ships.
+The scripts chunk carries consent and third-party scripts, and the runtime fetches it only for a page that needs it, see :doc:`client-extras`.
+The sse chunk carries the stream bridge, fetched once a scan finds a ``data-next-sse`` container.
+The csrf chunk carries the fetch of a deferred CSRF token, fetched on the first need of a page that shipped only the endpoint.
+The poll chunk carries the zone poller, fetched once a scan finds a ``data-next-poll`` zone.
+The dev chunk carries the diagnostics of a ``DEBUG`` render, and a production page never fetches it.
+A chunk that fails to load, or has not loaded within 15 seconds, fires ``partial:error`` of kind ``asset`` and is fetched again on its next need, so a stalled request holds no ``Next.ready``, form submit, or stream for good.
+``tests/static/test_chunk_sync.py`` holds the chunk lists of ``next.ts``, ``chunks.ts``, ``next/static/runtime.py``, ``package.json``, ``build_hooks.py``, and ``pyproject.toml`` to one another.
 The wheel excludes ``next/client/`` outright, so a project never imports the TypeScript and installs no Node toolchain to serve the runtime.
 The script builder publishes the bundle under the static path ``next/next.min.js``, which the active staticfiles storage fingerprints like any other asset.
 ``next/static`` is the ``next.static`` Python package rather than an application static directory, so ``NextAppDirectoriesFinder`` keeps the framework app out of the app-directories scan and ``NextStaticFilesFinder`` is the finder that serves the bundle, see :doc:`static`.
@@ -24,8 +31,8 @@ The surface splits into tiers that describe the intended audience for each name.
 A member whose name starts with an underscore is a bootstrap or test seam rather than application API.
 
 Stable.
-   ``Next.context``, ``Next.on``, ``Next.use``, ``Next.partial.onMount``, ``Next.partial.apply``, ``Next.partial.fetch``, ``Next.partial.setCsrf``, ``Next.partial.layers``, and ``Next.partial.sse``.
-   The ``next:*`` element events and the ``partial:*`` document events belong to the same tier.
+   ``Next.context``, ``Next.on``, ``Next.use``, ``Next.ready``, ``Next.navigation``, ``Next.consent``, ``Next.scripts``, ``Next.partial.onMount``, ``Next.partial.mount``, ``Next.partial.apply``, ``Next.partial.fetch``, ``Next.partial.setCsrf``, ``Next.partial.layers``, and ``Next.partial.sse``.
+   The ``next:*`` events and the ``partial:*`` document events belong to the same tier.
    Use these from a co-located asset, an island adapter, or a page script.
 
 Extension.
@@ -34,9 +41,9 @@ Extension.
    See :doc:`/content/topics/partial-rendering/extending` for the server half of both recipes.
 
 Internal.
-   ``Next._init`` is the bootstrap the injected inline payload calls, and ``Next.partial._configure`` and ``Next.partial._reset`` are the harness seams the unit suite drives.
+   ``Next._init`` is the bootstrap the injected inline payload calls, ``Next._land`` is the handshake every lazy chunk calls as it evaluates and ignores a key the runtime does not know, and ``Next.partial._configure`` and ``Next.partial._reset`` are the harness seams the unit suite drives.
    ``Next.partial.ready`` carries no underscore because the bootstrap calls it across a module boundary, and a page reaches for it only when it drives the runtime by hand.
-   None of the four is an application entry point.
+   None of the five is an application entry point.
 
 Public API
 ----------
@@ -69,14 +76,24 @@ The class itself is not exported from the bundle, so ``window.Next`` is the only
    * - ``Next.partial``
      - ``PartialSurface``
      - The apply, fetch, layer, and stream surface, built once when the bundle evaluates.
+   * - ``Next.navigation.current()``
+     - ``NavigationState``
+     - Where the page stands, ``{url, path, title}``.
+   * - ``Next.ready(chunk)``
+     - ``Promise<NextChunks[K]>``
+     - Resolve with the surfaces of a lazy chunk once it has loaded and taken the init payload, fetching it when needed, and reject when it cannot load.
+       ``"scripts"`` is the one chunk, see :doc:`client-extras`.
+   * - ``Next.consent``, ``Next.scripts``
+     - See :doc:`client-extras`
+     - The surfaces of the scripts chunk, ``undefined`` until it loads.
    * - ``Next._init(context)``
      - ``void``
      - The bootstrap the injected inline payload calls once per page.
        It is not an application hook, and a page that calls it a second time reseeds the store and re-fires ``ready``.
 
-``Next.on`` replays one event.
-A ``ready`` listener registered after the runtime is already ready is called at once with the current context, so a late script does not miss the boot.
-Every other event reaches only listeners registered before it fires.
+``Next.on`` replays one event to a listener that subscribes late.
+``ready`` describes a state rather than a moment, so a ``ready`` listener registered after the runtime is already ready is called at once with the current context.
+Every other event reaches only listeners registered before it fires, ``next:consent`` included, and a ``document`` listener never receives a replay.
 
 A listener that throws is caught, logged through ``console.error``, and skipped, and the rest of the fan-out still runs.
 A plugin author therefore reasons about failure per listener rather than per event, and a broken subscriber degrades its own feature instead of the whole page.
@@ -87,7 +104,7 @@ Runtime events
 
 ``NextEventMap`` is the exported interface that keys each bus payload by event name.
 The table below is its whole membership.
-The ``next:*`` element events fire on the DOM instead and carry no entry here, see `Document and element events`_.
+The ``next:mounted``, ``next:removed``, and ``next:morph-*`` element events fire on the DOM instead and carry no entry here, see `Document and element events`_.
 
 .. list-table::
    :header-rows: 1
@@ -103,15 +120,17 @@ The ``next:*`` element events fire on the DOM instead and carry no entry here, s
        An island reads ``changed`` to skip a re-render triggered by a foreign key.
    * - ``partial:before-request``
      - ``{url, method, intent}``, where ``intent`` is ``{zone?, uid?}``.
-       The runtime fires it before the request leaves, on the bus alone, so a listener observes rather than vetoes.
+       The runtime fires it before the request leaves, and the event is not cancelable, so a listener observes rather than vetoes.
    * - ``partial:before-apply``
      - ``{envelope}``, the parsed envelope with a mutable op list.
        The veto lives on the document event of the same name, not here.
    * - ``partial:applied``
-     - ``{envelope, ok}``.
+     - ``{envelope, ok, nodes}``.
        ``ok`` is ``false`` when any op threw or named an unknown verb, so a listener tells a clean apply from a degraded one that still mounted what did change.
+       ``nodes`` are the elements the ops inserted or morphed, the roots the mount pass ran over.
    * - ``partial:error``
-     - A ``PartialError``, discriminated on ``kind`` over ``network``, ``http``, ``parse``, ``op``, and ``asset``.
+     - A ``PartialError``, discriminated on ``kind`` over ``network``, ``http``, ``parse``, ``op``, ``asset``, and ``csrf``.
+       ``csrf`` means a deferred token could not be fetched, so the mutation never left.
        Each cause carries only its own fields, so a listener branches on ``kind`` before reading ``status`` or ``body``.
    * - ``partial:layer-opened``
      - ``{opener}``, the opening element, or ``null`` for a server-initiated open.
@@ -121,11 +140,18 @@ The ``next:*`` element events fire on the DOM instead and carry no entry here, s
      - ``{reason}``, one of ``escape``, ``backdrop``, ``dialog``, ``popstate``, ``dismissed``, or the text a server dismiss carried.
    * - ``next:toast``
      - ``{text, variant}``, fired alongside building the toast element.
+   * - ``next:navigated``
+     - ``{url, path, title, action}``, once per commit that changes the address or the title, and never for the page load.
+       A change of the title alone carries ``action: "none"``, see :doc:`client-extras`.
+   * - ``next:consent``
+     - ``{granted, denied, changed, initial}``, on every consent choice and once for the state the page starts from.
+   * - ``next:script-loaded``, ``next:script-error``
+     - ``{name}`` and ``{name, url}``, for a script of the manifest.
 
-Four of these reach the bus alone.
-``ready`` and ``context-updated`` have no document counterpart because the store is a runtime concern rather than a DOM one.
-``partial:before-request`` fires from the fetch layer, which holds no reference to a document.
-A ``partial:error`` of kind ``network``, ``http``, ``parse``, or ``asset`` also stays on the bus, and only the ``op`` kind reaches the document, because only that kind is raised from inside the apply pipeline.
+:doc:`client-extras` describes the last four.
+One rule covers the channels.
+Every event of the table fires on the document as a ``CustomEvent`` and on the ``Next.on`` bus with the same payload, except ``ready`` and ``context-updated``, which reach the bus alone because the store is a runtime concern rather than a DOM one.
+The rule holds for every source, so a ``partial:error`` from the wire, the asset loader, a stream, a chunk that failed to load, or a lazy CSRF fetch reaches both channels as the ``op`` kind of the apply pipeline does.
 
 Document and element events
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -133,7 +159,6 @@ Document and element events
 The runtime also dispatches ``CustomEvent`` instances on the DOM, a channel distinct from the ``Next.on`` bus.
 The element events bubble and are caught with a delegated ``document.addEventListener``, and the document events are dispatched on the document directly.
 A cancelable event is the only kind whose ``preventDefault()`` changes what the runtime does, and a ``Next.on`` listener for the same name cannot veto anything.
-``partial:before-request`` is absent from the table because the fetch layer holds no document reference and publishes it on the bus alone.
 
 .. list-table::
    :header-rows: 1
@@ -165,6 +190,10 @@ A cancelable event is the only kind whose ``preventDefault()`` changes what the 
      - The document
      - No
      - The layer stack, alongside appending the toast element.
+   * - ``partial:before-request``
+     - The document
+     - No
+     - The fetch layer, before the request leaves.
    * - ``partial:before-apply``
      - The document
      - Yes
@@ -177,7 +206,7 @@ A cancelable event is the only kind whose ``preventDefault()`` changes what the 
    * - ``partial:error``
      - The document
      - No
-     - The applier, for a ``kind: "op"`` failure alone.
+     - Every source of a failure, the applier, the fetch layer, the asset loader, a stream, the chunk loader, and the lazy CSRF fetch.
    * - ``partial:layer-opened``
      - The document
      - No
@@ -190,6 +219,8 @@ A cancelable event is the only kind whose ``preventDefault()`` changes what the 
      - The document
      - No
      - The layer stack, on a browser gesture or a server dismiss.
+
+``next:navigated``, ``next:consent``, ``next:script-loaded``, and ``next:script-error`` fire on the document as well, as the channel rule of `Runtime events`_ states, see :doc:`client-extras`.
 
 The ``event`` patch verb dispatches a server-named ``CustomEvent`` on the document and on the bus through the same path, so an application event name joins this channel without a client registration.
 :doc:`/content/topics/partial-rendering/extending` covers the server side and the reserved names the builder refuses.
@@ -226,8 +257,8 @@ The partial surface
      - Register a parser for a foreign response content type.
    * - ``setCsrf(csrf: CsrfPayload | undefined)``
      - ``void``
-     - Replace the header and token pair the next mutation submits, and clear it with ``undefined``.
-       An envelope carrying a rotated token overwrites whatever was set here.
+     - Replace the header and the token, or the header and the endpoint URL of a deferred token, that the next mutation submits with, and clear it with ``undefined``.
+       A deferred token is fetched once before the first unsafe request, and an envelope carrying a rotated token overwrites whatever was set here.
    * - ``onMount(selector: string, callback: (el: Element) => void)``
      - ``() => void``
      - Register a mount callback and receive the teardown that unregisters it.
@@ -238,6 +269,9 @@ The partial surface
    * - ``sse``
      - ``Sse``
      - The registry of open stream connections, see :doc:`/content/topics/partial-rendering/sse`.
+   * - ``mount(nodes: readonly Element[])``
+     - ``void``
+     - Run the mount pass over elements inserted outside an envelope.
    * - ``ready()``
      - ``void``
      - Seed the asset registry from the document, run the mount callbacks over it, then arm the triggers.
@@ -263,6 +297,7 @@ A name the server has not registered through ``register_patch_op`` never reaches
 
 ``parseHook`` widens the wire format.
 The hook owns the response body before classification and returns a value the applier parses as an envelope, so a backend answering a content type of its own is applied instead of navigated to.
+A hook that throws, and a value the applier rejects as no envelope, surface as a ``partial:error`` of kind ``parse``.
 The registry is keyed by the bare content type, with the charset and any other parameter stripped before the lookup.
 A body no hook claims and no envelope content type covers becomes a full navigation on a safe request and a ``kind: "http"`` error on a mutation, because the action endpoint is no page to navigate to.
 
@@ -362,14 +397,20 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
 Exported types
 ~~~~~~~~~~~~~~
 
-The entry module exports four type names.
-Two are its own and two are re-exported from the protocol module, which is where the client and the server agree on the wire vocabulary.
+The entry module exports sixteen type names.
+``NextContext``, ``NextEventMap``, and ``NextChunks`` are its own, and ``PartialError`` and ``PartialErrorKind`` come from the protocol module, which is where the client and the server agree on the wire vocabulary.
+``Envelope``, ``Patch``, ``Asset``, ``AssetLoad``, and ``FormMeta`` come from the apply module and type the envelope a parse hook or a ``partial:before-apply`` listener handles.
+``NavigatedDetail``, ``NavigationState``, ``NavigationAction``, ``ConsentChange``, ``ScriptsChunk``, and ``ScriptStatus`` come from the navigation, consent, chunk, and scripts modules, see :doc:`client-extras`.
 A page written in TypeScript reaches them through the bundle's declaration output rather than by importing ``next/client/``.
 
 .. code-block:: typescript
    :caption: the exported surface of next/client/next.ts
 
    export type NextContext = Readonly<Record<string, unknown>>;
+
+   export interface NextChunks {
+     scripts: ScriptsChunk;
+   }
 
    export interface NextEventMap {
      ready: NextContext;
@@ -380,19 +421,28 @@ A page written in TypeScript reaches them through the bundle's declaration outpu
        intent: { zone?: string; uid?: string };
      };
      "partial:before-apply": { envelope: Envelope };
-     "partial:applied": { envelope: Envelope; ok: boolean };
+     "partial:applied": { envelope: Envelope; ok: boolean; nodes: readonly Element[] };
      "partial:error": PartialError;
      "partial:layer-opened": { opener: HTMLElement | null };
      "partial:layer-accepted": { result: unknown };
      "partial:layer-dismissed": { reason: string };
      "next:toast": { text: string; variant: string };
+     "next:navigated": NavigatedDetail;
+     "next:consent": ConsentChange;
+     "next:script-loaded": { name: string };
+     "next:script-error": { name: string; url: string };
    }
 
    export type { PartialError, PartialErrorKind } from "./protocol";
+   export type { NavigatedDetail, NavigationAction, NavigationState } from "./navigation";
+   export type { Asset, AssetLoad, Envelope, FormMeta, Patch } from "./apply";
+   export type { ConsentChange } from "./consent";
+   export type { ScriptsChunk } from "./chunks";
+   export type { ScriptStatus } from "./scripts";
 
-``PartialError`` is the discriminated union every ``partial:error`` payload inhabits, over the ``network``, ``http``, ``parse``, ``op``, and ``asset`` kinds.
+``PartialError`` is the discriminated union every ``partial:error`` payload inhabits, over the ``network``, ``http``, ``parse``, ``op``, ``asset``, and ``csrf`` kinds.
 ``PartialErrorKind`` is its discriminant, aliased for a listener that switches on it.
-``Envelope`` and ``PartialSurface`` are declared in the apply and partial modules rather than re-exported here, so their names reach a reader through this page rather than through an import.
+``PartialSurface`` is declared in the partial module and not re-exported, so its name reaches a reader through this page rather than through an import.
 
 The plugin shape ``Next.use`` accepts stays module-local and carries no export.
 It is ``(next: typeof Next) => T``, a single function of the facade returning whatever the plugin wants to hand back.
@@ -423,7 +473,7 @@ None of these modules is reachable from application code, so the names serve rea
    * - ``layers.ts``
      - Modal layers over the native ``<dialog>``, top-down target resolution, and the toast tray.
    * - ``triggers.ts``
-     - The delegated ``data-next-*`` handlers, lazy zone activation, the pollers, and inline validation.
+     - The delegated ``data-next-*`` handlers, lazy zone activation, the fetch of the poll chunk, and inline validation.
    * - ``sse.ts``
      - The Server-Sent Events bridge, its echo ring of own request ids, and the pause and resume on tab visibility.
    * - ``assets.ts``
@@ -433,7 +483,22 @@ None of these modules is reachable from application code, so the names serve rea
    * - ``adapters.ts``
      - Default platform adapters over the browser globals a test harness replaces.
    * - ``protocol.ts``
-     - The wire vocabulary shared with the server, the content type, the headers, and the ``PartialError`` union.
+     - The wire vocabulary shared with the server, the content type, the headers, the ``PartialError`` union, and ``pageKey``, the same-origin path and query a layer and a zone are keyed by.
+   * - ``navigation.ts``
+     - The history writes of a commit and the one ``next:navigated`` it fires, a layer's push written as it opens and announced once its body commits.
+   * - ``head.ts``
+     - The four URL-bound head tags a ``meta`` operation syncs and a layer snapshots and restores.
+   * - ``csrf.ts``
+     - The token store, the single-flight fetch of a deferred token, and the prefetch on the first focus in a form.
+       The fetch itself ships in the csrf chunk.
+   * - ``chunks.ts``
+     - The core side of the lazy chunks, which fetches each on demand, and of the scripts chunk, which answers ``Next.ready("scripts")`` once it loads.
+   * - ``extras.ts``, ``consent.ts``, ``scripts.ts``
+     - The scripts chunk itself, consent and the script manifest loader.
+   * - ``poll.ts``
+     - The zone poller, its interval groups, and the pause and resume on tab visibility, shipped in the poll chunk.
+   * - ``sse-chunk.ts``, ``csrf-chunk.ts``, ``poll-chunk.ts``, ``dev.ts``
+     - The entries of the sse, csrf, poll, and dev chunks.
 
 Configuration
 -------------

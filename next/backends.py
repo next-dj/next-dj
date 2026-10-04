@@ -13,6 +13,7 @@ from django.dispatch import Signal
 
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.defaults import DEFAULTS
+from next.conf.scopes import scope_value
 from next.errors import (
     AbstractBackendError,
     BackendImportError,
@@ -25,8 +26,8 @@ from next.errors import (
 
 logger = logging.getLogger(__name__)
 
-# A family root is a class, but an abstract one cannot pass as `type[T]`, so
-# it travels under its constructor signature and `_root_class` narrows it back.
+# A family root is a class, but an abstract one cannot pass as `type[T]`, so it is
+# typed by its constructor signature and `_root_class` narrows it back.
 type BackendRoot[T] = Callable[..., T]
 
 
@@ -53,24 +54,41 @@ def resolve_backend_class[T](
     return klass
 
 
+def _setting_value(setting: str, scope: str | None) -> tuple[object, str]:
+    """Return the value one dotted-path key holds and the default it falls back to."""
+    if scope is None:
+        return getattr(next_framework_settings, setting), DEFAULTS[setting]
+    return scope_value(scope, setting), DEFAULTS[scope][setting]
+
+
 def resolve_setting_class[T](
-    setting: str, *, base: type[T], shipped: type[T], base_path: str
+    setting: str,
+    *,
+    base: BackendRoot[T],
+    shipped: BackendRoot[T],
+    base_path: str,
+    scope: str | None = None,
 ) -> type[T]:
     """Return the class named by one dotted-path setting, checked against `base`.
 
-    The shipped default short-circuits the import helper, because a package binds its
-    own default class only after importing the module that reads the setting.
+    The shipped default is returned without an import, since its package may still be
+    importing when the setting is read.
     """
-    dotted = getattr(next_framework_settings, setting)
-    if dotted == DEFAULTS[setting]:
-        klass: type[Any] = shipped
+    root = _root_class(base)
+    dotted, default = _setting_value(setting, scope)
+    if dotted == default:
+        klass: object = shipped
+    elif not isinstance(dotted, str):
+        raise SettingNotSubclassError(setting, dotted, base_path, scope=scope)
     else:
         try:
             klass = import_class_cached(dotted)
         except ImportError as exc:
-            raise SettingImportError(setting, dotted, exc) from exc
-    if not isinstance(klass, type) or not issubclass(klass, base):
-        raise SettingNotSubclassError(setting, dotted, base_path)
+            raise SettingImportError(setting, dotted, exc, scope=scope) from exc
+    if not isinstance(klass, type) or not issubclass(klass, root):
+        raise SettingNotSubclassError(setting, dotted, base_path, scope=scope)
+    if inspect.isabstract(klass):
+        raise AbstractBackendError(str(dotted))
     return klass
 
 

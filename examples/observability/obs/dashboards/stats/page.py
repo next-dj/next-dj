@@ -6,9 +6,12 @@ from obs.forms import DEFAULT_WINDOW
 from obs.serializers import WrappedJsContextSerializer
 
 from next import context
+from next.pages import MetadataDict
 
 
-# Page level, not next to the widget, because it must land first.
+metadata: MetadataDict = {"title": "Live stats"}
+
+# Page level, not next to the widget, because it must load first.
 scripts = [
     "https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js",
     "dashboards/js/chart_theme.js",

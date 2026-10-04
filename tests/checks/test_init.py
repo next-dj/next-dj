@@ -10,7 +10,7 @@ import next.checks as checks_package
 from next.checks import _LAZY_ATTRIBUTES, _LAZY_SOURCES_BY_MODULE
 
 
-_EAGER = frozenset({"NEXT", "register_all", "reset_check_caches"})
+_EAGER = frozenset({"NEXT", "SEO", "register_all", "reset_check_caches"})
 _NEXT_ROOT = pathlib.Path(inspect.getfile(checks_package)).parent.parent
 _CHECK_ID = re.compile(r"^next\.[EWI]\d+$")
 
@@ -32,6 +32,46 @@ def _check_id_owners() -> dict[str, set[str]]:
 _CHECK_ID_OWNERS = _check_id_owners()
 
 
+def _check_id_literals() -> dict[str, set[str]]:
+    """Map every string literal that is a whole check id to the modules holding it.
+
+    This also reads the ids a module binds to a constant before passing it as `id=`.
+    """
+    owners: dict[str, set[str]] = collections.defaultdict(set)
+    for path in sorted(_NEXT_ROOT.rglob("*.py")):
+        module = path.relative_to(_NEXT_ROOT.parent).as_posix()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and _CHECK_ID.match(node.value)
+            ):
+                owners[node.value].add(module)
+    return dict(owners)
+
+
+_CHECK_ID_LITERALS = _check_id_literals()
+
+_RETIRED_IDS = frozenset(
+    {"next.E001", "next.E066", "next.E091", "next.E109"}
+    | {f"next.W{number:03d}" for number in range(3, 30)}
+    | {f"next.W{number:03d}" for number in range(32, 42)}
+    | {"next.W044", "next.W045"}
+    | {f"next.W{number:03d}" for number in range(47, 54)}
+    | {f"next.W{number:03d}" for number in range(64, 67)}
+    | {"next.W073"}
+)
+
+_CHECKS_REFERENCE = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "docs"
+    / "content"
+    / "ref"
+    / "system-checks.rst"
+)
+_REFERENCE_ROW = re.compile(r"^   \* - ``(next\.[EW]\d{3})``$", re.MULTILINE)
+
+
 def _defined_check_names(module_path: pathlib.Path) -> frozenset[str]:
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
     return frozenset(
@@ -44,8 +84,7 @@ def _defined_check_names(module_path: pathlib.Path) -> frozenset[str]:
 def _area_check_sources() -> dict[str, tuple[pathlib.Path, ...]]:
     """Map each area's `checks` address to the files that define its checks.
 
-    An area that outgrew one file exposes a package whose `__init__` only re-exports, so
-    the names live in the submodules beside it.
+    A package `__init__` only re-exports, so the names live in the submodules below it.
     """
     flat = {
         f"next.{path.parent.name}.checks": (path,)
@@ -53,7 +92,7 @@ def _area_check_sources() -> dict[str, tuple[pathlib.Path, ...]]:
     }
     packages = {
         f"next.{path.parent.parent.name}.checks": tuple(
-            sorted(path.parent.glob("*.py"))
+            sorted(path.parent.rglob("*.py"))
         )
         for path in sorted(_NEXT_ROOT.glob("*/checks/__init__.py"))
     }
@@ -117,7 +156,8 @@ class TestPublicSurface:
         modules = list(_LAZY_SOURCES_BY_MODULE)
         assert modules == sorted(modules)
         assert all(
-            list(names) == sorted(names) for names in _LAZY_SOURCES_BY_MODULE.values()
+            list(names) == sorted(set(names))
+            for names in _LAZY_SOURCES_BY_MODULE.values()
         )
 
     def test_all_lists_no_private_name(self) -> None:
@@ -173,3 +213,35 @@ class TestCheckIdAllocation:
 
     def test_the_app_directories_finder_owns_its_own_id(self) -> None:
         assert _CHECK_ID_OWNERS["next.E083"] == {"next/static/checks.py"}
+
+    def test_no_id_literal_is_held_by_two_modules(self) -> None:
+        shared = {
+            check_id: sorted(modules)
+            for check_id, modules in _CHECK_ID_LITERALS.items()
+            if len(modules) > 1
+        }
+        assert shared == {}
+
+    def test_no_retired_id_is_emitted_again(self) -> None:
+        assert sorted(_RETIRED_IDS & set(_CHECK_ID_LITERALS)) == []
+
+    @pytest.mark.parametrize("kind", ["E", "W"])
+    def test_every_number_below_the_highest_is_allocated_or_retired(
+        self, kind: str
+    ) -> None:
+        prefix = f"next.{kind}"
+        numbers = [
+            int(check_id.removeprefix(prefix))
+            for check_id in _CHECK_ID_LITERALS
+            if check_id.startswith(prefix)
+        ]
+        expected = {f"{prefix}{number:03d}" for number in range(1, max(numbers) + 1)}
+        assert sorted(expected - set(_CHECK_ID_LITERALS) - _RETIRED_IDS) == []
+
+    @pytest.mark.skipif(
+        not _CHECKS_REFERENCE.is_file(), reason="the documentation is not checked out"
+    )
+    def test_the_reference_table_lists_every_id_once(self) -> None:
+        rows = _REFERENCE_ROW.findall(_CHECKS_REFERENCE.read_text(encoding="utf-8"))
+        assert len(rows) == len(set(rows))
+        assert sorted(rows) == sorted(_CHECK_ID_LITERALS)

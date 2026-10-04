@@ -1,7 +1,7 @@
 """Collector, dedup strategies, JS context policies, and placeholder slots.
 
-A fresh collector rides in the template context per request. It is fully type-agnostic,
-routing each asset to a slot named in `KindRegistry` with no built-in kind knowledge.
+Each render holds a fresh collector in its template context. The collector routes each
+asset to the slot `KindRegistry` names for its kind and knows no built-in kind.
 """
 
 from __future__ import annotations
@@ -26,9 +26,10 @@ logger = logging.getLogger(__name__)
 
 HEAD_CLOSE: str = "</head>"
 
-# One shared answer for every slot nothing registered, so a lookup that misses
-# neither allocates nor hands out a list a caller could fill.
+# One shared value for every slot with no registration, so a lookup that misses
+# neither allocates nor returns a list a caller could fill.
 _EMPTY: tuple[StaticAsset, ...] = ()
+_NO_NOTES: tuple[object, ...] = ()
 
 
 def _inline_dedup_key(asset: StaticAsset) -> tuple[str, str, str]:
@@ -205,7 +206,7 @@ class PlaceholderRegistry:
 
     @property
     def version(self) -> int:
-        """Return a counter every registration bumps, so a cached answer can tell."""
+        """Return the registration counter, which a memo compares to detect a change."""
         return self._version
 
     def register(self, name: str, *, token: str) -> None:
@@ -282,6 +283,7 @@ class StaticCollector:
         self._js_context: dict[str, Any] = {}
         self._js_context_serializers: dict[str, JsContextSerializer] = {}
         self._js_context_encoded: dict[str, str] = {}
+        self._notes: dict[str, list[object]] = {}
 
     def add(self, asset: StaticAsset, *, prepend: bool = False) -> bool:
         """Add the asset unless its dedup key was already recorded, and report which.
@@ -312,6 +314,14 @@ class StaticCollector:
         a caller from rewriting a bucket a later `add` still appends to.
         """
         return self._buckets.get(name, _EMPTY)
+
+    def note(self, key: str, value: object) -> None:
+        """Append `value` under `key` for another area to read at injection time."""
+        self._notes.setdefault(key, []).append(value)
+
+    def notes(self, key: str) -> Sequence[object]:
+        """Return what the render noted under `key`, in the order it was noted."""
+        return self._notes.get(key, _NO_NOTES)
 
     def _get_js_serializer(self) -> JsContextSerializer:
         if self._js_serializer is None:
@@ -388,6 +398,8 @@ class StaticCollector:
         """
         values = self._js_context
         serializers = self._js_context_serializers
+        if not values:
+            return JsContextPayload(values, {}, serializers)
         collided = {key for key in values if key in reserved}
         if not collided:
             return JsContextPayload(values, self.js_context_encoded(), serializers)

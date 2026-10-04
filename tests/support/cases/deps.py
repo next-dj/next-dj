@@ -1,0 +1,197 @@
+from __future__ import annotations
+
+import inspect
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from typing import TYPE_CHECKING, Annotated
+from uuid import UUID
+
+from next.urls import DUrl
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from django.http import HttpRequest
+
+    from next.deps import DependencyResolver
+
+
+_UUID_TEXT = "12345678-1234-5678-1234-567812345678"
+_UUID_VALUE = UUID(_UUID_TEXT)
+
+
+@dataclass(frozen=True, slots=True)
+class CoerceUrlValueCase:
+    """One row for ``TestCoerceUrlValue`` (raw value, type hint, expected value)."""
+
+    id: str
+    raw: object
+    hint: object
+    expected: object
+
+
+COERCE_URL_VALUE_CASES: tuple[CoerceUrlValueCase, ...] = (
+    CoerceUrlValueCase("int_ok", "42", int, 42),
+    CoerceUrlValueCase("int_bad", "x", int, "x"),
+    CoerceUrlValueCase("bool_true", "true", bool, True),
+    CoerceUrlValueCase("bool_one", "1", bool, True),
+    CoerceUrlValueCase("bool_yes", "yes", bool, True),
+    CoerceUrlValueCase("bool_zero", "0", bool, False),
+    CoerceUrlValueCase("bool_false", "false", bool, False),
+    CoerceUrlValueCase("float_ok", "3.14", float, 3.14),
+    CoerceUrlValueCase("float_bad", "x", float, "x"),
+    CoerceUrlValueCase("str_pass", "hello", str, "hello"),
+    CoerceUrlValueCase("uuid_ok", _UUID_TEXT, UUID, _UUID_VALUE),
+    CoerceUrlValueCase("uuid_bad", "not-a-uuid", UUID, "not-a-uuid"),
+    CoerceUrlValueCase("decimal_ok", "3.14", Decimal, Decimal("3.14")),
+    CoerceUrlValueCase("decimal_bad", "x", Decimal, "x"),
+    CoerceUrlValueCase("date_ok", "2026-01-15", date, date(2026, 1, 15)),
+    CoerceUrlValueCase("date_bad", "x", date, "x"),
+    CoerceUrlValueCase(
+        "datetime_ok",
+        "2026-01-15T10:30:00+00:00",
+        datetime,
+        datetime(2026, 1, 15, 10, 30, tzinfo=UTC),
+    ),
+    CoerceUrlValueCase("datetime_bad", "x", datetime, "x"),
+    CoerceUrlValueCase("isinstance_uuid", _UUID_VALUE, UUID, _UUID_VALUE),
+    CoerceUrlValueCase("isinstance_int", 42, int, 42),
+    CoerceUrlValueCase("non_type_hint", "anything", "not-a-type", "anything"),
+    CoerceUrlValueCase("str_from_int", 42, str, "42"),
+    CoerceUrlValueCase("unsupported_type", "hello", bytes, "hello"),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class UrlKwargsResolveCase:
+    """One row for ``UrlKwargsProvider.resolve`` table tests."""
+
+    id: str
+    name: str
+    annotation: object
+    url_kwargs: dict[str, object]
+    expected: object
+
+
+URL_KWARGS_RESOLVE_CASES: tuple[UrlKwargsResolveCase, ...] = (
+    UrlKwargsResolveCase("int_match", "id", int, {"id": 42}, 42),
+    UrlKwargsResolveCase("str_to_int", "id", int, {"id": "99"}, 99),
+    UrlKwargsResolveCase(
+        "no_annotation", "slug", inspect.Parameter.empty, {"slug": "hello"}, "hello"
+    ),
+    UrlKwargsResolveCase(
+        "int_conv_fail", "id", int, {"id": "not-a-number"}, "not-a-number"
+    ),
+    UrlKwargsResolveCase(
+        "str_annot", "slug", str, {"slug": "hello-world"}, "hello-world"
+    ),
+    UrlKwargsResolveCase("missing_key", "missing", str, {"other": "value"}, None),
+    UrlKwargsResolveCase(
+        "uuid_preserved", "id", UUID, {"id": _UUID_VALUE}, _UUID_VALUE
+    ),
+    UrlKwargsResolveCase("uuid_from_text", "id", UUID, {"id": _UUID_TEXT}, _UUID_VALUE),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class UrlByAnnotationResolveCase:
+    """One row for ``UrlByAnnotationProvider.resolve`` table tests."""
+
+    id: str
+    name: str
+    annotation: object
+    url_kwargs: dict[str, object]
+    expected: object | None
+
+
+URL_BY_ANNOTATION_RESOLVE_CASES: tuple[UrlByAnnotationResolveCase, ...] = (
+    UrlByAnnotationResolveCase("coerce_int", "pk", DUrl[int], {"pk": "123"}, 123),
+    UrlByAnnotationResolveCase(
+        "str_slug", "slug", DUrl[str], {"slug": "hello"}, "hello"
+    ),
+    UrlByAnnotationResolveCase("missing_key", "missing", DUrl[str], {}, None),
+    UrlByAnnotationResolveCase(
+        "two_arg_coerce_int", "note_id", DUrl["id", int], {"id": "42"}, 42
+    ),
+    UrlByAnnotationResolveCase(
+        "key_only_no_coercion", "note_id", DUrl["id"], {"id": "7"}, "7"
+    ),
+    UrlByAnnotationResolveCase(
+        "two_arg_reads_named_key", "note_id", DUrl["id", int], {"note_id": "9"}, None
+    ),
+    UrlByAnnotationResolveCase(
+        "coerce_uuid_preserved", "pk", DUrl[UUID], {"pk": _UUID_VALUE}, _UUID_VALUE
+    ),
+    UrlByAnnotationResolveCase(
+        "coerce_uuid_from_text", "pk", DUrl[UUID], {"pk": _UUID_TEXT}, _UUID_VALUE
+    ),
+    UrlByAnnotationResolveCase(
+        "annotated_coerce_int", "pk", Annotated[DUrl[int], "tenant"], {"pk": "123"}, 123
+    ),
+    UrlByAnnotationResolveCase(
+        "annotated_named_key",
+        "note_id",
+        Annotated[DUrl["id", int], "tenant"],
+        {"id": "42"},
+        42,
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class PlanCase:
+    """One callable resolved in one context, pinned to the literal it must yield.
+
+    `kwargs` is the loose mapping `resolve_dependencies` takes, and `expected`
+    the mapping a compile and a replay of the plan both have to produce.
+    """
+
+    id: str
+    func: Callable[..., object]
+    kwargs: dict[str, object]
+    expected: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class TemplateContextCase:
+    """One callable resolved the way a component render resolves it.
+
+    `template_context` is the mapping the tag hands the resolver, and `expected` the
+    literal both the compile and the replay have to produce.
+    """
+
+    id: str
+    func: Callable[..., object]
+    request: HttpRequest | None
+    template_context: dict[str, object] | None
+    expected: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ParityCase:
+    """One callable and one loose kwargs mapping both resolvers have to agree on.
+
+    `build` installs whatever providers or dependencies the case needs, so the two
+    resolvers under comparison are set up identically and independently.
+    """
+
+    id: str
+    func: Callable[..., object]
+    kwargs: dict[str, object] = field(default_factory=dict)
+    build: Callable[[DependencyResolver], None] = lambda _r: None
+
+
+@dataclass(frozen=True, slots=True)
+class ContextMarkerCase:
+    """One `Context` marker source, resolved against one template context.
+
+    `source` is what the marker was built with, a name, a callable, a constant, or None
+    for the parameter name, and `expected` is what both paths have to answer.
+    """
+
+    id: str
+    source: object
+    context_data: dict[str, object]
+    expected: object

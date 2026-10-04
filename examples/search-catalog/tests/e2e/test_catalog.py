@@ -4,7 +4,9 @@ import pytest
 from e2e_support.browser import (
     PageProbe,
     applied_count,
+    assert_same_document,
     expect_no_partial_request,
+    mark_document,
     wait_for_apply,
     wait_for_runtime,
 )
@@ -33,6 +35,13 @@ READ_FIRST_ROW_TAG = (
     "() => document.querySelector"
     "(\"[data-next-zone='catalog-results'] li\").keptAcrossAppends"
 )
+
+
+@pytest.fixture()
+def decided_visitor(page: Page, base_url: str) -> None:
+    page.context.add_cookies(
+        [{"name": "next_consent", "value": "2::1700000000", "url": base_url}]
+    )
 
 
 def open_listing(page: Page, base_url: str) -> None:
@@ -158,7 +167,11 @@ def test_revealing_the_sentinel_appends_the_next_page(
 
 
 def test_the_sentinel_walks_the_pages_once_and_then_retires(
-    page: Page, base_url: str, demo_data: None, next_probe: PageProbe
+    page: Page,
+    base_url: str,
+    demo_data: None,
+    next_probe: PageProbe,
+    decided_visitor: None,
 ) -> None:
     open_listing(page, base_url)
 
@@ -218,7 +231,7 @@ def test_the_minlength_hint_follows_the_field_state(
     page.locator(SEARCH).fill("ip")
 
     expect(page.locator(HELP)).to_have_text(
-        "Need 1 more — at least 3 characters in total."
+        "Need 1 more, at least 3 characters in total."
     )
     assert page.locator(SEARCH).evaluate("field => field.validity.valid") is False
 
@@ -230,3 +243,18 @@ def test_the_minlength_hint_follows_the_field_state(
         "Looks good — typing filters the catalog live."
     )
     assert page.locator(SEARCH).evaluate("field => field.validity.valid") is True
+
+
+def test_a_preset_renames_the_tab_without_a_reload(
+    page: Page, base_url: str, demo_data: None
+) -> None:
+    open_listing(page, base_url)
+    expect(page).to_have_title("All products · next.dj catalog")
+    mark_document(page)
+
+    seen = applied_count(page)
+    page.get_by_role("button", name="Cheapest first").click()
+    wait_for_apply(page, seen)
+
+    expect(page).to_have_title("Cheapest first · next.dj catalog")
+    assert_same_document(page)

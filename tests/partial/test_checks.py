@@ -7,8 +7,10 @@ import pytest
 from django.core.checks.registry import registry as check_registry
 from django.test import override_settings
 
+from next.checks import reset_check_caches
 from next.components import ComponentInfo, FileComponentsBackend
 from next.forms.backends import FormActionBackend, RegistryFormActionBackend
+from next.pages.manager import page
 from next.partial import checks
 from next.partial.registry import register_patch_op
 from tests.support import (
@@ -35,8 +37,8 @@ def _scanned_root(root: Path) -> Iterator[None]:
 def _context_pages(*pages: tuple[Path, str, str]) -> Iterator[None]:
     """Point the page-scanning checks at real on-disk page directories.
 
-    Real imports and compiles mimic production, so a zone tag and a
-    `@context` registration land here the same way they do live.
+    Real imports and compiles match production, so a zone tag and a `@context`
+    registration are recorded the same way as in a live process.
     """
     root = pages[0][0].parent.parent
     for page_file, source, body in pages:
@@ -199,6 +201,15 @@ class TestComposedTemplateCompileCheck:
             messages = checks.check_composed_templates_compile()
         assert [m.id for m in messages] == [checks.E_COMPOSED_TEMPLATE_SYNTAX]
         assert messages[0].obj == str(broken)
+
+    def test_a_template_attribute_without_a_layout_is_compiled(
+        self, tmp_path: Path
+    ) -> None:
+        page_file = _page_dir(tmp_path, "inline")
+        page_file.write_text('template = "{% if %}"\n')
+        with _scanned_root(tmp_path):
+            messages = checks.check_composed_templates_compile()
+        assert [m.obj for m in messages] == [str(page_file)]
 
 
 class TestComposedTemplateCompileIsDeployOnly:
@@ -406,7 +417,7 @@ class TestZoneInComponentCheck:
 
 @pytest.mark.usefixtures("restored_op_registry")
 class TestCustomPatchOpCheck:
-    """A custom verb that shadows a built-in or is malformed is reported."""
+    """A custom verb that is not a valid verb token is reported."""
 
     def test_default_registry_is_silent(self) -> None:
         assert checks.check_custom_patch_ops_well_formed() == []
@@ -415,23 +426,11 @@ class TestCustomPatchOpCheck:
         register_patch_op("confetti")
         assert checks.check_custom_patch_ops_well_formed() == []
 
-    def test_shadowing_a_builtin_verb_errors(self) -> None:
-        # a custom op named after a built-in verb never runs, the built-in wins
-        register_patch_op("morph")
-        messages = checks.check_custom_patch_ops_well_formed()
-        assert [m.id for m in messages] == [checks.E_OP_SHADOWS_BUILTIN]
-        assert "shadows a built-in verb" in messages[0].msg
-
     def test_malformed_verb_token_errors(self) -> None:
         register_patch_op("not a token")
         messages = checks.check_custom_patch_ops_well_formed()
         assert [m.id for m in messages] == [checks.E_OP_BAD_NAME]
         assert "is not a valid verb token" in messages[0].msg
-
-    def test_a_shadowed_builtin_is_not_also_reported_as_malformed(self) -> None:
-        # "morph" is a valid token, so the shadow branch has to end the verdict
-        register_patch_op("morph")
-        assert len(checks.check_custom_patch_ops_well_formed()) == 1
 
 
 class _PartialUnawareBackend(RegistryFormActionBackend):
@@ -577,8 +576,8 @@ class TestAssetVersionMovesBetweenDeploysCheck:
         ids=["pinned_tag", "manifest_sentinel"],
     )
     def test_a_named_version_is_silent(self, options: dict[str, object]) -> None:
-        # a pinned tag moves by hand and the sentinel answers to next.W069, so
-        # neither case earns a second warning about the same decision
+        # A pinned tag is moved by hand and the sentinel is reported as next.W069,
+        # so neither case gets a second warning about the same decision.
         with _partial_options(options):
             assert checks.check_asset_version_moves_between_deploys() == []
 
@@ -740,17 +739,12 @@ _ZONE_CHECKS = (
 
 
 @contextmanager
-def _counting_collect() -> Iterator[list[int]]:
-    """Count calls to the composed-page collector, delegating to the real one."""
-    real = checks.pages._collect_composed_pages
-    calls = [0]
-
-    def counting(manager: object) -> Iterator[tuple[Path, object]]:
-        calls[0] += 1
-        return real(manager)
-
-    with patch.object(checks.pages, "_collect_composed_pages", side_effect=counting):
-        yield calls
+def _counting_collect() -> Iterator[MagicMock]:
+    """Count the composed templates the walk builds, one per page and walk."""
+    with patch.object(
+        page, "composed_template_for", wraps=page.composed_template_for
+    ) as compose:
+        yield compose
 
 
 class TestComposedPagesMemo:
@@ -759,10 +753,10 @@ class TestComposedPagesMemo:
     def test_seven_checks_collect_pages_once(self, tmp_path: Path) -> None:
         page_file = _page_dir(tmp_path, "shared")
         body = '{% zone "z" %}<p>{{ a }}</p>{% endzone %}'
-        with _composed_pages((page_file, body)), _counting_collect() as calls:
+        with _composed_pages((page_file, body)), _counting_collect() as compose:
             for check in _ZONE_CHECKS:
                 check()
-        assert calls[0] == 1
+        assert compose.call_count == 1
 
     def test_new_manager_invalidates_memo(self, tmp_path: Path) -> None:
         first_page = _page_dir(tmp_path, "one")
@@ -776,16 +770,18 @@ class TestComposedPagesMemo:
             ids = [m.id for m in checks.check_duplicate_zone_names()]
         assert ids == [checks.E_DUPLICATE_ZONE]
 
-    def test_reset_hook_recollects_on_live_manager(self, tmp_path: Path) -> None:
+    def test_a_check_cache_reset_recollects_on_a_live_manager(
+        self, tmp_path: Path
+    ) -> None:
         page_file = _page_dir(tmp_path, "live")
         body = '{% zone "z" %}<p>{{ a }}</p>{% endzone %}'
-        with _composed_pages((page_file, body)), _counting_collect() as calls:
+        with _composed_pages((page_file, body)), _counting_collect() as compose:
             checks.check_duplicate_zone_names()
             checks.check_zone_name_is_slug()
-            assert calls[0] == 1
-            checks.reset_composed_pages_memo()
+            assert compose.call_count == 1
+            reset_check_caches()
             checks.check_zone_not_in_loop()
-            assert calls[0] == 2
+            assert compose.call_count == 2
 
     def test_memo_does_not_hide_e072(self, tmp_path: Path) -> None:
         broken = _page_dir(tmp_path, "torn")
@@ -794,3 +790,15 @@ class TestComposedPagesMemo:
             checks.check_duplicate_zone_names()
             messages = checks.check_composed_templates_compile()
         assert [m.id for m in messages] == [checks.E_COMPOSED_TEMPLATE_SYNTAX]
+
+
+class TestDeprecatedComposedReset:
+    """`reset_composed_pages_memo` drops the shared run memos behind a warning."""
+
+    def test_it_forgets_the_run_memos_and_warns(self) -> None:
+        with (
+            patch("next.partial.checks.forget_run_memos") as forget,
+            pytest.warns(DeprecationWarning, match="reset_check_caches"),
+        ):
+            checks.reset_composed_pages_memo()
+        forget.assert_called_once_with()

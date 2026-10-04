@@ -1,21 +1,29 @@
-"""Bounded caches the layers of the framework key their own way.
+"""Bounded in-process caches that the framework layers use for their memos.
 
-Each cache owns its bound and its eviction policy, so no caller carries either.
+Each cache holds its own bound and eviction policy, so a caller manages neither.
 """
 
 from __future__ import annotations
 
+import threading
 from collections import OrderedDict
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, ClassVar, Final, override
+from weakref import WeakSet
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-# The bound every path-keyed cache shares, far above what a project holds, so it catches
-# a caller naming keys without end rather than ranking entries.
+# The default bound of a path-keyed cache, far above the page count of a project.
+# It limits memory when a caller creates keys without end, rather than ranking entries.
 DEFAULT_CACHE_SIZE = 2048
+
+PAGE_HEADROOM: Final = 2
+"""The entries a `PageCache` holds per routed page, covering its ancestor entries."""
+
+# Serialises `PageCache.fit`, so every page cache ends with the bound of the same call.
+_FIT_LOCK = threading.Lock()
 
 
 class BoundedCache[K, V]:
@@ -33,14 +41,14 @@ class BoundedCache[K, V]:
         return self._entries[key]
 
     def __setitem__(self, key: K, value: V) -> None:
-        """Store `value` under `key` and evict the stalest entry past the bound."""
+        """Store `value` under `key` and evict the oldest entry once past the bound."""
         self._entries[key] = value
         if len(self._entries) > self._maxsize:
             try:
                 self._entries.popitem(last=False)
             except KeyError:
-                # No caller holds a lock, so a concurrent clear may have taken the
-                # stalest entry already, and with it everything past the bound.
+                # No caller holds a lock, so a concurrent clear may have emptied the
+                # cache already, which also brings it back within the bound.
                 return
 
     def __contains__(self, key: object) -> bool:
@@ -48,7 +56,7 @@ class BoundedCache[K, V]:
         return key in self._entries
 
     def __iter__(self) -> Iterator[K]:
-        """Iterate the held keys, from the stalest to the freshest."""
+        """Iterate the held keys, from the oldest to the newest."""
         return iter(self._entries)
 
     def __len__(self) -> int:
@@ -68,42 +76,83 @@ class BoundedCache[K, V]:
         self._entries.clear()
 
 
+class PageCache[K, V](BoundedCache[K, V]):
+    """A FIFO cache keyed by page, whose bound follows the routed page count.
+
+    A FIFO bound below the page count evicts every entry before its next read under
+    uniform traffic, so the URL build reports the count through `fit`.
+    """
+
+    __slots__ = ("__weakref__",)
+
+    _bound: ClassVar[int] = DEFAULT_CACHE_SIZE
+    _instances: ClassVar[WeakSet[PageCache[Any, Any]]] = WeakSet()
+
+    def __init__(self) -> None:
+        """Start at the bound that the last URL build set."""
+        super().__init__(PageCache._bound)
+        PageCache._instances.add(self)
+
+    @staticmethod
+    def fit(page_count: int) -> None:
+        """Set the bound of every page cache to `PAGE_HEADROOM` entries per routed page.
+
+        The bound never falls below `DEFAULT_CACHE_SIZE`. A lower bound drops the oldest
+        entries of each cache at once, so the pages of an earlier build are not held.
+        """
+        bound = max(DEFAULT_CACHE_SIZE, page_count * PAGE_HEADROOM)
+        with _FIT_LOCK:
+            if bound == PageCache._bound:
+                return
+            PageCache._bound = bound
+            for cache in list(PageCache._instances):
+                cache._maxsize = bound
+                cache._trim()
+
+    def _trim(self) -> None:
+        """Drop the oldest entries until the cache is within its bound."""
+        entries = self._entries
+        while len(entries) > self._maxsize:
+            try:
+                entries.popitem(last=False)
+            except KeyError:
+                return
+
+
 class LruCache[K, V](BoundedCache[K, V]):
-    """A bounded cache where reading refreshes an entry, for keys named without end."""
+    """A bounded cache that evicts the least recently read entry first."""
 
     __slots__ = ()
 
     @override
     def __getitem__(self, key: K) -> V:
-        """Return the entry under `key` and make it the freshest one."""
-        # The read comes first, so a key no mapping can hold still raises the
-        # TypeError that tells a caller to inspect afresh rather than the
-        # KeyError a reorder answers it with. No reader holds a lock, so an
-        # eviction landing in between reads as the miss the key has become,
-        # which costs a rebuild rather than an error out of a render.
+        """Return the entry under `key` and mark it as the most recently read."""
+        # The lookup runs first, so an unhashable key raises `TypeError`, which tells
+        # a caller to bypass the cache, where `move_to_end` would raise `KeyError`.
+        # No reader holds a lock, so a concurrent eviction between the two calls
+        # raises `KeyError`, which a caller treats as a miss and rebuilds.
         value = self._entries[key]
         self._entries.move_to_end(key)
         return value
 
     @override
     def __setitem__(self, key: K, value: V) -> None:
-        """Make `key` the freshest entry and evict the stalest past the bound."""
+        """Store `value` as the newest entry and evict the oldest past the bound."""
         self._entries[key] = value
         try:
             self._entries.move_to_end(key)
             if len(self._entries) > self._maxsize:
                 self._entries.popitem(last=False)
         except KeyError:
-            # The write lands first, so a key already held never goes missing for a
-            # reader without the lock, and the eviction that took this one has
-            # already brought the cache back inside the bound.
+            # The write runs first, so a held key never goes missing for a reader. A
+            # concurrent eviction that removed this key has already restored the bound.
             return
 
     @override
     def get(self, key: K, default: V | None = None) -> V | None:
         """Return the entry under `key` and refresh it, or `default` for a miss.
 
-        An eviction landing between the lookup and the refresh reads as a miss.
+        A concurrent eviction between the lookup and the refresh counts as a miss.
         """
         entries = self._entries
         try:
@@ -114,4 +163,10 @@ class LruCache[K, V](BoundedCache[K, V]):
         return value
 
 
-__all__ = ["DEFAULT_CACHE_SIZE", "BoundedCache", "LruCache"]
+__all__ = [
+    "DEFAULT_CACHE_SIZE",
+    "PAGE_HEADROOM",
+    "BoundedCache",
+    "LruCache",
+    "PageCache",
+]

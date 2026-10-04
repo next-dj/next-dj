@@ -231,9 +231,12 @@ Resolution order
 The framework computes the template scope in this order.
 
 1. URL kwargs from the matched route are seeded into the context dict.
-2. Inherited context functions from every ancestor ``page.py``, walked from the current page upward through every ancestor directory, bounded at 64 levels.
+2. Inherited context functions from every ancestor ``page.py``, bounded at 64 levels, the outermost file first and each file's callables in the order the file declares them.
+   Each one resolves its parameters against the context the pass has collected so far, so a callable reads a value an outer file or an earlier sibling published, and that value beats a captured URL segment of the same name.
+   A key an outer file already published is not computed again by a nearer callable, which is skipped.
 3. Page level context functions declared in the current ``page.py``.
-   Within one ``page.py`` the keyless callable runs first and the keyed ones follow in the string order of their keys, so a dict merge never overwrites a value a keyed callable published.
+   The page's own ``inherit_context=True`` callables run first, once, in declaration order, so the page sees what its descendants see.
+   The keyless callable follows and the remaining keyed ones come after it in the string order of their keys, so a dict merge never overwrites a value a keyed callable published.
    A callable tagged ``zone="name"`` runs only when that zone belongs to the batch the current zone GET asks for, and a callable of any other zone is never called.
    A full page render carries no batch and runs every page level callable, tagged or not.
 4. Context processors run after every ``@context`` callable.
@@ -259,12 +262,14 @@ The framework walks up from the current ``page.py`` directory and runs every ``@
 - A ``page.py`` at ``notes/pages/admin/`` publishes inherited values only for pages under ``/admin/``.
 - A page at ``/admin/links/`` sees both layers because it sits below both directories.
 
-When two ancestor directories publish the same inherited key, the value from the outermost ancestor wins.
+When two ancestor directories publish the same inherited key, the value from the outermost ancestor wins, and the nearer callable is never called.
+Within one file a dict merge spares a key a keyed callable published, whichever of the two the file declares first.
+Page metadata folds the other way round, the segment nearest to the page wins, so the two rules are not interchangeable, see :doc:`seo/metadata`.
 
 The chain is read from the registry of ``@context`` registrations rather than probed on disk, so a ``page.py`` deleted inside a running process keeps publishing its inherited values until the registry is rebuilt.
 
 The current page can shadow an inherited value by declaring a context function with the same key.
-The page level value takes precedence, and every layout wrapper in the chain sees that value.
+The page level value takes precedence on that page's own render, and every layout wrapper in the chain sees it, while the descendants of the page still receive the outer value.
 
 ``inherit_context=True`` and ``zone=`` are incompatible, and combining them raises ``ValueError`` at registration.
 A zone is declared in the template of a descendant page, so an ancestor ``page.py`` has no way to name it.
@@ -273,25 +278,25 @@ Inherited context therefore always runs, zone GET or full render alike.
 Inherited function that names a URL parameter
 ---------------------------------------------
 
-When an inherited context function is keyed under the same name as a captured URL segment, the parameter it asks for changes type across runs.
-On a descendant request the callable runs once and receives the raw URL string.
-On the declaring page's own request it runs twice, first in the inherited pass with the raw string, then in the page pass with the object the first run produced.
-Leave the parameter untyped and return early when it is already a model instance.
+An inherited context function keyed under the same name as a captured URL segment runs once per request, on the declaring page and on every descendant alike, and receives the raw segment.
+Every callable that runs after it and asks for that name receives the object it returned, since a collected context value beats the URL segment.
 
 .. code-block:: python
-   :caption: notes/pages/notes/[category]/page.py
+   :caption: shop/pages/[category]/page.py
 
-   from notes.models import Category
+   from shop.models import Category
 
    from next import context
 
    @context("category", inherit_context=True)
-   def category(category: object) -> Category:
-       if isinstance(category, Category):
-           return category
+   def category(category: str) -> Category:
        return Category.objects.get(slug=category)
 
-An annotation cannot be honest for both runs, because the second run on the declaring page receives the already resolved object, so leave the parameter untyped.
+   @context("offers", inherit_context=True)
+   def offers(category: Category) -> list[str]:
+       return [offer.title for offer in category.offers.all()]
+
+``offers`` is declared after ``category``, so it receives the ``Category`` row, and the annotation of each parameter stays honest.
 
 .. _topics-context-serialization:
 
@@ -351,26 +356,10 @@ Common patterns
 Per page title
 ~~~~~~~~~~~~~~
 
-Publish the page title from each page.
-
-.. code-block:: python
-   :caption: notes/pages/notes/[int:note_id]/page.py
-
-   from notes.models import Note
-
-   from next import context
-   from next.urls import DUrl
-
-   @context("page_title")
-   def page_title(note_id: DUrl[int]) -> str:
-       return Note.objects.get(pk=note_id).title
-
-Render it in the layout.
-
-.. code-block:: jinja
-   :caption: layout
-
-   <title>{{ page_title|default:"Notes" }}</title>
+A page title is metadata rather than context.
+Declare it as a ``metadata`` dict or a ``@page.metadata`` callable in ``page.py`` and let ``{% metadata %}`` in the root layout render it, see :doc:`seo/metadata`.
+The two mechanisms merge in opposite directions.
+An inherited context key keeps the value of the outermost ancestor, while a metadata key takes the value of the segment nearest to the page, which is what a title needs.
 
 Site wide configuration
 ~~~~~~~~~~~~~~~~~~~~~~~
