@@ -109,10 +109,11 @@ class StaticFilesBackend(StaticBackend):
         self._module_tag = self._template(opts, "module_tag", self._DEFAULT_MODULE_TAG)
 
     def _template(self, opts: Mapping[str, Any], key: str, default: str) -> str:
+        template = opts.get(key)
+        if not template:
+            return default
         where = f"STATIC_BACKENDS OPTIONS[{key!r}] of {type(self).__name__}"
-        return usable_template(
-            str(opts.get(key) or default), default, TAG_FIELDS, where
-        )
+        return usable_template(str(template), default, TAG_FIELDS, where)
 
     def _logical_static_path(self, logical_name: str, suffix: str) -> str:
         return f"{StaticNamespace.NEXT}/{logical_name}{suffix}"
