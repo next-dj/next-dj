@@ -254,7 +254,7 @@ class _Refusing:
 
 
 class _Capitals:
-    """Take capitals only, which no placeholder spells."""
+    """Accept capitals only, which no placeholder value matches."""
 
     regex = "[A-Z]+"
 

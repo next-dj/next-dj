@@ -16,7 +16,6 @@ from tests.seo.sources import CALLS
 from tests.support import BASE, WITH_BASE, routed, write_tree
 
 
-HOSTS = {"ALLOWED_HOSTS": ["testserver", "open.example", "closed.example"]}
 RAISING_RULES = """
 from django.http import HttpRequest
 
@@ -94,7 +93,7 @@ class MissingBackend(SitemapBackend):
 
 
 class BrokenServesBackend(RaisingBackend):
-    """A backend that cannot even tell whether it serves."""
+    """A backend whose `serves()` raises."""
 
     def serves(self):
         """Fail."""
@@ -107,8 +106,8 @@ def _backends(*names: str) -> dict[str, object]:
     return {"SEO": {"SITEMAP_BACKENDS": entries}}
 
 
-def _not_open(request) -> bool:
-    return request is not None and request.get_host() == "open.example"
+def _opened_by_header(request) -> bool:
+    return request is not None and request.headers.get("X-Open") == "1"
 
 
 def _raising_url(request) -> str:
@@ -128,7 +127,7 @@ def _views_records(caplog) -> list[logging.LogRecord]:
 
 
 class TestFailingSources:
-    """Project code that raises answers 503 and logs once, `DEBUG` raising it."""
+    """Project code that raises answers 503 and logs once, and `DEBUG` re-raises."""
 
     @pytest.mark.parametrize(
         ("sources", "path", "named"),
@@ -298,13 +297,13 @@ class TestSiteUrl:
 class TestIndexableCache:
     """A cached copy is keyed by the indexability of the request it answered."""
 
-    @override_settings(**HOSTS)
-    def test_a_closed_host_never_reads_the_open_copy(self, tmp_path) -> None:
+    def test_a_closed_request_never_reads_the_open_copy(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", sitemap="cache = 60\n")
-        site = {"URL": None, "INDEXABLE": _not_open}
+        site = {"URL": None, "INDEXABLE": _opened_by_header}
         with routed(root, SITE=site):
-            opened = Client().get("/sitemap.xml", HTTP_HOST="open.example")
-            closed = Client().get("/sitemap.xml", HTTP_HOST="closed.example")
-        assert opened.status_code == 200
+            opened = Client().get("/sitemap.xml", HTTP_X_OPEN="1")
+            closed = Client().get("/sitemap.xml")
+            again = Client().get("/sitemap.xml", HTTP_X_OPEN="1")
+        assert opened.status_code == again.status_code == 200
         assert closed.status_code == 404
         assert "noindex" in closed["X-Robots-Tag"]

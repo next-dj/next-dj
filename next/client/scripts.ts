@@ -1,5 +1,6 @@
-// Third-party scripts from the $scripts manifest, gated by consent and run at once,
-// on idle, on the first interaction, or on demand. A tag the server rendered stays.
+// Third-party scripts from the $scripts manifest, gated by consent and loaded at once,
+// on idle, on the first interaction, or on demand. A tag the server already rendered
+// is not inserted again.
 
 import { asString, cssEscape, fire, isRecord } from "./protocol";
 
@@ -31,7 +32,7 @@ export interface ScriptsDeps {
   idle?: IdleAdapter;
   // Where the first interaction is listened for. Absent, the window.
   events?: EventTarget;
-  // The nonce the page booted with, the one its policy names, stamped on every entry.
+  // The CSP nonce of the runtime script, set on every inserted script.
   nonce?: string | undefined;
 }
 
@@ -58,8 +59,8 @@ interface Entrant {
 const ATTR_SCRIPT = "data-next-script";
 const IDLE_TIMEOUT_MS = 3000;
 const INTERACTIONS = ["pointerdown", "keydown", "touchstart", "scroll"];
-// A dynamic script is async unless pinned, and a head strategy that waited for consent
-// keeps its place in the order among the others inserted with it.
+// A dynamically inserted script is async by default. These strategies set async to
+// false, so scripts that waited for consent run in insertion order.
 const IN_ORDER = new Set(["blocking", "defer"]);
 
 function readEntry(value: unknown): Entry | undefined {
@@ -87,7 +88,7 @@ function readEntry(value: unknown): Entry | undefined {
 function defaultIdle(): IdleAdapter {
   return (run) => {
     const schedule = (): void => {
-      // Safari has no requestIdleCallback, so a timeout stands in for the idle slot.
+      // Safari has no requestIdleCallback, so a timeout replaces it.
       if ("requestIdleCallback" in globalThis)
         requestIdleCallback(run, { timeout: IDLE_TIMEOUT_MS });
       else globalThis.setTimeout(run, 1);
@@ -129,7 +130,7 @@ export function createScripts(deps: ScriptsDeps): Scripts {
     return el;
   }
 
-  // A revoke that came while the entry waited, and a load() already waiting fails.
+  // Marks an entry blocked after a revoke while it waited, and rejects pending loads.
   function block(entrant: Entrant): void {
     entrant.status = "blocked";
     for (const waiter of entrant.waiters.splice(0)) {
@@ -137,7 +138,7 @@ export function createScripts(deps: ScriptsDeps): Scripts {
     }
   }
 
-  // The init body runs first, so a queue stub it defines exists before the vendor.
+  // The init body runs first, so a queue stub it defines exists before the vendor runs.
   function start(entrant: Entrant): void {
     if (entrant.status !== "pending") return;
     const { entry } = entrant;

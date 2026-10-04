@@ -67,7 +67,7 @@ export interface WireRequest {
   queue?: string;
   headers?: Record<string, string>;
   body?: BodyInit;
-  // An inline validation rides a POST to carry the body but mutates nothing, so it
+  // An inline validation uses a POST to send the body but mutates nothing, so it
   // joins the abortable queue and skips the mutation lock.
   abortable?: boolean;
   // The initiating form's data-next-key, threaded to apply for a repeated form.
@@ -126,8 +126,8 @@ export class Wire {
   readonly #dirtySnapshot: () => number;
   readonly #rememberRequestId: (id: string) => void;
 
-  // Latest-wins per-target GET queues and the per-uid mutation lock. A queue holds its
-  // live request only, so a key leaves once that request settles or is aborted.
+  // Latest-wins per-target GET queues and the per-uid mutation lock. A queue holds
+  // only its in-flight request, so a key is removed once it settles or is aborted.
   readonly #queues = new Map<string, AbortController>();
   readonly #busy = new Set<string>();
   readonly #parseHooks = new Map<string, ParseHook>();
@@ -234,8 +234,8 @@ export class Wire {
     return request.abortable === true ? request.zone : undefined;
   }
 
-  // A new safe GET to a target aborts the in-flight one (latest-wins). The response
-  // compares its own controller, so it drops itself once a fresher one took the key.
+  // A new safe GET to a target aborts the in-flight one (latest-wins). A response
+  // whose controller no longer holds the key is dropped.
   #enqueue(key: string): AbortController {
     this.#queues.get(key)?.abort();
     const controller = new AbortController();
@@ -255,8 +255,8 @@ export class Wire {
     const init: RequestInit = { method, headers, mode: "same-origin" };
     if (request.body !== undefined) init.body = request.body;
     if (entry !== undefined) init.signal = entry.signal;
-    // Snapshot the dirty counter before the request leaves: a field touched
-    // after this point is dirty relative to the response it will receive.
+    // Snapshot the dirty counter before the request is sent. A field touched after
+    // this point is dirty relative to the response it will receive.
     const snapshot = this.#dirtySnapshot();
     this.#dispatch("partial:before-request", {
       url: request.url,
@@ -267,7 +267,7 @@ export class Wire {
     try {
       response = await this.#fetch(target, init);
     } catch (error) {
-      // AbortError is never an error: the user moved on, no toast, no event.
+      // An AbortError means the request was superseded, so nothing is reported.
       if (isAbortError(error)) return;
       this.#dispatch("partial:error", {
         kind: "network",
@@ -294,7 +294,7 @@ export class Wire {
       return;
     }
     if (response.status >= 500) {
-      const body = await this.#text(response);
+      const body = await response.text();
       this.#dispatch("partial:error", {
         kind: "http",
         status: response.status,
@@ -302,7 +302,7 @@ export class Wire {
       } satisfies PartialError);
       return;
     }
-    // Only a safe zone GET names a page: mutations keep the unscoped resolve.
+    // Only a safe zone GET names a page. Mutations keep the unscoped resolve.
     const page =
       SAFE_METHODS.has(method) && request.zone !== undefined
         ? pageKey(request.url, this.#document)
@@ -311,7 +311,7 @@ export class Wire {
     const baseType = contentType.replace(/;.*$/, "").trim();
     const hook = this.#parseHooks.get(baseType);
     if (hook !== undefined) {
-      const body = await this.#text(response);
+      const body = await response.text();
       this.#deliver(hook(response, body), response, snapshot, request.key, page);
       return;
     }
@@ -322,7 +322,7 @@ export class Wire {
         this.#fallbackNavigate(response.url || target);
         return;
       }
-      const body = await this.#text(response);
+      const body = await response.text();
       this.#dispatch("partial:error", {
         kind: "http",
         status: response.status,
@@ -330,7 +330,7 @@ export class Wire {
       } satisfies PartialError);
       return;
     }
-    const body = await this.#text(response);
+    const body = await response.text();
     let raw: unknown;
     try {
       raw = JSON.parse(body);
@@ -358,10 +358,10 @@ export class Wire {
     this.#onEnvelope(raw, response, snapshot, key, page);
   }
 
-  // Guarded so a page that keeps answering non-envelope (login redirect, WAF
-  // stub, maintenance) cannot loop navigation: a `lazy="load"` zone re-asks on
-  // every page. The first navigates under the flag, a second while it stands
-  // degrades to a partial:error and leaves the page in place.
+  // Guarded so a page that keeps answering with a non-envelope (login redirect, WAF
+  // stub, maintenance) cannot loop navigation, since a `lazy="load"` zone asks again
+  // on every page. The first navigates and sets the flag, and a second while it is
+  // set fires a partial:error and leaves the page in place.
   #fallbackNavigate(url: string): void {
     if (this.#session.get(NAVIGATED_FLAG) === "1") {
       this.#session.remove(NAVIGATED_FLAG);
@@ -373,10 +373,6 @@ export class Wire {
     }
     this.#session.set(NAVIGATED_FLAG, "1");
     this.#navigate(url);
-  }
-
-  #text(response: Response): Promise<string> {
-    return response.text();
   }
 
   // Headers, not a plain record, so a caller writing a name in another case still

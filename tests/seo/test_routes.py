@@ -12,7 +12,7 @@ ALL = ["sitemap", "sitemap_section", "robots"]
 
 
 class TestRouteConstants:
-    """The addresses and names of the routes sit in one place."""
+    """The paths and names of the routes are defined in one module."""
 
     def test_the_addresses_and_the_names(self) -> None:
         assert [str(pattern.pattern) for pattern in PATTERNS] == [
@@ -28,7 +28,7 @@ class TestRouteConstants:
 
 
 class TestServed:
-    """A route is served only while its source is there, broken or not."""
+    """A route is served only while its source exists, broken or not."""
 
     @pytest.mark.parametrize(
         ("sources", "names"),

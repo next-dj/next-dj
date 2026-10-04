@@ -49,7 +49,7 @@ class BuiltResolver(DependencyResolver):
     """Resolver subclass that sets up a field of its own while it is built."""
 
     def __init__(self, *providers) -> None:
-        """Note that the constructor ran, on top of the base initialisation."""
+        """Record that the constructor ran, after the base initialisation."""
         super().__init__(*providers)
         self.badge = "built"
 

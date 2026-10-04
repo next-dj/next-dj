@@ -1,7 +1,7 @@
 """Discovery of the configured routers and of the page trees they route.
 
-Sits outside every area since checks, sources, and the page scan share it, reached
-through a port to dodge a `next.urls`/`next.pages` import cycle.
+It sits outside every area since checks, sources, and the page scan share it, and it
+reaches the routers through a port to avoid a `next.urls`/`next.pages` import cycle.
 """
 
 from __future__ import annotations
@@ -114,9 +114,9 @@ def get_router_manager() -> tuple[RouterManager | None, list[CheckMessage]]:
 def discover_page_registrations(
     router_manager: RouterManager | None = None,
 ) -> list[tuple[str, Path]]:
-    """Execute every routed `page.py` once per manager, answering each that ran.
+    """Execute every routed `page.py` once per manager, returning each that ran.
 
-    The pass reads the per-run walk of the trees, so it is dropped together with it.
+    The result is cached beside the per-run walk of the trees and dropped with it.
     """
     if router_manager is None:
         router_manager, _errors = get_router_manager()
@@ -160,7 +160,7 @@ def first_visit(path: Path, seen: set[Path]) -> bool:
 class PageRootsError(Exception):
     """A router failed to report usable page trees.
 
-    A raised failure travels as `__cause__`, so the check that reports it
+    A raised failure is kept as `__cause__`, so the check that reports it
     names the cause while every other reader takes the empty list.
     """
 
@@ -274,7 +274,7 @@ def page_tree_skip_names(router: RouterBackend) -> frozenset[str]:
 def routed_page_trees(manager: RouterManager) -> list[tuple[PageRoot, frozenset[str]]]:
     """Return each tree `manager` routes once, in router order, with the names it skips.
 
-    The sources at the top of a tree, `scripts.py` and the SEO files, read this list.
+    The `scripts.py` and SEO sources at the top of each tree are discovered from it.
     """
     seen: set[Path] = set()
     found: list[tuple[PageRoot, frozenset[str]]] = []

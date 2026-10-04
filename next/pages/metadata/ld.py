@@ -127,7 +127,7 @@ class Ref:
 
 type _Plan = tuple[tuple[str, str, bool], ...]
 
-# Weak keys, so a node class an autoreloaded page.py defines leaves with its module.
+# Weak keys release a node class defined in a reloaded `page.py` with its module.
 _PLANS: WeakKeyDictionary[type, _Plan] = WeakKeyDictionary()
 
 

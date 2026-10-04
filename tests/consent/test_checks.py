@@ -42,9 +42,9 @@ class TestConsentSettings:
     @pytest.mark.parametrize(
         ("backend", "fragment"),
         [
-            (3, "is no dotted path"),
+            (3, "is not a dotted path"),
             ("no.such.Backend", "does not import"),
-            ("next.consent.Consent", "is no next.consent.ConsentBackend subclass"),
+            ("next.consent.Consent", "is not a next.consent.ConsentBackend subclass"),
         ],
     )
     def test_an_unusable_backend_is_e137(self, backend: object, fragment: str) -> None:

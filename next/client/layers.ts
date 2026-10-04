@@ -50,21 +50,21 @@ interface Layer {
   opener: HTMLElement | null;
   close: DialogControl;
   returnFocus: Element | null;
-  // The opening page URL, captured at open time. Rides X-Next-Origin so the
+  // The opening page URL, captured at open time. Sent as X-Next-Origin so the
   // server resolves the host for an out-of-band render of its zones.
   host: string;
   // The head restored on close, kept current by a meta op of a page under the layer.
   head: Head;
-  // Set once a meta op arrived for this layer's own page, so a meta of a page under
-  // it waits for the close instead of showing over the modal.
+  // Set once a meta op arrived for this layer's own page, so a meta op of a page
+  // under it is applied on close instead of over the modal.
   titled: boolean;
-  // The page key of the honest URL, absent for a layer with no body to fetch.
+  // The page key of the layer's own URL, absent for a layer with no body to fetch.
   pushedUrl?: string;
   // Set once the body envelope announced the URL, so a close announces its replace.
   committed: boolean;
-  // The body fetch's queue, aborted on remove so a late body cannot land.
+  // The queue of the body fetch, aborted on remove so a late body is not applied.
   key: string;
-  // Drops the push held for the body, so a layer closed early rolls it back unannounced.
+  // Drops the held push, so a layer closed before its body reverts it unannounced.
   drop?: () => void;
 }
 
@@ -82,7 +82,7 @@ export interface LayerDeps {
   abort?: (key: string) => void;
   document?: Document;
   dialog?: DialogAdapter;
-  // The address bar shared with the applier, which announces the push a layer holds.
+  // The navigation shared with the applier, which announces the push a layer holds.
   navigation: Navigation;
   // The Back-gesture seam, a popstate past the top layer's pushed URL closes it.
   popstate?: PopStateAdapter;
@@ -97,7 +97,7 @@ export interface LayerStack {
   urlFor(el: Element): string;
   /** The host page of the layer owning an element, absent outside every layer. */
   hostFor(el: Element): string | undefined;
-  /** Move the URL of an element's page, answering whether the bar shows that page. */
+  /** Record a new URL for an element's page, true when the address bar shows it. */
   rewrite(el: Element, href: string): boolean;
   /** Open a layer, building the dialog and zone container before the request. */
   open(opener: HTMLElement | null, href?: string, zone?: string): Promise<void>;
@@ -193,15 +193,15 @@ export function createLayers(deps: LayerDeps): LayerStack {
     return bottom === undefined ? currentUrl() : bottom.host;
   }
 
-  // The opening page of the layer an element sits in. A mutation fired there rides it
-  // as X-Next-Origin, so the server resolves a foreign zone against the host.
+  // The opening page of the layer an element is in. A mutation fired there sends it as
+  // X-Next-Origin, so the server resolves a foreign zone against the host.
   function hostFor(el: Element): string | undefined {
     return layerOf(el)?.host;
   }
 
-  // A filter inside a layer moves the layer's own URL with the bar, so a close still
-  // finds the bar on it and replaces back to the host. A layer that wrote no URL, and
-  // the base page under one that did, leave the bar to the page it shows.
+  // A filter inside a layer updates the layer's own URL with the address bar, so a
+  // close still replaces it with the host. A layer that wrote no URL, and the base
+  // page under one that did, leave the address bar unchanged.
   function rewrite(el: Element, href: string): boolean {
     const layer = layerOf(el);
     const page = layer?.pushedUrl ?? stack[0]?.host ?? currentUrl();
@@ -268,9 +268,9 @@ export function createLayers(deps: LayerDeps): LayerStack {
     const seeded = href !== undefined && zone !== undefined;
     try {
       if (seeded) {
-        // The honest URL makes the modal shareable, and pushed at once Back closes it
-        // even while the body loads. The body envelope announces it, and a layer that
-        // never gets one rolls it back unannounced.
+        // The layer's own URL makes the modal shareable, and pushing it now lets Back
+        // close the layer while the body loads. The body envelope announces it, and a
+        // layer closed before that reverts it unannounced.
         const owner = pageKey(href, doc);
         layer.pushedUrl = owner;
         layer.drop = deps.navigation.hold(owner, href, () => (layer.committed = true));
@@ -304,7 +304,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     const accepted = layer.opener?.getAttribute(ACCEPTED_ATTR);
     if (accepted) {
       // On accept the host page is re-GET for the opener's named zone, so the list
-      // under the modal morphs. The host rides X-Next-Origin so the server resolves it.
+      // under the modal morphs. The host is sent as X-Next-Origin for the server.
       void deps.fetch({
         url: layer.host,
         zone: accepted,
@@ -324,9 +324,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
   // Splice the layer out, end its dialog, and return focus to the opener.
   function remove(layer: Layer): void {
     const index = stack.indexOf(layer);
-    // remove can land twice on one layer: a dismiss gesture tears it down while
-    // open's fetch is in flight, then the reject re-enters here. The early return
-    // makes the second call a no-op so nothing runs twice.
+    // remove can run twice for one layer. A dismiss gesture removes it while the body
+    // fetch is in flight, and the rejection of open calls it again, as a no-op.
     if (index === -1) return;
     const commit = deps.navigation.begin();
     try {
@@ -339,12 +338,12 @@ export function createLayers(deps: LayerDeps): LayerStack {
       fireRemoved(layer.dialog);
       layer.dialog.remove();
       if (layer.returnFocus instanceof HTMLElement) layer.returnFocus.focus();
-      // A programmatic close still sits on the pushed URL, so replace it back to the
-      // host. A Back-driven close already moved the URL, so the guard skips it.
+      // After a programmatic close the URL is still the pushed one, so it is replaced
+      // with the host. After Back the browser has already changed it.
       if (layer.committed && currentUrl() === layer.pushedUrl) {
         commit.write({ href: layer.host, action: "replace" });
       }
-      // What lay under the layer now lies under the one above it, or shows.
+      // The saved head passes to the layer above, or is written when none is above.
       const above = stack[index];
       if (above !== undefined) above.head = layer.head;
       else writeHead(doc, layer.head);
@@ -353,8 +352,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
     }
   }
 
-  // A page's tags go into the snapshot of each layer above it up to the first titled
-  // one, and reach the document only when no titled layer covers the page.
+  // A page's tags update the saved head of each layer above it up to the first titled
+  // one, and are written to the document only when no titled layer covers the page.
   function head(patch: HeadPatch, page?: string): void {
     const above = firstLayerAbove(page);
     if (above === -1) return;
@@ -367,8 +366,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
     writeHead(doc, patch);
   }
 
-  // The index of the first layer over a page, -1 for a page no longer on the stack:
-  // its layer closed while the envelope was in flight, and its tags are stale.
+  // The index of the first layer above a page, or -1 for a page no longer on the
+  // stack. Its layer closed while the envelope was in flight, so its tags are stale.
   function firstLayerAbove(page: string | undefined): number {
     if (page === undefined) return stack.length;
     const owner = topDown().find((layer) => layer.pushedUrl === page);
@@ -376,16 +375,19 @@ export function createLayers(deps: LayerDeps): LayerStack {
     return page === (stack[0]?.host ?? currentUrl()) ? 0 : -1;
   }
 
-  // Back past the topmost pushed URL closes that layer and the bare layers above
-  // it. Never restores zones or writes history, short of a client router.
+  // Back past the topmost pushed URL closes that layer and the bare layers above it.
+  // The pass repeats while the bar is off the next pushed URL, so a jump back over
+  // several entries closes every layer it skipped. Zones and history stay as they are.
   function onPopstate(): void {
     deps.navigation.popped(() => {
-      const layers = topDown();
-      const anchor = layers.find((layer) => layer.pushedUrl !== undefined);
-      if (anchor === undefined || anchor.pushedUrl === currentUrl()) return;
-      for (const layer of layers) {
-        dismissFrom(layer.dialog, "popstate");
-        if (layer === anchor) return;
+      for (;;) {
+        const layers = topDown();
+        const anchor = layers.find((layer) => layer.pushedUrl !== undefined);
+        if (anchor === undefined || anchor.pushedUrl === currentUrl()) return;
+        for (const layer of layers) {
+          dismissFrom(layer.dialog, "popstate");
+          if (layer === anchor) break;
+        }
       }
     });
   }
@@ -435,7 +437,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     // drift from the flags its addEventListener used.
     const controller = new AbortController();
     target.addEventListener("click", onClick, { signal: controller.signal });
-    // The popstate teardown rides the same signal, so one abort drops both.
+    // The popstate teardown runs on the same signal, so one abort removes both.
     const stopPopstate = popstate.listen(onPopstate);
     controller.signal.addEventListener("abort", stopPopstate, { once: true });
     detach = () => controller.abort();
@@ -475,8 +477,8 @@ export function nativeDialog(): DialogAdapter {
   return { open: openNativeDialog };
 }
 
-// Lives beside the layers rather than among the platform adapters: the dismiss
-// gestures are runtime logic, only showModal and close belong to the browser.
+// Kept beside the layers rather than among the platform adapters, since the dismiss
+// gestures are runtime logic. Only showModal and close belong to the browser.
 function openNativeDialog(
   dialog: HTMLDialogElement,
   onDismiss: (reason: string) => void,
@@ -496,8 +498,8 @@ function openNativeDialog(
   dialog.addEventListener("close", () => onDismiss(dialog.returnValue || "dialog"), {
     signal,
   });
-  // A click whose target is the dialog itself landed on the backdrop padding,
-  // children intercept inner clicks, so element identity is the hit-test.
+  // A click whose target is the dialog itself hit the backdrop, since children
+  // receive the inner clicks, so element identity is the hit test.
   dialog.addEventListener(
     "click",
     (event) => {

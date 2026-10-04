@@ -21,14 +21,7 @@ from django.core.checks import (
 
 from next.checks import NEXT, SEO
 from next.pages.responses import cache_problems
-from next.seo.discovery import (
-    ROBOTS_FILE,
-    ROBOTS_MODULE,
-    SITEMAP_MODULE,
-    SLUG,
-    SeoRoot,
-    SeoSource,
-)
+from next.seo.discovery import SLUG, SOURCE_NAMES, SeoRoot, SeoSource
 from next.seo.markers import CHANGEFREQS, RobotsRule, is_number
 from next.seo.registry import sitemap_items_registry
 from next.seo.robots import is_sitemap_url
@@ -42,9 +35,6 @@ from .roots import loaded_seo_roots, published_sources, robots_modules, sitemap_
 if TYPE_CHECKING:
     import types
     from collections.abc import Iterator
-
-
-_BELOW_ROOT_NAMES: Final = (SITEMAP_MODULE, ROBOTS_MODULE, ROBOTS_FILE)
 
 
 def imports_future_annotations(file_path: Path) -> bool:
@@ -76,6 +66,7 @@ def _import_error(source: SeoSource) -> CheckMessage | None:
 
 
 def _sources(root: SeoRoot) -> Iterator[SeoSource]:
+    """Yield the `sitemap.py` and the `robots.py` of the tree that exist."""
     for source in (root.sitemap, root.robots):
         if source is not None:
             yield source
@@ -97,15 +88,15 @@ def check_seo_module_imports(*args, **kwargs) -> list[CheckMessage]:
 
 @register(Tags.urls, NEXT, SEO)
 def check_seo_module_annotations(*args, **kwargs) -> list[CheckMessage]:
-    """Refuse deferred annotations in the sources the resolver calls into (`next.E119`).
+    """Refuse deferred annotations in the Python SEO sources (`next.E119`).
 
-    A `sitemap.py` and a `robots.py` hand their callables to the dependency resolver.
+    The dependency resolver reads the annotations of the callables of both sources.
     """
     roots = loaded_seo_roots()
     errors: list[CheckMessage] = []
     for root in roots:
-        for source in (root.sitemap, root.robots):
-            if source is None or not imports_future_annotations(source.path):
+        for source in _sources(root):
+            if not imports_future_annotations(source.path):
                 continue
             errors.append(
                 Error(
@@ -268,12 +259,12 @@ def check_sitemap_items_files(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _sources_below(root: SeoRoot) -> Iterator[Path]:
-    """Yield every SEO source file sitting under, but not at, the top of the tree."""
+    """Yield every SEO source file below the top of the tree."""
     for dirpath, dirnames, filenames in os.walk(root.path):
         dirnames[:] = sorted(name for name in dirnames if name not in root.skip_names)
         if Path(dirpath) == root.path:
             continue
-        for name in _BELOW_ROOT_NAMES:
+        for name in SOURCE_NAMES:
             if name in filenames:
                 yield Path(dirpath) / name
 
@@ -300,7 +291,7 @@ def check_seo_sources_below_root(*args, **kwargs) -> list[CheckMessage]:
 def check_seo_sources_on_closed_site(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a site closed to search still publishes for crawlers (`next.W111`).
 
-    A site private by design serves no sitemap or robots.txt, so it is silent.
+    A private site without a sitemap or a robots.txt raises no warning.
     """
     if site_config().indexable is not False:
         return []

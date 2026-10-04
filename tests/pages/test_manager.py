@@ -419,7 +419,7 @@ class TestGlobalPageInstance:
         assert context == page.context
 
     def test_global_page_template_registration(self, global_file_path) -> None:
-        """A template registered on the singleton lands in its registry."""
+        """A template registered on the singleton is stored in its registry."""
         template_str = "Global template: {{ message }}"
         page.register_template(global_file_path, template_str)
 
@@ -427,7 +427,7 @@ class TestGlobalPageInstance:
         assert page._templates.composed[global_file_path] == template_str
 
     def test_global_page_context_registration(self) -> None:
-        """A context function registered on the singleton lands in its registry."""
+        """A context function registered on the singleton is stored in its registry."""
 
         @page.context("global_key")
         def get_global_value() -> str:
@@ -926,7 +926,7 @@ class TestBrokenPageImportView:
     def test_broken_page_returns_404_in_prod(
         self, page_instance, tmp_path, url_parser, broken_source
     ) -> None:
-        """With both flags off the broken page answers 404, never a sibling body."""
+        """With both flags off the broken page returns 404, never a sibling body."""
         (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
         _page_file, pattern = self._broken_pattern(
             page_instance, tmp_path, url_parser, broken_source
@@ -1019,7 +1019,7 @@ class TestBrokenPageImportView:
         monkeypatch.setattr(loaders_module, "_load_python_module", counting)
 
         page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
-        # The build probes once, every later request answers 404 off the memo.
+        # The build probes once, and every later request returns 404 from the memo.
         with pytest.raises(Http404):
             pattern.callback(build_page_request())
         first_pass = calls.count(page_file)
@@ -1083,7 +1083,7 @@ class TestAuthorizationOutcomeVirtualPage:
     def test_a_page_without_render_never_loads_its_body(
         self, page_instance, tmp_path, monkeypatch
     ) -> None:
-        """A page with no guard of its own pays no body load to authorize."""
+        """A page with no guard of its own loads no body to authorize."""
         (tmp_path / "template.djx").write_text("<p>virtual</p>")
         calls: list[Path] = []
 

@@ -1,6 +1,6 @@
-// The address bar and its next:navigated event. A layer pushes its URL as it opens,
-// so Back closes it while the body loads, and the push is announced once the envelope
-// answering it commits. Every write inside one commit folds into a single event.
+// History writes and the next:navigated event. A layer pushes its URL when it opens,
+// so Back closes it while the body loads, and the push is announced once the body
+// envelope is applied. All writes inside one commit produce a single event.
 
 import { defaultHistory } from "./adapters";
 import type { HistoryAdapter } from "./apply";
@@ -10,14 +10,14 @@ import type { PartialError } from "./protocol";
 
 export type NavigationAction = "push" | "replace" | "pop" | "none";
 
-/** Where the page stands, the shape Next.navigation.current() returns. */
+/** The current URL, path and title, as Next.navigation.current() returns them. */
 export interface NavigationState {
   url: string;
   path: string;
   title: string;
 }
 
-/** The next:navigated detail, a title-only change carrying the action none. */
+/** The next:navigated detail. A change of the title alone has the action none. */
 export interface NavigatedDetail extends NavigationState {
   action: NavigationAction;
 }
@@ -28,9 +28,9 @@ export interface Intent {
   action: "push" | "replace";
 }
 
-/** An open commit, the writes of one envelope announced once at end. */
+/** The history writes of one envelope, announced together by end. */
 export interface Commit {
-  /** Announce the push held for the page the envelope answers. */
+  /** Include the held push of owner, the page the envelope was fetched for. */
   claim(owner: string | undefined): void;
   write(intent: Intent): void;
   /** Announce the change the commit made, if any. */
@@ -40,16 +40,16 @@ export interface Commit {
 export interface Navigation {
   current(): NavigationState;
   /**
-   * Push href at once and hold its announcement until an envelope for owner commits.
+   * Push href now and defer its announcement until an envelope for owner is applied.
    *
-   * The cancel drops the hold and, while the bar still shows owner, replaces it back,
-   * neither write announced.
+   * The returned cancel drops the hold and, while the URL is still owner, replaces it
+   * with the previous URL. Neither write is announced.
    */
   hold(owner: string, href: string, onCommit: () => void): () => void;
   begin(): Commit;
-  /** The history seam over write, for a caller that only knows push and replace. */
+  /** A HistoryAdapter whose writes are announced like any other. */
   asHistory(): HistoryAdapter;
-  /** Announce a Back gesture after the work it triggers. */
+  /** Run the popstate handling in during, then announce the change as a pop. */
   popped(during: () => void): void;
 }
 
@@ -68,7 +68,8 @@ export function createNavigation(deps: NavigationDeps): Navigation {
   const doc = deps.document ?? document;
   const history = deps.history ?? defaultHistory();
   const held = new Map<string, { from: NavigationState; onCommit: () => void }>();
-  // The path last announced, the from-point of a Back the browser already applied.
+  // The path last announced. A popstate is measured from it, since the browser has
+  // already changed the location.
   let known = currentUrl(doc);
   let open: Move | undefined;
 
@@ -80,7 +81,7 @@ export function createNavigation(deps: NavigationDeps): Navigation {
     };
   }
 
-  // A throwing pushState (a rate limit) costs the entry, never the envelope.
+  // A pushState that throws (a browser rate limit) loses the entry and is reported.
   function record(intent: Intent): boolean {
     try {
       history[intent.action](intent.href);
@@ -95,7 +96,7 @@ export function createNavigation(deps: NavigationDeps): Navigation {
     }
   }
 
-  // A push anywhere in the commit is a new entry, whatever replaced it after.
+  // A push anywhere in the commit makes it a push, even when a replace follows.
   function moved(move: Move, action: NavigationAction): void {
     move.action = move.action === "push" ? "push" : action;
   }
@@ -109,7 +110,7 @@ export function createNavigation(deps: NavigationDeps): Navigation {
         const entry = owner === undefined ? undefined : held.get(owner);
         if (owner === undefined || entry === undefined) return;
         held.delete(owner);
-        // The push already moved the bar, so the change is measured from before it.
+        // The URL changed with the held push, so start from the state saved before it.
         move.from = entry.from;
         moved(move, "push");
         entry.onCommit();
@@ -133,7 +134,7 @@ export function createNavigation(deps: NavigationDeps): Navigation {
     };
   }
 
-  // Write and announce at once, or fold into the commit already open.
+  // Write and announce now, or add the write to the commit that is already open.
   function write(href: string, action: Intent["action"]): void {
     const commit = frame({ from: current() });
     commit.write({ href, action });
@@ -151,7 +152,7 @@ export function createNavigation(deps: NavigationDeps): Navigation {
         held.delete(owner);
         if (currentUrl(doc) !== owner) return;
         record({ href: entry.from.path, action: "replace" });
-        // An unannounced push rolls back unannounced, so an open commit starts here.
+        // The push and its revert are both unannounced, so an open commit starts here.
         if (open !== undefined) open.from = current();
       };
     },

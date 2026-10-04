@@ -885,7 +885,7 @@ class TestCheckWizardUrlParamRoute:
             ),
         )
         errors = check_wizard_url_param_route()
-        assert len(errors) == 1
+        assert [error.id for error in errors] == ["next.E054"]
         assert "[stage]" in errors[0].msg
 
     @pytest.mark.parametrize(

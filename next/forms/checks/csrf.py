@@ -30,7 +30,7 @@ def _literal_action(node: FormNode) -> str | None:
 def _posts_bare(node: FormNode, page_path: Path) -> bool:
     """Whether a `{% form %}` may post without the runtime, so without a token field.
 
-    A form whose action is no literal, or names no registered action, may.
+    A form whose action is not a literal, or names no registered action, may.
     """
     name = _literal_action(node)
     meta = (
@@ -51,7 +51,8 @@ def _eager_csrf(page_path: Path, template: Template) -> CheckMessage | None:
     return shared_warning(
         page_path,
         "CSRF_DELIVERY is 'eager' and it renders a {% form %} or the runtime, so "
-        "every response sets the CSRF cookie and goes out private. Set "
+        "every response sets the CSRF cookie and is sent with Cache-Control: "
+        "private. Set "
         "CSRF_DELIVERY to 'auto'.",
         "next.W112",
     )
@@ -105,7 +106,7 @@ def _lazy_private_forms(shared: set[Path]) -> list[CheckMessage]:
 def check_shared_page_forms(*args, **kwargs) -> list[CheckMessage]:
     """Warn about a page whose forms break the CSRF token delivery.
 
-    A page a CDN may hold is checked under every mode, a private one under `"lazy"`.
+    A page a CDN may store is checked under every mode, a private one under `"lazy"`.
     """
     warnings: list[CheckMessage] = []
     shared: set[Path] = set()

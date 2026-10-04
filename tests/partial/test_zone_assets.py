@@ -41,7 +41,7 @@ class TestZoneGetUrlAssets:
 
 
 class TestZoneGetContextDelta:
-    """A serialize provider rides out as a context op with wire values."""
+    """A serialize provider is sent as a context op with wire values."""
 
     def test_serialize_provider_emits_context_op(self) -> None:
         response = NextClient().get_zones("/zoned/", "alpha")

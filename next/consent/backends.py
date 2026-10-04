@@ -15,14 +15,14 @@ from .markers import NECESSARY, UNDECIDED, Consent
 COOKIE_VERSION: Final = "2"
 """The format the runtime writes the consent cookie in, `2:<categories>:<seconds>`.
 
-The granted categories are joined by `|`, a cookie-octet a category name never holds.
+The granted categories are joined by `|`, a cookie octet no category name contains.
 """
 
 _SEPARATORS: Final[Mapping[str, str]] = {COOKIE_VERSION: "|", "1": ","}
 """The category separator of every format the backend reads.
 
-The first format joined the names with commas, which RFC 6265 keeps out of a cookie
-value, and stays readable for the cookies browsers already hold.
+Format `1` joins the names with commas, which RFC 6265 excludes from a cookie value.
+It is still read for the cookies browsers already hold.
 """
 
 _COOKIE_PARTS: Final = 3
@@ -32,7 +32,7 @@ _COOKIE_DEFAULTS: Final[Mapping[str, object]] = DEFAULTS["CONSENT"]["OPTIONS"]
 class ConsentBackend(ABC):
     """Reads the consent of a visitor from the request.
 
-    The backend takes its whole `CONSENT` entry, `OPTIONS` holding its own settings.
+    The backend receives the whole `CONSENT` entry. `OPTIONS` holds its own settings.
     """
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
@@ -55,17 +55,17 @@ class ConsentBackend(ABC):
     def client_config(self) -> Mapping[str, object]:
         """Return the entries the backend adds to `$consent` for the runtime.
 
-        The runtime keeps a choice only in its consent cookie, so a backend reading
-        anything else gets nothing back from the browser. The default adds nothing,
-        and the runtime then writes the cookie under its default name and age.
+        The runtime stores a choice only in its consent cookie, so a backend that
+        reads another source receives no choice from the browser. The default adds
+        nothing, and the runtime writes the cookie under its default name and age.
         """
         return {}
 
 
 class CookieConsentBackend(ConsentBackend):
-    """Reads the first-party cookie the runtime writes, no server endpoint involved.
+    """Reads the first-party cookie the runtime writes, without a server endpoint.
 
-    The cookie is not `HttpOnly` since the runtime writes it on every choice.
+    The cookie cannot be `HttpOnly`, since the runtime reads and writes it.
     """
 
     def _option(self, name: str) -> object:
@@ -81,7 +81,7 @@ class CookieConsentBackend(ConsentBackend):
 
     @override
     def read(self, request: HttpRequest) -> Consent:
-        """Parse the cookie, answering undecided for a missing or foreign value."""
+        """Parse the cookie, undecided for a missing or unrecognised value."""
         raw = request.COOKIES.get(self.cookie_name)
         if not isinstance(raw, str):
             return UNDECIDED
@@ -98,7 +98,7 @@ class CookieConsentBackend(ConsentBackend):
         return {"cookie": self.cookie()}
 
     def cookie(self) -> dict[str, object]:
-        """Return the cookie the runtime writes, a None `secure` taking the scheme."""
+        """Return the cookie the runtime writes, a `None` `secure` taking the scheme."""
         secure = self._option("secure")
         domain = self._option("domain")
         max_age = self._option("max_age")

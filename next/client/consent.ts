@@ -1,20 +1,21 @@
-// The visitor's consent per category, read from the cookie it is kept in and written
-// back on every choice. $consent seeds a visitor without one, since a page cached for
-// everyone always carries the undecided state. Only a choice grants past necessary.
+// The visitor's consent per category, read from the consent cookie and written back
+// on every choice. $consent seeds the state when there is no cookie, and a page in a
+// shared cache carries the undecided state. Only the visitor's choice grants more
+// than the necessary category.
 
 import { asString, fire, isRecord, matching } from "./protocol";
 
 const NECESSARY = "necessary";
 const DEFAULT_COOKIE = "next_consent";
-// A session cookie would forget the choice with the tab, so the server's default age
-// stands in when the payload names none.
+// The server's default cookie age, used when the payload sets none, since a session
+// cookie would lose the choice when the browser closes.
 const DEFAULT_MAX_AGE = 15552000;
 const CONSENTED = "data-next-consented";
 const CONSENTED_TEMPLATES = `template[${CONSENTED}]`;
-// Closes the else branch that follows a consented template, as live markup.
+// The comment that ends the else branch following a consented template.
 const CONSENTED_END = "/next-consented";
 
-/** The next:consent detail, initial for the state a page starts from. */
+/** The next:consent detail. initial is true for the state the page loads with. */
 export interface ConsentChange {
   granted: string[];
   denied: string[];
@@ -29,9 +30,9 @@ export interface Consent {
   update(choice: Record<string, boolean>, opts?: { reload?: boolean }): void;
   acceptAll(): void;
   rejectAll(): void;
-  /** Seed the state from the cookie, or from the $consent payload without one. */
+  /** Seed the state from the cookie, or from the $consent payload without a cookie. */
   _configure(value: unknown): void;
-  /** Announce the state the page starts from, once the chunk is configured. */
+  /** Announce the initial state once the chunk is configured. */
   _announce(): void;
   /** Reveal the consented markup in roots the granted categories allow. */
   _reveal(roots: readonly ParentNode[]): void;
@@ -44,7 +45,7 @@ export interface ConsentDeps {
   now?: () => number;
   // Called after every update, so gated scripts activate without a reload.
   onChange?: () => void;
-  // Given the revealed roots, so they get the mount pass morphed markup gets.
+  // Called with the revealed roots, so they get the mount pass patched markup gets.
   onReveal?: (nodes: readonly Element[]) => void;
 }
 
@@ -54,8 +55,8 @@ function strings(value: unknown): string[] {
     : [];
 }
 
-// The categories a stored decision grants, undefined for a missing or foreign one.
-// Version 2 joins them with "|", and version 1, which browsers still hold, with ",".
+// The categories a stored decision grants, undefined for a missing or unknown value.
+// Version 2 joins them with "|", and the legacy version 1 with ",".
 function storedChoice(jar: string, name: string): string[] | undefined {
   const prefix = `${name}=`;
   const pair = jar.split("; ").find((entry) => entry.startsWith(prefix));
@@ -63,8 +64,8 @@ function storedChoice(jar: string, name: string): string[] | undefined {
   return match?.[2]?.split(match[1] === "1" ? "," : "|");
 }
 
-// The nodes after a consented template up to its end marker, a nested block's own
-// marker skipped. Absent a marker there is no else branch to find.
+// The nodes after a consented template up to and including its end marker, skipping
+// the markers of nested blocks. Without a marker there is no else branch.
 function deniedBranch(template: Element): ChildNode[] {
   const branch: ChildNode[] = [];
   let depth = 0;
@@ -91,7 +92,7 @@ export function createConsent(deps: ConsentDeps): Consent {
 
   const cookieName = (): string => asString(cookie.name) ?? DEFAULT_COOKIE;
 
-  // Version, the granted categories past necessary, then the decision time in seconds.
+  // Writes the version, the granted categories but necessary, and the time in seconds.
   function persist(): void {
     const list = categories.filter((c) => c !== NECESSARY && granted.has(c)).join("|");
     const maxAge =
@@ -105,7 +106,7 @@ export function createConsent(deps: ConsentDeps): Consent {
     if (sameSite !== undefined) parts.push(`samesite=${sameSite}`);
     const domain = asString(cookie.domain);
     if (domain !== undefined) parts.push(`domain=${domain}`);
-    // An unset flag follows the scheme, so a plain-HTTP dev server still keeps it.
+    // An unset flag follows the page scheme, so a plain-HTTP dev server keeps it.
     const secure =
       typeof cookie.secure === "boolean"
         ? cookie.secure
@@ -123,11 +124,11 @@ export function createConsent(deps: ConsentDeps): Consent {
       initial,
     };
   }
-  // A block whose category is granted swaps its else branch for the template body.
-  // A revoke leaves the revealed markup, only a reload takes it back.
-  // One pass in document order. A block revealed inside another joins the pass and
-  // mounts with its outer block, and one inside a removed else branch is skipped.
-  // A root may be a block itself, the top of a replaced fragment.
+  // Replaces the else branch of each block whose category is granted with the
+  // template body. A revoke leaves revealed markup in place until the next page load.
+  // The pass runs in document order. A block revealed inside another is added to the
+  // pass and mounted with its outer block, and one inside a removed else branch is
+  // skipped. A root may itself be a block, the top of a replaced fragment.
   function reveal(within: readonly ParentNode[]): void {
     const roots: Element[] = [];
     const work = within.flatMap((root) =>
@@ -165,7 +166,7 @@ export function createConsent(deps: ConsentDeps): Consent {
       if (on) next.add(category);
     }
     const changed = categories.filter((c) => before.has(c) !== next.has(c));
-    // A banner re-affirming a decision on every load is no decision, nothing moves.
+    // A banner that repeats an unchanged decision changes and announces nothing.
     if (decided && changed.length === 0) return;
     granted = next;
     decided = true;
@@ -173,7 +174,7 @@ export function createConsent(deps: ConsentDeps): Consent {
     reveal([doc]);
     fire(doc, deps.dispatch, "next:consent", { ...state(changed, false) });
     deps.onChange?.();
-    // A revoked script keeps running until the page goes, so a reload is the undo.
+    // A revoked script keeps running until the page unloads, so only a reload stops it.
     if (opts.reload === true && changed.length > 0) reload();
   }
 
@@ -188,8 +189,8 @@ export function createConsent(deps: ConsentDeps): Consent {
     update,
     acceptAll: () => update(all(true)),
     rejectAll: () => update(all(false)),
-    // A payload without $consent names no categories, so the stored decision names
-    // them. Neither saying anything keeps the state already held.
+    // A payload without $consent lists no categories, so the stored decision supplies
+    // them. With neither, the current state is kept.
     _configure(value) {
       const config = isRecord(value) ? value : undefined;
       if (config !== undefined) {

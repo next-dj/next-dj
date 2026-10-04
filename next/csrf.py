@@ -1,6 +1,6 @@
-"""How a page hands the CSRF token to its runtime and forms, and the token endpoint.
+"""Where a page puts the CSRF token for its runtime and forms, and the token endpoint.
 
-A token in the HTML sets a cookie, so a page a shared cache holds defers it instead.
+A token in the HTML sets the CSRF cookie, so a page a shared cache may store defers it.
 """
 
 import enum
@@ -47,7 +47,7 @@ _SAME_ORIGIN: Final = "same-origin"
 class CsrfDelivery(enum.StrEnum):
     """Where a rendered page puts the CSRF token its forms and runtime post with.
 
-    `AUTO` defers it on a page a shared cache holds and embeds it everywhere else.
+    `AUTO` defers it on a page a shared cache may store and embeds it on the rest.
     """
 
     AUTO = "auto"
@@ -73,7 +73,7 @@ settings_reloaded.connect(forget_csrf_delivery)
 
 
 def defer_token(request: HttpRequest) -> None:
-    """Keep the token of this render out of its HTML, the runtime fetches it instead."""
+    """Keep the token out of the HTML of this render. The runtime fetches it instead."""
     setattr(request, CSRF_DEFERRED_ATTR, True)
 
 
@@ -85,18 +85,18 @@ def token_deferred(request: HttpRequest) -> bool:
 def csrf_header_name() -> str:
     """Return the CSRF header name in HTTP wire form from Django settings.
 
-    Django stores `CSRF_HEADER_NAME` in WSGI `META` form, so it is unmangled to the
-    wire name with the same rule Django uses to expose headers.
+    Django stores `CSRF_HEADER_NAME` in WSGI `META` form, so it is converted to the
+    wire name with the rule `request.headers` applies.
     """
     raw = settings.CSRF_HEADER_NAME
     name = HttpHeaders.parse_header_name(raw)
     if name is not None:
         return name
-    return raw.removeprefix(HttpHeaders.HTTP_PREFIX).replace("_", "-").title()
+    return raw.replace("_", "-").title()
 
 
 def csrf_token_payload(request: HttpRequest) -> dict[str, str]:
-    """Return the header name and a freshly masked token, minting one when needed."""
+    """Return the header name and a newly masked token, creating the secret if none."""
     return {"header": csrf_header_name(), "token": get_token(request)}
 
 
@@ -111,7 +111,7 @@ def csrf_url() -> str:
 def csrf_payload(request: HttpRequest) -> dict[str, str]:
     """Return the `$csrf` payload, the endpoint URL in place of a deferred token.
 
-    Without a routed endpoint the token is embedded after all, so forms still post.
+    When the endpoint is not routed the token is embedded instead, so forms still post.
     """
     if token_deferred(request):
         try:
@@ -128,7 +128,7 @@ def csrf_payload(request: HttpRequest) -> dict[str, str]:
 
 
 def _refusal(request: HttpRequest) -> HttpResponse | None:
-    """Return the answer to a request the endpoint must not hand a token to."""
+    """Return the error response for a request that gets no token, else `None`."""
     if request.method not in _SAFE_METHODS:
         return HttpResponseNotAllowed(_SAFE_METHODS)
     if request.headers.get(_REQUEST_FLAG) != "1":
@@ -140,9 +140,9 @@ def _refusal(request: HttpRequest) -> HttpResponse | None:
 
 
 def csrf_view(request: HttpRequest) -> HttpResponse:
-    """Answer the runtime of a page whose HTML carries no token with a fresh one.
+    """Return a new token to the runtime of a page whose HTML carries none.
 
-    The custom request header forces a CORS preflight, so no other site reads it.
+    The required custom header forces a CORS preflight, so no other origin reads it.
     """
     refusal = _refusal(request)
     response = JsonResponse(csrf_token_payload(request)) if refusal is None else refusal

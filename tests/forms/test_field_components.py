@@ -771,7 +771,7 @@ class TestCheckComponentWidgetFieldTypes:
 
         register_page_action("mixin_char_form", _MixinForm, str(echo_component))
         warnings = check_component_widget_field_types()
-        assert len(warnings) == 1
+        assert [warning.id for warning in warnings] == ["next.W055"]
         assert warnings[0].msg.startswith(
             "_ClearableComponentFileWidget is attached to _MixinForm.slug which is a "
             "CharField."

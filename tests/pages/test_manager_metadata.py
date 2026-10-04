@@ -525,7 +525,7 @@ HEAD = "<head>{% metadata %}</head>"
 
 
 class TestTheHeadThroughARequest:
-    """What a visitor receives follows the page tree on disk, braces and all."""
+    """A request renders the head of the current page tree, braces in values literal."""
 
     @override_settings(DEBUG=True)
     def test_an_edited_ancestor_reaches_the_next_request_under_debug(

@@ -288,8 +288,15 @@ class TestSitemapAndRobots:
     def test_a_post_is_dated_by_its_last_edit(self, next_client) -> None:
         urls = {url.loc: url for url in parse_sitemap(next_client.get("/sitemap.xml"))}
         assert urls["https://blog.example/posts/welcome/"].lastmod == "2026-03-02"
-        assert urls["https://blog.example/posts/hello-world/"].lastmod == ("2026-01-19")
+        assert urls["https://blog.example/posts/hello-world/"].lastmod == "2026-01-19"
         assert urls["https://blog.example/about/"].lastmod is None
+
+    def test_the_section_of_the_one_root_is_the_same_document(
+        self, next_client
+    ) -> None:
+        section = next_client.get("/sitemap-blog.xml")
+        assert section.status_code == 200
+        assert section.content == next_client.get("/sitemap.xml").content
 
     def test_the_module_changefreq_applies_to_every_entry(self, next_client) -> None:
         body = next_client.get("/sitemap.xml").content.decode()

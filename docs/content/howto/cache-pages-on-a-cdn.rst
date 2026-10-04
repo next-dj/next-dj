@@ -28,7 +28,7 @@ Mark the page as shared
 
 Browsers keep the page for a minute, the CDN for an hour, and the CDN serves a stale copy for a day while it revalidates.
 ``cache`` applies to that one page, so every public page declares its own.
-A CDN-targeted header such as ``CDN-Cache-Control`` or ``Surrogate-Control`` cannot ride ``headers``, since it would outlive the private form a personal response takes, see :doc:`/content/topics/caching`.
+A CDN-targeted header such as ``CDN-Cache-Control`` or ``Surrogate-Control`` cannot be set through ``headers``, since it would remain on a response the framework makes private, see :doc:`/content/topics/caching`.
 
 Keep the token out of the HTML
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -44,7 +44,7 @@ The runtime fetches a fresh token the first time the visitor focuses or presses 
 
 A form on a shared page then needs JavaScript, and ``manage.py check`` says so unless the form's action declares ``Meta.requires_runtime = True``, or ``requires_runtime=True`` on ``@action``, see :ref:`topics-forms-actions-requires-runtime`.
 It also reports a shared page under ``CSRF_DELIVERY = "eager"`` that renders a form or the runtime, and one that renders ``{% csrf_token %}``, since either sets the cookie on every response.
-Keep ``CSRF_USE_SESSIONS`` off, because a token in the session reads the session on every render and takes every shared page private.
+Keep ``CSRF_USE_SESSIONS`` off, because a token in the session reads the session on every render and makes every shared page private.
 
 Keep the render anonymous
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -68,7 +68,7 @@ Move the account menu into a lazy zone, which the browser fetches with its own c
    </header>
 
 A ``Consent`` parameter reads an undecided visitor on a shared page, and gated scripts wait for the runtime, so consent never varies the cached HTML.
-``CONSENT["SERVER_RENDER"] = True`` gives that up, and every shared page whose HTML then follows the consent cookie goes out private.
+``CONSENT["SERVER_RENDER"] = True`` gives that up, and every shared page whose HTML then follows the consent cookie is sent with ``Cache-Control: private``.
 
 Configure the CDN
 ~~~~~~~~~~~~~~~~~
@@ -91,7 +91,7 @@ Every zone response and every envelope carries ``Cache-Control: private, no-stor
    * - Forward ``Accept-Language`` only when the pages vary on it.
      - A page outside :func:`~django.conf.urls.i18n.i18n_patterns` under ``LocaleMiddleware`` answers several languages at one URL, which ``manage.py check`` reports.
 
-A CSP nonce belongs to one response, so a render that mints one goes out private, and ``manage.py check`` warns while a nonce is active beside shared pages.
+A CSP nonce belongs to one response, so a response whose render mints one is sent with ``Cache-Control: private``, and ``manage.py check`` warns while a nonce is active beside shared pages.
 Set ``CSP_NONCE`` to ``False`` and allow the scripts by hash or by source on a site a CDN serves, see :doc:`/content/security/csp-and-nonce`.
 
 Verification
@@ -106,13 +106,13 @@ Verification
 
 The full page answers the declared ``Cache-Control``, no ``Set-Cookie``, and ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, and the zone request answers ``private, no-store``.
 Submit the form with the browser's network panel open, and one ``GET /_next/csrf/`` precedes the ``POST``.
-A shared page that turns private logs ``declares a shared cache, but its response follows the visitor through a cookie, the session, the CSRF token, the consent, a CSP nonce or the Authorization header, so it goes out private.``, naming the file.
+A shared page that is made private logs ``declares a shared cache, but its response follows the visitor through a cookie, the session, the CSRF token, the consent, a CSP nonce or the Authorization header, so it goes out private.``, naming the file.
 
 See also
 --------
 
 .. seealso::
 
-   :doc:`/content/topics/caching` for ``cache``, ``headers``, and the rules that take a page private.
+   :doc:`/content/topics/caching` for ``cache``, ``headers``, and the rules that make a page private.
    :doc:`/content/security/csrf-and-forms` for the token delivery modes and :doc:`/content/ref/csrf` for the endpoint.
    :doc:`/content/topics/partial-rendering/reference` for the partial request headers.

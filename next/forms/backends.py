@@ -174,8 +174,8 @@ class ActionRegistration:
     Registrations are first-wins on a bare name, so an action declared later
     under an already-registered name stays reachable only through its own
     page scope. A registration that claims the binding rebinds the name to
-    itself instead, which is how a test override displaces the action it
-    stands in for."""
+    itself instead, so a test override displaces the action it replaces.
+    """
 
 
 class FormActionBackend(ABC):

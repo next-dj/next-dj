@@ -1,6 +1,6 @@
 """Discovery of the `scripts.py` at the top of every routed page tree.
 
-The source loads through its own loader, so a broken one never marks a page broken.
+Each source loads through its own loader, so a failing one never marks a page broken.
 """
 
 from collections.abc import Iterable
@@ -22,7 +22,7 @@ SCRIPTS_MODULE: Final = "scripts.py"
 class ScriptsSource:
     """One `scripts.py` with the scripts it declares, or why it declares none.
 
-    `problem` names a `scripts` value that is no iterable of `Script`.
+    `problem` describes a `scripts` value that is not an iterable of `Script`.
     """
 
     root: Path
@@ -48,7 +48,7 @@ def _declared(value: object) -> tuple[tuple[Script, ...], str | None]:
 def load_scripts(root: Path) -> ScriptsSource | None:
     """Execute the `scripts.py` of the tree at `root`, `None` when it holds none.
 
-    A failure stays on the source for the checks to report, so the pages still render.
+    A failure is recorded on the source for the checks, and the pages still render.
     """
     loaded = load_tree_source(
         root / SCRIPTS_MODULE, "next_scripts_source", ScriptsSourceImportError
@@ -62,7 +62,7 @@ def load_scripts(root: Path) -> ScriptsSource | None:
 
 
 def source_stale(source: ScriptsSource | None, root: Path) -> bool:
-    """Whether the `scripts.py` of `root` moved since `source` was read."""
+    """Whether the `scripts.py` of `root` changed since `source` was read."""
     held = None if source is None else source.stamp
     return stat_mtime_ns(root / SCRIPTS_MODULE) != held
 

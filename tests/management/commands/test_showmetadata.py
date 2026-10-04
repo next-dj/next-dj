@@ -13,7 +13,7 @@ def _show(path: str) -> str:
 
 
 class TestShowMetadata:
-    """`showmetadata` names the source of every key the chain of a page settles."""
+    """`showmetadata` names the source of every key the chain of a page sets."""
 
     def test_every_key_names_its_segment(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", pages=())
@@ -74,3 +74,26 @@ class TestShowMetadata:
             pytest.raises(CommandError, match="which is no page"),
         ):
             _show("/sitemap.xml")
+
+    @pytest.mark.parametrize(
+        ("source", "match"),
+        [
+            ("metadata = {'title': 1}\n", "metadata key 'title'"),
+            (
+                (
+                    "from next.pages import page\n\n"
+                    "metadata = {'title': 'Home'}\n\n"
+                    "@page.metadata\n"
+                    "def home_metadata():\n"
+                    "    return {}\n"
+                ),
+                "declares both a metadata dict",
+            ),
+        ],
+        ids=["shape", "conflict"],
+    )
+    def test_a_refused_chain_is_an_error(self, tmp_path, source, match) -> None:
+        root = write_tree(tmp_path / "pages", pages=())
+        write_page(root, "", source, body="<p>x</p>")
+        with routed(root), pytest.raises(CommandError, match=match):
+            _show("/")

@@ -15,7 +15,7 @@ it("hands the dev channel to the runtime as it evaluates", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   document.body.innerHTML = '<div data-next-zone="z" data-next-lazy="soon"></div>';
   win.Next._init({ $dev: true });
-  // The channel joins once the landed chunk resolves, catching up over the page.
+  // The diagnostics are attached once the loaded chunk resolves, then check the page.
   await Promise.resolve();
   expect(warn).toHaveBeenCalledWith(expect.stringContaining('data-next-lazy="soon"'));
 });

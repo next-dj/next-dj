@@ -5,7 +5,7 @@ Caching and response headers
 
 A page response carries headers beside its body, the ``Cache-Control`` a CDN obeys and whatever security header one section of the site needs.
 ``page.py`` declares the first through ``cache`` and the second through ``headers``, and the framework keeps a response that shows one visitor out of every shared cache.
-This page covers the two declarations, what each ``page.py`` name passes down the tree, and the rules that take a shared page private.
+This page covers the two declarations, what each ``page.py`` name passes down the tree, and the rules that make a shared page private.
 
 .. contents::
    :local:
@@ -46,8 +46,8 @@ cache
 The page answers ``Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600``.
 The directives are applied through :func:`~django.utils.cache.patch_cache_control` and :func:`~django.utils.cache.patch_vary_headers`, and only on a successful response to a ``GET`` or a ``HEAD``, so a ``POST`` the page answers itself never carries the page's cache and a callable ``cache`` is not even resolved for it.
 ``manage.py check`` reports an unknown key, a negative age, a flag that is no bool, and ``public`` together with ``no_store``.
-A callable ``cache`` that raises, or returns anything but the forms above, sends the page out ``private, no-store``, since no cache may keep a response whose policy is unknown.
-A page a contained failure degraded goes out ``private, no-store`` too, whatever its ``cache`` declares.
+A callable ``cache`` that raises, or returns anything but the forms above, sends the page with ``private, no-store``, since no cache may keep a response whose policy is unknown.
+A page whose render contained a failure is sent with ``private, no-store`` too, whatever its ``cache`` declares.
 A ``@page.metadata`` callable that raises, a renderer, a serializer or a runtime bundle that fails, each leaves the page without what it would have added, perhaps a ``noindex``, so no cache keeps the page past the failure.
 The page is not marked ``noindex`` in turn, since a callable that fails on every page would otherwise drop the whole site from search for as long as it fails.
 The failure is logged once per page, and under ``DEBUG`` or ``STRICT_LOADING`` it raises instead, naming the ``page.py`` and the shapes it may return.
@@ -56,8 +56,9 @@ The failure is logged once per page, and under ``DEBUG`` or ``STRICT_LOADING`` i
 A page is shared when its cache lets a CDN keep a copy, through ``public`` or ``s_maxage``.
 The checks cannot call a callable ``cache``, so they count its page as one that may be shared and mark it ``(callable cache)`` in the messages.
 A shared page renders so that its HTML is the same for every visitor.
-The CSRF token stays out of the HTML under ``CSRF_DELIVERY="auto"``, see :doc:`/content/security/csrf-and-forms`, a ``Consent`` parameter reads an undecided visitor, and gated scripts ride the runtime manifest, see :doc:`/content/topics/scripts/consent`.
-A render that still puts one visitor into the HTML takes the page private, as `Going private`_ describes.
+The CSRF token stays out of the HTML under ``CSRF_DELIVERY="auto"``, see :doc:`/content/security/csrf-and-forms`.
+A ``Consent`` parameter reads an undecided visitor, and gated scripts travel in the runtime manifest, see :doc:`/content/topics/scripts/consent`.
+A render that still puts data of one visitor into the HTML makes the response private, as `Going private`_ describes.
 
 headers
 -------
@@ -76,7 +77,7 @@ Each ``page.py`` from the page root to the page contributes its mapping, names m
    }
 
 Every page under ``/checkout/`` carries both headers, and a value is ASCII text on one line.
-``headers`` never names a caching header, ``Cache-Control``, ``CDN-Cache-Control``, ``Surrogate-Control``, ``Cloudflare-CDN-Cache-Control``, ``Expires``, ``Age``, or ``Vary``, because ``cache`` owns them and a header set here would outlive the private form a personal response takes.
+``headers`` never names a caching header, ``Cache-Control``, ``CDN-Cache-Control``, ``Surrogate-Control``, ``Cloudflare-CDN-Cache-Control``, ``Expires``, ``Age``, or ``Vary``, because ``cache`` owns them and a header set here would remain on a response the framework makes private.
 The framework owns ``X-Robots-Tag``, ``Set-Cookie``, ``Content-Type``, ``Content-Length``, ``Transfer-Encoding``, and ``Connection`` as well.
 ``Content-Security-Policy`` and its ``-Report-Only`` form stay with the CSP middleware, since Django's middleware and django-csp skip a response that already carries one, so a page's own would replace the whole site policy and its nonce.
 ``manage.py check`` reports a forbidden name, pointing a caching one at ``cache``, an invalid header name, and a value with a line break, another control character, or a character outside ASCII, and the response leaves each of them out.
@@ -118,7 +119,7 @@ Going private
 -------------
 
 A response a CDN keeps must not carry anything of one visitor, and the framework enforces it at runtime.
-A shared page goes out ``private``, with the other directives kept and one warning per page naming the file, when its response does any of the following.
+A shared page is sent with ``private`` in place of its shared directives, the other directives kept and one warning logged per page naming the file, when its response does any of the following.
 
 - It sets a cookie, from the view, from ``render()``, or from a middleware after the view, the session and CSRF middleware among them.
 - It reads the session, or needs the CSRF cookie refreshed during its render.
@@ -126,22 +127,23 @@ A shared page goes out ``private``, with the other directives kept and one warni
 - Its render minted a CSP nonce, through the framework tags or a template reading ``request.csp_nonce``, since a nonce belongs to one response.
 - Its HTML follows the consent cookie, which ``CONSENT["SERVER_RENDER"] = True`` forces on every page, the shared ones included.
 
-The response carries ``SharedCookies`` in place of Django's cookie jar, so the first cookie set on it takes the cache private whenever it lands, and a ``TemplateResponse`` rendered after the view is settled once its content exists.
-``public`` and ``Set-Cookie`` never leave the server together, provided ``ConditionalGetMiddleware`` sits above every middleware that sets a cookie, because the 304 it answers copies the cache before an outer cookie lands, and ``next.W124`` reports the order that breaks it.
+The response carries ``SharedCookies`` in place of Django's cookie jar, so the first cookie set on it makes the response private at whatever point it is set, and a ``TemplateResponse`` rendered after the view is settled once its content exists.
+A cookie written through ``update()`` or ``load()`` on the jar makes the response private as well.
+``public`` and ``Set-Cookie`` never leave the server together, provided ``ConditionalGetMiddleware`` sits above every middleware that sets a cookie.
+The 304 that middleware answers copies the cache headers of the page, so a cookie an outer middleware sets afterwards would reach a public response, and ``next.W124`` reports that order.
 ``next.middleware.SharedCacheGuardMiddleware`` closes that gap and any other one a third-party middleware opens, see `The shared cache guard`_.
-A cookie written through ``update()`` or ``load()`` on the jar takes the response private as well.
-A layout that reads ``request.user`` touches the session and takes every shared page under it private, which the warning makes visible.
+A layout that reads ``request.user`` accesses the session and makes every shared page under it private, which the warning makes visible.
 
 The shared cache guard
 ~~~~~~~~~~~~~~~~~~~~~~
 
 ``SharedCacheGuardMiddleware`` is opt-in and checks the finished response rather than the page.
-A response that sets a cookie while its ``Cache-Control`` carries ``public`` or ``s-maxage`` loses both directives and gains ``private``, its ``CDN-Cache-Control``, ``Cloudflare-CDN-Cache-Control``, and ``Surrogate-Control`` headers go, and ``Vary`` gains ``Cookie``.
+A response that sets a cookie while a shared cache may keep it loses ``public`` and ``s-maxage`` and gains ``private``, its ``CDN-Cache-Control``, ``Cloudflare-CDN-Cache-Control``, and ``Surrogate-Control`` headers are removed, and ``Vary`` gains ``Cookie``.
+A shared cache may keep a response whose ``Cache-Control`` carries ``public`` or ``s-maxage``, one with a CDN header, and one with a ``max-age`` or an ``Expires`` but neither ``private`` nor ``no-store``.
 Every other directive stays, and each path is logged once.
 List it first in ``MIDDLEWARE``, so it sees every cookie the stack sets.
-A project that uses ``UpdateCacheMiddleware`` lists the guard right below it, never above it, so the copy Django's cache stores is the private one.
-A response that sets a cookie loses its ``public`` and ``s-maxage`` directives and its CDN headers, and so does one whose bare ``max-age`` or ``Expires`` a shared cache would read as a lifetime.
-In either place ``next.W124`` stays silent.
+A project that uses ``UpdateCacheMiddleware`` lists the guard directly below it, never above it, so the copy Django's cache stores is the private one.
+In either position ``next.W124`` stays silent.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -156,14 +158,14 @@ In either place ``next.W124`` stays silent.
 
 The middleware runs on a sync and an async stack alike.
 
-Two settings take every shared page private at once, and ``manage.py check`` warns about both.
+Two settings make every shared page private at once, and ``manage.py check`` warns about both.
 ``CSRF_USE_SESSIONS = True`` keeps the CSRF token in the session, so every render reads it.
 An active CSP nonce, ``CSP_NONCE`` on beside the CSP middleware of Django or django-csp, stamps every render with a fresh one, and shared pages allow their scripts by hash or by source instead, see :doc:`/content/security/csp-and-nonce`.
 
-A shared landing page
----------------------
+A shared campaign page
+----------------------
 
-A campaign page is the typical shared page, and three habits keep it shared.
+A campaign page is the typical shared page, and three practices keep it shared.
 Its layout reads no ``request.user``, and an account menu moves into a lazy zone the browser fetches with its own cookies, see :doc:`/content/howto/cache-pages-on-a-cdn`.
 A form on it posts through the runtime, which fetches the deferred token, and ``Meta.requires_runtime = True`` on the form records that choice, so the check that warns about forms needing JavaScript stays quiet for it.
 A paid-traffic variant of the page stays out of the index and points at the organic page, so the two never compete.

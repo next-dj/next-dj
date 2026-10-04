@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from django.http import Http404
@@ -12,6 +13,7 @@ import next.partial.errors
 import next.partial.patches
 from next.pages import ld
 from next.pages.errors import PageMetadataShapeError
+from next.pages.metadata import resolve_metadata
 from next.partial import Asset, FormMeta, Patches, PatchResponse
 from next.partial.errors import (
     BuiltinPatchOpError,
@@ -408,7 +410,7 @@ def _meta(title: str | None, **rest: str | None) -> dict[str, object]:
 
 
 class TestMeta:
-    """`meta` ships the four head tags the origin page would render, each or null."""
+    """`meta` sends the four head tags the origin page would render, each or null."""
 
     def test_the_ancestor_template_wraps_the_title_of_the_verb(self) -> None:
         envelope = Patches(partial_request("/titled/leaf/")).meta("Wallets").envelope()
@@ -505,6 +507,22 @@ class TestMeta:
         with override_next_settings(METADATA={"DEFAULTS": defaults}):
             extras = builder().meta("Wallets").envelope().ops[0].extras
         assert extras == {"title": "Wallets", "description": None, "robots": None}
+
+    def test_the_blocks_the_op_omits_are_never_resolved(self) -> None:
+        defaults = {
+            "alternates": {"languages": True},
+            "og": {"images": [{"url": "/og.png"}]},
+            "jsonld": [ld.Node(id="#org", type="Organization", extra={"url": "/"})],
+        }
+        with (
+            override_next_settings(METADATA={"DEFAULTS": defaults}),
+            patch(
+                "next.partial.patches.resolve_metadata", wraps=resolve_metadata
+            ) as resolve,
+        ):
+            Patches(partial_request("/titled/leaf/")).meta("Wallets")
+        folded = resolve.call_args.args[0]
+        assert (folded.alternates, folded.og, folded.jsonld) == (None, None, ())
 
     def test_a_builder_without_a_request_ships_a_declared_canonical(self) -> None:
         with override_next_settings(

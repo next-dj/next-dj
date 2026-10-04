@@ -158,7 +158,7 @@ def _locs(response) -> list[str]:
 
 
 class TestNoSource:
-    """Without a source the SEO routes stay out, so the address is free."""
+    """Without a source the SEO routes are not mounted, so the project keeps the path."""
 
     def test_no_route_is_mounted_without_a_source(self, tmp_path) -> None:
         with routed(write_tree(tmp_path / "pages")):
@@ -319,7 +319,7 @@ class TestStaticSitemap:
 
 
 class TestBrokenSources:
-    """A source that fails to import holds its route, a sitemap answering 404.
+    """A source that fails to import keeps its route, and a sitemap answers 404.
 
     A broken robots answers 503, since a crawler reads a 404 there as allow all.
     """
@@ -763,7 +763,7 @@ class TestRobots:
 
 
 class TestClosedSite:
-    """A site closed to search lets crawlers in and lists nothing."""
+    """A site closed to search allows every crawler and lists no URL."""
 
     def test_the_sitemap_answers_404_while_the_site_is_closed(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", pages=("about",), sitemap="")
@@ -776,8 +776,12 @@ class TestClosedSite:
 
     @pytest.mark.parametrize(
         "sources",
-        [{"robots": ROBOTS}, {"robots_txt": b"User-agent: *\nDisallow: /\n"}],
-        ids=["robots-py", "robots-txt"],
+        [
+            {"robots": ROBOTS},
+            {"robots_txt": b"User-agent: *\nDisallow: /\n"},
+            {"robots": "1/0\n"},
+        ],
+        ids=["robots-py", "robots-txt", "broken-robots-py"],
     )
     def test_robots_answers_the_fixed_open_document(self, tmp_path, sources) -> None:
         root = write_tree(tmp_path / "pages", sitemap="", **sources)

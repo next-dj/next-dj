@@ -26,8 +26,8 @@ from next.errors import (
 
 logger = logging.getLogger(__name__)
 
-# A family root is a class, but an abstract one cannot pass as `type[T]`, so
-# it travels under its constructor signature and `_root_class` narrows it back.
+# A family root is a class, but an abstract one cannot pass as `type[T]`, so it is
+# typed by its constructor signature and `_root_class` narrows it back.
 type BackendRoot[T] = Callable[..., T]
 
 
@@ -71,7 +71,8 @@ def resolve_setting_class[T](
 ) -> type[T]:
     """Return the class named by one dotted-path setting, checked against `base`.
 
-    The shipped default skips the import, since its package is still importing then.
+    The shipped default is returned without an import, since its package may still be
+    importing when the setting is read.
     """
     root = _root_class(base)
     dotted, default = _setting_value(setting, scope)

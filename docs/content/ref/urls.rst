@@ -39,7 +39,7 @@ The wrapped sequence caches the concatenated pattern list against a three-part v
 ``router_manager.reload()`` bumps the router counter, registering or clearing form actions through ``form_action_manager`` bumps the forms counter, and binding the SEO routes port in ``NextFrameworkConfig.ready()`` or resetting the SEO sources moves the third, so the next access rebuilds the list exactly when something changed.
 The spliced source is the SEO routes of :doc:`seo`, read through the ``SeoRoutes`` port of :doc:`ports`, each present only while its source exists, the sitemap routes while a backend serves a sitemap and the robots route while a page root carries a ``robots.py`` or a ``robots.txt``.
 The pattern set also carries ``/_next/csrf/``, named ``next:csrf``, the token endpoint of :doc:`csrf`, mounted whatever the sources.
-``seo_routes_version`` is a ``SeoRoutesVersion`` holding a plain ``value``, so the token is read without a call across the port, and its ``move()`` draws from the same process-wide counter as the router versions, so no two states share a number.
+``seo_routes_version`` is a ``SeoRoutesVersion`` holding a plain ``value``, so the token is read without a call across the port, and its ``move()`` takes its next value from the same process-wide counter as the router versions, so no two states share a number.
 A sequence read before ``NextFrameworkConfig.ready()`` binds the port leaves the seo routes out and caches nothing, so an application that resolves or reverses a URL from an earlier ``ready()`` still gets the page routes.
 
 The counters are read after the pattern build, because expanding page modules can register form actions mid-build, so the cache stays valid for the post-registration state.

@@ -113,7 +113,7 @@ Discovery and registry
 ~~~~~~~~~~~~~~~~~~~~~~
 
 ``page_tree_roots`` answers one ``SeoRoot`` per routed page tree, with its section name, its routes, and the sources at its top, loaded once per reset through ``load_source``.
-A source that fails to import keeps its ``SeoSourceImportError`` on the ``SeoSource`` for the checks, and its route answers 404 through a ``BrokenSource``.
+A source that fails to import keeps its ``SeoSourceImportError`` on the ``SeoSource`` for the checks, and its route holds a ``BrokenSource``, which the sitemap route answers with 404 and the robots route with 503.
 ``sitemap_items_registry`` holds the ``@sitemap.items`` callables keyed by the running file and route, the last registration per key winning and a repeat recorded as a conflict.
 
 .. automodule:: next.seo.discovery

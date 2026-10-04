@@ -182,7 +182,7 @@ class TestURLParameterError:
 
 
 class TestPublicExports:
-    """Both refusals are importable from `next.urls`, not just the submodule."""
+    """Both refusals are importable from `next.urls`, not only the submodule."""
 
     @pytest.mark.parametrize(
         "name",
@@ -203,7 +203,7 @@ class TestDuplicateURLParameterError:
         assert isinstance(error, ValueError)
 
     def test_message_includes_file_path_when_given(self) -> None:
-        """A known page file lands in the message tail."""
+        """A known page file is named at the end of the message."""
         file_path = Path("/pages/dup/page.py")
         error = DuplicateURLParameterError("x", "[x]/[x]", file_path=file_path)
         assert error.file_path == file_path
@@ -249,7 +249,7 @@ class TestNamesDjangoRefuses:
         assert isinstance(InvalidURLParameterError("a.b", "[a.b]"), ValueError)
 
     def test_message_includes_file_path_when_given(self) -> None:
-        """A known page file lands in the message tail, as for the sibling."""
+        """A known page file is named at the end of the message, as for the sibling."""
         file_path = Path("/pages/2fa/page.py")
         error = InvalidURLParameterError("2fa", "[2fa]", file_path=file_path)
         assert error.file_path == file_path

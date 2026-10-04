@@ -111,7 +111,7 @@ class _Walk:
 
 
 class _Kind(Protocol):
-    """One accepted shape of a metadata value, which says cheaply whether one fits."""
+    """One accepted shape of a metadata value, with a cheap test of whether one fits."""
 
     @property
     def label(self) -> str: ...
@@ -122,9 +122,9 @@ class _Kind(Protocol):
 
 
 class _Whole:
-    """A shape a key path names on its own, never one option of several.
+    """A shape bound to one key path, never one option of a union.
 
-    It takes whatever it is given and refuses a wrong value as it coerces.
+    It accepts any value and refuses a wrong one while coercing it.
     """
 
     __slots__ = ()
@@ -307,7 +307,7 @@ class _Either:
 
 
 class _Mapped:
-    """The shapes a mapping takes, which accept any mapping and sort it out later."""
+    """The base of the mapping shapes, which accept any mapping until coerced."""
 
     __slots__ = ()
     label: ClassVar[str] = "a mapping"
@@ -355,6 +355,12 @@ class _Block(_Mapped):
         )
 
 
+def _non_str_key(key: object, *, walk: _Walk, path: str) -> Never:
+    walk.fail(
+        f"declares {_key_phrase(path)} with the key {key!r}, expected string keys"
+    )
+
+
 def _texts(value: object) -> tuple[Text, ...] | None:
     """Return one text or a sequence of texts as a tuple, `None` for anything else."""
     if isinstance(value, str | Promise):
@@ -381,16 +387,20 @@ class _Named(_Mapped):
         pairs: list[tuple[str, Text]] = []
         for name, item in value.items():
             if not isinstance(name, str):
-                _wrong_type(self, value, walk=walk, path=path)
+                _non_str_key(name, walk=walk, path=path)
+            child = f"{path}.{name}"
             raw = item
             if isinstance(raw, Replace):
-                walk.replaced.add(f"{path}.{name}")
+                walk.replaced.add(child)
                 raw = raw.value
                 if raw is None:
                     continue
             texts = _texts(raw)
             if texts is None:
-                _wrong_type(self, value, walk=walk, path=path)
+                walk.fail(
+                    f"declares {_key_phrase(child)} as {type(raw).__name__!r}, "
+                    "expected text or a sequence of text"
+                )
             pairs.extend((name, text) for text in texts)
         return tuple(pairs)
 
@@ -404,10 +414,7 @@ def _json_value(value: object, *, walk: _Walk, path: str) -> object:
         if isinstance(item, Mapping):
             key = next((key for key in item if not isinstance(key, str)), _NO_KEY)
             if key is not _NO_KEY:
-                walk.fail(
-                    f"declares {_key_phrase(where)} with the key {key!r}, expected "
-                    "string keys"
-                )
+                _non_str_key(key, walk=walk, path=where)
         elif isinstance(item, str | bytes) or not isinstance(item, Sequence):
             problem = json_problem(item)
             if problem is not None:
@@ -469,14 +476,14 @@ class _Languages(_Whole):
     def coerce(self, value: object, *, walk: _Walk, path: str) -> object:
         if isinstance(value, bool):
             return value
-        if not isinstance(value, Mapping) or not all(
-            isinstance(code, str) and _is_text(url) for code, url in value.items()
-        ):
+        if not isinstance(value, Mapping):
             _wrong_type(self, value, walk=walk, path=path)
-        return {
-            code: _web_url(url, walk=walk, path=f"{path}.{code}")
-            for code, url in value.items()
-        }
+        languages: dict[str, Url] = {}
+        for code, url in value.items():
+            if not isinstance(code, str):
+                _non_str_key(code, walk=walk, path=path)
+            languages[code] = _web_url(url, walk=walk, path=f"{path}.{code}")
+        return languages
 
 
 @dataclass(frozen=True, slots=True)
@@ -579,7 +586,7 @@ _SHORTHANDS: Final[Mapping[object, str]] = {
     IconDict: "url",
     ThemeColorDict: "color",
 }
-"""The key a bare string beside one of these dicts stands for."""
+"""The key a bare string given in place of one of these dicts sets."""
 
 _PATH_KINDS: Final[Mapping[str, _Kind]] = {
     "canonical": _Canonical(),
@@ -609,7 +616,7 @@ def _options(hint: object) -> tuple[object, ...]:
 def _kind(hint: object, path: str) -> _Kind:
     """Compile the shape of one annotated key.
 
-    A bare value beside a sequence of such values stands for a sequence of one.
+    A bare value given where a sequence of such values is expected is wrapped in one.
     """
     override = _PATH_KINDS.get(path)
     if override is not None:
@@ -629,7 +636,7 @@ def _kind(hint: object, path: str) -> _Kind:
 
 
 def _shorthand(block: object) -> _Kind:
-    """Return the shape of a bare value that stands for one key of `block`.
+    """Return the shape of a bare value that sets one key of `block`.
 
     A key the dict does not declare, the text of a title, takes text.
     """

@@ -85,7 +85,7 @@ It carries the resource hints and the relations the schema has no key for.
    }
 
 The ``href`` of a ``preconnect`` or ``dns-prefetch`` is an origin and stays as written, every other ``href`` is made absolute, and ``crossorigin=True`` renders ``crossorigin="anonymous"``.
-A rel that another key renders, ``canonical``, ``alternate``, ``icon``, ``apple-touch-icon``, ``mask-icon``, ``manifest``, or ``stylesheet``, is refused, and the check message names the key to use instead.
+A rel that another key renders, ``canonical``, ``alternate``, ``icon``, ``shortcut``, ``apple-touch-icon``, ``mask-icon``, ``manifest``, or ``stylesheet``, is reported by ``manage.py check``, and the message names the key to use instead.
 A resource hint whose ``href`` is not an origin, a ``preload`` without ``as``, and a rel no browser knows are reported too.
 
 Other names and properties

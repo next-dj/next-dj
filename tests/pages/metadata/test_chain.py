@@ -214,7 +214,7 @@ class TestTitleTemplates:
 
 
 class TestOverlay:
-    """An overlay folds last and stands in for the page's own callable."""
+    """An overlay folds last and replaces the page's own callable."""
 
     def test_the_ancestor_template_wraps_the_overlay_in_place_of_the_own_title(
         self, registry: PageMetadataRegistry, tmp_path: Path
@@ -493,7 +493,7 @@ class TestCallables:
 
 
 class TestContainedFailures:
-    """A render leaves a failing callable out, logging it once, loud under DEBUG."""
+    """A render omits a failing callable and logs it once, and raises under DEBUG."""
 
     @pytest.fixture(autouse=True)
     def _armed(self) -> None:
@@ -748,7 +748,7 @@ class TestMemo:
 
 
 class TestConcurrentReads:
-    """Threads meeting one cold chain at once all settle on the same fold."""
+    """Concurrent threads reading one unbuilt chain all receive the same fold."""
 
     THREADS = 8
 
@@ -792,9 +792,9 @@ class TestConcurrentReads:
 
 
 class TestConcurrentInvalidation:
-    """Readers racing edits of an ancestor never read an older fold once one settles.
+    """Concurrent readers never read an older fold once an edit of an ancestor loaded.
 
-    A read catching a half-written file folds to no description, fine only mid-write.
+    A read of a partially written file folds to no description, accepted mid-write only.
     """
 
     READERS = 6
@@ -814,7 +814,7 @@ class TestConcurrentInvalidation:
         lock = threading.Lock()
 
         def read(done: threading.Event) -> None:
-            # Signal even when a read raises, so the editor never waits on a dead one.
+            # Signal even when a read raises, so the editor never waits on a dead reader.
             try:
                 while not stop.is_set():
                     floor = settled[0]
@@ -824,7 +824,7 @@ class TestConcurrentInvalidation:
                         seen.append((floor, edit))
                     if floor == self.EDITS:
                         done.set()
-                    # Yield the interpreter, or spinning readers starve the editor.
+                    # Release the GIL, otherwise the reader loops block the editor thread.
                     time.sleep(0)
             finally:
                 done.set()
@@ -843,7 +843,7 @@ class TestConcurrentInvalidation:
         return seen
 
     def _stale(self, seen: list[tuple[int, int]]) -> list[tuple[int, int]]:
-        """Return the reads older than the edit settled before they began."""
+        """Return the reads that saw an edit older than the one loaded before they began."""
         return [
             (floor, edit)
             for floor, edit in seen
@@ -911,7 +911,7 @@ class TestOrigins:
 
 
 class TestThunk:
-    """The render-time thunk folds against whatever context each read hands it."""
+    """The render-time thunk folds against the context passed to each read."""
 
     def test_each_read_folds_against_the_context_it_is_handed(
         self, registry: PageMetadataRegistry, tmp_path: Path

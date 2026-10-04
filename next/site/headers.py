@@ -1,4 +1,4 @@
-"""The `X-Robots-Tag` a site closed to search stamps on every response it builds."""
+"""The `X-Robots-Tag` header a site closed to search sets on every response."""
 
 import functools
 from collections.abc import Callable
@@ -20,7 +20,7 @@ CLOSED_ROBOTS: Final = "noindex, nofollow"
 def stamp_site_robots[R: HttpResponseBase](response: R, request: HttpRequest) -> R:
     """Overwrite the robots header on a site closed to search, then return `response`.
 
-    An open site leaves the header to the page, so a noindex it declares survives.
+    An open site leaves the header unchanged, so a noindex the page sets is kept.
     """
     if not site_indexable(request):
         response[ROBOTS_HEADER] = CLOSED_ROBOTS
@@ -30,7 +30,7 @@ def stamp_site_robots[R: HttpResponseBase](response: R, request: HttpRequest) ->
 def site_robots[**P, R: HttpResponseBase](
     view: Callable[Concatenate[HttpRequest, P], R],
 ) -> Callable[Concatenate[HttpRequest, P], R]:
-    """Wrap a view so what it answers on a site closed to search carries noindex."""
+    """Wrap a view so its responses carry noindex on a site closed to search."""
 
     @functools.wraps(view)
     def wrapped(request: HttpRequest, /, *args: P.args, **kwargs: P.kwargs) -> R:

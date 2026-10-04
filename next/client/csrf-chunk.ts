@@ -1,5 +1,5 @@
-// The entry of next.csrf.min.js, the mint of a deferred token. The runtime fetches it
-// on the first need of a page that shipped only the endpoint.
+// The entry point of next.csrf.min.js, which fetches a deferred CSRF token. The runtime
+// loads it on the first mutation of a page that shipped only the token endpoint.
 
 import { mintCsrf } from "./csrf";
 

@@ -112,7 +112,7 @@ Response headers
 
 The view stamps what the policy declares on the response.
 The ``headers`` go on first, then the ``cache`` of a successful ``GET`` or ``HEAD``, taken back to ``private`` when the render set a cookie, read the session, minted a CSRF cookie, read the consent cookie, or minted a CSP nonce, or when the request carries ``Authorization``, then ``X-Robots-Tag``.
-A shared cache swaps the response's cookie jar for ``SharedCookies``, which takes the cache private the moment a middleware sets a cookie after the view, and a lazily rendered ``TemplateResponse`` settles the same question in a post-render callback.
+A shared cache swaps the response's cookie jar for ``SharedCookies``, which makes the response private as soon as a middleware sets a cookie after the view, and a lazily rendered ``TemplateResponse`` settles the same question in a post-render callback.
 On a site closed to search the header is ``noindex, nofollow``, and otherwise it repeats the robots directives the ``{% metadata %}`` resolve published on the request when they block, or those of the static fold when no head rendered.
 ``Vary: Cookie`` joins when the HTML followed the consent cookie.
 A ``render()`` that returns its own response passes the same stamping, its own headers winning.

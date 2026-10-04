@@ -59,7 +59,7 @@ class FoundAsset(NamedTuple):
 class _AssetPlan(NamedTuple):
     """What one page or component contributes, and where it was read from.
 
-    The registry generation rides along separately from directory mtimes, since a
+    The registry generation is stored apart from directory mtimes, since a
     registration changes what counts as an asset without touching any file mtime.
     """
 
@@ -309,8 +309,8 @@ class AssetDiscovery:
     def _registry_generation(self) -> tuple[int, int, int]:
         """Return the generation of every registry a plan reads while it is built.
 
-        Read before the plan probes anything, so a registration landing mid-probe
-        leaves the plan stale rather than falsely stamped as up to date.
+        Read before the plan probes anything, so a registration made during the probe
+        leaves the plan stale rather than wrongly marked as up to date.
         """
         return (
             self._stems.version,
@@ -427,8 +427,8 @@ class AssetDiscovery:
         module_dir = None if module_path is None else _resolved_parent(module_path)
         if module_dir is not None and module_dir != component_dir:
             directories.append(module_dir)
-        # Stat before the probe, so a file landing between the two reads leaves
-        # the plan stale rather than invisible until a restart.
+        # Stat before the probe, so a file created between the two reads leaves the
+        # plan stale rather than invisible until a restart.
         mtimes = _directory_mtimes(directories)
         files = tuple(
             find_role_files(
@@ -541,8 +541,8 @@ class AssetDiscovery:
         inside_a_tree = page_root is not None
         current_dir = file_path.parent
         for depth in range(MAX_ANCESTOR_WALK_DEPTH):
-            # Stat first so a file landing between the two reads leaves the
-            # plan stale rather than invisible until a restart.
+            # Stat first, so a file created between the two reads leaves the plan
+            # stale rather than invisible until a restart.
             mtime = stat_mtime_ns(current_dir)
             holds_layout = (current_dir / "layout.djx").exists()
             if holds_layout:

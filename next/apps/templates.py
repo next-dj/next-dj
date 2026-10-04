@@ -58,7 +58,7 @@ def _multiline_tag_pattern(pattern: str) -> str:
     """Return *pattern* with a line-spanning branch for next-dj's own block tags.
 
     Raises when Django's branch is not found, and every tag outside the next-dj
-    set keeps that branch, so a stray `{%` elsewhere swallows no extra text.
+    set keeps that branch, so a stray `{%` elsewhere consumes no extra text.
     """
     if _MULTILINE_BLOCK_TAG_BRANCH in pattern:
         return pattern

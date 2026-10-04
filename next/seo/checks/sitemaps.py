@@ -131,7 +131,7 @@ def check_sitemap_section_labels(*args, **kwargs) -> list[CheckMessage]:
 def check_sitemap_dynamic_routes(*args, **kwargs) -> list[CheckMessage]:
     """Warn about a dynamic route the sitemap neither lists nor excludes (`next.W092`).
 
-    A statically noindex route never reaches the sitemap, so it needs neither.
+    A route whose static metadata sets noindex is never listed, so it is skipped.
     """
     roots = loaded_seo_roots()
     warnings: list[CheckMessage] = []
@@ -161,7 +161,7 @@ def check_sitemap_dynamic_routes(*args, **kwargs) -> list[CheckMessage]:
 def check_sitemap_noindex_items(*args, **kwargs) -> list[CheckMessage]:
     """Warn when `@sitemap.items` lists a trail whose page is noindex (`next.W093`).
 
-    Silent on a closed site, where no sitemap is served and every page reads noindex.
+    A closed site is skipped, since it serves no sitemap and every page is noindex.
     """
     roots = loaded_seo_roots()
     warnings: list[CheckMessage] = []
@@ -186,7 +186,7 @@ def check_sitemap_noindex_items(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _i18n_problems(options: SitemapOptions) -> list[str]:
-    """Return what reads wrong among the i18n options of a `sitemap.py`, with a fix."""
+    """Return every inconsistent i18n option of a `sitemap.py`, each with its fix."""
     problems: list[str] = []
     if not options.i18n and (options.alternates or options.x_default):
         problems.append(
@@ -210,20 +210,21 @@ def _i18n_problems(options: SitemapOptions) -> list[str]:
 
 
 def _limit_warning(source: Path, module: types.ModuleType) -> CheckMessage | None:
-    """Return `next.W086` when a declared `limit` outgrows a page of alternates."""
+    """Return `next.W086` when a declared `limit` exceeds the limit under alternates."""
     declared = getattr(module, "limit", None)
-    options = SitemapOptions.read(module)
     if not is_int(declared) or declared <= 0:
         return None
-    effective = effective_limit(options, sitemap_languages(options))
+    options = SitemapOptions.read(module)
+    languages = sitemap_languages(options)
+    effective = effective_limit(options, languages)
     if options.limit <= effective:
         return None
-    links = len(sitemap_languages(options))
+    links = len(languages)
     default = " and x-default" if options.x_default else ""
     return DjangoWarning(
         f"{source} sets limit = {declared}, but every URL also links its "
         f"{links} languages{default} under alternates, so a page that long could "
-        f"outgrow the 50 MB a sitemap may weigh, and pages hold {effective} URLs "
+        f"exceed the 50 MB limit of a sitemap, and pages hold {effective} URLs "
         f"instead. Lower limit to {effective} or less, or drop it.",
         obj=str(source),
         id="next.W086",
@@ -237,7 +238,7 @@ def _uses_language_prefixes() -> bool:
 
 @register(Tags.urls, NEXT, SEO)
 def check_sitemap_i18n_options(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about i18n options that take no effect or outgrow a page (W100, W101, W086).
+    """Warn about i18n options without effect and oversized pages (W100, W101, W086).
 
     Without `i18n_patterns` every language reverses to one URL, listed once per code.
     """
@@ -288,7 +289,7 @@ def check_sitemap_excluded_items(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _tree_sections(roots: tuple[SeoRoot, ...]) -> Iterator[tuple[str, str]]:
-    """Yield every section the page trees serve with the source naming it."""
+    """Yield every section the page trees serve, with the source declaring it."""
     for root, _module in sitemap_roots(roots):
         own = root.section
         yield own, str(root.sitemap_path)
@@ -334,7 +335,7 @@ def _backend_sections() -> tuple[list[tuple[str, str]], list[CheckMessage]]:
 def check_sitemap_section_collisions(*args, **kwargs) -> list[CheckMessage]:
     """Flag two sources serving one sitemap section name (`next.E116`, `next.W089`).
 
-    The first source wins the name, so the second one never reaches the sitemap.
+    The first source keeps the name, so the second one is never listed.
     """
     roots = loaded_seo_roots()
     backend_sections, errors = _backend_sections()

@@ -66,7 +66,7 @@ class TestSitemapEntry:
 
 
 class TestRobotsRule:
-    """A `RobotsRule` pins its lists as tuples and refuses what breaks the grammar."""
+    """A `RobotsRule` stores tuples and rejects values that break the grammar."""
 
     def test_defaults_to_every_agent_with_no_directives(self) -> None:
         rule = RobotsRule()

@@ -14,24 +14,25 @@ from .markers import UNDECIDED, Consent
 class ConsentProvider(RegisteredParameterProvider):
     """Supply the `Consent` of the request to a parameter annotated with it.
 
-    A render the server keeps off the cookie sees an undecided visitor, the rest vary.
+    A render that does not read the cookie sees an undecided visitor. Any other render
+    varies on `Cookie`.
     """
 
     priority = 50
 
     @override
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
-        """Defer to the static verdict, which the context never changes."""
+        """Return the static answer, which the context does not change."""
         return self.static_can_handle(param) is True
 
     @override
     def static_can_handle(self, param: inspect.Parameter) -> bool:
-        """Settle on the annotation alone."""
+        """Match on the annotation alone."""
         return param.annotation is Consent
 
     @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
-        """Return the consent of the request, undecided where the server reads none."""
+        """Return the consent of the request, undecided when the server reads none."""
         request = context.request
         if not server_mode(request):
             return UNDECIDED

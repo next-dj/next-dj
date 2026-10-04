@@ -23,7 +23,8 @@ if TYPE_CHECKING:
 class MetadataPage(NamedTuple):
     """A routed `page.py` with its raw metadata, its own segment and its static fold.
 
-    `raw` is `None` for the callable form, `segment` and `static` on a schema failure.
+    `raw` is `None` for the callable form. `segment` and `static` are `None` when the
+    schema refuses the page or its chain.
     """
 
     url_path: str
@@ -43,7 +44,7 @@ _metadata_pages: RunMemo[list[MetadataPage]] = RunMemo()
 def loaded_metadata_pages() -> list[MetadataPage]:
     """Return every routed `page.py` with what it declares and what it folds to.
 
-    A router that fails to build answers no pages, since `next.E007` reports it once.
+    A router that fails to build returns no pages, since `next.E007` reports it once.
     """
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:

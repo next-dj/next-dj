@@ -140,8 +140,8 @@ def _stat_ns(path: Path) -> int | None:
 def _source_mtimes(info: ComponentInfo) -> dict[Path, int]:
     """Stat every file a load may read for `info`, before any of them is read.
 
-    Reading first and stat-ing after would file the old text under the mtime of
-    a save that landed in between, hiding that edit until the next one.
+    Reading first and stat-ing after would store the old text under the mtime of a
+    save made in between, hiding that edit until the next one.
     """
     mtimes: dict[Path, int] = {}
     for candidate in (info.template_path, info.module_path):
@@ -156,7 +156,7 @@ def _source_mtimes(info: ComponentInfo) -> dict[Path, int]:
 class CachedComponentTemplateLoader(ComponentTemplateLoader):
     """Reuse a compiled template until the file it was read from changes.
 
-    A render then pays at most one `stat` instead of a read plus a full parse, and a
+    A render then costs at most one `stat` instead of a read plus a full parse, and a
     `component` string picks up its own edits through the `component.py` autoreload.
     """
 
@@ -257,7 +257,7 @@ def _guarded_keys(context_data: dict[str, Any]) -> frozenset[str]:
 
 
 def _is_slot_key(key: object) -> bool:
-    """Report whether a key lands in the slot namespace, non-strings included."""
+    """Report whether a key of any type is in the slot namespace."""
     return isinstance(key, str) and key.startswith(SLOT_KEY_PREFIX)
 
 

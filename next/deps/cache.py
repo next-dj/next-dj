@@ -17,9 +17,9 @@ REQUEST_DEP_CACHE_ATTR: Final[str] = "_next_dep_cache"
 
 
 def render_dep_cache(request: object | None) -> dict[str, Any]:
-    """Return the form dispatch cache on `request`, or a fresh dict it never carries.
+    """Return the form dispatch cache on `request`, or a new dict that stays off it.
 
-    A render publishing its own cache would hand it to every component on the page.
+    A cache stored on the request would be shared with every component on the page.
     """
     cache = None if request is None else getattr(request, REQUEST_DEP_CACHE_ATTR, None)
     return cache if isinstance(cache, dict) else {}
@@ -28,7 +28,7 @@ def render_dep_cache(request: object | None) -> dict[str, Any]:
 def get_request_dep_cache(request: object | None) -> dict[str, Any] | None:
     """Return the form dispatch cache on `request`, `None` where it carries none.
 
-    Deprecated, `render_dep_cache` answers a fresh dict in place of `None`.
+    Deprecated. `render_dep_cache` returns a new dict where this returns `None`.
     """
     warnings.warn(
         "next.deps.get_request_dep_cache is deprecated, call render_dep_cache",

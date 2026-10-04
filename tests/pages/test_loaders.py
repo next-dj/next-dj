@@ -1398,7 +1398,7 @@ class TestPageModuleImportErrors:
         assert isinstance(error.__cause__, cause_type)
 
     def test_an_absent_file_is_never_executed(self, tmp_path, monkeypatch) -> None:
-        """A file that does not stat answers `None` without reaching the loader."""
+        """A file that does not stat returns `None` without reaching the loader."""
         missing = tmp_path / "page.py"
         executed: list[Path] = []
         monkeypatch.setattr(loaders_module, "_load_python_module", executed.append)
@@ -1535,7 +1535,7 @@ class TestPageModuleImportErrors:
 
     def test_a_record_the_file_outlived_stops_arming_the_probe(self, tmp_path) -> None:
         """A dead record is dropped, so the per-request gate goes quiet again."""
-        # The gate reads a process-wide store, so it answers for this file alone.
+        # The gate reads a process-wide store, so the assertion covers this file alone.
         reset_module_memo()
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
@@ -1564,7 +1564,7 @@ class TestPageModuleImportErrors:
     def test_an_evicted_failure_still_answers_for_its_file(
         self, tmp_path, monkeypatch
     ) -> None:
-        """A path the bound evicted is loaded again rather than read as healthy."""
+        """A path the bound evicted is loaded again rather than read as loadable."""
         monkeypatch.setattr(loaders_module, "_MODULE_MEMO", BoundedCache(1))
         reset_module_memo()
         broken = tmp_path / "broken.py"
@@ -1586,7 +1586,7 @@ class TestPageModuleImportErrors:
     def test_a_stale_absent_stat_cannot_split_a_failure_from_its_module(
         self, tmp_path, monkeypatch
     ) -> None:
-        """A load landing between a stale absent stat and its drop stays reported.
+        """A load completed between a stale absent stat and its drop stays reported.
 
         The broken load runs inside the patched stat, the way two threads interleave.
         """
@@ -1688,7 +1688,7 @@ class TestTheModuleMemoIsBounded:
     def test_a_new_page_past_the_bound_drops_the_stalest(
         self, tmp_path, monkeypatch
     ) -> None:
-        """A project with more pages than the bound holds the ones it just read."""
+        """A project with more pages than the bound holds the ones it read last."""
         monkeypatch.setattr(loaders_module, "_MODULE_MEMO", BoundedCache(2))
         reset_module_memo()
         pages = self._write_pages(tmp_path, ("first", "second", "third"))
@@ -1701,7 +1701,7 @@ class TestTheModuleMemoIsBounded:
     def test_a_warm_read_neither_executes_nor_writes(
         self, tmp_path, monkeypatch
     ) -> None:
-        """A hit answers from the memo, so the entries keep the order they landed in."""
+        """A hit reads the memo, so the entries keep the order they were stored in."""
         monkeypatch.setattr(loaders_module, "_MODULE_MEMO", BoundedCache(2))
         reset_module_memo()
         first, second = self._write_pages(tmp_path, ("first", "second"))
@@ -1721,7 +1721,7 @@ class TestTheModuleMemoIsBounded:
         assert list(loaders_module._MODULE_MEMO) == [first, second]
 
     def test_a_file_that_does_not_stat_leaves_no_entry(self, tmp_path) -> None:
-        """A page that vanished answers `None` and drops the entry it left behind."""
+        """A deleted page returns `None` and drops the entry it left behind."""
         reset_module_memo()
         page_file = tmp_path / "page.py"
         page_file.write_text('template = "gone soon"\n')

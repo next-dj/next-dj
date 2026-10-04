@@ -1,6 +1,7 @@
-"""The cache, headers and robots header a page response carries on top of its body.
+"""The `Cache-Control`, custom headers and `X-Robots-Tag` of a page response.
 
-`cache` is a claim of one page, while `headers` flow down the tree like a layout does.
+`cache` applies to the page that declares it, while `headers` apply to every page
+below the `page.py` that declares them.
 """
 
 from __future__ import annotations
@@ -64,7 +65,7 @@ class CacheDict(TypedDict, total=False):
 
 
 type HeadersDict = Mapping[str, str | None]
-"""The `headers` of a page, `None` dropping one an ancestor page set."""
+"""The `headers` of a page, where `None` removes a header an ancestor page set."""
 
 CACHE_FLAGS: Final = ("public", "immutable", "no_store", "no_cache", "must_revalidate")
 CACHE_AGES: Final = ("max_age", "s_maxage", "stale_while_revalidate", "stale_if_error")
@@ -82,18 +83,18 @@ CACHE_HEADERS: Final = frozenset(
         "vary",
     }
 )
-"""The caching header names `cache` owns, lower-cased, a CDN-targeted one included.
+"""The lower-cased caching header names only `cache` sets, the CDN-targeted ones too.
 
-One set by `headers` would outlive the private form a personal response takes.
+A value set through `headers` would remain when a personal response is made private.
 """
 
 CSP_HEADERS: Final = frozenset(
     {"content-security-policy", "content-security-policy-report-only"}
 )
-"""The policy headers a CSP middleware owns, lower-cased.
+"""The lower-cased policy headers the CSP middleware sets.
 
-Django's middleware and django-csp skip a response carrying one, so a page's own
-would replace the whole site policy, its nonce included.
+Django's CSP middleware and django-csp skip a response that already carries one, so a
+page value would replace the site policy and its nonce.
 """
 
 FORBIDDEN_HEADERS: Final = (
@@ -108,13 +109,13 @@ FORBIDDEN_HEADERS: Final = (
         "x-robots-tag",
     }
 )
-"""The header names a page may not set, lower-cased, since the framework owns them."""
+"""The lower-cased header names a page may not set, because the framework sets them."""
 
 _SHARED: Final = frozenset({"public", "s_maxage"})
 _PERSONAL: Final = _SHARED | {"private"}
 _TOKEN: Final = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 _UNSENDABLE: Final = re.compile(r"[^\t\x20-\x7e]")
-"""What no header value may hold, a control character or one outside ASCII."""
+"""Match a control character or a non-ASCII character, which no header value allows."""
 _BLOCKING: Final = NOINDEX_DIRECTIVES | {"nofollow"}
 _SUCCESS: Final = range(200, 300)
 _CACHEABLE: Final = frozenset({"GET", "HEAD"})
@@ -123,7 +124,7 @@ _CACHE_SHAPE: Final = (
     "seconds as an int, False, a CacheDict or a callable returning one"
 )
 _ANSWER_SHAPE: Final = "seconds as an int, False, a CacheDict or None"
-"""What a callable `cache` returns, `None` declaring no cache for that response."""
+"""The shapes a callable `cache` may return, `None` declaring no cache."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,12 +141,12 @@ class CacheControl:
 
     @property
     def stores(self) -> bool:
-        """Whether any cache may keep a copy of the response at all."""
+        """Whether any cache may store the response."""
         return all(name != "no_store" for name, _value in self.directives)
 
     @property
     def seconds(self) -> int | None:
-        """Return how long the response stays fresh, the shared age as a fallback."""
+        """Return the freshness lifetime, `s_maxage` when `max_age` is unset."""
         ages = dict(self.directives)
         age = ages.get("max_age", ages.get("s_maxage"))
         return age if is_int(age) else None
@@ -156,18 +157,23 @@ class CacheControl:
         return CacheControl((("private", True), *kept), self.vary)
 
     def apply(self, response: HttpResponseBase) -> None:
-        """Patch the directives and the `Vary` names onto `response`."""
-        patch_cache_control(response, **dict(self.directives))
+        """Patch the directives and the `Vary` names onto `response`.
+
+        Django writes an empty `Cache-Control` when given no directive, so none is
+        written for a declaration that only names `Vary` headers.
+        """
+        if self.directives:
+            patch_cache_control(response, **dict(self.directives))
         if self.vary:
             patch_vary_headers(response, self.vary)
 
 
 NO_STORE: Final = CacheControl((("private", True), ("no_store", True)))
-"""What `cache = False` sets, a response no cache keeps."""
+"""The directives `cache = False` sets, which forbid every cache to store a copy."""
 
 
 def _from_mapping(value: Mapping[object, object]) -> CacheControl | None:
-    """Read a `CacheDict`, `no_store` taking any shared permission back."""
+    """Read a `CacheDict`, where `no_store` removes `public` and `s_maxage`."""
     directives: list[tuple[str, int | bool]] = [
         (name, True) for name in CACHE_FLAGS if value.get(name) is True
     ]
@@ -189,9 +195,9 @@ def _from_mapping(value: Mapping[object, object]) -> CacheControl | None:
 
 
 def cache_control(value: object) -> CacheControl | None:
-    """Normalise a static `cache` value, a wrong shape reading as no declaration.
+    """Normalise a static `cache` value, returning `None` for a wrong shape.
 
-    Seconds alone mean public, the same as `cache = 3600` in a `sitemap.py`.
+    An int of seconds means `public, max-age=<seconds>`, as in a `sitemap.py`.
     """
     if value is False:
         return NO_STORE
@@ -205,6 +211,7 @@ def cache_control(value: object) -> CacheControl | None:
 
 
 def _mapping_problems(value: Mapping[object, object]) -> list[str]:
+    """Return the problems of a `CacheDict`, one per unknown key or misshapen value."""
     unknown = sorted(str(key) for key in value if key not in CACHE_KEYS)
     problems = [f"unknown keys {', '.join(unknown)}"] if unknown else []
     problems.extend(
@@ -227,7 +234,7 @@ def _mapping_problems(value: Mapping[object, object]) -> list[str]:
 
 
 def cache_problems(value: object, *, callable_allowed: bool = True) -> list[str]:
-    """Return what keeps a `cache` declaration from being read as written."""
+    """Return the problems that keep a `cache` declaration from applying as written."""
     if value is None or value is False or (callable_allowed and callable(value)):
         return []
     if is_int(value):
@@ -243,11 +250,12 @@ def is_header_name(value: object) -> bool:
 
 
 def is_header_value(value: object) -> bool:
-    """Whether `value` is ASCII text a header carries on one line as written."""
+    """Whether `value` is single-line ASCII text without a control character."""
     return isinstance(value, str) and _UNSENDABLE.search(value) is None
 
 
 def _usable_header(name: object, value: object) -> bool:
+    """Whether a page may send the header `name` with `value`, `None` removing it."""
     return (
         is_header_name(name)
         and str(name).lower() not in FORBIDDEN_HEADERS
@@ -256,7 +264,7 @@ def _usable_header(name: object, value: object) -> bool:
 
 
 def headers_problems(value: object) -> list[str]:
-    """Return what keeps a `headers` declaration from being sent as written."""
+    """Return the problems that keep a `headers` declaration from being sent."""
     if value is None:
         return []
     if not isinstance(value, Mapping):
@@ -264,16 +272,16 @@ def headers_problems(value: object) -> list[str]:
     problems: list[str] = []
     for name, header in value.items():
         if not is_header_name(name):
-            problems.append(f"{name!r} is no header name")
+            problems.append(f"{name!r} is not a valid header name")
         elif name.lower() in CACHE_HEADERS:
-            problems.append(f"{name} follows cache, so declare the caching there")
+            problems.append(f"{name} is set by cache, so declare the caching there")
         elif name.lower() in CSP_HEADERS:
             problems.append(
                 f"{name} would replace the site policy, so declare it through the "
                 "CSP middleware"
             )
         elif name.lower() in FORBIDDEN_HEADERS:
-            problems.append(f"{name} belongs to the framework")
+            problems.append(f"{name} is set by the framework")
         if header is not None and not is_header_value(header):
             problems.append(
                 f"the value of {name!r} must be ASCII text on one line, with no "
@@ -284,9 +292,10 @@ def headers_problems(value: object) -> list[str]:
 
 @dataclass(frozen=True, slots=True)
 class ResponsePolicy:
-    """What one page response carries on top of its body, settled before it renders.
+    """The cache, headers and robots header of one page response, set before render.
 
-    `robots` is the header the static metadata calls for, when no head was rendered.
+    `robots` is the `X-Robots-Tag` the static metadata requires, used when no head was
+    rendered.
     """
 
     cache: CacheControl | None = None
@@ -295,15 +304,15 @@ class ResponsePolicy:
 
     @property
     def shared(self) -> bool:
-        """Whether a shared cache may store the response, which defers its CSRF."""
+        """Whether a shared cache may store the response, deferring the CSRF token."""
         return self.cache is not None and self.cache.shared
 
 
 @dataclass(frozen=True, slots=True)
 class _Declared:
-    """What the `page.py` files above one page declare, with the stamps they ran at.
+    """The declarations of the `page.py` files above one page, with their load stamps.
 
-    `dynamic` is a callable `cache` only a request answers, `policy` holding the rest.
+    `dynamic` holds a callable `cache`, which needs a request, and `policy` the rest.
     """
 
     ancestors: AncestorStamps
@@ -315,7 +324,7 @@ _DECLARED: BoundedCache[Path, _Declared] = BoundedCache()
 
 
 def _merge_headers(merged: dict[str, tuple[str, str | None]], value: object) -> None:
-    """Fold one `headers` over the ones above it, by name without regard to case."""
+    """Merge one `headers` mapping over the ancestor ones, matching names by case."""
     if not isinstance(value, Mapping):
         return
     for name, header in value.items():
@@ -324,7 +333,7 @@ def _merge_headers(merged: dict[str, tuple[str, str | None]], value: object) -> 
 
 
 def _read_declared(page: Page, file_path: Path) -> _Declared:
-    """Read `cache` off the page and `headers` off each `page.py` from the root down."""
+    """Read `cache` from the page and `headers` from each `page.py`, the root first."""
     ancestors, modules = AncestorStamps.begin(file_path).loaded()
     merged: dict[str, tuple[str, str | None]] = {}
     own: object = None
@@ -347,7 +356,7 @@ def _read_declared(page: Page, file_path: Path) -> _Declared:
 
 
 def _revalidated(held: _Declared) -> _Declared | None:
-    """Return `held` while no `page.py` behind it loaded again, `None` once one did."""
+    """Return `held` while no `page.py` it was read from has reloaded, else `None`."""
     ancestors = held.ancestors.revalidated()
     if ancestors is None:
         return None
@@ -362,11 +371,11 @@ def response_policy(
     url_kwargs: Mapping[str, object],
     dep_cache: dict[str, object] | None = None,
 ) -> ResponsePolicy:
-    """Return the policy of one response, a static one read once per module reload.
+    """Return the policy of one response, reading the static part once per reload.
 
-    Only a `GET` or a `HEAD` carries a cache, a callable one resolved by injection.
-    Every page view reads its policy first, so the render it starts is watched for a
-    containment that degrades it.
+    Only a `GET` or a `HEAD` receives a cache, and a callable `cache` is resolved
+    through dependency injection. Every page view calls this first, so it also resets
+    the degraded flag of the render that follows.
     """
     watch_degraded()
     stored = _DECLARED.get(file_path)
@@ -393,9 +402,10 @@ def _dynamic_cache(
     dep_cache: dict[str, object],
     url_kwargs: Mapping[str, object],
 ) -> CacheControl | None:
-    """Answer a callable `cache`, a raising or misshapen one taking the page no-store.
+    """Evaluate a callable `cache`, falling back to `NO_STORE` when it fails.
 
-    No cache keeps a response whose policy is unknown, so a failure costs only the copy.
+    A response whose policy is unknown must not be stored, so a failure only disables
+    caching.
     """
     try:
         resolved = current_resolver().resolve_dependencies(
@@ -408,8 +418,8 @@ def _dynamic_cache(
         _failures.contain(
             exc,
             ("cache", file_path),
-            "The callable cache in %s raised, so the page goes out no-store. "
-            "Make it return %s.",
+            "The callable cache in %s raised, so the page is sent with "
+            "Cache-Control: private, no-store. Make it return %s.",
             file_path,
             _ANSWER_SHAPE,
         )
@@ -419,8 +429,8 @@ def _dynamic_cache(
         return cache_control(value)
     message = (
         f"The callable cache in {file_path} returned {reprlib.repr(value)}, and "
-        f"{', '.join(problems)}, so the page goes out no-store. Make it return "
-        f"{_ANSWER_SHAPE}."
+        f"{', '.join(problems)}, so the page is sent with Cache-Control: private, "
+        f"no-store. Make it return {_ANSWER_SHAPE}."
     )
     if fail_loudly():
         raise ImproperlyConfigured(message)
@@ -434,10 +444,10 @@ _COOKIE_VARY_ATTR: Final = "_next_cookie_vary"
 
 
 def prepare_page_render(policy: ResponsePolicy, request: HttpRequest) -> None:
-    """Set up the render of a full page its policy lets a shared cache hold.
+    """Prepare the render of a full page according to its policy.
 
-    The CSRF token leaves the HTML where `CSRF_DELIVERY` asks, and the render learns
-    no visitor may show. A zone answer is private and skips both.
+    The CSRF token is deferred where `CSRF_DELIVERY` requires it, and a page a shared
+    cache may store is marked as a shared render. A zone response skips both steps.
     """
     mode = csrf_delivery()
     if mode is CsrfDelivery.LAZY or (mode is CsrfDelivery.AUTO and policy.shared):
@@ -447,34 +457,34 @@ def prepare_page_render(policy: ResponsePolicy, request: HttpRequest) -> None:
 
 
 def mark_shared_render(request: HttpRequest) -> None:
-    """Mark a render a shared cache may hold, so its HTML shows no visitor."""
+    """Mark a render a shared cache may store, so its HTML must not show a visitor."""
     setattr(request, _SHARED_RENDER_ATTR, True)
 
 
 def shared_render(request: HttpRequest | None) -> bool:
-    """Whether a shared cache may hold the response this render builds."""
+    """Whether a shared cache may store the response this render builds."""
     return getattr(request, _SHARED_RENDER_ATTR, False) is True
 
 
 def mark_personal_render(request: HttpRequest | None) -> None:
-    """Mark a render whose HTML shows one visitor, so no shared cache may keep it."""
+    """Mark a render whose HTML is specific to one visitor, so it stays private."""
     if request is not None:
         setattr(request, _PERSONAL_RENDER_ATTR, True)
 
 
 def personal_render(request: HttpRequest | None) -> bool:
-    """Whether this render put something of one visitor into its HTML."""
+    """Whether this render put visitor-specific content into its HTML."""
     return getattr(request, _PERSONAL_RENDER_ATTR, False) is True
 
 
 def vary_on_cookie(request: HttpRequest | None) -> None:
-    """Mark the response of `request` as one whose HTML follows a cookie."""
+    """Mark the response of `request` as one whose HTML depends on a cookie."""
     if request is not None:
         setattr(request, _COOKIE_VARY_ATTR, True)
 
 
 def cookie_varies(request: HttpRequest | None) -> bool:
-    """Whether the HTML of this response follows a cookie."""
+    """Whether the HTML of this response depends on a cookie."""
     return getattr(request, _COOKIE_VARY_ATTR, False) is True
 
 
@@ -482,7 +492,7 @@ _WARNED: BoundedCache[Path, bool] = BoundedCache()
 
 
 def forget_response_policies(**kwargs) -> None:
-    """Drop the memoised policies and the pages already warned about going private."""
+    """Drop the memoised policies and the record of pages already warned about."""
     _DECLARED.clear()
     _WARNED.clear()
 
@@ -491,14 +501,14 @@ settings_reloaded.connect(forget_response_policies)
 
 
 def _warn_private(file_path: Path) -> None:
-    """Log once per page that its shared cache went private for a personal response."""
+    """Log once per page that its shared cache was made private for one visitor."""
     if file_path in _WARNED:
         return
     _WARNED[file_path] = True
     logger.warning(
         "%s declares a shared cache, but its response follows the visitor through a "
         "cookie, the session, the CSRF token, the consent, a CSP nonce or the "
-        "Authorization header, so it goes out private.",
+        "Authorization header, so it is sent with Cache-Control: private.",
         file_path,
     )
 
@@ -513,15 +523,16 @@ def _take_private(
 
 
 class SharedCookies(SimpleCookie):
-    """The cookies of a shared response, the first one set taking the cache private.
+    """The cookie jar of a shared response, which makes it private on the first cookie.
 
-    Middleware sets the CSRF and session cookies after the view, so the check sits here.
+    Middleware sets the CSRF and session cookies after the view returns, so the jar
+    itself runs the check.
     """
 
     def __init__(
         self, response: HttpResponseBase, control: CacheControl, file_path: Path
     ) -> None:
-        """Guard `response`, which holds the shared `control` of the page."""
+        """Watch `response`, which carries the shared `control` of the page."""
         super().__init__()
         self.shared: tuple[HttpResponseBase, CacheControl, Path] | None = (
             response,
@@ -531,33 +542,34 @@ class SharedCookies(SimpleCookie):
 
     @override
     def __setitem__(self, key: str, value: str | Morsel[str]) -> None:
-        """Set the cookie, then take back the shared-cache permission."""
+        """Set the cookie, then make the response private."""
         super().__setitem__(key, value)
         self.take_private()
 
     @override
     def update(self, *args: Any, **kwargs: Any) -> None:
-        """Set every cookie given, then take back the shared-cache permission."""
+        """Set every cookie given, then make the response private."""
         super().update(*args, **kwargs)
         self._took_cookie()
 
     @override
     def load(self, rawdata: str | SupportsItems[str, str | Morsel[Any]]) -> None:
-        """Parse the cookies given, then take back the shared-cache permission."""
+        """Parse the cookies given, then make the response private."""
         super().load(rawdata)
         self._took_cookie()
 
     def _took_cookie(self) -> None:
+        """Make the response private when the jar holds any cookie."""
         if self:
             self.take_private()
 
     @override
     def __reduce__(self) -> tuple[object, ...]:
-        """Pickle as a plain `SimpleCookie`, since a cached copy guards nothing."""
+        """Pickle as a plain `SimpleCookie`, since a cached copy has no response."""
         return (SimpleCookie, (), None, None, iter(self.items()))
 
     def take_private(self) -> None:
-        """Turn the response private, once, however many cookies follow."""
+        """Make the response private on the first call, ignoring every later call."""
         shared = self.shared
         if shared is not None:
             self.shared = None
@@ -565,12 +577,12 @@ class SharedCookies(SimpleCookie):
 
 
 def _personal(request: HttpRequest, response: HttpResponseBase) -> bool:
-    """Whether the response shows who asked, by a cookie, the session or its HTML.
+    """Whether the response is specific to the visitor, by a cookie, session or HTML.
 
-    A request with credentials is personal too, as a shared copy would reach everyone,
-    and so is one whose render read the CSP nonce, a template of the project included.
+    A request with an `Authorization` header is personal too, since a shared copy would
+    reach every visitor, and so is a render that read the CSP nonce in any template.
     """
-    # Read here, since `next.static` renders pages and so imports this module first.
+    # Imported here, because `next.static` imports this module during its own import.
     from next.static.nonce import nonce_minted  # noqa: PLC0415
 
     if (
@@ -587,7 +599,7 @@ def _personal(request: HttpRequest, response: HttpResponseBase) -> bool:
 
 
 def _after_render(request: HttpRequest, response: HttpResponseBase) -> None:
-    """Settle the cookie `Vary` and the shared cache of a lazily rendered response."""
+    """Apply the cookie `Vary` and the privacy rule to a lazily rendered response."""
     if cookie_varies(request):
         patch_vary_headers(response, ("Cookie",))
     if degraded():
@@ -604,7 +616,7 @@ def _apply_cache(
     request: HttpRequest,
     file_path: Path,
 ) -> None:
-    """Set the cache of a successful response that names none of its own."""
+    """Set the cache on a successful response that carries no `Cache-Control`."""
     if response.has_header("Cache-Control") or response.status_code not in _SUCCESS:
         return
     if control.shared and _personal(request, response):
@@ -616,10 +628,10 @@ def _apply_cache(
 
 
 def _hold_degraded(response: HttpResponseBase) -> None:
-    """Keep a page a contained failure degraded out of every cache.
+    """Send a page whose failure was contained with `Cache-Control: private, no-store`.
 
-    The page lacks what the failing source would have added, a `noindex` among
-    them, so neither a CDN nor the browser may keep it past the failure.
+    The page lacks what the failing source would have added, possibly a `noindex`, so
+    neither a CDN nor the browser may store it.
     """
     cookies = response.cookies
     if isinstance(cookies, SharedCookies):
@@ -630,13 +642,15 @@ def _hold_degraded(response: HttpResponseBase) -> None:
 
 
 def _blocks(content: str | None) -> bool:
+    """Whether the robots `content` holds a directive that blocks indexing or links."""
     return content is not None and not _BLOCKING.isdisjoint(robots_directives(content))
 
 
 def robots_tag(robots: str | None, googlebot: str | None) -> str | None:
-    """Return the `X-Robots-Tag` a page's robots directives call for, if any block.
+    """Return the `X-Robots-Tag` value of a page, `None` unless a directive blocks.
 
-    A header holds one agent, so the directives for every agent win over googlebot.
+    The header names one agent, so the directives for every agent take precedence over
+    the googlebot ones.
     """
     if _blocks(robots):
         return robots
@@ -646,12 +660,12 @@ def robots_tag(robots: str | None, googlebot: str | None) -> str | None:
 
 
 def _static_robots(page: Page, file_path: Path) -> str | None:
-    """Return the robots header the static metadata of the page calls for."""
+    """Return the `X-Robots-Tag` value the static metadata of the page requires."""
     return robots_tag(*robots_contents(page.static_metadata(file_path), indexable=True))
 
 
 def _stamp_headers(response: HttpResponseBase, policy: ResponsePolicy) -> None:
-    """Add the `headers` of the page, each one the response already set kept."""
+    """Add the `headers` of the page, keeping every header the response already set."""
     for name, value in policy.headers:
         response.headers.setdefault(name, value)
 
@@ -659,9 +673,10 @@ def _stamp_headers(response: HttpResponseBase, policy: ResponsePolicy) -> None:
 def finish_response[R: HttpResponseBase](
     response: R, policy: ResponsePolicy, request: HttpRequest, file_path: Path
 ) -> R:
-    """Stamp the headers, the cache and the robots header of a page on its response.
+    """Set the headers, the cache and the robots header of a page on its response.
 
-    A response `render()` built keeps every header it set, the page filling the gaps.
+    A response that `render()` built keeps every header it set, and the declarations
+    of the page fill only the missing ones.
     """
     _stamp_headers(response, policy)
     if policy.cache is not None:
@@ -687,9 +702,10 @@ def finish_response[R: HttpResponseBase](
 def finish_zone_response[R: HttpResponseBase](
     response: R, policy: ResponsePolicy, request: HttpRequest
 ) -> R:
-    """Stamp the headers and the robots header of a page on one of its zone answers.
+    """Set the headers and the site robots header of a page on a zone response.
 
-    Many CDNs ignore `Vary` and would serve a zone answer as the page, so none is kept.
+    Many CDNs ignore `Vary` and would serve a zone response for the full page, so a
+    response without its own `Cache-Control` is sent with `private, no-store`.
     """
     _stamp_headers(response, policy)
     if not response.has_header("Cache-Control"):

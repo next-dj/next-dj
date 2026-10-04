@@ -1,7 +1,7 @@
-// The entry of next.dev.min.js, handing the dev channel to the runtime as it evaluates.
+// The entry point of next.dev.min.js, which registers the dev diagnostics.
 
 import { createDiagnostics, warnCsrf } from "./diagnostics";
 
-// The chunk lands after _init seeded the context, so the payload is there to check.
+// The chunk evaluates after _init seeded the context, so the payload can be checked.
 warnCsrf(window.Next.context);
 window.Next._land("dev", createDiagnostics());

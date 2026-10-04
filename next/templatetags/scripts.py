@@ -1,6 +1,6 @@
 """Template tags for third-party scripts and consent-gated markup.
 
-`script` notes the render's collector, and `consented` gates its body.
+`{% script %}` adds a script to the render, and `{% #consented %}` gates its body.
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ def _merge_held(
 ) -> None:
     """Merge what a client-rendered gated body registered into the render's collector.
 
-    Styles and the JS context pass, being inert until the markup they serve shows.
+    Styles and the JS context are merged, since they act only once their markup shows.
     A script waits in the manifest for the category, and any other kind is dropped.
     """
     for slot in default_placeholders:
@@ -101,7 +101,7 @@ def _merge_held(
     for name in shadow.notes(SCRIPT_NOTE):
         collector.note(GATED_NOTE, GatedNote(category, cast("str", name)))
     for note in shadow.notes(GATED_NOTE):
-        # A block nested in this one held it back first, so it waits for both.
+        # A nested block held it back first, so it waits for both categories.
         held = cast("GatedNote", note)
         joint = joint_category(category, held.category)
         collector.note(GATED_NOTE, GatedNote(joint, held.target))
@@ -112,9 +112,9 @@ def _merge_held(
 class ConsentedNode(ConsentedTagNode):
     """Renders its body for a visitor who granted the category, else its else branch.
 
-    A client-rendered page gets both, the body inert in a template, then an end marker.
-    The body then registers on a collector of its own, so the scripts it names wait
-    for the category in the manifest instead of loading with the page.
+    On a client-rendered page the body sits in an inert `<template>`, followed by the
+    else branch and an end marker. The body registers on a collector of its own, so
+    the scripts it names wait in the manifest for the category.
     """
 
     def __init__(
@@ -127,7 +127,7 @@ class ConsentedNode(ConsentedTagNode):
 
     @override
     def render(self, context: template.Context) -> str:
-        """Render the branch the consent of the visitor picks."""
+        """Render the branch the consent of the visitor selects."""
         category = str(self.category.resolve(context))
         _warn_unknown(category)
         request = _request(context)

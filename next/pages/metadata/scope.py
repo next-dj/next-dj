@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class MetadataOptions:
-    """The upper-case switches beside `DEFAULTS`, each read leniently."""
+    """The upper-case options of the `METADATA` scope, each read leniently."""
 
     canonical_query: tuple[str, ...] = ()
 
@@ -55,8 +55,8 @@ def metadata_options() -> MetadataOptions:
 def site_segment() -> Segment:
     """Return the settings defaults as the outermost segment of every chain.
 
-    The site name falls back to `SITE["NAME"]`, and a malformed scope folds to nothing,
-    logged once per reload, since a shape error would fail every render.
+    The site name defaults to `SITE["NAME"]`. A malformed `DEFAULTS` is logged once per
+    reload and contributes nothing, since raising would fail every render.
     """
     defaults = scope_value("METADATA", "DEFAULTS")
     segment = Segment(SITE_SOURCE)
@@ -64,7 +64,6 @@ def site_segment() -> Segment:
         try:
             segment = normalize_site_metadata(defaults, source=SITE_SOURCE)
         except PageMetadataShapeError as exc:
-            # `next.E098` names it, so one bad key never takes every page down.
             logger.warning("%s, so the defaults fold to nothing", exc)
     name = site_config().name
     if segment.metadata.site_name is None and name is not None:

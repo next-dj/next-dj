@@ -24,8 +24,8 @@ _PREFIX: Final = "NEXT_FRAMEWORK['CONSENT']"
 _CATEGORY_NAME: Final = re.compile(r"[A-Za-z0-9_.-]+")
 """A category name the consent cookie `2:<a>|<b>:<seconds>` carries intact.
 
-`:` closes the list and `|` separates the names, so neither may appear in one, nor
-`,`, which separated them in the first format the server still reads.
+`:` ends the list and `|` separates the names, so a name contains neither. A name
+also excludes `,`, the separator of format `1`, which the server still reads.
 """
 
 
@@ -38,8 +38,8 @@ def _raw_categories() -> object:
 def category_list_problem() -> str | None:
     """Return what makes `CONSENT['CATEGORIES']` unusable, `None` when nothing does.
 
-    The scripts checks read it too, so a list `next.E135` reports draws no `next.E140`
-    for every script it would otherwise leave out.
+    The scripts checks call it too, so a list `next.E135` reports raises no `next.E140`
+    for each script as well.
     """
     listed = _raw_categories()
     if listed is None:
@@ -57,7 +57,7 @@ def category_list_problem() -> str | None:
 
 
 def _listed_categories() -> list[CheckMessage]:
-    """Report a `CONSENT['CATEGORIES']` that is no list of names or lacks necessary."""
+    """Report a `CONSENT['CATEGORIES']` that lists no names or lacks necessary."""
     problem = category_list_problem()
     if problem is None:
         return []
@@ -87,7 +87,7 @@ def _backend_errors(scope: Mapping[str, object]) -> list[CheckMessage]:
         return []
     problem: str | None = None
     if not isinstance(path, str) or not path:
-        problem = "is no dotted path"
+        problem = "is not a dotted path"
     else:
         try:
             backend = import_class_cached(path)
@@ -95,7 +95,7 @@ def _backend_errors(scope: Mapping[str, object]) -> list[CheckMessage]:
             problem = f"does not import: {exc}"
         else:
             if not (isinstance(backend, type) and issubclass(backend, ConsentBackend)):
-                problem = "is no next.consent.ConsentBackend subclass"
+                problem = "is not a next.consent.ConsentBackend subclass"
     if problem is None:
         return []
     return [

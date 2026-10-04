@@ -191,7 +191,7 @@ class TestValidateBehindViewPermissions:
 
 @pytest.mark.django_db()
 class TestValidateCsrfMeta:
-    """The CSRF meta rides the validate envelope only on a token rotation."""
+    """The validate envelope carries the CSRF meta only on a token rotation."""
 
     def test_rotation_stamps_the_csrf_payload(self, next_client: NextClient) -> None:
         response = next_client.post_action(

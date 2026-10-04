@@ -37,8 +37,8 @@ def _scanned_root(root: Path) -> Iterator[None]:
 def _context_pages(*pages: tuple[Path, str, str]) -> Iterator[None]:
     """Point the page-scanning checks at real on-disk page directories.
 
-    Real imports and compiles mimic production, so a zone tag and a
-    `@context` registration land here the same way they do live.
+    Real imports and compiles match production, so a zone tag and a `@context`
+    registration are recorded the same way as in a live process.
     """
     root = pages[0][0].parent.parent
     for page_file, source, body in pages:
@@ -589,8 +589,8 @@ class TestAssetVersionMovesBetweenDeploysCheck:
         ids=["pinned_tag", "manifest_sentinel"],
     )
     def test_a_named_version_is_silent(self, options: dict[str, object]) -> None:
-        # a pinned tag moves by hand and the sentinel answers to next.W069, so
-        # neither case earns a second warning about the same decision
+        # A pinned tag is moved by hand and the sentinel is reported as next.W069,
+        # so neither case gets a second warning about the same decision.
         with _partial_options(options):
             assert checks.check_asset_version_moves_between_deploys() == []
 

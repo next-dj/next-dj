@@ -356,6 +356,20 @@ class TestBackendsLoadedOnce:
             manager._ensure_backends()
         assert manager.default_backend is seeded
 
+    def test_the_load_is_marked_after_the_derived_state(self) -> None:
+        manager = StaticManager()
+        loaded_while_resolving: list[bool] = []
+        resolve = StaticManager._resolve_collector_strategies
+
+        def spy(self: StaticManager) -> None:
+            loaded_while_resolving.append(self._loaded)
+            resolve(self)
+
+        with mock.patch.object(StaticManager, "_resolve_collector_strategies", spy):
+            manager._ensure_backends()
+        assert loaded_while_resolving == [False]
+        assert manager._loaded
+
     def test_a_caller_emptying_the_list_does_not_trigger_a_reload(self) -> None:
         manager = StaticManager()
         manager._ensure_backends()

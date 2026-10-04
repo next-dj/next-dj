@@ -546,7 +546,7 @@ class TestZoneTickOnTheResolvingBranch:
     def test_a_render_redirect_short_circuits_the_tick(
         self, page_instance, tmp_path
     ) -> None:
-        """A redirect answers the tick before the shaper is consulted."""
+        """A redirect is returned for the tick before the shaper is consulted."""
         page_file = tmp_path / "page.py"
         page_file.write_text(
             "from django.http import HttpResponseRedirect\n\n\n"
@@ -629,7 +629,7 @@ class TestTemplateStalenessGate:
     def test_a_warm_get_stats_no_source_in_production(
         self, page_instance, tmp_path, monkeypatch
     ) -> None:
-        """The production hit answers from the caches without touching a source."""
+        """The production hit reads the caches without touching a source."""
         page_file = build_nested_page(tmp_path)
         view = unified_view(page_instance, page_file)
         view(build_page_request(), title="One")
@@ -642,7 +642,7 @@ class TestTemplateStalenessGate:
     def test_a_warm_get_stats_its_sources_in_dev(
         self, page_instance, tmp_path, monkeypatch, watched_template_edits
     ) -> None:
-        """The dev hit pays the stat that makes an edit visible."""
+        """The dev hit runs the stat that makes an edit visible."""
         page_file = build_nested_page(tmp_path)
         view = unified_view(page_instance, page_file)
         view(build_page_request(), title="One")
@@ -690,7 +690,7 @@ class TestTemplateStalenessGate:
     def test_production_serves_the_composed_template_until_the_caches_drop(
         self, page_instance, tmp_path
     ) -> None:
-        """An edit lands on the next deploy, or on an explicit cache drop."""
+        """An edit takes effect on the next deploy, or on an explicit cache drop."""
         page_file = build_nested_page(tmp_path, body="<h1>first</h1>")
         view = unified_view(page_instance, page_file)
         assert b"first" in view(build_page_request()).content
@@ -767,7 +767,7 @@ class TestTemplateRegistryBound:
     def test_a_compiled_form_evicted_alone_recompiles_from_the_held_source(
         self, page_instance, tmp_path, monkeypatch
     ) -> None:
-        """The surviving source answers the recompile without a disk read."""
+        """The surviving source serves the recompile without a disk read."""
         page_file = self._static_page(tmp_path, "page")
         page_instance.render(page_file)
         source = page_instance._templates.composed[page_file]
@@ -781,7 +781,7 @@ class TestTemplateRegistryBound:
 
 
 class TestFullPageResponseDeclaresItsNegotiation:
-    """A full page answers under the request headers the partial layer reads."""
+    """A full page renders under the request headers the partial layer reads."""
 
     def test_the_static_branch_varies_on_every_partial_header(
         self, page_instance, tmp_path

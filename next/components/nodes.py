@@ -1,7 +1,7 @@
-"""The base of the node `{% component %}` compiles to, apart from the tag library.
+"""The base class of the node `{% component %}` compiles to.
 
-The tag library reaches `next.static`, which imports this package, so a check finds
-compiled component tags through this base instead of importing the library.
+The tag library imports `next.static`, which imports this package, so a check finds
+compiled component tags through this base class instead of importing the library.
 """
 
 from django.template.base import Node

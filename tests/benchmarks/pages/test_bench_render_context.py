@@ -28,7 +28,7 @@ def _register_context_functions(page: Page, page_path, count: int) -> None:
 
 
 def _inherited_value() -> str:
-    """Inheritable context callable priced near zero, so the walk stays visible."""
+    """Inheritable context callable of negligible cost, so the walk stays visible."""
     return "v"
 
 

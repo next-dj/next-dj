@@ -39,7 +39,7 @@ import type { Diagnostics } from "./protocol";
 export interface PartialDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   mergeContext: (data: Record<string, unknown>) => void;
-  // The stream bridge, the CSRF mint, and the poller, each held by its own lazy chunk.
+  // The SSE bridge, the CSRF token fetch and the poller, each in its own lazy chunk.
   sse: LazyModule<SseFactory>;
   csrf: LazyModule<CsrfMint>;
   poll: LazyModule<PollFactory>;
@@ -52,7 +52,7 @@ export interface PartialAdapters {
   navigate?: Navigate;
   document?: Document;
   dev?: boolean;
-  // The dev channel, handed over once next.dev.min.js lands.
+  // The dev diagnostics, set once next.dev.min.js has loaded.
   diagnostics?: Diagnostics;
   dialog?: DialogAdapter;
   history?: HistoryAdapter;
@@ -73,7 +73,7 @@ export interface PartialSurface {
   defineOp(name: string, handler: OpHandler): void;
   parseHook(contentType: string, hook: ParseHook): void;
   setCsrf(csrf: CsrfPayload | undefined): void;
-  /** Where the page stands, what Next.navigation.current() answers. */
+  /** The current URL, path and title, returned by Next.navigation.current(). */
   _current(): NavigationState;
   /** Run the post-morph mount pass over markup inserted outside an envelope. */
   mount(nodes: readonly Element[]): void;
@@ -127,7 +127,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   let navigation = createNavigation(navigationDeps());
   let layers = createLayers(layerDeps());
   let triggers = createTriggers(triggerDeps());
-  // The bridge once its chunk landed, built over the adapters configured last.
+  // The SSE bridge once its chunk has loaded, built with the adapters configured last.
   let bridge: Sse | undefined;
   let sseAdapters: PartialAdapters | undefined;
   const live = (): Sse | undefined => {
@@ -137,8 +137,8 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     }
     return bridge;
   };
-  // A page with no stream never fetches the bridge. An id remembered before it lands
-  // answers a mutation no stream it opens was subscribed for, so none is kept.
+  // A page with no stream never fetches the bridge. A request id from before it loads
+  // belongs to a mutation no later stream is subscribed for, so it is not kept.
   const sse: Sse = {
     scan(root) {
       if (matching(root, `[${ATTR_SSE}]`).length === 0) return;
@@ -187,7 +187,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       // it rebuilds the stack and the applier cannot decide what this one sees.
       layers: () => layers,
       navigation: () => navigation,
-      // The visit verb rides this hard-navigation seam, the url verb rides navigation.
+      // The visit verb uses this full-navigation seam, the url verb uses navigation.
       navigate: () => navigate,
       assets: () => assets,
       mount: { run: runMount },
@@ -200,7 +200,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     return {
       ...adapters,
       dispatch: deps.dispatch,
-      // Shares the applier's navigation, whose commit writes the push a layer holds.
+      // The applier's navigation, whose commit announces the push a layer holds.
       navigation,
       fetch: (request: WireRequest) => wire.fetch(request),
       abort: (key: string) => wire.abort(key),
@@ -219,8 +219,8 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       // modal stamps the origin the server resolves its zones against.
       layerHost: (el: Element) => layers.hostFor(el),
       rewrite: (el: Element, href: string) => layers.rewrite(el, href),
-      // A filter submit syncs the address bar through the navigation, so it
-      // announces like any other write and never goes behind the runtime's back.
+      // A filter submit updates the URL through the navigation, so it is announced
+      // like any other write.
       history: navigation.asHistory(),
       diagnostics: readDiagnostics,
       poll: deps.poll,
@@ -240,8 +240,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
 
   function wireDeps(adapters?: PartialAdapters) {
     return {
-      // The fetch, document, navigate, and the same reload-once store the asset
-      // guard uses.
+      // The fetch, document, navigate, and the session store the asset guard uses.
       ...adapters,
       dispatch: announce(adapters),
       onEnvelope: (
@@ -315,7 +314,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       dev = adapters.dev ?? false;
       const previous = diagnostics;
       diagnostics = dev ? (adapters.diagnostics ?? previous) : undefined;
-      // A dev chunk landing after the ready scan catches up over the mounted page.
+      // Diagnostics that arrive after the ready scan check the already mounted page.
       if (mounted && diagnostics !== previous) diagnostics?.attrs(document);
       if (onlyDev(adapters)) return;
       if (adapters.document !== undefined) dirty.install(adapters.document);

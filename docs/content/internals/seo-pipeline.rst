@@ -189,7 +189,7 @@ The paginator is the public ``paginator`` property of the Django sitemap, overri
 Under ``i18n`` a ``LanguagePairs`` sequence pairs every entry with every language, and its count is the product.
 ``get_latest_lastmod`` answers a ``QuerySet`` part with one ``Max`` aggregate on the ``lastmod`` column, and a materialised part with the newest date it holds.
 
-``location`` reverses through ``page_reverse`` per call, so the language active in Django's ``i18n`` loop lands in the path.
+``location`` reverses through ``page_reverse`` per call, so the language active in Django's ``i18n`` loop appears in the path.
 Without ``i18n``, ``get_urls`` runs under ``LANGUAGE_CODE``, so the document never depends on the language of the crawler.
 The Django ``x_default`` derivation is switched off, and ``get_urls`` appends an ``x-default`` alternate on the URL of the default language through the same ``x_default_url`` helper the head uses.
 ``get_domain`` reads ``request_origin``, ``SITE["URL"]`` first, then :func:`~django.contrib.sites.shortcuts.get_current_site`, then the request host.
@@ -208,7 +208,7 @@ Views
 ~~~~~
 
 Every view answers ``GET`` and ``HEAD`` alone, answers a miss through ``_not_found`` with a constant reason, a plain-text 404 that skips the project's 404 handler, and stamps ``X-Robots-Tag: noindex, nofollow`` on a site closed to search.
-Any other exception, from an items callable, a backend, a ``rules`` callable, or a reverse, goes through ``FailureLog.contain`` of ``next.diagnostics``, answering 503 with ``Retry-After`` and logging once, or raising with a note under ``DEBUG``.
+Any other exception, from an items callable, a backend, a ``rules`` callable, or a reverse, goes through ``FailureLog.contain`` of ``next.diagnostics``, answering 503 with ``Retry-After`` and logging once, or raising with a note under ``DEBUG`` or ``STRICT_LOADING``.
 A view reached through a mount other than ``next_seo`` while ``next.seo.urls`` serves that route at another address answers 404, so each document has one address.
 The sitemap and robots views sit behind a wrapper that applies the declared ``Cache-Control`` to a 200 and, for a storable cache with an age, :func:`~django.views.decorators.cache.cache_page` keyed on the fingerprint and the indexability of the request, one wrap per indexability, rebuilt when the manager version moves.
 

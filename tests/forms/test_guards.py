@@ -181,7 +181,7 @@ class TestBuildActionGuard:
 
 
 class TestGuardRegistration:
-    """Guard config declared on Meta or @action lands in ActionMeta."""
+    """Guard config declared on Meta or @action is stored in ActionMeta."""
 
     @pytest.mark.parametrize(
         ("action_name", "expected"),

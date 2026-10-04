@@ -120,7 +120,7 @@ class TestSourceModules:
 
 
 class TestServedRoutes:
-    """Each predicate answers the way the matching route decides to mount."""
+    """Each predicate matches the mount decision of the route it describes."""
 
     def test_a_bare_tree_serves_nothing(self, tmp_path) -> None:
         with routed(write_tree(tmp_path / "pages")):

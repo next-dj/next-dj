@@ -141,6 +141,7 @@ class TestDeclaredRules:
             ("ftp://acme.example/s.xml", False),
             ("https://acme.example/s.xml\nUser-agent: evil", False),
             ("https:///s.xml", False),
+            ("https://[::1/s.xml", False),
             (3, False),
         ],
     )
@@ -188,7 +189,7 @@ class TestTextFile:
             caplog.at_level(logging.ERROR, logger="next.seo"),
         ):
             assert source.read() == b"one\n"
-        assert "the last good copy answers" in caplog.text
+        assert "the last copy read is served" in caplog.text
 
     def test_a_failed_first_read_raises(self, tmp_path) -> None:
         path = tmp_path / "robots.txt"
@@ -208,7 +209,7 @@ def _root(path: Path, **sources: object) -> SeoRoot:
 
 
 class TestCandidates:
-    """The sources pair with what they serve, in the order the routes prefer them."""
+    """Each source is paired with what it serves, in order of precedence."""
 
     def test_a_robots_py_precedes_its_robots_txt(self, tmp_path) -> None:
         module = _module()

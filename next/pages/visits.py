@@ -17,9 +17,9 @@ if TYPE_CHECKING:
 def visit_request(request: "HttpRequest", url: str | None) -> "HttpRequest":
     """Return a copy of `request` that presents a GET visit of `url`.
 
-    A page answers an out-of-band caller through the same `render()` its own view runs,
-    so that `render()` has to read the page, not the endpoint that asked on its behalf.
-    The copy keeps what a middleware attached, not the dependency cache of a dispatch.
+    An out-of-band caller runs the same `render()` as the page view, so that `render()`
+    must see the page URL rather than the endpoint that called it. The copy keeps what
+    a middleware attached, but not the dependency cache of a form dispatch.
     """
     path, _, query = (url or "").partition("?")
     visit = copy.copy(request)

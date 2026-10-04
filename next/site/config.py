@@ -1,4 +1,4 @@
-"""The site identity `NEXT_FRAMEWORK["SITE"]` declares, read once per reload."""
+"""The site identity that `NEXT_FRAMEWORK["SITE"]` declares, read once per reload."""
 
 import enum
 import functools
@@ -35,6 +35,7 @@ SITE_ORIGIN_ATTR: Final = "_next_site_origin"
 """The request attribute the origin of one request is held under."""
 
 _DECLARED_ATTR: Final = "_next_site_declared"
+_INDEXABLE_ATTR: Final = "_next_site_indexable"
 _URL_SETTING: Final = "NEXT_FRAMEWORK['SITE']['URL']"
 _INDEXABLE_SETTING: Final = "NEXT_FRAMEWORK['SITE']['INDEXABLE']"
 
@@ -48,7 +49,7 @@ _failures = FailureLog(logger)
 
 
 class _Failed(enum.Enum):
-    """What a callable `URL` that raised or answered no origin declares."""
+    """The marker for a callable `URL` that raised or returned no valid origin."""
 
     FAILED = enum.auto()
 
@@ -58,7 +59,7 @@ type _Declared = tuple[str, str] | Literal[_Failed.FAILED] | None
 
 @dataclass(frozen=True, slots=True)
 class SiteConfig:
-    """The `SITE` scope read leniently, the system checks reporting what it drops.
+    """The `SITE` scope, read leniently. The system checks report what it drops.
 
     `indexable` is `None` for the `"auto"` rule, which reads `DEBUG` on every call.
     """
@@ -75,14 +76,14 @@ def is_url_literal(value: str) -> bool:
 
 @functools.lru_cache(maxsize=256)
 def url_origin(value: str) -> tuple[str, str] | None:
-    """Return the scheme and the host of an http or https origin, `None` for the rest.
+    """Return the scheme and the host of an http or https origin, else `None`.
 
-    A path, a query, a fragment or credentials would leak into every URL built on it,
-    so none passes, and neither does a host Django would refuse or a port out of range.
+    A path, a query, a fragment or credentials would appear in every URL built on the
+    origin, so each is rejected, as are a host Django rejects and an invalid port.
     """
     try:
         parts = urlsplit(value)
-        # The port is parsed lazily and raises on one out of range.
+        # `port` is parsed on access and raises `ValueError` when out of range.
         _port = parts.port
     except ValueError:
         return None
@@ -101,9 +102,9 @@ def url_origin(value: str) -> tuple[str, str] | None:
 
 
 def url_rule(value: object) -> str | SiteUrlRule | None:
-    """Return the `URL` rule a setting value names, `None` for one the scope drops.
+    """Return the `URL` rule a setting value names, `None` for an unusable value.
 
-    The system check reads the same answer, so the two never disagree on a value.
+    The system check calls this function too, so both read every value the same way.
     """
     if isinstance(value, str):
         if is_url_literal(value):
@@ -118,7 +119,7 @@ def _indexable_rule(value: object) -> IndexableRule | None:
 
 @functools.cache
 def site_config() -> SiteConfig:
-    """Return the site identity read from the settings, built once per reload."""
+    """Return the site identity read from the settings, memoised until a reload."""
     name = scope_value("SITE", "NAME")
     return SiteConfig(
         url=url_rule(scope_value("SITE", "URL")),
@@ -136,7 +137,7 @@ settings_reloaded.connect(forget_site_config)
 
 
 def _url_failed(key: str, message: str, exc: Exception | None = None) -> _Failed:
-    """Report a callable `URL` that failed, raising under `DEBUG`, else logging once."""
+    """Report a failed callable `URL`, raising when loading is strict, else logging."""
     if fail_loudly():
         raise ImproperlyConfigured(message) from exc
     if exc is None:
@@ -147,7 +148,7 @@ def _url_failed(key: str, message: str, exc: Exception | None = None) -> _Failed
 
 
 def _answered_origin(rule: SiteUrlRule, request: HttpRequest | None) -> _Declared:
-    """Return the origin a callable `URL` answers, `None` when it declines one."""
+    """Return the origin a callable `URL` answers, `None` when it answers `None`."""
     try:
         value = rule(request)
     except INTENDED_EXCEPTIONS:
@@ -168,7 +169,7 @@ def _answered_origin(rule: SiteUrlRule, request: HttpRequest | None) -> _Declare
         return _url_failed(
             "answer",
             f"{_URL_SETTING} {describe_callable(rule)} answered {value!r}, which is "
-            "no http or https origin, so the SEO routes answer 503. Answer an "
+            "not an http or https origin, so the SEO routes answer 503. Answer an "
             "origin with no path like 'https://acme.example', or None to fall back "
             "to the request host.",
         )
@@ -178,7 +179,7 @@ def _answered_origin(rule: SiteUrlRule, request: HttpRequest | None) -> _Declare
 def _declared_origin(request: HttpRequest | None) -> _Declared:
     """Return the origin the `URL` rule answers, `None` for no rule or no origin.
 
-    A callable answers once per request, so its failure is reported once as well.
+    A callable is called once per request, and its answer is held on the request.
     """
     rule = site_config().url
     if rule is None:
@@ -195,7 +196,7 @@ def _declared_origin(request: HttpRequest | None) -> _Declared:
 
 
 def site_url(request: HttpRequest | None = None) -> str | None:
-    """Return the origin the site URL declares, `None` where it declares none.
+    """Return the origin the site URL declares, `None` when it declares none.
 
     A callable `URL` answers per request, so one process can serve several tenants.
     """
@@ -206,15 +207,15 @@ def site_url(request: HttpRequest | None = None) -> str | None:
 def site_url_failed(request: HttpRequest | None) -> bool:
     """Whether a callable `URL` raised or answered no origin for `request`.
 
-    A page falls back to the request host, while the SEO routes answer 503 instead.
+    A page then falls back to the request host, and the SEO routes answer 503.
     """
     return _declared_origin(request) is _Failed.FAILED
 
 
 def _current_domain(request: HttpRequest) -> str:
-    """Return the domain of the current site, the request host where the table has none.
+    """Return the domain of the current site, or the request host when no row matches.
 
-    Without `SITE_ID` an unknown host finds no row, which is no reason to answer 500.
+    Without `SITE_ID` a host missing from the sites table raises, which is no 500.
     """
     try:
         return str(get_current_site(request).domain)
@@ -225,7 +226,7 @@ def _current_domain(request: HttpRequest) -> str:
 def site_origin(request: HttpRequest | None) -> tuple[str, str]:
     """Return the scheme and the host every absolute URL of one request is built on.
 
-    The site URL wins, then the current site of `request`, a sites row or its `Host`.
+    The site URL takes precedence, then the sites row of `request`, then its `Host`.
     """
     if request is None:
         declared = _declared_origin(None)
@@ -246,16 +247,29 @@ def site_origin(request: HttpRequest | None) -> tuple[str, str]:
 
 
 def site_indexable(request: HttpRequest | None = None) -> bool:
-    """Whether search engines may index the site, the answer every head tag reads.
+    """Whether search engines may index the site, the answer every robots output reads.
 
-    A callable that raises closes the site for the request, so a failure never opens
-    a preview host to search.
+    A callable is called once per request, its answer held on the request. One that
+    raises closes the site for the request, so a failure never opens a preview host.
     """
     rule = site_config().indexable
     if rule is None:
         return not settings.DEBUG
     if isinstance(rule, bool):
         return rule
+    if request is None:
+        return _answered_indexable(rule, None)
+    held: bool | None = getattr(request, _INDEXABLE_ATTR, None)
+    if held is None:
+        held = _answered_indexable(rule, request)
+        setattr(request, _INDEXABLE_ATTR, held)
+    return held
+
+
+def _answered_indexable(
+    rule: Callable[[HttpRequest | None], object], request: HttpRequest | None
+) -> bool:
+    """Return the answer of a callable `INDEXABLE`, `False` when it raises."""
     try:
         return bool(rule(request))
     except Exception as exc:  # noqa: BLE001 - the callable is project code
@@ -278,7 +292,7 @@ def debug_closed() -> bool:
 def site_closed_to_crawlers(request: HttpRequest | None) -> bool:
     """Whether the SEO routes serve the closed documents for `request`.
 
-    A site only `DEBUG` closes still serves its own, previewed under noindex.
+    A site closed only by `DEBUG` still serves its own documents, under noindex.
     """
     return not site_indexable(request) and not debug_closed()
 
@@ -286,7 +300,7 @@ def site_closed_to_crawlers(request: HttpRequest | None) -> bool:
 def indexable_without_request() -> bool:
     """Whether the site reads as open where no request exists, as in a system check.
 
-    A callable rule is never called there and reads as open, so every check runs.
+    A callable rule is not called there and reads as open, so every check runs.
     """
     rule = site_config().indexable
     if rule is None:

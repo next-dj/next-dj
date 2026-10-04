@@ -54,8 +54,8 @@ _DEFAULT_BACKEND_PATH = "next.static.StaticFilesBackend"
 def _bundle_url(path: str) -> str | None:
     """Return the storage URL of a runtime bundle, `None` when the storage lacks it.
 
-    A hashing storage raises for a file `collectstatic` never copied, which would fail
-    every page, so the page goes without the bundle, loud under `DEBUG`.
+    A hashing storage raises for a file `collectstatic` did not copy. The page then
+    renders without the bundle, and the error is raised under `DEBUG`.
     """
     try:
         return str(staticfiles_storage.url(path))
@@ -71,9 +71,9 @@ def _bundle_url(path: str) -> str | None:
 
 
 def _script_builder(url: str | None, options: dict[str, object]) -> NextScriptBuilder:
-    """Build the script builder, an unknown policy read as the default one.
+    """Build the script builder, using `auto` when the configured policy is unknown.
 
-    Without a runtime URL nothing is injected, as no tag could load it.
+    Without a runtime URL the policy is `disabled`, since no tag could load the runtime.
     """
     if url is None:
         options = {**options, "policy": ScriptInjectionPolicy.DISABLED}
@@ -94,8 +94,8 @@ def _script_builder(url: str | None, options: dict[str, object]) -> NextScriptBu
 def _rewrites_asset_urls(backend: StaticBackend) -> bool:
     """Report whether the backend replaces the identity `asset_url` hook.
 
-    Settled once per backend load so a pipeline nothing rewrites pays no call.
-    Checked on the instance, so a backend composing its rewrite in `__init__` counts.
+    Computed once per backend load, so a pipeline without a rewrite skips the call.
+    Checked on the instance, so a backend that assigns its rewrite in `__init__` counts.
     """
     return getattr(backend.asset_url, "__func__", None) is not StaticBackend.asset_url
 
@@ -115,8 +115,6 @@ class StaticManager(BackendListManager[StaticBackend]):
 
     def __init__(self) -> None:
         """Initialise empty backend and discovery caches, loaded lazily."""
-        # The reload always seeds at least one backend, so the flag only
-        # gates the lazy first load and the settings-reload invalidation.
         super().__init__()
         self._discovery: AssetDiscovery | None = None
         self._cached_page_roots: tuple[Path, ...] | None = None
@@ -209,10 +207,10 @@ class StaticManager(BackendListManager[StaticBackend]):
         return self._script_builder
 
     def chunk_url(self, name: str) -> str | None:
-        """Return the URL of the lazy chunk `$chunks` names `name`, once per storage.
+        """Return the URL of the lazy chunk `name`, resolved once per storage.
 
-        `None` means the storage lacks the chunk, which the runtime then looks for
-        beside itself.
+        `None` means the storage lacks the chunk, and the runtime then loads it from
+        its own directory.
         """
         if name not in self._chunk_urls:
             self._chunk_urls[name] = _bundle_url(CHUNK_STATIC_PATHS[name])
@@ -222,7 +220,8 @@ class StaticManager(BackendListManager[StaticBackend]):
     def reload(self) -> None:
         """Rebuild the backend list from merged framework settings.
 
-        A failing entry costs only itself, an empty list falls back to staticfiles.
+        A failing entry is skipped, and an empty list falls back to staticfiles. The
+        load is marked last, so a thread that sees it reads the derived state too.
         """
         self._discovery = None
         self._cached_page_roots = None
@@ -241,9 +240,9 @@ class StaticManager(BackendListManager[StaticBackend]):
             default=_DEFAULT_BACKEND_PATH,
             signal=static_backend_loaded,
         )
-        self._mark_loaded()
         self._static_version = _project_static_version()
         self._resolve_collector_strategies()
+        self._mark_loaded()
 
     def _resolve_collector_strategies(self) -> None:
         """Read the pipeline-level facts the first backend settles for a render.
@@ -321,7 +320,7 @@ def get_static_manager() -> StaticManager:
     """Return the live `StaticManager` behind the lazy default handle.
 
     A caller that patches a method and restores it needs the instance itself, so a
-    settings reload swapping the handle midway cannot misdirect the restore.
+    settings reload that replaces the handle cannot redirect the restore.
     """
     manager = default_manager._wrapped
     if manager is empty:
@@ -353,20 +352,20 @@ def reset_default_manager() -> None:
 
 
 def forget_manager_page_roots(**kwargs) -> None:
-    """Tell the default manager a reload moved what the routers report.
+    """Tell the default manager that a router reload changed the page roots.
 
-    A manager nothing has built yet reads them fresh anyway, so the lazy
-    handle is left alone rather than woken to be invalidated.
+    A manager that is not built yet reads them on first use, so the lazy handle is
+    not built only to be invalidated.
     """
     if default_manager._wrapped is not empty:
         default_manager.forget_page_roots()
 
 
 def forget_manager_backend_urls(**kwargs) -> None:
-    """Tell the default manager the staticfiles storage was rebuilt.
+    """Tell the default manager that the staticfiles storage was rebuilt.
 
-    A manager nothing has built yet holds no backend and no memo, so the lazy
-    handle is left alone rather than woken to be invalidated.
+    A manager that is not built yet holds no backend and no memo, so the lazy handle
+    is not built only to be invalidated.
     """
     if default_manager._wrapped is not empty:
         default_manager.forget_backend_urls()
@@ -378,10 +377,10 @@ def _on_settings_reloaded(**kwargs) -> None:
 
 
 def _on_setting_changed(*, setting: str, **kwargs) -> None:
-    """Drop the derived state a Django setting moved out from under.
+    """Drop the derived state that a changed Django setting invalidates.
 
-    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half, while `APP_DIRS` trees
-    move with `INSTALLED_APPS` and a memoised URL answers for a rebuilt storage.
+    `settings_reloaded` covers only `NEXT_FRAMEWORK`. `APP_DIRS` trees change with
+    `INSTALLED_APPS`, and memoised URLs are stale once the storage is rebuilt.
     """
     if setting == "INSTALLED_APPS":
         forget_manager_page_roots()

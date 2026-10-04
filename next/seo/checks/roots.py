@@ -1,4 +1,4 @@
-"""The routed page trees the SEO checks read, the very ones the routes serve."""
+"""Helpers giving the SEO checks the page trees the runtime discovery found."""
 
 from __future__ import annotations
 
@@ -18,11 +18,10 @@ if TYPE_CHECKING:
 
 
 def loaded_seo_roots() -> tuple[SeoRoot, ...]:
-    """Return every routed page tree with its sources, as the routes hold them.
+    """Return every routed page tree with its sources, from the runtime discovery.
 
-    The checks read the runtime discovery rather than running their own, so no
-    `sitemap.py` or `robots.py` runs twice and the items registry is never rewritten.
-    A router that fails to start is `next.E007`, reported once by the URL checks.
+    Reusing the discovery executes no `sitemap.py` or `robots.py` a second time.
+    A router that fails to start yields no tree, as `next.E007` already reports it.
     """
     router_manager, init_errors = get_router_manager()
     if router_manager is None or init_errors:
@@ -50,28 +49,28 @@ def robots_modules(
 
 
 def declares_sitemap(roots: tuple[SeoRoot, ...]) -> bool:
-    """Whether any tree carries a `sitemap.py`, imported or not."""
+    """Whether any tree has a `sitemap.py`, imported or not."""
     return any(root.sitemap is not None for root in roots)
 
 
 def serves_sitemap() -> bool:
-    """Whether `/sitemap.xml` is routed, the answer the route itself reads."""
+    """Whether `/sitemap.xml` is mounted, as the route decides it."""
     return seo_manager.serves_sitemap()
 
 
 def serves_robots(roots: tuple[SeoRoot, ...]) -> bool:
-    """Whether a robots source serves `/robots.txt`, the way the route decides it."""
+    """Whether a robots source serves `/robots.txt`, as the route decides it."""
     return any(served is not None for _path, served in robots_candidates(roots))
 
 
 def published_sources(roots: tuple[SeoRoot, ...]) -> list[str]:
-    """Name the crawler-facing sources the site serves."""
+    """Return the names of the crawler-facing sources the site serves."""
     served = (("a sitemap", serves_sitemap()), ("a robots.txt", serves_robots(roots)))
     return [name for name, present in served if present]
 
 
 def items_trails(root: SeoRoot) -> set[str]:
-    """Return the trails `@sitemap.items` lists URLs of in the tree."""
+    """Return the trails the `@sitemap.items` callables of the tree list URLs for."""
     return {entry.trail for entry in root.items_entries()}
 
 

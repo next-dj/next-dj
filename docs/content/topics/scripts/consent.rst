@@ -41,14 +41,13 @@ The framework knows one category, ``necessary``, which is always granted, since 
 Every other category is the project's own, and it declares the ones its scripts use in ``CATEGORIES``, ``necessary`` among them.
 Every category but ``necessary`` stays denied until the visitor chooses.
 A category name is a cookie-safe token of letters, digits, ``_``, ``-``, and ``.``, since the cookie writes the granted names between colons, separated by ``|``.
-The other values shown are the defaults, and ``manage.py check`` reports a list without ``necessary``, a name outside the token, a script in a category the list lacks, a ``{% #consented %}`` block naming one by a literal, a ``BACKEND`` that does not import, and a ``SERVER_RENDER`` outside ``"auto"``, ``True``, and ``False``.
+The other values shown are the defaults, and the ``CONSENT`` entry of :doc:`/content/ref/settings` lists the checks that validate the scope.
 
 The cookie
 ----------
 
 ``CookieConsentBackend`` reads a first-party cookie the runtime writes on every choice, ``next_consent=2:analytics|marketing:<seconds>``, the version, the granted categories past ``necessary``, and the time of the decision.
-The first version, ``1:analytics,marketing:<seconds>``, joined the categories with commas, which RFC 6265 keeps out of a cookie value.
-The server and the runtime still read it, so a visitor who chose under it keeps the choice, and the runtime writes version 2 on the next choice.
+The server and the runtime also read the ``1:analytics,marketing:<seconds>`` form, which separates the categories with commas, and the runtime writes the ``2:`` form on the next choice.
 The cookie is not ``HttpOnly``, since the runtime writes it, and no server endpoint is involved.
 ``OPTIONS`` names the cookie, its ``max_age``, ``samesite``, ``domain``, ``path``, and ``secure``, which follows the scheme of the page while it is ``None``.
 
@@ -57,7 +56,8 @@ The runtime keeps the choice in this cookie alone, whatever the backend.
 A backend tells it the cookie through ``client_config()``, the entries it adds to ``$consent``, and one that adds none leaves the runtime writing ``next_consent`` with the default age.
 
 A backend that fails to import, to build, or to read, or that answers anything but a ``Consent``, never fails the page.
-Under ``DEBUG`` the error is raised with a note naming ``NEXT_FRAMEWORK['CONSENT']['BACKEND']``, and in production every visitor reads as undecided, every category but ``necessary`` stays denied, and the failure is logged once.
+Under ``DEBUG`` or ``STRICT_LOADING`` the error is raised with a note naming ``NEXT_FRAMEWORK['CONSENT']['BACKEND']``.
+Otherwise every visitor reads as undecided, every category but ``necessary`` stays denied, and the failure is logged once.
 
 Where gated scripts render
 --------------------------
@@ -69,7 +69,7 @@ Where gated scripts render
    A page whose ``cache`` lets a CDN keep it renders the same HTML for every visitor, sends every gated script through the manifest, and adds no ``Vary: Cookie``.
 
 ``True``
-   The server always reads the cookie, a shared page included, and a shared page whose HTML then follows the cookie goes out ``private`` beside its ``Vary: Cookie``, since many CDNs ignore ``Vary``.
+   The server always reads the cookie, a shared page included, and a shared page whose HTML then follows the cookie is sent with ``Cache-Control: private`` beside its ``Vary: Cookie``, since many CDNs ignore ``Vary``.
 
 ``False``
    The server never reads it, every gated script and block waits for the runtime, and a ``Consent`` parameter receives ``UNDECIDED`` on every page.
@@ -95,7 +95,7 @@ A parameter annotated ``Consent`` receives the visitor's choice, in a ``@context
 ``consent.allows("marketing")`` answers the question, ``consent.decided`` whether the visitor chose at all, and ``{% if consent.marketing %}`` reads the same in a template.
 Where the server reads the cookie, reading it marks the response ``Vary: Cookie``.
 Where it does not, on a shared page under ``"auto"`` and on every page under ``False``, the parameter receives ``UNDECIDED``, a visitor who has not chosen, and adds no ``Vary``, so the cached HTML shows no one in particular.
-Under ``True`` a shared page reads the real choice and goes out ``private``.
+Under ``True`` a shared page reads the real choice and is sent with ``Cache-Control: private``.
 
 Gating markup
 -------------
@@ -132,7 +132,7 @@ The banner
 ----------
 
 The consent banner is the project's own markup, and ``Next.consent`` is the surface it drives.
-``Next.consent`` exists once the scripts chunk, ``next.scripts.min.js``, has landed, so the banner waits for it through ``Next.ready("scripts")``.
+``Next.consent`` exists once the scripts chunk, ``next.scripts.min.js``, has loaded, so the banner waits for it through ``Next.ready("scripts")``.
 
 .. code-block:: javascript
    :caption: shop/static/shop/banner.js
@@ -154,7 +154,7 @@ The consent banner is the project's own markup, and ``Next.consent`` is the surf
 ``Next.ready("scripts")`` resolves once the chunk has taken the page's payload, fetching it on a page that did not, and rejects when the chunk cannot load, so a banner never records a choice nothing keeps.
 
 ``update({analytics: true, marketing: false})`` records a choice per category and leaves unnamed ones as they were, and ``{reload: true}`` reloads the page when a category changed, since a revoked script keeps running until the page goes.
-An ``update`` that changes nothing for a visitor who already decided writes no cookie and fires no ``next:consent``, so a banner or a consent platform that re-affirms the choice on every load costs nothing.
+An ``update`` that changes nothing for a visitor who already decided writes no cookie and fires no ``next:consent``, so a banner or a consent platform that repeats the choice on every load has no effect.
 A revoke keeps every script of the category still waiting on its strategy from loading.
 The cookies a vendor already set stay, and a ``next:consent`` listener clears them, see :ref:`howto-vendor-adapter-revoke`.
 

@@ -158,7 +158,7 @@ Runtime script overrides
 ------------------------
 
 With ``CSP_NONCE`` on, every tag the framework writes carries the nonce the CSP middleware minted, the ``next.min.js`` shell included, so a strict policy needs no manual injection, see :doc:`/content/security/csp-and-nonce`.
-A nonce belongs to one response and takes a shared page private, so a site a CDN serves sets ``CSP_NONCE`` to ``False`` and allows its scripts by hash or by source.
+A nonce belongs to one response and makes a shared page private, so a site a CDN serves sets ``CSP_NONCE`` to ``False`` and allows its scripts by hash or by source.
 ``NEXT_FRAMEWORK["NEXT_JS_OPTIONS"]`` accepts template overrides, which keep the ``{nonce_attr}`` placeholder, and ``ScriptInjectionPolicy`` values described on :ref:`ref-settings` and in :doc:`/content/topics/static-assets/js-context`.
 
 Site, CSRF, and consent

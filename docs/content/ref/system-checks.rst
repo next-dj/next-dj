@@ -53,7 +53,7 @@ An id is the exact string the message carries, ``next.W059`` rather than a tag o
 The :doc:`Django settings reference <django:ref/settings>` documents the setting itself, and :doc:`django:ref/checks` covers the rest of the check framework.
 
 Silencing answers a deliberate shape the check cannot recognise as intended, and it is the wrong answer to a defect the check names correctly.
-The :repo:`audit-forms <tree/main/examples/audit-forms>` example earns ``next.W059``, which reports that two static wizard steps declare the same field name and that ``get_all_cleaned_data()`` keeps only the last value.
+The :repo:`audit-forms <tree/main/examples/audit-forms>` example triggers ``next.W059``, which reports that two static wizard steps declare the same field name and that ``get_all_cleaned_data()`` keeps only the last value.
 That wizard repeats one acknowledgement field across its three steps on purpose and reads the answer per step rather than out of the merged mapping, so the collapse the warning describes costs the project nothing and the id sits in ``SILENCED_SYSTEM_CHECKS`` beside a comment naming the reason.
 
 A silenced check stays visible in the run.
@@ -96,7 +96,7 @@ The ``metadata`` package of ``next.pages.checks`` reports a declaration the fram
 ``pages`` and ``links`` carry no check and hold the page pass and the URL predicates the checking submodules share.
 Every check reads the static fold, the settings tier, and the ``metadata`` dicts of the chain, so a ``@page.metadata`` callable is validated for its shape and never called.
 
-``next.pages.checks.responses`` reads the ``cache`` and ``headers`` of every routed ``page.py``, the ``CSRF_DELIVERY`` setting, and what a page a shared cache may hold renders.
+``next.pages.checks.responses`` reads the ``cache`` and ``headers`` of every routed ``page.py``, the ``CSRF_DELIVERY`` setting, and the composed template of every page a shared cache may hold.
 The shared-page warnings walk the composed templates through the ``composed`` memo the partial checks share, and the two about the forms of such a page live in ``next.forms.checks.csrf``.
 See :doc:`/content/howto/cache-pages-on-a-cdn` for shared pages from the project side.
 
@@ -129,7 +129,7 @@ Scripts and consent
 ~~~~~~~~~~~~~~~~~~~
 
 ``next.scripts.checks`` reads every ``scripts.py``, the consent categories, and the composed pages that render ``{% #consented %}``, and ``next.consent.checks`` the rest of the ``CONSENT`` scope.
-``next.static.checks`` owns ``next.W117`` for the tag templates the nonce reaches and ``next.W120`` for the shared pages a nonce takes private, since the nonce is a static option.
+``next.static.checks`` owns ``next.W117`` for the tag templates the nonce reaches and ``next.W120`` for the shared pages a nonce makes private, since the nonce is a static option.
 It also owns ``next.E130`` for the injection policy, ``next.E139`` for a tag template ``.format`` cannot fill, and ``next.W090`` for a runtime bundle the storage cannot serve.
 
 .. automodule:: next.scripts.checks
@@ -155,7 +155,7 @@ Components
 Forms
 ~~~~~
 
-The package splits into ``actions`` for the registered form classes and ``@action`` handlers, ``config`` for the ``NEXT_FRAMEWORK`` keys the subsystem reads, ``csrf`` for how a form on a page a shared cache may hold gets its token, ``widgets`` for the ``ComponentWidget`` a field carries, and ``wizards`` for the ``FormWizard`` subclasses.
+The package splits into ``actions`` for the registered form classes and ``@action`` handlers, ``config`` for the ``NEXT_FRAMEWORK`` keys the subsystem reads, ``csrf`` for how a form receives its token on a page a shared cache may hold, ``widgets`` for the ``ComponentWidget`` a field carries, and ``wizards`` for the ``FormWizard`` subclasses.
 ``sources`` carries no check and holds the page-tree pass every reader shares, because a page-scoped registration exists only once its ``page.py`` has run.
 
 .. automodule:: next.forms.checks
@@ -571,7 +571,7 @@ Errors
        A bare fragment such as ``#org`` and the rooted ``/#org`` name one node, since both render on the site root.
      - ``next.pages.checks.metadata.ld``
    * - ``next.E102``
-     - A ``page.py`` declares both a ``metadata`` dict and a ``@page.metadata`` callable.
+     - A ``page.py`` declares both a ``metadata`` dict and a ``@page.metadata`` callable, or names its ``@page.metadata`` callable ``metadata``, the name the dict takes.
      - ``next.pages.checks.metadata.shape``
    * - ``next.E103``
      - A module-level ``metadata`` is not a mapping.
@@ -699,7 +699,7 @@ Errors
      - ``next.scripts.checks``
    * - ``next.E137``
      - ``CONSENT["BACKEND"]`` does not import or is no ``ConsentBackend`` subclass.
-       Pages still render, every visitor reading as undecided with every category but ``necessary`` denied, and the failure is logged once, or raised under ``DEBUG``.
+       Pages still render, every visitor reading as undecided with every category but ``necessary`` denied, and the failure is logged once, or raised under ``DEBUG`` or ``STRICT_LOADING``.
        Name a subclass by its dotted path, or remove ``BACKEND`` to read the cookie the runtime writes.
      - ``next.consent.checks``
    * - ``next.E138``
@@ -739,7 +739,7 @@ Errors
        Pages embed the token instead and log it once, and the hint asks for ``include("next.urls")``.
      - ``next.pages.checks.responses``
    * - ``next.E149``
-     - The CSRF token endpoint or the form action endpoint reverses, but ``resolve()`` of its address lands on another pattern, a project pattern listed above ``include("next.urls")`` or a page, which the message names by its file.
+     - The CSRF token endpoint or the form action endpoint reverses, but ``resolve()`` of its address returns another pattern, a project pattern listed above ``include("next.urls")`` or a page, which the message names by its file.
        The framework routes lead the patterns of ``next.urls``, so a page tree cannot shadow them from inside the include.
      - ``next.urls.checks``
 
@@ -891,7 +891,7 @@ Warnings
      - ``next.pages.checks.metadata.shape``
    * - ``next.W088``
      - A ``noindex`` page points its canonical at another origin, which passes no signal.
-       On a site closed to search every page reads as ``noindex``, so any cross-origin canonical draws it.
+       On a site closed to search every page reads as ``noindex``, so any cross-origin canonical triggers it.
      - ``next.pages.checks.metadata.shape``
    * - ``next.W089``
      - A ``SITEMAP_BACKENDS`` backend raises from ``sections(None)``, which the checks call without a request to compare its section names with the others, so ``next.E116`` cannot read its sections.
@@ -975,11 +975,11 @@ Warnings
      - ``next.site.checks``
    * - ``next.W111``
      - ``SITE["INDEXABLE"]`` is ``False`` while the site still publishes a ``sitemap.py`` or a robots source for crawlers.
-       A site private by design serves none of them and draws no warning.
+       A site private by design serves none of them and triggers no warning.
        The check carries ``deploy=True`` and the ``seo`` tag.
      - ``next.seo.checks.sources``
    * - ``next.W112``
-     - A page a shared cache may hold renders a ``{% form %}`` or the runtime while ``CSRF_DELIVERY`` is ``"eager"``, so every response sets the CSRF cookie and goes out private.
+     - A page a shared cache may hold renders a ``{% form %}`` or the runtime while ``CSRF_DELIVERY`` is ``"eager"``, so every response sets the CSRF cookie and is sent with ``Cache-Control: private``.
      - ``next.forms.checks.csrf``
    * - ``next.W113``
      - A page a shared cache may hold renders ``{% csrf_token %}``, which sets the CSRF cookie on every response.
@@ -1008,11 +1008,11 @@ Warnings
      - ``next.consent.checks``
    * - ``next.W120``
      - A CSP nonce is active, ``CSP_NONCE`` on and a nonce-minting middleware installed, while pages declare a ``cache`` a CDN may hold.
-       A nonce belongs to one visitor, so each of those pages goes out private, and the message lists them.
+       A nonce belongs to one visitor, so each of those pages is sent with ``Cache-Control: private``, and the message lists them.
      - ``next.static.checks``
    * - ``next.W121``
      - ``CSRF_USE_SESSIONS`` is on while pages declare a ``cache`` a CDN may hold.
-       The CSRF middleware then reads the session on every request, so each of those pages goes out private, and the message lists them.
+       The CSRF middleware then reads the session on every request, so each of those pages is sent with ``Cache-Control: private``, and the message lists them.
      - ``next.pages.checks.responses``
    * - ``next.W122``
      - ``SITE["URL"]`` is unset while ``ALLOWED_HOSTS`` holds ``"*"``, so any client picks the host of the canonical, Open Graph, sitemap, and robots URLs, and a CDN may keep them for everyone.
@@ -1024,7 +1024,7 @@ Warnings
      - ``next.scripts.checks``
    * - ``next.W124``
      - ``settings.MIDDLEWARE`` lists ``ConditionalGetMiddleware`` below a middleware that may set a cookie, such as ``SessionMiddleware``, while pages declare a ``cache`` a CDN may hold.
-       The 304 it answers copies the shared cache before that cookie lands, so the framework cannot take it private, and the message lists the pages.
+       The 304 it answers copies the shared ``Cache-Control`` of the page, and a cookie the outer middleware sets afterwards reaches a public response the framework can no longer make private, so the message lists the pages.
        A middleware is matched by its class, so a subclass counts as its base, and one that does not import counts as one that may set a cookie.
        ``next.middleware.SharedCacheGuardMiddleware`` listed first, or with only ``UpdateCacheMiddleware`` above it, silences it, and the hint names it.
      - ``next.pages.checks.responses``

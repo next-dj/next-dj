@@ -8,13 +8,14 @@ from django.core.management.base import BaseCommand, CommandError
 from django.urls import Resolver404, resolve
 
 from next.pages import page
+from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.metadata.chain import metadata_origins
 
 
 class Command(BaseCommand):
-    """Show which segment of the chain settles each metadata key of a page."""
+    """Show which segment of the chain sets each metadata key of a page."""
 
-    help = "Show which settings tier or page.py settles every metadata key of a URL."
+    help = "Show which settings tier or page.py sets every metadata key of a URL."
 
     @override
     def add_arguments(self, parser: ArgumentParser) -> None:
@@ -32,6 +33,10 @@ class Command(BaseCommand):
         if not isinstance(page_path, Path):
             msg = f"{path} resolves to {match.view_name}, which is no page"
             raise CommandError(msg)
+        try:
+            chain = page.metadata_chain(page_path)
+        except (PageMetadataShapeError, PageMetadataConflictError) as exc:
+            raise CommandError(str(exc)) from exc
         self.stdout.write(str(page_path))
-        for origin in metadata_origins(page.metadata_chain(page_path)):
+        for origin in metadata_origins(chain):
             self.stdout.write(f"  {origin.key}: {origin.source}")

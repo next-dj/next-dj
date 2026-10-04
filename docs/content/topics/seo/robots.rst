@@ -70,7 +70,7 @@ Rules per request
        return groups
 
 ``robots.py`` is read by the dependency resolver, so it keeps ``from __future__ import annotations`` out.
-A ``rules`` callable that raises answers 503 with ``Retry-After`` and logs the failure once, and under ``DEBUG`` the exception reaches the technical page with a note naming the callable.
+A ``rules`` callable that raises answers 503 with ``Retry-After`` and logs the failure once, and under ``DEBUG`` or ``STRICT_LOADING`` the exception reaches the technical page with a note naming the callable.
 The checks read a static ``rules`` list alone, so a callable's groups are never compared against the sitemap.
 
 The Sitemap lines
@@ -106,7 +106,7 @@ The static form
 
 A ``robots.txt`` at the top of the page root is served byte for byte as ``text/plain; charset=utf-8``.
 The file is re-read when its mtime moves and answers 404 once it is gone.
-A read that fails answers the last good bytes, or a 503 with ``Retry-After`` when there are none, because a crawler reads a 5xx as a reason to come back and a 500 as a block.
+A read that fails answers the last good bytes, or a 503 with ``Retry-After`` when there are none, so a crawler reads the file as unreachable rather than as permission to crawl everything.
 
 Nothing is appended to a static ``robots.txt``, so its ``Sitemap:`` line is written by hand, and ``manage.py check`` reports one missing while the project serves a sitemap, and a file that does not decode as UTF-8.
 
@@ -118,7 +118,7 @@ A ``robots.py`` and a ``robots.txt`` in one root, or a source in two roots, is a
 At runtime the first source in router order answers, ``robots.py`` ahead of ``robots.txt`` within a root, and under ``DEBUG`` a warning names the ones ignored, once.
 A ``robots.py`` that fails to import keeps the route and answers 503 with ``Retry-After`` rather than falling back to another source.
 A 404 would be wrong here, since RFC 9309 reads a 4xx on ``/robots.txt`` as no restriction at all, which would open a staging host to every crawler.
-A crawler backs off a 5xx and keeps the rules it read before.
+RFC 9309 reads a 5xx as an unreachable file, which a crawler answers by crawling nothing or by keeping the rules it cached before.
 
 A closed site
 -------------

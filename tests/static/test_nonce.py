@@ -104,7 +104,7 @@ class TestResolveNonce:
             resolve_nonce(request)
         assert not nonce_minted(request)
 
-    def test_a_nonce_the_middleware_minted_counts_whoever_read_it(self) -> None:
+    def test_a_nonce_the_middleware_minted_counts_as_minted(self) -> None:
         request = RequestFactory().get("/")
         setattr(request, CSP_NONCE_ATTR, "n1")
         assert nonce_minted(request)

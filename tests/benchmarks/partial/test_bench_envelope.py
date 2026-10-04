@@ -47,6 +47,12 @@ class TestBenchEnvelopeBuild:
 
         benchmark(run)
 
+    @pytest.mark.benchmark(group="partial.envelope")
+    def test_meta_over_the_site_defaults(self, benchmark) -> None:
+        """A head update with no origin page, folded over the site defaults."""
+        metadata = {"title": "Saved", "description": "The draft is saved."}
+        benchmark(lambda: Patches.versioned("9f3c2e1b").meta(metadata).envelope())
+
 
 class TestBenchShapeInvalid:
     """Shape an INVALID outcome into a patch envelope through the form path."""

@@ -14,8 +14,8 @@ def joint_category(*categories: str) -> str:
     """Return the category a script waits for when every one of `categories` must hold.
 
     A script declared `marketing` inside a `{% #consented "analytics" %}` block, or a
-    block inside another, waits for both. The names join with a space, which no
-    category name holds, and `Consent.allows` and the runtime both read it as "all".
+    block inside another, waits for both. The names are joined with a space, which
+    no category name contains, and `Consent.allows` and the runtime require each one.
     """
     names = sorted(
         {name for category in categories for name in category.split()} - {NECESSARY}
@@ -27,7 +27,7 @@ def joint_category(*categories: str) -> str:
 class Consent:
     """The categories a visitor granted, `necessary` always among them.
 
-    `decided` stays False until the visitor chooses, every other category denied.
+    `decided` is False until the visitor chooses, and every other category is denied.
     """
 
     granted: frozenset[str] = field(default=frozenset({NECESSARY}))
@@ -43,9 +43,10 @@ class Consent:
         )
 
     def __getitem__(self, category: str) -> bool:
-        """Answer `{% if consent.marketing %}` like `allows`, leaving fields alone.
+        """Answer `{% if consent.marketing %}` like `allows`.
 
-        A template tries the key first, so a field name raises to reach the attribute.
+        A template tries a key lookup first, so a field name raises `KeyError` and the
+        lookup falls through to the attribute.
         """
         if category in _FIELDS:
             raise KeyError(category)

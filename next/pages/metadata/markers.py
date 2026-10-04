@@ -27,7 +27,7 @@ NOINDEX_DIRECTIVES: Final = frozenset({"noindex", "none"})
 
 
 class Merge(Enum):
-    """How a nearer segment folds one field over what its ancestors settled on."""
+    """How a segment merges one field over the value its ancestors folded to."""
 
     REPLACE = "replace"
     DEEP = "deep"
@@ -375,9 +375,9 @@ class TitleSpec:
 
 @dataclass(frozen=True, slots=True)
 class Segment:
-    """One normalised source, the keys it folds on its own beside its `metadata`.
+    """One normalised source, its `metadata` and the keys folded outside of it.
 
-    `replaced` holds the key paths a `Replace` took whole, and `trail` the directory.
+    `replaced` holds the key paths a `Replace` set whole, and `trail` the directory.
     """
 
     source: str

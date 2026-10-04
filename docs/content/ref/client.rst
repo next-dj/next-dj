@@ -18,7 +18,7 @@ The sse chunk carries the stream bridge, fetched once a scan finds a ``data-next
 The csrf chunk carries the fetch of a deferred CSRF token, fetched on the first need of a page that shipped only the endpoint.
 The poll chunk carries the zone poller, fetched once a scan finds a ``data-next-poll`` zone.
 The dev chunk carries the diagnostics of a ``DEBUG`` render, and a production page never fetches it.
-A chunk that fails to load, or has not landed within 15 seconds, fires ``partial:error`` of kind ``asset`` and is fetched again on its next need, so a stalled request holds no ``Next.ready``, form submit, or stream for good.
+A chunk that fails to load, or has not loaded within 15 seconds, fires ``partial:error`` of kind ``asset`` and is fetched again on its next need, so a stalled request holds no ``Next.ready``, form submit, or stream for good.
 ``tests/static/test_chunk_sync.py`` holds the chunk lists of ``next.ts``, ``chunks.ts``, ``next/static/runtime.py``, ``package.json``, ``build_hooks.py``, and ``pyproject.toml`` to one another.
 The wheel excludes ``next/client/`` outright, so a project never imports the TypeScript and installs no Node toolchain to serve the runtime.
 The script builder publishes the bundle under the static path ``next/next.min.js``, which the active staticfiles storage fingerprints like any other asset.
@@ -81,11 +81,11 @@ The class itself is not exported from the bundle, so ``window.Next`` is the only
      - Where the page stands, ``{url, path, title}``.
    * - ``Next.ready(chunk)``
      - ``Promise<NextChunks[K]>``
-     - Resolve with the surfaces of a lazy chunk once it has landed and taken the init payload, fetching it when needed, and reject when it cannot load.
+     - Resolve with the surfaces of a lazy chunk once it has loaded and taken the init payload, fetching it when needed, and reject when it cannot load.
        ``"scripts"`` is the one chunk, see :doc:`client-extras`.
    * - ``Next.consent``, ``Next.scripts``
      - See :doc:`client-extras`
-     - The surfaces of the scripts chunk, ``undefined`` until it lands.
+     - The surfaces of the scripts chunk, ``undefined`` until it loads.
    * - ``Next._init(context)``
      - ``void``
      - The bootstrap the injected inline payload calls once per page.
@@ -491,7 +491,7 @@ None of these modules is reachable from application code, so the names serve rea
      - The token store, the single-flight fetch of a deferred token, and the prefetch on the first focus in a form.
        The fetch itself ships in the csrf chunk.
    * - ``chunks.ts``
-     - The core side of the lazy chunks, which fetches each on demand, and of the scripts chunk, which answers ``Next.ready("scripts")`` once it lands.
+     - The core side of the lazy chunks, which fetches each on demand, and of the scripts chunk, which answers ``Next.ready("scripts")`` once it loads.
    * - ``extras.ts``, ``consent.ts``, ``scripts.ts``
      - The scripts chunk itself, consent and the script manifest loader.
    * - ``poll.ts``

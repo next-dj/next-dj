@@ -93,7 +93,7 @@ def check_site_settings(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _site_row_pinned() -> bool:
-    """Whether `django.contrib.sites` answers one row whatever the `Host` header is."""
+    """Whether `django.contrib.sites` returns one row whatever the `Host` header is."""
     return (
         apps.is_installed(_SITES_APP) and getattr(settings, "SITE_ID", None) is not None
     )

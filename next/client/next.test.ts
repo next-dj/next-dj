@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "./next";
 // The scripts chunk registers on evaluation, as it does once the runtime fetches it.
 import "./extras";
-// The single-module chunks land the same way.
+// The single-module chunks register the same way.
 import "./sse-chunk";
 import "./csrf-chunk";
 import "./poll-chunk";

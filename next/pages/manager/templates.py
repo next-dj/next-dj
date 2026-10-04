@@ -98,15 +98,14 @@ class PageTemplateCache:
             if mtime is not None:
                 mtimes[source] = mtime
         if mtimes:
-            # Bounded with the layer it shadows, so an evicted page leaves no
-            # snapshot of sources nothing composes from any more.
+            # Bounded like the layer it tracks, so an evicted page leaves no snapshot.
             store[file_path] = mtimes
 
     def _is_stale(self, file_path: Path, store: SourceMtimes) -> bool:
         """Return whether any source tracked in `store` changed on disk.
 
-        Compared for inequality rather than growth, so a checkout moving mtime
-        backwards still reads as changed, same as a source that no longer stats.
+        Compared for inequality rather than growth, so a checkout that moves an mtime
+        backwards counts as a change, as does a source that no longer exists.
         """
         if not template_edits_watched():
             return False

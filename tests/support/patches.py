@@ -245,7 +245,7 @@ def static_names_resolved_by(
     """Answer `staticfiles_storage.url` from a mapping and miss like a manifest does.
 
     A name the mapping does not list raises the manifest's own `ValueError`, and the
-    patch lands on the class so an `override_settings` inside the block cannot drop it.
+    patch is applied to the class so an `override_settings` inside the block keeps it.
     """
 
     def resolve(name: str) -> str:

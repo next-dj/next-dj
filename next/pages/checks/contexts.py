@@ -26,8 +26,8 @@ if TYPE_CHECKING:
     from next.pages.registry import ZoneBinding
 
 
-# The file router routes only this name, so a context bound anywhere else is
-# dead, including one bound to the page.py next door.
+# The file router routes only this name, so a context bound to any other file never
+# runs, including one bound to a sibling page.py.
 _PAGE_CONTEXT_SUBJECT = RegistrationSubject(
     decorator="@context", anchor_name="page.py", render="page render", code="next.E074"
 )
@@ -42,10 +42,10 @@ class PageContexts(NamedTuple):
 
 
 def load_routed_pages() -> list[tuple[str, Path]] | None:
-    """Import every routed `page.py` once per run, answering with the ones that loaded.
+    """Import every routed `page.py` once per run and return the ones that loaded.
 
-    The manager is the one these checks resolved, so a patched router tree reaches it.
-    `None` means the routers failed to load, which `next.E007` reports on its own.
+    The router manager is the one these checks resolved, so a patched router tree is
+    used. `None` means the routers failed to load, which `next.E007` reports.
     """
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
@@ -84,8 +84,8 @@ def _annotation_is_dict_like(annotation: object) -> bool:
 def _return_annotation(func: Callable[..., Any]) -> object:
     """Return the resolved return annotation, read the way the DI resolver reads it.
 
-    A hint the resolver itself could not evaluate is no ground to block a page, so an
-    unreadable annotation answers the same as an absent one.
+    A hint the resolver itself cannot evaluate does not block a page, so an unreadable
+    annotation counts as an absent one.
     """
     try:
         return cached_type_hints(func).get("return", inspect.Signature.empty)
@@ -138,7 +138,7 @@ def _keyless_context_errors(
 
 @register(Tags.templates, NEXT)
 def check_context_functions(*args, **kwargs) -> list[CheckMessage]:
-    """Require keyless `@context` callables to return a dict when invoked."""
+    """Require a keyless `@context` callable to be annotated dict-like (`next.E029`)."""
     errors: list[CheckMessage] = []
     for entry in loaded_page_contexts():
         errors.extend(_keyless_context_errors(entry.page_path, entry.bindings))

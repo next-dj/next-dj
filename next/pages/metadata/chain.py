@@ -79,7 +79,7 @@ class ChainSource:
 class ChainEntry:
     """The memoised chain of one page with the stamps that validate it.
 
-    A request folds only `tail` over `prefix`, `folded` is the fold of a static chain.
+    A request folds only `tail` over `prefix`. `folded` is set for a static chain.
     """
 
     ancestors: AncestorStamps
@@ -126,9 +126,9 @@ def _trail(directory: Path, root: Path) -> str:
 def _build_chain(
     registry: PageMetadataRegistry, file_path: Path, site: Segment
 ) -> ChainEntry:
-    """Walk the ancestors inside the page tree root first and fold what each declares.
+    """Walk the ancestors in the page tree, root first, and fold what each declares.
 
-    The stamps name the loads it folded.
+    The entry records the stamps of the module loads it folded.
     """
     ancestors, modules = AncestorStamps.begin(file_path).loaded()
     paths = ancestors.paths
@@ -167,7 +167,7 @@ def _build_chain(
 def _revalidated(
     entry: ChainEntry, registry: PageMetadataRegistry, site: Segment
 ) -> ChainEntry | None:
-    """Return `entry` while nothing behind it moved, `None` once something did."""
+    """Return `entry` while its sources are unchanged, `None` once one changed."""
     if entry.site is not site:
         return None
     ancestors = entry.ancestors.revalidated()
@@ -176,7 +176,7 @@ def _revalidated(
     registry_version = registry.version
     if ancestors is entry.ancestors and entry.registry_version == registry_version:
         return entry
-    # A re-executed callable at an unchanged mtime keeps the old, identical object.
+    # A callable re-registered under the same name and flag keeps its stamp.
     if registry.stamps(entry.paths) != entry.registry_stamps:
         return None
     return replace(entry, ancestors=ancestors, registry_version=registry_version)
@@ -270,8 +270,8 @@ def fold_chain(
 ) -> Metadata:
     """Fold the chain of `file_path`, `overlay` standing as the page's own segment.
 
-    The overlay lies over the page's own dict and replaces its callable.
-    A callable that fails raises, so the caller decides what a failure costs.
+    The overlay merges over the page's own dict and replaces its callable.
+    A failing callable raises, so the caller decides how to handle the failure.
     """
     entry = chain_entry(registry, file_path)
     if overlay is None:
@@ -296,16 +296,16 @@ def fold_chain(
 
 
 class MetadataOrigin(NamedTuple):
-    """One folded key path and the source that settled it."""
+    """One folded key path and the source that set it."""
 
     key: str
     source: str
 
 
 def metadata_origins(entry: ChainEntry) -> tuple[MetadataOrigin, ...]:
-    """Name the source of every key the static fold settles, then each callable.
+    """Name the source of every key the static fold sets, then each callable.
 
-    A callable answers only per request, so it is listed under `*`, whatever it sets.
+    A callable returns its keys only per request, so it is listed under `*`.
     """
     segments = (entry.site, *(source.segment for source in entry.sources))
     traced = trace_origins(segments)

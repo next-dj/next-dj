@@ -15,7 +15,7 @@ Unset and nearest
 -----------------
 
 ``None`` means unset at every level, so a key a page leaves at ``None`` keeps whatever the ancestors set.
-A callable returning ``{"description": post.summary}`` for a post with no summary therefore keeps the site description rather than erasing it.
+A callable returning ``{"description": post.summary}`` for a post whose summary is ``None`` therefore keeps the site description rather than erasing it.
 Among the layers that do set a key, the one nearest to the page wins, because a page knows its own title better than the root does.
 
 This is the opposite of inherited ``@context``, where the outermost ancestor wins.

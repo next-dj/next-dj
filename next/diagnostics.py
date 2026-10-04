@@ -1,4 +1,4 @@
-"""Failures of user and third-party code: raised under DEBUG, else logged once."""
+"""Containment of failures in user and third-party code, each cause logged once."""
 
 from collections.abc import Callable, Hashable
 from contextvars import ContextVar
@@ -11,8 +11,8 @@ from next.conf.settings import fail_loudly
 from next.conf.signals import settings_reloaded
 
 
-# A view raises these on purpose to answer 400, 403 or 404, and Django turns each into
-# its own response and its own log, `django.security` for a suspicious operation.
+# A view raises these to answer 400, 403 or 404, and Django converts each into its own
+# response and log entry, so a containment must let them propagate.
 INTENDED_EXCEPTIONS: tuple[type[BaseException], ...] = (
     Http404,
     PermissionDenied,
@@ -25,18 +25,18 @@ _DEGRADED: ContextVar[bool] = ContextVar("next_degraded", default=False)
 
 
 def watch_degraded() -> None:
-    """Start a render that no containment has degraded yet.
+    """Mark the current render as not degraded.
 
-    A page render calls it first, so `degraded` answers for that render alone.
+    A page view calls it before it renders, so `degraded` reports on that render alone.
     """
     _DEGRADED.set(False)
 
 
 def degraded() -> bool:
-    """Whether a containment degraded the render `watch_degraded` started.
+    """Return whether a failure was contained since the last `watch_degraded` call.
 
-    A degraded page is missing what its failing source would have added, so its
-    response must not reach a shared cache as if it were whole.
+    A degraded page lacks the output of its failing source, so its response must not
+    be stored in a shared cache.
     """
     return _DEGRADED.get()
 
@@ -53,24 +53,26 @@ _MALFORMED = (
 
 
 class FailureLog:
-    """Report each failing source once, re-armed when the framework is reconfigured.
+    """Log each failure key once until the framework settings are reloaded.
 
-    User code that keeps raising runs on every request, so a production log would
-    otherwise carry the same traceback per hit and bury the first, useful one.
+    A failing user callable runs on every request, so logging every occurrence would
+    repeat one traceback per request. The set of reported keys has no bound, so a key
+    is drawn from a finite set such as a source path or a setting name, never from
+    request data.
     """
 
     def __init__(self, logger: Logger) -> None:
-        """Report through `logger`, with every diagnostic armed."""
+        """Log through `logger` and forget every reported key on `settings_reloaded`."""
         self._logger = logger
         self._reported: set[Hashable] = set()
         settings_reloaded.connect(self.clear)
 
     def clear(self, **kwargs: object) -> None:
-        """Re-arm every diagnostic, so a reconfigure is reported afresh."""
+        """Forget every reported key, so each failure is logged again."""
         self._reported.clear()
 
     def first_failure(self, *key: Hashable) -> bool:
-        """Whether this failure is unreported, recording it when it is."""
+        """Return whether `key` is not reported yet, recording it as reported."""
         if key in self._reported:
             return False
         self._reported.add(key)
@@ -79,13 +81,12 @@ class FailureLog:
     def contain(
         self, exc: BaseException, key: Hashable, message: str, *args: object
     ) -> None:
-        """Handle `exc`, the exception in flight: re-raise it when loud, else log once.
+        """Re-raise `exc` under `DEBUG` or `STRICT_LOADING`, else log it once.
 
         Call it from the `except` block that caught `exc`, then return the caller's
-        fallback. Under `DEBUG` or `STRICT_LOADING` the exception propagates with
-        `message` attached as a note, so the technical page names the source and the
-        fix. Otherwise `message` is logged with the traceback the first time `key`
-        fails.
+        fallback. A re-raised exception carries `message` as a note, so the technical
+        error page names the source and the fix. Otherwise the render is marked
+        degraded, and `message` is logged with the traceback the first time `key` fails.
         """
         if fail_loudly():
             exc.add_note(message % args if args else message)
@@ -101,10 +102,11 @@ class FailureLog:
 
 
 class BackendReadLog(FailureLog):
-    """Read what a backend reports, answering a default when it cannot.
+    """Read a value from a backend, returning a default when the read fails.
 
-    A backend that keeps raising is read on every reloader tick and static lookup, so
-    a failing source is reported once and re-armed on the reconfigure it subscribes to.
+    A backend is read on every reloader tick and static lookup, so a failing read is
+    logged once per backend class and subject. Unlike `contain`, a failing read is
+    never re-raised, under `DEBUG` included.
     """
 
     def read[T](
@@ -116,10 +118,10 @@ class BackendReadLog(FailureLog):
         valid: Callable[[T], bool],
         default: T,
     ) -> T:
-        """Return what `read` answers, or `default` when it raises or is malformed.
+        """Return what `read` returns, `default` when it raises or `valid` refuses it.
 
-        The shape is checked inside the guard, because inspecting what came back is
-        itself a read of backend code and a raising one is the same kind of failure.
+        `valid` runs inside the same guard, since inspecting the result can run backend
+        code that raises.
         """
         source = type(backend).__name__
         try:

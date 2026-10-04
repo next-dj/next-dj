@@ -1,6 +1,6 @@
 """Shared helpers used by per-subpackage system-check modules.
 
-The discovery names and the unknown-key probe of `next.conf` travel on from here.
+It also re-exports the discovery helpers and the `next.conf` unknown-key check.
 """
 
 from __future__ import annotations
@@ -42,9 +42,9 @@ WALK_HINT = (
 
 
 def raw_scope(name: str) -> Mapping[str, object] | None:
-    """Return the `NEXT_FRAMEWORK[name]` mapping as written, `None` when it is none.
+    """Return the `NEXT_FRAMEWORK[name]` mapping as written, `None` when it is no dict.
 
-    A `NEXT_FRAMEWORK` or a scope that is no dict is `next.E076`, reported once there.
+    A `NEXT_FRAMEWORK` or a scope that is no dict is reported once, by `next.E076`.
     """
     raw = getattr(settings, USER_SETTING, None)
     if not isinstance(raw, dict):
@@ -56,7 +56,7 @@ def raw_scope(name: str) -> Mapping[str, object] | None:
 def takes_request(func: Callable[..., Any]) -> bool:
     """Whether `func` can be called with the request as its one positional argument.
 
-    A callable whose signature cannot be read is given the benefit of the doubt.
+    A callable whose signature cannot be inspected counts as taking the request.
     """
     try:
         inspect.signature(func).bind(None)
@@ -68,15 +68,15 @@ def takes_request(func: Callable[..., Any]) -> bool:
 
 
 class RunMemo[T]:
-    """One value a check run builds once, held for as long as its key stays the same.
+    """Hold one value a check run builds once, kept while its key is the same object.
 
-    The key is compared by identity and held, so no reused `id` can pass for it.
+    The memo keeps a reference to the key, so a new object cannot reuse its `id`.
     """
 
     __slots__ = ("_held",)
 
     def __init__(self) -> None:
-        """Start empty and join the memos `forget_run_memos` drops."""
+        """Start empty and register with `forget_run_memos`."""
         self._held: tuple[object, T] | None = None
         _RUN_MEMOS.append(self)
 
@@ -119,9 +119,10 @@ def registration_file_errors(
     registrations: dict[Path, tuple[str, ...]],
     misattributed: Iterable[tuple[Path, Path, str]],
 ) -> list[CheckMessage]:
-    """Report registrations that no render of the intended file ever collects.
+    """Report registrations that no render of the intended file collects.
 
-    A registration keys on its declaring file, so an imported helper binds elsewhere.
+    A registration is keyed on the file that declares the callable, so decorating an
+    imported helper binds it to the helper's file.
     """
     records = sorted(misattributed, key=_by_paths)
     errors = _cross_file_errors(subject, records)
@@ -132,8 +133,8 @@ def registration_file_errors(
 def import_backend_class(dotted_path: str) -> type[Any]:
     """Import a dotted backend path, folding any import-time failure into ImportError.
 
-    A backend module runs arbitrary code at import, and a check that lets it
-    raise takes the whole run down instead of reporting one error.
+    A backend module runs arbitrary code at import, and a check that lets it raise
+    aborts the whole run instead of reporting one error.
     """
     try:
         return import_class_cached(dotted_path)
@@ -143,7 +144,7 @@ def import_backend_class(dotted_path: str) -> type[Any]:
 
 
 def _names_by_file(records: list[tuple[Path, Path, str]]) -> dict[Path, set[str]]:
-    """Group the misattributed names by the file they landed on."""
+    """Group the misattributed names by the file they are bound to."""
     grouped: dict[Path, set[str]] = {}
     for _registered_from, declared_in, name in records:
         grouped.setdefault(declared_in, set()).add(name)
@@ -153,7 +154,7 @@ def _names_by_file(records: list[tuple[Path, Path, str]]) -> dict[Path, set[str]
 def _cross_file_errors(
     subject: RegistrationSubject, records: list[tuple[Path, Path, str]]
 ) -> list[CheckMessage]:
-    """Report each registration that landed on a file other than the one running it."""
+    """Report each registration bound to a file other than the one that runs it."""
     errors: list[CheckMessage] = []
     for registered_from, declared_in, name in records:
         errors.append(
@@ -174,9 +175,9 @@ def _dead_file_errors(
     registrations: dict[Path, tuple[str, ...]],
     already_reported: dict[Path, set[str]],
 ) -> list[CheckMessage]:
-    """Report registrations sitting on a file the renderer never looks at.
+    """Report registrations bound to a file the renderer never reads.
 
-    A name in `already_reported` is left out, because the cross-file report named it.
+    A name in `already_reported` is skipped, since the cross-file report names it.
     """
     errors: list[CheckMessage] = []
     for file_path in sorted(registrations, key=str):

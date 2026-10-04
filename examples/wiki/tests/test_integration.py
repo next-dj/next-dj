@@ -671,6 +671,7 @@ class TestSitemap:
             if '"wiki_article"' in query["sql"]
         ]
         assert any("COUNT(" in sql for sql in article_queries)
+        assert any("LIMIT" in sql for sql in article_queries)
         assert not any('"wiki_article"."body_md"' in sql for sql in article_queries)
 
     def test_the_noindex_form_pages_drop_out_by_their_own_tag(

@@ -551,7 +551,7 @@ class TestModelFormFactoryAttribution:
         meta = backend.get_meta("user_form")
         assert meta is not None
         assert meta["file_path"] == str(module_file.resolve())
-        # Plain attribution lands in Django, so registration used the stack fallback.
+        # Plain attribution resolves into Django, so registration used the stack.
         assert (
             Path(defining_file(form_class)).resolve().is_relative_to(_DJANGO_FORMS_ROOT)
         )

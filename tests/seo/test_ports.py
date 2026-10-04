@@ -5,7 +5,7 @@ from tests.support import call_shape, port_methods, routed, write_tree
 
 
 class TestSeoRoutesPort:
-    """The SEO port hands the lazy urlpatterns its routes without an import."""
+    """The SEO port gives the URL manager its routes without an import."""
 
     def test_the_port_declares_the_expected_methods(self) -> None:
         assert port_methods(SeoRoutes) == ["patterns"]
@@ -17,7 +17,7 @@ class TestSeoRoutesPort:
 
 
 class TestSeoRoutesImpl:
-    """The routes port answers the routes a source backs."""
+    """The routes port returns the routes whose source exists."""
 
     def test_the_routes_are_those_of_the_seo_urls(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", sitemap="", robots="")

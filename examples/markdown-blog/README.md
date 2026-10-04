@@ -171,7 +171,7 @@ Only step 3 is used here, and both loaders take part. `MarkdownTemplateLoader` b
 
 ### 6. Tracing which loader won through `template_loaded`
 
-The framework sends `next.pages.signals.template_loaded` after a page registers its template source, with the page `file_path` as the only payload. [`blog/receivers.py`](blog/receivers.py) uses it to answer the question the priority list above raises in practice — which source actually backed a given page:
+The framework sends `next.pages.signals.template_loaded` after a page registers its template source, with the page `file_path` as the only payload. [`blog/receivers.py`](blog/receivers.py) uses it to record which source backed each page, the question the priority list above raises in practice:
 
 ```python
 @receiver(template_loaded)
@@ -258,7 +258,7 @@ def post_meta(article: Post) -> MetadataDict:
     }
 ```
 
-It names the `article` context key and reads the `Post` that callable already parsed. `keywords` takes a list and renders one `<meta name="keywords">` joined by commas. The `og` block merges into the one the settings and the root declare, so `og:type` turns to `article` while `og:site_name` and the social image stay. The structured data is a plain schema.org dict, the dates serialise as ISO days, and every node of the fold lands in one `@graph`, so a post carries the `BlogPosting` and the `BreadcrumbList` of section 4 in a single script. The framework makes an `@id` absolute but leaves the other values as written, so `image` goes through `next.pages.metadata.absolute_url`, the helper the head resolves its own URLs with, and names the same card the Open Graph tags use, since an article earns its rich result only with an image.
+It names the `article` context key and reads the `Post` that callable already parsed. `keywords` takes a list and renders one `<meta name="keywords">` joined by commas. The `og` block merges into the one the settings and the root declare, so `og:type` turns to `article` while `og:site_name` and the social image stay. The structured data is a plain schema.org dict, the dates serialise as ISO days, and every node of the fold is placed in one `@graph`, so a post carries the `BlogPosting` and the `BreadcrumbList` of section 4 in a single script. The framework makes an `@id` absolute but leaves the other values as written, so `image` goes through `next.pages.metadata.absolute_url`, the helper the head resolves its own URLs with, and names the same card the Open Graph tags use, since search engines show an article as a rich result only when it has an image.
 
 The integration tests read the head back through `next.testing.assert_metadata`, which parses the tags of a response and compares only the keys a test names. `manage.py check` validates every metadata dict and the sources of the page root at startup.
 

@@ -340,7 +340,7 @@ class TestUrlSchemes:
 
 
 class TestHreflangPatterns:
-    """`check_metadata_hreflang_patterns` wants `i18n_patterns()` behind `True`."""
+    """`check_metadata_hreflang_patterns` requires `i18n_patterns()` for `True`."""
 
     def test_languages_true_without_prefix_patterns_is_w087(
         self, tmp_path: Path

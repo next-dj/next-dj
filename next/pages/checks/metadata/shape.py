@@ -189,7 +189,7 @@ def _parent_parameters(func: Callable[..., Any]) -> list[str]:
 def check_metadata_parent_parameter(*args, **kwargs) -> list[CheckMessage]:
     """Flag a `@page.metadata` parameter annotated `Metadata` (`next.E121`).
 
-    The fold of the ancestors is no longer injected, the chain merges it instead.
+    Nothing injects the fold of the ancestors, since the chain merges it.
     """
     pages = loaded_metadata_pages()
     errors: list[CheckMessage] = []

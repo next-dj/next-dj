@@ -25,7 +25,7 @@ def _canonical_and_loc(root: Path, **extra: object) -> tuple[HttpResponse, str]:
 
 
 class TestRequestOrigin:
-    """The site URL wins, then the current site, then the host of the request."""
+    """The site URL comes first, then the current site, then the request host."""
 
     def test_the_site_url_wins_over_the_request(self) -> None:
         request = RequestFactory().get("/", HTTP_HOST="testserver")
@@ -49,7 +49,7 @@ class TestRequestOrigin:
 
 
 class TestOrigin:
-    """An origin spells absolute URLs and the site a Django sitemap reads."""
+    """An origin builds absolute URLs and the site object a Django sitemap reads."""
 
     def test_url_joins_the_path(self) -> None:
         assert Origin("https", "acme.example").url("/a/") == "https://acme.example/a/"

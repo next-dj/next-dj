@@ -1,11 +1,11 @@
-// The entry of next.scripts.min.js, consent and third-party scripts. The runtime
-// fetches it on demand and this module hands itself over on evaluation.
+// The entry point of next.scripts.min.js, consent and third-party scripts. The runtime
+// fetches it on demand, and on evaluation it registers its factory with Next._land.
 
 import type { Extras, ExtrasHost } from "./chunks";
 import { createConsent } from "./consent";
 import { createScripts } from "./scripts";
 
-/** Build the chunk's surfaces over what the runtime lends it. */
+/** Build the consent and scripts surfaces over the runtime functions in host. */
 export function createExtrasChunk(host: ExtrasHost): Extras {
   const consent = createConsent({
     dispatch: host.dispatch,
@@ -14,12 +14,12 @@ export function createExtrasChunk(host: ExtrasHost): Extras {
   });
   const scripts = createScripts({
     dispatch: host.dispatch,
-    // A joint category names several, space-separated, and waits for each of them.
+    // A joint category lists several names separated by spaces and requires all.
     allows: (category) =>
       category.split(" ").every((name) => consent.get()[name] === true),
     nonce: host.nonce,
   });
-  // Consented markup a morph or a layer body brings lies inside the nodes it touched.
+  // Consented markup inserted by a patch lies inside the nodes the apply touched.
   document.addEventListener("partial:applied", (event) =>
     consent._reveal((event as CustomEvent<{ nodes: Element[] }>).detail.nodes),
   );

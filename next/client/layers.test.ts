@@ -54,8 +54,8 @@ afterEach(() => {
   for (const layers of madeStacks.splice(0)) layers._reset();
 });
 
-// The applier's commit as the body envelope lands, the one point a layer's push is
-// written. A stack without an applier never reaches it on its own.
+// The applier's commit as the body envelope is applied, the one point a layer's push
+// is announced. A stack without an applier never reaches it on its own.
 function landBody(navigation: Navigation, url: string, doc: Document = document): void {
   const commit = navigation.begin();
   commit.claim(pageKey(url, doc));
@@ -1019,6 +1019,16 @@ describe("layer intercepting URL lifecycle", () => {
     window.history.replaceState(null, "", "/photos/1/");
     fire();
     expect(layers.size()).toBe(1);
+  });
+
+  it("a jump back over two pushed entries closes both nested layers", async () => {
+    await layers.open(null, "/photos/1/", "a");
+    await layers.open(null, "/photos/1/edit/", "b");
+    window.history.replaceState(null, "", "/feed/");
+    fire();
+    expect(layers.size()).toBe(0);
+    expect(navigated().at(-1)).toMatchObject({ path: "/feed/", action: "pop" });
+    expect(navigated().filter((d) => d.action === "pop")).toHaveLength(1);
   });
 
   it("Back past a pushed layer also closes the bare layers above it", async () => {

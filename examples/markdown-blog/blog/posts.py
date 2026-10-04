@@ -54,7 +54,7 @@ class Post:
 
 
 def reading_minutes(text: str) -> int:
-    """Estimate reading time in whole minutes at ~200 wpm."""
+    """Estimate the reading time in whole minutes at `WPM` words a minute."""
     return max(1, round(len(text.split()) / WPM))
 
 

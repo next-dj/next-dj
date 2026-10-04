@@ -97,7 +97,7 @@ def _normalize_handler_response(
             # Mirrors Django's CreateView convention for a returned instance.
             return HttpResponseRedirect(str(get_absolute_url()))
     # Every rich return type the framework ships subclasses HttpResponse and is
-    # caught above, so the `.url` sniff is last-resort sugar, not a hook.
+    # caught above, so the `.url` check is a last-resort fallback, not a hook.
     if hasattr(raw, "url") and (url := getattr(raw, "url", None)):
         return HttpResponseRedirect(url)
     warnings.warn(

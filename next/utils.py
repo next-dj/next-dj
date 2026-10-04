@@ -1,7 +1,7 @@
 """Cross-area helpers for paths, `DIRS` entries, page trees, routes, and edit watching.
 
-Everything here sits below the subpackages that share it, so a value object
-two of them build travels through this module rather than closing a cycle.
+Everything here sits below the subpackages that share it, so a value object two of
+them build is defined here rather than in one of them, which would close a cycle.
 """
 
 from __future__ import annotations
@@ -44,13 +44,13 @@ WEB_SCHEMES: Final[frozenset[str]] = frozenset({"http", "https"})
 
 
 class Unset(enum.Enum):
-    """The type of `UNSET`, the one sentinel for a value not read yet."""
+    """The type of `UNSET`, the framework sentinel for an absent value."""
 
     UNSET = enum.auto()
 
 
 UNSET: Final = Unset.UNSET
-"""What a memo holds before its first read, told apart from a `None` it may hold."""
+"""The marker of an absent value, such as an unread memo, distinct from `None`."""
 
 
 def is_int(value: object) -> TypeGuard[int]:
@@ -127,12 +127,13 @@ def stat_mtime_ns(path: Path) -> int | None:
 class _SourceLoader(importlib.machinery.SourceFileLoader):
     """Validate the cached bytecode of a source on its nanosecond mtime.
 
-    A `.pyc` keyed on whole seconds hands a same-size rewrite the older code.
+    A `.pyc` validated on whole seconds serves stale code after a same-size rewrite
+    within the same second.
     """
 
     @override
     def path_stats(self, path: str) -> Mapping[str, Any]:
-        """Return the mtime in nanoseconds, the low bits of which the `.pyc` keeps."""
+        """Return the mtime in nanoseconds, whose low 32 bits the `.pyc` keeps."""
         stat = Path(path).stat()
         return {"mtime": stat.st_mtime_ns, "size": stat.st_size}
 
@@ -154,9 +155,10 @@ def exec_module_file(path: Path, name: str) -> types.ModuleType | None:
 
 @dataclass(frozen=True, slots=True)
 class TreeSource[E: Exception]:
-    """One Python file at the top of a page tree, the module it ran to or its failure.
+    """One Python file at the top of a page tree, with its executed module or failure.
 
-    `stamp` is the mtime it ran at, so a watched process reads it again once it moves.
+    `stamp` is the mtime at execution, so a watched process runs the file again after
+    an edit.
     """
 
     path: Path
@@ -165,16 +167,17 @@ class TreeSource[E: Exception]:
     stamp: int | None = None
 
     def stale(self) -> bool:
-        """Whether the file moved on disk since it ran, gone or rewritten."""
+        """Return whether the file was deleted or rewritten since it ran."""
         return stat_mtime_ns(self.path) != self.stamp
 
 
 def load_tree_source[E: Exception](
     path: Path, module_name: str, error: Callable[[Path], E]
 ) -> TreeSource[E] | None:
-    """Execute the file at `path` as `module_name`, `None` where no file sits there.
+    """Execute the file at `path` as `module_name`, `None` when there is no file.
 
-    It runs user code, so any exception is the user's and stays on the source to report.
+    An exception the file raises is logged and kept on the source as the `__cause__` of
+    `error(path)`, for its caller to report.
     """
     if not path.is_file():
         return None
@@ -217,9 +220,9 @@ def tree_label(path: Path) -> str:
 
 
 def unique_labels(labels: Iterable[str]) -> list[str]:
-    """Return one distinct label per label, a repeat suffixed past every label taken.
+    """Return the labels made distinct, each repeat suffixed with a free number.
 
-    A label no other tree shares keeps it, so a suffix never lands on a natural label.
+    A label no other tree shares is kept, and a suffixed label never equals an input.
     """
     wanted = list(labels)
     taken = set(wanted)
@@ -377,7 +380,7 @@ def _route_rank(name: str) -> tuple[int, int, int, str]:
     match it too, whatever order the directory read returned. A static segment comes
     first, then a parameter, then a catch-all. Within each, the one with more literal
     text goes first, so `post-[id]` precedes `[slug]`, then the narrower converters,
-    so `[uuid:key]` precedes `[str:key]`, and the name settles the rest.
+    so `[uuid:key]` precedes `[str:key]`, and the name breaks the remaining ties.
     """
     param = wildcard = False
     width = 0
@@ -413,8 +416,8 @@ def _visit_page_dir(
     has_page = False
     children: list[os.DirEntry[str]] = []
     for entry in entries:
-        # The kind rides along with the name the directory read returned, so a
-        # tree costs a stat per symlink rather than one per entry it holds.
+        # `is_dir` reads the type the directory listing returned, so only a symlink
+        # costs a stat.
         if entry.is_dir():
             children.append(entry)
         elif entry.name in _PAGE_FILES:

@@ -118,8 +118,8 @@ _RUNTIME_BUNDLE_PATHS: Final = (
 def _runtime_bundle_source(logical_path: str) -> Path | None:
     """Return the built runtime file the logical path names, or None when unbuilt.
 
-    Stat'd per lookup rather than held with a scan, because a source checkout builds
-    the bundle while the process runs and a held miss would answer 404 until restart.
+    Checked per lookup rather than memoised, because a source checkout may build the
+    bundle while the process runs and a memoised miss would return 404 until restart.
     """
     if logical_path not in _RUNTIME_BUNDLE_PATHS:
         return None
@@ -131,7 +131,7 @@ def _runtime_bundle_static_files() -> dict[str, Path]:
     """Map the built runtime, its chunks and their sourcemaps into `next/`.
 
     A source checkout carries no build output, so a missing file is left unmapped.
-    One directory read answers every bundle, however many chunks the runtime ships.
+    One directory scan covers every bundle.
     """
     folder = _RUNTIME_BUNDLE_ROOT / _RUNTIME_BUNDLE_DIR
     try:
@@ -197,8 +197,8 @@ class _MappedSourceStorage(Storage):
 class _ScanRoots(NamedTuple):
     """The trees one scan reads, page trees first and component trees after.
 
-    A reconfigured tree moves no mtime the snapshot below would notice, so the
-    roots ride the scan and are compared whatever the process watches.
+    A reconfigured tree changes no mtime the snapshot records, so the roots are stored
+    with the scan and always compared.
     """
 
     pages: tuple[Path, ...]
@@ -317,8 +317,8 @@ def _scan_directories(roots: _ScanRoots) -> tuple[tuple[Path, int | None], ...]:
 def _build_scan(roots: _ScanRoots) -> _Scan:
     """Discover every co-located asset and note what the answer was read from.
 
-    Generations and the snapshot are taken before the walk, so anything landing
-    mid-walk leaves the scan stale rather than falsely fresh.
+    Generations and the snapshot are taken before the walk, so a change during the walk
+    leaves the scan stale rather than wrongly fresh.
     """
     registries = _registry_generation()
     watched = template_edits_watched()
@@ -409,7 +409,7 @@ class NextStaticFilesFinder(BaseFinder):
 def _framework_app_name() -> str | None:
     """Return the app name of the framework's own `AppConfig`.
 
-    Read from the app registry, so renaming the app cannot quietly republish it.
+    Read from the app registry, so a renamed app is still excluded.
     """
     app_config = apps.get_containing_app_config(__name__)
     name: str | None = getattr(app_config, "name", None)

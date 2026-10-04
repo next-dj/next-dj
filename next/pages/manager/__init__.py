@@ -1,6 +1,6 @@
-"""`Page` manager and its process-wide singleton.
+"""The `Page` manager and its process-wide singleton.
 
-`context` is the alias for `page.context` that user code spells as `@context`.
+`context` is an alias of `page.context`, which user code applies as `@context`.
 """
 
 from __future__ import annotations
@@ -75,10 +75,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class _BodyResolution:
-    """Per-request outcome of `Page._resolve_page_body`.
+    """The per-request outcome of `Page._resolve_page_body`.
 
-    `http_response` is typed `HttpResponseBase` so streaming responses flow through
-    verbatim, and a string `dynamic` body has no compiled source for a standalone zone.
+    `http_response` is typed `HttpResponseBase` so a streaming response passes through
+    unchanged, and a `dynamic` string body has no compiled source to render a zone.
     """
 
     body: str | None = None
@@ -102,8 +102,8 @@ class Page:
     def register_template(self, file_path: Path, template_str: str) -> None:
         """Store rendered template source for `file_path`.
 
-        The compiled-template entry and the memoised path facts go with it,
-        so every layer keyed off the page path invalidates together.
+        The compiled template and the memoised path facts are dropped with it, so every
+        layer keyed by the page path is invalidated together.
         """
         self._templates.composed[file_path] = template_str
         self._templates.compiled.pop(file_path)
@@ -113,7 +113,7 @@ class Page:
     def clear_template_caches(self) -> None:
         """Drop every composed layer, the mtime snapshots, and the path facts.
 
-        For a page or layout rewritten in place, since staleness needs a moved mtime.
+        Used for a file rewritten in place, since stale detection needs a changed mtime.
         """
         self._templates.clear()
         clear_page_path_info()
@@ -437,15 +437,15 @@ class Page:
             skeleton = self._layout_loader.compose_skeleton(file_path)
             templates.skeleton[file_path] = skeleton
             templates.record_skeleton(file_path)
-            # A dynamic page registers no template, so the facts drop here.
+            # A dynamic page registers no template, so its path facts are dropped here.
             forget_page_path_info(file_path)
         return skeleton
 
     def composed_template_for(self, file_path: Path) -> Template:
         """Return the compiled composed template for the static body.
 
-        Both caches key off the composed layer and go stale together. The source is
-        held in a local, because the bound may evict it between two reads.
+        Both caches are keyed by the page and become stale together. The source is held
+        in a local, because the bound may evict it between two reads.
         """
         templates = self._templates
         composed = templates.composed.get(file_path)
@@ -484,18 +484,18 @@ class Page:
         visit_url: str | None,
         url_kwargs: Mapping[str, object] | None = None,
     ) -> tuple[HttpResponseBase | None, bool]:
-        """Resolve a page body once, reporting its short-circuit and its kind.
+        """Resolve a page body once, returning its short-circuit response and its kind.
 
-        `render()` runs under the same injection as the unified view, against a request
-        presenting a GET visit of `visit_url`, so a guard keyed on the shape of the
-        request answers as it would on a visit. A caller that knows no URL for the page
-        passes `None` and leaves the live path in place. A page without a `render()`
-        authorizes every caller, exactly as its own static view does, and loads no body.
+        `render()` runs with the same injection as the unified view, against a copy of
+        the request that presents a GET visit of `visit_url`, so a guard that reads the
+        request behaves as it would on a visit. A caller that knows no URL for the page
+        passes `None` and keeps the current path. A page without a `render()` authorizes
+        every caller, as its static view does, and loads no body.
         """
         module, error = load_page_module(file_path)
         if error is not None:
-            # Not Http404. A 404 would answer the caller's own URL instead of
-            # the morph, and falling through would skip the page's guards.
+            # Not Http404, since a 404 would refer to the caller URL rather than the
+            # morph target, and continuing would bypass the guards of the page.
             raise error
         render_func = getattr(module, "render", None) if module is not None else None
         if not callable(render_func):

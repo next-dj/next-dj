@@ -45,7 +45,7 @@ def check_request_in_context(*args, **kwargs) -> list[CheckMessage]:
 
 @register(Tags.templates, NEXT)
 def check_context_processor_signature(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when a configured context processor has no `request` parameter."""
+    """Report a context processor that takes no `request` parameter (`next.E040`)."""
     errors: list[CheckMessage] = []
     for backend_index, backend in _iter_page_backend_configs():
         processors = backend.get("OPTIONS", {}).get("context_processors") or []

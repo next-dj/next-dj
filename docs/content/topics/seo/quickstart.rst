@@ -1,7 +1,7 @@
 .. _topics-seo-quickstart:
 
-SEO in 5 minutes
-================
+SEO quickstart
+==============
 
 Page metadata works on the pages the file router serves, a directory with a ``page.py`` or a template.
 A plain Django view renders none of it, and ``{% metadata %}`` in its template renders the empty string.
@@ -108,7 +108,7 @@ It takes dependency-injected parameters like a ``@context`` callable, so it read
    def note_metadata(note: Note) -> MetadataDict:
        return {"title": note.title, "description": note.summary, "og": {"type": "article"}}
 
-The row is fetched once, a missing row answers 404, and an empty summary keeps the site description, because ``None`` means unset.
+The row is fetched once, a missing row answers 404, and a summary of ``None`` keeps the site description, because ``None`` means unset.
 See :doc:`metadata` for both forms and :doc:`merge` for how the layers combine.
 
 Publish a sitemap

@@ -154,6 +154,7 @@ class TestLanguagePairs:
         pairs = LanguagePairs(ChainedEntries([_part([1, 2])]), [])
         assert len(pairs) == 0
         assert pairs[0:5] == []
+        assert list(pairs) == []
 
     def test_a_paginated_page_of_pairs(self) -> None:
         pairs = LanguagePairs(ChainedEntries([_part(range(5))]), ["en", "de"])

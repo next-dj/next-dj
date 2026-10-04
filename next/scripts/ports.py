@@ -13,7 +13,7 @@ from .manager import scripts_manager
 
 
 class PageScriptsImpl(PageScripts):
-    """Binds the port to the render entry point of the area."""
+    """Binds the port to `scripts_manager.render`."""
 
     @override
     def render(

@@ -39,7 +39,7 @@ def page_template_path(page_path: Path) -> Path:
 
 
 def renders_itself(page_path: Path) -> bool:
-    """Whether the page answers through its own `render()` instead of a template."""
+    """Whether the page responds through its own `render()` instead of a template."""
     module, _error = load_page_module(page_path)
     return module is not None and callable(getattr(module, "render", None))
 
@@ -57,7 +57,7 @@ def _has_metadata_tag(nodelist: NodeList) -> bool:
 class TemplateSearch:
     """Search a composition through the components and includes it reaches.
 
-    What the search cannot resolve answers `None`, sparing a false alarm.
+    A composition the search cannot resolve returns `None`, which raises no warning.
     """
 
     def __init__(self, test: NodeTest) -> None:
@@ -94,7 +94,7 @@ class TemplateSearch:
     ) -> bool | None:
         """Load an include named by a constant and descend into its template.
 
-        A name computed at render time or one the engine cannot load answers `None`.
+        A name computed at render time or one the engine cannot load returns `None`.
         """
         expression = node.template
         name = expression.var

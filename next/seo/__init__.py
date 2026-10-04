@@ -1,4 +1,4 @@
-"""Sitemap and robots built from the page trees and the sitemap backends."""
+"""The sitemap and robots.txt routes built from the page trees and sitemap backends."""
 
 from . import checks, signals
 from .backends import PageTreeSitemapBackend, SitemapBackend

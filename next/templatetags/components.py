@@ -199,8 +199,8 @@ class ComponentNode(ComponentTagNode):
         self.nodelist = nodelist
         # Prop names are fixed at compile time, so the guard rebuilds nothing.
         self.prop_names = frozenset(props)
-        # Which slots a body holds is settled once the body is compiled, so
-        # the recursive walk runs here and the render pays nothing. Django's
+        # The slots a body holds are fixed once the body is compiled, so the
+        # recursive walk runs here rather than on every render. Django's
         # ``get_nodes_by_type`` also descends into a nested ``{% #component %}``,
         # which parses first and has already claimed the slots of its own body.
         claimed = [
@@ -322,8 +322,8 @@ class ComponentNode(ComponentTagNode):
             render_ctx.pop(key, None)
         render_ctx.update(self._resolved_props(context))
         render_ctx[TEMPLATE_PATH_KEY] = path
-        # Children arrive as finished markup, spliced in as written the way slot
-        # content is. Escaping inside them is the calling template's business.
+        # Children are finished markup, inserted unescaped like slot content.
+        # Escaping inside them is the responsibility of the calling template.
         render_ctx["children"] = children
         render_ctx[COMPONENT_PROPS_CONTEXT_KEY] = self.prop_names
 

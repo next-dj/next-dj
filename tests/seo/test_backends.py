@@ -17,7 +17,7 @@ class _Bare(SitemapBackend):
 
 
 class TestSitemapBackend:
-    """The base keeps its entry and serves, uncached, whatever it lists."""
+    """The base stores its entry and serves its sections without caching."""
 
     def test_the_defaults_serve_uncached(self) -> None:
         backend = _Bare({"BACKEND": "x", "OPTIONS": {"a": 1}})

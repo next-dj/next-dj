@@ -1,6 +1,6 @@
 """Discovery helpers that list page roots and component folder pairs.
 
-`runserver`, `collectstatic`, and static discovery reach this, dropping a bad router.
+`runserver`, `collectstatic` and static discovery use it, skipping a failing router.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ _reads = BackendReadLog(logger)
 class _BackendsMemo(NamedTuple):
     """The held routers, and the base directory they were built against.
 
-    The base directory rides along since a change to it alone emits no reload, and
+    The base directory is stored because a change to it alone emits no reload, and
     `backends=None` marks an incomplete build so the next read retries it.
     """
 
@@ -66,13 +66,13 @@ _state = _WatchState()
 
 
 def _forget_backends() -> None:
-    """Drop the held routers and re-arm the diagnostics of the ones that failed."""
+    """Drop the held routers and reset the logged failures of the ones that failed."""
     _reads.clear()
     _state.memo = None
 
 
 def forget_watch_state(**kwargs) -> None:
-    """Drop everything the watch layer holds, so a reconfigure is read afresh."""
+    """Drop everything the watch layer holds, so a reconfiguration is read again."""
     _forget_backends()
     forget_resolved_trees()
 
@@ -122,8 +122,8 @@ def _page_backends_for_watch() -> list[RouterBackend]:
 def iter_page_backends_for_watch() -> Iterator[RouterBackend]:
     """Return one router per `PAGE_BACKENDS` entry, skipping the ones that fail.
 
-    A backend that cannot be built costs its own trees alone, so the watcher still sees
-    every tree the other entries report, and every router is built eagerly.
+    A backend that cannot be built loses only its own trees, so the watcher still sees
+    every tree the other entries report. Every router is built eagerly.
     """
     return iter(_page_backends_for_watch())
 
@@ -131,7 +131,7 @@ def iter_page_backends_for_watch() -> Iterator[RouterBackend]:
 def page_root_paths_for_watch(backend: RouterBackend) -> list[Path]:
     """Return the resolved page trees `backend` reports.
 
-    A backend that raises or misshapes its answer contributes no tree, not a bad value.
+    A backend that raises or returns the wrong shape contributes no tree.
     """
     roots: list[PageRoot] = _reads.read(
         backend,

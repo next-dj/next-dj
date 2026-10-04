@@ -183,6 +183,14 @@ class TestCacheControl:
     def test_a_wrong_shape_reads_as_no_declaration(self, value) -> None:
         assert cache_control(value) is None
 
+    def test_a_declaration_naming_only_vary_sets_no_cache_control(self) -> None:
+        control = cache_control({"vary": ["Accept"]})
+        assert control is not None
+        response = HttpResponse()
+        control.apply(response)
+        assert "Cache-Control" not in response
+        assert response["Vary"] == "Accept"
+
     def test_vary_names_join_the_vary_header(self) -> None:
         control = cache_control({"max_age": 5, "vary": ["Accept", 3, "X-Tenant"]})
         assert control == CacheControl((("max_age", 5),), ("Accept", "X-Tenant"))
@@ -265,15 +273,15 @@ class TestProblems:
         ("value", "problem"),
         [
             (["X-A"], "expected a mapping of header names to text or None"),
-            ({"Bad Name": "x"}, "'Bad Name' is no header name"),
-            ({3: "x"}, "3 is no header name"),
-            ({"set-cookie": "a=b"}, "set-cookie belongs to the framework"),
-            ({"X-Robots-Tag": "noindex"}, "X-Robots-Tag belongs to the framework"),
+            ({"Bad Name": "x"}, "'Bad Name' is not a valid header name"),
+            ({3: "x"}, "3 is not a valid header name"),
+            ({"set-cookie": "a=b"}, "set-cookie is set by the framework"),
+            ({"X-Robots-Tag": "noindex"}, "X-Robots-Tag is set by the framework"),
             (
                 {"CDN-Cache-Control": "max-age=60"},
-                "CDN-Cache-Control follows cache, so declare the caching there",
+                "CDN-Cache-Control is set by cache, so declare the caching there",
             ),
-            ({"expires": "0"}, "expires follows cache, so declare the caching there"),
+            ({"expires": "0"}, "expires is set by cache, so declare the caching there"),
             (
                 {"Content-Security-Policy": "frame-ancestors 'none'"},
                 (
@@ -401,7 +409,7 @@ class TestPageCache:
         ],
         ids=["raises", "wrong_type", "wrong_value"],
     )
-    def test_a_broken_callable_goes_out_no_store_and_logs_once(
+    def test_a_broken_callable_sends_no_store_and_logs_once(
         self, tmp_path, caplog, body, fragment
     ) -> None:
         source = f'template = "x"\n\ndef cache():\n    {body}\n'
@@ -545,7 +553,7 @@ class TestRenderResponse:
         with caplog.at_level(logging.WARNING, logger="next.pages.responses"):
             response = _get(root)
         assert response["Cache-Control"] == "private, max-age=60"
-        assert "goes out private" in caplog.text
+        assert "is sent with Cache-Control: private" in caplog.text
 
     def test_a_stream_keeps_its_cache_and_gets_the_site_robots(self, tmp_path) -> None:
         root = _tree(tmp_path, ("", "cache = 60\n" + SSE_PAGE))
@@ -558,7 +566,7 @@ class TestRenderResponse:
 
 
 class TestSharedDowngrade:
-    """A shared page that turns personal goes out private, never public."""
+    """A shared page whose response is personal is sent private, never public."""
 
     def test_a_session_read_goes_private(self, tmp_path, caplog) -> None:
         source = (
@@ -574,7 +582,7 @@ class TestSharedDowngrade:
             response = _get(_tree(tmp_path, ("", source)))
         assert response["Cache-Control"] == "private"
         assert "Cookie" in response["Vary"]
-        assert "goes out private" in caplog.text
+        assert "is sent with Cache-Control: private" in caplog.text
 
     @pytest.mark.django_db()
     def test_a_session_write_sets_its_cookie_on_a_private_page(self, tmp_path) -> None:
@@ -606,7 +614,7 @@ class TestSharedDowngrade:
         ):
             Client().get("/")
             Client().get("/")
-        assert caplog.text.count("goes out private") == 1
+        assert caplog.text.count("is sent with Cache-Control: private") == 1
 
     def test_a_cookie_set_after_the_view_takes_the_cache_back(self, tmp_path) -> None:
         file_path = write_page(tmp_path, "", "template = 'x'\n")
@@ -690,13 +698,12 @@ class TestLateCookies:
         with caplog.at_level(logging.WARNING, logger="next.pages.responses"):
             response = _get(root)
         assert response["Cache-Control"] == "private, max-age=60"
-        assert "goes out private" in caplog.text
+        assert "is sent with Cache-Control: private" in caplog.text
 
     def test_a_degrade_while_the_template_renders_keeps_caches_away(
         self, tmp_path
     ) -> None:
-        # The containment lands after the cache was stamped, so the late hook
-        # replaces it.
+        # Contained after the cache is set, so the post-render hook replaces the cache.
         before = (
             "import logging, next.diagnostics as d; "
             "request.boom = type('B', (), {'__str__': lambda s: d.FailureLog("
@@ -853,6 +860,20 @@ class TestZoneAndPatchResponses:
             "template = '{% zone \"box\" %}<p>x</p>{% endzone %}'\n"
             "cache = 60\n"
             "headers = {'X-Team': 'web'}\n"
+        )
+        with routed(_tree(tmp_path, ("", source))):
+            response = NextClient().get_zones("/", "box")
+        assert response.status_code == 200
+        assert response["Cache-Control"] == "private, no-store"
+        assert response["X-Team"] == "web"
+
+    def test_a_render_response_to_a_zone_get_is_never_stored(self, tmp_path) -> None:
+        source = (
+            "from django.http import HttpResponse\n\n"
+            "cache = 60\n"
+            "headers = {'X-Team': 'web'}\n\n"
+            "def render():\n"
+            "    return HttpResponse('x')\n"
         )
         with routed(_tree(tmp_path, ("", source))):
             response = NextClient().get_zones("/", "box")

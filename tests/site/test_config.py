@@ -56,6 +56,11 @@ def raising_rule(request: HttpRequest | None) -> bool:
     raise RuntimeError(msg)
 
 
+def counted_indexable(request: HttpRequest | None) -> bool:
+    CALLED.append(request)
+    return True
+
+
 def counted_url(request: HttpRequest | None) -> str:
     CALLED.append(request)
     return "https://tenant.example"
@@ -283,6 +288,14 @@ class TestSiteIndexable:
     def test_an_unusable_rule_falls_back_to_auto(self, rule: object) -> None:
         with site_settings(INDEXABLE=rule), override_settings(DEBUG=True):
             assert site_indexable() is False
+
+    def test_a_callable_is_called_once_per_request(self) -> None:
+        request = _get("testserver")
+        with site_settings(INDEXABLE=counted_indexable):
+            assert site_indexable(request) is True
+            assert site_indexable(request) is True
+            assert site_indexable(None) is True
+        assert [request, None] == CALLED
 
     def test_the_rule_reads_debug_on_every_call(self) -> None:
         site_config()

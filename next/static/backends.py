@@ -41,8 +41,8 @@ class StaticBackend(ABC):
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
         """Store the raw config mapping and prime the URL memo it may fill."""
         self._config: Mapping[str, Any] = config or {}
-        # Bounded against a backend asked for logical names without end rather than
-        # as a policy, so the stalest insert goes and a warm tag reorders nothing.
+        # Bounded only to cap memory for an unbounded set of names. Eviction is by
+        # insertion order, so a cache hit reorders nothing.
         self._url_cache: BoundedCache[tuple[str, ...], str] = BoundedCache()
 
     @property
@@ -53,8 +53,8 @@ class StaticBackend(ABC):
     def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return the public URL of an already-resolved asset for this render.
 
-        Overriding this one hook lets a per-request scheme, such as a per-tenant
-        prefix, reach even the framework-built `next.min.js` runtime tag.
+        Override it to apply a per-request scheme, such as a per-tenant prefix, to
+        every asset URL, the `next.min.js` runtime tag included.
         """
         del request
         return url
@@ -62,15 +62,15 @@ class StaticBackend(ABC):
     def resolve_url(self, reference: str) -> str:
         """Turn an authored asset reference into a public URL.
 
-        The default keeps the reference literal, so an older backend renders as before.
+        The default returns the reference unchanged.
         """
         return reference
 
     def forget_urls(self) -> None:
         """Drop every memoised URL, so the next lookup resolves it again.
 
-        `StaticManager.forget_backend_urls` announces the rebuild and drops what else
-        held a URL, so this hook is a backend's own half of it, not an entry point.
+        `StaticManager.forget_backend_urls` calls it after a storage rebuild and drops
+        the other memoised URLs itself, so call that method rather than this hook.
         """
         self._url_cache.clear()
 
@@ -86,8 +86,9 @@ class StaticBackend(ABC):
 class StaticFilesBackend(StaticBackend):
     """Resolve co-located asset URLs through Django staticfiles.
 
-    `css_tag`, `js_tag`, and `module_tag` hold format strings needing `{url}` and
-    `{nonce_attr}`, both escaped because the tag is spliced past the engine.
+    `css_tag`, `js_tag`, and `module_tag` hold format strings taking `{url}` and
+    `{nonce_attr}`. Both are HTML-escaped, since the tag is inserted after the template
+    engine has rendered.
     """
 
     _DEFAULT_CSS_TAG: ClassVar[str] = '<link rel="stylesheet" href="{url}"{nonce_attr}>'
@@ -97,7 +98,7 @@ class StaticFilesBackend(StaticBackend):
     )
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
-        """Read the tag templates from the OPTIONS mapping, a broken one as default."""
+        """Read the tag templates from `OPTIONS`, the default replacing a broken one."""
         super().__init__(config)
         opts = dict(self._config.get("OPTIONS") or {})
         self._css_tag = self._template(opts, "css_tag", self._DEFAULT_CSS_TAG)

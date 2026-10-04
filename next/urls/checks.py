@@ -286,8 +286,8 @@ def check_next_pages_configuration(*args, **kwargs) -> list[CheckMessage]:
 def check_router_manager(*args, **kwargs) -> list[CheckMessage]:
     """Report a router that fails to initialise (`next.E007`), once per check run.
 
-    Every check that walks the routers skips quietly on the same failure, and this
-    one carries each tag those checks run under, so any `--tag` selection sees it.
+    Every check that walks the routers skips the failure without a message. This check
+    carries each tag those checks run under, so any `--tag` selection reports it.
     """
     _router_manager, init_errors = get_router_manager()
     return init_errors
@@ -384,7 +384,7 @@ _PROBE_UID = "probe"
 
 
 def _framework_routes() -> tuple[tuple[str, str, Callable[[], str]], ...]:
-    """Return each framework endpoint a page may shadow, by name and how it reverses."""
+    """Return the label, URL name and reverse call of each framework endpoint."""
     return (
         ("CSRF token endpoint", CSRF_URL_NAME, csrf_url),
         (
@@ -396,7 +396,7 @@ def _framework_routes() -> tuple[tuple[str, str, Callable[[], str]], ...]:
 
 
 def _answered_by(match: ResolverMatch) -> str:
-    """Name what answers an address, the page file when a page does."""
+    """Describe the view of `match`, by its page file when a page answers."""
     page_path = getattr(match.func, "next_page_path", None)
     if page_path is not None:
         return f"the page {page_path} (route {match.route!r})"

@@ -78,8 +78,8 @@ def _check_page_functions_in_directory(
 ) -> tuple[list[CheckMessage], list[CheckMessage]]:
     """Check `page.py` files for render/template rules, skipping files in `seen`.
 
-    The walk refuses what the router refuses, so a `page.py` under a skipped
-    directory answers no URL and is held to no body-source rule.
+    The walk skips what the router skips, so a `page.py` under a skipped directory
+    serves no URL and is exempt from the body-source rules.
     """
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []

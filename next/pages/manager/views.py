@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
 
 class _RoutedPageView(Protocol):
-    """A page view carrying the source path form dispatch resolves back to."""
+    """A page view carrying the `page.py` path form dispatch maps an origin URL to."""
 
     next_page_path: Path
 
@@ -53,7 +53,7 @@ def unified_view(
     *,
     broken_at_build: bool = False,
 ) -> Callable[..., HttpResponseBase]:
-    """Return the view for a page, on the branch its body source dictates.
+    """Return the static or the resolving view of a page, as its body source requires.
 
     The view carries `next_page_path`, so form dispatch maps an origin URL back to it.
     """
@@ -67,19 +67,35 @@ def unified_view(
     return view
 
 
+def _raise_load_error(file_path: Path) -> None:
+    """Raise the import failure of `file_path` when the framework fails loudly."""
+    # `has_load_errors` runs first, so a site without a load error runs no stat.
+    if has_load_errors() and fail_loudly():
+        error = last_load_error(file_path)
+        if error is not None:
+            raise error
+
+
+def _reloaded_module(file_path: Path) -> types.ModuleType | None:
+    """Return the module now at `file_path`, raising its import failure or a 404."""
+    # The memo re-reads by mtime and drops the error once the file imports.
+    module, error = load_page_module(file_path)
+    if error is not None:
+        if fail_loudly():
+            raise error
+        raise Http404
+    return module
+
+
 def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]:
     """Return the view of a page whose body comes from files on disk.
 
-    Nothing about that body depends on the request, so the view serves
-    the compiled composed template and resolves no body of its own.
+    The body does not depend on the request, so the view renders the compiled
+    composed template and resolves no body per request.
     """
 
     def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
-        # `has_load_errors` first, so a healthy site pays no stat.
-        if has_load_errors() and fail_loudly():
-            error = last_load_error(file_path)
-            if error is not None:
-                raise error
+        _raise_load_error(file_path)
         dep_cache = render_dep_cache(request)
         policy = response_policy(
             page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
@@ -111,24 +127,16 @@ def _resolving_view(
 ) -> Callable[..., HttpResponseBase]:
     """Return the view that resolves a per-request body before composing.
 
-    `broken_at_build` re-reads the module per request, so a fix lands without a
-    restart and a still-broken file never skips the guards `render()` would apply.
+    `broken_at_build` re-reads the module per request, so a fix takes effect without a
+    restart and a still-broken file never bypasses the guards `render()` applies.
     """
 
     def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
-        active_module = module
         if broken_at_build:
-            # The memo re-reads by mtime and drops the error once the file imports.
-            active_module, error = load_page_module(file_path)
-            if error is not None:
-                if fail_loudly():
-                    raise error
-                raise Http404
-        # Both guards first, so a healthy site pays no stat.
-        elif has_load_errors() and fail_loudly():
-            error = last_load_error(file_path)
-            if error is not None:
-                raise error
+            active_module = _reloaded_module(file_path)
+        else:
+            _raise_load_error(file_path)
+            active_module = module
         dep_cache = render_dep_cache(request)
         policy = response_policy(
             page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
@@ -141,6 +149,8 @@ def _resolving_view(
             file_path, active_module, request, _dep_cache=dep_cache, **kwargs
         )
         if resolution.http_response is not None:
+            if intent.zones:
+                return finish_zone_response(resolution.http_response, policy, request)
             return finish_response(resolution.http_response, policy, request, file_path)
         if intent.zones:
             zone = shaper.zone_response(
@@ -203,7 +213,7 @@ def create_url_pattern(
 ) -> URLPattern | None:
     """Return a `path()` pattern for a page, template, or virtual entry."""
     # The error class comes through the parser, because importing next.urls
-    # at module level would close the next.pages <-> next.urls cycle.
+    # at module level would create an import cycle between next.pages and next.urls.
     try:
         django_pattern, _parameters = url_parser.parse_url_pattern(url_path)
     except url_parser.parameter_error as exc:

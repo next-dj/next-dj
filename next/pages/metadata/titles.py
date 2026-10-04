@@ -79,7 +79,7 @@ def template_has_title(template: str) -> bool:
 
 
 def _title_or_bare(template: Text, text: Text, site_name: Text | None) -> SafeString:
-    """Fill the template, or answer the bare text when it wants an absent site name.
+    """Fill the template, or return the bare text when it needs an absent site name.
 
     The template is parsed after translation, so the decision has to wait for `str()`.
     """

@@ -44,8 +44,8 @@ interface Ctx {
 
 type Keyed = MorphOptions["keyed"];
 
-// Read the id through getAttribute: the `id` property is subject to DOM
-// clobbering, an `<input name="id">` shadows form.id.
+// Read the id through getAttribute, since the `id` property is subject to DOM
+// clobbering, where an `<input name="id">` shadows form.id.
 function readId(el: Element, keyed: Keyed): string | null {
   const key = el.getAttribute(ATTR_KEY);
   if (key !== null) {
@@ -57,7 +57,7 @@ function readId(el: Element, keyed: Keyed): string | null {
 
 // Build id-sets for one tree in a single pass. Each element's id bubbles into
 // every ancestor's set, so a wrapper without an id still votes through its
-// descendants. Collected ids also land in the universe for the intersection.
+// descendants. Collected ids are also added to the universe for the intersection.
 function collectIds(
   root: Element,
   into: Map<Element, Set<string>>,
@@ -171,8 +171,8 @@ function findMatch(
   return pointer;
 }
 
-// A hyphenated tag or a shadow root is atomic: on a tag match only attributes
-// sync, children are never morphed, the engine never enters the shadow root.
+// A hyphenated tag or a shadow root is atomic. On a tag match only attributes
+// sync, and the engine never morphs its children or enters the shadow root.
 function isAtomic(el: Element): boolean {
   return el.tagName.includes("-") || el.shadowRoot != null;
 }
@@ -276,8 +276,8 @@ function syncAttributes(ctx: Ctx, oldEl: Element, newEl: Element): void {
       }
     }
   }
-  // Snapshot the old names: removeAttribute mutates the live NamedNodeMap, so a
-  // fixed list keeps the pass stable while it removes.
+  // Snapshot the old names, since removeAttribute mutates the live NamedNodeMap and
+  // a fixed list keeps the pass stable while it removes.
   const oldNames = Array.from(oldEl.attributes, (attr) => attr.name);
   for (const name of oldNames) {
     if (newEl.hasAttribute(name) || skipAttribute(ctx, oldEl, name)) continue;
@@ -349,8 +349,8 @@ function morphChildren(
 }
 
 // A match always shares its new pair's tag, so an atomic element with a changed
-// tag never matches: it is inserted fresh and the old one discarded, the honest
-// connected/disconnected lifecycle for a custom element.
+// tag never matches. It is inserted new and the old one discarded, which gives a
+// custom element the correct connected and disconnected callbacks.
 function applyMatch(
   ctx: Ctx,
   match: Node,

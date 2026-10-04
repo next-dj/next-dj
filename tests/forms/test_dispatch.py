@@ -1291,7 +1291,7 @@ class TestWizardWithPlainDjangoSteps:
     """Bare django.forms classes work as wizard steps without registration."""
 
     def test_plain_steps_are_not_registered_as_actions(self) -> None:
-        """A plain Django form step never lands in the action registry."""
+        """A plain Django form step is never added to the action registry."""
         backend = form_action_manager.default_backend
         assert backend.get_meta("plain_identity_step") is None
         assert backend.get_meta("plain_scope_step") is None

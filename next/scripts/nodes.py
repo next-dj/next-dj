@@ -1,13 +1,13 @@
-"""The base of the node `{% #consented %}` compiles to, apart from the tag library.
+"""The base class of the node `{% #consented %}` compiles to.
 
-The tag library imports this package, so a check finds the blocks through this base.
+The tag library imports this package, so the checks find the blocks through this base.
 """
 
 from django.template.base import FilterExpression, Node
 
 
 class ConsentedTagNode(Node):
-    """A compiled `{% #consented %}` block, both branches searched by the checks."""
+    """A compiled `{% #consented %}` block. The checks search both branches."""
 
     category: FilterExpression
     child_nodelists = ("granted", "denied")

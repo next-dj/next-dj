@@ -1,6 +1,6 @@
-// The dev channel: what the envelope boundary dropped, per-op timing, stripped
-// scripts, doubly keyed nodes and ignored trigger attributes. It ships in
-// next.dev.min.js, which the runtime fetches only for a page rendered under $dev.
+// The dev diagnostics. They report what the envelope boundary dropped, per-op timing,
+// stripped scripts, nodes with both a key and an id, and ignored trigger attributes.
+// They ship in next.dev.min.js, which the runtime fetches only for a $dev payload.
 
 import { assetLoad, isPatch, isWellFormedAsset } from "./apply";
 import { readCsrf } from "./csrf";
@@ -17,8 +17,8 @@ import {
 import type { Diagnostics } from "./protocol";
 import { LAZY_ATTR, MERGE_ATTR, POLL_ATTR } from "./triggers";
 
-// The closed value sets the dev warning guards, so a typo is caught at authoring
-// time rather than dropped in silence. Merge mirrors the server's vocabulary.
+// The accepted values of the checked attributes, so a typo is reported during
+// development instead of being ignored. The merge values match the server.
 const LAZY_VALUES = new Set(["load", "revealed"]);
 const MERGE_VALUES = new Set(["append", "prepend"]);
 
@@ -30,8 +30,8 @@ function reportNonArray(field: string, value: unknown): void {
   }
 }
 
-// The breakdown of what the two boundary filters dropped, walking the wire arrays a
-// second time, which is why production never does it.
+// Reports what the two boundary filters dropped. It walks the wire arrays a second
+// time, so only the dev chunk does it.
 function reportDropped(wire: Record<string, unknown>): void {
   reportNonArray("ops", wire.ops);
   const rawOps = Array.isArray(wire.ops) ? wire.ops : [];
@@ -55,49 +55,49 @@ function reportDropped(wire: Record<string, unknown>): void {
   if (malformedAssets > 0) {
     console.warn(`[next] dropped malformed assets: ${malformedAssets}`);
   }
-  // A debug line, not a warn, since a custom kind with no insertion verb is a
-  // normal configuration. The kinds are named as the only signal such an asset leaves.
+  // A debug line, not a warning, since a custom kind without an insertion verb is a
+  // valid configuration. The kinds are named since nothing else reports such an asset.
   if (skipped > 0) {
     const named = Array.from(kinds).join(", ");
     console.debug(`[next] skipped assets of unsupported kind (${skipped}): ${named}`);
   }
 }
 
-// Contained so a stubbed or exhausted user timing cannot fail the op it measures.
+// Errors are caught so a stubbed or full user timing buffer cannot fail the op.
 function openMeasure(startMark: string): void {
   try {
     performance.mark(startMark);
   } catch {
-    // A measurement never decides the fate of what it measures.
+    // A timing failure must not fail the op.
   }
 }
 
-// Close the diagnostic span of one op. A user-timing failure stays inside here,
-// so the finally of the timing cannot displace the op's outcome.
+// End the timing span of one op. A user timing error is caught here, so it cannot
+// replace the op's result in the caller's finally block.
 function closeMeasure(name: string, startMark: string): void {
   try {
     performance.measure(name, startMark);
-    // A dev tab lives for hours and the panel already recorded the span as it
-    // was created, so neither the mark nor the measure stays in the buffer.
+    // The performance panel records the span when it is created, so the mark and
+    // the measure are cleared to keep the buffer of a long-lived dev tab small.
     performance.clearMarks(startMark);
     performance.clearMeasures(name);
   } catch {
-    // A measurement never decides the fate of what it measured.
+    // A timing failure must not fail the op.
   }
 }
 
-// The timing line of one op. A page may replace console.debug with a throwing
-// stub, so the failure stays inside and cannot displace the op's outcome.
+// Log the timing of one op. A page may replace console.debug with a stub that
+// throws, so the error is caught and cannot replace the op's result.
 function reportTiming(message: string): void {
   try {
     console.debug(message);
   } catch {
-    // A measurement never decides the fate of what it measured.
+    // A timing failure must not fail the op.
   }
 }
 
-// The zone an op addresses, read the way each verb resolves its own zone, so
-// refresh prefers its top-level zone and layer.open carries only that field.
+// The zone an op addresses, read as each verb resolves it. refresh prefers its
+// top-level zone, and layer.open has only that field.
 function zoneOf(patch: {
   op: string;
   target?: unknown;
@@ -124,7 +124,7 @@ function warnAttr(attr: string, value: string, allowed: Set<string>): void {
   );
 }
 
-// The interval has no closed set to list, so the message spells the bounds.
+// The interval has no fixed set of values, so the message states the bounds.
 function warnPoll(value: string): void {
   console.warn(
     `[next.partial] ${POLL_ATTR}="${value}" is not a whole number of milliseconds between ${MIN_POLL_MS} and ${MAX_POLL_MS} and is ignored. The {% zone %} tag writes the resolved interval.`,
@@ -137,7 +137,7 @@ function warnPollZone(value: string): void {
   );
 }
 
-// Warn on hand-written values the runtime drops in silence.
+// Warn on hand-written values the runtime ignores.
 function validateAttrs(root: ParentNode): void {
   for (const el of matching(root, `[${LAZY_ATTR}]`)) {
     const value = attrOf(el, LAZY_ATTR);
@@ -154,7 +154,7 @@ function validateAttrs(root: ParentNode): void {
   }
 }
 
-/** Warn on a $csrf payload the runtime ignored, read off the seeded context. */
+/** Warn on a $csrf payload in the seeded context that the runtime ignored. */
 export function warnCsrf(context: Readonly<Record<string, unknown>>): void {
   // Otherwise the only symptom is a 403 on every programmatic mutation.
   if (context.$csrf !== undefined && readCsrf(context.$csrf) === undefined) {
@@ -164,16 +164,16 @@ export function warnCsrf(context: Readonly<Record<string, unknown>>): void {
   }
 }
 
-/** Build the dev channel the runtime reports through once this chunk lands. */
+/** Build the dev diagnostics the runtime reports through once this chunk loads. */
 export function createDiagnostics(): Diagnostics {
-  // Serial of the timing marks, so two ops sharing a label hold two marks.
+  // A counter appended to each mark name, so two ops with one label get two marks.
   let timings = 0;
   return {
     dropped: reportDropped,
     timed(patch, run) {
       const zone = zoneOf(patch);
       const label = zone ?? patch.op;
-      // The serial keeps each mark distinct, so a nested apply cannot clear it.
+      // A distinct mark name means a nested apply cannot clear this mark.
       timings += 1;
       const startMark = `next:apply:${label}:start:${timings}`;
       openMeasure(startMark);

@@ -541,7 +541,7 @@ class TestResolveWithTemplateContext:
         assert result["form"] is form
 
     def test_uses_dependency_cache_instance_when_passed(self) -> None:
-        """A DependencyCache passed as _cache is used, values landing in its backing."""
+        """A DependencyCache passed as _cache is used and stores into its backing."""
         r = DependencyResolver()
 
         def provide() -> str:

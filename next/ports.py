@@ -64,7 +64,7 @@ class PartialShaper(Protocol):
     """Shapes page and form responses for partial requests.
 
     The caller decides through `intent` whether a request is partial, and that
-    intent travels on as an argument so no shape method re-reads the request.
+    intent is passed as an argument so no shape method re-reads the request.
     """
 
     def intent(self, request: HttpRequest) -> PartialIntent:
@@ -180,18 +180,18 @@ class StaticAssets(Protocol):
 class SeoRoutes(Protocol):
     """The routes the seo area adds to the lazy urlpatterns.
 
-    `next.seo` imports `next.urls`, so the pattern concat reaches back through this.
+    `next.seo` imports `next.urls`, so `next.urls` reads the SEO routes through this.
     """
 
     def patterns(self) -> list[URLPattern]:
-        """Return the SEO routes a source backs, spliced after every page route."""
+        """Return the SEO routes whose source exists, placed after every page route."""
         ...
 
 
 class PageScripts(Protocol):
     """The third-party scripts one page render adds to its head and init payload.
 
-    `next.scripts` reads the static manager, so the injector reaches it through this.
+    `next.scripts` imports the static manager, so the injector reads it through this.
     """
 
     def render(

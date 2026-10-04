@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
+from unittest.mock import patch
 
 import pytest
 from django.contrib.sitemaps import Sitemap
@@ -12,7 +13,11 @@ from django.utils.functional import lazy
 
 from next.conf.signals import settings_reloaded
 from next.pages.responses import cache_control
-from next.seo import PageTreeSitemapBackend, SitemapBackend
+from next.seo import (
+    PageTreeSitemapBackend,
+    SitemapBackend,
+    manager as seo_manager_module,
+)
 from next.seo.discovery import BrokenSource
 from next.seo.manager import (
     SeoManager,
@@ -180,6 +185,37 @@ class TestSources:
         assert "sources" not in caplog.text
 
 
+class TestResetDuringALookup:
+    """A value computed while a reset happens is returned but never memoised."""
+
+    def test_a_robots_source_found_across_a_reset_is_not_kept(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", robots="")
+        real = seo_manager_module.robots_candidates
+
+        def candidates(roots):
+            seo_manager.reset()
+            return real(roots)
+
+        with routed(root):
+            with patch.object(seo_manager_module, "robots_candidates", candidates):
+                found = seo_manager.robots_source()
+            assert isinstance(found, DeclaredRobots)
+            assert seo_manager.robots_source() is not found
+
+    def test_a_fingerprint_taken_across_a_reset_is_not_kept(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", sitemap="cache = 60\n")
+        real = seo_manager_module._source_bytes
+
+        def source_bytes(roots):
+            seo_manager.reset()
+            return real(roots)
+
+        with routed(root):
+            with patch.object(seo_manager_module, "_source_bytes", source_bytes):
+                seo_manager.fingerprint()
+            assert seo_manager._fingerprint is None
+
+
 class TestFingerprint:
     """The fingerprint follows the source bytes and the settings, once per version."""
 
@@ -238,7 +274,7 @@ _TEXT = lazy(lambda: "Acme", str)()
 
 
 class TestStableRepr:
-    """The spelling ignores set order, addresses and laziness."""
+    """The representation ignores set order, addresses and laziness."""
 
     @pytest.mark.parametrize(
         ("value", "spelled"),
@@ -288,7 +324,7 @@ class TestStableRepr:
 
 
 class TestRefresh:
-    """A watched process reads an SEO source again once its file moves on disk."""
+    """Under `DEBUG` an SEO source is read again once its file changes on disk."""
 
     def test_a_watched_edit_resets_the_sources(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages")
