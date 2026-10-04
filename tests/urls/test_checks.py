@@ -8,8 +8,10 @@ from django.core.checks import Error
 from django.http import HttpRequest, HttpResponse
 from django.test import override_settings
 from django.urls import NoReverseMatch, include, path, re_path
+from django.views import View
 
 from next.checks import reset_check_caches
+from next.forms.uid import reverse_form_action
 from next.testing import override_next_settings
 from next.urls import PageRoot, RouterBackend
 from next.urls.checks import (
@@ -451,6 +453,25 @@ def _page_view(request: HttpRequest) -> HttpResponse:
 _page_view.next_page_path = Path("/srv/pages/[[rest]]/page.py")
 
 
+class _Nested:
+    """Holds a view class whose qualified name differs from its name."""
+
+    class Inner(View):
+        """Answer every method with a plain response."""
+
+        def get(self, request: HttpRequest) -> HttpResponse:
+            """Return a plain response."""
+            return HttpResponse("inner")
+
+
+class _CallableView:
+    """A view instance that defines no `__qualname__` of its own."""
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        """Return a plain response."""
+        return HttpResponse("instance")
+
+
 class TestFrameworkRoutesReachable:
     """`next.E149` names the pattern answering a framework endpoint first."""
 
@@ -492,6 +513,53 @@ class TestFrameworkRoutesReachable:
         ):
             [error] = check_framework_routes_reachable()
         assert "resolves that address to nothing" in error.msg
+
+    def test_the_routed_form_action_view_passes(self) -> None:
+        urlconf = _urlconf("included", path("", include("next.urls")))
+        with override_settings(ROOT_URLCONF=urlconf):
+            assert reverse_form_action("probe") == "/_next/form/probe/"
+            assert check_framework_routes_reachable() == []
+
+    def test_a_project_view_reusing_the_csrf_name_is_e149(self) -> None:
+        urlconf = _urlconf(
+            "named_csrf",
+            path("_next/csrf/", _mine, name="csrf"),
+            path("", include("next.urls")),
+        )
+        with override_settings(ROOT_URLCONF=urlconf):
+            errors = check_framework_routes_reachable()
+        assert [error.id for error in errors] == ["next.E149"]
+        assert f"{__name__}._mine (route '_next/csrf/')" in errors[0].msg
+
+    def test_a_project_view_reusing_the_form_action_name_is_e149(self) -> None:
+        urlconf = _urlconf(
+            "named_action",
+            path("_next/form/<str:uid>/", _mine, name="form_action"),
+            path("", include("next.urls")),
+        )
+        with override_settings(ROOT_URLCONF=urlconf):
+            [error] = check_framework_routes_reachable()
+        assert "form action endpoint" in error.msg
+
+    def test_a_class_based_view_is_named_by_its_qualified_class(self) -> None:
+        urlconf = _urlconf(
+            "class_view",
+            path("_next/csrf/", _Nested.Inner.as_view()),
+            path("", include("next.urls")),
+        )
+        with override_settings(ROOT_URLCONF=urlconf):
+            [error] = check_framework_routes_reachable()
+        assert f"{__name__}._Nested.Inner (route '_next/csrf/')" in error.msg
+
+    def test_a_callable_instance_view_is_named_by_its_class(self) -> None:
+        urlconf = _urlconf(
+            "instance_view",
+            path("_next/csrf/", _CallableView()),
+            path("", include("next.urls")),
+        )
+        with override_settings(ROOT_URLCONF=urlconf):
+            [error] = check_framework_routes_reachable()
+        assert f"{__name__}._CallableView (route '_next/csrf/')" in error.msg
 
     def test_an_unrouted_endpoint_is_left_to_its_own_check(self) -> None:
         with override_settings(ROOT_URLCONF=_urlconf("none", path("", _mine))):

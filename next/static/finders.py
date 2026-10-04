@@ -378,8 +378,8 @@ class NextStaticFilesFinder(BaseFinder):
     ) -> str | list[str]:
         """Resolve the logical path to an absolute path, or an empty list on a miss.
 
-        A miss answers `[]` whatever `find_all` says, since `finders.find` reads another
-        falsy answer as a match, and the ignore covers django-stubs typing it `str`.
+        A miss returns `[]` whatever `find_all` is, since `finders.find` reads another
+        falsy value as a match. The ignore covers django-stubs typing the result `str`.
         """
         # Django's BaseFinder.find dictates a positional bool and a deprecated
         # `all` keyword, so the override matches it and normalises `all` back.

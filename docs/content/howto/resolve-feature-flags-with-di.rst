@@ -59,7 +59,7 @@ The provider claims any parameter whose annotation origin is ``DFlag`` and reads
            return get_cached_flag(str(name)) or model_cls(name=str(name), enabled=False)
 
 ``can_handle`` returns ``True`` only for ``DFlag[...]`` subscripts.
-``static_can_handle`` settles the parameter from the annotation alone, so the plan claims it at compile time and no other provider is consulted for it per request.
+``static_can_handle`` decides the parameter from the annotation alone, so the plan claims it at compile time and no other provider is consulted for it per request.
 ``resolve`` checks two sources.
 A page captures the name in the URL through ``context.url_kwargs``.
 A component receives it as a template prop through ``context.context_data``.

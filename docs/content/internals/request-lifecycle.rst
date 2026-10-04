@@ -111,17 +111,19 @@ Response headers
 ~~~~~~~~~~~~~~~~
 
 The view stamps what the policy declares on the response.
-The ``headers`` go on first, then the ``cache`` of a successful ``GET`` or ``HEAD``, taken back to ``private`` when the render set a cookie, read the session, minted a CSRF cookie, read the consent cookie, or minted a CSP nonce, or when the request carries ``Authorization``, then ``X-Robots-Tag``.
-A shared cache swaps the response's cookie jar for ``SharedCookies``, which makes the response private as soon as a middleware sets a cookie after the view, and a lazily rendered ``TemplateResponse`` settles the same question in a post-render callback.
+The ``headers`` go on first, then the ``cache`` of a successful ``GET`` or ``HEAD``, taken back to ``private`` when the render set a cookie, read the session, minted a CSRF cookie, read the consent cookie, or minted a CSP nonce, or when the request carries ``Authorization``.
+A final step then sets ``X-Robots-Tag`` and ``Vary: Cookie`` and, last, sends a response whose render contained a failure with ``private, no-store``, so a callable ``SITE["INDEXABLE"]`` that first runs for the robots header and fails still keeps the response out of every cache.
+A shared cache swaps the response's cookie jar for ``SharedCookies``, which makes the response private as soon as a middleware sets a cookie after the view, and a lazily rendered ``TemplateResponse`` runs the final step in a post-render callback, so the robots its head published reach the header.
 On a site closed to search the header is ``noindex, nofollow``, and otherwise it repeats the robots directives the ``{% metadata %}`` resolve published on the request when they block, or those of the static fold when no head rendered.
 ``Vary: Cookie`` joins when the HTML followed the consent cookie.
 A ``render()`` that returns its own response passes the same stamping, its own headers winning.
 A zone response goes through ``finish_zone_response``, which stamps the page ``headers``, ``private, no-store`` where the response names no ``Cache-Control`` of its own, and the site-level robots header, so a CDN that ignores ``Vary`` never keeps it.
+A zone request reads the page ``headers`` alone, so a callable ``cache`` is never called for it.
 
 Both routed views then stamp the partial ``Vary`` set on the finished response, whether or not the project declares a single zone.
 The header names ``X-Next-Request``, ``X-Next-Zone``, ``X-Next-Merge``, and ``X-Next-Version``, because a full page and a zone envelope answer the same URL and a shared cache that ignores those headers would serve one where the other belongs.
 A project using no partial rendering therefore still ships the four names on every file-routed HTML response, which narrows what a shared cache may reuse across clients that send different values.
-The one response that escapes the stamp is the one a ``render`` function returns itself, because that branch leaves the view before the port is reached.
+A response a ``render`` function returns itself receives the stamp only when it succeeds and carries ``Cache-Control``, because a browser could otherwise serve a stored copy in place of a zone fetch, while a redirect or an uncached answer is left alone.
 See :doc:`/content/topics/partial-rendering/reference` for the request headers behind that set and what a shared cache does with them.
 
 Form submission path

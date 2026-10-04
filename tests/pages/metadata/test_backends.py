@@ -3,12 +3,13 @@ from collections.abc import Iterable
 from typing import ClassVar, override
 
 import pytest
-from django.test import override_settings
+from django.test import Client, override_settings
 from django.utils import translation
 from django.utils.functional import lazy
 from django.utils.safestring import SafeString
 
 import next.pages.metadata.backends as backends_module
+from next.diagnostics import QUIET_PERIOD
 from next.errors import (
     AbstractBackendError,
     SettingImportError,
@@ -36,7 +37,7 @@ from next.pages.metadata import (
     resolve_metadata,
 )
 from next.pages.metadata.backends import configured_renderer_class, metadata_renderer
-from tests.support import BASE
+from tests.support import BASE, routed, write_page
 
 
 def _resolved(**values: object) -> ResolvedMetadata:
@@ -319,7 +320,9 @@ class TestConfiguredRenderer:
 
     def test_a_class_outside_the_family_is_refused(self) -> None:
         with (
-            override_settings(NEXT_FRAMEWORK=_renderer_setting("next.pages.Metadata")),
+            override_settings(
+                NEXT_FRAMEWORK=_renderer_setting("next.pages.metadata.Metadata")
+            ),
             pytest.raises(SettingNotSubclassError) as caught,
         ):
             configured_renderer_class()
@@ -360,7 +363,7 @@ class BrokenRenderer(HtmlMetadataRenderer):
 
 
 class TestRendererFallback:
-    """A renderer that cannot be built is replaced by the HTML renderer, logged once."""
+    """A renderer that cannot be built is replaced by the HTML renderer and logged."""
 
     @pytest.fixture(autouse=True)
     def _armed(self) -> None:
@@ -368,7 +371,7 @@ class TestRendererFallback:
 
     @pytest.mark.parametrize(
         "dotted",
-        ["nope.Renderer", "next.pages.Metadata", f"{__name__}.BrokenRenderer"],
+        ["nope.Renderer", "next.pages.metadata.Metadata", f"{__name__}.BrokenRenderer"],
         ids=["import", "family", "init"],
     )
     def test_the_html_renderer_stands_in(
@@ -384,6 +387,46 @@ class TestRendererFallback:
         assert second is first
         assert len(caplog.records) == 1
         assert "renders through HtmlMetadataRenderer" in caplog.text
+
+    def test_every_page_rendered_through_the_stand_in_is_never_shared(
+        self, tmp_path
+    ) -> None:
+        root = tmp_path / "pages"
+        root.mkdir()
+        (root / "layout.djx").write_text(
+            "<html><head>{% metadata %}</head><body>{% template %}</body></html>"
+        )
+        write_page(root, "", "template = 'x'\ncache = 3600\n")
+        with routed(root, METADATA={"RENDERER": f"{__name__}.BrokenRenderer"}):
+            responses = [Client().get("/") for _ in range(2)]
+        assert [r.status_code for r in responses] == [200, 200]
+        assert [r["Cache-Control"] for r in responses] == ["private, no-store"] * 2
+
+    def test_a_recurring_stand_in_is_logged_again_after_the_quiet_period(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        clock = [1000.0]
+        monkeypatch.setattr("next.diagnostics.monotonic", lambda: clock[0])
+        root = tmp_path / "pages"
+        root.mkdir()
+        (root / "layout.djx").write_text(
+            "<html><head>{% metadata %}</head><body>{% template %}</body></html>"
+        )
+        write_page(root, "", "template = 'x'\ncache = 3600\n")
+        broken = {"RENDERER": f"{__name__}.BrokenRenderer"}
+        with (
+            routed(root, METADATA=broken),
+            caplog.at_level("WARNING", logger="next.pages.metadata.backends"),
+        ):
+            first = Client().get("/")
+            clock[0] += QUIET_PERIOD
+            second = Client().get("/")
+        assert [first["Cache-Control"], second["Cache-Control"]] == [
+            "private, no-store"
+        ] * 2
+        assert [record.levelname for record in caplog.records] == ["ERROR", "WARNING"]
+        assert "is still replaced by HtmlMetadataRenderer" in caplog.records[1].message
+        assert caplog.records[1].suppressed == 1
 
     def test_a_broken_renderer_is_loud_under_debug(self) -> None:
         with (
@@ -407,6 +450,14 @@ class TestSections:
             "<title>[T]</title>",
             '<meta name="brand" content="acme">',
         ]
+
+    def test_the_hooks_are_bound_once_per_renderer(self) -> None:
+        renderer = RobotsFirstRenderer()
+        renderer.render(_resolved(title="T"))
+        hooks = vars(renderer)["_hooks"]
+        renderer.render(_resolved(title="U"))
+        assert vars(renderer)["_hooks"] is hooks
+        assert hooks[0] == renderer.render_robots
 
     @override_settings(NEXT_FRAMEWORK={"SITE": {"INDEXABLE": False}})
     def test_a_custom_renderer_cannot_lose_a_closed_site(self) -> None:

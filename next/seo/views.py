@@ -6,7 +6,7 @@ import functools
 import logging
 from collections.abc import Callable, Mapping
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Concatenate, Final, cast
+from typing import TYPE_CHECKING, Any, Concatenate, Final, NamedTuple, cast
 
 from django.conf import settings
 from django.contrib.sitemaps.views import SitemapIndexItem, x_robots_tag
@@ -265,12 +265,24 @@ def _source_response(
     )
 
 
+class _Wrapping(NamedTuple):
+    """The wrappers of one manager version, built from one read of the cache control."""
+
+    version: int
+    view: View
+    """The view every request takes, or the one `cache_page` wraps per indexability."""
+    stored: CacheControl | None
+    """The cache control of a copy stored per indexability, `None` when none is."""
+    copies: dict[int, View]
+
+
 class _CachedView:
     """A view wrapped in `cache_page` when its source declares a cache.
 
     The wrapper is rebuilt per manager version. The key prefix holds the source
     fingerprint, so a copy cached before an edit is never served, and the request
-    indexability, so a closed request never reads the copy of an open one.
+    indexability, so a closed request never reads the copy of an open one. The
+    indexability is read only when a copy is stored.
     """
 
     __slots__ = ("control", "held", "view")
@@ -279,31 +291,31 @@ class _CachedView:
         """Store the view and the cache control reader, wrapping nothing yet."""
         self.view = view
         self.control = control
-        self.held: tuple[int, dict[int, View]] = (-1, {})
+        self.held = _Wrapping(-1, view, None, {})
 
     def get(self, request: HttpRequest) -> View:
-        """Return the view for the manager version and the indexability of `request`."""
+        """Return the view for the manager version and, when stored, for `request`."""
         version = seo_manager.version
-        if self.held[0] != version:
-            self.held = (version, {})
+        held = self.held
+        if held.version != version:
+            held = self.held = self._load(version)
+        if held.stored is None:
+            return held.view
         indexable = int(site_indexable(request))
-        views = self.held[1]
-        view = views.get(indexable)
+        view = held.copies.get(indexable)
         if view is None:
-            view = views[indexable] = self._wrap(indexable)
+            prefix = f"next-seo-{seo_manager.fingerprint()}-{indexable}"
+            view = cache_page(held.stored.seconds, key_prefix=prefix)(held.view)
+            held.copies[indexable] = view
         return view
 
-    def _wrap(self, indexable: int) -> View:
-        """Return the view with the declared cache control and `cache_page` applied."""
+    def _load(self, version: int) -> _Wrapping:
+        """Read the cache control once and apply it to the view."""
         control = self.control()
-        view = self.view
-        if control is not None:
-            view = _with_cache(view, control)
-            seconds = control.seconds
-            if seconds and control.stores:
-                prefix = f"next-seo-{seo_manager.fingerprint()}-{indexable}"
-                view = cache_page(seconds, key_prefix=prefix)(view)
-        return view
+        if control is None:
+            return _Wrapping(version, self.view, None, {})
+        stored = control if control.seconds and control.stores else None
+        return _Wrapping(version, _with_cache(self.view, control), stored, {})
 
 
 def _with_cache(view: View, control: CacheControl) -> View:

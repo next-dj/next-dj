@@ -19,7 +19,7 @@ import type { SessionStore } from "./assets";
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
-// Kept apart from the version guard's flag in assets.ts, one must not clear the other.
+// Kept apart from the version guard's flag in assets.ts, so neither clears the other.
 const NAVIGATED_FLAG = "next:partial:navigated";
 
 /** Fetch stand-in so vitest can drive requests deterministically. */
@@ -56,14 +56,13 @@ export interface CsrfSource {
 export interface WireRequest {
   url: string;
   method?: string;
-  // A mutation locks on the form uid, a safe GET queues on its named queue or on url
-  // plus zone.
-  // Absent both, the request runs unqueued and unlocked.
+  // A mutation locks on the form uid, and a safe GET queues on its named queue or on
+  // url and zone. Absent both, the request runs unqueued and unlocked.
   uid?: string;
   // The X-Next-Zone value, absent when the answer addresses the whole page.
   zone?: string;
   // The queue and abort identity, defaulting to the zone. An inline validation names
-  // its own key, so the zone it declares still travels as the header.
+  // its own key, and the zone it declares is still sent as the header.
   queue?: string;
   headers?: Record<string, string>;
   body?: BodyInit;
@@ -72,12 +71,15 @@ export interface WireRequest {
   abortable?: boolean;
   // The initiating form's data-next-key, threaded to apply for a repeated form.
   key?: string;
+  // The page a mutation was submitted from, which receives the meta op of the reply.
+  owner?: string;
 }
 
 /**
- * Sink for a recognised envelope. The snapshot is the dirty counter captured at
+ * Receiver of a recognised envelope. The snapshot is the dirty counter captured at
  * fetch time so a field touched after the request is protected from its own
- * response. The page is the URL a safe zone GET fetched, absent on mutations.
+ * response. The page is the URL a safe zone GET fetched, absent on mutations. The
+ * owner is the page a mutation was submitted from.
  */
 export type EnvelopeHandler = (
   raw: unknown,
@@ -85,6 +87,7 @@ export type EnvelopeHandler = (
   snapshot: number,
   key: string | undefined,
   page: string | undefined,
+  owner: string | undefined,
 ) => void;
 
 /** Turns a foreign content-type body into a JSON-ish envelope before apply. */
@@ -156,7 +159,7 @@ export class Wire {
   }
 
   /**
-   * Register a parse-hook per content-type. The hook owns the body before
+   * Register a parse-hook per content-type. The hook reads the body before
    * classification, so a foreign wire format never reaches navigation.
    */
   parseHook(contentType: string, hook: ParseHook): void {
@@ -165,7 +168,7 @@ export class Wire {
 
   /**
    * Abort the in-flight request on a queue without starting a new one, so a form submit
-   * can cancel its own inline validation and a late answer finds its queue gone.
+   * can cancel its own inline validation and a late reply to it is dropped.
    */
   abort(key: string): void {
     this.#queues.get(key)?.abort();
@@ -189,7 +192,7 @@ export class Wire {
     // An abortable POST (inline validation) queues like a safe GET, taking no lock.
     const locked = !safe && !request.abortable && uid !== undefined;
     if (locked) {
-      // A second submit drops while busy, so a double click yields one fetch.
+      // A second submit is dropped while busy, so a double click sends one fetch.
       if (this.#busy.has(uid)) return;
       this.#busy.add(uid);
     }
@@ -263,9 +266,13 @@ export class Wire {
       method,
       intent: { zone: request.zone, uid: request.uid },
     });
-    let response: Response;
+    // The body read runs inside the try too, since an abort or a dropped connection
+    // can reject it after the headers arrived.
     try {
-      response = await this.#fetch(target, init);
+      const response = await this.#fetch(target, init);
+      // A safe-GET response that a newer request superseded is dropped unreported.
+      if (queueKey !== undefined && this.#queues.get(queueKey) !== entry) return;
+      await this.#classify(request, target, method, response, snapshot);
     } catch (error) {
       // An AbortError means the request was superseded, so nothing is reported.
       if (isAbortError(error)) return;
@@ -273,11 +280,7 @@ export class Wire {
         kind: "network",
         error,
       } satisfies PartialError);
-      return;
     }
-    // A stale safe-GET response that lost its race is dropped silently.
-    if (queueKey !== undefined && this.#queues.get(queueKey) !== entry) return;
-    await this.#classify(request, target, method, response, snapshot);
   }
 
   async #classify(
@@ -287,8 +290,8 @@ export class Wire {
     response: Response,
     snapshot: number,
   ): Promise<void> {
-    // 409 on a safe method means an asset version mismatch with an empty body:
-    // the runtime does a full visit of the current URL, nothing else.
+    // A 409 on a safe method means an asset version mismatch with an empty body. The
+    // runtime then does a full visit of the current URL and nothing else.
     if (response.status === 409 && SAFE_METHODS.has(method)) {
       this.#navigate(response.url || target);
       return;
@@ -310,14 +313,10 @@ export class Wire {
     const contentType = response.headers.get("content-type") ?? "";
     const baseType = contentType.replace(/;.*$/, "").trim();
     const hook = this.#parseHooks.get(baseType);
-    if (hook !== undefined) {
-      const body = await response.text();
-      this.#deliver(hook(response, body), response, snapshot, request.key, page);
-      return;
-    }
     // A non-envelope reply or a redirect is a full navigation to the final URL. On a
-    // mutation the URL is the action endpoint, so navigating there would 405.
-    if (baseType !== CONTENT_TYPE || response.redirected) {
+    // mutation the URL is the action endpoint, so navigating there would 405. A
+    // parse hook handles its content type, so its body never reaches navigation.
+    if (hook === undefined && (baseType !== CONTENT_TYPE || response.redirected)) {
       if (response.redirected || SAFE_METHODS.has(method)) {
         this.#fallbackNavigate(response.url || target);
         return;
@@ -331,37 +330,27 @@ export class Wire {
       return;
     }
     const body = await response.text();
-    let raw: unknown;
+    // A body the hook or JSON cannot parse, or an envelope apply rejects as malformed,
+    // is a parse error rather than an unhandled rejection of a fire-and-forget fetch.
     try {
-      raw = JSON.parse(body);
+      const raw: unknown = hook !== undefined ? hook(response, body) : JSON.parse(body);
+      // Cleared once the body parses, so a later non-envelope reply on this page
+      // navigates once more.
+      this.#session.remove(NAVIGATED_FLAG);
+      this.#onEnvelope(raw, response, snapshot, request.key, page, request.owner);
     } catch (error) {
       this.#dispatch("partial:error", {
         kind: "parse",
         body,
         error,
       } satisfies PartialError);
-      return;
     }
-    this.#deliver(raw, response, snapshot, request.key, page);
   }
 
-  // Clearing the navigate-once flag on a correct classify lets the next
-  // non-envelope on the same page earn its own single navigation.
-  #deliver(
-    raw: unknown,
-    response: Response,
-    snapshot: number,
-    key: string | undefined,
-    page: string | undefined,
-  ): void {
-    this.#session.remove(NAVIGATED_FLAG);
-    this.#onEnvelope(raw, response, snapshot, key, page);
-  }
-
-  // Guarded so a page that keeps answering with a non-envelope (login redirect, WAF
-  // stub, maintenance) cannot loop navigation, since a `lazy="load"` zone asks again
-  // on every page. The first navigates and sets the flag, and a second while it is
-  // set fires a partial:error and leaves the page in place.
+  // Guarded so a page that keeps replying with a non-envelope (login redirect, WAF
+  // stub, maintenance) cannot loop navigation, since a `lazy="load"` zone requests
+  // again on every page. The first navigates and sets the flag, and a second while it
+  // is set fires a partial:error and leaves the page in place.
   #fallbackNavigate(url: string): void {
     if (this.#session.get(NAVIGATED_FLAG) === "1") {
       this.#session.remove(NAVIGATED_FLAG);
@@ -376,7 +365,7 @@ export class Wire {
   }
 
   // Headers, not a plain record, so a caller writing a name in another case still
-  // collides with the runtime's own and each header is stamped exactly once.
+  // matches the runtime's header of that name and each header is set exactly once.
   #headers(
     request: WireRequest,
     method: string,
@@ -387,8 +376,8 @@ export class Wire {
       [HEADER_ACCEPT]: ACCEPT,
       ...request.headers,
     });
-    // The version travels only once the client has learned one from an
-    // envelope, so the first request of a page asserts no stale version.
+    // The version is sent only after the client has read one from an envelope, so
+    // the first request of a page asserts no stale version.
     const version = this.#version();
     if (version) headers.set(HEADER_VERSION, version);
     if (request.zone !== undefined) headers.set(HEADER_ZONE, request.zone);

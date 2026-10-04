@@ -252,7 +252,7 @@ class PollProvider(RegisteredParameterProvider):
 
 `static_can_handle` reads the verdict off the annotation, so the plan compiler hands the parameter to `PollProvider` once per callable rather than polling every provider on each request, and `compile_resolve` unpacks the model out of `DPoll[Poll]` once per plan so a vote pays for the query alone. Both the filler and `resolve` call `_by_url_or_post`, so the two paths cannot drift apart.
 
-Page and component modules that use `DPoll[Poll]` never start with `from __future__ import annotations` and import both names at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate — a marker or a model imported only under `if TYPE_CHECKING` — drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
+Page and component modules that use `DPoll[Poll]` never start with `from __future__ import annotations` and import both names at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate, such as a marker or a model imported only under `if TYPE_CHECKING`, drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
 
 ### 9. Two composites at two scopes
 
@@ -284,16 +284,16 @@ Vite hashes the filenames it builds, so the asset URLs need no `v` parameter and
 
 ## Further reading
 
-- [`polls/apps.py`](polls/apps.py) — `PollsConfig.ready()` with the two registry calls.
-- [`polls/signals.py`](polls/signals.py) — `broadcast_vote` receiver plus the dev-mode Vite injector.
-- [`polls/broker.py`](polls/broker.py) — `PollBroker`, `Snapshot`, and the `Change` value object.
-- [`polls/backends.py`](polls/backends.py) — `ViteManifestBackend` dev/prod URL routing.
-- [`polls/screens/polls/[int:id]/stream/page.py`](polls/screens/polls/[int:id]/stream/page.py) — the `PatchEventStream` page module.
-- [`polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue`](polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue) — the chart Vue SFC.
-- [`next/partial/sse.py`](../../next/partial/sse.py) — `PatchEventStream`, the politeness headers, and the heartbeat contract.
-- [`next/partial/patches.py`](../../next/partial/patches.py) — the `Patches` builder and the `refresh` verb.
-- [`next/forms/signals.py`](../../next/forms/signals.py) — `action_dispatched` payload contract used by the receiver.
-- [`next/static/signals.py`](../../next/static/signals.py) — `collector_finalized` signal that drives the Vite dev preamble.
-- [`next/components/context.py`](../../next/components/context.py) — `@component.context` and the `serialize=True` flag.
-- [`next/pages/metadata/`](../../next/pages/metadata/) — the metadata chain behind the index dict and the `@page.metadata` callable of section 10.
-- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.W074` for a kind with no insertion verb.
+- [`polls/apps.py`](polls/apps.py): `PollsConfig.ready()` with the two registry calls.
+- [`polls/signals.py`](polls/signals.py): `broadcast_vote` receiver plus the dev-mode Vite injector.
+- [`polls/broker.py`](polls/broker.py): `PollBroker`, `Snapshot`, and the `Change` value object.
+- [`polls/backends.py`](polls/backends.py): `ViteManifestBackend` dev/prod URL routing.
+- [`polls/screens/polls/[int:id]/stream/page.py`](polls/screens/polls/[int:id]/stream/page.py): the `PatchEventStream` page module.
+- [`polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue`](polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue): the chart Vue SFC.
+- [`next/partial/sse.py`](../../next/partial/sse.py): `PatchEventStream`, the politeness headers, and the heartbeat contract.
+- [`next/partial/patches.py`](../../next/partial/patches.py): the `Patches` builder and the `refresh` verb.
+- [`next/forms/signals.py`](../../next/forms/signals.py): `action_dispatched` payload contract used by the receiver.
+- [`next/static/signals.py`](../../next/static/signals.py): `collector_finalized` signal that drives the Vite dev preamble.
+- [`next/components/context.py`](../../next/components/context.py): `@component.context` and the `serialize=True` flag.
+- [`next/pages/metadata/`](../../next/pages/metadata/): the metadata chain behind the index dict and the `@page.metadata` callable of section 10.
+- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst): `next.W074` for a kind with no insertion verb.

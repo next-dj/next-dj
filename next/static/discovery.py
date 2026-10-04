@@ -39,9 +39,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Every cache below catches a caller naming paths without end rather than working
-# as an eviction policy, because a project holds far fewer pages and components
-# than the bound allows. So the stalest insert goes and a hit reorders nothing.
+# Every cache below bounds a caller that names unbounded paths and is not an eviction
+# policy, because a project holds far fewer pages and components than the bound
+# allows. The oldest insert is evicted first, and a hit does not reorder entries.
 
 # What identifies the component a plan was built for. The folder it reads comes
 # from one of the two paths, and the logical name comes from the component name.
@@ -119,7 +119,7 @@ def _resolved_parent(path: Path) -> Path:
     """Return the resolved directory holding `path`, or its own spelling.
 
     A relative path resolves through the working directory, which an atomic deploy
-    removes under a live worker, and a render is no place to raise.
+    removes under a live worker, and a render must not raise for it.
     """
     parent = path.parent
     try:
@@ -163,7 +163,7 @@ class StemRegistry:
 
     @property
     def version(self) -> int:
-        """Return a counter every registration bumps, so a cached answer can tell."""
+        """Return the registration counter, which a memo compares to detect a change."""
         return self._version
 
     def register(self, role: str, stem: str) -> None:

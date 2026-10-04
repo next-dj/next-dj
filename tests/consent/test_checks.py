@@ -1,8 +1,10 @@
 import pytest
 from django.test import override_settings
 
+from next.consent import UNDECIDED, ConsentBackend
 from next.consent.checks import (
     check_consent_categories,
+    check_consent_cookie_options,
     check_consent_cookie_secure,
     check_consent_settings,
 )
@@ -109,7 +111,7 @@ class TestConsentCategories:
 class TestConsentCookieSecure:
     """A deploy with a Secure session cookie keeps the consent cookie Secure too."""
 
-    def test_an_explicit_insecure_cookie_is_w129(self) -> None:
+    def test_an_explicit_insecure_cookie_is_w119(self) -> None:
         with override_settings(
             SESSION_COOKIE_SECURE=True,
             NEXT_FRAMEWORK={"CONSENT": {"OPTIONS": {"secure": False}}},
@@ -129,3 +131,67 @@ class TestConsentCookieSecure:
             SESSION_COOKIE_SECURE=session, NEXT_FRAMEWORK={"CONSENT": consent}
         ):
             assert check_consent_cookie_secure() == []
+
+
+class HeaderBackend(ConsentBackend):
+    """A backend whose `OPTIONS` mean something other than the cookie."""
+
+    def read(self, request):  # pragma: no cover - never built
+        return UNDECIDED
+
+
+class TestConsentCookieOptions:
+    """The cookie options the runtime writes verbatim must be ones a browser keeps."""
+
+    def _ids(self, options: object, **consent: object) -> list[str]:
+        framework = {"CONSENT": {"OPTIONS": options, **consent}}
+        with override_settings(NEXT_FRAMEWORK=framework):
+            return check_ids(check_consent_cookie_options())
+
+    @pytest.mark.parametrize("samesite", ["Lexx", "", 3])
+    def test_an_unknown_samesite_is_e150(self, samesite: object) -> None:
+        assert self._ids({"samesite": samesite}) == ["next.E150"]
+
+    @pytest.mark.parametrize("secure", [None, False])
+    def test_samesite_none_without_secure_is_w125(self, secure: object) -> None:
+        assert self._ids({"samesite": "None", "secure": secure}) == ["next.W125"]
+
+    @pytest.mark.parametrize("max_age", [0, -1, "60", 1.5, True])
+    def test_a_max_age_that_is_no_positive_int_is_e151(self, max_age: object) -> None:
+        assert self._ids({"max_age": max_age}) == ["next.E151"]
+
+    @pytest.mark.parametrize(
+        ("options", "consent"),
+        [
+            ({"samesite": "Lax", "max_age": 60}, {}),
+            ({"samesite": "strict"}, {}),
+            ({"samesite": "None", "secure": True}, {}),
+            ({"samesite": None, "max_age": None}, {}),
+            ("x", {}),
+            ({"samesite": "Lexx"}, {"BACKEND": f"{__name__}.HeaderBackend"}),
+            ({"samesite": "Lexx"}, {"BACKEND": "no.such.Backend"}),
+            ({"samesite": "Lexx"}, {"BACKEND": 3}),
+        ],
+        ids=[
+            "lax",
+            "any-case",
+            "secure-none",
+            "unset",
+            "no-mapping",
+            "other-backend",
+            "unimportable",
+            "no-path",
+        ],
+    )
+    def test_usable_options_or_another_backend_are_silent(
+        self, options: object, consent: dict[str, object]
+    ) -> None:
+        assert self._ids(options, **consent) == []
+
+    def test_the_named_cookie_backend_is_checked(self) -> None:
+        backend = {"BACKEND": "next.consent.CookieConsentBackend"}
+        assert self._ids({"max_age": 0}, **backend) == ["next.E151"]
+
+    def test_no_scope_is_silent(self) -> None:
+        with override_settings(NEXT_FRAMEWORK={}):
+            assert check_consent_cookie_options() == []

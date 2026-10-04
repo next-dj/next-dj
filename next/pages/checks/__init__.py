@@ -26,7 +26,6 @@ from .metadata import (
     check_metadata_social_folds,
     check_metadata_tag_rendered,
     check_metadata_title_templates,
-    check_metadata_url_schemes,
     check_page_metadata_shape,
 )
 from .modules import check_page_functions, check_page_module_imports
@@ -70,7 +69,6 @@ __all__ = [
     "check_metadata_social_folds",
     "check_metadata_tag_rendered",
     "check_metadata_title_templates",
-    "check_metadata_url_schemes",
     "check_page_functions",
     "check_page_metadata_shape",
     "check_page_module_imports",

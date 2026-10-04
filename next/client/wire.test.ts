@@ -250,6 +250,63 @@ describe("Wire classification", () => {
     expect(h.envelopes).toHaveLength(1);
     expect((h.envelopes[0] as { body: string }).body).toBe("raw-body");
   });
+
+  // A response whose body read rejects after the headers arrived.
+  function cutOff(error: Error): Response {
+    const response = envelopeResponse(ENVELOPE);
+    Object.defineProperty(response, "text", { value: () => Promise.reject(error) });
+    return response;
+  }
+
+  it("reports a body read the connection cut off as a network error", async () => {
+    const h = makeWire(async () => cutOff(new TypeError("connection reset")));
+    await expect(h.wire.fetch({ url: "/list/", zone: "z" })).resolves.toBeUndefined();
+    const err = h.dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail).toMatchObject({
+      kind: "network",
+      error: expect.any(TypeError),
+    });
+    expect(h.envelopes).toEqual([]);
+  });
+
+  it("drops a body read an abort cut off without an error", async () => {
+    const aborted = new Error("The operation was aborted.");
+    aborted.name = "AbortError";
+    const h = makeWire(async () => cutOff(aborted));
+    await expect(h.wire.fetch({ url: "/list/", zone: "z" })).resolves.toBeUndefined();
+    expect(h.dispatched.some((d) => d.event === "partial:error")).toBe(false);
+  });
+
+  it("reports an envelope the handler rejects as a parse error with its body", async () => {
+    const dispatched: { event: string; detail: Record<string, unknown> }[] = [];
+    const wire = new Wire({
+      fetch: async () => envelopeResponse("{}"),
+      session: memorySession(),
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      onEnvelope: () => {
+        throw new TypeError("envelope without a version");
+      },
+      csrf: { current: () => undefined, ensure: async () => undefined },
+    });
+    await expect(wire.fetch({ url: "/list/", zone: "z" })).resolves.toBeUndefined();
+    const errors = dispatched.filter((d) => d.event === "partial:error");
+    expect(errors.map((d) => d.detail)).toEqual([
+      { kind: "parse", body: "{}", error: expect.any(TypeError) },
+    ]);
+  });
+
+  it("reports a parse-hook that throws as a parse error with the body", async () => {
+    const h = makeWire(async () =>
+      envelopeResponse("raw-body", { type: "text/vnd.next.stream+html" }),
+    );
+    h.wire.parseHook("text/vnd.next.stream+html", () => {
+      throw new SyntaxError("bad frame");
+    });
+    await expect(h.wire.fetch({ url: "/list/", zone: "z" })).resolves.toBeUndefined();
+    const err = h.dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail).toMatchObject({ kind: "parse", body: "raw-body" });
+    expect(h.envelopes).toEqual([]);
+  });
 });
 
 describe("Wire non-envelope navigate-once", () => {

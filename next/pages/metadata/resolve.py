@@ -22,6 +22,7 @@ from django.utils.timezone import get_current_timezone, is_naive, make_aware
 from django.utils.translation import get_language, to_locale
 
 from next.conf import next_framework_settings
+from next.conf.signals import settings_reloaded
 from next.diagnostics import FailureLog
 from next.pages.errors import PageMetadataRequestError, PageMetadataShapeError
 from next.ports import router_access_slot
@@ -59,9 +60,6 @@ from .scope import metadata_options
 
 RESOLVED_METADATA_ATTR: Final = "_next_resolved_metadata"
 """The request attribute a rendered `{% metadata %}` publishes its resolve under."""
-
-SITE_NOINDEX: Final = CLOSED_ROBOTS
-"""The robots content every page of a site closed to search engines carries."""
 
 _PAGE_ONE: Final = ("page", "1")
 _ROBOTS_BOOLEANS: Final = ("noarchive", "nosnippet", "noimageindex", "notranslate")
@@ -251,7 +249,7 @@ def robots_contents(
 ) -> tuple[str | None, str | None]:
     """Return the robots and googlebot contents, the site rule taking precedence."""
     if not indexable:
-        return SITE_NOINDEX, None
+        return CLOSED_ROBOTS, None
     robots = meta.robots
     if robots is None:
         return None, None
@@ -280,6 +278,14 @@ def _alternates(
     return _or_none(partial(_hreflang_pairs, meta, request)) or ()
 
 
+def _self_match(meta: Metadata, request: HttpRequest | None) -> ResolverMatch | None:
+    """Return the resolve of the request when the alternates name its own path."""
+    if meta.canonical is not None and meta.canonical is not True:
+        return None
+    match = getattr(request, "resolver_match", None)
+    return match if isinstance(match, ResolverMatch) else None
+
+
 def _hreflang_pairs(
     meta: Metadata, request: HttpRequest | None
 ) -> tuple[tuple[str, str], ...]:
@@ -292,7 +298,9 @@ def _hreflang_pairs(
         pairs = tuple(item for item in languages if item[0] != X_DEFAULT)
         fallback = next((url for code, url in languages if code == X_DEFAULT), None)
     elif languages is True:
-        pairs = hreflang_urls(_page_path(meta, request, "alternates"))
+        pairs = hreflang_urls(
+            _page_path(meta, request, "alternates"), match=_self_match(meta, request)
+        )
         fallback = x_default_url(pairs)
     else:
         return ()
@@ -509,6 +517,14 @@ def _crumb_route(trail: str, template: str) -> tuple[str, tuple[str, ...]]:
     return template.format(name=parser.prepare_url_name(trail)), tuple(parameters)
 
 
+def _forget_crumb_routes(**kwargs: object) -> None:
+    """Drop the memoised crumb routes, so a reconfigured URL parser takes effect."""
+    _crumb_route.cache_clear()
+
+
+settings_reloaded.connect(_forget_crumb_routes)
+
+
 def _crumb_url(
     trail: str, match: ResolverMatch, template: str, urlconf: str | None
 ) -> str | None:
@@ -696,7 +712,6 @@ __all__ = [
     "ORIGIN_RELS",
     "RESOLVED_METADATA_ATTR",
     "SCHEMA_CONTEXTS",
-    "SITE_NOINDEX",
     "absolute_url",
     "iso_time",
     "og_locale",

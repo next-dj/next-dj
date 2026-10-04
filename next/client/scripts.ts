@@ -62,6 +62,10 @@ const INTERACTIONS = ["pointerdown", "keydown", "touchstart", "scroll"];
 // A dynamically inserted script is async by default. These strategies set async to
 // false, so scripts that waited for consent run in insertion order.
 const IN_ORDER = new Set(["blocking", "defer"]);
+// The attribute names next.scripts.markers.allowed_attr lets a script carry, so a stale
+// page or a custom manifest cannot make setAttribute throw.
+const ATTR_NAME =
+  /^(?:integrity|crossorigin|referrerpolicy|data-[a-z0-9][a-z0-9._-]*)$/;
 
 function readEntry(value: unknown): Entry | undefined {
   if (!isRecord(value)) return undefined;
@@ -71,7 +75,8 @@ function readEntry(value: unknown): Entry | undefined {
   if (name === undefined || (src === undefined && init === undefined)) return undefined;
   const attrs = isRecord(value.attrs)
     ? Object.entries(value.attrs).filter(
-        (pair): pair is [string, string] => typeof pair[1] === "string",
+        (pair): pair is [string, string] =>
+          typeof pair[1] === "string" && ATTR_NAME.test(pair[0]),
       )
     : [];
   return {

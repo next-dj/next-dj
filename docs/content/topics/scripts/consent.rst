@@ -57,7 +57,8 @@ A backend tells it the cookie through ``client_config()``, the entries it adds t
 
 A backend that fails to import, to build, or to read, or that answers anything but a ``Consent``, never fails the page.
 Under ``DEBUG`` or ``STRICT_LOADING`` the error is raised with a note naming ``NEXT_FRAMEWORK['CONSENT']['BACKEND']``.
-Otherwise every visitor reads as undecided, every category but ``necessary`` stays denied, and the failure is logged once.
+Otherwise every visitor reads as undecided, every category but ``necessary`` stays denied, and the failure is logged at most once every ten minutes.
+A backend that fails to import or to build is not tried again until the framework settings reload.
 
 Where gated scripts render
 --------------------------
@@ -124,8 +125,9 @@ A ``{% use_script %}``, ``{% use_module %}``, or ``{% #use_script %}`` in the bo
 They load in order after the page, not where the body stands, and a script the rest of the page registers as well loads with the page.
 A gate only tightens.
 A declared script keeps its own category and waits for the block's as well, so a ``marketing`` script named inside a ``{% #consented "analytics" %}`` block needs both, and a block nested in another needs the outer category too.
+A script that several client-rendered blocks name waits for the category of each of them.
 The entry names every category it waits for, separated by a space, and both ``Consent.allows`` and the runtime read such a name as all of them.
-Any other asset kind the body registers is dropped and logged once, since only a script can wait for the category.
+Any other asset kind the body registers is dropped and logged at most once every ten minutes, since only a script can wait for the category.
 When the server decides, the body renders in place for a visitor who granted the category, its scripts with it.
 
 The banner

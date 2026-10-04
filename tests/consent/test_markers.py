@@ -1,7 +1,8 @@
 import pytest
 from django.template import Context, Template
 
-from next.consent import NECESSARY, UNDECIDED, Consent, joint_category
+from next.consent import NECESSARY, UNDECIDED, Consent
+from next.consent.markers import joint_category
 
 
 class TestConsent:

@@ -44,13 +44,16 @@ cache
    }
 
 The page answers ``Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600``.
-The directives are applied through :func:`~django.utils.cache.patch_cache_control` and :func:`~django.utils.cache.patch_vary_headers`, and only on a successful response to a ``GET`` or a ``HEAD``, so a ``POST`` the page answers itself never carries the page's cache and a callable ``cache`` is not even resolved for it.
+The directives are applied through :func:`~django.utils.cache.patch_cache_control` and :func:`~django.utils.cache.patch_vary_headers`, and only on a successful response to a ``GET`` or a ``HEAD``, so a ``POST`` the page answers itself never carries the page's cache, and a callable ``cache`` is not even resolved for it or for a zone request.
 ``manage.py check`` reports an unknown key, a negative age, a flag that is no bool, and ``public`` together with ``no_store``.
 A callable ``cache`` that raises, or returns anything but the forms above, sends the page with ``private, no-store``, since no cache may keep a response whose policy is unknown.
 A page whose render contained a failure is sent with ``private, no-store`` too, whatever its ``cache`` declares.
+A callable ``SITE["INDEXABLE"]`` that fails while the response headers are set counts as such a failure.
+A serializer, a runtime bundle, a chunk, a tag template or a consent backend that the framework replaced with a fallback keeps that fallback until the configuration changes, and every render that uses it is sent with ``private, no-store``, not only the first.
 A ``@page.metadata`` callable that raises, a renderer, a serializer or a runtime bundle that fails, each leaves the page without what it would have added, perhaps a ``noindex``, so no cache keeps the page past the failure.
 The page is not marked ``noindex`` in turn, since a callable that fails on every page would otherwise drop the whole site from search for as long as it fails.
-The failure is logged once per page, and under ``DEBUG`` or ``STRICT_LOADING`` it raises instead, naming the ``page.py`` and the shapes it may return.
+A page whose own ``metadata`` dict the schema refuses is the exception, and it renders under ``noindex`` until the declaration is fixed.
+The failure is logged at most once every ten minutes per page, and under ``DEBUG`` or ``STRICT_LOADING`` it raises instead, naming the ``page.py`` and the shapes it may return.
 ``Http404`` and ``PermissionDenied`` raised from it answer 404 and 403 as from any view.
 
 A page is shared when its cache lets a CDN keep a copy, through ``public`` or ``s_maxage``.
@@ -119,7 +122,7 @@ Going private
 -------------
 
 A response a CDN keeps must not carry anything of one visitor, and the framework enforces it at runtime.
-A shared page is sent with ``private`` in place of its shared directives, the other directives kept and one warning logged per page naming the file, when its response does any of the following.
+A shared page is sent with ``private`` in place of its shared directives, the other directives kept and a warning naming the file logged at most once every ten minutes per page, when its response does any of the following.
 
 - It sets a cookie, from the view, from ``render()``, or from a middleware after the view, the session and CSRF middleware among them.
 - It reads the session, or needs the CSRF cookie refreshed during its render.
@@ -133,6 +136,7 @@ A cookie written through ``update()`` or ``load()`` on the jar makes the respons
 The 304 that middleware answers copies the cache headers of the page, so a cookie an outer middleware sets afterwards would reach a public response, and ``next.W124`` reports that order.
 ``next.middleware.SharedCacheGuardMiddleware`` closes that gap and any other one a third-party middleware opens, see `The shared cache guard`_.
 A layout that reads ``request.user`` accesses the session and makes every shared page under it private, which the warning makes visible.
+A response that is made private or ``no-store`` also loses its ``CDN-Cache-Control``, ``Cloudflare-CDN-Cache-Control``, and ``Surrogate-Control`` headers, since a CDN reads those ahead of ``Cache-Control``.
 
 The shared cache guard
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -140,7 +144,7 @@ The shared cache guard
 ``SharedCacheGuardMiddleware`` is opt-in and checks the finished response rather than the page.
 A response that sets a cookie while a shared cache may keep it loses ``public`` and ``s-maxage`` and gains ``private``, its ``CDN-Cache-Control``, ``Cloudflare-CDN-Cache-Control``, and ``Surrogate-Control`` headers are removed, and ``Vary`` gains ``Cookie``.
 A shared cache may keep a response whose ``Cache-Control`` carries ``public`` or ``s-maxage``, one with a CDN header, and one with a ``max-age`` or an ``Expires`` but neither ``private`` nor ``no-store``.
-Every other directive stays, and each path is logged once.
+Every other directive stays, and each URL route is logged at most once every ten minutes, the path standing in where no route resolved.
 List it first in ``MIDDLEWARE``, so it sees every cookie the stack sets.
 A project that uses ``UpdateCacheMiddleware`` lists the guard directly below it, never above it, so the copy Django's cache stores is the private one.
 In either position ``next.W124`` stays silent.
@@ -206,6 +210,8 @@ Partial responses
 -----------------
 
 Every zone response carries ``Cache-Control: private, no-store`` together with the ``headers`` of its page, the answer to a zone GET, a lazy zone, and a refused zone request alike.
+A response that the page's ``render()`` function returns to a zone GET carries ``private, no-store`` too, unless it sets a ``Cache-Control`` of its own.
+A zone response whose render contained a failure carries ``private, no-store`` whatever it sets.
 Every patch envelope an action answers carries ``private, no-store`` as well, and a stream carries ``no-cache, no-transform``.
 Many CDNs ignore ``Vary``, so a cached zone response would reach a visitor who asked for the full page at the same URL.
 A CDN in front of a shared page therefore bypasses its cache for every request that carries ``X-Next-Request``, see :doc:`/content/howto/cache-pages-on-a-cdn`.

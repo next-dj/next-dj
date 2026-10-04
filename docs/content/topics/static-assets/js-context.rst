@@ -66,7 +66,7 @@ Set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` to the dotted path of a serializ
 ``resolve_serializer`` reads the setting on every call and builds one instance per dotted path, which every render shares until the settings reload.
 When the key is absent or set to an empty string the framework uses ``JsonJsContextSerializer``.
 A path that does not import, a class whose constructor raises, or an instance without ``dumps`` gives way to ``JsonJsContextSerializer`` too, so no page fails over it.
-The failure is logged once, and under ``DEBUG`` or ``STRICT_LOADING`` it raises instead, naming the setting.
+The failure is logged at most once every ten minutes, and under ``DEBUG`` or ``STRICT_LOADING`` it raises instead, naming the setting.
 
 System checks
 ~~~~~~~~~~~~~
@@ -339,7 +339,7 @@ An absent or empty ``NEXT_JS_OPTIONS`` uses the ``AUTO`` policy and the default 
      - Pages where you control placement of the script tags in a layout template.
 
 The runtime rides the ``scripts`` slot, so a layout without ``{% collect_scripts %}`` gets no ``next.min.js`` and no ``window.Next`` even under ``AUTO``, while the preload hint is still injected and points at a script the page never loads.
-The preload hint needs a ``</head>``, and a fragment rendered without one carries none.
+The preload hint needs a ``</head>`` and the ``{% collect_scripts %}`` placeholder the runtime loads from, and a page without either carries none.
 The hint is inserted before the first ``</head>`` in the document.
 
 Set the policy through the ``NEXT_JS_OPTIONS`` dict.
@@ -408,7 +408,7 @@ Pass its ``js_context()``, ``js_context_serializers()``, and ``js_context_encode
        )
 
 A payload built this way carries none of the framework's reserved entries, because the static manager both claims and writes those keys only under ``AUTO``, so a page injected by hand runs no consent-gated script and no deferred CSRF.
-Without ``$chunks`` the runtime fetches each lazy chunk as ``next.<name>.min.js`` beside ``next.min.js``, a name a hashing storage such as ``ManifestStaticFilesStorage`` does not serve.
+Without ``$chunks`` the runtime has no URL for any lazy chunk, so ``Next.ready("scripts")`` rejects and the stream, CSRF, poll, and diagnostics chunks never load.
 Add ``"$chunks": {name: staticfiles_storage.url(path) for name, path in CHUNK_STATIC_PATHS.items()}`` to the payload, with ``CHUNK_STATIC_PATHS`` from ``next.static.runtime``, so every chunk resolves through the storage.
 ``Next.ready`` waits for ``Next._init``, so a layout that never emits the init script leaves every ``Next.ready`` call pending.
 It does carry a project key of a reserved name, because ``js_context()`` is the unfiltered store and the reserved-key drop lives in the automatic path alone.

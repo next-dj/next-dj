@@ -1,6 +1,6 @@
 """Scripts implementation bound into the `next.ports` slot at app startup."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import override
 
@@ -22,7 +22,7 @@ class PageScriptsImpl(PageScripts):
         *,
         page_path: Path | None,
         request: HttpRequest | None,
-        nonce: str | None,
+        nonce: Callable[[], str | None],
     ) -> tuple[str, Mapping[str, object]]:
         """Return the head tags and the reserved payload entries of one render."""
         return scripts_manager.render(

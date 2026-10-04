@@ -8,9 +8,10 @@ from unittest.mock import Mock, patch
 import pytest
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
-from django.test import RequestFactory, override_settings
+from django.test import Client, RequestFactory, override_settings
 from django.urls import Resolver404, URLResolver, include, path
 
+from next.caches import PAGE_HEADROOM, PageCache
 from next.forms import ActionRegistration, RegistryFormActionBackend
 from next.forms.manager import FormActionManager, form_action_manager
 from next.pages import page
@@ -39,6 +40,8 @@ from tests.support import (
     file_router_config_entry,
     importable_dir,
     named_temp_py,
+    routed,
+    write_tree,
 )
 
 
@@ -912,6 +915,30 @@ class TestLazyUrlPatterns:
                 resolver.resolve("lazy/miss/")
             mock_iter.assert_called_once()
         assert patterns is urlpatterns
+
+
+class TestPageCacheBound:
+    """Each URL build sizes the page caches by the pages it mounts, in both directions."""
+
+    @pytest.fixture(autouse=True)
+    def _small_default(self, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+        monkeypatch.setattr("next.caches.DEFAULT_CACHE_SIZE", 1)
+        yield
+        monkeypatch.undo()
+        PageCache.fit(0)
+
+    def test_the_bound_follows_the_routed_pages(self, tmp_path: Path) -> None:
+        many = write_tree(tmp_path / "many", pages=("", "a", "b"))
+        few = write_tree(tmp_path / "few", pages=("",))
+        with routed(many):
+            Client().get("/")
+            assert PageCache._bound == 3 * PAGE_HEADROOM
+            lazy_urlpatterns._cache = None
+            list(lazy_urlpatterns)
+            assert PageCache._bound == 3 * PAGE_HEADROOM
+        with routed(few):
+            Client().get("/")
+            assert PageCache._bound == PAGE_HEADROOM
 
 
 class TestBuildUrlResolver:

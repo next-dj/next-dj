@@ -1,5 +1,10 @@
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import pytest
 from django.core.exceptions import ImproperlyConfigured
+from django.http import HttpResponse
+from django.urls import path
 
 from next.pages.ports import PageScanImpl
 from next.partial.ports import PartialShaperImpl
@@ -15,6 +20,7 @@ from next.ports import (
 from next.scripts.ports import PageScriptsImpl
 from next.seo.ports import SeoRoutesImpl
 from next.static.ports import StaticAssetsImpl
+from next.urls.manager import _LazyUrlPatterns
 from next.urls.ports import RouterAccessImpl
 from tests.support import IntentOnlyShaper
 
@@ -89,3 +95,25 @@ class TestAppComposition:
     @pytest.mark.parametrize(("slot", "impl"), PROCESS_SLOTS)
     def test_the_process_slot_holds_its_implementation(self, slot, impl) -> None:
         assert isinstance(slot.get(), impl)
+
+
+class TestUrlsBuiltBeforeTheSeoPortBinds:
+    """A URL build that runs before `ready()` binds the SEO port caches nothing stale.
+
+    A project app listed ahead of `next` can reverse a URL in its own `ready()`, so the
+    page patterns are built while the slot is unbound.
+    """
+
+    def test_the_seo_routes_join_once_the_port_binds(self) -> None:
+        sitemap = path("sitemap.xml", lambda _request: HttpResponse(), name="sitemap")
+        slot: PortSlot[object] = PortSlot("seo routes port")
+        lazy = _LazyUrlPatterns()
+        with patch("next.urls.manager.seo_routes_slot", slot):
+            early = list(lazy)
+            # Bound without moving the SEO routes version, so only an uncached early
+            # build lets the routes join.
+            slot.set(SimpleNamespace(patterns=lambda: [sitemap]))
+            late = list(lazy)
+
+        assert sitemap not in early
+        assert late[-1] is sitemap

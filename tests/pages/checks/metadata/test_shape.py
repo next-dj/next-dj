@@ -10,7 +10,6 @@ from next.pages.checks import (
     check_metadata_noindex_canonical,
     check_metadata_parent_parameter,
     check_metadata_registration_files,
-    check_metadata_url_schemes,
     check_page_metadata_shape,
 )
 from next.testing import override_next_settings
@@ -311,12 +310,11 @@ class TestParentParameter:
 
 
 class TestUrlSchemes:
-    """A foreign scheme fails the shape, so the fold check sees only web URLs."""
+    """A foreign scheme fails the shape, so the fold carries only web URLs."""
 
-    def test_a_foreign_scheme_never_reaches_the_fold(self, tmp_path: Path) -> None:
+    def test_a_foreign_scheme_is_a_shape_error(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"canonical": "javascript:alert(1)"}')
         with patch_checks_router_manager(pages_directory=tmp_path):
-            assert check_metadata_url_schemes() == []
             assert check_ids(check_page_metadata_shape()) == ["next.E104"]
 
     def test_a_lazy_url_is_left_to_the_render_that_forces_it(
@@ -325,18 +323,7 @@ class TestUrlSchemes:
         templated_page(tmp_path, LAZY_FOREIGN_URLS)
         with patch_checks_router_manager(pages_directory=tmp_path):
             assert check_page_metadata_shape() == []
-            assert check_metadata_url_schemes() == []
             assert check_metadata_noindex_canonical() == []
-
-    def test_http_and_relative_urls_are_silent(self, tmp_path: Path) -> None:
-        metadata_page(
-            tmp_path,
-            '{"canonical": "/x/", "og": {"url": "https://a.b/x/", '
-            '"images": ["http://a.b/i.png", "i.png"]}, '
-            '"alternates": {"languages": True}}',
-        )
-        with patch_checks_router_manager(pages_directory=tmp_path):
-            assert check_metadata_url_schemes() == []
 
 
 class TestHreflangPatterns:

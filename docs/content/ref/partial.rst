@@ -152,7 +152,8 @@ Custom verbs
 ~~~~~~~~~~~~
 
 ``register_patch_op`` registers a custom verb name on the server and earns the generic ``Patches.op`` channel.
-``manage.py check`` reads the registered names, reporting ``next.E066`` for a name that shadows a built-in verb and ``next.E090`` for a name that is not a valid verb token.
+``register_patch_op`` raises ``BuiltinPatchOpError`` for a built-in verb name, because the client applies the built-in verb and a custom handler under that name would never run.
+``manage.py check`` reads the registered names and reports ``next.E090`` for a name that is not a valid verb token.
 An unregistered name fails at runtime with ``UnknownPatchOpError``.
 The client supplies the handler through ``Next.partial.defineOp``.
 See :doc:`/content/topics/partial-rendering/extending` for the end-to-end recipe.

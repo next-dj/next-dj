@@ -300,7 +300,7 @@ The loader decides where a component body comes from and how long a compiled tem
 ``METADATA["RENDERER"]`` names a ``next.pages.MetadataRenderer`` subclass, whose ``render(resolved)`` turns the ``ResolvedMetadata`` of one response into the markup ``{% metadata %}`` writes into the head.
 The resolve has already read the request and the settings, so the renderer sees neither and cannot lose a policy.
 Subclass ``HtmlMetadataRenderer`` and extend its ``sections`` or override a ``render_<name>`` hook to add a tag while keeping every stock one, see :doc:`/content/ref/metadata` for the contract.
-A path that does not import or names no concrete subclass is ``next.E107``, and a render with it falls back to ``HtmlMetadataRenderer`` with one logged error.
+A path that does not import or names no concrete subclass is ``next.E107``, a render with it falls back to ``HtmlMetadataRenderer``, every such page is sent with ``private, no-store``, and the failure is logged at most once every ten minutes.
 
 Signals
 -------

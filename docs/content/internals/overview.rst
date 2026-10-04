@@ -177,7 +177,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - Subsystem
      - Submodules
    * - ``next.pages``
-     - ``manager`` (``templates``, ``views``), ``registry``, ``loaders``, ``context``, ``processors``, ``scan``, ``paths``, ``placeholder``, ``visits``, ``metadata`` (``dicts``, ``markers``, ``normalize``, ``scope``, ``titles``, ``fold``, ``chain``, ``registry``, ``resolve``, ``hreflang``, ``ld``, ``head``, ``backends``, ``nodes``), ``responses``, ``ports``, ``errors``, ``checks`` (``composed``, ``contexts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, ``zones``), ``signals``, ``watch``.
+     - ``manager`` (``templates``, ``views``), ``registry``, ``loaders``, ``context``, ``processors``, ``scan``, ``paths``, ``placeholder``, ``visits``, ``metadata`` (``dicts``, ``markers``, ``normalize``, ``shapes``, ``scope``, ``titles``, ``fold``, ``chain``, ``registry``, ``resolve``, ``hreflang``, ``ld``, ``head``, ``backends``, ``nodes``), ``responses``, ``ports``, ``errors``, ``checks`` (``composed``, ``contexts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, ``zones``), ``signals``, ``watch``.
    * - ``next.components``
      - ``manager``, ``registry``, ``scanner``, ``sources``, ``loading``, ``renderers``, ``context``, ``facade``, ``info``, ``backends``, ``watch``, ``ports``, ``checks``, ``signals``.
    * - ``next.urls``
@@ -206,9 +206,9 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.server``
      - ``autoreload``, ``watcher``, ``roots``, ``signals``.
    * - ``next.conf``
-     - ``settings``, ``defaults``, ``scopes``, ``merge``, ``frozen``, ``helpers``, ``imports``, ``checks``, ``signals``.
+     - ``settings``, ``defaults``, ``scopes``, ``merge``, ``frozen``, ``sentinels``, ``helpers``, ``imports``, ``checks``, ``signals``.
    * - ``next.testing``
-     - ``client``, ``capture``, ``isolation``, ``actions``, ``rendering``, ``loaders``, ``html``, ``patching``, ``deps``, ``metadata``, ``seo``, ``plugin``.
+     - ``client``, ``capture``, ``isolation``, ``actions``, ``rendering``, ``loaders``, ``html``, ``patching``, ``deps``, ``metadata``, ``seo``, ``responses``, ``plugin``.
        ``plugin`` is the only module in the area that imports pytest, and a suite loads it with ``-p next.testing.plugin``.
    * - ``next.apps``
      - ``config``, ``autoreload``, ``templates``, ``staticfiles``, ``components``, ``checks``.
@@ -218,7 +218,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
      - A single flat module holding the protocols and slots one subsystem calls another through, each bound in ``AppConfig.ready`` to the implementation its owning area keeps in that area's ``ports`` module.
        ``PartialShaper`` lets the page and form paths shape partial responses without importing ``next.partial``, ``RouterAccess`` lets the page watcher and the checks build routers without importing ``next.urls``, ``StaticAssets`` lets the render path reach the static manager without importing ``next.static``, ``PageScan`` lets the checks execute the routed ``page.py`` modules without closing the loop back into ``next.pages.scan``, ``SeoRoutes`` lets the lazy urlpatterns append the SEO routes without importing ``next.seo``, and ``PageScripts`` lets the static injector add the third-party scripts without importing ``next.scripts``.
    * - ``next.utils``
-     - A single flat module holding the path helpers, the ``PageRoot`` value object, the ``template_edits_watched`` predicate, the ``TreeSource`` loader of a file at the top of a page tree, and the ``UNSET`` sentinel that several subsystems share.
+     - A single flat module holding the path helpers, the ``PageRoot`` value object, the ``template_edits_watched`` predicate, the ``TreeSource`` loader of a file at the top of a page tree, and a re-export of the ``UNSET`` sentinel of ``next.conf.sentinels``.
    * - ``next.caches``
      - A single flat module holding ``BoundedCache`` and ``LruCache``, so every memo in the framework carries its own bound and eviction policy rather than leaving it to the caller.
    * - ``next.introspect``
@@ -226,7 +226,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.seeding``
      - A single flat module holding the render-context keys every area shares and the ``RenderFrame`` a component render inherits from the page around it.
    * - ``next.diagnostics``
-     - A single flat module holding the containment of user and third-party code that raises, which is raised under ``DEBUG`` or ``STRICT_LOADING`` and logged once per source otherwise.
+     - A single flat module holding the containment of user and third-party code that raises, which is raised under ``DEBUG`` or ``STRICT_LOADING`` and otherwise logged once per source, and again after a quiet period of ten minutes with the number of suppressed occurrences.
    * - ``next.errors``
      - A single flat module holding the exceptions more than one subsystem raises, the ``DIRS`` shape refusal and the six a backend the loader cannot resolve produces.
    * - ``next.signals``

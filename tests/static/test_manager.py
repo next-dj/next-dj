@@ -94,7 +94,7 @@ class TestPageRootsFollowTheRouters:
     def test_page_roots_are_taken_as_the_watch_layer_spells_them(
         self, fresh_manager: StaticManager, tmp_path: Path
     ) -> None:
-        """The watch layer answers resolved, so a lookup pays no second resolve."""
+        """The watch layer returns resolved roots, so a lookup resolves once."""
         spelling = tmp_path / "site" / ".." / "site"
         with mock.patch(
             "next.static.manager.get_pages_directories_for_watch",
@@ -181,7 +181,7 @@ class TestForgetManagerBackendUrls:
     def test_a_manifest_setting_also_drops_the_runtime_bundle_url(
         self, reset_default: None
     ) -> None:
-        """The script tag and the preload hint read that URL through the same storage."""
+        """The script tag and the preload hint read that URL from one storage."""
         manager = get_static_manager()
         before = manager.script_builder().url
 
@@ -213,7 +213,7 @@ class TestAppListChanges:
     def test_an_app_list_change_drops_the_cached_page_roots(
         self, reset_default: None, tmp_path: Path
     ) -> None:
-        """The override reaches the live manager, resolver memo and all."""
+        """The override reaches the live manager, including its resolver memo."""
         manager = get_static_manager()
         with mock.patch(
             "next.static.manager.get_pages_directories_for_watch", return_value=[]
@@ -458,7 +458,7 @@ class TestProjectStaticVersion:
         assert url == "/static/a.css?v=2026.9.19"
 
     def test_the_version_lands_on_the_rewritten_url_exactly_once(self) -> None:
-        """The backend hook runs first, so it never meets a URL already stamped."""
+        """The backend hook runs first, so it never receives a versioned URL."""
         with override_settings(NEXT_FRAMEWORK=VERSIONED_AND_PREFIXED):
             url = StaticManager().asset_url(
                 "/static/a.css", request=RequestFactory().get("/")

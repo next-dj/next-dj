@@ -74,6 +74,14 @@ def _leaf(value: object) -> object:
     return value
 
 
+def _json_key(key: object) -> object:
+    """Return a mapping key `json.dumps` writes, refusing any other key."""
+    if key is None or isinstance(key, str | int | float):
+        return key
+    msg = f"the key {key!r} is not text, a number, a bool or None"
+    raise ValueError(msg)
+
+
 def to_json(
     value: object, *, ids: UrlMap = _same, urls: UrlMap | None = None
 ) -> object:
@@ -82,7 +90,8 @@ def to_json(
     A nested node renders in place, every `@id` passes through `ids`, and `urls`
     maps the strings of a URL property, the value itself or a sequence's items.
     An enum becomes its value and a naive datetime takes the current time zone.
-    A leaf JSON cannot hold, `nan` or a set among them, raises `ValueError`.
+    A leaf JSON cannot hold, `nan` or a set among them, raises `ValueError`, and so
+    does a mapping key other than text, a number, a bool or `None`.
     """
     if isinstance(value, Node | Ref):
         return value.as_jsonld(ids)
@@ -90,7 +99,7 @@ def to_json(
         return value if urls is None else urls(value)
     if isinstance(value, Mapping):
         return {
-            key: ids(item)
+            _json_key(key): ids(item)
             if key == ID and isinstance(item, str)
             else to_json(item, ids=ids)
             for key, item in value.items()

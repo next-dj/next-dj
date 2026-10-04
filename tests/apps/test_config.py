@@ -8,6 +8,7 @@ import pytest
 from django.apps import apps
 from django.conf import settings
 from django.test import override_settings
+from django.urls import Resolver404, resolve
 from django.utils import autoreload
 from django.utils.autoreload import (
     StatReloader as DjangoStatReloader,
@@ -47,6 +48,8 @@ from tests.support import (
     MalformedRootsRouter,
     RaisingRootsRouter,
     importable_dir,
+    routed,
+    write_tree,
 )
 
 
@@ -498,6 +501,21 @@ class TestDependencyResolverInstall:
         before = seo_routes_version.value
         apps.get_app_config("next").ready()
         assert seo_routes_version.value not in {0, before}
+
+    def test_patterns_built_before_ready_gain_the_seo_routes(
+        self, tmp_path: Path
+    ) -> None:
+        """An app that resolves a URL in its own `ready()` cannot hide the sitemap."""
+        slot = PortSlot["SeoRoutesImpl"]("seo routes port")
+        with (
+            routed(write_tree(tmp_path / "pages", sitemap="")),
+            patch("next.apps.config.seo_routes_slot", slot),
+            patch("next.urls.manager.seo_routes_slot", slot),
+        ):
+            with pytest.raises(Resolver404):
+                resolve("/sitemap.xml")
+            apps.get_app_config("next").ready()
+            assert resolve("/sitemap.xml").route == "sitemap.xml"
 
     def test_a_router_reload_resets_the_seo_manager(self) -> None:
         """The SEO routes follow the routers, so a router reload drops their memo."""

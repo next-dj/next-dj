@@ -215,6 +215,36 @@ describe("layer flow through the partial surface", () => {
     expect(document.title).toBe("Saved");
   });
 
+  it("the title a base-page mutation answers waits under a layer opened meanwhile", async () => {
+    window.history.replaceState(null, "", "/feed/");
+    document.title = "Feed";
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-action="u"></form>';
+    let release!: (r: Response) => void;
+    respond = () => new Promise<Response>((r) => (release = r));
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    const saved = release;
+    respond = () =>
+      envelopeResponse(
+        JSON.stringify(
+          envelope([
+            { op: "morph", target: { zone: "photo" }, html: "<div>p</div>" },
+            { op: "meta", title: "Photo" },
+          ]),
+        ),
+      );
+    await partial.layers.open(null, "/photos/1/", "photo");
+    expect(document.title).toBe("Photo");
+    saved(envelopeResponse(JSON.stringify(envelope([{ op: "meta", title: "Saved" }]))));
+    await flush();
+    expect(document.title).toBe("Photo");
+    partial.layers.close({ result: undefined });
+    expect(document.title).toBe("Saved");
+    window.history.replaceState(null, "", "/");
+  });
+
   it("a validation-error envelope morphs the master zone and leaves the layer open", async () => {
     respond = () =>
       envelopeResponse(

@@ -462,21 +462,22 @@ Resolution cache
 ----------------
 
 Each resolution pass wraps a per-render dependency cache in a fresh ``DependencyCache``.
-The wrapper is new per call, but the backing store is shared across every ``@context`` callable in one page render, so a ``Depends("name")`` value resolved by one callable is reused by the next.
-The page's ``render()`` function fills the same store before the context runs, and the ``@page.metadata`` callables read it after, so a value any of them resolved is reused by the rest.
+The wrapper is new per call, but one backing store spans the whole page render, the callable ``cache`` of the ``page.py``, its ``render()`` function, every ``@context`` callable, and every ``@page.metadata`` callable.
+A ``Depends("name")`` provider therefore runs once per render, for the first of these callables that asks for it, and every later one reads the value it returned.
 The cache memoises ``Depends("name")`` callables only, keyed by the registered name.
 
 A second context function in the same page render that asks for the same ``Depends("name")`` dependency receives the memoised value, not a fresh call.
 To share one value across several context functions in the same render, register it with ``resolver.dependency("active_tenant")`` and ask for it through ``Depends("active_tenant")`` in each callable that needs it.
 The first callable to ask pays the resolution, and every later callable in the same pass reads the value the cache already holds.
 
-That store covers the ``page.py`` context merge, and a component render is a pass of its own.
+That store covers the callables of the ``page.py``, and a component render is a pass of its own.
 On an ordinary GET every ``@component.context`` callable of one component resolves against a cache built for that component, so a ``Depends("name")`` two components both ask for is resolved once per component rather than once per page.
 A ``render`` function in a ``component.py`` is further apart still and always gets a fresh cache, on a GET and inside a form dispatch alike, so a value it shares with the page around it is computed again for the call.
 Keep a dependency cheap when several components ask for it, or have it read a store of its own scoped to the request.
 
 The cache lives for one form dispatch.
-Every stage of that POST, from ``get_initial`` through the validation-failure re-render, shares it, and the ``@component.context`` callables of the re-rendered page join it too rather than each building their own.
+Every stage of that POST, from ``get_initial`` through the validation-failure re-render, shares it.
+Each component instance of the re-rendered page reads a copy of it, so a value resolved earlier in the dispatch is reused while a value one instance resolves from its own props stays with that instance.
 ``FormActionDispatch`` attaches its dependency cache to the request, and ``render_dep_cache`` reads it back.
 Outside a form dispatch the function answers a fresh empty dict the request never carries, so a caller never handles a missing cache.
 ``get_request_dep_cache`` is deprecated, answers ``None`` outside a dispatch, and raises a ``DeprecationWarning`` on every call.

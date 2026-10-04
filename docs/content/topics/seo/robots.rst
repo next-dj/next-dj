@@ -145,3 +145,4 @@ See also
    :doc:`quickstart` for the first robots file of a site.
    :doc:`/content/ref/seo` for ``RobotsRule`` and the ``next.seo.urls`` include.
    :repo:`wiki <tree/main/examples/wiki>` for ``rules`` per request.
+   :repo:`shortener <tree/main/examples/shortener>` for a static ``robots.txt``.

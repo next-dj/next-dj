@@ -329,10 +329,18 @@ class TestAssetKindLoadableCheck:
 
 
 class OldSignatureBackend(StaticFilesBackend):
-    """A backend written before renderers took the request and the nonce."""
+    """A backend whose renderer takes neither the request nor the nonce."""
 
     def render_link_tag(self, url):
-        """Render the tag the old way."""
+        """Render the tag from the URL alone."""
+        return f'<link rel="stylesheet" href="{url}">'
+
+
+class RequestOnlyBackend(StaticFilesBackend):
+    """A backend whose renderer takes the request but not the nonce."""
+
+    def render_link_tag(self, url, *, request=None):
+        """Render the tag without a nonce."""
         return f'<link rel="stylesheet" href="{url}">'
 
 
@@ -346,6 +354,7 @@ class OptionsBackend(StaticFilesBackend):
 
 _HERE = "tests.static.test_checks"
 _OLD = {"STATIC_BACKENDS": [{"BACKEND": f"{_HERE}.OldSignatureBackend"}]}
+_REQUEST_ONLY = {"STATIC_BACKENDS": [{"BACKEND": f"{_HERE}.RequestOnlyBackend"}]}
 
 
 def _babel_kind() -> KindRegistry:
@@ -368,8 +377,16 @@ class TestAssetRenderersCheck:
         assert check_ids(messages) == ["next.E147"]
         assert isinstance(messages[0], Error)
         assert "'css'" in messages[0].msg
-        assert "render_link_tag without the request and nonce" in messages[0].msg
+        assert "render_link_tag without the request keyword" in messages[0].msg
+        assert "every page holding such an asset fails" in messages[0].msg
         assert "nonce=None" in messages[0].hint
+
+    def test_a_renderer_without_the_nonce_fails_only_under_a_nonce(self) -> None:
+        with override_settings(NEXT_FRAMEWORK=_REQUEST_ONLY):
+            [message] = check_asset_renderers()
+        assert message.id == "next.E147"
+        assert "render_link_tag without the nonce keyword" in message.msg
+        assert "whenever its request carries a CSP nonce" in message.msg
 
     def test_a_renderer_the_backend_lacks_is_named(self, monkeypatch) -> None:
         monkeypatch.setattr(checks_module, "default_kinds", _babel_kind())
@@ -562,7 +579,7 @@ class TestReservedJsContextKeyCheck:
 
 
 class TestAppDirectoriesFinderCheck:
-    """Which configured finder entry earns ``next.E083`` and which stays silent."""
+    """Which configured finder entry raises ``next.E083`` and which raises nothing."""
 
     @pytest.mark.parametrize("case", APP_FINDER_CASES, ids=lambda case: case.id)
     def test_entry_is_refused_only_when_it_publishes_the_package(

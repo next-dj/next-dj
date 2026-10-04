@@ -150,13 +150,14 @@ class TestRuntime:
 class TestGatedBlocking:
     """A gated blocking script blocks nothing once the runtime renders it (W116)."""
 
-    def test_it_is_w125(self, tmp_path: Path) -> None:
+    def test_it_is_w116_and_names_the_fix(self, tmp_path: Path) -> None:
         scripts = _scripts(
             "Script('a', init='1', category='marketing', strategy=Strategy.BLOCKING)"
         )
-        assert check_ids(_run(tmp_path, check_gated_blocking_scripts, scripts)) == [
-            "next.W116"
-        ]
+        messages = _run(tmp_path, check_gated_blocking_scripts, scripts)
+        assert check_ids(messages) == ["next.W116"]
+        assert "Declare it Strategy.ASYNC or Strategy.DEFER" in messages[0].msg
+        assert "['SERVER_RENDER'] to True" in messages[0].msg
 
     def test_an_always_server_render_is_silent(self, tmp_path: Path) -> None:
         scripts = _scripts(
@@ -183,6 +184,7 @@ class TestDeploy:
         messages = _run(tmp_path, check_script_deploy, scripts)
         assert check_ids(messages) == ["next.W118"]
         assert "'a'" in messages[0].msg
+        assert "Load its src over https://." in messages[0].msg
 
 
 @pytest.fixture()

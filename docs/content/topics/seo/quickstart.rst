@@ -177,7 +177,7 @@ Check the result
 While ``DEBUG`` is on the site is closed to search.
 Every page renders ``noindex, nofollow``, and ``/sitemap.xml`` and ``/robots.txt`` still answer with ``X-Robots-Tag: noindex, nofollow`` for a preview.
 With ``DEBUG`` off the pages render the robots directives they declare, see :doc:`site`.
-``showmetadata`` prints which layer settles each key of a page, and :doc:`auditing` covers the checks and the test helpers.
+``showmetadata`` prints which layer sets each key of a page, and :doc:`auditing` covers the checks and the test helpers.
 
 See also
 --------

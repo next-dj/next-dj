@@ -14,7 +14,6 @@ from .shape import (
     check_metadata_noindex_canonical,
     check_metadata_parent_parameter,
     check_metadata_registration_files,
-    check_metadata_url_schemes,
     check_page_metadata_shape,
 )
 from .templates import check_metadata_tag_rendered
@@ -35,6 +34,5 @@ __all__ = [
     "check_metadata_social_folds",
     "check_metadata_tag_rendered",
     "check_metadata_title_templates",
-    "check_metadata_url_schemes",
     "check_page_metadata_shape",
 ]

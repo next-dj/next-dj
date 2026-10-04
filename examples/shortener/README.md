@@ -13,7 +13,7 @@ This is the example to read first. It is the smallest complete project in the ca
 | `/admin/` | Top ten links with an inline edit form and a delete button per row, plus the unflushed click counters. Nested admin layout with a subnav. |
 | `/admin/stats/` | Totals for links, persisted clicks, and pending clicks, plus the live per-action dispatch counters. |
 | `/admin/links/<slug>/` | Link detail, resolved through a custom `DLink[Link]` DI provider. Resets the cached clicks for that slug. |
-| `/robots.txt` | Rendered from a one-line `robots.py`, keeps crawlers off the `/s/` redirects. |
+| `/robots.txt` | Served as written from a static `robots.txt`, keeps crawlers off the `/s/` redirects. |
 
 ## How to run
 
@@ -55,15 +55,15 @@ NEXT_FRAMEWORK = {
 
 The router walks two roots. `DIRS` names the project-level page root [`host/`](host/), which owns the single outermost `layout.djx`. `APP_DIRS = True` adds the `routes/` tree of every installed app, so the pages themselves live in [`shortener/routes/`](shortener/routes/). Component lookup is layered the same way: the shared shadcn kit in [`../_shared/_components/`](../_shared/_components/) through `DIRS`, plus any `_widgets/` folder the page walk meets inside a page tree.
 
-The framework hardcodes neither name. `routes/` could be `screens/` or `panels/`, `_widgets/` could be `_cards/` — the other examples rename both on purpose.
+The framework hardcodes neither name. `routes/` could be `screens/` or `panels/`, `_widgets/` could be `_cards/`, and the other examples rename both on purpose.
 
-### 2. Page, template, layout — how a URL is rendered
+### 2. Page, template, layout: how a URL is rendered
 
 A directory under `routes/` with a `page.py` becomes a URL. The framework composes a template in three layers:
 
-- **`layout.djx`** (any ancestor directory) — the outer shell. Must contain the placeholder `{% template %}` where the child content is substituted.
-- **`template.djx`** (sibling of `page.py`) — the page body. Just HTML. No `{% template %}` wrapping needed because the framework handles substitution.
-- **`page.py`** — Python side: context functions (`@context`), optional self-registering form classes (`next.forms.Form`/`ModelForm`), optional `template = "..."` module attribute, optional `render(request, ...) -> HttpResponse`.
+- **`layout.djx`** (any ancestor directory): the outer shell. Must contain the placeholder `{% template %}` where the child content is substituted.
+- **`template.djx`** (sibling of `page.py`): the page body. Just HTML. No `{% template %}` wrapping needed because the framework handles substitution.
+- **`page.py`**: the Python side, with context functions (`@context`), optional self-registering form classes (`next.forms.Form`/`ModelForm`), optional `template = "..."` module attribute, optional `render(request, ...) -> HttpResponse`.
 
 Ancestor layouts cascade: `routes/admin/stats/` inherits `routes/admin/layout.djx`, which itself is wrapped by [`host/layout.djx`](host/layout.djx). Look at the nested toolbar in [`admin/layout.djx`](shortener/routes/admin/layout.djx):
 
@@ -83,11 +83,11 @@ Ancestor layouts cascade: `routes/admin/stats/` inherits `routes/admin/layout.dj
 
 The placeholder is empty. The outer toolbar stays visible on every admin sub-page.
 
-### 3. Context functions — feeding data to the template
+### 3. Context functions: feeding data to the template
 
 Three patterns, each useful:
 
-**Keyed single value** — the most common:
+**Keyed single value**, the most common:
 
 ```python
 @context("recent_links")
@@ -97,7 +97,7 @@ def recent_links() -> list[Link]:
 
 Renders as `{{ recent_links }}` in the template.
 
-**Unkeyed dict** — group related values, avoid duplicate DI resolution:
+**Unkeyed dict**, to group related values and avoid duplicate DI resolution:
 
 ```python
 # routes/admin/links/[slug]/page.py
@@ -108,7 +108,7 @@ def link_context(link: DLink[Link]) -> dict[str, object]:
 
 `@context("link")` + `@context("cache_key")` would each trigger the `DLink` provider and hit the database twice. The unkeyed form runs the dependency once, merges the dict into the template context. A `dict` is the whole contract of the unkeyed form, so a callable that returns anything else is refused with `next.pages.PageContextShapeError` naming the callable and the page, rather than failing anonymously inside the merge.
 
-**Reusing a shared helper** — wrap it in the page module that needs it:
+**Reusing a shared helper**, wrapped in the page module that needs it:
 
 ```python
 # routes/admin/page.py
@@ -122,7 +122,7 @@ def admin_pending_clicks() -> dict[str, int]:
 
 `@context` keys the registration on the file where the decorated function is declared, so decorating `pending_clicks` in place would bind it to `shortener/cache.py` instead of to this page.
 
-### 4. `inherit_context=True` — sharing context down the tree
+### 4. `inherit_context=True`: sharing context down the tree
 
 ```python
 @context("recent_links", inherit_context=True)
@@ -132,7 +132,7 @@ def recent_links() -> list[Link]:
 
 Declared once in [`admin/page.py`](shortener/routes/admin/page.py), available in `admin/stats/` and `admin/links/<slug>/` templates. Use it for toolbar-level data. Do not mark heavy queries `inherit_context=True` unless every sub-page actually needs them.
 
-### 5. Forms — class-bound `Form` + `{% form %}`
+### 5. Forms: class-bound `Form` + `{% form %}`
 
 [`routes/page.py`](shortener/routes/page.py) declares the form class. A `next.forms.Form` subclass registers itself by file path through `__init_subclass__`, so its auto-name is `create_link_form` (snake_case of the class). The submit logic lives in `on_valid`, no separate handler. The redirect target and the flash message are declared on `Meta`:
 
@@ -151,7 +151,7 @@ class CreateLinkForm(Form):
         success_message = "Short link created for %(url)s."
 ```
 
-`on_valid` receives only the parameters it declares — the DI resolver fills what the signature asks for. Delegating to `super().on_valid(request)` follows `Meta.success_url`, which `page_reverse_lazy()` fills from the route tree instead of a path literal, and the dispatcher flashes `Meta.success_message` (interpolated over `cleaned_data` with `%` formatting) through `django.contrib.messages`. The home page calls the shared `flash_messages` component, which drains the queue and maps each level tag onto an `alert` variant, so an error flash is red rather than green. `ComponentWidget("input", type="url", ...)` makes `{{ form.url }}` render through the shared `input` component instead of Django's default widget, so a form field and a hand-written control look identical.
+`on_valid` receives only the parameters it declares. The DI resolver fills what the signature asks for. Delegating to `super().on_valid(request)` follows `Meta.success_url`, which `page_reverse_lazy()` fills from the route tree instead of a path literal, and the dispatcher flashes `Meta.success_message` (interpolated over `cleaned_data` with `%` formatting) through `django.contrib.messages`. The home page calls the shared `flash_messages` component, which drains the queue and maps each level tag onto an `alert` variant, so an error flash is red rather than green. `ComponentWidget("input", type="url", ...)` makes `{{ form.url }}` render through the shared `input` component instead of Django's default widget, so a form field and a hand-written control look identical.
 
 Creating the row is its own problem: [`_create_link_with_unique_slug`](shortener/routes/page.py) tries random six-character slugs inside `transaction.atomic()` and catches `IntegrityError` from the unique constraint, widening the slug by one character every ten collisions. The database decides uniqueness, so two concurrent submissions cannot both win a slug.
 
@@ -171,7 +171,7 @@ Creating the row is its own problem: [`_create_link_with_unique_slug`](shortener
 
 The `{% form "name" %}` tag resolves the form to its stable UID endpoint, injects a CSRF token, and exposes the bound `form` in the block.
 
-> `{% form %}`, `{% component %}`, `{% collect_styles %}`, `{% url %}` etc. are all globally loaded template tags. **Do not** write `{% load forms components next_static %}` — `next.apps.templates.install()` registers them as Django builtins at startup.
+> `{% form %}`, `{% component %}`, `{% collect_styles %}`, `{% url %}` etc. are all globally loaded template tags. **Do not** write `{% load forms components next_static %}`, because `next.apps.templates.install()` registers them as Django builtins at startup.
 
 The admin list edits each link inline. The same form renders once per row, so each carries `key=link.slug` (`data-next-key`) and an invalid submit re-renders the submitted row, not the first:
 
@@ -186,23 +186,23 @@ The admin list edits each link inline. The same form renders once per row, so ea
 
 [`EditLinkForm`](shortener/routes/admin/page.py) is a `ModelForm` over `Link` and resolves the edited row from the posted `slug` in `get_initial`, so one registered form serves every row. A looped `{% form %}` without `key=` or `zone=` raises `next.W070`.
 
-### 6. Patch envelopes — `prepend`, `remove`, and an out-of-band foreign morph
+### 6. Patch envelopes: `prepend`, `remove`, and an out-of-band foreign morph
 
 Three actions author their own patch envelopes through `Patches(request)` and fall back to a redirect when no runtime is present, so each works the same with or without JS.
 
-- **`prepend` with dedupe.** The home create form wraps its latest-links list in a `{% zone "latest-links" tag="ul" %}`. On a partial submit [`CreateLinkForm.on_valid`](shortener/routes/page.py) renders one keyed `link_row` and prepends it: `Patches(request).prepend({"zone": "latest-links"}, row, dedupe="key").response()`. Dedupe by `data-next-key` (the slug) means a resubmission replaces its row instead of doubling it. Without the runtime the form keeps its declared `Meta.success_url` redirect. The empty-state branch lives _inside_ the zone body rather than around the tag, because a standalone zone render never evaluates an enclosing `{% if %}` — the framework rejects the other arrangement with `next.E063`.
+- **`prepend` with dedupe.** The home create form wraps its latest-links list in a `{% zone "latest-links" tag="ul" %}`. On a partial submit [`CreateLinkForm.on_valid`](shortener/routes/page.py) renders one keyed `link_row` and prepends it: `Patches(request).prepend({"zone": "latest-links"}, row, dedupe="key").response()`. Dedupe by `data-next-key` (the slug) means a resubmission replaces its row instead of doubling it. Without the runtime the form keeps its declared `Meta.success_url` redirect. The empty-state branch lives _inside_ the zone body rather than around the tag, because a standalone zone render never evaluates an enclosing `{% if %}`. The framework rejects the other arrangement with `next.E063`.
 - **`remove`.** Each admin row is a `<li data-next-key="{{ link.slug }}">`. The [`delete_link`](shortener/routes/admin/page.py) action drops the row in place: `Patches(request).remove({"css": 'li[data-next-key="..."]'}).response(fallback="/admin/")`.
-- **`morph_foreign_zone` (out of band).** The home page owns a `{% zone "links-badge" %}` that totals unflushed clicks. Both home-page providers are bound to their own zone — `@context("pending_total_label", zone="links-badge")` and `@context("recent_links", zone="latest-links")` — so the badge morph never lists the links and a `latest-links` render never totals the click cache, while the full page render still runs both. The [`reset_clicks`](shortener/routes/admin/links/[slug]/page.py) action on the detail page re-renders that zone of the _foreign_ home page out of band: `Patches(request).morph_foreign_zone("links-badge", "/")`. The home page's body resolution re-runs first, so the zone travels only when that page would have served the request.
+- **`morph_foreign_zone` (out of band).** The home page owns a `{% zone "links-badge" %}` that totals unflushed clicks. Both home-page providers are bound to their own zone through `@context("pending_total_label", zone="links-badge")` and `@context("recent_links", zone="latest-links")`, so the badge morph never lists the links and a `latest-links` render never totals the click cache, while the full page render still runs both. The [`reset_clicks`](shortener/routes/admin/links/[slug]/page.py) action on the detail page re-renders that zone of the _foreign_ home page out of band: `Patches(request).morph_foreign_zone("links-badge", "/")`. The home page's body resolution re-runs first, so the zone travels only when that page would have served the request.
 
 The row markup ships from one place. `on_valid` renders the same [`link_row`](shortener/routes/_widgets/link_row/component.djx) component the page render uses, passing the page's `template.djx` path as `current_template_path` so the component resolver finds a page-scoped `_widgets/` name outside a page render.
 
 Every partial response carries the asset version so the client can tell a stale tab from a fresh deploy. These examples serve assets straight off disk with no hashed manifest to derive a version from, so `config/settings.py` names the release tag itself with `"STATIC_VERSION": "v1"`. The same string stamps every asset URL and every partial response, and bumping it is what asks an open tab to reload.
 
-### 7. Components — simple, composite, and shared
+### 7. Components: simple, composite, and shared
 
 A component lives in `_widgets/<name>/`:
 
-- **Simple**: just `component.djx` — pure template.
+- **Simple**: a `component.djx` only, a pure template.
 - **Composite**: `component.py` + `component.djx`. The Python side adds context via `@component.context("key")`.
 
 [`_widgets/link_card/`](shortener/routes/_widgets/link_card/) is a composite. The template renders a card while the Python function computes a display URL via `reverse`:
@@ -225,7 +225,7 @@ Every `{% component %}` prop compiles as a Django `FilterExpression`, so `title=
 
 The card also ships a co-located [`component.css`](shortener/routes/_widgets/link_card/component.css). The collector emits it once per page no matter how many cards render.
 
-### 8. Shared `nav_link` — DRY the active-state logic
+### 8. Shared `nav_link`: one place for the active-state logic
 
 Root nav and admin subnav both need the same active-state rule. The logic lives once in the shared kit at [`_shared/_components/nav_link/component.py`](../_shared/_components/nav_link/component.py), registered as a global component root through `COMPONENT_BACKENDS[0]["DIRS"]` in [`config/settings.py`](config/settings.py):
 
@@ -247,7 +247,7 @@ Usage:
 {# exact match #}
 {% component "nav_link" url_name="next:page_admin_stats" label="Stats" variant="tabs" %}
 
-{# prefix match — stays active across every URL name that contains 'page_admin' #}
+{# prefix match: stays active across every URL name that contains 'page_admin' #}
 {% component "nav_link" url_name="next:page_admin" active_when="page_admin" label="admin" variant="bar" %}
 ```
 
@@ -264,9 +264,9 @@ Every anchor in the project goes through `{% url %}`. File-router URLs sit under
 | `routes/admin/stats/page.py` | `/admin/stats/` | `next:page_admin_stats` |
 | `routes/admin/links/[slug]/page.py` | `/admin/links/<slug>/` | `next:page_admin_links_slug` |
 
-Use them as `{% url 'next:page_admin' %}` or with args: `{% url 'next:page_admin_links_slug' slug=link.slug %}`. Rename files freely — templates stay correct because they never hardcode paths.
+Use them as `{% url 'next:page_admin' %}` or with args: `{% url 'next:page_admin_links_slug' slug=link.slug %}`. Rename files freely. Templates stay correct because they never hardcode paths.
 
-### 10. Custom DI provider — `DLink[Link]`
+### 10. Custom DI provider: `DLink[Link]`
 
 [`providers.py`](shortener/providers.py) implements a typed injection marker that fetches the matching `Link` from the URL `slug`:
 
@@ -313,7 +313,7 @@ def current_link(link: DLink[Link]) -> Link:
     return link
 ```
 
-### 11. A plain Django view beside the file router — `/s/<slug>/`
+### 11. A plain Django view beside the file router: `/s/<slug>/`
 
 `/s/<slug>/` answers with a redirect and never renders HTML. It could live under `routes/`: a module-level `render()` outranks the composed template, and returning any `HttpResponseBase` from it short-circuits the layout and static pipelines entirely. The example keeps the redirect as a plain view in [`views.py`](shortener/views.py) instead, to show that both routing styles share one URLconf:
 
@@ -362,23 +362,24 @@ def _on_action_dispatched(action_name: str, **kwargs) -> None:
 
 `AppConfig.ready()` imports the module so the receiver connects at startup, and [`admin/stats/page.py`](shortener/routes/admin/stats/page.py) exposes `action_counts()` as the `form_actions` context. Submitting the create form, an inline edit, a delete, or a clicks reset moves a row in that card without any of those handlers knowing the counter exists.
 
-### 14. `robots.py` at the page root
+### 14. A static `robots.txt` at the page root
 
-[`shortener/routes/robots.py`](shortener/routes/robots.py) is one line beside the root `page.py`:
+[`shortener/routes/robots.txt`](shortener/routes/robots.txt) sits beside the root `page.py` and holds two lines:
 
-```python
-rules = [RobotsRule(user_agent="*", disallow=["/s/"])]
+```text
+User-agent: *
+Disallow: /s/
 ```
 
-The file's presence switches `/robots.txt` on, served as `text/plain; charset=utf-8` with one group per `RobotsRule`. `/s/<slug>/` is the plain Django view of section 11, a redirect that bumps the click counter of section 12 on every hit, so a crawler chasing short links would count as traffic, and there is nothing at those URLs to index. `/admin/` is left open on purpose. Its [`page.py`](shortener/routes/admin/page.py) declares `"robots": {"index": False}`, a crawler has to fetch a page to see that tag, and `manage.py check` reports a `Disallow` that would hide it. There is no `sitemap.py` here, the one public page is `/` and a document listing it would add nothing, so `/sitemap.xml` stays a 404 and the rendered robots carries no `Sitemap:` line. Drop a `sitemap.py` into the root and both appear, the [markdown-blog](../markdown-blog/) and the [wiki](../wiki/) show the two ways to fill one.
+The file's presence switches `/robots.txt` on, served byte for byte as `text/plain; charset=utf-8` and read again when its mtime changes. The rules never vary and there is no `Sitemap:` line to write, so a static file needs no Python. `/s/<slug>/` is the plain Django view of section 11, a redirect that bumps the click counter of section 12 on every hit. A crawler chasing short links would count as traffic, and there is nothing at those URLs to index. `/admin/` is left open on purpose. Its [`page.py`](shortener/routes/admin/page.py) declares `"robots": {"index": False}`, and a crawler has to fetch a page to read that tag. There is no `sitemap.py` here. The one public page is `/` and a document listing it would add nothing, so `/sitemap.xml` stays a 404. Nothing is appended to a static file, so a project that adds a `sitemap.py` writes the `Sitemap:` line into `robots.txt` by hand, and `manage.py check` warns while it is missing. The [markdown-blog](../markdown-blog/) and the [wiki](../wiki/) show the declared `robots.py` form, where the framework writes the `Sitemap:` line and `manage.py check` compares each `Disallow` with the sitemap and the `noindex` pages. Those checks read only a `robots.py`.
 
-`NEXT_FRAMEWORK["SITE"]` in [`config/settings.py`](config/settings.py) names `https://short.example` as the origin and pins `INDEXABLE` to `True`. The default `"auto"` follows `DEBUG`, so the dev server would put `noindex` on every page and answer `/robots.txt` with a bare allow-all group instead of the rules above, leaving crawlers free to fetch the pages and read that tag. The pinned value shows the file a deploy serves.
+`NEXT_FRAMEWORK["SITE"]` in [`config/settings.py`](config/settings.py) names `https://short.example` as the origin and pins `INDEXABLE` to `True`. The default `"auto"` follows `DEBUG`, so the dev server would put `noindex` on every page and send `/robots.txt` under `X-Robots-Tag: noindex, nofollow`. The pinned value shows the pages and the headers a deploy serves.
 
 ## Gotchas
 
 ### PEP 563 and DI annotations
 
-The DI resolver reads the resolved type hints of a callable, so deferred annotations do not break a `DLink[Link]` parameter by themselves — they make the failure silent and total instead. A single name the resolver cannot evaluate drops the whole callable back to its raw annotations, where every parameter is a **string**, `typing.get_origin(string)` returns `None`, and `LinkProvider` never claims the parameter.
+The DI resolver reads the resolved type hints of a callable, so deferred annotations do not break a `DLink[Link]` parameter by themselves. They make the failure silent and total instead. A single name the resolver cannot evaluate drops the whole callable back to its raw annotations, where every parameter is a **string**, `typing.get_origin(string)` returns `None`, and `LinkProvider` never claims the parameter.
 
 Two rules:
 
@@ -387,14 +388,14 @@ Two rules:
 
 ### An unresolvable `{% component %}` prop renders empty
 
-`{% component "card" title=some_var %}` resolves `some_var` against the template context. A name that is not there resolves to Django's `string_if_invalid` instead of raising, so a typo in a prop name shows up as a blank slot rather than an error. Quoted literals are demoted from `SafeString` to plain `str` so `{{ prop }}` autoescapes — opt back in with `prop=value|safe`.
+`{% component "card" title=some_var %}` resolves `some_var` against the template context. A name that is not there resolves to Django's `string_if_invalid` instead of raising, so a typo in a prop name shows up as a blank slot rather than an error. Quoted literals are demoted from `SafeString` to plain `str` so `{{ prop }}` autoescapes. Opt back in with `prop=value|safe`.
 
 ## Further reading
 
-- [next/urls/backends.py](../../next/urls/backends.py) — file router implementation.
-- [next/deps/providers.py](../../next/deps/providers.py) — DI base classes used by `DLink`.
-- [next/forms/dispatch/](../../next/forms/dispatch/) — form action dispatch pipeline.
-- [next/components/context.py](../../next/components/context.py) — `@component.context` mechanics.
-- [next/pages/loaders.py](../../next/pages/loaders.py) — layout composition logic.
-- [next/partial/](../../next/partial/) — zones, patch envelopes, and the fallback contract used in section 6.
-- [next/seo/](../../next/seo/) — the `RobotsRule` marker and the robots view behind section 14.
+- [next/urls/backends.py](../../next/urls/backends.py): file router implementation.
+- [next/deps/providers.py](../../next/deps/providers.py): DI base classes used by `DLink`.
+- [next/forms/dispatch/](../../next/forms/dispatch/): form action dispatch pipeline.
+- [next/components/context.py](../../next/components/context.py): `@component.context` mechanics.
+- [next/pages/loaders.py](../../next/pages/loaders.py): layout composition logic.
+- [next/partial/](../../next/partial/): zones, patch envelopes, and the fallback contract used in section 6.
+- [next/seo/](../../next/seo/): the robots view that serves the static file of section 14.

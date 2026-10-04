@@ -30,7 +30,10 @@ from tests.support.cases.watch import WATCHED_BACKENDS_CASES, WatchedBackendsCas
 
 
 # The promise every watcher diagnostic ends on, which a reload then keeps.
-_RECONFIGURE_PROMISE = "until the framework is reconfigured."
+_RECONFIGURE_PROMISE = (
+    "The same failure is not logged again for 600 seconds or until the framework is "
+    "reconfigured."
+)
 
 
 def _write_app(root: Path, name: str) -> Path:

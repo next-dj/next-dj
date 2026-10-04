@@ -51,9 +51,6 @@ export interface ExtrasLoader {
 export interface ChunkDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   document?: Document;
-  // The runtime's own script element, read during evaluation. Null for an inline
-  // bootstrap, where $chunks is the only source of a chunk URL.
-  runtime: Element | null;
   nonce: string | undefined;
   // The seeded init payload, read at fetch time for its $chunks map.
   context: () => Record<string, unknown>;
@@ -83,12 +80,11 @@ export interface Lazy<T> extends LazyModule<T> {
 /**
  * A loader for a chunk carrying one module, with at most one fetch in flight.
  *
- * The URL is the chunk's `$chunks` entry in the seeded payload, or next.<key>.min.js
- * beside the runtime script when the payload has none. The entry takes precedence
- * because a hashing storage serves the chunk under a name the sibling URL cannot
- * derive. A missing URL or a failed fetch resolves undefined, and a failed fetch is
- * retried on the next call. A file that loads without registering its module counts
- * as failed, as does one that has not registered it within CHUNK_TIMEOUT.
+ * The URL is the chunk's `$chunks` entry in the seeded payload, the only source, since
+ * a hashing or signing storage serves the chunk under a URL the client cannot derive.
+ * A missing entry or a failed fetch resolves undefined, and a failed fetch is retried
+ * on the next call. A file that loads without registering its module counts as
+ * failed, as does one that has not registered it within CHUNK_TIMEOUT.
  */
 export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
   const doc = deps.document ?? document;
@@ -101,18 +97,16 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
       if (value !== undefined) return Promise.resolve(value);
       if (pending !== undefined) return pending;
       const chunks = deps.context().$chunks;
-      const runtime = deps.runtime;
-      const url =
-        (isRecord(chunks) ? asString(chunks[key]) : undefined) ??
-        (runtime instanceof HTMLScriptElement && runtime.src !== ""
-          ? new URL(`next.${key}.min.js`, runtime.src).href
-          : undefined);
+      const url = isRecord(chunks) ? asString(chunks[key]) : undefined;
       if (url === undefined) return Promise.resolve(undefined);
       const el = doc.createElement("script");
       if (deps.nonce !== undefined) el.nonce = deps.nonce;
+      // Per attempt, since another script may remove the tag before it reports.
+      let failed = false;
       const fail = (): void => {
         // Nothing to do once the module is registered or this attempt has failed.
-        if (value !== undefined || !el.isConnected) return;
+        if (failed || value !== undefined) return;
+        failed = true;
         // A retry appends a new tag, so the failed one is removed.
         el.remove();
         pending = undefined;

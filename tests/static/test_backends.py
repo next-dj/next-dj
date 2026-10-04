@@ -366,7 +366,7 @@ class TestManifestMissReadsAlikeOnBothPaths:
 
 
 class TestUrlMemoKeySpaces:
-    """One memo holds both resolvers, so their keys can never answer for each other."""
+    """One memo holds both resolvers, so the key of one never matches the other."""
 
     def test_a_file_and_a_name_keep_their_own_answers(self, tmp_path: Path) -> None:
         backend = StaticFilesBackend()

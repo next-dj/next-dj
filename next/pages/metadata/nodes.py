@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Final, NamedTuple, cast, override
 
 from django.template.base import Node
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString
 
+from next.diagnostics import FailureLog
 from next.seeding import METADATA_KEY
 
 from .backends import metadata_renderer
@@ -22,6 +24,8 @@ if TYPE_CHECKING:
 
     from .markers import Breadcrumb, ResolvedMetadata
 
+
+_failures: Final = FailureLog(logging.getLogger(__name__))
 
 _NAV: Final = '<nav aria-label="Breadcrumb"><ol>{}</ol></nav>'
 _CURRENT: Final = ' aria-current="page"'
@@ -63,9 +67,26 @@ class MetadataNode(Node):
 
     @override
     def render(self, context: Context) -> str:
-        """Render the head tags of the page, the empty string outside a page render."""
+        """Render the head tags of the page, the empty string outside a page render.
+
+        A renderer that raises leaves the head empty and is contained by `FailureLog`.
+        """
         resolved = context_metadata(context)
-        return "" if resolved is None else metadata_renderer().render(resolved)
+        if resolved is None:
+            return ""
+        renderer = metadata_renderer()
+        try:
+            return renderer.render(resolved)
+        except Exception as exc:  # noqa: BLE001 - a renderer and lazy text run user code
+            _failures.contain(
+                exc,
+                (type(renderer), type(exc)),
+                "%s raised %s while it rendered the head of a page, so the head "
+                "renders empty. Fix the renderer or the metadata value it reads.",
+                type(renderer).__name__,
+                type(exc).__name__,
+            )
+            return ""
 
 
 def _crumb(crumb: Breadcrumb) -> SafeString:

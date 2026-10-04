@@ -133,9 +133,9 @@ class MarkdownTemplateLoader(TemplateLoader):
 
 Three methods, three responsibilities:
 
-- **`can_load`** — cheap existence check, so the chain can skip this loader without touching the disk twice.
-- **`load_template`** — reads the file and returns the rendered body string inside a `prose` article, since Markdown carries no classes of its own. Returning `None` on a read error lets the chain fall through to the next loader instead of raising mid-request.
-- **`source_path`** — points at the on-disk file for the stale-cache detector, so editing a `.md` file recomposes the template on the next request without a server restart.
+- **`can_load`**: cheap existence check, so the chain can skip this loader without touching the disk twice.
+- **`load_template`**: reads the file and returns the rendered body string inside a `prose` article, since Markdown carries no classes of its own. Returning `None` on a read error lets the chain fall through to the next loader instead of raising mid-request.
+- **`source_path`**: points at the on-disk file for the stale-cache detector, so editing a `.md` file recomposes the template on the next request without a server restart.
 
 `source_name = "template.md"` is the label the framework prints in `next.W043` when a page declares this source alongside a higher-priority one. A loader fits a page whose body is one file of its own. It is the wrong tool for the posts, since a loader sees the `page.py` path and never the URL, so a dynamic route reads its content in a `@context` instead.
 
@@ -190,7 +190,7 @@ The click handler reads the serialized post the page put on the window:
 
 ```js
 const post = window.Next?.context?.post;
-await navigator.clipboard.writeText(`${post.title} — ${location.href}`);
+await navigator.clipboard.writeText(`${post.title} - ${location.href}`);
 ```
 
 `component.js` is collected by `{% collect_scripts %}` in the root layout only on pages that render the component. The index and `/about/` never call `share_button`, so its script is absent from their HTML. The handler bails out when `window.Next.context.post` is missing, which is what happens if the component is ever rendered outside a post page, and it reports a failed `navigator.clipboard` write on the button itself rather than throwing.
@@ -330,11 +330,11 @@ The example sets `STATIC_VERSION` and the partial asset version derives from it,
 
 ## Further reading
 
-- [`next/pages/loaders.py`](../../next/pages/loaders.py) — the `TemplateLoader` ABC, `build_registered_loaders`, `compose_body`, and layout discovery.
-- [`next/pages/signals.py`](../../next/pages/signals.py) — the `template_loaded` payload contract used in section 6.
-- [`next/pages/processors.py`](../../next/pages/processors.py) — context-processor discovery across the router and Django `TEMPLATES`.
-- [`next/pages/metadata/`](../../next/pages/metadata/) — the metadata chain of section 8: the `MetadataDict` schema, `absolute_url`, the breadcrumbs and the `{% metadata %}` renderer.
-- [`next/seo/`](../../next/seo/) — the sitemap and robots of section 13 and `RobotsRule`.
-- [`next/static/serializers.py`](../../next/static/serializers.py) — how `@context(serialize=True)` values reach `window.Next.context`.
-- [`docs/content/topics/pages.rst`](../../docs/content/topics/pages.rst) — the "Custom template loaders" section this example anchors.
-- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.E012`, `next.E040`, `next.E042`, `next.E043`, `next.E089`, and `next.W043`.
+- [`next/pages/loaders.py`](../../next/pages/loaders.py): the `TemplateLoader` ABC, `build_registered_loaders`, `compose_body`, and layout discovery.
+- [`next/pages/signals.py`](../../next/pages/signals.py): the `template_loaded` payload contract used in section 6.
+- [`next/pages/processors.py`](../../next/pages/processors.py): context-processor discovery across the router and Django `TEMPLATES`.
+- [`next/pages/metadata/`](../../next/pages/metadata/): the metadata chain of section 8, with the `MetadataDict` schema, `absolute_url`, the breadcrumbs and the `{% metadata %}` renderer.
+- [`next/seo/`](../../next/seo/): the sitemap and robots of section 13 and `RobotsRule`.
+- [`next/static/serializers.py`](../../next/static/serializers.py): how `@context(serialize=True)` values reach `window.Next.context`.
+- [`docs/content/topics/pages.rst`](../../docs/content/topics/pages.rst): the "Custom template loaders" section this example anchors.
+- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst): `next.E012`, `next.E040`, `next.E042`, `next.E043`, `next.E089`, and `next.W043`.

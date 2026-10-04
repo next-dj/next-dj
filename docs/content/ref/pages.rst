@@ -7,8 +7,8 @@ Module summary
 --------------
 
 ``next.pages`` exposes the ``Page`` coordinator and its ``page`` singleton, the ``@context`` decorator, the ``Context`` and ``ContextResult`` value objects, the ``PageModuleImportError`` raised by a broken ``page.py`` and the ``PageContextShapeError`` raised by a keyless ``@context`` answering no mapping, and the ``checks`` and ``signals`` submodules.
-It also exposes the page metadata surface, the ``Metadata`` and ``ResolvedMetadata`` values, the ``MetadataDict`` and ``SiteMetadataDict`` input shapes, the ``Replace`` and ``RESET`` markers, the ``ld`` nodes, the ``MetadataRenderer`` contract with its ``HtmlMetadataRenderer``, and the four ``PageMetadata*`` errors, see :doc:`metadata`.
-The ``CacheDict`` and ``HeadersDict`` shapes of the ``cache`` and ``headers`` a ``page.py`` declares complete the surface, see `Response policy`_ below.
+It also exposes the page metadata names a page module uses most, the ``ResolvedMetadata`` value, the ``MetadataDict`` input shape, the ``Replace`` and ``RESET`` markers, the ``ld`` nodes, the ``MetadataRenderer`` contract with its ``HtmlMetadataRenderer``, and the four ``PageMetadata*`` errors, see :doc:`metadata`.
+The ``CacheDict`` and ``HeadersDict`` shapes of the ``cache`` and ``headers`` a ``page.py`` declares, and the ``CacheControl`` value a ``cache`` normalises to, complete the surface, see `Response policy`_ below.
 
 Public API
 ----------
@@ -158,12 +158,12 @@ Response policy
 ~~~~~~~~~~~~~~~
 
 ``next.pages.responses`` reads the ``cache`` and ``headers`` a ``page.py`` declares and stamps them, with the ``X-Robots-Tag`` the metadata calls for, on the page response.
-``CacheDict`` is the dict form of ``cache`` and ``HeadersDict`` the mapping ``headers`` takes, both exported from ``next.pages``.
+``CacheDict`` is the dict form of ``cache``, ``HeadersDict`` the mapping ``headers`` takes, and ``CacheControl`` the normalised directives a ``SitemapBackend.cache_control()`` returns, all three exported from ``next.pages``.
 A shared ``cache`` applies to a ``GET`` or a ``HEAD`` alone and is sent with ``private`` when the response depends on the visitor, through a cookie, a session read, a CSRF cookie, a consent read, a CSP nonce, or an ``Authorization`` header on the request.
 ``headers`` may not name a caching header, ``Cache-Control``, ``CDN-Cache-Control``, ``Surrogate-Control``, ``Cloudflare-CDN-Cache-Control``, ``Expires``, ``Age``, or ``Vary``, which ``cache`` owns.
 ``SharedCookies`` is the cookie jar a shared response carries in place of Django's, so a cookie a middleware sets after the view, the session and CSRF cookies among them, still makes the response private, and a post-render callback settles a lazily rendered response the same way.
 A zone response carries the ``headers`` of its page and ``private, no-store``.
-A callable ``cache`` that raises or answers a wrong shape sends the page with ``private, no-store`` and logs once, raising under ``DEBUG`` or ``STRICT_LOADING``.
+A callable ``cache`` that raises or answers a wrong shape sends the page with ``private, no-store`` and logs at most once every ten minutes, raising under ``DEBUG`` or ``STRICT_LOADING``.
 See :doc:`/content/topics/caching` for the rules.
 
 .. autoclass:: next.pages.CacheDict
@@ -172,7 +172,7 @@ See :doc:`/content/topics/caching` for the rules.
 .. autodata:: next.pages.HeadersDict
    :no-value:
 
-.. autoclass:: next.pages.responses.CacheControl
+.. autoclass:: next.pages.CacheControl
    :members:
 
 .. autoclass:: next.pages.responses.SharedCookies

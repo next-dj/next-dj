@@ -5,22 +5,19 @@ The sources use their own loader, so an import failure never flags a page as bro
 
 from __future__ import annotations
 
-import functools
 import re
+import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Final
+
+from django.apps import apps
+from django.utils.text import slugify
 
 from next.discovery import routed_page_trees
 from next.pages.responses import cache_control
-from next.urls.manager import router_manager
-from next.utils import (
-    TreeSource,
-    load_tree_source,
-    stat_mtime_ns,
-    tree_label,
-    unique_labels,
-    walk_page_tree,
-)
+from next.urls.manager import router_manager, seo_routes_version
+from next.utils import TreeSource, load_tree_source, stat_mtime_ns, walk_page_tree
 
 from .errors import SeoSourceImportError
 from .registry import sitemap_items_registry
@@ -28,8 +25,7 @@ from .registry import sitemap_items_registry
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Mapping
-    from pathlib import Path
+    from collections.abc import Iterable, Mapping
 
     from next.pages.responses import CacheControl
     from next.urls import RouterManager
@@ -135,6 +131,45 @@ def declared_cache(module: types.ModuleType) -> CacheControl | None:
     return None if callable(value) else cache_control(value)
 
 
+def _app_label_for(path: Path) -> str | None:
+    """Return the label of the innermost installed app whose directory holds `path`."""
+    resolved = path.resolve()
+    holding = [
+        (len(app_path.parts), str(config.label))
+        for config in apps.get_app_configs()
+        if resolved.is_relative_to(app_path := Path(config.path).resolve())
+    ]
+    return max(holding)[1] if holding else None
+
+
+def tree_label(path: Path) -> str:
+    """Return the stable name of a page tree, its app label or else its directory."""
+    label = _app_label_for(path)
+    if label is None:
+        label = slugify(path.name) or "root"
+    return label
+
+
+def unique_labels(labels: Iterable[str]) -> list[str]:
+    """Return the labels made distinct, each repeat suffixed with a free number.
+
+    A label no other tree shares is kept, and a suffixed label never equals an input.
+    """
+    wanted = list(labels)
+    taken = set(wanted)
+    unique: list[str] = []
+    handed: set[str] = set()
+    for label in wanted:
+        candidate = label
+        number = 1
+        while candidate in handed or (candidate != label and candidate in taken):
+            number += 1
+            candidate = f"{label}-{number}"
+        handed.add(candidate)
+        unique.append(candidate)
+    return unique
+
+
 def section_label(path: Path, module: types.ModuleType | None = None) -> str:
     """Return the section name of a page tree in the sitemap index.
 
@@ -177,15 +212,47 @@ def discover_seo_roots(manager: RouterManager) -> tuple[SeoRoot, ...]:
     )
 
 
-@functools.cache
+class _RootsMemo:
+    """The discovered trees, tagged with the SEO routes version they were built at."""
+
+    __slots__ = ("held", "lock")
+
+    def __init__(self) -> None:
+        """Start empty, with the lock that serialises discovery."""
+        self.held: tuple[int, tuple[SeoRoot, ...]] | None = None
+        self.lock = threading.RLock()
+
+    def current(self, version: int) -> tuple[SeoRoot, ...] | None:
+        """Return the trees discovered at `version`, `None` for another version."""
+        held = self.held
+        return held[1] if held is not None and held[0] == version else None
+
+
+_roots_memo: Final = _RootsMemo()
+
+
 def page_tree_roots() -> tuple[SeoRoot, ...]:
-    """Return every page tree the URL router serves, discovered once per reset."""
-    return discover_seo_roots(router_manager)
+    """Return every page tree the URL router serves, discovered once per routes version.
+
+    Discovery runs under a lock, so concurrent callers execute each source once. Trees
+    discovered while a reset moves the version are returned but never served again.
+    """
+    roots = _roots_memo.current(seo_routes_version.value)
+    if roots is not None:
+        return roots
+    with _roots_memo.lock:
+        version = seo_routes_version.value
+        roots = _roots_memo.current(version)
+        if roots is None:
+            roots = discover_seo_roots(router_manager)
+            _roots_memo.held = (version, roots)
+        return roots
 
 
 def forget_page_tree_roots() -> None:
     """Clear the discovered trees, so the next call loads every source again."""
-    page_tree_roots.cache_clear()
+    with _roots_memo.lock:
+        _roots_memo.held = None
 
 
 __all__ = [

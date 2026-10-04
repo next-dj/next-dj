@@ -4,12 +4,15 @@ import pytest
 from django.core.exceptions import BadRequest, PermissionDenied, SuspiciousOperation
 from django.http import Http404
 
+from next.caches import DEFAULT_CACHE_SIZE
 from next.conf.signals import settings_reloaded
 from next.diagnostics import (
     INTENDED_EXCEPTIONS,
+    QUIET_PERIOD,
     BackendReadLog,
     FailureLog,
     degraded,
+    reset_failure_logs,
     watch_degraded,
 )
 from next.testing import override_next_settings
@@ -22,8 +25,26 @@ class _Backend:
 _BOOM = RuntimeError("boom")
 
 
-def _raise() -> list[int]:
-    raise _BOOM
+def _raise(error: Exception = _BOOM) -> list[int]:
+    raise error
+
+
+class _Clock:
+    """A monotonic clock a test moves by hand."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture()
+def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
+    """Replace the clock the failure logs read with one the test moves."""
+    held = _Clock()
+    monkeypatch.setattr("next.diagnostics.monotonic", held)
+    return held
 
 
 @pytest.fixture()
@@ -125,17 +146,30 @@ class TestBackendReadLog:
 
         assert caplog.text.count("failed to report its watched trees") == 2
 
+    def test_a_failure_that_keeps_failing_is_reported_after_the_quiet_period(
+        self, log: BackendReadLog, clock: _Clock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"):
+            for _ in range(3):
+                log.read(_Backend(), "watched trees", _raise, valid=bool, default=[])
+            clock.now += QUIET_PERIOD
+            log.read(_Backend(), "watched trees", _raise, valid=bool, default=[])
+
+        assert [record.suppressed for record in caplog.records] == [0, 2]
+        assert "occurred 2 more times" in caplog.records[1].getMessage()
+        assert caplog.records[1].exc_info is not None
+
 
 @pytest.fixture()
 def failures() -> FailureLog:
     return FailureLog(logging.getLogger("next.tests.diagnostics"))
 
 
-def _contained(failures: FailureLog, key: object) -> str:
-    """Run a failing call through `contain`, answering the caller's fallback."""
+def _contained(failures: FailureLog, key: object, error: Exception = _BOOM) -> str:
+    """Run a call raising `error` through `contain`, answering the caller's fallback."""
     try:
-        _raise()
-    except RuntimeError as exc:
+        _raise(error)
+    except Exception as exc:  # noqa: BLE001 - every failure goes to `contain`
         failures.contain(exc, key, "items() in %s raised", "sitemap.py")
     return "fallback"
 
@@ -200,6 +234,37 @@ class TestFailureLog:
         assert caplog.text.count("missing x.js") == 1
         assert "missing y.js" in caplog.text
 
+    def test_an_intended_exception_propagates_in_production(
+        self, failures: FailureLog, caplog: pytest.LogCaptureFixture, settings
+    ) -> None:
+        """A 404 a user callable raises stays a 404, not a logged degradation."""
+        settings.DEBUG = False
+        watch_degraded()
+        with (
+            caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"),
+            pytest.raises(Http404),
+        ):
+            _contained(failures, "items", Http404())
+
+        assert caplog.records == []
+        assert degraded() is False
+
+    def test_an_empty_pass_through_contains_an_intended_exception(
+        self, failures: FailureLog, caplog: pytest.LogCaptureFixture, settings
+    ) -> None:
+        """A call site outside any view contains a 404 like any other failure."""
+        settings.DEBUG = False
+        watch_degraded()
+        with caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"):
+            try:
+                _raise(Http404())
+            except Http404 as exc:
+                failures.contain(exc, "items", "items() raised", pass_through=())
+
+        assert [record.getMessage() for record in caplog.records] == ["items() raised"]
+        assert degraded() is True
+        watch_degraded()
+
     def test_warn_degrades_nothing(self, failures: FailureLog) -> None:
         watch_degraded()
         failures.warn("a", "missing %s", "x.js")
@@ -212,6 +277,111 @@ class TestFailureLog:
             SuspiciousOperation,
             BadRequest,
         }
+
+
+class TestQuietPeriod:
+    """A key that keeps failing is logged again once per quiet period, with a count."""
+
+    def test_repeats_within_the_period_stay_quiet(
+        self,
+        failures: FailureLog,
+        clock: _Clock,
+        caplog: pytest.LogCaptureFixture,
+        settings,
+    ) -> None:
+        settings.DEBUG = False
+        with caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"):
+            _contained(failures, "items")
+            clock.now += QUIET_PERIOD - 1
+            _contained(failures, "items")
+
+        assert len(caplog.records) == 1
+        assert caplog.records[0].suppressed == 0
+
+    def test_the_first_repeat_after_the_period_carries_the_count(
+        self,
+        failures: FailureLog,
+        clock: _Clock,
+        caplog: pytest.LogCaptureFixture,
+        settings,
+    ) -> None:
+        settings.DEBUG = False
+        with caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"):
+            for _ in range(4):
+                _contained(failures, "items")
+            clock.now += QUIET_PERIOD
+            _contained(failures, "items")
+            _contained(failures, "items")
+
+        assert [record.suppressed for record in caplog.records] == [0, 3]
+        assert caplog.records[1].getMessage() == (
+            "items() in sitemap.py raised The same failure occurred 3 more times "
+            "since it was last logged."
+        )
+        assert caplog.records[1].exc_info is not None
+
+    def test_a_repeat_after_a_silent_period_carries_no_count(
+        self, failures: FailureLog, clock: _Clock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING, logger="next.tests.diagnostics"):
+            failures.warn("a", "missing %s", "x.js")
+            clock.now += QUIET_PERIOD * 3
+            failures.warn("a", "missing %s", "x.js")
+
+        assert [record.getMessage() for record in caplog.records] == [
+            "missing x.js",
+            "missing x.js",
+        ]
+
+    def test_a_message_without_arguments_keeps_its_percent_sign(
+        self, failures: FailureLog, clock: _Clock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING, logger="next.tests.diagnostics"):
+            failures.warn("a", "100% of x.js is missing")
+            failures.warn("a", "100% of x.js is missing")
+            clock.now += QUIET_PERIOD
+            failures.warn("a", "100% of x.js is missing")
+
+        assert caplog.records[1].getMessage() == (
+            "100% of x.js is missing The same failure occurred 1 more times since it "
+            "was last logged."
+        )
+
+    def test_first_failure_answers_at_the_same_rate(
+        self, failures: FailureLog, clock: _Clock
+    ) -> None:
+        answers = [failures.first_failure("a", "serves")]
+        answers.append(failures.first_failure("a", "serves"))
+        clock.now += QUIET_PERIOD
+        answers.append(failures.first_failure("a", "serves"))
+        answers.append(failures.first_failure("a", "serves"))
+
+        assert answers == [True, False, True, False]
+
+    def test_the_held_keys_are_bounded(self, failures: FailureLog) -> None:
+        """A caller that mints keys without end cannot grow the log without end."""
+        for number in range(DEFAULT_CACHE_SIZE + 10):
+            failures.first_failure(number)
+
+        assert failures.first_failure(0) is True
+        assert failures.first_failure(DEFAULT_CACHE_SIZE + 9) is False
+
+
+class TestResetFailureLogs:
+    """One call re-arms every failure log of the process."""
+
+    def test_every_log_reports_again(self, caplog: pytest.LogCaptureFixture) -> None:
+        first = FailureLog(logging.getLogger("next.tests.diagnostics"))
+        second = BackendReadLog(logging.getLogger("next.tests.diagnostics"))
+        with caplog.at_level(logging.WARNING, logger="next.tests.diagnostics"):
+            first.warn("a", "missing %s", "x.js")
+            second.warn("a", "missing %s", "y.js")
+            reset_failure_logs()
+            first.warn("a", "missing %s", "x.js")
+            second.warn("a", "missing %s", "y.js")
+
+        assert caplog.text.count("missing x.js") == 2
+        assert caplog.text.count("missing y.js") == 2
 
 
 class TestDegraded:

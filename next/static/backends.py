@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from html import escape
-from typing import TYPE_CHECKING, Any, ClassVar, override
+from typing import TYPE_CHECKING, Any, ClassVar, Final, override
 
 from django.contrib.staticfiles.storage import staticfiles_storage
 
@@ -26,9 +26,12 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
 
-# Changing one of these rebuilds `staticfiles_storage`, so every URL resolved
-# through the manifest it held answers for a manifest that is gone.
+# Changing one of these rebuilds `staticfiles_storage`, so every URL resolved through
+# the previous storage refers to a manifest that no longer applies.
 MANIFEST_SETTINGS = frozenset({"STATIC_ROOT", "STATIC_URL", "STORAGES"})
+
+DEFAULT_STATIC_BACKEND: Final = "next.static.StaticFilesBackend"
+"""The backend a `STATIC_BACKENDS` entry without `BACKEND` names, and the fallback."""
 
 
 class StaticBackend(ABC):

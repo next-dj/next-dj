@@ -25,6 +25,7 @@ from next.pages.metadata.markers import (
     Merge,
     ResolvedMetadata,
     Segment,
+    refused_robots,
     robots_directives,
     robots_noindex,
 )
@@ -209,3 +210,43 @@ class TestNoindex:
     ) -> None:
         assert Metadata(robots=robots).noindex is expected
         assert robots_noindex(robots) is expected
+
+
+class TestRefusedRobots:
+    """A refused source turns the robots to noindex and keeps every other directive."""
+
+    @pytest.mark.parametrize(
+        ("robots", "expected"),
+        [
+            (None, "noindex"),
+            ("nofollow", "noindex, nofollow"),
+            ("noindex, nofollow", "noindex, nofollow"),
+            ("index, nofollow, noarchive", "noindex, nofollow, noarchive"),
+            ("All", "noindex"),
+            (Robots(follow=False), Robots(index=False, follow=False)),
+            (
+                Robots(index=True, googlebot=Robots(index=True)),
+                Robots(index=False, googlebot=Robots(index=False)),
+            ),
+            (
+                Robots(googlebot="index, nosnippet"),
+                Robots(index=False, googlebot="noindex, nosnippet"),
+            ),
+        ],
+        ids=[
+            "unset",
+            "text",
+            "text_noindex",
+            "text_index",
+            "text_all",
+            "object",
+            "object_googlebot",
+            "text_googlebot",
+        ],
+    )
+    def test_the_declared_directives_are_kept(
+        self, robots: Robots | str | None, expected: Robots | str
+    ) -> None:
+        refused = refused_robots(robots)
+        assert refused == expected
+        assert robots_noindex(refused)

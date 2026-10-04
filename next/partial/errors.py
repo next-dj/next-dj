@@ -60,18 +60,18 @@ class ReservedPatchKeyError(ValueError):
 
 
 class BuiltinPatchOpError(ValueError):
-    """Raised when the generic `op()` channel names a built-in verb.
+    """Raised when `register_patch_op` or the generic `op()` channel names a built-in.
 
-    A built-in verb owns typed wire keys, so it must travel through its
-    typed builder method rather than the raw `op()` payload channel.
+    A built-in verb owns typed wire keys, so it travels only through its typed
+    builder method, and the client applies it before any custom handler.
     """
 
     def __init__(self, name: str) -> None:
         """Store the built-in verb name and build a readable message."""
         self.name = name
         super().__init__(
-            f'Patch op "{name}" is built in, emit it through its typed '
-            "builder method rather than the generic op() channel."
+            f'Patch op "{name}" is built in. Emit it through its typed Patches '
+            "method, and register a custom verb under a different name."
         )
 
 

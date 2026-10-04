@@ -30,8 +30,7 @@ class TestPageResponseVary:
         assert _varied(Client().get("/dynamic/")) >= _PARTIAL_VARY
 
     def test_a_page_short_circuiting_with_a_redirect_is_left_alone(self) -> None:
-        # the page returns its own response before the port is ever reached, so
-        # stamping Vary on it would be the port reaching past its own seam
+        # A redirect is not a cacheable 2xx response, so the port leaves its Vary alone.
         response = Client().get("/redirecting/")
         assert response.status_code == 302
         assert _PARTIAL_VARY.isdisjoint(_varied(response))

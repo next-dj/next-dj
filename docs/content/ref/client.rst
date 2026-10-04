@@ -297,6 +297,7 @@ A name the server has not registered through ``register_patch_op`` never reaches
 
 ``parseHook`` widens the wire format.
 The hook owns the response body before classification and returns a value the applier parses as an envelope, so a backend answering a content type of its own is applied instead of navigated to.
+A hook that throws, and a value the applier rejects as no envelope, surface as a ``partial:error`` of kind ``parse``.
 The registry is keyed by the bare content type, with the charset and any other parameter stripped before the lookup.
 A body no hook claims and no envelope content type covers becomes a full navigation on a safe request and a ``kind: "http"`` error on a mutation, because the action endpoint is no page to navigate to.
 

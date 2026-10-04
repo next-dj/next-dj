@@ -17,8 +17,7 @@ from next.conf.defaults import DEFAULTS
 from next.conf.scopes import scope_value
 from next.conf.signals import settings_reloaded
 from next.diagnostics import FailureLog
-from next.site import site_config
-from next.site.config import site_closed_to_crawlers
+from next.site.config import site_closed_to_crawlers, site_config
 from next.urls.manager import seo_routes_version
 from next.utils import UNSET, Unset, template_edits_watched
 
@@ -133,16 +132,23 @@ def stable_repr(value: object) -> str:
 
 
 def _serves(backend: SitemapBackend) -> bool:
-    """Whether `backend` serves, an exception counting as serving."""
+    """Whether `backend` serves, an exception counting as serving once contained.
+
+    It runs during URL resolution, outside any view, so an intended exception such as
+    `Http404` is contained too and never fails the resolution of every other URL.
+    """
     try:
         return bool(backend.serves())
-    except Exception:
-        if _failures.first_failure(backend_path(backend), "serves"):
-            logger.exception(
-                "%s.serves() raised, so /sitemap.xml stays mounted and answers 503 "
-                "while its sections fail too. Make serves() return without raising.",
-                backend_path(backend),
-            )
+    except Exception as exc:  # noqa: BLE001 - contained, the probe runs project code
+        path = backend_path(backend)
+        _failures.contain(
+            exc,
+            (path, "serves"),
+            "%s.serves() raised, so /sitemap.xml stays mounted and answers 503 "
+            "while its sections fail too. Make serves() return without raising.",
+            path,
+            pass_through=(),
+        )
         return True
 
 
@@ -206,8 +212,9 @@ class SeoManager(BackendListManager[SitemapBackend]):
     def serves_sitemap(self) -> bool:
         """Whether a backend has sections, which mounts `/sitemap.xml`.
 
-        It runs during URL resolution, so a backend that raises counts as serving,
-        and its route answers 503 instead of failing every other route.
+        It runs during URL resolution. A backend that raises fails the request under
+        `DEBUG` or `STRICT_LOADING`, and otherwise counts as serving, so its route
+        answers 503 instead of failing every other route.
         """
         return any(_serves(backend) for backend in self.backends)
 

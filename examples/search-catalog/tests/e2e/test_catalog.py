@@ -231,7 +231,7 @@ def test_the_minlength_hint_follows_the_field_state(
     page.locator(SEARCH).fill("ip")
 
     expect(page.locator(HELP)).to_have_text(
-        "Need 1 more — at least 3 characters in total."
+        "Need 1 more, at least 3 characters in total."
     )
     assert page.locator(SEARCH).evaluate("field => field.validity.valid") is False
 

@@ -270,6 +270,17 @@ class TestToJson:
         with pytest.raises(ValueError, match=problem):
             to_json({"a": [value]})
 
+    @pytest.mark.parametrize("key", [(1, 2), b"k", frozenset()], ids=repr)
+    def test_a_key_json_cannot_write_raises(self, key: object) -> None:
+        with pytest.raises(ValueError, match="is not text, a number"):
+            to_json({"a": {key: 1}})
+        with pytest.raises(ValueError, match="is not text, a number"):
+            ld.Node(extra={"offers": {key: 1}}).as_jsonld()
+
+    def test_every_key_json_writes_is_kept(self) -> None:
+        value = {"a": 1, 2: 2, 3.5: 3, True: 4, None: 5}
+        assert to_json(value) == value
+
     def test_a_node_property_json_lacks_raises(self) -> None:
         with pytest.raises(ValueError, match="a finite number"):
             ld.Node(extra={"price": math.inf}).as_jsonld()

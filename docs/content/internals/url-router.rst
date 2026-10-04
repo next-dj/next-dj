@@ -115,11 +115,11 @@ Route order
 
 The lazy sequence lists the framework routes first, the CSRF token endpoint at ``_next/csrf/`` and the form action endpoint at ``_next/form/<uid>/``, then the page routes, then the SEO routes.
 A page tree with a root catch-all such as ``[[rest]]`` matches every path, so a framework route listed after it would never answer, and every deferred token fetch and form post would reach that page instead.
-The ``next.E149`` system check resolves both addresses and names the pattern that answers them when it is not the framework view, which catches a pattern of the root URLconf listed above the include.
+The ``next.E149`` system check resolves both addresses and compares the resolved view with the framework view, so a pattern of the root URLconf listed above the include is caught even when it reuses the framework URL name.
 
 Inside one page tree the walker yields the page of a directory first, real or virtual, and then descends into its subdirectories.
 The subdirectories are ranked by kind, static names first, then names holding a ``[param]`` segment, then names holding a ``[[catch-all]]`` segment.
-Within a kind, a name with more literal text comes first, so ``post-[id]`` precedes ``[slug]``, then the narrower converters, ``int`` and ``uuid`` ahead of ``slug``, ``slug`` and a project converter ahead of ``str``, and ``str`` ahead of ``path``, and the name settles the rest.
+Within a kind, a name with more literal text comes first, so ``post-[id]`` precedes ``[slug]``, then the narrower converters, ``int`` and ``uuid`` ahead of ``slug``, ``slug`` and a project converter ahead of ``str``, and ``str`` ahead of ``path``, and the name decides the rest.
 The rank reads a name through ``ROUTE_BRACKET_PATTERN``, the expression the URL parser converts, so ``blog/about`` always precedes ``blog/[slug]``.
 The pattern list is therefore the same on every file system, whatever order ``os.scandir`` returns the entries in.
 

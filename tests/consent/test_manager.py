@@ -21,6 +21,7 @@ from next.consent.manager import (
     server_mode,
     server_render,
 )
+from next.diagnostics import QUIET_PERIOD, degraded, watch_degraded
 from next.pages.responses import mark_shared_render, shared_render
 from next.testing import override_next_settings
 from tests.support import consent_request
@@ -65,6 +66,19 @@ class WrongTypeBackend(ConsentBackend):
 
     def read(self, request):
         return {"analytics": True}
+
+
+class CountingConfigBackend(ConsentBackend):
+    """A backend that counts how often its runtime entries are read."""
+
+    reads = 0
+
+    def read(self, request):
+        return UNDECIDED
+
+    def client_config(self):
+        type(self).reads += 1
+        return {"endpoint": "/consent/"}
 
 
 class RaisingConfigBackend(ConsentBackend):
@@ -284,6 +298,25 @@ class TestFailingBackend:
         text = str(caught.value) + "".join(getattr(caught.value, "__notes__", []))
         assert "NEXT_FRAMEWORK['CONSENT']['BACKEND']" in text
 
+    def test_an_unimportable_path_is_imported_once_per_reload(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        get = consent_backend_manager.get
+        calls: list[None] = []
+
+        def counted():
+            calls.append(None)
+            return get()
+
+        monkeypatch.setattr(consent_backend_manager, "get", counted)
+        with override_next_settings(CONSENT={"BACKEND": "no.such.Backend"}):
+            for _ in range(2):
+                get_consent(consent_request("2::1"))
+                consent_payload(UNDECIDED)
+            assert len(calls) == 1
+        get_consent(consent_request("2::1"))
+        assert len(calls) == 2
+
     def test_an_intended_answer_passes(self) -> None:
         with pytest.raises(Http404):
             _consent_of(NotFoundBackend)
@@ -320,9 +353,57 @@ class TestClientConfig:
         assert len(caplog.records) == 1
         assert fragment in caplog.text
 
+    def test_the_entries_are_read_once_per_backend(self) -> None:
+        CountingConfigBackend.reads = 0
+        payloads = self._payload(CountingConfigBackend)
+        assert [payload["endpoint"] for payload in payloads] == ["/consent/"] * 2
+        assert CountingConfigBackend.reads == 1
+        self._payload(CountingConfigBackend)
+        assert CountingConfigBackend.reads == 2
+
     def test_a_raising_backend_entry_raises_under_debug(self) -> None:
         with pytest.raises(RuntimeError, match="no config"):
             self._payload(RaisingConfigBackend, debug=True)
+
+
+class TestMemoisedFailure:
+    """Every render that reuses a memoised failure is degraded, and it is logged again."""
+
+    @pytest.mark.parametrize(
+        ("backend", "read"),
+        [
+            (BrokenInitBackend, lambda: get_consent(consent_request("2::1"))),
+            (RaisingConfigBackend, lambda: consent_payload(UNDECIDED)),
+        ],
+        ids=["load", "client_config"],
+    )
+    def test_every_render_is_degraded_and_the_failure_is_logged_again(
+        self,
+        backend: type,
+        read,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        now = [1000.0]
+        monkeypatch.setattr("next.diagnostics.monotonic", lambda: now[0])
+        marks = []
+        with (
+            override_next_settings(
+                CONSENT={"BACKEND": f"{__name__}.{backend.__name__}"}
+            ),
+            caplog.at_level(logging.WARNING, LOGGER),
+        ):
+            for _ in range(3):
+                watch_degraded()
+                read()
+                marks.append(degraded())
+            now[0] += QUIET_PERIOD
+            read()
+        watch_degraded()
+        assert marks == [True, True, True]
+        assert len(caplog.records) == 2
+        assert "still" in caplog.records[1].getMessage()
+        assert caplog.records[1].suppressed == 3
 
 
 class TestRenderMode:

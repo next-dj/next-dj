@@ -65,15 +65,15 @@ def _cache_keys() -> list[str]:
 class TestRouting:
     """Cover routing, status codes, and CSS dedup."""
 
-    def test_landing_renders(self, next_client, demo_data) -> None:
-        """Render the landing page with featured products and category links."""
+    def test_home_page_renders(self, next_client, demo_data) -> None:
+        """Render the home page with featured products and category links."""
         r = next_client.get("/")
         assert r.status_code == 200
         body = r.content.decode()
         assert "Welcome to the catalog" in body
         assert "Featured" in body
 
-    def test_landing_without_show_falls_back_to_the_default(
+    def test_home_page_without_show_falls_back_to_the_default(
         self, next_client, demo_data
     ) -> None:
         """Render the `DQuery[int]` default when no `?show` is supplied."""
@@ -90,15 +90,15 @@ class TestRouting:
             "zero_clamps_to_one",
         ),
     )
-    def test_landing_show_query_param(
+    def test_home_page_show_query_param(
         self, next_client, demo_data, show, expected_count
     ) -> None:
-        """Honour `?show=N` on the landing through `DQuery[int]`."""
+        """Honour `?show=N` on the home page through `DQuery[int]`."""
         body = next_client.get(f"/?show={show}").content.decode()
         assert body.count("data-product-card") == expected_count
 
-    def test_landing_reuses_product_card_css(self, next_client, demo_data) -> None:
-        """Render the shared `product_card.css` once on the landing too."""
+    def test_home_page_reuses_product_card_css(self, next_client, demo_data) -> None:
+        """Render the shared `product_card.css` once on the home page too."""
         body = next_client.get("/").content.decode()
         assert body.count("data-product-card") == 3
         assert body.count("product_card.css") == 1
@@ -148,17 +148,19 @@ class TestRouting:
         assert "iPhone 15" in r.content.decode()
 
     def test_filter_panel_scoped_to_catalog(self, next_client, demo_data) -> None:
-        """The filter_panel CSS reaches catalog pages and never the landing page."""
+        """The filter_panel CSS reaches catalog pages and never the home page."""
         catalog_body = next_client.get("/catalog/").content.decode()
         assert "filter_panel" in catalog_body
 
-        landing_body = next_client.get("/").content.decode()
-        assert "filter_panel" not in landing_body
+        home_body = next_client.get("/").content.decode()
+        assert "filter_panel" not in home_body
 
-    def test_catalog_layout_css_absent_on_landing(self, next_client, demo_data) -> None:
-        """catalog/layout.css is not injected on the landing page."""
-        landing_body = next_client.get("/").content.decode()
-        assert "catalog/layout" not in landing_body
+    def test_catalog_layout_css_absent_on_home_page(
+        self, next_client, demo_data
+    ) -> None:
+        """catalog/layout.css is not injected on the home page."""
+        home_body = next_client.get("/").content.decode()
+        assert "catalog/layout" not in home_body
 
 
 class TestFilters:

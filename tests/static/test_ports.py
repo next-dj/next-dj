@@ -7,7 +7,7 @@ from tests.support import call_shape, component_info, port_methods
 
 
 class TestStaticAssetsPort:
-    """The static port matches the manager the render path used to import."""
+    """The static port matches the call shapes of `StaticManager`."""
 
     def test_the_port_declares_the_expected_methods(self) -> None:
         assert port_methods(StaticAssets) == [

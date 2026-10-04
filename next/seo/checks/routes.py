@@ -19,6 +19,7 @@ from next.checks import NEXT, SEO
 from next.seo.routes import ROBOTS_ROUTE, SITEMAP_ROUTE
 from next.seo.views import robots_view, sitemap_view
 
+from .robots import route_path
 from .roots import loaded_seo_roots, serves_robots, serves_sitemap
 
 
@@ -60,7 +61,10 @@ def _trail_address(trail: str, served: list[str]) -> str | None:
 
 @register(Tags.urls, NEXT, SEO)
 def check_seo_route_collisions(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a page routed at an address the SEO sources serve (`next.E115`)."""
+    """Flag a page directory named after an address the SEO sources serve (`next.E115`).
+
+    The page answers its own path, so a visitor and a crawler reach two documents.
+    """
     roots = loaded_seo_roots()
     errors: list[CheckMessage] = []
     routes = [route for route, _view, _source in _served(roots)]
@@ -69,11 +73,12 @@ def check_seo_route_collisions(*args, **kwargs) -> list[CheckMessage]:
             address = _trail_address(trail, routes)
             if address is None:
                 continue
+            routed_at = route_path(trail) or f"/{trail}/"
             errors.append(
                 Error(
-                    f"{page_path} routes {address}, the address the framework serves "
-                    "from the SEO sources, so the two answers shadow each other. "
-                    "Rename the directory.",
+                    f"{page_path} routes {routed_at}, beside the {address} the "
+                    "framework serves from the SEO sources, so crawlers and visitors "
+                    "reach two different documents. Rename the directory.",
                     obj=str(page_path),
                     id="next.E115",
                 )

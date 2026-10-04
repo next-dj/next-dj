@@ -2,7 +2,7 @@
 
 A workspace for two independent tenants (Acme and Globex) that share the same Django project, the same page tree, and the same static pipeline. Each request is scoped to one tenant, the page tree resolves notes through that tenant, the static pipeline rewrites every asset URL with a per-tenant prefix, and the chrome reads its accent color from a request-derived CSS variable.
 
-> **Trust boundary.** The `X-Tenant` header is attacker-controlled. Anybody can send `X-Tenant: globex` with `curl`, so this shape isolates tenants only behind a reverse proxy that owns the header. That proxy must be the single route to the application, the application must bind to an address the public network cannot reach, the proxy must derive the slug from something it owns — a host mapping, a client certificate, its own session — rather than from anything the client sent, and it must set the header on every request it forwards so an inbound copy is overwritten instead of passed along. A proxy that fills the header in only when it is absent keeps the client's forged value, and that single misconfiguration removes the isolation entirely. Run this example with nothing in front of it and every visitor picks their own tenant.
+> **Trust boundary.** The `X-Tenant` header is attacker-controlled. Anybody can send `X-Tenant: globex` with `curl`, so this shape isolates tenants only behind a reverse proxy that owns the header. That proxy must be the single route to the application, the application must bind to an address the public network cannot reach, the proxy must derive the slug from something it owns (a host mapping, a client certificate, its own session) rather than from anything the client sent, and it must set the header on every request it forwards so an inbound copy is overwritten instead of passed along. A proxy that fills the header in only when it is absent keeps the client's forged value, and that single misconfiguration removes the isolation entirely. Run this example with nothing in front of it and every visitor picks their own tenant.
 >
 > Two shapes need no proxy at all: read the tenant out of the signed-in user's membership rows, or out of `request.get_host()`, which `ALLOWED_HOSTS` narrows to the names the project publishes. [`docs/content/howto/scope-requests-per-tenant.rst`](../../docs/content/howto/scope-requests-per-tenant.rst) puts all three side by side in trust order. This example reads the header because that is the shape which shows a custom `RegisteredParameterProvider` and a request-aware static backend with the fewest moving parts, not because it is the shape to reach for first.
 
@@ -49,7 +49,7 @@ There are two ways to drive the app:
   curl -H 'X-Tenant: globex' http://127.0.0.1:8000/notes/
   ```
 
-  Choosing the tenant by hand like this is precisely the forgery the trust boundary above describes, and against a bare development server it works — which is why the boundary is stated rather than implied. The query and cookie fallbacks are disabled outside `DEBUG`. A request with no tenant at all returns `400 Missing X-Tenant header.`, and in `DEBUG` the body appends a one-line pointer at the query affordance. A slug that matches no row returns `404 Unknown tenant.`. Neither body repeats what the client sent: a body quoting the submitted slug is an oracle for enumerating tenant names, and in an HTML response it is a reflected-XSS sink.
+  Choosing the tenant by hand like this is precisely the forgery the trust boundary above describes, and against a bare development server it works. That is why the boundary is stated rather than implied. The query and cookie fallbacks are disabled outside `DEBUG`. A request with no tenant at all returns `400 Missing X-Tenant header.`, and in `DEBUG` the body appends a one-line pointer at the query affordance. A slug that matches no row returns `404 Unknown tenant.`. Neither body repeats what the client sent: a body quoting the submitted slug is an oracle for enumerating tenant names, and in an HTML response it is a reflected-XSS sink.
 
 Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_components/page_head/component.djx) component. No Node, no build step. [`root_pages/layout.djx`](root_pages/layout.djx) calls it in block form and fills its `extra` slot with `{% use_style %}` registrations. The unconditional one names [`static/notes/css/theme.css`](static/notes/css/theme.css), which holds the `.accent-bar` / `.accent-text` / `.accent-border` rules and reads `var(--tenant-accent)` with the shared primary colour as the fallback. A tenant whose `Tenant.theme` key names a sheet of its own registers that one after it, and section 2 walks both hops. The variable itself is set once as an inline `style` on `<body>` from `tenant_theme_css`, so a page rendered without a tenant still has a usable palette.
 
@@ -69,7 +69,7 @@ The chain has three links:
        return list(Note.objects.filter(tenant=active_tenant))
    ```
 
-   The framework injects the `Tenant` instance directly. Every query in the example that reaches a tenant-owned row carries that filter: the two note listings, the `Note.objects.create` of the create form, and the `get_object_or_404(Note, pk=note_id, tenant=tenant)` behind both the editor's `note` context and its `get_initial`. Middleware that attaches a tenant repairs nothing if one queryset forgets to use it. Page modules never start with `from __future__ import annotations` and import `DTenant` at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate — a marker or a model imported only under `if TYPE_CHECKING` — drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
+   The framework injects the `Tenant` instance directly. Every query in the example that reaches a tenant-owned row carries that filter: the two note listings, the `Note.objects.create` of the create form, and the `get_object_or_404(Note, pk=note_id, tenant=tenant)` behind both the editor's `note` context and its `get_initial`. Middleware that attaches a tenant repairs nothing if one queryset forgets to use it. Page modules never start with `from __future__ import annotations` and import `DTenant` at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate, such as a marker or a model imported only under `if TYPE_CHECKING`, drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
 
 ### 2. Per-tenant asset URLs
 
@@ -84,7 +84,7 @@ class TenantPrefixStaticBackend(StaticFilesBackend):
         return PREFIX_FORMAT.format(slug=tenant.slug) + url
 ```
 
-One override is enough because every URL the pipeline renders goes through `asset_url` — the co-located `<link>` and `<script>` tags, the `next.min.js` runtime tag, and its `<link rel="preload">` hint. Rewriting inside `render_*_tag` instead would leave the runtime bundle on the unprefixed URL, because core builds that tag from `NEXT_JS_OPTIONS` rather than from a renderer method.
+One override is enough because every URL the pipeline renders goes through `asset_url`: the co-located `<link>` and `<script>` tags, the `next.min.js` runtime tag, and its `<link rel="preload">` hint. Rewriting inside `render_*_tag` instead would leave the runtime bundle on the unprefixed URL, because core builds that tag from `NEXT_JS_OPTIONS` rather than from a renderer method.
 
 The settings entry is one backend:
 
@@ -94,7 +94,7 @@ The settings entry is one backend:
 ],
 ```
 
-The `next.static` collector caches deduplicated URLs once. The `asset_url` hook lets you decorate URLs at injection time without forking that cache. Whatever the hook returns is HTML-escaped into the `<link>` or `<script>` tag, so a rewrite that folds request-derived text into a URL cannot break out of the attribute — the finished tag is spliced past the template engine and never sees its autoescape.
+The `next.static` collector caches deduplicated URLs once. The `asset_url` hook lets you decorate URLs at injection time without forking that cache. Whatever the hook returns is HTML-escaped into the `<link>` or `<script>` tag, so a rewrite that folds request-derived text into a URL cannot break out of the attribute. The finished tag is inserted after the template engine runs, so its autoescape never applies.
 
 Overriding `asset_url` alone leaves `resolve_url` inherited, and the two hooks run at different moments. `resolve_url` turns an authored reference into a public URL while the asset is registered, and `asset_url` decorates that URL for the request being rendered. The root layout registers the shared sheet by name, and a sheet the active tenant's theme key names after it:
 
@@ -238,16 +238,16 @@ def workspace_meta(active_tenant: DTenant) -> MetadataDict:
 
 ## Further reading
 
-- [`next/static/backends.py`](../../next/static/backends.py) — the `StaticBackend` ABC with the `asset_url` hook and its `request=` kwarg, plus the `resolve_url` hook this example inherits.
-- [`next/static/manager.py`](../../next/static/manager.py) — the `StaticManager.inject` call site that threads `request`.
-- [`next/urls/backends.py`](../../next/urls/backends.py) — the `FileRouterBackend.DIRS` handling that makes `root_pages/` work.
-- [`next/components/backends.py`](../../next/components/backends.py) — the matching `FileComponentsBackend.DIRS` handling for `root_blocks/`.
-- [`next/deps/providers.py`](../../next/deps/providers.py) — the `RegisteredParameterProvider` ABC used by `TenantProvider`.
-- [`next/pages/registry.py`](../../next/pages/registry.py) — the `inherit_context` walk that lifts `tenant` to every descendant page.
-- [`next/pages/metadata/`](../../next/pages/metadata/) — the metadata chain that runs the inherited tenant callable of section 8.
-- [`docs/content/topics/static-assets/backends.rst`](../../docs/content/topics/static-assets/backends.rst) — the request-aware output section that this example anchors.
-- [`docs/content/security/static-assets.rst`](../../docs/content/security/static-assets.rst) — the rule behind the theme key table in section 2.
-- [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst) — the request-scoped provider pattern.
-- [`docs/content/howto/enforce-object-level-permissions.rst`](../../docs/content/howto/enforce-object-level-permissions.rst) — the `check_permissions` and `has_object_permission` hooks used in section 7.
-- [`docs/content/topics/forms/signals.rst`](../../docs/content/topics/forms/signals.rst) — the `form_access_denied` payload contract.
-- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.W054` for `ComponentWidget`.
+- [`next/static/backends.py`](../../next/static/backends.py): the `StaticBackend` ABC with the `asset_url` hook and its `request=` kwarg, plus the `resolve_url` hook this example inherits.
+- [`next/static/manager.py`](../../next/static/manager.py): the `StaticManager.inject` call site that threads `request`.
+- [`next/urls/backends.py`](../../next/urls/backends.py): the `FileRouterBackend.DIRS` handling that makes `root_pages/` work.
+- [`next/components/backends.py`](../../next/components/backends.py): the matching `FileComponentsBackend.DIRS` handling for `root_blocks/`.
+- [`next/deps/providers.py`](../../next/deps/providers.py): the `RegisteredParameterProvider` ABC used by `TenantProvider`.
+- [`next/pages/registry.py`](../../next/pages/registry.py): the `inherit_context` walk that lifts `tenant` to every descendant page.
+- [`next/pages/metadata/`](../../next/pages/metadata/): the metadata chain that runs the inherited tenant callable of section 8.
+- [`docs/content/topics/static-assets/backends.rst`](../../docs/content/topics/static-assets/backends.rst): the request-aware output section that this example anchors.
+- [`docs/content/security/static-assets.rst`](../../docs/content/security/static-assets.rst): the rule behind the theme key table in section 2.
+- [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst): the request-scoped provider pattern.
+- [`docs/content/howto/enforce-object-level-permissions.rst`](../../docs/content/howto/enforce-object-level-permissions.rst): the `check_permissions` and `has_object_permission` hooks used in section 7.
+- [`docs/content/topics/forms/signals.rst`](../../docs/content/topics/forms/signals.rst): the `form_access_denied` payload contract.
+- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst): `next.W054` for `ComponentWidget`.

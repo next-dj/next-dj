@@ -1,14 +1,22 @@
 import json
 import re
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from django.http import HttpResponse
 from django.test import Client, RequestFactory, override_settings
-from django.urls import NoReverseMatch
+from django.urls import (
+    NoReverseMatch,
+    clear_url_caches,
+    path,
+    reverse,
+    set_script_prefix,
+)
 
 from next.conf import next_framework_settings
 from next.csrf import (
+    _REQUEST_FLAG,
     CSRF_DEFERRED_ATTR,
     CsrfDelivery,
     csrf_delivery,
@@ -20,7 +28,9 @@ from next.csrf import (
     token_deferred,
 )
 from next.forms.uid import ORIGIN_FIELD_NAME
+from next.partial.headers import REQUEST_FLAG
 from tests.support import FEED_URLCONF, isolated_form_registries, routed, write_page
+from tests.support.sites import mine
 
 
 RUNTIME = "<html><head></head><body>{% template %}{% collect_scripts %}</body></html>"
@@ -37,6 +47,9 @@ def ping():
     return HttpResponse("pong")
 """
 FLAG = {"HTTP_X_NEXT_REQUEST": "1"}
+
+# A project view named `csrf`, which is not the token endpoint.
+urlpatterns = [path("account/csrf/", mine, name="csrf")]
 NEVER_CACHED = "max-age=0, no-cache, no-store, must-revalidate, private"
 
 
@@ -145,6 +158,44 @@ class TestPayload:
         ):
             csrf_payload(request)
         assert "include('next.urls')" in raised.value.__notes__[0]
+
+    def test_a_project_view_named_csrf_is_not_the_endpoint(self, caplog) -> None:
+        request = RequestFactory().get("/")
+        defer_token(request)
+        with override_settings(ROOT_URLCONF=__name__):
+            payload = csrf_payload(request)
+        assert set(payload) == {"header", "token"}
+        assert "include('next.urls')" in caplog.text
+
+    def test_the_endpoint_reverses_once_per_routes_version(self, tmp_path) -> None:
+        request = RequestFactory().get("/")
+        defer_token(request)
+        with (
+            routed(_action_tree(tmp_path)),
+            patch("next.csrf.reverse", side_effect=reverse) as reverses,
+        ):
+            first = [csrf_payload(request)["url"] for _ in range(3)]
+            clear_url_caches()
+            again = csrf_payload(request)["url"]
+        assert first == ["/_next/csrf/"] * 3
+        assert again == "/_next/csrf/"
+        assert reverses.call_count == 2
+
+    def test_the_endpoint_follows_the_script_prefix(self, tmp_path) -> None:
+        request = RequestFactory().get("/")
+        defer_token(request)
+        with routed(_action_tree(tmp_path)):
+            plain = csrf_payload(request)["url"]
+            set_script_prefix("/app/")
+            try:
+                prefixed = csrf_payload(request)["url"]
+            finally:
+                set_script_prefix("/")
+        assert plain == "/_next/csrf/"
+        assert prefixed == "/app/_next/csrf/"
+
+    def test_the_request_flag_is_the_partial_header(self) -> None:
+        assert _REQUEST_FLAG == REQUEST_FLAG
 
     def test_the_token_payload_ignores_the_deferral(self) -> None:
         request = RequestFactory().get("/")

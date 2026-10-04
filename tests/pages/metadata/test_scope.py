@@ -8,17 +8,20 @@ from django.utils.translation import gettext_lazy
 
 from next.checks import reset_check_caches
 from next.conf import next_framework_settings
+from next.diagnostics import QUIET_PERIOD, degraded, watch_degraded
 from next.pages import ld
 from next.pages.errors import PageMetadataShapeError
 from next.pages.metadata import Metadata, Robots, noindexed
-from next.pages.metadata.markers import Segment, TitleSpec
+from next.pages.metadata.markers import REFUSED_ROBOTS, Segment, TitleSpec
 from next.pages.metadata.normalize import normalize_site_metadata
 from next.pages.metadata.scope import (
     SITE_SOURCE,
     MetadataOptions,
+    contain_site_refusal,
     forget_metadata_scope,
     metadata_options,
     site_segment,
+    site_tier,
 )
 from tests.support import next_framework_settings_stand_in
 
@@ -109,17 +112,60 @@ class TestSiteSegment:
             normalize_site_metadata(defaults, source=SITE_SOURCE)
         assert excinfo.value.source == SITE_SOURCE
 
-    def test_a_refused_scope_folds_to_nothing_and_warns_once(self, caplog) -> None:
-        defaults = {"canonical": "javascript:x", "site_name": "Acme"}
+    def test_a_refused_scope_folds_to_noindex_alone(self) -> None:
+        defaults = {"canonical": "javascript:x", "robots": "index"}
+        framework = {"SITE": {"NAME": "Acme"}, "METADATA": {"DEFAULTS": defaults}}
+        with override_settings(NEXT_FRAMEWORK=framework):
+            first = site_tier()
+            again = site_segment()
+        assert first.segment == Segment(
+            SITE_SOURCE, Metadata(robots=REFUSED_ROBOTS, site_name="Acme")
+        )
+        assert again is first.segment
+        assert isinstance(first.refusal, PageMetadataShapeError)
+
+    def test_every_contained_read_of_a_refused_scope_degrades(
+        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        clock = [1000.0]
+        monkeypatch.setattr("next.diagnostics.monotonic", lambda: clock[0])
+        defaults = {"canonical": "javascript:x"}
         with (
             override_settings(NEXT_FRAMEWORK={"METADATA": {"DEFAULTS": defaults}}),
             caplog.at_level("WARNING", logger="next.pages.metadata.scope"),
         ):
-            first = site_segment()
-            again = site_segment()
-        assert first == Segment(SITE_SOURCE)
-        assert again is first
-        assert caplog.text.count("so the defaults fold to nothing") == 1
+            marks = []
+            for _ in range(2):
+                watch_degraded()
+                contain_site_refusal()
+                marks.append(degraded())
+            clock[0] += QUIET_PERIOD
+            contain_site_refusal()
+        assert marks == [True, True]
+        assert [record.suppressed for record in caplog.records] == [0, 1]
+        assert "renders under noindex" in caplog.records[0].message
+
+    def test_an_accepted_scope_leaves_the_render_alone(self) -> None:
+        watch_degraded()
+        contain_site_refusal()
+        assert not degraded()
+
+    @pytest.mark.parametrize(
+        ("django", "strict"),
+        [({"DEBUG": True}, {}), ({}, {"STRICT_LOADING": True})],
+        ids=["debug", "strict"],
+    )
+    def test_a_refused_scope_raises_when_loud(
+        self, django: dict[str, object], strict: dict[str, object]
+    ) -> None:
+        metadata = {"DEFAULTS": {"canonical": "javascript:x"}}
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={"METADATA": metadata, **strict}, **django
+            ),
+            pytest.raises(PageMetadataShapeError, match="canonical"),
+        ):
+            site_segment()
 
     def test_the_site_name_falls_back_to_the_site_scope(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"SITE": {"NAME": "Acme"}}):
@@ -188,5 +234,5 @@ class TestForgetMetadataScope:
         site_segment()
         metadata_options()
         reset()
-        assert site_segment.cache_info().currsize == 0
+        assert site_tier.cache_info().currsize == 0
         assert metadata_options.cache_info().currsize == 0

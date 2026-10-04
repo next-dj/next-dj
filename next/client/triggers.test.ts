@@ -312,6 +312,20 @@ describe("trigger delegation", () => {
     expect(requests[0]!.headers?.["X-Next-Origin"]).toBe("/requests/");
   });
 
+  it("names the page a submit was fired from as the owner of its answer", () => {
+    document.body.innerHTML =
+      '<div id="modal"><form action="/_next/form/u/" data-next-action="u"></form></div>';
+    const modal = document.querySelector("#modal")!;
+    const { triggers, requests } = makeTriggers({
+      pageUrl: (el) => (modal.contains(el) ? "/photos/1/" : "/feed/"),
+    });
+    detach = triggers.install(document);
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(requests[0]!.owner).toBe("/photos/1/");
+  });
+
   it("sends no origin header on a submit outside every layer", () => {
     document.body.innerHTML =
       '<form action="/_next/form/u/" data-next-action="u"></form>';

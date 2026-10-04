@@ -29,6 +29,7 @@ from .html import (
 from .isolation import (
     reset_component_templates,
     reset_components,
+    reset_failure_logs,
     reset_form_actions,
     reset_form_registration_state,
     reset_page_cache,
@@ -86,6 +87,7 @@ __all__ = [
     "render_page",
     "reset_component_templates",
     "reset_components",
+    "reset_failure_logs",
     "reset_form_actions",
     "reset_form_registration_state",
     "reset_page_cache",

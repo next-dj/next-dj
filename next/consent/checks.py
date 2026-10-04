@@ -13,13 +13,17 @@ from next.checks import NEXT
 from next.checks.common import errors_for_unknown_keys, raw_scope
 from next.conf import import_class_cached
 from next.conf.defaults import AUTO
+from next.utils import is_int
 
-from .backends import ConsentBackend
+from .backends import ConsentBackend, CookieConsentBackend
 from .manager import CONSENT_KEYS
 from .markers import NECESSARY
 
 
 _PREFIX: Final = "NEXT_FRAMEWORK['CONSENT']"
+
+_SAMESITE: Final = frozenset({"lax", "strict", "none"})
+"""The `SameSite` values a browser accepts, compared without case as Django does."""
 
 _CATEGORY_NAME: Final = re.compile(r"[A-Za-z0-9_.-]+")
 """A category name the consent cookie `2:<a>|<b>:<seconds>` carries intact.
@@ -142,6 +146,80 @@ def check_consent_categories(*args, **kwargs) -> list[CheckMessage]:
     return _listed_categories() + _unsafe_categories()
 
 
+def _cookie_options(scope: Mapping[str, object]) -> Mapping[str, object] | None:
+    """Return the `OPTIONS` of a cookie backend, `None` under any other backend.
+
+    A backend that does not import is reported by `next.E137` alone.
+    """
+    path = scope.get("BACKEND")
+    if path is not None:
+        try:
+            backend = import_class_cached(path) if isinstance(path, str) else None
+        except ImportError:
+            return None
+        cookie = isinstance(backend, type) and issubclass(backend, CookieConsentBackend)
+        if not cookie:
+            return None
+    options = scope.get("OPTIONS")
+    return options if isinstance(options, Mapping) else {}
+
+
+def _samesite_errors(options: Mapping[str, object]) -> list[CheckMessage]:
+    """Report an unknown `samesite` (E150), or `'None'` without `secure` (W125)."""
+    samesite = options.get("samesite")
+    if samesite is None:
+        return []
+    if not isinstance(samesite, str) or samesite.lower() not in _SAMESITE:
+        return [
+            Error(
+                f"{_PREFIX}['OPTIONS']['samesite'] is {samesite!r}, which the browser "
+                "ignores, so the consent cookie takes its default SameSite policy. "
+                "Write 'Lax', 'Strict' or 'None', or remove it.",
+                obj=settings,
+                id="next.E150",
+            )
+        ]
+    if samesite.lower() == "none" and options.get("secure") is not True:
+        return [
+            DjangoWarning(
+                f"{_PREFIX}['OPTIONS']['samesite'] is 'None' while 'secure' is not "
+                "True, so a browser rejects the consent cookie on every page that is "
+                "not served over https and the choice is not kept. Set 'secure' to "
+                "True, or write 'Lax'.",
+                obj=settings,
+                id="next.W125",
+            )
+        ]
+    return []
+
+
+def _max_age_errors(options: Mapping[str, object]) -> list[CheckMessage]:
+    """Report a `max_age` that is not a positive number of seconds (E151)."""
+    max_age = options.get("max_age")
+    if max_age is None or (is_int(max_age) and max_age > 0):
+        return []
+    return [
+        Error(
+            f"{_PREFIX}['OPTIONS']['max_age'] is {max_age!r}. A value that is not an "
+            "int is replaced by the default age, and a value of zero or less makes "
+            "the browser drop the consent cookie at once, so the choice is not kept. "
+            "Write a positive number of seconds, or remove it.",
+            obj=settings,
+            id="next.E151",
+        )
+    ]
+
+
+@register(NEXT)
+def check_consent_cookie_options(*args, **kwargs) -> list[CheckMessage]:
+    """Validate the cookie `samesite` (E150, W125) and `max_age` (E151) options."""
+    scope = raw_scope("CONSENT")
+    options = None if scope is None else _cookie_options(scope)
+    if options is None:
+        return []
+    return [*_samesite_errors(options), *_max_age_errors(options)]
+
+
 @register(NEXT, deploy=True)
 def check_consent_cookie_secure(*args, **kwargs) -> list[CheckMessage]:
     """Warn when the session cookie is Secure and the consent cookie is not (W119)."""
@@ -165,6 +243,7 @@ def check_consent_cookie_secure(*args, **kwargs) -> list[CheckMessage]:
 __all__ = [
     "category_list_problem",
     "check_consent_categories",
+    "check_consent_cookie_options",
     "check_consent_cookie_secure",
     "check_consent_settings",
 ]

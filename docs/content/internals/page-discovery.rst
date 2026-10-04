@@ -76,10 +76,10 @@ Modules
 
 ``next.pages.metadata``.
    Folds the settings tier and the ``metadata`` dicts and ``@page.metadata`` callables of the ancestor chain into one ``Metadata`` value and resolves it per response, see `Metadata resolution`_ below.
-   ``dicts`` holds the input shapes, ``markers`` the frozen values, ``Replace``, and the merge strategy of each field, ``normalize`` the strict normaliser compiled from the ``dicts`` annotations, ``scope`` the memoised read of the ``METADATA`` scope with its options and the settings tier, ``titles`` the safe title template, ``fold`` the strategy-driven merge, ``chain`` the ancestor walk and its memo, ``registry`` the callable per file, ``resolve`` the request-time stage, ``hreflang`` the translated alternates and their memo, ``ld`` the JSON-LD node base and the breadcrumb list, ``head`` the head parser the tests read, ``backends`` the renderer contract and the configured renderer, and ``nodes`` the ``{% metadata %}`` and ``{% breadcrumbs %}`` nodes.
+   ``dicts`` holds the input shapes, ``markers`` the frozen values, ``Replace``, and the merge strategy of each field, ``normalize`` the strict normaliser compiled from the ``dicts`` annotations, ``shapes`` the validators it compiles to, ``scope`` the memoised read of the ``METADATA`` scope with its options and the settings tier, ``titles`` the safe title template, ``fold`` the strategy-driven merge, ``chain`` the ancestor walk and its memo, ``registry`` the callable per file, ``resolve`` the request-time stage, ``hreflang`` the translated alternates and their memo, ``ld`` the JSON-LD node base and the breadcrumb list, ``head`` the head parser the tests read, ``backends`` the renderer contract and the configured renderer, and ``nodes`` the ``{% metadata %}`` and ``{% breadcrumbs %}`` nodes.
 
 ``next.pages.responses``.
-   Reads the ``cache`` and ``headers`` of the chain once per module reload into a ``ResponsePolicy``, settles the CSRF delivery of the render before it runs, and stamps the headers, the cache, and the ``X-Robots-Tag`` on the response, taking a shared cache back to ``private`` when the response turns personal.
+   Reads the ``cache`` and ``headers`` of the chain once per module reload into a ``ResponsePolicy``, decides the CSRF delivery of the render before it runs, and stamps the headers, the cache, and the ``X-Robots-Tag`` on the response, taking a shared cache back to ``private`` when the response turns personal.
 
 ``next.pages.errors``.
    Defines the six exceptions the area raises.

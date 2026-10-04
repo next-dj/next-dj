@@ -1,5 +1,7 @@
+import logging
 from pathlib import Path
 
+import pytest
 from django.http import HttpRequest, HttpResponse
 from django.template import Template
 
@@ -9,6 +11,7 @@ from next.components import (
     render_component,
 )
 from next.components.manager import components_manager
+from next.diagnostics import FailureLog
 from next.forms import ActionRegistration, RegistryFormActionBackend
 from next.forms.backends import FormActionBackend
 from next.forms.manager import form_action_manager
@@ -17,6 +20,7 @@ from next.pages.manager import page
 from next.testing import (
     reset_component_templates,
     reset_components,
+    reset_failure_logs,
     reset_form_actions,
     reset_form_registration_state,
     reset_page_cache,
@@ -194,6 +198,22 @@ class TestResetScripts:
         html = get(root).content.decode()
         assert 'data-next-script="new"' in html
         assert 'data-next-script="base"' not in html
+
+
+class TestResetFailureLogs:
+    """reset_failure_logs makes a failure logged earlier in the process log again."""
+
+    def test_a_logged_key_logs_again_after_the_reset(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        failures = FailureLog(logging.getLogger("next.tests.isolation"))
+        with caplog.at_level(logging.WARNING, logger="next.tests.isolation"):
+            failures.warn("key", "missing x.js")
+            failures.warn("key", "missing x.js")
+            reset_failure_logs()
+            failures.warn("key", "missing x.js")
+
+        assert caplog.text.count("missing x.js") == 2
 
 
 class _StatelessBackend(FormActionBackend):

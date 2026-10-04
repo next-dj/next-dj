@@ -67,6 +67,34 @@ describe("the scripts manifest", () => {
     expect(scripts.status("gtag")).toBe("loading");
   });
 
+  it("keeps only the attribute names the server allows on a script", () => {
+    scripts._configure([
+      {
+        name: "tag",
+        src: "/tag.js",
+        attrs: {
+          "bad name": "x",
+          onload: "alert(1)",
+          "Data-Upper": "x",
+          "data-": "x",
+          "data-site.id_v-2": "s",
+          integrity: "sha384-abc",
+          referrerpolicy: "no-referrer",
+        },
+      },
+    ]);
+    const [tag] = inserted("tag");
+    const names = tag!.getAttributeNames().filter((name) => name !== "nonce");
+    expect(names.sort()).toEqual([
+      "data-next-script",
+      "data-site.id_v-2",
+      "integrity",
+      "referrerpolicy",
+      "src",
+    ]);
+    expect(scripts.status("tag")).toBe("loading");
+  });
+
   it("stamps the bootstrap nonce whatever nonce an entry names", () => {
     scripts._configure([{ name: "a", init: "/* a */", nonce: "own" }]);
     expect(inserted("a")[0]!.nonce).toBe("boot");

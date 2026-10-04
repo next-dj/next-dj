@@ -7,7 +7,7 @@ Module summary
 --------------
 
 ``next.seo`` serves ``/sitemap.xml``, ``/sitemap-<section>.xml``, and ``/robots.txt`` from the sources at the top of every page root and from the configured sitemap backends, on top of :doc:`django:ref/contrib/sitemaps`.
-It exports the ``SitemapEntry`` and ``RobotsRule`` value objects, the ``sitemap`` declaration object, the ``SitemapBackend`` contract with the shipped ``PageTreeSitemapBackend``, the ``seo_manager`` façade, and the four exceptions.
+It exports the ``SitemapEntry`` and ``RobotsRule`` value objects, the ``sitemap`` declaration object, the ``SitemapBackend`` contract with the shipped ``PageTreeSitemapBackend``, and the four exceptions.
 The routes join ``include("next.urls")`` on their own, and ``next.seo.urls`` mounts them at the host root when the router sits elsewhere, while the views behind them are internal.
 The page metadata the sitemap reads belongs to :doc:`metadata`, and the site origin and indexability to :doc:`site`.
 
@@ -37,10 +37,11 @@ Backends
 ~~~~~~~~
 
 A backend takes its ``SITEMAP_BACKENDS`` entry, keeps ``OPTIONS`` as ``options``, and answers fresh Django sitemaps keyed by section name from ``sections(request)``, the request ``None`` for a check.
-``serves()`` routes ``/sitemap.xml`` while any backend answers true, and ``cache_control()`` names the cache the sitemap views carry.
-``serves()`` runs while URLs resolve, so ``SeoManager.serves_sitemap`` counts a backend that raises as serving and logs it once, and ``sections()`` raising answers 503 through the route, the exception noted with the backend's dotted path.
+``serves()`` routes ``/sitemap.xml`` while any backend answers true, and ``cache_control()`` names the cache the sitemap views carry as a ``next.pages.CacheControl``, or ``None``.
+``serves()`` runs while URLs resolve, outside any view, so a backend whose ``serves()`` raises, ``Http404`` included, fails the request under ``DEBUG`` or ``STRICT_LOADING`` and otherwise counts as serving and is logged at most once every ten minutes.
+``sections()`` raising answers 503 through the route, the exception noted with the backend's dotted path.
 ``backend_path`` answers that dotted path.
-``shortest_cache`` settles the cache of several backends, one that forbids storing winning, then the shortest age.
+``shortest_cache`` combines the cache of several backends, one that forbids storing winning, then the shortest age.
 ``PageTreeSitemapBackend`` answers one section per page tree with a ``sitemap.py``, plus one per ``section=`` its items name.
 
 .. automodule:: next.seo.backends
@@ -49,7 +50,7 @@ A backend takes its ``SITEMAP_BACKENDS`` entry, keeps ``OPTIONS`` as ``options``
 Manager
 ~~~~~~~
 
-``seo_manager`` loads the backends, merges their sections, and memoises the robots source until a reset.
+``seo_manager`` of ``next.seo.manager`` loads the backends, merges their sections, and memoises the robots source until a reset.
 Its ``version`` reads ``seo_routes_version`` of ``next.urls.manager``, the token the cached views and the lazy URL patterns key on, and every ``reset`` moves it.
 ``refresh()`` resets the manager once a source file of any tree moved on disk while ``DEBUG`` watches template edits, and every SEO view asks it first, so an edited ``sitemap.py``, ``robots.py``, or ``robots.txt`` shows without a restart, as a ``scripts.py`` does.
 ``fingerprint()`` digests the sources, the backend entries, and the site config through ``stable_repr``, which spells a value alike in every process, so the cache keys of every worker agree.
@@ -88,7 +89,7 @@ Routes
 
 Every route answers ``GET`` and ``HEAD`` alone, a miss as a plain-text 404 that skips the project's 404 page, and on a site closed to search every response carries ``X-Robots-Tag: noindex, nofollow``.
 The 404 body reads ``Not found`` unless ``DEBUG`` is on, which names the reason from a fixed set of constants, never the text of an exception.
-Project code that raises inside a route, an items callable, a backend, a ``rules`` callable, or a row that does not reverse, answers 503 with ``Retry-After`` and is logged once per failure, and ``DEBUG`` or ``STRICT_LOADING`` raises it with a note naming its source.
+Project code that raises inside a route, an items callable, a backend, a ``rules`` callable, or a row that does not reverse, answers 503 with ``Retry-After`` and is logged at most once every ten minutes per failure, and ``DEBUG`` or ``STRICT_LOADING`` raises it with a note naming its source.
 ``Http404`` and ``PermissionDenied`` pass through, a broken ``robots.py`` answers 503 as well, and a broken ``sitemap.py`` answers 404.
 The sitemap and robots routes are wrapped in :func:`~django.views.decorators.cache.cache_page` when their source declares a storable ``cache``, keyed on the fingerprint of the sources and the indexability of the request, and only a 200 carries the declared ``Cache-Control``.
 
@@ -112,7 +113,7 @@ The page metadata reads the same origin, so a canonical link and the sitemap loc
 Discovery and registry
 ~~~~~~~~~~~~~~~~~~~~~~
 
-``page_tree_roots`` answers one ``SeoRoot`` per routed page tree, with its section name, its routes, and the sources at its top, loaded once per reset through ``load_source``.
+``page_tree_roots`` answers one ``SeoRoot`` per routed page tree, with its section name, its routes, and the sources at its top, loaded once per SEO routes version through ``load_source`` under a lock, so concurrent callers execute each source once.
 A source that fails to import keeps its ``SeoSourceImportError`` on the ``SeoSource`` for the checks, and its route holds a ``BrokenSource``, which the sitemap route answers with 404 and the robots route with 503.
 ``sitemap_items_registry`` holds the ``@sitemap.items`` callables keyed by the running file and route, the last registration per key winning and a repeat recorded as a conflict.
 

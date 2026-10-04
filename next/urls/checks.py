@@ -18,7 +18,7 @@ from next.checks.common import (
 )
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
-from next.csrf import CSRF_URL_NAME, csrf_url
+from next.csrf import csrf_url, csrf_view
 from next.forms.uid import URL_NAME_FORM_ACTION, reverse_form_action
 
 from .backends import FILE_ROUTER_CONFIG_KEYS, FileRouterBackend, RouterBackend
@@ -383,16 +383,28 @@ _PROBE_UID = "probe"
 """A form action uid any `<str:uid>` route accepts, so the address resolves as one."""
 
 
-def _framework_routes() -> tuple[tuple[str, str, Callable[[], str]], ...]:
-    """Return the label, URL name and reverse call of each framework endpoint."""
-    return (
-        ("CSRF token endpoint", CSRF_URL_NAME, csrf_url),
-        (
-            "form action endpoint",
-            URL_NAME_FORM_ACTION,
-            lambda: reverse_form_action(_PROBE_UID),
-        ),
+def _framework_routes() -> tuple[tuple[str, Callable[[], str], frozenset[Any]], ...]:
+    """Return the label, reverse call and serving views of each framework endpoint."""
+    # Deferred, because the form manager imports the pages package, which imports this.
+    from next.forms.manager import form_action_manager  # noqa: PLC0415
+
+    action_views = frozenset(
+        pattern.callback
+        for pattern in form_action_manager
+        if pattern.name == URL_NAME_FORM_ACTION
     )
+    return (
+        ("CSRF token endpoint", csrf_url, frozenset({csrf_view})),
+        ("form action endpoint", lambda: reverse_form_action(_PROBE_UID), action_views),
+    )
+
+
+def _view_path(func: Callable[..., Any]) -> str:
+    """Return the dotted path of a view, the class of a class-based or callable one."""
+    view = getattr(func, "view_class", func)
+    if not hasattr(view, "__qualname__"):
+        view = type(view)
+    return f"{view.__module__}.{view.__qualname__}"
 
 
 def _answered_by(match: ResolverMatch) -> str:
@@ -400,17 +412,19 @@ def _answered_by(match: ResolverMatch) -> str:
     page_path = getattr(match.func, "next_page_path", None)
     if page_path is not None:
         return f"the page {page_path} (route {match.route!r})"
-    return f"{match._func_path} (route {match.route!r})"
+    return f"{_view_path(match.func)} (route {match.route!r})"
 
 
 @register(Tags.urls, NEXT)
 def check_framework_routes_reachable(*args, **kwargs) -> list[CheckMessage]:
-    """Report a framework endpoint another pattern answers first (`next.E149`).
+    """Report a framework endpoint that a view other than its own answers (`next.E149`).
 
-    An endpoint that does not reverse is left to the checks of its own setting.
+    The resolved view is compared, not the URL name, so a project view that reuses
+    the name does not pass. An endpoint that does not reverse is left to the checks
+    of its own setting.
     """
     errors: list[CheckMessage] = []
-    for label, url_name, address in _framework_routes():
+    for label, address, views in _framework_routes():
         try:
             url = address()
         except NoReverseMatch:
@@ -419,7 +433,7 @@ def check_framework_routes_reachable(*args, **kwargs) -> list[CheckMessage]:
             match: ResolverMatch | None = resolve(url)
         except Resolver404:
             match = None
-        if match is not None and match.url_name == url_name:
+        if match is not None and match.func in views:
             continue
         answered = "nothing" if match is None else _answered_by(match)
         errors.append(

@@ -18,13 +18,10 @@ from next.utils import (
     is_int,
     is_middleware,
     load_tree_source,
-    middleware_index,
     middleware_listed,
     resolve_base_dir,
     stat_mtime_ns,
     template_edits_watched,
-    tree_label,
-    unique_labels,
 )
 
 
@@ -201,21 +198,6 @@ class TestIsDynamicTrail:
         assert is_dynamic_trail(trail) is expected
 
 
-class TestTreeLabels:
-    """A page tree is named by its app, else its directory, and made unique."""
-
-    def test_a_repeated_label_takes_a_numeric_suffix(self) -> None:
-        assert unique_labels(["pages"] * 3) == ["pages", "pages-2", "pages-3"]
-
-    def test_a_suffix_never_takes_the_label_of_another_tree(self) -> None:
-        assert unique_labels(["blog", "blog", "blog-2"]) == ["blog", "blog-3", "blog-2"]
-        assert unique_labels(["blog-2", "blog", "blog"]) == ["blog-2", "blog", "blog-3"]
-
-    def test_every_tree_is_labelled_in_order(self, tmp_path: Path) -> None:
-        roots = [tmp_path / "a" / "pages", tmp_path / "b" / "Pages", tmp_path / "!"]
-        assert [tree_label(root) for root in roots] == ["pages", "pages", "root"]
-
-
 class _SourceError(Exception):
     def __init__(self, path: Path) -> None:
         super().__init__(f"{path} failed")
@@ -316,9 +298,7 @@ class TestMiddlewareDetection:
         assert is_middleware("csp.missing.CSPMiddleware", "csp.missing.CSPMiddleware")
         assert not is_middleware(self.LOCALE, "csp.missing.CSPMiddleware")
 
-    def test_the_index_is_the_first_match(self) -> None:
-        middleware = ["a.B", f"{__name__}._Locale", self.LOCALE]
-        assert middleware_index(middleware, self.LOCALE) == 1
-        assert middleware_listed(middleware, self.LOCALE)
-        assert middleware_index(["a.B"], self.LOCALE) is None
+    def test_a_list_holding_a_match_lists_the_base(self) -> None:
+        assert middleware_listed(["a.B", f"{__name__}._Locale"], self.LOCALE)
+        assert not middleware_listed(["a.B"], self.LOCALE)
         assert not middleware_listed([], self.LOCALE)

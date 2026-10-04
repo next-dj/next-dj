@@ -458,8 +458,8 @@ class TestMappedSourceStorage:
 class TestMalformedRouterSurvival:
     """The static paths read routers through the guard, so a wrong shape is inert.
 
-    Nothing about the watch helpers is mocked here, so the real discovery is
-    what survives a backend answering bare paths instead of `PageRoot` entries.
+    The watch helpers are not mocked, so the test runs the real discovery against a
+    backend that returns bare paths instead of `PageRoot` entries.
     """
 
     @contextmanager

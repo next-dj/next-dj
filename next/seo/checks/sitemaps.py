@@ -24,12 +24,17 @@ from next.seo.sitemaps import (
     effective_limit,
     is_excluded,
     sitemap_languages,
-    static_noindex,
 )
 from next.site.config import indexable_without_request
 from next.utils import is_dynamic_trail, is_int
 
-from .roots import declares_sitemap, items_trails, loaded_seo_roots, sitemap_roots
+from .roots import (
+    checked_noindex,
+    declares_sitemap,
+    items_trails,
+    loaded_seo_roots,
+    sitemap_roots,
+)
 
 
 if TYPE_CHECKING:
@@ -142,7 +147,7 @@ def check_sitemap_dynamic_routes(*args, **kwargs) -> list[CheckMessage]:
         for trail, page_path in root.trails.items():
             if not is_dynamic_trail(trail) or trail in listed:
                 continue
-            if is_excluded(trail, globs) or static_noindex(page_path):
+            if is_excluded(trail, globs) or checked_noindex(page_path):
                 continue
             warnings.append(
                 DjangoWarning(
@@ -171,7 +176,7 @@ def check_sitemap_noindex_items(*args, **kwargs) -> list[CheckMessage]:
         source = root.sitemap_path
         for trail in sorted(items_trails(root)):
             page_path = root.trails.get(trail)
-            if page_path is None or not static_noindex(page_path):
+            if page_path is None or not checked_noindex(page_path):
                 continue
             warnings.append(
                 DjangoWarning(

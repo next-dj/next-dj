@@ -7,7 +7,7 @@ Backends load lazily, page-tree roots are held until a reload moves them, and
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, cast, override
+from typing import TYPE_CHECKING, Final, cast, override
 
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.core.signals import setting_changed
@@ -16,11 +16,11 @@ from django.utils.functional import LazyObject, empty
 from next.backends import BackendListManager, backend_entries, load_backends
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
-from next.diagnostics import FailureLog
+from next.diagnostics import FailureLog, isolated_build, mark_degraded
 from next.pages.watch import get_pages_directories_for_watch
 
 from .assets import with_version
-from .backends import MANIFEST_SETTINGS, StaticBackend
+from .backends import DEFAULT_STATIC_BACKEND, MANIFEST_SETTINGS, StaticBackend
 from .collector import StaticCollector
 from .discovery import AssetDiscovery, PathResolver
 from .inject import PlaceholderInjector
@@ -48,7 +48,33 @@ logger = logging.getLogger(__name__)
 
 _failures = FailureLog(logger)
 
-_DEFAULT_BACKEND_PATH = "next.static.StaticFilesBackend"
+_HELD_BUILDER: Final = "held script builder"
+"""The failure key under which a reused fallback script builder is logged."""
+
+_HELD_BACKENDS: Final = "held static backends"
+"""The failure key under which a reused fallback backend list is logged."""
+
+
+def _reused(key: str, message: str, *args: object) -> None:
+    """Mark the render degraded and log the reused fallback at the `FailureLog` rate.
+
+    A memo calls it on every read of a fallback, so a failure that lasts for the life
+    of the process is logged again after each quiet period.
+    """
+    mark_degraded()
+    _failures.warn(key, message, *args)
+
+
+def _isolated[T](key: str, build: Callable[[], T]) -> tuple[T, bool]:
+    """Return what `build` returns and whether it contained a failure.
+
+    The build logged the cause, so a failed build starts the quiet period of `key`,
+    and the first read of the fallback is not logged a second time.
+    """
+    value, failed = isolated_build(build)
+    if failed:
+        _failures.first_failure(key)
+    return value, failed
 
 
 def _bundle_url(path: str) -> str | None:
@@ -106,8 +132,23 @@ def _project_static_version() -> str | None:
     return str(version) if version else None
 
 
+def _load_static_backends() -> list[StaticBackend]:
+    """Load `STATIC_BACKENDS`, falling back to staticfiles when no entry loads."""
+    return load_backends(
+        backend_entries("STATIC_BACKENDS"),
+        base=StaticBackend,
+        default=DEFAULT_STATIC_BACKEND,
+        signal=static_backend_loaded,
+    ) or load_backends(
+        [{}],
+        base=StaticBackend,
+        default=DEFAULT_STATIC_BACKEND,
+        signal=static_backend_loaded,
+    )
+
+
 class StaticManager(BackendListManager[StaticBackend]):
-    """Coordinate static backends, asset discovery, and the injector they feed.
+    """Coordinate static backends, asset discovery, and the placeholder injector.
 
     Backends load lazily from `NEXT_FRAMEWORK['STATIC_BACKENDS']` on first access, and
     the default one delegates URL resolution to Django staticfiles.
@@ -118,11 +159,12 @@ class StaticManager(BackendListManager[StaticBackend]):
         super().__init__()
         self._discovery: AssetDiscovery | None = None
         self._cached_page_roots: tuple[Path, ...] | None = None
-        self._script_builder: NextScriptBuilder | None = None
+        self._script_builder: tuple[NextScriptBuilder, bool] | None = None
         self._chunk_urls: dict[str, str | None] = {}
         self._dedup_factory: Callable[[], DedupStrategy] | None = None
         self._js_policy_factory: Callable[[], JsContextPolicy] | None = None
         self._rewrites_urls: bool = False
+        self._backends_degraded: bool = False
         self._static_version: str | None = None
         self._injector = PlaceholderInjector(self)
 
@@ -134,8 +176,20 @@ class StaticManager(BackendListManager[StaticBackend]):
 
     @property
     def default_backend(self) -> StaticBackend:
-        """Return the first configured backend used for file registration."""
+        """Return the first configured backend used for file registration.
+
+        A backend list that a contained failure shaped, such as a tag template replaced
+        by its default, marks every render that reads it as degraded.
+        """
         self._ensure_backends()
+        if self._backends_degraded:
+            _reused(
+                _HELD_BACKENDS,
+                "The static backend list still holds a default in place of a failing "
+                "STATIC_BACKENDS entry or tag template, so every page that reads it is "
+                "marked degraded. The error logged when the list was loaded names the "
+                "cause.",
+            )
         return self._backends[0]
 
     @property
@@ -185,8 +239,14 @@ class StaticManager(BackendListManager[StaticBackend]):
         if not self._rewrites_urls and version is None:
             return url
         if self._rewrites_urls:
-            url = self.default_backend.asset_url(url, request=request)
+            url = self._backends[0].asset_url(url, request=request)
         return with_version(url, version)
+
+    @property
+    def rewrites_urls(self) -> bool:
+        """Return whether `asset_url` asks the backend, which may answer per request."""
+        self._ensure_backends()
+        return self._rewrites_urls
 
     def resolve_url(self, reference: str) -> str:
         """Return the public URL an authored asset reference names.
@@ -196,25 +256,51 @@ class StaticManager(BackendListManager[StaticBackend]):
         return self.default_backend.resolve_url(reference)
 
     def script_builder(self) -> NextScriptBuilder:
-        """Return the builder holding the runtime URL and the tag templates."""
-        if self._script_builder is None:
+        """Return the builder holding the runtime URL and the tag templates.
+
+        A builder that a contained failure shaped marks every render that uses it as
+        degraded, not only the render that built it.
+        """
+        held = self._script_builder
+        if held is None:
             options = next_framework_settings.NEXT_JS_OPTIONS
             if not isinstance(options, dict):  # pragma: no cover
                 options = {}
-            self._script_builder = _script_builder(
-                _bundle_url(NEXT_JS_STATIC_PATH), options
+            held = self._script_builder = _isolated(
+                _HELD_BUILDER,
+                lambda: _script_builder(_bundle_url(NEXT_JS_STATIC_PATH), options),
             )
-        return self._script_builder
+        builder, failed = held
+        if failed:
+            _reused(
+                _HELD_BUILDER,
+                "The script builder still holds a default in place of a failing "
+                "NEXT_JS_OPTIONS entry or the missing %s, so every page that uses it "
+                "is marked degraded. The error logged when it was built names the "
+                "cause.",
+                NEXT_JS_STATIC_PATH,
+            )
+        return builder
 
     def chunk_url(self, name: str) -> str | None:
-        """Return the URL of the lazy chunk `name`, resolved once per storage.
+        """Return the URL of the lazy chunk `$chunks` names `name`, once per storage.
 
-        `None` means the storage lacks the chunk, and the runtime then loads it from
-        its own directory.
+        `None` means the storage lacks the chunk, and the page then cannot load it.
+        Every render that meets a missing chunk is marked degraded.
         """
+        path = CHUNK_STATIC_PATHS[name]
         if name not in self._chunk_urls:
-            self._chunk_urls[name] = _bundle_url(CHUNK_STATIC_PATHS[name])
-        return self._chunk_urls[name]
+            self._chunk_urls[name] = _bundle_url(path)
+        url = self._chunk_urls[name]
+        if url is None:
+            # `_bundle_url` logged under this key, which starts its quiet period.
+            _reused(
+                path,
+                "The static files storage still has no %s, so pages render without "
+                "it. Build the client runtime and run collectstatic.",
+                path,
+            )
+        return url
 
     @override
     def reload(self) -> None:
@@ -229,16 +315,8 @@ class StaticManager(BackendListManager[StaticBackend]):
         self._chunk_urls = {}
         self._dedup_factory = None
         self._js_policy_factory = None
-        self._backends = load_backends(
-            backend_entries("STATIC_BACKENDS"),
-            base=StaticBackend,
-            default=_DEFAULT_BACKEND_PATH,
-            signal=static_backend_loaded,
-        ) or load_backends(
-            [{}],
-            base=StaticBackend,
-            default=_DEFAULT_BACKEND_PATH,
-            signal=static_backend_loaded,
+        self._backends, self._backends_degraded = _isolated(
+            _HELD_BACKENDS, _load_static_backends
         )
         self._static_version = _project_static_version()
         self._resolve_collector_strategies()
@@ -334,8 +412,8 @@ def collect_component_assets(
 ) -> None:
     """Discover a composite component's co-located assets into the collector.
 
-    A simple component owns no co-located assets and a missing collector is no sink, so
-    both short-circuit before the lazy default manager is touched.
+    A simple component has no co-located assets and a missing collector has nowhere to
+    record them, so both return before the lazy default manager is built.
     """
     if collector is None or info.is_simple:
         return

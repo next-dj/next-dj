@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from next.caches import BoundedCache
+from next.caches import PageCache
 from next.pages.loaders import build_registered_loaders
 from next.utils import stat_mtime_ns, template_edits_watched
 
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 # Mtimes of every source behind one composition, keyed by its page path.
-type SourceMtimes = BoundedCache[Path, dict[Path, int]]
+type SourceMtimes = PageCache[Path, dict[Path, int]]
 
 
 class PageTemplateCache:
@@ -28,13 +28,13 @@ class PageTemplateCache:
 
     def __init__(self, layout_loader: LayoutTemplateLoader) -> None:
         """Start empty, composing through `layout_loader` when a layer is rebuilt."""
-        self.composed: BoundedCache[Path, str] = BoundedCache()
-        self.compiled: BoundedCache[Path, Template] = BoundedCache()
-        self.skeleton: BoundedCache[Path, str] = BoundedCache()
+        self.composed: PageCache[Path, str] = PageCache()
+        self.compiled: PageCache[Path, Template] = PageCache()
+        self.skeleton: PageCache[Path, str] = PageCache()
         # The skeleton keeps its own snapshot, because the composed layer refreshes
         # its own on eviction and would otherwise hide a layout edit.
-        self.composed_sources: SourceMtimes = BoundedCache()
-        self.skeleton_sources: SourceMtimes = BoundedCache()
+        self.composed_sources: SourceMtimes = PageCache()
+        self.skeleton_sources: SourceMtimes = PageCache()
         self._layout_loader = layout_loader
 
     def clear(self) -> None:

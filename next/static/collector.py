@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 HEAD_CLOSE: str = "</head>"
 
-# One shared answer for every slot nothing registered, so a lookup that misses
-# neither allocates nor hands out a list a caller could fill.
+# One shared value for every slot with no registration, so a lookup that misses
+# neither allocates nor returns a list a caller could fill.
 _EMPTY: tuple[StaticAsset, ...] = ()
 _NO_NOTES: tuple[object, ...] = ()
 
@@ -206,7 +206,7 @@ class PlaceholderRegistry:
 
     @property
     def version(self) -> int:
-        """Return a counter every registration bumps, so a cached answer can tell."""
+        """Return the registration counter, which a memo compares to detect a change."""
         return self._version
 
     def register(self, name: str, *, token: str) -> None:

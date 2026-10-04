@@ -1,5 +1,6 @@
 """Registry of the patch verbs the builder side of the protocol accepts."""
 
+from next.partial.errors import BuiltinPatchOpError
 from next.partial.signals import patch_op_registered
 
 
@@ -47,9 +48,11 @@ class PatchOpRegistry:
     def register(self, name: str) -> None:
         """Register a custom verb and announce it to subscribers.
 
-        The name is recorded whatever it is, so a registration shadowing a
-        built-in verb stays visible to the check that reports it.
+        A built-in verb raises `BuiltinPatchOpError`, because the client applies the
+        built-in and a custom handler under that name would never run.
         """
+        if name in BUILTIN_OPS:
+            raise BuiltinPatchOpError(name)
         if name not in self._by_name:
             self._by_name[name] = len(self._ordered)
             self._ordered.append(name)
@@ -69,7 +72,10 @@ patch_op_registry = PatchOpRegistry()
 
 
 def register_patch_op(name: str) -> None:
-    """Register a custom patch verb with the builder side of the protocol."""
+    """Register a custom patch verb with the builder side of the protocol.
+
+    A built-in verb raises `BuiltinPatchOpError`.
+    """
     patch_op_registry.register(name)
 
 

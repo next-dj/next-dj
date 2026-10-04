@@ -151,7 +151,8 @@ The first read of a template announces each zone through ``zone_registered``, wh
 
 ``ops`` is an ordinary registry.
 ``BUILTIN_OPS`` is the frozen set of fifteen verbs the client already understands, and ``PatchOpRegistry`` records the ones a project adds through ``register_patch_op``.
-Membership is what ``Patches.op`` consults, and the recorded names are what the checks read, so a registration that shadows a built-in verb is kept on record rather than dropped, which is how ``next.E066`` can report it.
+Membership is what ``Patches.op`` consults, and the recorded names are what ``next.E090`` reads.
+``register`` raises ``BuiltinPatchOpError`` for a built-in verb before anything is recorded or announced.
 The registry carries a ``version`` counter bumped on each new name.
 
 Caches
@@ -177,7 +178,7 @@ Signals
 
 ``zone_registered`` fires the first time a compiled template is indexed, once per zone, with the template, the name, and the lazy and poll options.
 ``zone_rendered`` fires once per rendered zone of a batch, with the page path, the request, and the duration.
-``patch_op_registered`` fires on every ``register_patch_op`` call, including one that names a verb already on record.
+``patch_op_registered`` fires on every ``register_patch_op`` call that succeeds, including one that names a verb already on record.
 ``sse_stream_opened`` and ``sse_stream_closed`` bracket a patch stream, the second carrying the duration and the number of envelopes sent.
 ``partial_backend_loaded`` fires when the protocol backend is built from settings.
 

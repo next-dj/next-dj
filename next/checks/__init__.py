@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     )
     from next.consent.checks import (
         check_consent_categories,
+        check_consent_cookie_options,
         check_consent_cookie_secure,
         check_consent_settings,
     )
@@ -85,7 +86,6 @@ if TYPE_CHECKING:
         check_metadata_social_folds,
         check_metadata_tag_rendered,
         check_metadata_title_templates,
-        check_metadata_url_schemes,
         check_page_functions,
         check_page_metadata_shape,
         check_page_module_imports,
@@ -192,6 +192,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
     ),
     "next.consent.checks": (
         "check_consent_categories",
+        "check_consent_cookie_options",
         "check_consent_cookie_secure",
         "check_consent_settings",
     ),
@@ -241,7 +242,6 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_metadata_social_folds",
         "check_metadata_tag_rendered",
         "check_metadata_title_templates",
-        "check_metadata_url_schemes",
         "check_page_functions",
         "check_page_metadata_shape",
         "check_page_module_imports",
@@ -352,6 +352,7 @@ __all__ = [
     "check_composed_templates_compile",
     "check_conditional_get_order",
     "check_consent_categories",
+    "check_consent_cookie_options",
     "check_consent_cookie_secure",
     "check_consent_settings",
     "check_consented_categories",
@@ -400,7 +401,6 @@ __all__ = [
     "check_metadata_social_folds",
     "check_metadata_tag_rendered",
     "check_metadata_title_templates",
-    "check_metadata_url_schemes",
     "check_next_components_configuration",
     "check_next_framework_unknown_top_level_keys",
     "check_next_framework_value_types",

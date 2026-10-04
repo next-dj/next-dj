@@ -19,6 +19,7 @@ The pushed URL is the real address of the body rather than a masked URL of the p
 A refresh or a shared link resolves that URL as its own standalone page through its own ``page.py``, and Back closes the top layer.
 There is no client router and no URL masking.
 A single ``popstate`` handler closes the layer whose pushed URL the browser moved past.
+A layer whose push the browser refused has no history entry, so Back leaves it open.
 The URL is pushed as the modal opens, so Back closes it even while its body is still loading, and a layer whose body fails to load or that closes before the body arrives replaces the URL back to the page underneath.
 
 ``data-next-confirm`` and ``data-next-layer`` combine on one link.
@@ -38,7 +39,8 @@ A title from the host page or a lower layer, carried by a poll of the base page,
 That title shows at once when the covering layers set no title of their own, and otherwise the layer title stays in the tab until they close.
 With nested layers each one restores the newest title of the layer below it.
 
-A mutation and a programmatic ``Next.partial.apply()`` carry no page, so their title counts as the top layer's.
+A mutation counts as the page its form sits in, the host page for a form outside every layer or inside a layer that pushed no URL, and the layer's own page for a form inside a layer that did.
+A programmatic ``Next.partial.apply()`` carries no page, so its title counts as the top layer's.
 A stream counts as the page that subscribed it only while that URL still matches the host or the pushed URL of a layer, and otherwise its title counts as the top layer's as well.
 
 .. _partial-server-layers:

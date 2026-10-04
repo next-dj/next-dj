@@ -1,7 +1,7 @@
 """Render collected assets into the placeholder tokens of a finished page.
 
 The injector reads the backend, the URL rewrite, and the script builder from the
-static manager, and owns everything that turns a collector into markup.
+static manager, and holds every step that renders a collector into markup.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from .runtime import (
     CHUNK_STATIC_PATHS,
     CHUNKS_PAYLOAD_KEY,
     CSRF_PAYLOAD_KEY,
+    DEV_CHUNK_KEY,
     DEV_PAYLOAD_KEY,
     RESERVED_PAYLOAD_KEYS,
     ScriptInjectionPolicy,
@@ -41,15 +42,15 @@ if TYPE_CHECKING:
     from .runtime import NextScriptBuilder
 
 
-DEV_CHUNK: Final = "dev"
-"""The `$chunks` key of the diagnostics chunk, named only under `DEBUG`."""
-
-
-_RUNTIME_SLOT_NAME = "scripts"
-_HEAD_SLOT_NAME = "head"
+_RUNTIME_SLOT_NAME: Final = "scripts"
+_HEAD_SLOT_NAME: Final = "head"
 _NO_SCRIPTS: tuple[str, Mapping[str, object]] = ("", {})
 
-type _ChunksMemo = tuple[dict[str, str], type[JsContextSerializer], str]
+# The storage URLs of the listed chunks, the URLs a page names, the serializer type
+# and the encoded entry.
+type _ChunksMemo = tuple[
+    tuple[tuple[str, str], ...], dict[str, str], type[JsContextSerializer], str
+]
 
 
 class InjectionProvider(Protocol):
@@ -75,24 +76,30 @@ class InjectionProvider(Protocol):
         """Return the URL of the lazy chunk `name`, or None if the storage lacks it."""
         raise NotImplementedError
 
+    @property
+    def rewrites_urls(self) -> bool:
+        """Return whether `asset_url` may answer differently for another request."""
+        raise NotImplementedError
+
 
 class _Render:
     """The per-injection values computed once before the slots render."""
 
-    __slots__ = ("head", "nonce", "payload", "request", "runtime_url")
+    __slots__ = ("head", "payload", "request", "runtime_url")
 
-    def __init__(
-        self,
-        request: HttpRequest | None,
-        nonce: str | None,
-        runtime_url: str | None,
-        scripts: tuple[str, Mapping[str, object]],
-    ) -> None:
-        """Hold the request, its nonce, the runtime URL and the scripts it adds."""
+    def __init__(self, request: HttpRequest | None, runtime_url: str | None) -> None:
+        """Hold the request and the runtime URL, with no third-party scripts yet."""
         self.request = request
-        self.nonce = nonce
         self.runtime_url = runtime_url
-        self.head, self.payload = scripts
+        self.head, self.payload = _NO_SCRIPTS
+
+    def nonce(self) -> str | None:
+        """Return the request nonce, resolved by the first tag that carries it.
+
+        A minted nonce makes the response private, so a render that writes no tag
+        leaves the page shareable.
+        """
+        return resolve_nonce(self.request)
 
 
 class PlaceholderInjector:
@@ -124,6 +131,10 @@ class PlaceholderInjector:
             replaced = tuple(
                 slot.name for slot in default_placeholders if slot.token in html
             )
+        # The runtime loads only from the scripts placeholder, so a page without one
+        # gets no preload hint for it.
+        runtime_slot = default_placeholders.get(_RUNTIME_SLOT_NAME)
+        hints_runtime = runtime_slot is not None and runtime_slot.token in html
         backend = sender.default_backend
         builder = sender.script_builder()
         # Resolved once per render, so the script tag and the preload hint share one
@@ -133,26 +144,20 @@ class PlaceholderInjector:
             if builder.policy is ScriptInjectionPolicy.AUTO
             else None
         )
-        nonce = resolve_nonce(request)
+        render = _Render(request, runtime_url)
         scripts = page_scripts_slot.peek()
-        render = _Render(
-            request,
-            nonce,
-            runtime_url,
-            _NO_SCRIPTS
-            if scripts is None
-            else scripts.render(
-                collector, page_path=page_path, request=request, nonce=nonce
-            ),
-        )
+        if scripts is not None:
+            render.head, render.payload = scripts.render(
+                collector, page_path=page_path, request=request, nonce=render.nonce
+            )
         for slot in default_placeholders:
             rendered = self._render_slot(slot, collector, backend, builder, render)
             if slot.name == _HEAD_SLOT_NAME and rendered and slot.token not in html:
                 html = html.replace(HEAD_CLOSE, f"{rendered}\n{HEAD_CLOSE}", 1)
             else:
                 html = html.replace(slot.token, rendered)
-        if runtime_url is not None:
-            html = self._inject_preload_hint(html, builder, runtime_url, nonce)
+        if runtime_url is not None and hints_runtime:
+            html = self._inject_preload_hint(html, builder, runtime_url, render.nonce())
         if replaced is not None:
             html_injected.send(
                 sender=sender,
@@ -199,21 +204,28 @@ class PlaceholderInjector:
         """Return the `$chunks` entry and its encoding, reused while the URLs match.
 
         Every chunk is listed because a later patch may need any of them, except the
-        dev chunk, which only `DEBUG` lists. A chunk the storage lacks is omitted, and
-        the runtime then loads it from its own directory.
+        dev chunk, which only `DEBUG` lists. A chunk the storage lacks is left out.
+        Without a per-request rewrite the page URLs follow from the storage URLs, so
+        the backend is asked only when those move.
         """
         provider = self._provider
-        urls = {
-            name: provider.asset_url(url, request=request)
+        stored = tuple(
+            (name, url)
             for name in CHUNK_STATIC_PATHS
-            if (dev or name != DEV_CHUNK) and (url := provider.chunk_url(name))
-        }
+            if (dev or name != DEV_CHUNK_KEY) and (url := provider.chunk_url(name))
+        )
         serializer = resolve_serializer()
         held = self._chunks
-        if held is not None and held[0] == urls and held[1] is type(serializer):
-            return urls, held[2]
+        if held is not None and held[0] == stored and not provider.rewrites_urls:
+            urls = held[1]
+        else:
+            urls = {
+                name: provider.asset_url(url, request=request) for name, url in stored
+            }
+        if held is not None and held[1] == urls and held[2] is type(serializer):
+            return urls, held[3]
         fragment = serializer.dumps(urls)
-        self._chunks = (urls, type(serializer), fragment)
+        self._chunks = (stored, urls, type(serializer), fragment)
         return urls, fragment
 
     def _wrap_with_runtime(
@@ -236,9 +248,9 @@ class PlaceholderInjector:
             js_context,
             key_serializers=payload.serializers,
             encoded=encoded,
-            nonce=render.nonce,
+            nonce=render.nonce(),
         )
-        tag = builder.script_tag(render.runtime_url, nonce=render.nonce)
+        tag = builder.script_tag(render.runtime_url, nonce=render.nonce())
         next_scripts = f"{tag}\n{init_payload}\n"
         return next_scripts + user_tags if user_tags else next_scripts
 
@@ -262,11 +274,16 @@ class PlaceholderInjector:
             tag = default_kinds.inline_tag(asset.kind)
             if tag is None:
                 return asset.inline
-            return f"<{tag}{nonce_attr(render.nonce)}>{asset.inline}</{tag}>"
-        renderer_name = default_kinds.renderer(asset.kind)
-        renderer = getattr(backend, renderer_name)
+            return f"<{tag}{nonce_attr(render.nonce())}>{asset.inline}</{tag}>"
+        renderer = getattr(backend, default_kinds.renderer(asset.kind))
         url = self._provider.asset_url(asset.url, request=render.request)
-        rendered: str = renderer(url, request=render.request, nonce=render.nonce)
+        nonce = render.nonce()
+        # A renderer written without the nonce keyword still serves a page without one.
+        rendered: str = (
+            renderer(url, request=render.request)
+            if nonce is None
+            else renderer(url, request=render.request, nonce=nonce)
+        )
         return rendered
 
 

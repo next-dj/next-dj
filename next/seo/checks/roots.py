@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from next.checks.common import get_router_manager
+from next.pages import page
+from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.seo.manager import seo_manager
 from next.seo.robots import robots_candidates
 
@@ -74,7 +76,20 @@ def items_trails(root: SeoRoot) -> set[str]:
     return {entry.trail for entry in root.items_entries()}
 
 
+def checked_noindex(page_path: Path) -> bool:
+    """Whether the static metadata of a page sets noindex, read without raising.
+
+    A chain the schema refuses reads as noindex, as the sitemap view reads it. The
+    metadata checks report the refusal, so this read neither raises nor logs it.
+    """
+    try:
+        return page.metadata_chain(page_path).static.noindex
+    except (PageMetadataShapeError, PageMetadataConflictError):
+        return True
+
+
 __all__ = [
+    "checked_noindex",
     "declares_sitemap",
     "items_trails",
     "loaded_seo_roots",

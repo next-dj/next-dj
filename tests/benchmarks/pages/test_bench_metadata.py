@@ -210,14 +210,18 @@ class TestBenchMetadataRender:
             request.resolver_match = resolve("/blog/hello/")
             benchmark(_render, _CRUMBS, request)
 
+    @pytest.mark.parametrize("matched", [True, False], ids=["page_view", "unmatched"])
     @pytest.mark.benchmark(group="pages.metadata")
-    def test_hreflang_warm(self, benchmark) -> None:
+    def test_hreflang_warm(self, benchmark, *, matched: bool) -> None:
+        """A page view carries its resolver match, an out-of-band render resolves."""
         meta = Metadata(alternates=Alternates(languages=True))
         request = RequestFactory().get("/headed/")
         with (
             override_settings(**I18N_ROUTED),
             override_next_settings(SITE={"URL": BASE}),
         ):
+            if matched:
+                request.resolver_match = resolve("/headed/")
             forget_translated_urls()
             _render(meta, request)
             benchmark(_render, meta, request)

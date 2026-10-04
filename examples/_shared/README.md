@@ -1,6 +1,6 @@
-# `examples/_shared` — UI kit for next.dj examples
+# `examples/_shared`: UI kit for next.dj examples
 
-A shadcn-inspired component palette that every next.dj example pulls in through the regular component subsystem. **Not** part of the `next-dj` package — this is a worked example of how to set up a shared component root with the [components](../../docs/content/topics/components.rst) and [static-assets](../../docs/content/topics/static-assets/) systems. Copy it into your own project the same way the examples here do, or use it as a reference for building your own kit.
+A shadcn-inspired component palette that every next.dj example pulls in through the regular component subsystem. **Not** part of the `next-dj` package. It is a worked example of how to set up a shared component root with the [components](../../docs/content/topics/components.rst) and [static-assets](../../docs/content/topics/static-assets/) systems. Copy it into your own project the same way the examples here do, or use it as a reference for building your own kit.
 
 ## Why a shared kit
 
@@ -70,7 +70,7 @@ The kit also ships two plain Python modules, and `markdown_preview/component.py`
 
 The `markdown_preview` component is the one place the live Markdown preview behaviour lives. Its `component.djx` draws a labelled pane, its `component.py` turns the `source` prop into safe HTML through the shared [`markup.py`](markup.py) helper and declares the `marked` CDN under `scripts`, and its co-located `component.mjs` keeps the pane in sync with its control. No page template calls it. The `markdown_textarea` composite does: it renders the plain `textarea` primitive with `markdown_source=True` and the pane right under it, so `ComponentWidget("markdown_textarea", rows=12)` is a whole Markdown editor while `textarea` stays a control that knows nothing about Markdown. The framework auto-discovers the co-located `component.mjs` (emitted as `<script type="module">`) and `component.css` from inside that widget render and dedupes them into the page slots, so no manual static path is needed. The script registers through `Next.partial.onMount("[data-markdown-preview]", ...)` and binds to the `data-markdown-source` control before the pane, falling back to the nearest one in the pane's parent and then in the form, so two Markdown fields in one form each drive their own pane without hardcoding a field name. It remembers the pairing in a `WeakMap` rather than in a data attribute, because a morph drops an attribute the server markup does not carry and the mount pass would then wire a second listener onto the same control.
 
-Each example houses the shared HTML envelope in a project-level page root listed under `PAGE_BACKENDS["DIRS"]` — `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/` depending on the project. The dir contains a single `layout.djx` (and optionally `_<components-dir>/` for project-shared components) that wraps every page rendered by the per-app `PAGES_DIR` tree:
+Each example houses the shared HTML envelope in a project-level page root listed under `PAGE_BACKENDS["DIRS"]`: `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/` depending on the project. The dir contains a single `layout.djx` (and optionally `_<components-dir>/` for project-shared components) that wraps every page rendered by the per-app `PAGES_DIR` tree:
 
 ```django
 <!DOCTYPE html>
@@ -162,11 +162,11 @@ Every entry below is a void call (`{% component "name" prop=value %}`) or a bloc
 | `button` | `variant` (default/secondary/outline/ghost/destructive/link), `size` (sm/md/lg/icon), `type`, `href`, `target`, `name`/`value`, `disabled`, `text`, `extra` | `content` (falls back to `{{ text }}`) |
 | `card` | `title`, `description`, `extra` | `content`, `footer` |
 | `badge` | `variant` (default/secondary/outline/destructive/success/warning/info/muted), `text`, `extra` | `content` (falls back to `{{ text }}`) |
-| `input` / `textarea` | `type`, `name`, `id`, `value`, `placeholder`, `autocomplete`, `required`, `disabled`, `autofocus`, `rows` (textarea), `markdown_source` (textarea, stamps `data-markdown-source="true"`), `errors` (truthy list flips the border to destructive), `aria_invalid`, `aria_describedby`, `extra` | — |
+| `input` / `textarea` | `type`, `name`, `id`, `value`, `placeholder`, `autocomplete`, `required`, `disabled`, `autofocus`, `rows` (textarea), `markdown_source` (textarea, stamps `data-markdown-source="true"`), `errors` (truthy list flips the border to destructive), `aria_invalid`, `aria_describedby`, `extra` | None |
 | `label` | `for_id`, `text`, `extra` | `content` (falls back to `{{ text }}`) |
 | `field` | `label`, `for_id`, `required`, `help`, `error`, `extra` | `control` |
 | `alert` | `variant` (default/info/success/warning/destructive), `title`, `text`, `extra` | `content` (falls back to `{{ text }}`) |
-| `flash_messages` | — (drains `django.contrib.messages` off the request and maps each level tag onto an `alert` variant) | — |
+| `flash_messages` | None (drains `django.contrib.messages` off the request and maps each level tag onto an `alert` variant) | None |
 | `table` | `extra`, `wrapper_extra` | `content` (write raw `<thead>`/`<tbody>`/`<tr>` inside) |
 | `nav` | `extra` | `content` |
 | `nav_link` | `url_name` (Django named route) **or** `url` (literal), `url_kwargs`, `url_args`, `active_when` (substring match against `resolver_match.view_name`), `label`, `variant` (tabs/pills/bar), `extra` | `content` (falls back to `{{ label }}`) |
@@ -176,8 +176,8 @@ Every entry below is a void call (`{% component "name" prop=value %}`) or a bloc
 | `app_shell` | `brand`, `brand_href`, `brand_icon`, `main_extra`, `header_visible` | `brand` (falls back to brand text + icon + href chrome), `nav`, `actions`, `content`, `page_footer` |
 | `dropdown` | `label`, `extra` | `trigger`, `items` |
 | `dialog` | `id`, `title`, `description`, `extra` | `content`, `footer` |
-| `markdown_preview` | `source` (raw Markdown rendered server-side for first paint), `label` (defaults to `Live preview`) | — |
-| `markdown_textarea` | every `textarea` prop, passed through to the control it renders above the preview pane | — |
+| `markdown_preview` | `source` (raw Markdown rendered server-side for first paint), `label` (defaults to `Live preview`) | None |
+| `markdown_textarea` | every `textarea` prop, passed through to the control it renders above the preview pane | None |
 
 The `input` and `textarea` primitives double as `ComponentWidget` targets: `next.forms.ComponentWidget("input")` renders the bound field through the component, filling `name`, `id`, `value`, `errors`, `aria_invalid`, and `aria_describedby` from the field's state on every render and re-render. The forms examples (shortener, wiki, multi-tenant, kanban, audit-forms) all bind their fields this way. A widget render is a full render frame of its own, so a widget target may compose: `markdown_textarea` calls both `{% component "textarea" %}` and `{% component "markdown_preview" %}` from inside the widget render, and the nested components' co-located CSS and JS land in the same document as the page's own assets. The contract is documented in [`docs/content/topics/forms/field-components.rst`](../../docs/content/topics/forms/field-components.rst).
 
@@ -233,7 +233,7 @@ The kit ships `shared/css` and `shared/js` and no icon. The icon belongs to the 
 
 ## Prop / slot naming
 
-Slot and prop names live in separate namespaces — caller slot content reaches the component scope under the `slot_<name>` key, separate from props (see the [components topic](../../docs/content/topics/components.rst), "Slots" section). The kit takes advantage of this and ships several composites where a slot intentionally shares a name with a prop so the prop drives the default while a slot still overrides it:
+Slot and prop names live in separate namespaces. Caller slot content reaches the component scope under the `slot_<name>` key, separate from props (see the [components topic](../../docs/content/topics/components.rst), "Slots" section). The kit takes advantage of this and ships several composites where a slot intentionally shares a name with a prop so the prop drives the default while a slot still overrides it:
 
 - `app_shell` exposes a `brand` slot that defaults to the standard brand chrome driven by `brand`, `brand_href`, and `brand_icon` props. Override the slot to drop in a custom SVG logo while keeping the same surrounding layout.
 - `page_header` exposes a `description` slot whose default body is `<p>{{ description }}</p>`. Override it when the description needs richer markup than a plain paragraph allows.
@@ -243,7 +243,7 @@ The default-body path keeps the void call site short (`{% component "page_header
 
 ## React and Vue alongside the kit
 
-[`examples/kanban`](../kanban/) and [`examples/live-polls`](../live-polls/) keep their respective Vite-built React and Vue components for interactive surfaces (board drag-drop, SSE-driven chart). The surrounding chrome — header, page title, buttons, forms — comes from the shared `.djx` palette, so the visual language stays unified across template-only and SPA-style example apps. React and Vue files freely reuse the same Tailwind utilities and CSS custom properties, which is how the colour scheme stays consistent inside the mounted React tree.
+[`examples/kanban`](../kanban/) and [`examples/live-polls`](../live-polls/) keep their respective Vite-built React and Vue components for interactive surfaces (board drag-drop, SSE-driven chart). The surrounding chrome (header, page title, buttons, forms) comes from the shared `.djx` palette, so the visual language stays unified across template-only and SPA-style example apps. React and Vue files freely reuse the same Tailwind utilities and CSS custom properties, which is how the colour scheme stays consistent inside the mounted React tree.
 
 ## Cleanup checklist when adopting the kit
 

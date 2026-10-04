@@ -51,13 +51,16 @@ CSRF_CHUNK_STATIC_PATH: Final = "next/next.csrf.min.js"
 POLL_CHUNK_STATIC_PATH: Final = "next/next.poll.min.js"
 """The zone poller, fetched once a page marks a zone to poll."""
 
+DEV_CHUNK_KEY: Final = "dev"
+"""The `$chunks` key of the diagnostics chunk, listed only under `DEBUG`."""
+
 CHUNK_STATIC_PATHS: Final[Mapping[str, str]] = MappingProxyType(
     {
         "scripts": SCRIPTS_CHUNK_STATIC_PATH,
         "sse": SSE_CHUNK_STATIC_PATH,
         "csrf": CSRF_CHUNK_STATIC_PATH,
         "poll": POLL_CHUNK_STATIC_PATH,
-        "dev": DEV_CHUNK_STATIC_PATH,
+        DEV_CHUNK_KEY: DEV_CHUNK_STATIC_PATH,
     }
 )
 """Every lazy chunk by the `$chunks` key the runtime fetches it under."""
@@ -139,7 +142,7 @@ def usable_template(
     """Return `template` when it formats with `fields`, else `default`.
 
     A template that cannot format would fail every render, so the default replaces it.
-    The error is raised under `DEBUG` and logged once otherwise.
+    The error is raised under `DEBUG` and otherwise logged at the `FailureLog` rate.
     """
     try:
         dry_run_template(template, fields)

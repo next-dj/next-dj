@@ -5,7 +5,6 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Final
-from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.conf.urls.i18n import is_language_prefix_patterns_used
@@ -25,9 +24,8 @@ from next.pages.checks.contexts import annotation_mismatch, load_routed_pages
 from next.pages.manager import page
 from next.pages.metadata import Metadata, noindexed
 from next.site import site_url
-from next.utils import WEB_SCHEMES
 
-from .links import foreign_origin, url_fields
+from .links import foreign_origin
 from .pages import MetadataPage, folded_pages, loaded_metadata_pages
 from .scope import declared_segments, segment_errors
 
@@ -267,28 +265,6 @@ def check_metadata_enum_values(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_metadata_url_schemes(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a URL field whose scheme is neither http nor https (`next.E109`)."""
-    pages = loaded_metadata_pages()
-    errors: list[CheckMessage] = []
-    for entry, meta in folded_pages(pages):
-        for field, url in url_fields(meta):
-            scheme = urlsplit(url).scheme
-            if not scheme or scheme in WEB_SCHEMES:
-                continue
-            errors.append(
-                Error(
-                    f"{entry.page_path} folds metadata key {field!r} to {url!r}, "
-                    f"whose scheme {scheme!r} is neither http nor https. Write an "
-                    "absolute http(s) URL or a root-relative path.",
-                    obj=str(entry.page_path),
-                    id="next.E109",
-                )
-            )
-    return errors
-
-
-@register(Tags.templates, NEXT, SEO)
 def check_metadata_hreflang_patterns(*args, **kwargs) -> list[CheckMessage]:
     """Warn when `alternates.languages=True` has no `i18n_patterns()` (`next.W087`).
 
@@ -350,6 +326,5 @@ __all__ = [
     "check_metadata_noindex_canonical",
     "check_metadata_parent_parameter",
     "check_metadata_registration_files",
-    "check_metadata_url_schemes",
     "check_page_metadata_shape",
 ]

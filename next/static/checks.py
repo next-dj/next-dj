@@ -19,12 +19,12 @@ from next.pages.checks.responses import private_pages_warning
 from next.pages.scan import iter_serialized_page_context_keys
 
 from .assets import default_kinds
-from .backends import StaticBackend, StaticFilesBackend
+from .backends import DEFAULT_STATIC_BACKEND, StaticBackend, StaticFilesBackend
 from .finders import NextAppDirectoriesFinder
 from .nonce import nonce_active
 from .runtime import (
     CHUNK_STATIC_PATHS,
-    DEV_CHUNK_STATIC_PATH,
+    DEV_CHUNK_KEY,
     INIT_FIELDS,
     NEXT_JS_STATIC_PATH,
     RESERVED_PAYLOAD_KEYS,
@@ -74,7 +74,7 @@ def _check_single_backend(
             )
         )
         return messages
-    backend_path = config.get("BACKEND", "next.static.StaticFilesBackend")
+    backend_path = config.get("BACKEND", DEFAULT_STATIC_BACKEND)
     if not isinstance(backend_path, str):
         messages.append(
             Error(
@@ -137,7 +137,7 @@ def check_static_backends(**kwargs) -> list[CheckMessage]:
         messages.append(
             DjangoWarning(
                 "NEXT_FRAMEWORK['STATIC_BACKENDS'] is empty. The "
-                "framework falls back to next.static.StaticFilesBackend.",
+                f"framework falls back to {DEFAULT_STATIC_BACKEND}.",
                 obj=settings,
                 id="next.W030",
             )
@@ -168,7 +168,6 @@ def check_asset_kinds_are_loadable(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
-_DEFAULT_BACKEND: Final = "next.static.StaticFilesBackend"
 _RENDER_KEYWORDS: Final = frozenset({"request", "nonce"})
 _NAMED: Final = frozenset(
     {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
@@ -181,7 +180,7 @@ def _rendering_backend() -> tuple[str, type[StaticBackend]]:
     for config in configs if isinstance(configs, list) else ():
         if not isinstance(config, dict):
             continue
-        path = config.get("BACKEND", _DEFAULT_BACKEND)
+        path = config.get("BACKEND", DEFAULT_STATIC_BACKEND)
         if not isinstance(path, str):
             continue
         try:
@@ -190,27 +189,43 @@ def _rendering_backend() -> tuple[str, type[StaticBackend]]:
             continue
         if isinstance(backend, type) and issubclass(backend, StaticBackend):
             return path, backend
-    return _DEFAULT_BACKEND, StaticFilesBackend
+    return DEFAULT_STATIC_BACKEND, StaticFilesBackend
 
 
-def _takes_render_keywords(method: Callable[..., object]) -> bool:
-    """Whether a renderer accepts the `request` and `nonce` every render passes it."""
+def _missing_render_keywords(method: Callable[..., object]) -> frozenset[str]:
+    """Return the render keywords a renderer cannot accept, empty when it takes both.
+
+    Every render passes `request`, and a render whose request carries a nonce passes
+    `nonce` too.
+    """
     try:
         parameters = inspect.signature(method).parameters.values()
     except (TypeError, ValueError):
-        return True
+        return frozenset()
     if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters):
-        return True
+        return frozenset()
     named = {param.name for param in parameters if param.kind in _NAMED}
-    return named >= _RENDER_KEYWORDS
+    return _RENDER_KEYWORDS - named
 
 
 def _renderer_problem(backend: type[StaticBackend], name: str) -> str | None:
+    """Return why renderer `name` fails a render, `None` when no render fails."""
     method = getattr(backend, name, None)
     if not callable(method):
-        return f"has no {name} method"
-    if not _takes_render_keywords(method):
-        return f"defines {name} without the request and nonce keywords"
+        return (
+            f"has no {name} method, so every page holding such an asset fails to render"
+        )
+    missing = _missing_render_keywords(method)
+    if "request" in missing:
+        return (
+            f"defines {name} without the request keyword, so every page holding "
+            "such an asset fails to render"
+        )
+    if missing:
+        return (
+            f"defines {name} without the nonce keyword, so a page holding such an "
+            "asset fails to render whenever its request carries a CSP nonce"
+        )
     return None
 
 
@@ -220,8 +235,7 @@ def check_asset_renderers(*args, **kwargs) -> list[CheckMessage]:
     path, backend = _rendering_backend()
     return [
         Error(
-            f"Asset kind {kind!r} renders through {path}, which {problem}, so every "
-            "page holding such an asset fails to render.",
+            f"Asset kind {kind!r} renders through {path}, which {problem}.",
             hint=(
                 "Define the renderer as (self, url, *, request=None, nonce=None) and "
                 "give the tag it returns a nonce attribute whenever nonce is set."
@@ -360,7 +374,7 @@ def _js_context_serializer_instance_message(path: str) -> CheckMessage | None:
 
 
 def _publishes_framework_package(path: object) -> bool:
-    """Whether a configured finder walks app static dirs without skipping our own."""
+    """Return whether a finder walks app static dirs without skipping this package."""
     if not isinstance(path, str):
         return False
     try:
@@ -379,7 +393,7 @@ def check_app_directories_finder(*args, **kwargs) -> list[CheckMessage]:
     """Refuse an app-directories finder that publishes the framework package.
 
     An error rather than a warning, because a warning leaves `collectstatic` free to
-    copy the framework's own sources into a directory the web server hands out.
+    copy the framework's own sources into a directory the web server serves.
     """
     return [
         Error(
@@ -505,13 +519,13 @@ def check_tag_templates_format(*args, **kwargs) -> list[CheckMessage]:
 
 _DEPLOYED_BUNDLES: Final = (
     NEXT_JS_STATIC_PATH,
-    *(path for path in CHUNK_STATIC_PATHS.values() if path != DEV_CHUNK_STATIC_PATH),
+    *(path for key, path in CHUNK_STATIC_PATHS.items() if key != DEV_CHUNK_KEY),
 )
 """The runtime bundles a production page may load, the dev chunk left out."""
 
 
 def _bundle_problem(path: str) -> str | None:
-    """Say why the storage cannot serve a runtime bundle, `None` when it can."""
+    """Return why the storage cannot serve a runtime bundle, `None` when it can."""
     if not finders.find(path):
         return "no static files finder answers it, so the client runtime is unbuilt"
     try:

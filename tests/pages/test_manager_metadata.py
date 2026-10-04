@@ -249,9 +249,10 @@ class TestStaticReads:
         _root, leaf = write_page_chain(
             tmp_path, [("root", ROOT), ("leaf", 'metadata = {"title": "Leaf"}\n')]
         )
-        meta = instance.static_metadata(leaf)
+        meta, refused = instance.static_metadata(leaf)
         assert str(meta.title) == "Leaf | Root"
         assert meta.description == "Root"
+        assert not refused
 
     def test_the_declaration_the_chain_and_the_registrations_read_through(
         self, tmp_path: Path

@@ -95,7 +95,7 @@ The page above renders no canonical link, no Open Graph image, and no ``rating``
    ``Replace(value)`` takes ``value`` whole instead of merging it, and ``RESET`` is ``Replace()`` with no value.
    ``"jsonld": Replace([...])`` swaps the inherited graph for the given nodes, and ``"title": Replace("Offer")`` renders ``Offer`` free of every template above it.
 
-``manage.py showmetadata /notes/42/`` prints which layer settles each key of one page, see :doc:`auditing`.
+``manage.py showmetadata /notes/42/`` prints which layer sets each key of one page, see :doc:`auditing`.
 
 See also
 --------

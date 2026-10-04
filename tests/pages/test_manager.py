@@ -10,8 +10,10 @@ import pytest
 from django.http import Http404, HttpRequest
 from django.template import Template
 from django.test import override_settings
+from django.urls import path as url_path
 
 import next.pages.loaders as loaders_module
+from next.caches import PageCache
 from next.pages import Page, context, page
 from next.pages.loaders import (
     LayoutTemplateLoader,
@@ -21,6 +23,7 @@ from next.pages.loaders import (
     _load_python_module_memo,
     build_registered_loaders,
 )
+from next.pages.manager.views import fit_page_caches
 from next.pages.registry import PageContextRegistry
 from next.static import default_manager as static_default_manager
 from tests.support import (
@@ -523,6 +526,26 @@ class TestContextMisattribution:
         instance._context_manager.reset()
 
         assert instance._context_manager.misattributed() == ()
+
+
+class TestFitPageCaches:
+    """The page caches are sized by the distinct pages a list of patterns mounts."""
+
+    def test_each_page_is_counted_once(
+        self, page_instance, tmp_path, url_parser, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        patterns: list[object] = [url_path("plain/", HttpRequest), "marker"]
+        for name in ("a", "b"):
+            (tmp_path / name).mkdir()
+            (tmp_path / name / "template.djx").write_text("x")
+            file_path = tmp_path / name / "page.py"
+            patterns.append(
+                page_instance.create_url_pattern(name, file_path, url_parser)
+            )
+        patterns.append(patterns[-1])
+        with patch.object(PageCache, "fit") as fit:
+            fit_page_caches(patterns)
+        fit.assert_called_once_with(2)
 
 
 class TestLayoutIntegration:

@@ -154,8 +154,8 @@ function validateAttrs(root: ParentNode): void {
   }
 }
 
-/** Warn on a $csrf payload in the seeded context that the runtime ignored. */
-export function warnCsrf(context: Readonly<Record<string, unknown>>): void {
+// Warn on a $csrf payload in the seeded context that the runtime ignored.
+function warnCsrf(context: Readonly<Record<string, unknown>>): void {
   // Otherwise the only symptom is a 403 on every programmatic mutation.
   if (context.$csrf !== undefined && readCsrf(context.$csrf) === undefined) {
     console.warn(
@@ -164,10 +164,19 @@ export function warnCsrf(context: Readonly<Record<string, unknown>>): void {
   }
 }
 
-/** Build the dev diagnostics the runtime reports through once this chunk loads. */
-export function createDiagnostics(): Diagnostics {
+/**
+ * Build the dev diagnostics the runtime reports through once this chunk loads.
+ *
+ * The seeded context is checked for a malformed $csrf payload on the first attrs call.
+ * The runtime calls attrs only on the diagnostics it keeps, so a second copy of the
+ * chunk does not repeat the warning.
+ */
+export function createDiagnostics(
+  context: Readonly<Record<string, unknown>> = {},
+): Diagnostics {
   // A counter appended to each mark name, so two ops with one label get two marks.
   let timings = 0;
+  let checked = false;
   return {
     dropped: reportDropped,
     timed(patch, run) {
@@ -200,6 +209,10 @@ export function createDiagnostics(): Diagnostics {
     keyed(el) {
       console.warn(`[next.morph] ${ATTR_KEY} and id on one node`, el);
     },
-    attrs: validateAttrs,
+    attrs(root) {
+      if (!checked) warnCsrf(context);
+      checked = true;
+      validateAttrs(root);
+    },
   };
 }

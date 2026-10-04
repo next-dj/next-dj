@@ -59,6 +59,7 @@ export interface TriggerDeps {
     body?: BodyInit;
     abortable?: boolean;
     key?: string;
+    owner?: string;
   }) => void;
   // Abort the in-flight request on a queue, so a submit cancels its own validation.
   abort: (key: string) => void;
@@ -297,6 +298,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       url: form.getAttribute("action") ?? here(),
       method: "POST",
       uid,
+      owner: pageUrl(form),
       ...(zone !== null ? { zone } : {}),
       ...(key !== null ? { key } : {}),
       ...(origin !== undefined ? { headers: { [HEADER_ORIGIN]: origin } } : {}),

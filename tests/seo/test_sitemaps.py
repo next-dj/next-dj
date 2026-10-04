@@ -1,11 +1,10 @@
 import logging
-import os
 import types
 from datetime import UTC, date, datetime
 
 import pytest
 from django.contrib.auth.models import User
-from django.test import override_settings
+from django.test import Client, override_settings
 from django.utils import translation
 
 from next.pages.metadata.hreflang import hreflang_urls, x_default_url
@@ -18,12 +17,12 @@ from next.seo.sitemaps import (
     PageTreeSitemap,
     SitemapItem,
     SitemapOptions,
-    _mtime,
     is_excluded,
     lastmod_datetime,
     listed_trails,
     static_noindex,
 )
+from next.testing import parse_sitemap
 from tests.support import (
     BASE,
     I18N,
@@ -31,12 +30,14 @@ from tests.support import (
     NOINDEX,
     WITH_BASE,
     routed,
+    write_metadata_tree,
     write_page,
     write_tree,
 )
 
 
 SITE = OriginSite("acme.example")
+UNKNOWN_KEY = "headline"
 
 
 def _section(name: str | None = None, request=None) -> PageTreeSitemap:
@@ -139,42 +140,26 @@ class TestListedTrails:
     def test_a_noindex_page_reads_noindex(self, tmp_path) -> None:
         assert static_noindex(write_page(tmp_path, "", NOINDEX)) is True
 
-    def test_a_conflicting_page_reads_as_indexed(self, tmp_path, caplog) -> None:
+    def test_a_refused_page_reads_noindex(self, tmp_path, caplog) -> None:
         page_path = write_page(
-            tmp_path,
-            "",
-            "from next.pages import page\n"
-            'metadata = {"title": "a"}\n'
-            "@page.metadata\n"
-            "def meta():\n"
-            '    return {"title": "b"}\n',
+            tmp_path, "", f"metadata = {{'{UNKNOWN_KEY}': 'Refused'}}\n"
         )
-        with caplog.at_level(logging.WARNING, logger="next.seo"):
-            assert static_noindex(page_path) is False
-            assert static_noindex(page_path) is False
+        with caplog.at_level(logging.ERROR, logger="next.pages.metadata.chain"):
+            assert static_noindex(page_path) is True
+            assert static_noindex(page_path) is True
         refused = [r for r in caplog.records if "is refused" in r.getMessage()]
         assert len(refused) == 1
 
-    def test_an_edit_of_a_refused_page_warns_again(self, tmp_path, caplog) -> None:
-        page_path = write_page(
-            tmp_path,
-            "",
-            "from next.pages import page\n"
-            'metadata = {"title": "a"}\n'
-            "@page.metadata\n"
-            "def meta():\n"
-            '    return {"title": "b"}\n',
+    def test_the_sitemap_leaves_a_refused_page_out(self, tmp_path) -> None:
+        root = write_metadata_tree(
+            tmp_path / "pages",
+            ("", "{'title': 'Home'}"),
+            ("refused", f"{{'{UNKNOWN_KEY}': 'Refused'}}"),
         )
-        with caplog.at_level(logging.WARNING, logger="next.seo"):
-            static_noindex(page_path)
-            stat = page_path.stat()
-            os.utime(page_path, (stat.st_atime, stat.st_mtime + 5))
-            static_noindex(page_path)
-        refused = [r for r in caplog.records if "is refused" in r.getMessage()]
-        assert len(refused) == 2
-
-    def test_a_vanished_page_has_no_mtime(self, tmp_path) -> None:
-        assert _mtime(tmp_path / "gone.py") is None
+        with routed(root):
+            response = Client().get("/sitemap.xml")
+        assert response.status_code == 200
+        assert [url.loc for url in parse_sitemap(response)] == ["http://testserver/"]
 
 
 class TestPageTreeSitemap:
@@ -478,9 +463,23 @@ class TestQuerySetItems:
             first = _locations(section)[0]
         assert first == f"{BASE}/people/user24/"
 
-    def test_the_latest_lastmod_is_one_aggregate(
+    def test_an_undated_row_leaves_no_latest(
         self, tmp_path, django_assert_num_queries
     ) -> None:
+        User.objects.filter(username="user03").update(
+            last_login=datetime(2026, 2, 1, tzinfo=UTC)
+        )
+        root = write_tree(tmp_path / "pages", pages=("people/[slug]",), sitemap=USERS)
+        with routed(root):
+            section = _section()
+            with django_assert_num_queries(2):
+                latest = section.get_latest_lastmod()
+        assert latest is None
+
+    def test_every_row_dated_answers_the_latest_in_one_aggregate(
+        self, tmp_path, django_assert_num_queries
+    ) -> None:
+        User.objects.update(last_login=datetime(2026, 1, 1, tzinfo=UTC))
         User.objects.filter(username="user03").update(
             last_login=datetime(2026, 2, 1, tzinfo=UTC)
         )

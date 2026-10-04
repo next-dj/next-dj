@@ -3,6 +3,9 @@
 # Allow CI to point at a prebuilt venv's pytest (bypassing `uv run` and its sync step)
 PYTEST ?= uv run pytest
 
+# Allow CI to point the examples' `manage.py check` at the same prebuilt venv as PYTEST
+EXAMPLE_PYTHON ?= uv run python
+
 # The browser suites need the e2e group. `uv run --group` is additive, unlike `uv sync --group`,
 # so it adds playwright without pruning dev. CI overrides this with `uv run --no-project pytest`.
 PYTEST_E2E ?= uv run --group e2e pytest
@@ -120,9 +123,11 @@ test-examples: # run Python, JS tests for examples with coverage
 		if [ -d "$$example_dir" ] && [ -f "$$example_dir/manage.py" ]; then \
 			if [ -d "$$example_dir/tests" ]; then \
 				cd "$$example_dir" && $(PYTEST) tests/ --ignore=tests/e2e -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=100; \
+				$(EXAMPLE_PYTHON) manage.py check --deploy --tag seo --fail-level WARNING; \
 				cd - > /dev/null; \
 			elif [ -f "$$example_dir/tests.py" ]; then \
 				cd "$$example_dir" && $(PYTEST) tests.py -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=100; \
+				$(EXAMPLE_PYTHON) manage.py check --deploy --tag seo --fail-level WARNING; \
 				cd - > /dev/null; \
 			fi; \
 		fi; \

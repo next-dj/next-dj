@@ -19,6 +19,7 @@ from next.backends import backend_entries, load_backends, resolve_setting_class
 from next.conf.signals import settings_reloaded
 from next.csrf import CSRF_URL_NAME, csrf_view
 from next.forms.manager import form_action_manager
+from next.pages.manager.views import fit_page_caches
 from next.ports import seo_routes_slot
 
 from .backends import RouterBackend
@@ -220,6 +221,7 @@ class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
         # Pages expand first because loading a page module registers its form actions.
         # The framework routes still lead, so a root catch-all cannot match them.
         pages = list(router_manager)
+        fit_page_caches(pages)
         patterns: list[URLPattern | URLResolver] = [
             _CSRF_PATTERN,
             *form_action_manager,

@@ -91,7 +91,7 @@ Every zone response and every envelope carries ``Cache-Control: private, no-stor
    * - Forward ``Accept-Language`` only when the pages vary on it.
      - A page outside :func:`~django.conf.urls.i18n.i18n_patterns` under ``LocaleMiddleware`` answers several languages at one URL, which ``manage.py check`` reports.
 
-A CSP nonce belongs to one response, so a response whose render mints one is sent with ``Cache-Control: private``, and ``manage.py check`` warns while a nonce is active beside shared pages.
+A CSP nonce belongs to one response, so a response whose render writes a tag that carries one is sent with ``Cache-Control: private``, and ``manage.py check`` warns while a nonce is active beside shared pages.
 Set ``CSP_NONCE`` to ``False`` and allow the scripts by hash or by source on a site a CDN serves, see :doc:`/content/security/csp-and-nonce`.
 
 Verification
@@ -106,7 +106,7 @@ Verification
 
 The full page answers the declared ``Cache-Control``, no ``Set-Cookie``, and ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, and the zone request answers ``private, no-store``.
 Submit the form with the browser's network panel open, and one ``GET /_next/csrf/`` precedes the ``POST``.
-A shared page that is made private logs ``declares a shared cache, but its response follows the visitor through a cookie, the session, the CSRF token, the consent, a CSP nonce or the Authorization header, so it goes out private.``, naming the file.
+A shared page that is made private logs ``declares a shared cache, but its response follows the visitor through a cookie, the session, the CSRF token, the consent, a CSP nonce or the Authorization header, so it is sent with Cache-Control: private.``, naming the file.
 
 See also
 --------

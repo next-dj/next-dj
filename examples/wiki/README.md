@@ -88,7 +88,7 @@ The search form carries `data-next-target="search-results"`, `data-next-trigger=
 
 Both file-backed doc pages wrap examples in [`wiki/routes/docs/_blocks/doc_figure/`](wiki/routes/docs/_blocks/doc_figure/). The component sits inside the page tree, so it is visible from every template under `/docs/` and from nowhere else. It has exactly one insertion point, so a named slot would be ceremony: the caller writes markup between `{% #component "doc_figure" %}` and `{% /component %}`, the framework hands it over as `children`, and the template splices it with `{{ children }}`.
 
-The two channels differ, and `/docs/components/` shows the difference on one call. The block body is spliced as written, so the `<em>` and `<strong>` runs inside it reach the page as markup — whether the values interpolated there were escaped is the calling template's business, exactly as with `{% include %}`. The `caption` prop carries the same snippet from `markup_sample` in `page.py` and is escaped like every prop, so the figcaption shows `<em>emphasis</em>` as text.
+The two channels differ, and `/docs/components/` shows the difference on one call. The block body is spliced as written, so the `<em>` and `<strong>` runs inside it reach the page as markup. Whether the values interpolated there were escaped is the responsibility of the calling template, exactly as with `{% include %}`. The `caption` prop carries the same snippet from `markup_sample` in `page.py` and is escaped like every prop, so the figcaption shows `<em>emphasis</em>` as text.
 
 ### 10. One layout, two page roots
 
@@ -149,11 +149,11 @@ The two mechanisms split the work by what each can do. A `Disallow` stops the fe
 
 ## Further reading
 
-- [next/urls/manager.py](../../next/urls/manager.py) — `RouterManager.reload` emits the `router_reloaded` signal.
-- [next/urls/backends.py](../../next/urls/backends.py) — `FileRouterBackend.generate_urls` is the public extension surface.
-- [next/deps/providers.py](../../next/deps/providers.py) — DI provider contract used by `ArticleProvider`.
-- [next/pages/metadata/](../../next/pages/metadata/) — the metadata chain behind `@page.metadata` and `{% metadata %}`.
-- [next/seo/](../../next/seo/) — `@sitemap.items`, `RobotsRule`, and the sitemap backend that lists the page tree.
-- [next/testing/](../../next/testing/) — `assert_metadata` and `parse_sitemap`, which the integration tests read the head and the sitemap back through.
-- [next/components/context.py](../../next/components/context.py) — `@component.context` wiring used by `markdown_preview`.
-- [next/templatetags/components.py](../../next/templatetags/components.py) — the `{% #component %}` tag that collects slots and free children.
+- [next/urls/manager.py](../../next/urls/manager.py): `RouterManager.reload` emits the `router_reloaded` signal.
+- [next/urls/backends.py](../../next/urls/backends.py): `FileRouterBackend.generate_urls` is the public extension surface.
+- [next/deps/providers.py](../../next/deps/providers.py): DI provider contract used by `ArticleProvider`.
+- [next/pages/metadata/](../../next/pages/metadata/): the metadata chain behind `@page.metadata` and `{% metadata %}`.
+- [next/seo/](../../next/seo/): `@sitemap.items`, `RobotsRule`, and the sitemap backend that lists the page tree.
+- [next/testing/](../../next/testing/): `assert_metadata` and `parse_sitemap`, which the integration tests read the head and the sitemap back through.
+- [next/components/context.py](../../next/components/context.py): `@component.context` wiring used by `markdown_preview`.
+- [next/templatetags/components.py](../../next/templatetags/components.py): the `{% #component %}` tag that collects slots and free children.

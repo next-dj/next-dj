@@ -48,6 +48,7 @@ Isolation
 ``reset_registries`` and its narrower variants clear the framework registries between tests.
 ``reset_form_registration_state`` additionally clears the registration diagnostics and the cached wizard backend.
 ``reset_scripts`` drops every discovered ``scripts.py`` and ``reset_seo`` the discovered SEO sources and the ``@sitemap.items`` registrations, for a test that rewrites a source, since outside ``DEBUG`` each one is read once.
+``reset_failure_logs`` makes every failure the framework contained log again, for a test that asserts on a log record whatever ran before it.
 
 .. automodule:: next.testing.isolation
    :members:

@@ -9,7 +9,7 @@ Module summary
 ``next.static`` exposes the asset discovery, the request-scoped collector, and the configured static backends.
 It also exposes the kind and placeholder registries, the ``next.min.js`` script builder, the two staticfiles finders, and the JS context serializer.
 ``next.static.runtime`` holds the script builder and the init payload keys, and ``next.static.nonce`` the CSP nonce every tag carries.
-``next.static.scripts`` is a deprecated alias that resolves every name from ``next.static.runtime``, and the two CSRF helpers from ``next.csrf``, with a ``DeprecationWarning``.
+``next.static.scripts`` is a deprecated alias that resolves every name from ``next.static.runtime``, ``csrf_header_name`` from ``next.csrf``, and ``csrf_payload`` as ``next.csrf.csrf_token_payload``, with a ``DeprecationWarning`` that names the current import.
 ``static_name`` covers the reference shape rule, and ``StaticAssetNotFoundError`` and ``StaticAssetTraversalError`` name the two references the pipeline refuses, see :doc:`/content/topics/static-assets/name-resolution`.
 
 Public API

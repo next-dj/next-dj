@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from next.backends import backend_entries
 from next.conf.signals import settings_reloaded
-from next.diagnostics import BackendReadLog
+from next.diagnostics import QUIET_PERIOD, BackendReadLog
 from next.ports import router_access_slot
 from next.utils import (
     forget_resolved_trees,
@@ -34,12 +34,12 @@ logger = logging.getLogger(__name__)
 
 _NOT_BUILT = (
     "PAGE_BACKENDS entry number %s (%s) could not be built, so it contributes "
-    "nothing to the watcher. The same failure is not logged again until the "
-    "framework is reconfigured."
+    "nothing to the watcher. The same failure is not logged again for "
+    f"{QUIET_PERIOD:.0f} seconds or until the framework is reconfigured."
 )
 
-# Every read of a router goes through one log, so a backend that keeps raising
-# reports once per configuration wherever the watch layer reads it.
+# Every read of a router goes through one log, so a backend that keeps raising is
+# logged at the same bounded rate wherever the watch layer reads it.
 _reads = BackendReadLog(logger)
 
 

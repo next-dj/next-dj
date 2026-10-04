@@ -41,19 +41,24 @@ def _posts_bare(node: FormNode, page_path: Path) -> bool:
     return meta is None or not meta.get("requires_runtime", False)
 
 
-def _eager_csrf(page_path: Path, template: Template) -> CheckMessage | None:
+def _forms(template: Template) -> list[FormNode]:
+    """Return every `{% form %}` node of a composed page template."""
+    return cast("list[FormNode]", template.nodelist.get_nodes_by_type(FormNode))
+
+
+def _eager_csrf(
+    page_path: Path, template: Template, forms: list[FormNode]
+) -> CheckMessage | None:
     """Return `next.W112` for a shared page whose HTML carries the CSRF token."""
     if csrf_delivery() is not CsrfDelivery.EAGER:
         return None
-    forms = template.nodelist.get_nodes_by_type(FormNode)
     if not forms and not renders_runtime(template):
         return None
     return shared_warning(
         page_path,
         "CSRF_DELIVERY is 'eager' and it renders a {% form %} or the runtime, so "
         "every response sets the CSRF cookie and is sent with Cache-Control: "
-        "private. Set "
-        "CSRF_DELIVERY to 'auto'.",
+        "private. Set CSRF_DELIVERY to 'auto'.",
         "next.W112",
     )
 
@@ -67,15 +72,14 @@ _REQUIRES_RUNTIME: Final = (
 )
 
 
-def _bare_forms(page_path: Path, template: Template) -> bool:
+def _bare_forms(page_path: Path, forms: list[FormNode]) -> bool:
     """Whether a `{% form %}` of the page may post without the runtime."""
-    nodes = cast("list[FormNode]", template.nodelist.get_nodes_by_type(FormNode))
-    return any(_posts_bare(node, page_path) for node in nodes)
+    return any(_posts_bare(node, page_path) for node in forms)
 
 
-def _deferred_form(page_path: Path, template: Template) -> CheckMessage | None:
+def _deferred_form(page_path: Path, forms: list[FormNode]) -> CheckMessage | None:
     """Return `next.W115` for a shared page whose forms post without a token field."""
-    if csrf_delivery() is CsrfDelivery.EAGER or not _bare_forms(page_path, template):
+    if csrf_delivery() is CsrfDelivery.EAGER or not _bare_forms(page_path, forms):
         return None
     return shared_warning(
         page_path,
@@ -98,7 +102,7 @@ def _lazy_private_forms(shared: set[Path]) -> list[CheckMessage]:
             id="next.W115",
         )
         for page_path, template in iter_composed_pages()
-        if page_path not in shared and _bare_forms(page_path, template)
+        if page_path not in shared and _bare_forms(page_path, _forms(template))
     ]
 
 
@@ -112,7 +116,11 @@ def check_shared_page_forms(*args, **kwargs) -> list[CheckMessage]:
     shared: set[Path] = set()
     for page_path, template in shared_pages():
         shared.add(page_path)
-        found = (_eager_csrf(page_path, template), _deferred_form(page_path, template))
+        forms = _forms(template)
+        found = (
+            _eager_csrf(page_path, template, forms),
+            _deferred_form(page_path, forms),
+        )
         warnings.extend(warning for warning in found if warning is not None)
     warnings.extend(_lazy_private_forms(shared))
     return warnings

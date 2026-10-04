@@ -2,6 +2,7 @@ import functools
 import types
 from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -130,6 +131,21 @@ class TestStamps:
         (stamp, missing) = registry.stamps((page_file, other))
         assert stamp is not None
         assert missing is None
+
+    def test_the_entry_is_written_before_the_stamp(
+        self, registry: PageMetadataRegistry, page_file: Path
+    ) -> None:
+        """A build that reads the new stamp then reads the new entry as well."""
+        seen: list[PageMetadataEntry | None] = []
+        stamp = registry._stamp
+
+        def recording(file_path: Path) -> None:
+            seen.append(registry.entry(file_path))
+            stamp(file_path)
+
+        with patch.object(registry, "_stamp", side_effect=recording):
+            registry.register(page_file, _wallet_meta)
+        assert seen == [PageMetadataEntry(func=_wallet_meta, inherit=False)]
 
     def test_the_same_callable_again_keeps_the_stamp(
         self, registry: PageMetadataRegistry, page_file: Path

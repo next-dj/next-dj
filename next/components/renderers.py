@@ -291,7 +291,8 @@ def _inject_component_context(
     collector: StaticCollector | None = context_data.get(COLLECTOR_KEY)
     guarded = _guarded_keys(context_data)
 
-    cache = DependencyCache(backing_dict=render_dep_cache(request))
+    # A copy, so a value one instance resolves from its props never reaches the next.
+    cache = DependencyCache(backing_dict=dict(render_dep_cache(request)))
     stack: list[str] = []
 
     for ctx_func in ctx_funcs:

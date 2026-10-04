@@ -1,4 +1,6 @@
 import logging
+import threading
+from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
 
@@ -7,7 +9,7 @@ from django.test import override_settings
 
 from next.discovery import get_router_manager
 from next.pages.loaders import has_load_errors
-from next.seo import SeoSourceImportError, discovery as seo_discovery, seo_manager
+from next.seo import SeoSourceImportError, discovery as seo_discovery
 from next.seo.discovery import (
     SOURCE_NAMES,
     SeoRoot,
@@ -18,8 +20,12 @@ from next.seo.discovery import (
     page_tree_roots,
     section_label,
     source_stamps,
+    tree_label,
+    unique_labels,
 )
+from next.seo.manager import seo_manager
 from next.seo.registry import sitemap_items_registry
+from next.urls.manager import seo_routes_version
 from tests.support import POSTS_ITEMS, importable_dir, routed, write_page, write_tree
 
 
@@ -239,3 +245,68 @@ class TestPageTreeRoots:
             first = page_tree_roots()
             seo_manager.reset()
             assert page_tree_roots() is not first
+
+    def test_concurrent_callers_discover_once(self, tmp_path) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+        calls: list[int] = []
+
+        def slow_discover(manager):
+            calls.append(1)
+            entered.set()
+            release.wait(5)
+            return ()
+
+        root = write_tree(tmp_path / "pages", sitemap="")
+        with (
+            routed(root),
+            patch.object(seo_discovery, "discover_seo_roots", slow_discover),
+        ):
+            forget_page_tree_roots()
+            first = threading.Thread(target=page_tree_roots)
+            second = threading.Thread(target=page_tree_roots)
+            first.start()
+            assert entered.wait(5)
+            second.start()
+            second.join(0.1)
+            release.set()
+            first.join(5)
+            second.join(5)
+            forget_page_tree_roots()
+        assert calls == [1]
+
+    def test_trees_found_during_a_reset_are_not_kept(self, tmp_path) -> None:
+        calls: list[int] = []
+
+        def discover_across_a_reset(manager):
+            calls.append(1)
+            if len(calls) == 1:
+                seo_routes_version.move()
+            return ()
+
+        root = write_tree(tmp_path / "pages", sitemap="")
+        with (
+            routed(root),
+            patch.object(seo_discovery, "discover_seo_roots", discover_across_a_reset),
+        ):
+            forget_page_tree_roots()
+            page_tree_roots()
+            page_tree_roots()
+            page_tree_roots()
+            forget_page_tree_roots()
+        assert calls == [1, 1]
+
+
+class TestTreeLabels:
+    """A page tree is named by its app, else its directory, and made unique."""
+
+    def test_a_repeated_label_takes_a_numeric_suffix(self) -> None:
+        assert unique_labels(["pages"] * 3) == ["pages", "pages-2", "pages-3"]
+
+    def test_a_suffix_never_takes_the_label_of_another_tree(self) -> None:
+        assert unique_labels(["blog", "blog", "blog-2"]) == ["blog", "blog-3", "blog-2"]
+        assert unique_labels(["blog-2", "blog", "blog"]) == ["blog-2", "blog", "blog-3"]
+
+    def test_every_tree_is_labelled_in_order(self, tmp_path: Path) -> None:
+        roots = [tmp_path / "a" / "pages", tmp_path / "b" / "Pages", tmp_path / "!"]
+        assert [tree_label(root) for root in roots] == ["pages", "pages", "root"]

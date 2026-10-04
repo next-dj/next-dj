@@ -26,7 +26,7 @@ from next.seo.markers import CHANGEFREQS, RobotsRule, is_number
 from next.seo.registry import sitemap_items_registry
 from next.seo.robots import is_sitemap_url
 from next.seo.sitemaps import MAX_LIMIT, SitemapOptions
-from next.site import site_config
+from next.site.config import site_config
 from next.utils import WEB_SCHEMES, is_int
 
 from .roots import loaded_seo_roots, published_sources, robots_modules, sitemap_roots

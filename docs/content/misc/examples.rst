@@ -28,7 +28,8 @@ The table runs roughly in order of how much it assumes.
    * - :repo:`shortener <tree/main/examples/shortener>`
      - Shortens a URL, lists the results, and prepends a new row into the live list without a reload.
        Reads request values through custom DI providers, caches lookups in ``LocMemCache``, declares the post-submit redirect and flash message on the form itself, and seeds data from a management command.
-     - :doc:`/content/topics/file-router`, :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/partial-rendering/index`
+       Serves a static ``robots.txt`` that keeps crawlers off the redirect URLs.
+     - :doc:`/content/topics/file-router`, :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/seo/robots`
    * - :repo:`markdown-blog <tree/main/examples/markdown-blog>`
      - Publishes Markdown posts through nested layouts, hands serialised values to the browser, feeds a site-wide value through a context processor, and runs a co-located ``component.js`` beside the component that needs it.
        Builds the head from ``DEFAULTS`` down to a per-post ``@page.metadata`` callable with a plain ``BlogPosting`` JSON-LD dict and keywords from the front matter, renders ``{% breadcrumbs %}`` in its nested layouts, names a static social card in ``og.images``, and advertises an RSS feed through ``alternates.feeds``.
