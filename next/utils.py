@@ -6,7 +6,6 @@ them build is defined here rather than in one of them, which would close a cycle
 
 from __future__ import annotations
 
-import enum
 import functools
 import importlib.machinery
 import importlib.util
@@ -18,13 +17,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, TypeGuard, override
 from urllib.parse import unquote_to_bytes
 
-from django.apps import apps
 from django.conf import settings
 from django.utils.encoding import repercent_broken_unicode
 from django.utils.module_loading import import_string
-from django.utils.text import slugify
 
 from next.caches import DEFAULT_CACHE_SIZE
+from next.conf.sentinels import UNSET, Unset  # noqa: F401 - the areas import it here
 from next.errors import InvalidDirsError
 
 
@@ -41,16 +39,6 @@ MAX_ANCESTOR_WALK_DEPTH = 64
 
 WEB_SCHEMES: Final[frozenset[str]] = frozenset({"http", "https"})
 """The URL schemes a page, a head tag or a sitemap may point a crawler at."""
-
-
-class Unset(enum.Enum):
-    """The type of `UNSET`, the framework sentinel for an absent value."""
-
-    UNSET = enum.auto()
-
-
-UNSET: Final = Unset.UNSET
-"""The marker of an absent value, such as an unread memo, distinct from `None`."""
 
 
 def is_int(value: object) -> TypeGuard[int]:
@@ -198,45 +186,6 @@ class PageRoot:
 
     path: Path
     label: str
-
-
-def _app_label_for(path: Path) -> str | None:
-    """Return the label of the innermost installed app whose directory holds `path`."""
-    resolved = path.resolve()
-    holding = [
-        (len(app_path.parts), str(config.label))
-        for config in apps.get_app_configs()
-        if resolved.is_relative_to(app_path := Path(config.path).resolve())
-    ]
-    return max(holding)[1] if holding else None
-
-
-def tree_label(path: Path) -> str:
-    """Return the stable name of a page tree, its app label or else its directory."""
-    label = _app_label_for(path)
-    if label is None:
-        label = slugify(path.name) or "root"
-    return label
-
-
-def unique_labels(labels: Iterable[str]) -> list[str]:
-    """Return the labels made distinct, each repeat suffixed with a free number.
-
-    A label no other tree shares is kept, and a suffixed label never equals an input.
-    """
-    wanted = list(labels)
-    taken = set(wanted)
-    unique: list[str] = []
-    handed: set[str] = set()
-    for label in wanted:
-        candidate = label
-        number = 1
-        while candidate in handed or (candidate != label and candidate in taken):
-            number += 1
-            candidate = f"{label}-{number}"
-        handed.add(candidate)
-        unique.append(candidate)
-    return unique
 
 
 def page_roots_shape_error(source: str, roots: list[Any]) -> str | None:
@@ -460,14 +409,6 @@ def is_middleware(entry: object, base: str) -> bool:
     return found is not None and parent is not None and issubclass(found, parent)
 
 
-def middleware_index(middleware: Iterable[object], base: str) -> int | None:
-    """Return where the first entry `is_middleware` matches sits, `None` for none."""
-    for index, entry in enumerate(middleware):
-        if is_middleware(entry, base):
-            return index
-    return None
-
-
 def middleware_listed(middleware: Iterable[object], base: str) -> bool:
     """Whether `middleware` lists the class `base` or a subclass of it."""
-    return middleware_index(middleware, base) is not None
+    return any(is_middleware(entry, base) for entry in middleware)

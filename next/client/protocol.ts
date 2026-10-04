@@ -40,7 +40,7 @@ export interface Diagnostics {
   stripped(address: string | undefined): void;
   /** Warn that one node carries both data-next-key and id. */
   keyed: (el: Element) => void;
-  /** Warn on the hand-written trigger attributes the runtime ignores. */
+  /** Warn on hand-written trigger attributes and seeded values the runtime ignores. */
   attrs(root: ParentNode): void;
 }
 

@@ -153,6 +153,7 @@ The framework reserves three keys of the ``Next._init`` payload for this surface
      - ``{scripts, sse, csrf, poll}``, the URLs of ``next.scripts.min.js``, ``next.sse.min.js``, ``next.csrf.min.js``, and ``next.poll.min.js`` through the staticfiles storage, in every payload, and under ``DEBUG`` ``dev`` too, the URL of ``next.dev.min.js``.
    * - ``$scripts``
      - The manifest, one ``{name, src?, init?, strategy, category, attrs, nonce?}`` per script the server did not write, in declaration order.
+       The runtime drops an ``attrs`` name outside the set :doc:`/content/topics/scripts/declaring` lists.
    * - ``$consent``
      - ``{categories, decided, granted, cookie?}`` and whatever else the backend's ``client_config()`` adds, where ``cookie`` comes from ``CookieConsentBackend``.
 

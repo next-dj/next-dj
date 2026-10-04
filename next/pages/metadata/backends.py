@@ -7,7 +7,7 @@ import functools
 import json
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from itertools import chain
 from typing import ClassVar, Final, override
 
@@ -17,7 +17,7 @@ from django.utils.safestring import SafeString
 
 from next.backends import resolve_setting_class
 from next.conf.signals import settings_reloaded
-from next.diagnostics import FailureLog
+from next.diagnostics import FailureLog, isolated_build, mark_degraded
 
 from .markers import (
     Article,
@@ -33,6 +33,7 @@ from .resolve import CONTEXT
 
 
 _failures: Final = FailureLog(logging.getLogger(__name__))
+_RENDERER_KEY: Final = "RENDERER"
 
 _TITLE: Final = "<title>{}</title>"
 _NAMED: Final = '<meta name="{}" content="{}">'
@@ -94,6 +95,7 @@ class HtmlMetadataRenderer(MetadataRenderer):
     """Render the head tags section by section, every value escaped.
 
     A subclass reorders or extends `sections` and overrides the `render_*` hooks.
+    The hooks are bound on the first render, so `sections` is read once per instance.
     """
 
     sections: ClassVar[tuple[str, ...]] = (
@@ -118,11 +120,16 @@ class HtmlMetadataRenderer(MetadataRenderer):
         "jsonld",
     )
 
+    @functools.cached_property
+    def _hooks(self) -> tuple[Callable[[ResolvedMetadata], Lines], ...]:
+        """Return the `render_*` hook of every section, bound once per renderer."""
+        return tuple(getattr(self, f"render_{name}") for name in self.sections)
+
     @override
     def render(self, resolved: ResolvedMetadata) -> SafeString:
         """Return the lines of every section joined by newlines, empty for nothing."""
-        hooks = (getattr(self, f"render_{name}") for name in self.sections)
-        return SafeString("\n".join(chain.from_iterable(h(resolved) for h in hooks)))
+        lines = chain.from_iterable(hook(resolved) for hook in self._hooks)
+        return SafeString("\n".join(lines))
 
     def render_title(self, resolved: ResolvedMetadata) -> Lines:
         """Render the `<title>`."""
@@ -382,19 +389,39 @@ def configured_renderer_class() -> type[MetadataRenderer]:
     )
 
 
-@functools.cache
 def metadata_renderer() -> MetadataRenderer:
     """Return the renderer `METADATA["RENDERER"]` names, built once per reload.
 
     A renderer that cannot be resolved or built is replaced by `HtmlMetadataRenderer`
-    and logged once, so a wrong path does not fail every page. It raises under `DEBUG`.
+    and logged, so a wrong path does not fail every page. It raises under `DEBUG`.
+    Every render that uses the replacement is degraded, not only the one that built
+    it, and the failure is logged again at the `FailureLog` rate.
     """
+    renderer, failed = _built_renderer()
+    if failed:
+        mark_degraded()
+        _failures.warn(
+            _RENDERER_KEY,
+            "NEXT_FRAMEWORK['METADATA']['RENDERER'] is still replaced by "
+            "HtmlMetadataRenderer, so every page is sent with private, no-store.",
+        )
+    return renderer
+
+
+@functools.cache
+def _built_renderer() -> tuple[MetadataRenderer, bool]:
+    """Build the configured renderer once, with whether it was replaced."""
+    return isolated_build(_build_renderer)
+
+
+def _build_renderer() -> MetadataRenderer:
+    """Build the configured renderer, `HtmlMetadataRenderer` when it fails."""
     try:
         return configured_renderer_class()()
     except Exception as exc:  # noqa: BLE001 - the renderer's __init__ is user code
         _failures.contain(
             exc,
-            "RENDERER",
+            _RENDERER_KEY,
             "NEXT_FRAMEWORK['METADATA']['RENDERER'] could not be built (%s), so the "
             "head renders through HtmlMetadataRenderer. Name a concrete "
             "next.pages.MetadataRenderer subclass.",
@@ -405,7 +432,7 @@ def metadata_renderer() -> MetadataRenderer:
 
 def forget_metadata_renderer(**kwargs) -> None:
     """Drop the memoised renderer, so a settings reload takes effect."""
-    metadata_renderer.cache_clear()
+    _built_renderer.cache_clear()
 
 
 settings_reloaded.connect(forget_metadata_renderer)

@@ -4,7 +4,9 @@ import logging
 import pytest
 from django.http import HttpResponse
 from django.test import RequestFactory
+from django.urls import ResolverMatch
 
+from next.diagnostics import QUIET_PERIOD
 from next.middleware import SharedCacheGuardMiddleware, guard_shared_cache
 from next.testing import override_next_settings
 
@@ -104,11 +106,33 @@ class TestGuardSharedCache:
         records = _guarded_records(caplog)
         assert [record.args for record in records] == [("/a/",), ("/b/",)]
 
+    def test_each_route_is_reported_once_whatever_its_path(self, caplog) -> None:
+        for path in ("/posts/1/", "/posts/2/"):
+            request = RequestFactory().get(path)
+            request.resolver_match = ResolverMatch(
+                _response, (), {}, route="posts/<int:pk>/"
+            )
+            guard_shared_cache(request, _response("public"))
+        records = _guarded_records(caplog)
+        assert [record.args for record in records] == [("/posts/1/",)]
+
     def test_a_reconfigure_reports_a_path_again(self, caplog) -> None:
         guard_shared_cache(RequestFactory().get("/a/"), _response("public"))
         with override_next_settings(CSP_NONCE=False):
             guard_shared_cache(RequestFactory().get("/a/"), _response("public"))
         assert len(_guarded_records(caplog)) == 2
+
+    def test_a_route_is_reported_again_after_the_quiet_period(
+        self, caplog, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        now = [1000.0]
+        monkeypatch.setattr("next.diagnostics.monotonic", lambda: now[0])
+        for _ in range(3):
+            guard_shared_cache(RequestFactory().get("/a/"), _response("public"))
+        now[0] += QUIET_PERIOD
+        guard_shared_cache(RequestFactory().get("/a/"), _response("public"))
+        records = _guarded_records(caplog)
+        assert [record.suppressed for record in records] == [0, 2]
 
 
 class TestSharedCacheGuardMiddleware:

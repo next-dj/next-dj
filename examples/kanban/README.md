@@ -109,7 +109,7 @@ class KanbanConfig(AppConfig):
 
 ### 3. `ViteManifestBackend`
 
-The custom backend resolves URLs only — rendering is delegated to the built-in `render_module_tag`:
+The custom backend resolves URLs only and delegates rendering to the built-in `render_module_tag`:
 
 ```python
 class ViteManifestBackend(StaticFilesBackend):
@@ -178,7 +178,7 @@ The React root follows the framework-island contract. `Next.partial.onMount("#ka
 
 ### 6. The same board with and without JavaScript
 
-`template.djx` renders the whole board server-side — `{% component "column" %}` per column, `{% component "card" %}` per card, and a `{% form "create_card_form" %}` block in every column footer. Without JavaScript the page stays a working board: columns, cards, and one "Add" button per column that posts, redirects, and re-renders. React then mounts into `#kanban-board` and replaces that markup with the same layout driven by `window.Next.context.board`, down to the "New card" input, so the swap is invisible.
+`template.djx` renders the whole board server-side: `{% component "column" %}` per column, `{% component "card" %}` per card, and a `{% form "create_card_form" %}` block in every column footer. Without JavaScript the page stays a working board: columns, cards, and one "Add" button per column that posts, redirects, and re-renders. React then mounts into `#kanban-board` and replaces that markup with the same layout driven by `window.Next.context.board`, down to the "New card" input, so the swap is invisible.
 
 ### 7. Optimistic move and create with rollback
 
@@ -196,9 +196,9 @@ Creating a card has the same shape plus one extra problem. The action answers wi
 
 `CreateColumnForm` cannot use that route. It creates a row under the board rather than editing one, so there is no instance to load. It carries `board_id` as a hidden field instead and its `on_valid` takes `board: DBoard[Board]`, which `BoardProvider` resolves from `url_kwargs["id"]` when a page renders and from POST `board_id` when the dispatcher handles the action. `MoveCardForm` takes its subject the same way: `on_valid` declares `card: DCard[Card]` and `CardProvider` resolves it from POST `card_id`, the key both sides read off the shared `CARD_PARAM` constant.
 
-The two providers answer `static_can_handle` differently, and the difference is the point. `BoardProvider` settles a `DBoard[...]` parameter from the annotation alone, so it returns `True`, becomes the terminal of that parameter in the compiled injection plan, and implements `compile_resolve` to read the model out of the annotation once per plan instead of once per resolve. `CardProvider` also needs a POST `card_id` before it owns anything, so it returns `False` for a foreign annotation and `None` for `DCard[...]`, which keeps it a runtime candidate whose `can_handle` runs per request — the compiler never asks it for a filler. `BoardProvider` routes both `resolve` and its compiled filler through one module-level fetch helper, so the two paths cannot drift apart.
+The two providers answer `static_can_handle` differently, and the difference is the point. `BoardProvider` settles a `DBoard[...]` parameter from the annotation alone, so it returns `True`, becomes the terminal of that parameter in the compiled injection plan, and implements `compile_resolve` to read the model out of the annotation once per plan instead of once per resolve. `CardProvider` also needs a POST `card_id` before it owns anything, so it returns `False` for a foreign annotation and `None` for `DCard[...]`, which keeps it a runtime candidate whose `can_handle` runs per request, and the compiler never asks it for a filler. `BoardProvider` routes both `resolve` and its compiled filler through one module-level fetch helper, so the two paths cannot drift apart.
 
-Modules that use these markers never start with `from __future__ import annotations` and import both the marker and the model at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate — a marker or a model imported only under `if TYPE_CHECKING` — drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
+Modules that use these markers never start with `from __future__ import annotations` and import both the marker and the model at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate, such as a marker or a model imported only under `if TYPE_CHECKING`, drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
 
 ### 10. One title for the board and its settings page
 
@@ -224,18 +224,18 @@ The settings page hosts three independent `<form>` blocks. Each one posts to its
 
 ## Further reading
 
-- [`kanban/apps.py`](kanban/apps.py) — `KanbanConfig.ready()` with the two registry calls.
-- [`kanban/signals.py`](kanban/signals.py) — `inject_vite_dev_assets` receiver wired in `DEBUG` mode.
-- [`kanban/backends.py`](kanban/backends.py) — `ViteManifestBackend` dev/prod URL routing.
-- [`vite.config.ts`](vite.config.ts) — glob multi-entry build that discovers all co-located `.jsx` files.
-- [`vitest.config.ts`](vitest.config.ts) — Vitest setup targeting `kanban/**/*.test.{jsx,tsx}`.
-- [`next/static/assets.py`](../../next/static/assets.py) — the public `KindRegistry` API used by `apps.py`.
-- [`next/static/defaults.py`](../../next/static/defaults.py) — the framework bootstrap that registers `css`, `js`, and `module` through the same call.
-- [`next/static/collector.py`](../../next/static/collector.py) — `HashContentDedup`, `DeepMergePolicy`, and the slot-keyed buckets.
-- [`next/static/signals.py`](../../next/static/signals.py) — `collector_finalized` signal fired after collection completes.
-- [`next/static/manager.py`](../../next/static/manager.py) — placeholder-driven injection that dispatches per-asset renderers through `getattr` on the active backend.
-- [`next/components/context.py`](../../next/components/context.py) — `@component.context` and the `serialize=True` flag.
-- [`next/forms/manager.py`](../../next/forms/manager.py) — `form_action_manager.get_action_url(...)` used by the page to lift the move and create endpoint URLs into the React layer.
-- [`next/deps/providers.py`](../../next/deps/providers.py) — `RegisteredParameterProvider` ABC used by `BoardProvider`/`CardProvider`.
-- [`next/pages/metadata/`](../../next/pages/metadata/) — the metadata chain behind `@page.metadata(inherit=True)` in section 10.
-- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst) — `next.E048` / `next.E049` for `Meta.instance_from_url`.
+- [`kanban/apps.py`](kanban/apps.py): `KanbanConfig.ready()` with the two registry calls.
+- [`kanban/signals.py`](kanban/signals.py): `inject_vite_dev_assets` receiver wired in `DEBUG` mode.
+- [`kanban/backends.py`](kanban/backends.py): `ViteManifestBackend` dev/prod URL routing.
+- [`vite.config.ts`](vite.config.ts): glob multi-entry build that discovers all co-located `.jsx` files.
+- [`vitest.config.ts`](vitest.config.ts): Vitest setup targeting `kanban/**/*.test.{jsx,tsx}`.
+- [`next/static/assets.py`](../../next/static/assets.py): the public `KindRegistry` API used by `apps.py`.
+- [`next/static/defaults.py`](../../next/static/defaults.py): the framework bootstrap that registers `css`, `js`, and `module` through the same call.
+- [`next/static/collector.py`](../../next/static/collector.py): `HashContentDedup`, `DeepMergePolicy`, and the slot-keyed buckets.
+- [`next/static/signals.py`](../../next/static/signals.py): `collector_finalized` signal fired after collection completes.
+- [`next/static/manager.py`](../../next/static/manager.py): placeholder-driven injection that dispatches per-asset renderers through `getattr` on the active backend.
+- [`next/components/context.py`](../../next/components/context.py): `@component.context` and the `serialize=True` flag.
+- [`next/forms/manager.py`](../../next/forms/manager.py): `form_action_manager.get_action_url(...)` used by the page to lift the move and create endpoint URLs into the React layer.
+- [`next/deps/providers.py`](../../next/deps/providers.py): `RegisteredParameterProvider` ABC used by `BoardProvider`/`CardProvider`.
+- [`next/pages/metadata/`](../../next/pages/metadata/): the metadata chain behind `@page.metadata(inherit=True)` in section 10.
+- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst): `next.E048` / `next.E049` for `Meta.instance_from_url`.

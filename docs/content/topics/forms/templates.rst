@@ -244,7 +244,7 @@ Forms in hand-written views
 ---------------------------
 
 A ``{% form %}`` tag also works inside a template rendered by an ordinary Django view, outside the file router.
-The success path needs nothing extra, the handler runs and its response goes out.
+The success path needs nothing extra, the handler runs and its response is sent.
 The error re-render is different.
 The dispatcher resolves the posted origin to a view and reads the page source location from its ``next_page_path`` attribute, which the file router sets on every routed view and a hand-written view lacks.
 Without it an invalid submission returns HTTP 400 instead of re-rendering.

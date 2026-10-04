@@ -6,20 +6,15 @@ from django.http import Http404, HttpRequest
 from django.test import RequestFactory, override_settings
 
 from next.conf import next_framework_settings
-from next.site import (
-    SiteConfig,
-    SiteOriginError,
-    site_config,
-    site_indexable,
-    site_origin,
-    site_url,
-)
+from next.site import SiteOriginError, site_indexable, site_origin, site_url
 from next.site.config import (
     SITE_ORIGIN_ATTR,
+    SiteConfig,
     forget_site_config,
     indexable_without_request,
     is_url_literal,
     site_closed_to_crawlers,
+    site_config,
     site_url_failed,
     url_origin,
 )

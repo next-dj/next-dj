@@ -45,7 +45,10 @@ class TestSettingsScope:
         ("dotted", "fragment"),
         [
             ("nope.Renderer", "could not be imported"),
-            ("next.pages.Metadata", "is not a next.pages.MetadataRenderer subclass"),
+            (
+                "next.pages.metadata.Metadata",
+                "is not a next.pages.MetadataRenderer subclass",
+            ),
             ("next.pages.MetadataRenderer", "is abstract"),
         ],
         ids=["import", "family", "abstract"],

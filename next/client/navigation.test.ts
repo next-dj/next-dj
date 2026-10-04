@@ -302,17 +302,17 @@ describe("the commit phase", () => {
     const again = navigation.hold("/photos/2/", "/photos/2/", () =>
       committed.push("new"),
     );
-    drop();
+    drop!();
     expect(location.pathname).toBe("/photos/2/");
     applier.apply(envelope([]), { page: "/photos/2/" });
     expect(committed).toEqual(["new"]);
-    again();
+    again!();
   });
 
   it("a hold pushes at once and its drop rolls back, neither announced", () => {
     const drop = navigation.hold("/photos/2/", "/photos/2/", () => undefined);
     expect(location.pathname).toBe("/photos/2/");
-    drop();
+    drop!();
     expect(location.pathname).toBe("/feed/");
     expect(writes.map((w) => w.action)).toEqual(["push", "replace"]);
     expect(navigated()).toEqual([]);
@@ -321,7 +321,7 @@ describe("the commit phase", () => {
   it("a drop after the bar moved on leaves it where it is", () => {
     const drop = navigation.hold("/photos/2/", "/photos/2/", () => undefined);
     window.history.replaceState(null, "", "/elsewhere/");
-    drop();
+    drop!();
     expect(location.pathname).toBe("/elsewhere/");
   });
 

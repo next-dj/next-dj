@@ -100,7 +100,6 @@ class NextBus extends EventTarget {
 }
 
 // Read during module evaluation, the only time document.currentScript is set.
-const RUNTIME = document.currentScript;
 const NONCE = scriptNonce(document);
 
 /** The window-exposed runtime facade, a static class since there is one per page. */
@@ -112,7 +111,6 @@ class Next {
   // The dependencies shared by every chunk loader.
   static #chunk: ChunkDeps = {
     dispatch: (event, payload) => Next.#bus.emit(event, payload),
-    runtime: RUNTIME,
     nonce: NONCE,
     context: () => Next.#context,
   };

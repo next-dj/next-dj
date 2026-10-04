@@ -6,6 +6,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from .responses import response_text
+
 
 if TYPE_CHECKING:
     from django.http.response import HttpResponseBase
@@ -47,15 +49,6 @@ def _entry(entry: ET.Element) -> SitemapUrl:
         lastmod=_text(entry, "lastmod"),
         alternates=alternates,
     )
-
-
-def response_text(response: HttpResponseBase) -> str:
-    """Return the body of a response as text, a streamed one read to its end."""
-    if getattr(response, "streaming", False):
-        body = b"".join(getattr(response, "streaming_content", ()))
-    else:
-        body = getattr(response, "content", b"")
-    return body.decode(response.charset or "utf-8", errors="replace")
 
 
 def parse_sitemap(response: HttpResponseBase) -> list[SitemapUrl]:

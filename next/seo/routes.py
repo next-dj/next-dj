@@ -42,18 +42,22 @@ _failures = FailureLog(logger)
 def _served(route: str, probe: Callable[[], bool]) -> bool:
     """Whether `probe` mounts `route`, a probe that raises keeping the route.
 
-    It runs during URL resolution, so a failure must not break the other routes,
-    and the view of the route answers 503 for the same failure.
+    It runs during URL resolution, outside any view, so an intended exception such as
+    `Http404` is contained like any other. A failure fails the request under `DEBUG`
+    or `STRICT_LOADING`, and otherwise keeps the route, whose view answers 503 for the
+    same failure while the other routes still resolve.
     """
     try:
         return probe()
-    except Exception:
-        if _failures.first_failure(route):
-            logger.exception(
-                "Deciding whether to mount /%s raised, so the route stays mounted "
-                "and answers 503 until its source loads.",
-                route,
-            )
+    except Exception as exc:  # noqa: BLE001 - contained, the probe runs project code
+        _failures.contain(
+            exc,
+            route,
+            "Deciding whether to mount /%s raised, so the route stays mounted "
+            "and answers 503 until its source loads.",
+            route,
+            pass_through=(),
+        )
         return True
 
 

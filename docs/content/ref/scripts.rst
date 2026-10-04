@@ -56,11 +56,12 @@ Backends
 
 A ``ConsentBackend`` takes its whole ``CONSENT`` entry, exposes ``OPTIONS`` as ``options``, and reads a ``Consent`` off a request, which is the one method a subclass implements.
 ``client_config()`` answers the entries the backend adds to ``$consent``, nothing by default, and the categories and the choice win over an entry of the same name.
+The consent manager reads ``client_config()`` once per backend instance, so its entries depend on the settings alone.
 The runtime keeps the choice only in its consent cookie, so a backend that reads something else gets nothing back from the browser.
 ``CookieConsentBackend`` reads the ``2:<a>|<b>:<seconds>`` cookie the runtime writes and also accepts the ``1:<a>,<b>:<seconds>`` form, whose categories are separated by commas.
 Its ``cookie()`` answers the name, age, and flags the runtime writes the cookie with, which is the ``cookie`` entry its ``client_config()`` adds.
 Under a backend that adds no ``cookie`` entry, the runtime keeps its cookie of the choice under the default name and age.
-A backend that raises or answers anything but a ``Consent`` reads as ``UNDECIDED`` and is logged once, and under ``DEBUG`` or ``STRICT_LOADING`` the exception propagates.
+A backend that raises or answers anything but a ``Consent`` reads as ``UNDECIDED`` and is logged at most once every ten minutes, and under ``DEBUG`` or ``STRICT_LOADING`` the exception propagates.
 
 .. automodule:: next.consent.backends
    :members:

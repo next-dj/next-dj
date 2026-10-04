@@ -12,7 +12,8 @@ from django.urls import NoReverseMatch, reverse
 
 from next.conf import next_framework_settings
 from next.pages.loaders import has_load_errors
-from next.seo import SitemapTrailError, seo_manager, views
+from next.seo import SitemapTrailError, views
+from next.seo.manager import seo_manager
 from next.testing import override_next_settings, parse_sitemap
 from tests.seo.sources import CALLS
 from tests.support import (

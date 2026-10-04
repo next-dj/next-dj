@@ -81,7 +81,7 @@ Run Django's deployment checks in a separate step against the production setting
 Explain a surprising key
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-``showmetadata`` prints which layer settles each key of a page, ``DEFAULTS`` or a ``page.py``, and lists the callables after them.
+``showmetadata`` prints which layer sets each key of a page, ``DEFAULTS`` or a ``page.py``, and lists the callables after them.
 
 .. code-block:: bash
    :caption: shell

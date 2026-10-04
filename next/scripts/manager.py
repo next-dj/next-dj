@@ -5,21 +5,30 @@ Strategy, category and consent split a render into head tags and manifest entrie
 
 import logging
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final
 from urllib.parse import urlsplit
 
+from django.core.signals import setting_changed
 from django.http import HttpRequest
 
 from next.caches import BoundedCache
-from next.consent import UNDECIDED, Consent, get_consent, joint_category
+from next.consent import NECESSARY, UNDECIDED, Consent, get_consent
 from next.consent.manager import consent_configured, consent_payload, server_mode
+from next.consent.markers import joint_category
 from next.diagnostics import FailureLog
 from next.discovery import routed_page_trees
 from next.pages.responses import vary_on_cookie
-from next.static import StaticAsset, StaticCollector, default_kinds, get_static_manager
+from next.static import (
+    StaticAsset,
+    StaticCollector,
+    StaticManager,
+    default_kinds,
+    get_static_manager,
+)
+from next.static.backends import MANIFEST_SETTINGS
 from next.static.errors import StaticAssetNotFoundError, StaticAssetTraversalError
 from next.static.runtime import CONSENT_PAYLOAD_KEY, SCRIPTS_PAYLOAD_KEY
 from next.urls.manager import router_manager
@@ -78,6 +87,8 @@ class ScriptsManager:
         self._trees: dict[Path, tuple[Script, ...]] = {}
         self._roots_of: BoundedCache[Path, object] = BoundedCache()
         self._kept: dict[Path, ScriptsSource | None] = {}
+        self._srcs: BoundedCache[str, tuple[str | None, bool]] = BoundedCache()
+        self._srcs_storage: object = None
         self._failures = FailureLog(logger)
 
     def _load(self) -> None:
@@ -117,17 +128,34 @@ class ScriptsManager:
                 self._load()
 
     def _root_of(self, page_path: Path) -> Path | None:
-        """Return the page tree `page_path` belongs to, the innermost one."""
+        """Return the page tree `page_path` belongs to, the innermost one.
+
+        A miss is filled under the lock from a loaded registry, so a concurrent reset
+        cannot leave a `None` root behind for a page that has one.
+        """
         held = self._roots_of.get(page_path, _MISSING)
         if held is not _MISSING:
             return held  # type: ignore[return-value]
         resolved = page_path.resolve()
-        roots = [
-            root for root in self._registry.roots() if resolved.is_relative_to(root)
-        ]
-        root = max(roots, key=lambda path: len(path.parts)) if roots else None
-        self._roots_of[page_path] = root
+        with self._lock:
+            if not self._loaded:
+                self._load()
+            roots = [
+                root for root in self._registry.roots() if resolved.is_relative_to(root)
+            ]
+            root = max(roots, key=lambda path: len(path.parts)) if roots else None
+            self._roots_of[page_path] = root
         return root
+
+    def _tree_of(self, root: Path) -> tuple[Script, ...]:
+        """Return the scripts of the tree at `root`, filled under the lock."""
+        with self._lock:
+            if not self._loaded:
+                self._load()
+            source = self._registry.source(root)
+            held = _NO_SCRIPTS if source is None else source.scripts
+            self._trees[root] = held
+        return held
 
     def tree(self, page_path: Path | None) -> tuple[Script, ...]:
         """Return the scripts of the tree `page_path` belongs to.
@@ -145,11 +173,7 @@ class ScriptsManager:
             with self._lock:
                 self._refresh_root(root)
         held = self._trees.get(root)
-        if held is None:
-            source = self._registry.source(root)
-            held = _NO_SCRIPTS if source is None else source.scripts
-            self._trees[root] = held
-        return held
+        return self._tree_of(root) if held is None else held
 
     def reset(self, **kwargs) -> None:
         """Forget every tree, so the next render discovers them again.
@@ -163,6 +187,7 @@ class ScriptsManager:
             self._registry.reset()
             self._trees.clear()
             self._roots_of.clear()
+            self._srcs.clear()
             self._failures.clear()
             self._loaded = False
 
@@ -172,17 +197,20 @@ class ScriptsManager:
         collector: StaticCollector,
         page_path: Path | None,
     ) -> list[Script]:
-        """Return the scripts this render runs, a held-back one waiting for its block.
+        """Return the scripts this render runs, a held-back one waiting for its blocks.
 
         A script that is `auto`, or that the page names outside a gated block, is not
         held back. A held-back script waits for its own category and the category of
-        the block, so a `marketing` script named in an `analytics` block needs both.
+        every block that names it, so a `marketing` script named in an `analytics`
+        block needs both.
         """
         names = {name for name in collector.notes(SCRIPT_NOTE) if isinstance(name, str)}
         held: dict[str, str] = {}
         for note in _gated(collector):
             if isinstance(note.target, str):
-                held.setdefault(note.target, note.category)
+                held[note.target] = joint_category(
+                    held.get(note.target, NECESSARY), note.category
+                )
         known = {script.name for script in tree}
         for name in sorted((names | held.keys()) - known):
             self._failures.warn(
@@ -207,9 +235,12 @@ class ScriptsManager:
         *,
         page_path: Path | None,
         request: HttpRequest | None,
-        nonce: str | None,
+        nonce: Callable[[], str | None],
     ) -> tuple[str, Mapping[str, object]]:
-        """Return the head tags and the reserved payload entries of one render."""
+        """Return the head tags and the reserved payload entries of one render.
+
+        `nonce` is called only when a head tag is written, since it mints the nonce.
+        """
         tree = self.tree(page_path)
         if not (tree or consent_configured() or collector.notes(CONSENT_NOTE)):
             return _NOTHING
@@ -228,10 +259,9 @@ class ScriptsManager:
         if entries:
             payload[SCRIPTS_PAYLOAD_KEY] = entries
         payload[CONSENT_PAYLOAD_KEY] = consent_payload(consent)
-        tags = "\n".join(
-            head_tags(script, src, nonce)
-            for script, src in self._sourced(head, request)
-        )
+        sourced = self._sourced(head, request)
+        token = nonce() if sourced else None
+        tags = "\n".join(head_tags(script, src, token) for script, src in sourced)
         return tags, payload
 
     def _sourced(
@@ -245,15 +275,9 @@ class ScriptsManager:
         paired: list[tuple[Script, str | None]] = []
         for script in scripts:
             src: str | None = None
-            if script.src is not None and urlsplit(script.src).netloc:
-                # A third-party URL is used as written, without the static version.
-                src = script.src
-            elif script.src is not None:
-                try:
-                    src = manager.asset_url(
-                        manager.resolve_url(script.src), request=request
-                    )
-                except _ASSET_ERRORS:
+            if script.src is not None:
+                url, own = self._resolved(script.src, manager)
+                if url is None:
                     self._failures.warn(
                         ("missing", script.name, script.src),
                         "The script %r names a missing file, %r, so only its init "
@@ -263,8 +287,37 @@ class ScriptsManager:
                     )
                     if script.init is None:
                         continue
+                elif own:
+                    src = manager.asset_url(url, request=request)
+                else:
+                    # A third-party URL is used as written, without the static version.
+                    src = url
             paired.append((script, src))
         return paired
+
+    def _resolved(self, src: str, manager: StaticManager) -> tuple[str | None, bool]:
+        """Return the URL `src` names and whether the static pipeline owns it.
+
+        The answer is memoised per storage, and `None` marks a file it cannot resolve.
+        """
+        if self._srcs_storage is not manager:
+            self._srcs.clear()
+            self._srcs_storage = manager
+        held = self._srcs.get(src)
+        if held is not None:
+            return held
+        answer: tuple[str | None, bool] = (src, False)
+        if not urlsplit(src).netloc:
+            try:
+                answer = (manager.resolve_url(src), True)
+            except _ASSET_ERRORS:
+                answer = (None, False)
+        self._srcs[src] = answer
+        return answer
+
+    def forget_srcs(self) -> None:
+        """Drop the memoised `src` URLs, so a rebuilt storage resolves them again."""
+        self._srcs.clear()
 
 
 def _split(
@@ -317,6 +370,15 @@ scripts_manager = ScriptsManager()
 def forget_scripts(**kwargs) -> None:
     """Drop every discovered `scripts.py`, so a reload takes effect."""
     scripts_manager.reset()
+
+
+def _on_setting_changed(*, setting: str, **kwargs) -> None:
+    """Drop the memoised `src` URLs once the staticfiles storage is rebuilt."""
+    if setting in MANIFEST_SETTINGS:
+        scripts_manager.forget_srcs()
+
+
+setting_changed.connect(_on_setting_changed)
 
 
 __all__ = [

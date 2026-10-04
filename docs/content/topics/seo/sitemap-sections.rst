@@ -82,7 +82,7 @@ A backend subclasses ``SitemapBackend`` and answers fresh Django sitemaps keyed 
                pages = pages.filter(site__hostname=request.get_host())
            return {"cms": GenericSitemap({"queryset": pages, "date_field": "updated_at"})}
 
-``serves()`` tells the route whether the backend has anything, ``True`` by default, and ``cache_control()`` names the cache its responses ask for, ``None`` by default.
+``serves()`` tells the route whether the backend has anything, ``True`` by default, and ``cache_control()`` names the cache its responses ask for as a ``next.pages.CacheControl``, ``None`` by default.
 The sections of every backend merge in list order, the first holder of a name winning.
 Each backend built sends ``sitemap_backend_loaded``.
 
@@ -92,7 +92,8 @@ One that raises triggers ``next.W089`` and takes no part in the comparison.
 A backend that raises never takes the site down.
 ``sections()`` raising, or a section raising while it lists its URLs, answers 503 with ``Retry-After`` and logs the failure once, and under ``DEBUG`` or ``STRICT_LOADING`` the exception reaches the technical page with a note naming the backend.
 ``Http404`` and ``PermissionDenied`` pass through as the answers they ask for.
-``serves()`` runs while every URL of the site resolves, so one that raises is logged once and counts as serving, and ``/sitemap.xml`` answers 503 rather than every route failing with it.
+``serves()`` runs while every URL of the site resolves.
+One that raises fails the request under ``DEBUG`` or ``STRICT_LOADING`` with a note naming the backend, and otherwise is logged at most once every ten minutes and counts as serving, so ``/sitemap.xml`` answers 503 rather than every route failing with it.
 
 The origin of every URL
 -----------------------

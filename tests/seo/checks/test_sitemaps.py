@@ -43,6 +43,8 @@ NO_APP_DIRS = [
 ]
 
 
+UNKNOWN_KEY = "headline"
+
 UNKNOWN_ITEMS = """
 from next.seo import sitemap
 
@@ -175,6 +177,14 @@ class TestDynamicRoutes:
         root = write_tree(tmp_path / "pages", sitemap="")
         write_page(root, "posts/[slug]", NOINDEX)
         with routed(root):
+            assert check_sitemap_dynamic_routes() == []
+
+    def test_a_refused_route_reads_noindex_without_raising_under_debug(
+        self, tmp_path
+    ) -> None:
+        root = write_tree(tmp_path / "pages", sitemap="")
+        write_page(root, "posts/[slug]", f"metadata = {{'{UNKNOWN_KEY}': 'R'}}\n")
+        with routed(root), override_settings(DEBUG=True):
             assert check_sitemap_dynamic_routes() == []
 
 

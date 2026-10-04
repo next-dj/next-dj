@@ -3,15 +3,8 @@
 Checks register through `next.checks`, since `next.pages` imports this package early.
 """
 
-from .config import SiteConfig, site_config, site_indexable, site_origin, site_url
+from .config import site_indexable, site_origin, site_url
 from .errors import SiteOriginError
 
 
-__all__ = [
-    "SiteConfig",
-    "SiteOriginError",
-    "site_config",
-    "site_indexable",
-    "site_origin",
-    "site_url",
-]
+__all__ = ["SiteOriginError", "site_indexable", "site_origin", "site_url"]

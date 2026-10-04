@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextvars import copy_context
 from functools import partial
 from typing import TYPE_CHECKING, Any
 from unittest import mock
@@ -8,6 +9,8 @@ from unittest import mock
 import pytest
 from django.test import RequestFactory, override_settings
 
+from next.diagnostics import QUIET_PERIOD, degraded, watch_degraded
+from next.ports import PortSlot
 from next.static import (
     StaticAsset,
     StaticCollector,
@@ -61,6 +64,11 @@ HASHED_CHUNKS = (
     '"csrf":"/static/next/next.csrf.min.9c0d.js",'
     '"poll":"/static/next/next.poll.min.1e2f.js"'
 )
+REQUEST_ONLY_BACKENDS = {
+    "STATIC_BACKENDS": [
+        {"BACKEND": "tests.static.test_inject.RequestOnlyStaticBackend"}
+    ]
+}
 COMPOSED_BACKENDS = {
     "STATIC_BACKENDS": [{"BACKEND": "tests.static.test_inject.ComposedStaticBackend"}]
 }
@@ -83,6 +91,14 @@ def _stamp_prefix(prefix: str, url: str, *, request: HttpRequest | None = None) 
     if request is None or not url.startswith("/"):
         return url
     return f"{prefix}{url}"
+
+
+class RequestOnlyStaticBackend(StaticFilesBackend):
+    """Backend whose script renderer takes the request but not the nonce."""
+
+    def render_script_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+        """Render the tag without a nonce."""
+        return f'<script src="{url}" data-old></script>'
 
 
 class ComposedStaticBackend(StaticFilesBackend):
@@ -156,6 +172,25 @@ class TestInjectScriptsAuto:
         assert f'Next._init({{"user":"alice",{CHUNKS}}})' in out
         assert f'<script src="{JS_URL}"></script>' in out
         assert SCRIPTS_PLACEHOLDER not in out
+
+    def test_an_unbound_scripts_port_adds_no_head_or_payload(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        html = f"<head></head><body>{SCRIPTS_PLACEHOLDER}</body>"
+        with (
+            mock.patch(
+                "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+            ),
+            mock.patch(
+                "next.static.inject.page_scripts_slot", PortSlot("page scripts port")
+            ),
+        ):
+            out = fresh_manager.inject(html, collector)
+
+        assert "/static/next/next.min.js" in out
+        assert "<script" not in out.split("</head>")[0]
+        assert f"Next._init({{{CHUNKS}}})" in out
 
     def test_next_script_comes_before_user_scripts(
         self, fresh_manager: StaticManager
@@ -542,6 +577,17 @@ class TestInjectPreloadHint:
             out = fresh_manager.inject(html, collector)
         assert 'rel="preload"' not in out
 
+    def test_no_scripts_placeholder_means_no_preload(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        """The runtime loads from the scripts placeholder alone, so none is hinted."""
+        html = f"<head>{HEAD_CLOSE}</head><body></body>"
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+        ):
+            out = fresh_manager.inject(html, StaticCollector())
+        assert out == html
+
     def test_disabled_policy_skips_preload(self, fresh_manager: StaticManager) -> None:
         collector = StaticCollector()
         html = f"<head>{HEAD_CLOSE}</head>"
@@ -714,7 +760,7 @@ def _records(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 
 class TestBrokenRuntimeConfiguration:
-    """A runtime the storage lacks or a policy no member names costs no page."""
+    """A runtime the storage lacks or an unknown policy still renders the page."""
 
     PAGE = f"<head></head><body>{SCRIPTS_PLACEHOLDER}</body>"
 
@@ -780,3 +826,186 @@ class TestBrokenRuntimeConfiguration:
             pytest.raises(ValueError, match="Invalid NextScriptBuilder policy"),
         ):
             StaticManager().inject(self.PAGE, StaticCollector())
+
+
+class TestRendererWithoutTheNonceKeyword:
+    """A renderer written before the nonce keyword serves every page without one."""
+
+    def _inject(self, nonce: str | None) -> str:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url=JS_URL, kind="js"))
+        with (
+            override_settings(NEXT_FRAMEWORK={**REQUEST_ONLY_BACKENDS, **DISABLED}),
+            mock.patch("next.static.inject.resolve_nonce", return_value=nonce),
+        ):
+            return StaticManager().inject(
+                f"<body>{SCRIPTS_PLACEHOLDER}</body>",
+                collector,
+                request=RequestFactory().get("/"),
+            )
+
+    def test_a_page_without_a_nonce_renders(self) -> None:
+        assert f'<script src="{JS_URL}" data-old></script>' in self._inject(None)
+
+    def test_a_page_with_a_nonce_still_fails(self) -> None:
+        with pytest.raises(TypeError, match="nonce"):
+            self._inject("n0")
+
+
+class TestTheNonceIsResolvedOnDemand:
+    """The injector asks for the nonce only when it writes a tag that carries one."""
+
+    def _resolved(self, html: str, collector: StaticCollector, **framework) -> int:
+        with (
+            override_settings(NEXT_FRAMEWORK=framework),
+            mock.patch(
+                "next.static.inject.resolve_nonce", return_value=None
+            ) as resolve,
+        ):
+            StaticManager().inject(html, collector, request=RequestFactory().get("/"))
+        return resolve.call_count
+
+    def test_a_render_that_writes_no_tag_never_asks(self) -> None:
+        html = f"<head>{STYLES_PLACEHOLDER}{HEAD_CLOSE}</head>{SCRIPTS_PLACEHOLDER}"
+        assert self._resolved(html, StaticCollector(), **DISABLED) == 0
+
+    def test_a_written_tag_asks(self) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        html = f"<head>{STYLES_PLACEHOLDER}</head>"
+        assert self._resolved(html, collector, **DISABLED) == 1
+
+
+class _NotASerializer:
+    """A class `JS_CONTEXT_SERIALIZER` may name by mistake."""
+
+
+class _Clock:
+    """A monotonic clock a test moves by hand."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class TestMemoisedFallbacksDegradeEveryRender:
+    """A fallback a contained failure built marks every render that reuses it.
+
+    Each case renders twice, moves the clock past the quiet period and renders once
+    more, so the reused fallback is logged a second time with the suppressed count.
+    """
+
+    PAGE = f"<head>{HEAD_CLOSE}</head><body>{SCRIPTS_PLACEHOLDER}</body>"
+
+    @pytest.fixture(autouse=True)
+    def _rearmed(self):
+        manager_failures.clear()
+        yield
+        manager_failures.clear()
+
+    @pytest.fixture(autouse=True)
+    def _clock(self, monkeypatch: pytest.MonkeyPatch) -> _Clock:
+        held = _Clock()
+        monkeypatch.setattr("next.diagnostics.monotonic", held)
+        self.clock = held
+        return held
+
+    def _degraded_renders(self) -> list[bool]:
+        """Inject through one manager, each render watched on its own."""
+        manager = StaticManager()
+
+        def render() -> bool:
+            watch_degraded()
+            manager.inject(self.PAGE, StaticCollector())
+            return degraded()
+
+        renders = [copy_context().run(render) for _ in range(2)]
+        self.clock.now += QUIET_PERIOD
+        return [*renders, copy_context().run(render)]
+
+    @staticmethod
+    def _assert_logged_again(caplog: pytest.LogCaptureFixture, reused: str) -> None:
+        """Assert one error at build time and one warning after the quiet period."""
+        records = [r for r in caplog.records if r.name.startswith("next.static")]
+        assert [r.levelname for r in records] == ["ERROR", "WARNING"]
+        assert reused in records[1].getMessage()
+        assert records[1].suppressed > 0
+
+    def test_a_sound_configuration_degrades_nothing(self, caplog) -> None:
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+        ):
+            assert self._degraded_renders() == [False, False, False]
+        assert not caplog.records
+
+    def test_an_unknown_policy(self, caplog) -> None:
+        with override_next_settings(NEXT_JS_OPTIONS={"policy": "sometimes"}):
+            assert self._degraded_renders() == [True, True, True]
+        self._assert_logged_again(caplog, "script builder still holds a default")
+
+    def test_an_uncollected_runtime(self, caplog) -> None:
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url",
+            side_effect=_hashed_without("next/next.min.js"),
+        ):
+            assert self._degraded_renders() == [True, True, True]
+        self._assert_logged_again(caplog, "missing next/next.min.js")
+
+    def test_an_uncollected_chunk(self, caplog) -> None:
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url",
+            side_effect=_hashed_without("next/next.sse.min.js"),
+        ):
+            assert self._degraded_renders() == [True, True, True]
+        self._assert_logged_again(caplog, "still has no next/next.sse.min.js")
+
+    def test_a_broken_serializer(self, caplog) -> None:
+        path = f"{__name__}._NotASerializer"
+        with (
+            override_next_settings(JS_CONTEXT_SERIALIZER=path),
+            mock.patch(
+                "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+            ),
+        ):
+            assert self._degraded_renders() == [True, True, True]
+        self._assert_logged_again(caplog, "still cannot serialize")
+
+    def test_a_backend_tag_template_that_cannot_format(self, caplog) -> None:
+        backends = [
+            {
+                "BACKEND": "next.static.StaticFilesBackend",
+                "OPTIONS": {"js_tag": "<script src={url}{oops}>"},
+            }
+        ]
+        with (
+            override_next_settings(STATIC_BACKENDS=backends),
+            mock.patch(
+                "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+            ),
+        ):
+            assert self._degraded_renders() == [True, True, True]
+        self._assert_logged_again(caplog, "static backend list still holds a default")
+
+
+class TestChunkUrlsWithoutARewrite:
+    """Without a per-request rewrite the chunk URLs are built once per storage."""
+
+    def test_a_later_render_asks_the_pipeline_only_for_the_runtime(self) -> None:
+        manager = StaticManager()
+        html = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
+        with (
+            override_next_settings(STATIC_VERSION="v1"),
+            mock.patch(
+                "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+            ),
+        ):
+            first = manager.inject(html, StaticCollector())
+            with mock.patch.object(
+                manager, "asset_url", wraps=manager.asset_url
+            ) as asset_url:
+                second = manager.inject(html, StaticCollector())
+        assert second == first
+        assert '"poll":"/static/next/next.poll.min.js?v=v1"' in second
+        assert asset_url.call_args_list == [mock.call(NEXT_JS_URL, request=None)]

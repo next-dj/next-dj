@@ -415,18 +415,13 @@ class TestPageMetadata:
 
 
 class TestRobots:
-    """`robots.py` at the page root fences the redirects, no sitemap beside it."""
+    """A static `robots.txt` at the page root fences the redirects, no sitemap."""
 
-    def test_robots_renders_the_declared_rules_without_a_sitemap_line(
-        self, next_client
-    ) -> None:
+    def test_robots_serves_the_static_file_as_written(self, next_client) -> None:
         response = next_client.get("/robots.txt")
         assert response.status_code == 200
         assert response["Content-Type"] == "text/plain; charset=utf-8"
-        assert response.content.decode().splitlines() == [
-            "User-agent: *",
-            "Disallow: /s/",
-        ]
+        assert response.content == b"User-agent: *\nDisallow: /s/\n"
 
     def test_without_a_sitemap_module_the_route_does_not_exist(
         self, next_client

@@ -11,6 +11,7 @@ import next.pages
 import next.partial
 import next.partial.errors
 import next.partial.patches
+from next.diagnostics import degraded, watch_degraded
 from next.pages import ld
 from next.pages.errors import PageMetadataShapeError
 from next.pages.metadata import resolve_metadata
@@ -74,6 +75,17 @@ from next.pages import page
 @page.metadata(inherit=True)
 def root_meta():
     raise Http404
+"""
+VISIT_ROOT = """
+from django.http import HttpRequest
+
+from next.pages import page
+
+
+@page.metadata(inherit=True)
+def root_meta(request: HttpRequest):
+    tab = request.GET.get("tab", "-")
+    return {"title": {"template": f"{{title}} | {request.method} {request.path} {tab}"}}
 """
 LEAF_TITLE = 'template = "<p>Leaf</p>"\nmetadata = {"title": "Leaf"}\n'
 STATIC_ROOT = 'metadata = {"title": {"template": "{title} | Static"}}\n'
@@ -480,7 +492,7 @@ class TestMeta:
         defaults = {"title": {"template": "{title} | Acme", "default": "Acme"}}
         with override_next_settings(METADATA={"DEFAULTS": defaults}):
             envelope = builder().meta("Wallets").envelope()
-        assert envelope.ops[0].as_dict() == {"op": "meta", **_meta("Wallets | Acme")}
+        assert envelope.ops[0].as_dict() == {"op": "meta", "title": "Wallets | Acme"}
 
     @pytest.mark.parametrize(
         "builder",
@@ -506,7 +518,37 @@ class TestMeta:
         }
         with override_next_settings(METADATA={"DEFAULTS": defaults}):
             extras = builder().meta("Wallets").envelope().ops[0].extras
-        assert extras == {"title": "Wallets", "description": None, "robots": None}
+        assert extras == {"title": "Wallets"}
+
+    @pytest.mark.parametrize(
+        "builder",
+        [
+            lambda: Patches.versioned("v1"),
+            lambda: Patches(partial_request(origin=None)),
+        ],
+        ids=["no_request", "no_origin"],
+    )
+    def test_a_builder_without_an_origin_page_omits_the_unset_tags(
+        self, builder: Callable[[], Patches]
+    ) -> None:
+        # A null would remove the tag, and the server does not know the origin's tags.
+        extras = builder().meta({"description": "All"}).envelope().ops[0].extras
+        assert extras == {"description": "All"}
+
+    def test_a_builder_without_an_origin_page_degrades_under_refused_defaults(
+        self,
+    ) -> None:
+        defaults = {"canonical": "javascript:x"}
+        with override_next_settings(METADATA={"DEFAULTS": defaults}):
+            watch_degraded()
+            extras = Patches.versioned("v1").meta("Wallets").envelope().ops[0].extras
+            assert degraded() is True
+        assert extras == {"title": "Wallets", "robots": "noindex"}
+
+    def test_a_builder_without_an_origin_page_sends_a_set_robots(self) -> None:
+        with override_next_settings(SITE={"INDEXABLE": False}):
+            extras = Patches.versioned("v1").meta("W").envelope().ops[0].extras
+        assert extras == {"title": "W", "robots": "noindex, nofollow"}
 
     def test_the_blocks_the_op_omits_are_never_resolved(self) -> None:
         defaults = {
@@ -560,6 +602,25 @@ class TestMeta:
         with _routed(tmp_path):
             envelope = _builder_for(tmp_path, leaf).meta("Post").envelope()
         assert envelope.ops[0].extras == _meta("Post | Kanban")
+
+    def test_an_inherited_callable_reads_a_get_visit_of_the_origin(
+        self, tmp_path: Path
+    ) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", VISIT_ROOT), ("leaf", LEAF_TITLE)]
+        )
+        with _routed(tmp_path):
+            envelope = _builder_for(tmp_path, leaf).meta("Post").envelope()
+        assert envelope.ops[0].extras["title"] == "Post | GET /root/leaf/ -"
+
+    def test_an_inherited_callable_reads_the_queued_url(self, tmp_path: Path) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", VISIT_ROOT), ("leaf", LEAF_TITLE)]
+        )
+        with _routed(tmp_path):
+            builder = _builder_for(tmp_path, leaf).replace_url("/root/leaf/?tab=2")
+            envelope = builder.meta("Post").envelope()
+        assert envelope.ops[1].extras["title"] == "Post | GET /root/leaf/ 2"
 
     def test_an_inherited_callable_runs_behind_the_origin_guard(
         self, tmp_path: Path

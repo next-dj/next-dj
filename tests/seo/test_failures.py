@@ -10,7 +10,8 @@ from django.test import Client, override_settings
 from django.urls import NoReverseMatch
 
 from next.pages.responses import cache_control
-from next.seo import SitemapBackend, seo_manager
+from next.seo import SitemapBackend
+from next.seo.manager import seo_manager
 from next.testing import parse_sitemap
 from tests.seo.sources import CALLS
 from tests.support import BASE, WITH_BASE, routed, write_tree
@@ -99,6 +100,14 @@ class BrokenServesBackend(RaisingBackend):
         """Fail."""
         msg = "serves down"
         raise RuntimeError(msg)
+
+
+class NotFoundServesBackend(RaisingBackend):
+    """A backend whose `serves()` raises `Http404`, as `get_object_or_404` does."""
+
+    def serves(self):
+        """Find nothing."""
+        raise Http404
 
 
 def _backends(*names: str) -> dict[str, object]:
@@ -240,6 +249,33 @@ class TestBackends:
         served = [r for r in caplog.records if "serves() raised" in r.getMessage()]
         assert len(served) == 1
 
+    @override_settings(DEBUG=False)
+    def test_a_404_from_serves_keeps_every_route(self, tmp_path, caplog) -> None:
+        root = write_tree(tmp_path / "pages", pages=("", "about"))
+        with (
+            routed(root, **WITH_BASE, **_backends("NotFoundServesBackend")),
+            caplog.at_level(logging.ERROR),
+        ):
+            home = Client().get("/")
+            about = Client().get("/about/")
+            sitemap = Client().get("/sitemap.xml")
+        assert [home.status_code, about.status_code] == [200, 200]
+        assert sitemap.status_code == 503
+        assert any("serves() raised" in r.getMessage() for r in caplog.records)
+
+    @override_settings(DEBUG=True)
+    def test_debug_raises_from_serves_naming_the_backend(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages")
+        with (
+            routed(root, **WITH_BASE, **_backends("BrokenServesBackend")),
+            pytest.raises(RuntimeError, match="serves down") as caught,
+        ):
+            Client().get("/sitemap.xml")
+        assert caught.value.__notes__[0].startswith(
+            "tests.seo.test_failures.BrokenServesBackend.serves() raised, so "
+            "/sitemap.xml stays mounted"
+        )
+
     def test_a_raising_robots_lookup_keeps_every_route(self, tmp_path, caplog) -> None:
         root = write_tree(tmp_path / "pages", pages=("", "about"), robots="")
         with (
@@ -307,3 +343,21 @@ class TestIndexableCache:
         assert opened.status_code == again.status_code == 200
         assert closed.status_code == 404
         assert "noindex" in closed["X-Robots-Tag"]
+
+    @pytest.mark.parametrize(
+        "source",
+        ["", "cache = False\n", "cache = {'vary': ['Accept-Language']}\n"],
+        ids=["no_cache", "no_store", "no_stored_age"],
+    )
+    def test_a_source_without_a_stored_copy_skips_the_indexability(
+        self, tmp_path, source: str
+    ) -> None:
+        root = write_tree(tmp_path / "pages", sitemap=source)
+        with (
+            routed(root, SITE={"URL": None, "INDEXABLE": True}),
+            patch("next.seo.views.site_indexable") as indexable,
+        ):
+            first = Client().get("/sitemap.xml")
+            second = Client().get("/sitemap.xml")
+        assert first.status_code == second.status_code == 200
+        indexable.assert_not_called()

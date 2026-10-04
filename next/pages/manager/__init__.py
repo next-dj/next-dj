@@ -28,9 +28,11 @@ from next.pages.metadata.chain import (
     ChainEntry,
     MetadataDeclaration,
     MetadataThunk,
+    StaticMetadata,
     chain_entry,
     declared_metadata,
     fold_chain,
+    static_metadata,
 )
 from next.pages.metadata.registry import MetadataRegistrations, PageMetadataRegistry
 from next.pages.metadata.scope import forget_metadata_scope
@@ -205,9 +207,13 @@ class Page:
         """Return the registered callables and their misattributions."""
         return self._metadata_registry.registrations()
 
-    def static_metadata(self, file_path: Path) -> Metadata:
-        """Return the metadata of `file_path` readable without a request."""
-        return chain_entry(self._metadata_registry, file_path).static
+    def static_metadata(self, file_path: Path) -> StaticMetadata:
+        """Return the metadata of `file_path` readable without a request.
+
+        A chain the schema refuses reads as the site defaults under `noindex`, and the
+        refusal is contained as `contained_chain` describes.
+        """
+        return static_metadata(self._metadata_registry, file_path)
 
     def fold_metadata(
         self,

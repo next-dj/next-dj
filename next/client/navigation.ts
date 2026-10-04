@@ -43,9 +43,10 @@ export interface Navigation {
    * Push href now and defer its announcement until an envelope for owner is applied.
    *
    * The returned cancel drops the hold and, while the URL is still owner, replaces it
-   * with the previous URL. Neither write is announced.
+   * with the previous URL. Neither write is announced. A push the browser refuses
+   * holds nothing and returns undefined.
    */
-  hold(owner: string, href: string, onCommit: () => void): () => void;
+  hold(owner: string, href: string, onCommit: () => void): (() => void) | undefined;
   begin(): Commit;
   /** A HistoryAdapter whose writes are announced like any other. */
   asHistory(): HistoryAdapter;
@@ -145,7 +146,7 @@ export function createNavigation(deps: NavigationDeps): Navigation {
     current,
     hold(owner, href, onCommit) {
       const entry = { from: current(), onCommit };
-      if (!record({ href, action: "push" })) return () => undefined;
+      if (!record({ href, action: "push" })) return;
       held.set(owner, entry);
       return () => {
         if (held.get(owner) !== entry) return;

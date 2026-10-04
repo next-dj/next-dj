@@ -175,7 +175,7 @@ The package splits into ``backends`` for the ``PARTIAL_BACKENDS`` entries, ``for
 
 .. automodule:: next.partial.checks
    :members:
-   :exclude-members: E_BACKENDS_NOT_A_LIST, E_BACKEND_WITHOUT_PATH, E_COMPOSED_TEMPLATE_SYNTAX, E_CONTEXT_ZONE_UNKNOWN, E_DUPLICATE_ZONE, E_LAZY_WITHOUT_PLACEHOLDER, E_NON_ASCII_ZONE, E_OP_BAD_NAME, E_OP_SHADOWS_BUILTIN, E_ZONE_IN_COMPONENT, E_ZONE_IN_FOR, E_ZONE_IN_IF, W_FORM_BACKEND_NOT_AWARE, W_FORM_IN_FOR_NO_KEY, W_MANIFEST_VERSION_NO_STORAGE, W_TOO_MANY_BACKENDS, W_WITH_OVER_ZONE
+   :exclude-members: E_BACKENDS_NOT_A_LIST, E_BACKEND_WITHOUT_PATH, E_COMPOSED_TEMPLATE_SYNTAX, E_CONTEXT_ZONE_UNKNOWN, E_DUPLICATE_ZONE, E_LAZY_WITHOUT_PLACEHOLDER, E_NON_ASCII_ZONE, E_OP_BAD_NAME, E_ZONE_IN_COMPONENT, E_ZONE_IN_FOR, E_ZONE_IN_IF, W_FORM_BACKEND_NOT_AWARE, W_FORM_IN_FOR_NO_KEY, W_MANIFEST_VERSION_NO_STORAGE, W_TOO_MANY_BACKENDS, W_WITH_OVER_ZONE
 
 Apps
 ~~~~
@@ -209,7 +209,7 @@ One code stands for one condition, so silencing it through ``SILENCED_SYSTEM_CHE
 The ``Emitted by`` column names the module that builds the message, which for the three check packages is the submodule rather than the package.
 
 A code that a release dropped is retired and never reused, so a silenced code keeps naming the condition it named.
-The retired errors are ``next.E001`` and ``next.E091``.
+The retired errors are ``next.E001``, ``next.E066``, ``next.E091``, and ``next.E109``.
 The retired warnings are ``next.W003`` through ``next.W029``, ``next.W032`` through ``next.W041``, ``next.W044``, ``next.W045``, ``next.W047`` through ``next.W053``, ``next.W064`` through ``next.W066``, and ``next.W073``.
 
 Errors
@@ -437,10 +437,6 @@ Errors
    * - ``next.E065``
      - A component template declares a ``{% zone %}`` tag, which belongs to a page or layout.
      - ``next.partial.checks.zones``
-   * - ``next.E066``
-     - A custom patch op shadows a built-in verb, so the built-in wins on the wire and the custom handler never runs.
-       A name that is no valid verb token is ``next.E090``.
-     - ``next.partial.checks.ops``
    * - ``next.E067``
      - ``NEXT_FRAMEWORK['PARTIAL_BACKENDS']`` is not a list, so the value is ignored and the default protocol backend loads in place of the configured one.
        The generic shape probe behind ``next.E076`` leaves this key out, so the drop is reported once.
@@ -579,7 +575,7 @@ Errors
    * - ``next.E104``
      - A ``metadata`` dict names a key or a value the schema refuses, at any depth, the key path named in the message.
        This covers a URL with a scheme outside http and https, ``x-default`` given both in ``languages`` and as ``x_default``, a NaN or a non-string key in raw JSON-LD, ``canonical: False``, an ``og.determiner``, ``viewport_fit``, ``interactive_widget``, or ``color_scheme`` outside its values, a ``twitter.card`` outside ``summary``, ``summary_large_image``, ``app``, and ``player``, and a ``player`` card without ``twitter.player``.
-       A lazy URL passes unforced, and a render that forces it to such a scheme leaves the tag out and logs the ``PageMetadataShapeError`` once.
+       A lazy URL passes unforced, and a render that forces it to such a scheme leaves the tag out and logs the ``PageMetadataShapeError`` at most once every ten minutes.
        Under ``DEBUG`` or ``STRICT_LOADING`` the render raises it instead.
      - ``next.pages.checks.metadata.shape``
    * - ``next.E105``
@@ -591,15 +587,11 @@ Errors
    * - ``next.E107``
      - ``NEXT_FRAMEWORK["METADATA"]["RENDERER"]`` does not import or names no concrete ``MetadataRenderer`` subclass.
        The check imports the dotted path and never builds the class.
-       A render with such a value falls back to ``HtmlMetadataRenderer`` and logs it once, and raises under ``DEBUG`` or ``STRICT_LOADING``.
+       A render with such a value falls back to ``HtmlMetadataRenderer`` and logs it at most once every ten minutes, and raises under ``DEBUG`` or ``STRICT_LOADING``.
      - ``next.pages.checks.metadata.scope``
    * - ``next.E108``
      - A ``@page.metadata`` callable is not annotated as returning a mapping.
        The check is static, because running the callable at check time could reach an unmigrated database.
-     - ``next.pages.checks.metadata.shape``
-   * - ``next.E109``
-     - A URL field of the fold carries a scheme outside http and https, a canonical, an ``og.url``, an alternate, a feed, an Open Graph or Twitter medium, an icon, the manifest, or a link ``href``.
-       A lazy URL is left out, the render that forces it checks it instead.
      - ``next.pages.checks.metadata.shape``
    * - ``next.E110``
      - A ``sitemap.py`` or a ``robots.py`` raises on import, the cause named, a ``RobotsRuleError`` among them.
@@ -618,10 +610,11 @@ Errors
    * - ``next.E114``
      - More than one source serves ``/robots.txt``, a ``robots.py`` beside a ``robots.txt`` or a source in two page roots, and only the first answers.
        The message names the source that answers and the ones ignored.
-       At runtime the same choice is logged once under ``DEBUG`` and never in production, where this check is the report.
+       At runtime the same choice is logged at most once every ten minutes under ``DEBUG`` and never in production, where this check is the report.
      - ``next.seo.checks.robots``
    * - ``next.E115``
-     - A page directory is named after an address the SEO sources serve, ``sitemap.xml``, ``sitemap-<section>.xml``, or ``robots.txt``, so the page and the framework route shadow each other.
+     - A page directory is named after an address the SEO sources serve, ``sitemap.xml``, ``sitemap-<section>.xml``, or ``robots.txt``, so the page answers its own path, such as ``/sitemap.xml/``, beside the framework route.
+       Crawlers and visitors then reach two different documents, and the message names both paths.
        A urlpattern of the project answering the address first is ``next.W094``.
      - ``next.seo.checks.routes``
    * - ``next.E116``
@@ -675,7 +668,7 @@ Errors
      - ``next.site.checks``
    * - ``next.E130``
      - ``NEXT_JS_OPTIONS["policy"]`` names no ``ScriptInjectionPolicy``, read through ``NextScriptBuilder.from_options`` as a render reads it.
-       Pages inject the runtime as under ``"auto"``, and log the fallback once.
+       Pages inject the runtime as under ``"auto"``, and log the fallback at most once every ten minutes.
      - ``next.static.checks``
    * - ``next.E131``
      - A ``page.py`` declares a ``cache`` or ``headers`` the response cannot carry as written, an unknown key, a negative age, a flag that is no bool, ``public`` with ``no_store``, a forbidden or invalid header name, or a value with a control character or a character outside ASCII.
@@ -699,7 +692,7 @@ Errors
      - ``next.scripts.checks``
    * - ``next.E137``
      - ``CONSENT["BACKEND"]`` does not import or is no ``ConsentBackend`` subclass.
-       Pages still render, every visitor reading as undecided with every category but ``necessary`` denied, and the failure is logged once, or raised under ``DEBUG`` or ``STRICT_LOADING``.
+       Pages still render, every visitor reading as undecided with every category but ``necessary`` denied, and the failure is logged at most once every ten minutes, or raised under ``DEBUG`` or ``STRICT_LOADING``.
        Name a subclass by its dotted path, or remove ``BACKEND`` to read the cookie the runtime writes.
      - ``next.consent.checks``
    * - ``next.E138``
@@ -707,7 +700,7 @@ Errors
      - ``next.scripts.checks``
    * - ``next.E139``
      - A custom ``preload_template``, ``script_tag_template``, or ``init_template`` in ``NEXT_JS_OPTIONS``, or a ``css_tag``, ``js_tag``, or ``module_tag`` in a ``STATIC_BACKENDS`` entry, does not format with its fields, ``{url}`` or ``{payload}`` and ``{nonce_attr}``, through a stray brace or another field.
-       The check formats each with blank values, and a render uses the default tag in its place and logs it once.
+       The check formats each with blank values, and a render uses the default tag in its place and logs it at most once every ten minutes.
      - ``next.static.checks``
    * - ``next.E140``
      - A script names a category ``CONSENT["CATEGORIES"]`` does not list, so no visitor can grant it.
@@ -717,7 +710,7 @@ Errors
      - A script ``src`` is neither an http or https URL nor a staticfiles name a finder answers, such as another scheme, a scheme-relative URL, an absolute path, or a name that climbs out of the static root.
      - ``next.scripts.checks``
    * - ``next.E142``
-     - A script ``init`` holds ``</script``, ``<script``, or ``<!--``, which the HTML parser reads as markup, so the element closes early or swallows the rest of the page.
+     - A script ``init`` holds ``</script`` or ``<script`` followed by whitespace, ``/``, or ``>``, or holds ``<!--``, which the HTML parser reads as markup, so the element closes early or hides the rest of the page.
      - ``next.scripts.checks``
    * - ``next.E143``
      - A script carries an attribute outside ``integrity``, ``crossorigin``, ``referrerpolicy``, and the ``data-*`` names.
@@ -732,16 +725,24 @@ Errors
      - A ``CONSENT["CATEGORIES"]`` name holds a character outside letters, digits, ``_``, ``-``, and ``.``, which the consent cookie ``2:<a>|<b>:<seconds>`` cannot carry.
      - ``next.consent.checks``
    * - ``next.E147``
-     - A registered asset kind renders through a method of the rendering backend, the first ``STATIC_BACKENDS`` entry that loads, which is missing or takes no ``request`` and ``nonce`` keywords, so every page holding such an asset fails to render.
+     - A registered asset kind renders through a method of the rendering backend, the first ``STATIC_BACKENDS`` entry that loads, which is missing or takes no ``request`` keyword, so every page holding such an asset fails to render, or takes no ``nonce`` keyword, so such a page fails to render whenever its request carries a CSP nonce.
      - ``next.static.checks``
    * - ``next.E148``
      - ``CSRF_DELIVERY`` is ``"lazy"``, or ``"auto"`` with a page whose ``cache`` a CDN may hold, while ``ROOT_URLCONF`` does not route the ``_next/csrf/`` endpoint, so ``csrf_url()`` does not reverse.
-       Pages embed the token instead and log it once, and the hint asks for ``include("next.urls")``.
+       Pages embed the token instead and log it at most once every ten minutes, and the hint asks for ``include("next.urls")``.
      - ``next.pages.checks.responses``
    * - ``next.E149``
-     - The CSRF token endpoint or the form action endpoint reverses, but ``resolve()`` of its address returns another pattern, a project pattern listed above ``include("next.urls")`` or a page, which the message names by its file.
+     - The CSRF token endpoint or the form action endpoint reverses, but ``resolve()`` of its address returns a view other than the framework view, such as a project pattern listed above ``include("next.urls")``, a project view that reuses the URL name ``csrf`` or ``form_action``, or a page, which the message names by its file.
        The framework routes lead the patterns of ``next.urls``, so a page tree cannot shadow them from inside the include.
      - ``next.urls.checks``
+   * - ``next.E150``
+     - The consent cookie's ``samesite`` option is not ``"Lax"``, ``"Strict"``, or ``"None"`` in any letter case, so the browser ignores it and the cookie takes its default policy.
+       Only a ``CookieConsentBackend`` or a subclass of it is checked.
+     - ``next.consent.checks``
+   * - ``next.E151``
+     - The consent cookie's ``max_age`` option is not a positive int.
+       A value that is not an int is replaced by the default age, and zero or less makes the browser drop the cookie at once, so the choice is not kept.
+     - ``next.consent.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -899,19 +900,19 @@ Warnings
      - ``next.seo.checks.sitemaps``
    * - ``next.W090``
      - The client runtime ``next/next.min.js`` or a lazy chunk other than the dev one is unbuilt, so no static files finder answers it, or the static files storage, a hashing one such as ``ManifestStaticFilesStorage``, holds no entry for it.
-       A page renders without the runtime, or without the chunk, and logs it once.
+       A page renders without the runtime, or without the chunk, and logs it at most once every ten minutes.
        The check carries ``deploy=True``.
      - ``next.static.checks``
    * - ``next.W091``
      - A ``{% #consented %}`` block on a composed page, a component it reaches, or a template it includes names by a literal a category ``CONSENT["CATEGORIES"]`` does not list, so no visitor can grant it and the block always renders its ``else`` branch.
-       A category named by a variable is not read, and under ``DEBUG`` a render logs such a category once.
+       A category named by a variable is not read, and under ``DEBUG`` a render logs such a category at most once every ten minutes.
        Silent while ``CONSENT`` is unset, which ``next.W123`` reports, or while ``next.E135`` reports the list.
      - ``next.scripts.checks``
    * - ``next.W092``
      - A dynamic route of a tree with a ``sitemap.py`` has no ``@sitemap.items`` callable, matches no ``exclude`` glob, and is not ``noindex`` by its static metadata, so the sitemap lists no URL for it.
      - ``next.seo.checks.sitemaps``
    * - ``next.W093``
-     - An ``@sitemap.items`` trail names a page whose static metadata is ``noindex``, so the sitemap invites crawlers to a page the tag turns away.
+     - An ``@sitemap.items`` trail names a page whose static metadata is ``noindex``, so the sitemap lists a page whose tag keeps it out of the index.
        Silent while the site is closed to search, which serves no sitemap.
      - ``next.seo.checks.sitemaps``
    * - ``next.W094``
@@ -1028,6 +1029,9 @@ Warnings
        A middleware is matched by its class, so a subclass counts as its base, and one that does not import counts as one that may set a cookie.
        ``next.middleware.SharedCacheGuardMiddleware`` listed first, or with only ``UpdateCacheMiddleware`` above it, silences it, and the hint names it.
      - ``next.pages.checks.responses``
+   * - ``next.W125``
+     - The consent cookie's ``samesite`` option is ``"None"`` while ``secure`` is not ``True``, so a browser rejects the cookie on a page that is not served over https.
+     - ``next.consent.checks``
 
 Codes are assigned per check and are not contiguous.
 

@@ -7,11 +7,11 @@ interface Dispatched {
   detail: Record<string, unknown>;
 }
 
-function runtimeScript(src: string): HTMLScriptElement {
-  const el = document.createElement("script");
-  if (src !== "") el.src = src;
-  return el;
-}
+// The $chunks map the server emits for a storage that holds every chunk.
+const CHUNKS = {
+  scripts: "/static/next/next.scripts.min.js",
+  dev: "/static/next/next.dev.min.js",
+};
 
 function chunkTags(): HTMLScriptElement[] {
   return Array.from(document.head.querySelectorAll("script"));
@@ -46,10 +46,7 @@ function fakeChunk() {
   return { factory, calls, hosts };
 }
 
-function makeLoader(
-  runtime: Element | null = runtimeScript("/static/next/next.min.js"),
-  withNonce = true,
-) {
+function makeLoader(withNonce = true) {
   const dispatched: Dispatched[] = [];
   const installed: ScriptsChunk[] = [];
   const mount = vi.fn();
@@ -57,7 +54,6 @@ function makeLoader(
   const deps = {
     dispatch: (event: string, detail: Record<string, unknown>) =>
       void dispatched.push({ event, detail }),
-    runtime,
     nonce: withNonce ? "boot" : undefined,
     context: () => seeded,
   };
@@ -90,11 +86,11 @@ describe("fetching the scripts chunk", () => {
   });
 
   it.each(["$scripts", "$consent"])(
-    "fetches the runtime's sibling once when the payload carries %s",
+    "fetches the $chunks URL once when the payload carries %s",
     (key) => {
       const { loader } = makeLoader();
-      loader.init({ [key]: [] });
-      loader.init({ [key]: [] });
+      loader.init({ [key]: [], $chunks: CHUNKS });
+      loader.init({ [key]: [], $chunks: CHUNKS });
       const [tag] = chunkTags();
       expect(chunkTags()).toHaveLength(1);
       expect(tag!.src).toBe(`${location.origin}/static/next/next.scripts.min.js`);
@@ -103,12 +99,12 @@ describe("fetching the scripts chunk", () => {
   );
 
   it("a page without a CSP nonce fetches the chunk without one", () => {
-    const { loader } = makeLoader(runtimeScript("/static/next/next.min.js"), false);
-    loader.init({ $scripts: [] });
+    const { loader } = makeLoader(false);
+    loader.init({ $scripts: [], $chunks: CHUNKS });
     expect(chunkTags()[0]!.hasAttribute("nonce")).toBe(false);
   });
 
-  it("prefers the $chunks payload key over the sibling", () => {
+  it("fetches the hashed name the $chunks key gives", () => {
     const { loader } = makeLoader();
     loader.init({
       $consent: {},
@@ -119,21 +115,36 @@ describe("fetching the scripts chunk", () => {
     );
   });
 
-  it("falls back to the sibling when $chunks names no scripts chunk", () => {
-    const { loader } = makeLoader();
-    loader.init({ $consent: {}, $chunks: { other: "/x.js" } });
-    expect(chunkTags()[0]!.src).toBe(
-      `${location.origin}/static/next/next.scripts.min.js`,
-    );
-  });
-
-  it("an inline bootstrap without $chunks has nowhere to fetch from", async () => {
-    for (const runtime of [null, runtimeScript(""), document.createElement("div")]) {
-      const { loader } = makeLoader(runtime);
+  it.each([undefined, "/x.js", { other: "/x.js" }, { scripts: 1 }])(
+    "a payload whose $chunks is %j has nowhere to fetch from",
+    async ($chunks) => {
+      const { loader } = makeLoader();
       const ready = loader.ready();
-      loader.init({ $scripts: [] });
+      loader.init({ $scripts: [], $chunks });
       await expect(ready).rejects.toThrow("unavailable");
+      expect(chunkTags()).toEqual([]);
+    },
+  );
+
+  it("never guesses a chunk URL beside the runtime script", async () => {
+    // The runtime reads its own script element during evaluation, so it is set first.
+    const runtime = document.createElement("script");
+    runtime.src = "/static/next/next.min.js";
+    Object.defineProperty(document, "currentScript", {
+      value: runtime,
+      configurable: true,
+    });
+    vi.resetModules();
+    try {
+      await import("./next");
+    } finally {
+      Object.defineProperty(document, "currentScript", {
+        value: null,
+        configurable: true,
+      });
     }
+    window.Next._init({ $scripts: [] });
+    await expect(window.Next.ready("scripts")).rejects.toThrow("unavailable");
     expect(chunkTags()).toEqual([]);
   });
 });
@@ -166,7 +177,7 @@ describe("waiting for the scripts chunk", () => {
 
   it("a ready after init fetches a chunk the payload did not ask for", async () => {
     const { loader } = makeLoader();
-    loader.init({ page: "home" });
+    loader.init({ page: "home", $chunks: CHUNKS });
     const ready = loader.ready();
     expect(chunkTags()).toHaveLength(1);
     loader.register(fakeChunk().factory);
@@ -197,30 +208,32 @@ describe("waiting for the scripts chunk", () => {
   it("configures a chunk with the payload init stored last, not the one it fetched for", async () => {
     const { loader } = makeLoader();
     const { factory, calls } = fakeChunk();
-    loader.init({ $scripts: [], page: "first" });
+    loader.init({ $scripts: [], $chunks: CHUNKS, page: "first" });
     const ready = loader.ready();
-    loader.init({ $scripts: [], page: "second" });
+    loader.init({ $scripts: [], $chunks: CHUNKS, page: "second" });
     loader.register(factory);
     await ready;
-    expect(calls).toEqual([["configure", { $scripts: [], page: "second" }]]);
+    expect(calls).toEqual([
+      ["configure", { $scripts: [], $chunks: CHUNKS, page: "second" }],
+    ]);
   });
 
   it("takes the first chunk that lands and ignores a second copy", async () => {
     const { loader, installed } = makeLoader();
     const first = fakeChunk();
     const second = fakeChunk();
-    loader.init({ $consent: {} });
+    loader.init({ $consent: {}, $chunks: CHUNKS });
     loader.register(first.factory);
     loader.register(second.factory);
     await loader.ready();
-    expect(first.calls).toEqual([["configure", { $consent: {} }]]);
+    expect(first.calls).toEqual([["configure", { $consent: {}, $chunks: CHUNKS }]]);
     expect(second.hosts).toEqual([]);
     expect(installed).toHaveLength(1);
   });
 
   it("a failed chunk no ready awaits is reported as an asset alone", async () => {
     const { loader, dispatched } = makeLoader();
-    loader.init({ $scripts: [] });
+    loader.init({ $scripts: [], $chunks: CHUNKS });
     chunkTags()[0]!.dispatchEvent(new Event("error"));
     await Promise.resolve();
     expect(dispatched.map((d) => d.detail.kind)).toEqual(["asset"]);
@@ -230,7 +243,7 @@ describe("waiting for the scripts chunk", () => {
     const { loader, dispatched } = makeLoader();
     const onDocument = vi.fn();
     document.addEventListener("partial:error", onDocument);
-    loader.init({ $scripts: [] });
+    loader.init({ $scripts: [], $chunks: CHUNKS });
     const pending = loader.ready();
     const failed = chunkTags()[0]!;
     failed.dispatchEvent(new Event("error"));
@@ -239,10 +252,7 @@ describe("waiting for the scripts chunk", () => {
     await expect(pending).rejects.toThrow("unavailable");
     expect(dispatched[0]).toMatchObject({
       event: "partial:error",
-      detail: {
-        kind: "asset",
-        url: `${location.origin}/static/next/next.scripts.min.js`,
-      },
+      detail: { kind: "asset", url: CHUNKS.scripts },
     });
     expect(onDocument).toHaveBeenCalledOnce();
     const retry = loader.ready();
@@ -254,17 +264,14 @@ describe("waiting for the scripts chunk", () => {
 });
 
 describe("a single-module chunk", () => {
-  function makeDev(
-    runtime: Element | null = runtimeScript("/static/next/next.min.js"),
-  ) {
+  function makeDev() {
     const doc = document.implementation.createHTMLDocument("");
     const errors: Record<string, unknown>[] = [];
-    let seeded: Record<string, unknown> = { $dev: true };
+    let seeded: Record<string, unknown> = { $dev: true, $chunks: CHUNKS };
     const chunk = lazyChunk<string>(
       {
         dispatch: (_event, detail) => errors.push(detail),
         document: doc,
-        runtime,
         nonce: "boot",
         context: () => seeded,
       },
@@ -279,12 +286,12 @@ describe("a single-module chunk", () => {
     };
   }
 
-  it("fetches the runtime's sibling once, with the bootstrap nonce", async () => {
+  it("fetches its $chunks URL once, with the bootstrap nonce", async () => {
     const { chunk, tags } = makeDev();
     const first = chunk.load();
     const second = chunk.load();
-    expect(tags().map((el) => [el.src, el.nonce])).toEqual([
-      [`${location.origin}/static/next/next.dev.min.js`, "boot"],
+    expect(tags().map((el) => [el.getAttribute("src"), el.nonce])).toEqual([
+      [CHUNKS.dev, "boot"],
     ]);
     expect(chunk.get()).toBeUndefined();
     chunk.land("diagnostics");
@@ -316,10 +323,7 @@ describe("a single-module chunk", () => {
     tags()[0]!.dispatchEvent(new Event("error"));
     expect(tags()).toEqual([]);
     expect(await pending).toBeUndefined();
-    expect(errors[0]).toMatchObject({
-      kind: "asset",
-      url: `${location.origin}/static/next/next.dev.min.js`,
-    });
+    expect(errors[0]).toMatchObject({ kind: "asset", url: CHUNKS.dev });
     void chunk.load();
     expect(tags()).toHaveLength(1);
   });
@@ -358,6 +362,22 @@ describe("a single-module chunk", () => {
     }
   });
 
+  it("fails a tag another script removed before it reported, then retries", async () => {
+    vi.useFakeTimers();
+    try {
+      const { chunk, errors, tags } = makeDev();
+      const pending = chunk.load();
+      tags()[0]!.remove();
+      vi.advanceTimersByTime(CHUNK_TIMEOUT);
+      expect(await pending).toBeUndefined();
+      expect(errors).toEqual([expect.objectContaining({ kind: "asset" })]);
+      void chunk.load();
+      expect(tags()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps a landed module when its file reports the load", async () => {
     const { chunk, errors, tags } = makeDev();
     const pending = chunk.load();
@@ -368,8 +388,9 @@ describe("a single-module chunk", () => {
     expect(tags()).toHaveLength(1);
   });
 
-  it("answers undefined when there is nowhere to fetch from", async () => {
-    const { chunk, tags } = makeDev(null);
+  it("answers undefined when $chunks names no URL for it", async () => {
+    const { chunk, tags, seed } = makeDev();
+    seed({ $dev: true, $chunks: { scripts: CHUNKS.scripts } });
     expect(await chunk.load()).toBeUndefined();
     expect(tags()).toEqual([]);
   });

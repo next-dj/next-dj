@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -8,6 +10,7 @@ from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy
 from pytest_lazy_fixtures import lf
 
+from next import utils
 from next.conf import next_framework_settings
 from next.conf.frozen import FrozenDict, FrozenList
 from next.conf.merge import (
@@ -20,7 +23,9 @@ from next.conf.merge import (
     accepted_value,
     merge_user_settings,
 )
+from next.conf.sentinels import Unset
 from next.conf.settings import NextFrameworkSettings
+from tests.django_setup import PROJECT_ROOT
 
 
 DEFAULTS: dict[str, Any] = NextFrameworkSettings.DEFAULTS
@@ -167,3 +172,32 @@ class TestReplacementIsWhole:
             DEFAULTS, {"FORM_WIZARD_BACKEND": {"OPTIONS": {"TIMEOUT": 60}}}
         )
         assert "BACKEND" not in merged["FORM_WIZARD_BACKEND"]
+
+
+class TestSentinelHome:
+    """The configuration layer defines the sentinel and imports no area helper."""
+
+    def test_the_utils_sentinel_is_the_configuration_one(self) -> None:
+        assert utils.UNSET is UNSET
+        assert utils.Unset is Unset
+
+    def test_the_merge_imports_no_framework_helper(self) -> None:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys\n"
+                    "from django.conf import settings\n"
+                    "from tests.django_setup import build_test_settings\n"
+                    "settings.configure(**build_test_settings())\n"
+                    "import next.conf.merge\n"
+                    "print('next.utils' in sys.modules)\n"
+                ),
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert completed.stdout.strip() == "False"

@@ -10,7 +10,7 @@ from next.pages.responses import cookie_varies
 from next.scripts.discovery import load_scripts
 from next.scripts.manager import ScriptsManager, scripts_manager
 from next.scripts.registry import ScriptsRegistry
-from next.static import StaticCollector
+from next.static import StaticCollector, StaticManager
 from next.static.errors import StaticAssetNotFoundError, StaticAssetTraversalError
 from next.testing import NextClient, envelope_of
 from next.utils import PageRoot
@@ -342,12 +342,52 @@ class TestReset:
             manager.reset()
             manager.reset()
             kept = manager.sources()
+            assert manager.sources() == kept
             touch_later(first / "scripts.py", NEW_SCRIPTS)
             manager.reset()
             moved = manager.sources()
         assert kept == before
         assert [call.args[0] for call in loads.call_args_list] == [first, second, first]
         assert [script.name for script in moved[0].scripts] == ["new"]
+
+
+class TestConcurrentReset:
+    """A reset between the steps of a lookup never leaves an empty tree behind."""
+
+    def test_a_reset_before_the_root_lookup_keeps_the_tree(
+        self, tmp_path: Path
+    ) -> None:
+        root = write_tree(tmp_path / "pages", scripts=NEW_SCRIPTS)
+        manager = ScriptsManager(ScriptsRegistry())
+        ensure = manager._ensure_loaded
+
+        def loaded_then_reset() -> None:
+            ensure()
+            manager.reset()
+
+        with patch("next.scripts.manager.routed_page_trees", return_value=_trees(root)):
+            with patch.object(manager, "_ensure_loaded", side_effect=loaded_then_reset):
+                first = manager.tree(root / "page.py")
+            again = manager.tree(root / "page.py")
+        assert [script.name for script in first] == ["new"]
+        assert again == first
+
+    def test_a_reset_before_the_tree_fill_keeps_the_tree(self, tmp_path: Path) -> None:
+        root = write_tree(tmp_path / "pages", scripts=NEW_SCRIPTS)
+        manager = ScriptsManager(ScriptsRegistry())
+        root_of = manager._root_of
+
+        def found_then_reset(page_path: Path) -> Path | None:
+            found = root_of(page_path)
+            manager.reset()
+            return found
+
+        with patch("next.scripts.manager.routed_page_trees", return_value=_trees(root)):
+            with patch.object(manager, "_root_of", side_effect=found_then_reset):
+                first = manager.tree(root / "page.py")
+            again = manager.tree(root / "page.py")
+        assert [script.name for script in first] == ["new"]
+        assert again == first
 
 
 class TestSources:
@@ -390,6 +430,29 @@ class TestSources:
         )
         html = get(write_tree(tmp_path / "pages", scripts=scripts)).content.decode()
         assert '<script src="/static/x/a.js" async data-next-script="a">' in html
+
+    def test_a_src_resolves_once_per_storage(self, tmp_path: Path) -> None:
+        scripts = (
+            "from next.scripts import Script\nscripts = (Script('a', src='x/a.js'),)\n"
+        )
+        root = write_tree(tmp_path / "pages", scripts=scripts)
+        client = Client()
+        with (
+            routed(root),
+            patch.object(
+                StaticManager,
+                "resolve_url",
+                autospec=True,
+                side_effect=StaticManager.resolve_url,
+            ) as resolves,
+        ):
+            first = client.get("/").content.decode()
+            client.get("/")
+            with override_settings(STATIC_URL="/assets/"):
+                moved = client.get("/").content.decode()
+        assert [call.args[1] for call in resolves.call_args_list] == ["x/a.js"] * 2
+        assert '<script src="/static/x/a.js"' in first
+        assert '<script src="/assets/x/a.js"' in moved
 
     def test_a_vendor_url_keeps_no_project_version(self, tmp_path: Path) -> None:
         scripts = (
@@ -521,6 +584,24 @@ class TestHeldScripts:
             page=(
                 'template = \'{% #consented "analytics" %}'
                 '{% script "tracker" %}{% /consented %}\'\ncache = 60\n'
+            ),
+        )
+        response = get(root, CONSENT={"CATEGORIES": ["analytics", "marketing"]})
+        entries = {entry["name"]: entry for entry in payload(response)["$scripts"]}
+        assert entries["tracker"]["category"] == "analytics marketing"
+
+    def test_a_script_two_blocks_hold_waits_for_both(self, tmp_path: Path) -> None:
+        root = write_tree(
+            tmp_path / "pages",
+            scripts=(
+                "from next.scripts import Script\n"
+                "scripts = (Script('tracker', src='https://px.example/t.js', "
+                "auto=False),)\n"
+            ),
+            page=(
+                'template = \'{% #consented "analytics" %}{% script "tracker" %}'
+                '{% /consented %}{% #consented "marketing" %}{% script "tracker" %}'
+                "{% /consented %}'\ncache = 60\n"
             ),
         )
         response = get(root, CONSENT={"CATEGORIES": ["analytics", "marketing"]})

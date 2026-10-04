@@ -7,7 +7,7 @@ necessary by default.
 from . import checks, providers, signals
 from .backends import ConsentBackend, CookieConsentBackend
 from .manager import consent_categories, get_consent
-from .markers import NECESSARY, UNDECIDED, Consent, joint_category
+from .markers import NECESSARY, UNDECIDED, Consent
 
 
 __all__ = [
@@ -19,6 +19,5 @@ __all__ = [
     "checks",
     "consent_categories",
     "get_consent",
-    "joint_category",
     "signals",
 ]

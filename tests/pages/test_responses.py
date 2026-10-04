@@ -15,7 +15,10 @@ from django.utils.functional import SimpleLazyObject
 
 from next.csrf import token_deferred
 from next.pages import CacheDict, HeadersDict, page
+from next.pages.errors import PageMetadataShapeError
 from next.pages.loaders import load_page_module, module_generation, reset_module_memo
+from next.pages.metadata import Metadata
+from next.pages.metadata.resolve import publish_metadata, resolve_metadata
 from next.pages.responses import (
     NO_STORE,
     CacheControl,
@@ -983,6 +986,78 @@ class TestRobotsHeader:
         assert html["X-Robots-Tag"] == raw["X-Robots-Tag"] == "noindex, nofollow"
 
 
+class RaisingRenderer:
+    """A metadata renderer whose `render` raises."""
+
+    def render(self, resolved: object) -> str:
+        """Raise as a broken custom renderer would."""
+        raise TypeError(resolved)
+
+
+UNKNOWN_KEY = "headline"
+REFUSED = f"template = 'x'\ncache = 3600\nmetadata = {{'{UNKNOWN_KEY}': 'Refused'}}\n"
+
+
+class TestRefusedMetadata:
+    """A chain the schema refuses renders under noindex and is never shared."""
+
+    @pytest.mark.parametrize("layout", [HEAD, "{% template %}"], ids=["head", "bare"])
+    def test_every_response_is_private_and_noindex(
+        self, tmp_path, caplog, layout
+    ) -> None:
+        root = _tree(tmp_path, ("", REFUSED), layout=layout)
+        with routed(root):
+            responses = [Client().get("/") for _ in range(2)]
+        assert [r.status_code for r in responses] == [200, 200]
+        assert {r["Cache-Control"] for r in responses} == {"private, no-store"}
+        assert {r["X-Robots-Tag"] for r in responses} == {"noindex"}
+        refused = [r for r in caplog.records if "is refused" in r.getMessage()]
+        assert len(refused) == 1
+
+    def test_the_head_renders_noindex(self, tmp_path) -> None:
+        response = _get(_tree(tmp_path, ("", REFUSED)))
+        assert '<meta name="robots" content="noindex">' in response.content.decode()
+
+    def test_a_raising_renderer_empties_the_head_and_is_never_shared(
+        self, tmp_path
+    ) -> None:
+        source = "template = 'x'\ncache = 3600\nmetadata = {'title': 'T'}\n"
+        root = _tree(tmp_path, ("", source))
+        with (
+            patch("next.pages.metadata.nodes.metadata_renderer", RaisingRenderer),
+            routed(root),
+        ):
+            response = Client().get("/")
+        assert response.status_code == 200
+        assert response["Cache-Control"] == "private, no-store"
+        assert "<title>" not in response.content.decode()
+
+    @pytest.mark.parametrize("layout", [HEAD, "{% template %}"], ids=["head", "bare"])
+    def test_a_refused_defaults_tier_is_private_and_noindex(
+        self, tmp_path, caplog, layout
+    ) -> None:
+        source = "template = 'x'\ncache = 3600\nmetadata = {'title': 'T'}\n"
+        root = _tree(tmp_path, ("", source), layout=layout)
+        defaults = {UNKNOWN_KEY: "Refused", "robots": "index"}
+        with routed(root, METADATA={"DEFAULTS": defaults}):
+            responses = [Client().get("/") for _ in range(2)]
+        assert [r.status_code for r in responses] == [200, 200]
+        assert [r["Cache-Control"] for r in responses] == ["private, no-store"] * 2
+        assert [r["X-Robots-Tag"] for r in responses] == ["noindex"] * 2
+        refused = [r for r in caplog.records if "renders under noindex" in r.message]
+        assert len(refused) == 1
+
+    def test_a_refusal_raises_under_debug(self, tmp_path) -> None:
+        root = _tree(tmp_path, ("", REFUSED))
+        with (
+            routed(root),
+            override_settings(DEBUG=True),
+            pytest.raises(PageMetadataShapeError) as raised,
+        ):
+            Client(raise_request_exception=True).get("/")
+        assert "Run manage.py check" in raised.value.__notes__[0]
+
+
 class TestCsrfDeferral:
     """A shared page keeps the CSRF token out of its HTML in `auto`."""
 
@@ -1137,3 +1212,210 @@ class TestPersonalRender:
     def test_no_request_marks_nothing(self) -> None:
         mark_personal_render(None)
         assert not personal_render(None)
+
+
+def raising_indexable(request: object) -> bool:
+    """Fail the way a broken `SITE["INDEXABLE"]` callable would."""
+    raise RuntimeError(request)
+
+
+BROKEN_INDEXABLE = {"SITE": {"INDEXABLE": raising_indexable}}
+RENDER_RESPONSE = (
+    "from django.http import HttpResponse\n\n"
+    "cache = 3600\n\n"
+    "def render():\n"
+    "    response = HttpResponse('x')\n"
+    "    response['CDN-Cache-Control'] = 'max-age=600'\n"
+    "    return response\n"
+)
+COUNTED_CACHE = "CALLS = []\n\ndef cache():\n    CALLS.append(1)\n    return 60\n"
+
+
+class TestSealing:
+    """The degraded check runs after every stamp, on eager and lazy responses alike."""
+
+    @pytest.mark.parametrize(
+        ("source", "layout"),
+        [
+            ("template = 'x'\ncache = 3600\n", "{% template %}"),
+            (RENDER_RESPONSE, HEAD),
+            (LAZY_PAGE.format(cache=3600, before="pass", source="x"), HEAD),
+        ],
+        ids=["page_without_a_head", "render_response", "lazy_render_response"],
+    )
+    def test_a_raising_indexable_keeps_every_cache_away(
+        self, tmp_path, source, layout
+    ) -> None:
+        root = _tree(tmp_path, ("", source), layout=layout)
+        with routed(root, **BROKEN_INDEXABLE):
+            response = Client().get("/")
+        assert response.status_code == 200
+        assert response["Cache-Control"] == "private, no-store"
+        assert response["X-Robots-Tag"] == "noindex, nofollow"
+        assert "CDN-Cache-Control" not in response
+
+    def test_a_head_resolved_while_the_template_renders_reaches_the_header(
+        self, tmp_path
+    ) -> None:
+        file_path = write_page(tmp_path, "", "template = 'x'\n")
+        request = RequestFactory().get("/")
+        resolved = resolve_metadata(Metadata(robots="noindex"), request=request)
+
+        def head() -> str:
+            publish_metadata(request, resolved)
+            return ""
+
+        template = engines["django"].from_string("{{ head }}")
+        response = SimpleTemplateResponse(template, {"head": head})
+        finish_response(response, ResponsePolicy(), request, file_path)
+        assert "X-Robots-Tag" not in response
+        response.render()
+        assert response["X-Robots-Tag"] == "noindex"
+
+    def test_a_lazy_render_response_keeps_its_static_noindex(self, tmp_path) -> None:
+        source = (
+            LAZY_PAGE.format(cache=None, before="pass", source="x")
+            + "metadata = {'robots': 'noindex'}\n"
+        )
+        assert _get(_tree(tmp_path, ("", source)))["X-Robots-Tag"] == "noindex"
+
+
+class TestCdnHeaders:
+    """A response made private or no-store loses every header a CDN reads first."""
+
+    def test_a_personal_render_response_drops_them(self, tmp_path) -> None:
+        source = RENDER_RESPONSE.replace(
+            "    return response\n",
+            "    response.set_cookie('seen', '1')\n    return response\n",
+        )
+        response = _get(_tree(tmp_path, ("", source)))
+        assert response["Cache-Control"] == "private, max-age=3600"
+        assert "CDN-Cache-Control" not in response
+
+    def test_a_shared_render_response_keeps_them(self, tmp_path) -> None:
+        response = _get(_tree(tmp_path, ("", RENDER_RESPONSE)))
+        assert response["Cache-Control"] == "public, max-age=3600"
+        assert response["CDN-Cache-Control"] == "max-age=600"
+
+    @pytest.mark.parametrize("name", CACHING_HEADERS[:3])
+    def test_a_late_cookie_drops_them(self, tmp_path, name) -> None:
+        file_path = write_page(tmp_path, "", "template = 'x'\n")
+        response = HttpResponse("x")
+        response[name] = "max-age=600"
+        policy = ResponsePolicy(cache_control(60))
+        finish_response(response, policy, RequestFactory().get("/"), file_path)
+        response.cookies["sid"] = "1"
+        assert response["Cache-Control"] == "private, max-age=60"
+        assert name not in response
+
+
+class TestRenderResponseVary:
+    """A successful `render()` response that carries a cache varies like a page."""
+
+    def test_a_cached_response_varies_on_the_partial_headers(self, tmp_path) -> None:
+        response = _get(_tree(tmp_path, ("", RENDER_RESPONSE)))
+        assert response["Vary"] == PARTIAL_VARY
+
+    @pytest.mark.parametrize(
+        "body",
+        ["return HttpResponse('x')", "return HttpResponse('x', status=404)"],
+        ids=["no_cache", "error_status"],
+    )
+    def test_any_other_response_is_left_alone(self, tmp_path, body) -> None:
+        source = f"from django.http import HttpResponse\n\ndef render():\n    {body}\n"
+        response = _get(_tree(tmp_path, ("", source)))
+        assert "Vary" not in response
+
+
+class TestZoneSkipsTheCallableCache:
+    """A zone response is never stored, so the callable `cache` is not called."""
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "template = '{% zone \"box\" %}<p>x</p>{% endzone %}'\n",
+            (
+                "from django.http import HttpResponse\n\n"
+                "def render():\n    return HttpResponse('x')\n"
+            ),
+        ],
+        ids=["static", "render_response"],
+    )
+    def test_a_zone_get_does_not_call_it(self, tmp_path, body) -> None:
+        root = _tree(tmp_path, ("", body + COUNTED_CACHE))
+        with routed(root):
+            zone = NextClient().get_zones("/", "box")
+            full = Client().get("/")
+        module, _error = load_page_module(root / "page.py")
+        assert zone["Cache-Control"] == "private, no-store"
+        assert full["Cache-Control"] == "public, max-age=60"
+        assert module.CALLS == [1]
+
+    def test_a_method_without_a_cache_reads_one_policy(self, tmp_path) -> None:
+        file_path = write_page(tmp_path, "", "template = 'x'\ncache = 60\n")
+        request = RequestFactory().post("/")
+        first = response_policy(page, file_path, request, url_kwargs={})
+        assert response_policy(page, file_path, request, url_kwargs={}) is first
+
+
+DEGRADED_ZONE_RESPONSE = (
+    "import logging\n"
+    "from django.http import HttpResponse\n"
+    "from next.diagnostics import FailureLog\n\n"
+    "def render():\n"
+    "    FailureLog(logging.getLogger('t')).contain(RuntimeError('x'), 'k', 'm')\n"
+    "    response = HttpResponse('x')\n"
+    "    response['Cache-Control'] = 'public, max-age=60'\n"
+    "    return response\n"
+)
+FAILING_CONSENT = {
+    "CONSENT": {"BACKEND": "tests.consent.test_manager.RaisingConfigBackend"}
+}
+
+
+class TestDegradedZoneResponse:
+    """A zone response whose render contained a failure is never stored."""
+
+    @override_settings(DEBUG=False)
+    def test_its_own_shared_cache_is_replaced(self, tmp_path) -> None:
+        with routed(_tree(tmp_path, ("", DEGRADED_ZONE_RESPONSE))):
+            response = NextClient().get_zones("/", "box")
+        assert response.status_code == 200
+        assert response["Cache-Control"] == "private, no-store"
+
+
+class TestMemoisedConsentFailure:
+    """Every page that reuses a memoised consent failure is kept out of shared caches."""
+
+    @override_settings(DEBUG=False)
+    def test_every_render_after_the_failure_is_private(self, tmp_path) -> None:
+        root = _tree(
+            tmp_path, ("", "template = '<p>x</p>'\ncache = 3600\n"), layout=RUNTIME
+        )
+        with routed(root, **FAILING_CONSENT):
+            responses = [Client().get("/") for _ in range(2)]
+        assert [r["Cache-Control"] for r in responses] == ["private, no-store"] * 2
+
+
+A_DAY = 86400.0
+
+
+class TestPrivateWarningRate:
+    """A page made private on every request is logged again after each quiet period."""
+
+    def test_the_warning_returns_with_the_count(
+        self, tmp_path, caplog, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        now = [1000.0]
+        monkeypatch.setattr("next.diagnostics.monotonic", lambda: now[0])
+        root = _tree(tmp_path, ("", "template = 'x'\ncache = 60\n"), layout=RUNTIME)
+        with (
+            routed(root, CSRF_DELIVERY="eager"),
+            caplog.at_level(logging.WARNING, logger="next.pages.responses"),
+        ):
+            Client().get("/")
+            Client().get("/")
+            now[0] += A_DAY
+            Client().get("/")
+        records = [r for r in caplog.records if "Cache-Control: private" in r.message]
+        assert [record.suppressed for record in records] == [0, 1]

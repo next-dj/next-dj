@@ -12,7 +12,6 @@ E_ZONE_IN_FOR: Final = "next.E062"
 E_ZONE_IN_IF: Final = "next.E063"
 E_LAZY_WITHOUT_PLACEHOLDER: Final = "next.E064"
 E_ZONE_IN_COMPONENT: Final = "next.E065"
-E_OP_SHADOWS_BUILTIN: Final = "next.E066"
 E_BACKENDS_NOT_A_LIST: Final = "next.E067"
 E_COMPOSED_TEMPLATE_SYNTAX: Final = "next.E072"
 E_BACKEND_WITHOUT_PATH: Final = "next.E073"
@@ -35,7 +34,6 @@ __all__ = [
     "E_LAZY_WITHOUT_PLACEHOLDER",
     "E_NON_ASCII_ZONE",
     "E_OP_BAD_NAME",
-    "E_OP_SHADOWS_BUILTIN",
     "E_ZONE_IN_COMPONENT",
     "E_ZONE_IN_FOR",
     "E_ZONE_IN_IF",

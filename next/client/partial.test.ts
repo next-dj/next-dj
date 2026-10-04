@@ -202,6 +202,20 @@ describe("createPartial surface", () => {
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("hooked");
   });
 
+  it.each(["{}", "[]", '"text"'])(
+    "reports a well-typed response whose JSON %s is no envelope as a parse error",
+    async (body) => {
+      partial._configure({ document, fetch: async () => patchesResponse(body) });
+      await expect(
+        partial.fetch({ url: "/list/", zone: "z" }),
+      ).resolves.toBeUndefined();
+      const errors = dispatched.filter((d) => d.event === "partial:error");
+      expect(errors.map((d) => d.detail)).toEqual([
+        { kind: "parse", body, error: expect.any(TypeError) },
+      ]);
+    },
+  );
+
   it("_reset clears custom ops, csrf, and configured adapters", async () => {
     partial.defineOp("confetti", () => undefined);
     partial.setCsrf({ header: "X-CSRFToken", token: "tok" });

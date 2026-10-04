@@ -8,7 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from django.forms import BaseForm, BaseFormSet
@@ -200,9 +200,12 @@ class PageScripts(Protocol):
         *,
         page_path: Path | None,
         request: HttpRequest | None,
-        nonce: str | None,
+        nonce: Callable[[], str | None],
     ) -> tuple[str, Mapping[str, object]]:
-        """Return the head tags and the reserved payload entries of one render."""
+        """Return the head tags and the reserved payload entries of one render.
+
+        `nonce` mints the request nonce, so it is called only when a tag is written.
+        """
         ...
 
 

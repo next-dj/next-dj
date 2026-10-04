@@ -16,7 +16,9 @@ Delivery modes
 
 A deferred render leaves the hidden field out of ``{% form %}``, and ``$csrf`` carries ``{"header": ..., "url": ...}`` in place of ``{"header": ..., "token": ...}``.
 The runtime fetches the token from ``url`` before the first unsafe request, and Django reads it from the header, so the form posts as before.
-When ``ROOT_URLCONF`` does not route the endpoint, ``csrf_payload`` embeds the token after all and logs once, so forms still post, and under ``DEBUG`` or ``STRICT_LOADING`` it raises the ``NoReverseMatch`` instead.
+``csrf_url()`` reverses ``next:csrf``, and where ``next.urls`` is the root URLconf, without a namespace, it reverses ``csrf_view`` itself, so a project pattern named ``csrf`` is never taken for the endpoint.
+The address is reversed once per URLconf, script prefix, and language, and again after the routes change.
+When ``ROOT_URLCONF`` does not route the endpoint, ``csrf_payload`` embeds the token after all and logs at most once every ten minutes, so forms still post, and under ``DEBUG`` or ``STRICT_LOADING`` it raises the ``NoReverseMatch`` instead.
 ``next.E148`` reports the missing route at startup.
 ``CSRF_USE_SESSIONS = True`` reads the session on every render, so every shared page is sent with ``Cache-Control: private`` whatever the mode, and ``manage.py check`` warns about it.
 

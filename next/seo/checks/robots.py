@@ -17,13 +17,14 @@ from django.urls.converters import get_converters
 
 from next.checks import NEXT, SEO
 from next.seo.robots import declared_rules, robots_candidates, rule_pattern
-from next.seo.sitemaps import SitemapOptions, listed_trails, static_noindex
+from next.seo.sitemaps import SitemapOptions, listed_trails
 from next.site.config import indexable_without_request
 from next.urls.errors import URLParameterError
 from next.urls.parser import default_url_parser
 from next.urls.reverse import page_reverse
 
 from .roots import (
+    checked_noindex,
     items_trails,
     loaded_seo_roots,
     robots_modules,
@@ -152,7 +153,7 @@ def _placeholder(converter_name: str) -> tuple[object, str] | None:
     return None
 
 
-def _route_path(trail: str) -> str | None:
+def route_path(trail: str) -> str | None:
     """Return the URL path of `trail` up to its first parameter, `None` if unknown.
 
     Placeholder values fill the parameters, so a dynamic trail reverses on its own.
@@ -178,7 +179,7 @@ def route_paths(root: SeoRoot) -> dict[str, str]:
     """Return the URL path of every trail, a dynamic one up to its first parameter."""
     paths: dict[str, str] = {}
     for trail in root.trails:
-        path = _route_path(trail)
+        path = route_path(trail)
         if path is not None:
             paths[trail] = path
     return paths
@@ -186,7 +187,8 @@ def route_paths(root: SeoRoot) -> dict[str, str]:
 
 def _sitemap_paths(root: SeoRoot, module: types.ModuleType) -> set[str]:
     """Return the URL paths the sitemap of `root` lists."""
-    listed = set(listed_trails(root.trails, SitemapOptions.read(module).exclude))
+    exclude = SitemapOptions.read(module).exclude
+    listed = set(listed_trails(root.trails, exclude, noindex=checked_noindex))
     listed |= items_trails(root)
     return {path for trail, path in route_paths(root).items() if trail in listed}
 
@@ -222,7 +224,7 @@ def _noindex_paths(roots: tuple[SeoRoot, ...]) -> set[str]:
         path
         for root in roots
         for trail, path in route_paths(root).items()
-        if static_noindex(root.trails[trail])
+        if checked_noindex(root.trails[trail])
     }
 
 
@@ -288,5 +290,6 @@ __all__ = [
     "check_robots_disallow",
     "check_seo_single_sources",
     "check_seo_text_files",
+    "route_path",
     "route_paths",
 ]

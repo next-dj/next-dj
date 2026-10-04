@@ -99,7 +99,7 @@ Provider order
 --------------
 
 Providers are ordered by ascending ``priority``, and the first one that claims a parameter produces its value.
-Each provider claims a parameter through ``can_handle`` at resolve time, or settles it ahead of time through ``static_can_handle``.
+Each provider claims a parameter through ``can_handle`` at resolve time, or claims it ahead of time through ``static_can_handle``.
 The compiled plan keeps that order, but a static verdict removes the check from every parameter the provider provably never owns.
 
 Every ``RegisteredParameterProvider`` subclass carries a ``priority`` class attribute, and the resolver sorts the registry by it.

@@ -18,7 +18,8 @@ A custom verb
 A verb beyond the built-in set is registered on both sides.
 The server registers the name and the client supplies the handler.
 A registered name earns the generic ``op()`` channel on the builder, so the typed methods stay the only authors of the built-in verbs.
-``manage.py check`` reads the registered names, reporting ``next.E066`` for a name that shadows a built-in verb and ``next.E090`` for a name that is not a valid verb token.
+``register_patch_op`` raises ``BuiltinPatchOpError`` for a built-in verb name, because the client applies the built-in verb and a custom handler under that name would never run.
+``manage.py check`` reads the registered names and reports ``next.E090`` for a name that is not a valid verb token.
 An unregistered verb fails at runtime with ``UnknownPatchOpError``.
 
 Register the name once on the server.

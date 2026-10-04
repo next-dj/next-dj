@@ -1,6 +1,10 @@
+from unittest.mock import patch
+
 import pytest
+from django.test import override_settings
 from django.urls import URLPattern
 
+from next.diagnostics import degraded, watch_degraded
 from next.seo import routes
 from next.seo.manager import seo_manager
 from next.seo.routes import SeoPatterns, served_names, served_patterns
@@ -53,6 +57,35 @@ class TestServed:
         with routed(write_tree(tmp_path / "pages", **sources)):
             assert served_names() == names
             assert {pattern.name for pattern in served_patterns(PATTERNS)} == names
+
+
+class TestFailingProbe:
+    """A probe that raises keeps its route, contained like any project failure."""
+
+    def test_a_raising_probe_keeps_the_route_and_degrades(self, tmp_path) -> None:
+        with (
+            routed(write_tree(tmp_path / "pages")),
+            patch.object(seo_manager, "robots_source", side_effect=OSError("disk")),
+        ):
+            watch_degraded()
+            assert served_names() == {"robots"}
+            assert degraded()
+        watch_degraded()
+
+    @override_settings(DEBUG=True)
+    def test_debug_raises_naming_the_route(self, tmp_path) -> None:
+        with (
+            routed(write_tree(tmp_path / "pages")),
+            patch.object(seo_manager, "robots_source", side_effect=OSError("disk")),
+            pytest.raises(OSError, match="disk") as caught,
+        ):
+            served_names()
+        assert caught.value.__notes__ == [
+            (
+                "Deciding whether to mount /robots.txt raised, so the route stays "
+                "mounted and answers 503 until its source loads."
+            )
+        ]
 
 
 class TestSeoPatterns:

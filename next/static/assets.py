@@ -123,7 +123,7 @@ class KindRegistry:
 
     @property
     def version(self) -> int:
-        """Return a counter every registration bumps, so a cached answer can tell."""
+        """Return the registration counter, which a memo compares to detect a change."""
         return self._version
 
     def register(

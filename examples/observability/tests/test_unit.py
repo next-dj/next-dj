@@ -10,7 +10,7 @@ from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from obs import metrics
 from obs.apps import METRIC_PULSE_OP
-from obs.backends import CountingComponentsBackend
+from obs.backends import BabelJsxBackend, CountingComponentsBackend
 from obs.dashboards.page import totals
 from obs.dashboards.stats.components.page import counters as components_counters
 from obs.dashboards.stats.forms.page import dispatched, validation_failed
@@ -251,6 +251,26 @@ class TestCountingComponentsBackend:
             result = backend.get_component("missing", Path("/tmp/x.djx"))
         assert result is None
         assert metrics.read_kind("components.lookup") == {}
+
+
+class TestBabelJsxBackend:
+    """The `.jsx` renderer escapes the URL and carries the nonce like the parent."""
+
+    def test_tag_carries_the_nonce_and_an_escaped_url(self) -> None:
+        tag = BabelJsxBackend().render_babel_script_tag(
+            '/static/a.jsx?x="1"&y', nonce='n"1'
+        )
+        assert tag == (
+            '<script type="text/babel" data-presets="env,react" '
+            'src="/static/a.jsx?x=&quot;1&quot;&amp;y" nonce="n&quot;1"></script>'
+        )
+
+    def test_tag_without_a_nonce_has_no_nonce_attribute(self) -> None:
+        tag = BabelJsxBackend().render_babel_script_tag("/static/a.jsx")
+        assert tag == (
+            '<script type="text/babel" data-presets="env,react" '
+            'src="/static/a.jsx"></script>'
+        )
 
 
 @dataclass(frozen=True, slots=True)

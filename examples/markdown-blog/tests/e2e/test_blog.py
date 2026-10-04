@@ -63,7 +63,7 @@ def test_the_share_button_copies_the_title_and_the_current_url(
 
     expect(button).to_have_text("✓ Copied")
     assert page.evaluate("() => navigator.clipboard.readText()") == (
-        f"Welcome to the blog — {base_url}/posts/welcome/"
+        f"Welcome to the blog - {base_url}/posts/welcome/"
     )
     assert page.evaluate("() => window.Next.context.post.title") == (
         "Welcome to the blog"

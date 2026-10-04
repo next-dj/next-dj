@@ -15,7 +15,7 @@ from django.utils.encoding import iri_to_uri
 
 from next.checks import reset_check_caches
 from next.conf import NextFrameworkSettings, next_framework_settings
-from next.diagnostics import watch_degraded
+from next.diagnostics import reset_failure_logs, watch_degraded
 from next.forms import uid
 from next.forms.wizard import SessionFormWizardBackend, wizard_backend_manager
 from next.pages import Page
@@ -98,6 +98,14 @@ def _fresh_translation_memo() -> Generator[None, None, None]:
     forget_translated_urls()
     yield
     forget_translated_urls()
+
+
+@pytest.fixture(autouse=True)
+def _rearmed_failure_logs() -> Generator[None, None, None]:
+    """Start each test with every failure log re-armed, whatever ran before it."""
+    reset_failure_logs()
+    yield
+    reset_failure_logs()
 
 
 @pytest.fixture(autouse=True)

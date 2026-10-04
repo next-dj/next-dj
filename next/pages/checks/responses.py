@@ -24,13 +24,13 @@ from next.conf.defaults import USER_SETTING
 from next.csrf import CSRF_URL_NAME, CsrfDelivery, csrf_delivery, csrf_url
 from next.pages.loaders import _load_python_module_memo
 from next.pages.responses import cache_control, cache_problems, headers_problems
-from next.utils import is_middleware, middleware_index, middleware_listed
+from next.utils import is_middleware, middleware_listed
 
 from .composed import iter_composed_pages
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
     from pathlib import Path
 
     from django.template.base import Template
@@ -57,6 +57,14 @@ A subclass counts as its base class.
 _RUNTIME_TAG: Final = "collect_scripts"
 _MIN_LANGUAGES: Final = 2
 _NAMED_PAGES: Final = 3
+
+
+def _middleware_index(middleware: Iterable[object], base: str) -> int | None:
+    """Return where the first entry `is_middleware` matches sits, `None` for none."""
+    for index, entry in enumerate(middleware):
+        if is_middleware(entry, base):
+            return index
+    return None
 
 
 def _page_modules() -> Iterator[tuple[Path, object, object]]:
@@ -212,10 +220,10 @@ def _guarded(middleware: list[object]) -> bool:
     stores is the private one. Listed above `UpdateCacheMiddleware`, the guard runs
     after the public copy is already stored.
     """
-    index = middleware_index(middleware, _CACHE_GUARD)
+    index = _middleware_index(middleware, _CACHE_GUARD)
     if index is None:
         return False
-    update = middleware_index(middleware, _UPDATE_CACHE)
+    update = _middleware_index(middleware, _UPDATE_CACHE)
     if update is not None and update > index:
         return False
     return all(is_middleware(entry, _UPDATE_CACHE) for entry in middleware[:index])
@@ -229,7 +237,7 @@ def check_conditional_get_order(*args, **kwargs) -> list[CheckMessage]:
     builds, so a cookie that an outer middleware sets later is sent on a public 304.
     """
     middleware = list(getattr(settings, "MIDDLEWARE", None) or ())
-    position = middleware_index(middleware, _CONDITIONAL_GET)
+    position = _middleware_index(middleware, _CONDITIONAL_GET)
     if position is None or _guarded(middleware):
         return []
     outer = [
@@ -244,7 +252,7 @@ def check_conditional_get_order(*args, **kwargs) -> list[CheckMessage]:
         DjangoWarning(
             f"settings.MIDDLEWARE lists {', '.join(outer)} above "
             "ConditionalGetMiddleware, and it may set a cookie on the 304 that "
-            "middleware builds after the page made its cache private, so a public "
+            "middleware builds after the page made its response private, so a public "
             "304 could carry Set-Cookie into a shared cache. Pages affected: "
             f"{_listed(pages)}.",
             hint=(

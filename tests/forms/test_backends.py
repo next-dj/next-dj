@@ -321,6 +321,14 @@ class TestRegistryFormActionBackend:
         empty_backend = RegistryFormActionBackend()
         assert empty_backend.generate_urls() == []
 
+    def test_generate_urls_hands_out_one_view(self) -> None:
+        """Every URL build routes to the same view object, which E149 compares."""
+        backend = form_action_manager.default_backend
+        assert isinstance(backend, RegistryFormActionBackend)
+        [first] = backend.generate_urls()
+        [second] = backend.generate_urls()
+        assert first.callback is second.callback
+
     def test_register_action_stores_handler(self) -> None:
         """Handler is stored under (scope_key, name) key."""
         backend = RegistryFormActionBackend()

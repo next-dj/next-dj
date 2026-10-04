@@ -20,7 +20,7 @@ from next.pages import page as page_manager
 from next.pages.metadata import resolve_metadata
 from next.pages.metadata.fold import fold_metadata
 from next.pages.metadata.normalize import normalize_metadata
-from next.pages.metadata.scope import site_segment
+from next.pages.metadata.scope import contain_site_refusal, site_segment
 from next.pages.visits import visit_request
 from next.seeding import JS_CONTEXT_KEY
 from next.static.assets import default_kinds
@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from django.http import HttpResponseBase
 
     from next.forms.origin import OriginMatch
-    from next.pages.metadata import Metadata, MetadataDict, Text
+    from next.pages.metadata import Metadata, MetadataDict, ResolvedMetadata, Text
     from next.pages.metadata.dicts import Url
     from next.pages.metadata.markers import Segment
 
@@ -117,6 +117,16 @@ def _head_fields(
         jsonld=(),
         breadcrumbs=(),
     )
+
+
+def _head_extras(resolved: "ResolvedMetadata") -> dict[str, object]:
+    """Return the wire keys of a meta operation in envelope order."""
+    return {
+        "title": _plain(resolved.title),
+        "description": _plain(resolved.description),
+        "canonical": resolved.canonical,
+        "robots": resolved.robots,
+    }
 
 
 def _local_url(base: str | None, href: str) -> str:
@@ -493,51 +503,60 @@ class Patches:
     def meta(self, metadata: "Text | MetadataDict") -> "Patches":
         """Queue a head update that folds `metadata` over the origin page as its own.
 
-        A text value sets the title only. Without an origin page the value folds over
-        the site `DEFAULTS` alone. A URL operation queued earlier names the address a
-        self canonical resolves against. The operation carries the title, the
-        description, the canonical and the robots. A malformed `metadata` raises. A
-        failing inherited callable is logged once and drops this operation only.
+        A text value sets the title only. The operation carries the title, the
+        description, the canonical and the robots. The origin chain folds and resolves
+        against a GET visit of the address the head describes, which is the last URL
+        operation queued so far or the origin. Without an origin page the value folds
+        over the site `DEFAULTS` alone and an unset field is left out, so the client
+        keeps the tag it has. A malformed `metadata` raises. A failing inherited
+        callable is logged at the `FailureLog` rate and drops this operation only.
         """
         raw = {"title": metadata} if isinstance(metadata, str | Promise) else metadata
         segment = normalize_metadata(raw, source=_META_SOURCE)
         match = None if self._request is None else self._origin_match()
         page_path = None if match is None else match.page_path
         if match is None or page_path is None:
+            contain_site_refusal()
             folded = fold_metadata((site_segment(), segment))
             # The action endpoint is not a page, so a self canonical names no address.
-            send_canonical = folded.canonical is not True
-            canonical = folded.canonical if send_canonical else None
-            request = self._request
+            canonical = None if folded.canonical is True else folded.canonical
+            resolved = resolve_metadata(
+                _head_fields(folded, canonical), request=self._request
+            )
+            extras = {
+                key: value
+                for key, value in _head_extras(resolved).items()
+                if value is not None
+            }
         else:
-            origin_fold = self._fold_origin_metadata(page_path, match, segment)
+            visit = visit_request(self._require_request(), self._head_address(match))
+            origin_fold = self._fold_origin_metadata(page_path, match, segment, visit)
             if origin_fold is None:
                 return self
-            folded, canonical, send_canonical = origin_fold, origin_fold.canonical, True
-            request = visit_request(self._require_request(), self._head_address(match))
-        resolved = resolve_metadata(_head_fields(folded, canonical), request=request)
-        extras: dict[str, object] = {
-            "title": _plain(resolved.title),
-            "description": _plain(resolved.description),
-        }
-        if send_canonical:
-            extras["canonical"] = resolved.canonical
-        extras["robots"] = resolved.robots
+            resolved = resolve_metadata(
+                _head_fields(origin_fold, origin_fold.canonical), request=visit
+            )
+            extras = _head_extras(resolved)
         self._ops.append(Patch(op="meta", extras=extras))
         return self
 
     def _fold_origin_metadata(
-        self, page_path: "Path", match: "OriginMatch", segment: "Segment"
+        self,
+        page_path: "Path",
+        match: "OriginMatch",
+        segment: "Segment",
+        visit: "HttpRequest",
     ) -> "Metadata | None":
         """Fold the origin chain under `segment`, or None when an inherited one failed.
 
-        The failure is logged once per page and exception type.
+        The inherited callables read `visit`, the request the origin view would see.
+        The failure is logged per page and exception type at the `FailureLog` rate.
         """
         try:
             return page_manager.fold_metadata(
                 page_path,
                 overlay=segment,
-                request=self._request,
+                request=visit,
                 url_kwargs=dict(match.url_kwargs),
                 context_data=self._metadata_context,
             )

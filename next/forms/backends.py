@@ -3,6 +3,7 @@
 import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, override
 from weakref import WeakSet
@@ -196,7 +197,11 @@ class FormActionBackend(ABC):
 
     @abstractmethod
     def generate_urls(self) -> "list[URLPattern]":
-        """Return URLconf entries for this backend."""
+        """Return URLconf entries for this backend.
+
+        Each call returns the same view objects, because `next.E149` identifies the
+        form action endpoint by the view that `resolve()` returns for it.
+        """
 
     @abstractmethod
     def dispatch(self, request: "HttpRequest", uid: str) -> "HttpResponseBase":
@@ -471,8 +476,14 @@ class RegistryFormActionBackend(FormActionBackend):
         """Return one catch-all route when at least one action is registered."""
         if not self._registry:
             return []
-        view = require_http_methods(["GET", "POST"])(self.dispatch)
-        return [path("_next/form/<str:uid>/", view, name=URL_NAME_FORM_ACTION)]
+        return [
+            path("_next/form/<str:uid>/", self._action_view, name=URL_NAME_FORM_ACTION)
+        ]
+
+    @cached_property
+    def _action_view(self) -> "Callable[..., HttpResponseBase]":
+        """Return the dispatch view, built once so every URL build shares it."""
+        return require_http_methods(["GET", "POST"])(self.dispatch)
 
     @override
     def dispatch(self, request: "HttpRequest", uid: str) -> "HttpResponseBase":

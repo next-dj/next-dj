@@ -17,6 +17,7 @@ from next.components.renderers import (
     COMPONENT_PROPS_CONTEXT_KEY,
     _inject_component_context,
 )
+from next.deps.cache import REQUEST_DEP_CACHE_ATTR
 from next.pages import page
 from tests.support import (
     bound_dependency,
@@ -87,14 +88,16 @@ def _inject(
 
 
 class TestNamedDependenciesPerInstance:
-    """A page GET gives every component instance a named-dependency cache of its own."""
+    """Every component instance keeps its own named-dependency resolutions."""
 
+    @pytest.mark.parametrize("dispatch", [False, True], ids=["get", "dispatch"])
     @pytest.mark.parametrize(
         "source", [LOOPING_PAGE, RENDERING_PAGE], ids=["template", "render"]
     )
     def test_looped_instances_resolve_their_own_value(
-        self, tmp_path: Path, source: str
+        self, tmp_path: Path, source: str, *, dispatch: bool
     ) -> None:
+        """A form dispatch re-render shares its cache, but not one instance's values."""
         _mgr, info, module_path = build_composite_component(
             tmp_path / "badge", name="badge", template="<b>{{ label }}={{ upper }}</b>"
         )
@@ -108,7 +111,10 @@ class TestNamedDependenciesPerInstance:
             bound_dependency("label_upper", lambda label: label.upper()),
             patch.object(components_manager, "get_component", return_value=info),
         ):
-            response = view(build_page_request())
+            request = build_page_request()
+            if dispatch:
+                setattr(request, REQUEST_DEP_CACHE_ATTR, {})
+            response = view(request)
         assert response.content.decode().count("<b>") == 3
         for label in ("alpha", "beta", "gamma"):
             assert f"<b>{label}={label.upper()}</b>" in response.content.decode()

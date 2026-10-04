@@ -7,6 +7,7 @@ tests that verify registry behaviour or reload backends after swapping settings.
 from __future__ import annotations
 
 from next.components.manager import components_manager
+from next.diagnostics import reset_failure_logs
 from next.forms.manager import form_action_manager
 from next.forms.registration import registration_diagnostics
 from next.forms.wizard import wizard_backend_manager
@@ -82,6 +83,7 @@ def reset_seo() -> None:
 __all__ = [
     "reset_component_templates",
     "reset_components",
+    "reset_failure_logs",
     "reset_form_actions",
     "reset_form_registration_state",
     "reset_page_cache",

@@ -58,14 +58,16 @@ interface Layer {
   // Set once a meta op arrived for this layer's own page, so a meta op of a page
   // under it is applied on close instead of over the modal.
   titled: boolean;
-  // The page key of the layer's own URL, absent for a layer with no body to fetch.
+  // The page key of the layer's own URL, absent for a layer with no body to fetch. It
+  // scopes the body's zones and head even when the browser refused the push.
   pushedUrl?: string;
   // Set once the body envelope announced the URL, so a close announces its replace.
   committed: boolean;
   // The queue of the body fetch, aborted on remove so a late body is not applied.
   key: string;
   // Drops the held push, so a layer closed before its body reverts it unannounced.
-  drop?: () => void;
+  // Absent when the layer has no history entry of its own.
+  drop?: (() => void) | undefined;
 }
 
 /** The seams createLayers needs, each defaulting to a platform adapter. */
@@ -375,14 +377,15 @@ export function createLayers(deps: LayerDeps): LayerStack {
     return page === (stack[0]?.host ?? currentUrl()) ? 0 : -1;
   }
 
-  // Back past the topmost pushed URL closes that layer and the bare layers above it.
-  // The pass repeats while the bar is off the next pushed URL, so a jump back over
-  // several entries closes every layer it skipped. Zones and history stay as they are.
+  // Back past the URL of the topmost layer with a history entry closes that layer and
+  // the layers above it that have none. The pass repeats while the bar is off the next
+  // such URL, so a jump back over several entries closes every layer it skipped. Zones
+  // and history stay as they are.
   function onPopstate(): void {
     deps.navigation.popped(() => {
       for (;;) {
         const layers = topDown();
-        const anchor = layers.find((layer) => layer.pushedUrl !== undefined);
+        const anchor = layers.find((layer) => layer.drop !== undefined);
         if (anchor === undefined || anchor.pushedUrl === currentUrl()) return;
         for (const layer of layers) {
           dismissFrom(layer.dialog, "popstate");

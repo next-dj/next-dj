@@ -11,7 +11,7 @@ The ``next`` application ships one management command, ``showmetadata``, a thin 
 showmetadata
 ------------
 
-``manage.py showmetadata <path>`` resolves a URL path to its page and prints, for every key the static metadata settles, the source that settles it, ``DEFAULTS`` or a ``page.py``.
+``manage.py showmetadata <path>`` resolves a URL path to its page and prints, for every key the static metadata sets, the source that sets it, ``DEFAULTS`` or a ``page.py``.
 Each ``@page.metadata`` callable of the page follows under ``*``, since a callable answers only per request.
 
 .. code-block:: text

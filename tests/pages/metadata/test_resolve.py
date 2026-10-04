@@ -10,10 +10,12 @@ from zoneinfo import ZoneInfo
 import pytest
 from django.http import HttpRequest
 from django.test import RequestFactory, override_settings
-from django.urls import ResolverMatch, reverse_lazy
+from django.urls import ResolverMatch, resolve, reverse_lazy
 from django.utils import translation
 from django.utils.functional import lazy
 
+import next.pages.metadata.hreflang as hreflang_module
+from next.conf.signals import settings_reloaded
 from next.pages import ld
 from next.pages.errors import PageMetadataRequestError, PageMetadataShapeError
 from next.pages.metadata import (
@@ -43,7 +45,7 @@ from next.pages.metadata import (
 )
 from next.pages.metadata.normalize import normalize_metadata
 from next.pages.metadata.resolve import (
-    SITE_NOINDEX,
+    _crumb_route,
     _failures,
     iso_time,
     og_locale,
@@ -55,6 +57,7 @@ from next.pages.metadata.resolve import (
 )
 from next.seo.origin import request_origin
 from next.site import SiteOriginError
+from next.site.headers import CLOSED_ROBOTS
 from next.testing import override_next_settings
 from next.urls.parser import default_url_parser
 from tests.support import (
@@ -74,6 +77,7 @@ from tests.support import (
     UrlSchemeCase,
     build_mock_http_request,
     handler_declared_here,
+    record_calls,
 )
 
 
@@ -277,12 +281,12 @@ class TestRobots:
         self, meta: Metadata
     ) -> None:
         resolved = resolve_metadata(meta, request=None)
-        assert (resolved.robots, resolved.googlebot) == (SITE_NOINDEX, None)
+        assert (resolved.robots, resolved.googlebot) == (CLOSED_ROBOTS, None)
         assert resolved.noindex is True
 
     @override_settings(DEBUG=True)
     def test_the_auto_rule_closes_the_site_under_debug(self) -> None:
-        assert resolve_metadata(Metadata(), request=None).robots == SITE_NOINDEX
+        assert resolve_metadata(Metadata(), request=None).robots == CLOSED_ROBOTS
 
     @pytest.mark.parametrize(
         ("robots", "expected"),
@@ -364,6 +368,22 @@ class TestAlternates:
             ("de", f"{BASE}/de/headed/"),
             ("x-default", f"{BASE}/en/headed/"),
         )
+
+    @pytest.mark.parametrize(
+        ("canonical", "resolves"), [(None, 0), (True, 0), ("/headed/", 1)]
+    )
+    @override_settings(**I18N_ROUTED)
+    @override_next_settings(**WITH_BASE)
+    def test_the_request_match_spares_the_resolve_of_its_own_path(
+        self, monkeypatch: pytest.MonkeyPatch, canonical: object, resolves: int
+    ) -> None:
+        meta = Metadata(canonical=canonical, alternates=Alternates(languages=True))
+        request = _request("/headed/")
+        request.resolver_match = resolve("/headed/")
+        calls = record_calls(monkeypatch, hreflang_module, "resolve")
+        resolved = resolve_metadata(meta, request=request)
+        assert resolved.alternates[1] == ("de", f"{BASE}/de/headed/")
+        assert len(calls) == resolves
 
     @override_settings(**I18N_ROUTED)
     @override_next_settings(**WITH_BASE)
@@ -970,6 +990,12 @@ class TestBreadcrumbUrls:
     def _resolved(self, request: object) -> tuple[Breadcrumb, ...]:
         meta = Metadata(breadcrumbs=self.CRUMBS)
         return resolve_metadata(meta, request=cast("HttpRequest", request)).breadcrumbs
+
+    def test_a_settings_reload_forgets_the_crumb_routes(self) -> None:
+        _crumb_route("blog/[slug]", "page_{name}")
+        assert _crumb_route.cache_info().currsize > 0
+        settings_reloaded.send(sender=None)
+        assert _crumb_route.cache_info().currsize == 0
 
     @override_settings(ROOT_URLCONF=NAMESPACED_URLCONF)
     def test_a_request_without_a_match_links_nothing(self) -> None:

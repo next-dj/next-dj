@@ -10,7 +10,9 @@ import pytest
 from django.core.checks import Error, run_checks
 from django.test import override_settings
 
+from next import discovery
 from next.conf.signals import settings_reloaded
+from next.diagnostics import degraded
 from next.discovery import (
     PageRootsError,
     discover_page_registrations,
@@ -536,6 +538,58 @@ class TestRoutedPageTrees:
         found = routed_page_trees(manager)
         assert [root.path for root, _skip in found] == [tree, tmp_path]
         assert all(isinstance(skip, frozenset) for _root, skip in found)
+
+    def test_a_failing_router_costs_its_trees_and_is_logged(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, settings
+    ) -> None:
+        """A request reads the trees, so the failure degrades the render it ran in."""
+        settings.DEBUG = False
+        manager = MagicMock(spec=RouterManager)
+        manager.backends = (RaisingRootsRouter(), _RootTreeRouter([tmp_path]))
+        with caplog.at_level("ERROR", logger="next.discovery"):
+            found = routed_page_trees(manager)
+
+        assert [root.path for root, _skip in found] == [tmp_path]
+        assert "RaisingRootsRouter failed to list its page trees" in caplog.text
+        assert "database is down" in caplog.text
+        assert degraded() is True
+
+    def test_a_failing_router_raises_under_debug(self, settings) -> None:
+        settings.DEBUG = True
+        manager = MagicMock(spec=RouterManager)
+        manager.backends = (RaisingRootsRouter(),)
+        with pytest.raises(PageRootsError) as caught:
+            routed_page_trees(manager)
+
+        assert "Make page_roots() return" in caught.value.__notes__[0]
+
+    def test_the_contract_is_read_once_per_router_version(self, tmp_path: Path) -> None:
+        manager = MagicMock(spec=RouterManager)
+        manager.version = 1
+        manager.backends = (SkippingRouter([tmp_path], frozenset({"api"})),)
+        with patch.object(
+            SkippingRouter, "skip_dir_names", return_value=frozenset({"api"})
+        ) as asked:
+            first = routed_page_trees(manager)
+            routed_page_trees(manager)
+            manager.version = 2
+            manager.backends = (SkippingRouter([tmp_path], frozenset({"api"})),)
+            routed_page_trees(manager)
+
+        assert first[0][1] == frozenset({"api"})
+        assert asked.call_count == 2
+
+    def test_a_reload_pins_no_router_for_the_rest_of_the_process(
+        self, tmp_path: Path
+    ) -> None:
+        """Each reload builds new routers, and none of them stays in a check cache."""
+        manager = MagicMock(spec=RouterManager)
+        for version in range(3):
+            manager.version = version
+            manager.backends = (_RootTreeRouter([tmp_path]),)
+            routed_page_trees(manager)
+
+        assert discovery._CACHED_ROUTERS == []
 
 
 class TestPageTreeSkipNames:

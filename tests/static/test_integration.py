@@ -83,7 +83,7 @@ class TestFullRenderPipeline:
 
 
 class TestUseStyleBlocksThroughPipeline:
-    """{% use_style %} registration order survives collector + inject."""
+    """`{% use_style %}` registration order is kept through the collector and inject."""
 
     def test_use_style_lands_in_final_html(
         self, wired_manager: StaticManager, collector: StaticCollector
@@ -188,7 +188,7 @@ class TestEmptyCollectorIntegration:
 
 
 class TestOneAssetSpelledTwoWays:
-    """Resolving before the collector sees a value is what lets dedup do its job."""
+    """A value is resolved before the collector records it, so dedup matches both."""
 
     def test_two_spellings_emit_exactly_one_link(
         self,

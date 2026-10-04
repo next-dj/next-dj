@@ -46,6 +46,7 @@ jobs:
     - name: Run example tests
       env:
         PYTEST: uv run --no-project pytest
+        EXAMPLE_PYTHON: uv run --no-project python
       run: make test-examples
 
   test-examples-js:

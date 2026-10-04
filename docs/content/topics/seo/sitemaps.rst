@@ -26,7 +26,7 @@ Without one no sitemap route exists, so a ``path("sitemap.xml", ...)`` placed af
 
 The file is executed once when the framework discovers the tree and kept until the SEO routes reset on a router or settings reload.
 While ``DEBUG`` is on an edit shows on the next request without a restart, since every SEO route first checks the files at the top of each page root.
-A file that fails to import is logged once, keeps its route, and answers 404, so no partial sitemap ships, and ``manage.py check`` reports the cause.
+A file that fails to import is logged once, keeps its route, and answers 404, so no partial sitemap is served, and ``manage.py check`` reports the cause.
 A 404 is safe here, since a crawler reads a missing sitemap as nothing listed and keeps the URLs it already knows.
 ``sitemap.py`` is read by the dependency resolver like a ``page.py``, so it keeps ``from __future__ import annotations`` out.
 A ``sitemap.py`` below the top of the tree is never read, and the checks say so.
@@ -43,7 +43,8 @@ A route matching a glob in ``exclude`` is left out as well, and a glob matches t
 Only ``*`` and ``?`` are wildcards, and brackets are literal because routes spell parameters with them, so ``posts/[slug]`` names that one dynamic route.
 
 Only the static metadata is read, ``DEFAULTS`` plus every ``metadata`` dict from the page root down.
-Metadata the schema refuses does not break the document, the route is listed with a logged warning, and the metadata checks report the fault.
+Metadata the schema refuses does not break the document, the route is left out because its page renders under ``noindex``, the refusal is logged at most once every ten minutes, and the metadata checks report the fault.
+Under ``DEBUG`` or ``STRICT_LOADING`` the sitemap raises instead.
 The list is memoised until a ``page.py`` of the tree loads again.
 
 Dynamic routes and lazy items

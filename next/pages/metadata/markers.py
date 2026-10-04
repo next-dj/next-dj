@@ -5,7 +5,7 @@ Annotations stay strings here because `dicts.py` imports `Replace` from this mod
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final, Literal, Never, override
@@ -24,6 +24,11 @@ MERGE_KEY: Final = "next_merge"
 
 NOINDEX_DIRECTIVES: Final = frozenset({"noindex", "none"})
 """The robots directives that keep a page out of the index."""
+
+REFUSED_ROBOTS: Final = "noindex"
+"""The directive a page renders with while the schema refuses its metadata."""
+
+_INDEX_DIRECTIVES: Final = frozenset({"index", "all"})
 
 
 class Merge(Enum):
@@ -82,6 +87,30 @@ def robots_noindex(robots: Robots | str | None) -> bool:
     if robots is None:
         return False
     return not robots_directives(robots).isdisjoint(NOINDEX_DIRECTIVES)
+
+
+def refused_robots(robots: Robots | str | None) -> Robots | str:
+    """Return `robots` under `REFUSED_ROBOTS`, every other declared directive kept.
+
+    A refused source must not make a page indexable, but a `nofollow` the site
+    declared still applies.
+    """
+    if robots is None:
+        return REFUSED_ROBOTS
+    if isinstance(robots, Robots):
+        googlebot = robots.googlebot
+        if googlebot is not None:
+            googlebot = refused_robots(googlebot)
+        return replace(robots, index=False, googlebot=googlebot)
+    if robots_noindex(robots):
+        return robots
+    kept = [
+        token.strip()
+        for token in robots.split(",")
+        if token.strip()
+        and token.rsplit(":", 1)[-1].strip().lower() not in _INDEX_DIRECTIVES
+    ]
+    return ", ".join((REFUSED_ROBOTS, *kept))
 
 
 @dataclass(frozen=True, slots=True)
@@ -429,6 +458,7 @@ __all__ = [
     "MERGE_KEY",
     "NOINDEX_DIRECTIVES",
     "NO_BREADCRUMBS",
+    "REFUSED_ROBOTS",
     "RESET",
     "Alternates",
     "Article",
@@ -457,6 +487,7 @@ __all__ = [
     "TwitterPlayer",
     "Verification",
     "Viewport",
+    "refused_robots",
     "robots_directives",
     "robots_noindex",
 ]

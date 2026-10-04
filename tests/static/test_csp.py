@@ -95,3 +95,36 @@ class TestDjangoCspMiddleware:
             response = Client().get("/")
         assert "nonce-" not in response["Content-Security-Policy"]
         assert set(_tag_nonces(response)) == {None}
+
+
+class TestANonceOnlyForAWrittenTag:
+    """A render mints the nonce only when it writes a tag that carries it."""
+
+    def test_a_page_that_writes_no_tag_stays_shareable(self, tmp_path: Path) -> None:
+        root = tmp_path / "pages"
+        root.mkdir(parents=True)
+        (root / "layout.djx").write_text(LAYOUT)
+        write_page(root, "", 'template = "<p>x</p>"\ncache = 3600\n')
+        with routed(root, NEXT_JS_OPTIONS={"policy": "disabled"}):
+            response = Client().get("/")
+        assert response.status_code == 200
+        assert "nonce" not in response.content.decode()
+        assert "nonce-" not in response["Content-Security-Policy"]
+        assert response["Cache-Control"] == "public, max-age=3600"
+
+    def test_a_page_that_writes_a_tag_turns_private(self, tmp_path: Path) -> None:
+        root = tmp_path / "pages"
+        root.mkdir(parents=True)
+        (root / "layout.djx").write_text(LAYOUT)
+        write_page(root, "", PAGE + "cache = 3600\n")
+        with routed(root, NEXT_JS_OPTIONS={"policy": "disabled"}):
+            response = Client().get("/")
+        assert set(_tag_nonces_of(response)) == {_header_nonce(response)}
+        assert "private" in response["Cache-Control"]
+
+
+def _tag_nonces_of(response: HttpResponse) -> list[str | None]:
+    return [
+        match.group(1) if (match := NONCE_ATTR.search(tag)) else None
+        for tag in TAG.findall(response.content.decode())
+    ]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from next.caches import BoundedCache
+from next.caches import PageCache
 from next.deps.cache import render_dep_cache
 from next.deps.resolver import current_resolver
 from next.introspect import MisattributedContext, MisattributionLog, callable_name
@@ -131,10 +131,8 @@ class PageContextRegistry:
         self._memo_version = 0
         # Bounded, because a router may name page paths without end, while the
         # registry holds only the files a `@context` ran in.
-        self._merge_order: BoundedCache[Path, _PageOrder] = BoundedCache()
-        self._inheritable: BoundedCache[Path, tuple[_OrderedEntries, ...]] = (
-            BoundedCache()
-        )
+        self._merge_order: PageCache[Path, _PageOrder] = PageCache()
+        self._inheritable: PageCache[Path, tuple[_OrderedEntries, ...]] = PageCache()
 
     @property
     def version(self) -> int:

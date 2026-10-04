@@ -9,7 +9,6 @@ from .errors import (
     SitemapEntryError,
     SitemapTrailError,
 )
-from .manager import seo_manager
 from .markers import RobotsRule, SitemapEntry
 
 
@@ -23,7 +22,6 @@ __all__ = [
     "SitemapEntryError",
     "SitemapTrailError",
     "checks",
-    "seo_manager",
     "signals",
     "sitemap",
 ]

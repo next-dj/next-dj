@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from django.conf import settings
@@ -11,6 +11,7 @@ from django.utils import translation
 from django.utils.functional import lazy
 
 from next.components import ComponentInfo, components_manager
+from next.diagnostics import degraded, watch_degraded
 from next.pages.metadata import Breadcrumb
 from next.pages.metadata.chain import MetadataThunk
 from next.pages.metadata.nodes import BreadcrumbsNode, MetadataNode, render_breadcrumbs
@@ -28,6 +29,9 @@ from tests.support import (
     write_page,
     write_page_chain,
 )
+
+
+_RAISING = Mock(render=Mock(side_effect=ValueError("broken")))
 
 
 def _render(source: str, **ctx) -> str:
@@ -139,6 +143,30 @@ class TestMetadataNode:
             assert template.render(context) == "<title>de</title>"
         with translation.override("en"):
             assert template.render(context) == "<title>en</title>"
+
+    def test_a_raising_renderer_renders_an_empty_head(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        thunk = _thunk(tmp_path, 'metadata = {"title": "T"}\n')
+        watch_degraded()
+        with patch(
+            "next.pages.metadata.nodes.metadata_renderer", return_value=_RAISING
+        ):
+            assert _render("a{% metadata %}b", **{METADATA_KEY: thunk}) == "ab"
+            assert _render("{% metadata %}", **{METADATA_KEY: thunk}) == ""
+        assert degraded()
+        [record] = [r for r in caplog.records if "renders empty" in r.getMessage()]
+        assert "Mock raised ValueError" in record.getMessage()
+
+    @override_settings(DEBUG=True)
+    def test_a_raising_renderer_raises_under_debug(self, tmp_path: Path) -> None:
+        thunk = _thunk(tmp_path, 'metadata = {"title": "T"}\n')
+        with (
+            patch("next.pages.metadata.nodes.metadata_renderer", return_value=_RAISING),
+            pytest.raises(ValueError, match="broken") as raised,
+        ):
+            _render("{% metadata %}", **{METADATA_KEY: thunk})
+        assert "renders empty" in raised.value.__notes__[0]
 
     def test_the_tag_reaches_a_component_render(self, tmp_path: Path) -> None:
         (tmp_path / "head.djx").write_text("<head>{% metadata %}</head>")

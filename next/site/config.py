@@ -269,7 +269,11 @@ def site_indexable(request: HttpRequest | None = None) -> bool:
 def _answered_indexable(
     rule: Callable[[HttpRequest | None], object], request: HttpRequest | None
 ) -> bool:
-    """Return the answer of a callable `INDEXABLE`, `False` when it raises."""
+    """Return the answer of a callable `INDEXABLE`, `False` when it raises.
+
+    It also runs in `RobotsHeaderMiddleware`, outside any view, so an intended
+    exception such as `Http404` is contained like any other.
+    """
     try:
         return bool(rule(request))
     except Exception as exc:  # noqa: BLE001 - the callable is project code
@@ -280,6 +284,7 @@ def _answered_indexable(
             "carries noindex. Make it answer a bool for a request and for None.",
             _INDEXABLE_SETTING,
             describe_callable(rule),
+            pass_through=(),
         )
         return False
 

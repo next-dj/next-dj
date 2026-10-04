@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from next.caches import BoundedCache
+from next.caches import PageCache
 from next.introspect import MisattributedContext, MisattributionLog, callable_name
 from next.pages.errors import PageMetadataConflictError
 from next.pages.signals import metadata_registered
@@ -56,7 +56,7 @@ class PageMetadataRegistry:
         self._misattributions = MisattributionLog()
         self._version = 0
         self._stamps: dict[Path, int] = {}
-        self._chains: BoundedCache[Path, ChainEntry] = BoundedCache()
+        self._chains: PageCache[Path, ChainEntry] = PageCache()
 
     @property
     def version(self) -> int:
@@ -131,13 +131,14 @@ class PageMetadataRegistry:
                 f"{callable_name(existing.func)!r} and {callable_name(func)!r}"
             )
             raise PageMetadataConflictError(file_path, detail)
+        self._entries[file_path] = PageMetadataEntry(func=func, inherit=inherit)
+        # A chain build reads the stamps before the entries, so the entry goes first.
         if (
             existing is None
             or callable_name(existing.func) != callable_name(func)
             or existing.inherit != inherit
         ):
             self._stamp(file_path)
-        self._entries[file_path] = PageMetadataEntry(func=func, inherit=inherit)
         self._bump()
         if metadata_registered.has_listeners(PageMetadataRegistry):
             metadata_registered.send(

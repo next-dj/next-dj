@@ -16,15 +16,14 @@ Site
 It keeps the answer on the request, and without a declared ``URL`` and without a request it raises ``SiteOriginError``, a ``ValueError`` whose ``url`` names the URL that stayed relative when one did.
 ``site_url(request=None)`` answers the declared origin alone, the literal ``URL`` or what a callable ``URL`` answers for the request, and ``None`` without one or when the callable answers ``None``.
 A callable ``URL`` is called once per request.
-One that raises or answers no origin raises ``ImproperlyConfigured`` under ``DEBUG`` or ``STRICT_LOADING`` and is logged once otherwise, and ``site_url_failed(request)`` then answers true so the SEO routes answer 503.
+One that raises or answers no origin raises ``ImproperlyConfigured`` under ``DEBUG`` or ``STRICT_LOADING`` and is logged at most once every ten minutes otherwise, and ``site_url_failed(request)`` then answers true so the SEO routes answer 503.
 ``url_origin(value)`` is the one validation both read, an ``http`` or ``https`` URL with a host and no path, query, or fragment, and ``url_rule(value)`` the reading of a setting value the runtime and ``check_site_settings`` share.
 ``site_indexable(request=None)`` answers whether search engines may index the site for the request, ``"auto"`` reading ``DEBUG`` on every call, a bool standing as it is, and a callable receiving the request or ``None``, one that raises answering false.
 ``debug_closed()`` answers whether only ``DEBUG`` closes the site under ``"auto"``, the case where the sitemap and the robots file are still served under ``noindex`` for a preview, and ``site_closed_to_crawlers(request)`` whether the SEO routes serve the closed documents.
 ``indexable_without_request()`` is the answer the system checks read, a callable rule never called and read as open.
-``site_config()`` answers the ``SiteConfig`` read once per settings reload.
 
 .. automodule:: next.site.config
-   :members: SiteConfig, site_config, site_origin, site_url, site_url_failed, site_indexable, debug_closed, site_closed_to_crawlers, indexable_without_request, url_origin, url_rule, SITE_KEYS
+   :members: site_origin, site_url, site_url_failed, site_indexable, debug_closed, site_closed_to_crawlers, indexable_without_request, url_origin, url_rule, SITE_KEYS
 
 .. automodule:: next.site.errors
    :members:

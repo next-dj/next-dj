@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from django.contrib.sitemaps import Sitemap
     from django.http import HttpRequest
 
-    from next.pages.responses import CacheControl
+    from next.pages import CacheControl
 
     from .discovery import SeoRoot
     from .registry import SitemapItemsEntry

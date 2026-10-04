@@ -16,6 +16,7 @@ from django.core.checks import CheckMessage, Error
 from django.core.exceptions import ImproperlyConfigured
 
 from next.conf.signals import settings_reloaded
+from next.diagnostics import FailureLog
 from next.ports import page_scan_slot, router_access_slot
 from next.utils import page_roots_shape_error, walk_page_tree
 
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+_failures = FailureLog(logger)
 
 
 class _RouterManagerCache:
@@ -67,6 +69,23 @@ class _RouterContract:
 _CACHED_ROUTERS: list[RouterBackend] = []
 _SCANNED_TREES_CACHE: dict[int, _ScannedTrees] = {}
 _ROUTER_CONTRACT_CACHE: dict[int, _RouterContract] = {}
+
+
+class _RoutedSkipNames:
+    """The skip names of the routers of one manager version, read once per version.
+
+    The manager pins its backends until its version moves, so no `id` is reused while
+    the memo holds it.
+    """
+
+    __slots__ = ("held",)
+
+    def __init__(self) -> None:
+        """Start with no version read."""
+        self.held: tuple[object, dict[int, frozenset[str]]] | None = None
+
+
+_routed_skip_names = _RoutedSkipNames()
 
 
 def _keep_alive(router: RouterBackend) -> int:
@@ -140,6 +159,7 @@ def reset_router_manager_cache(**kwargs) -> None:
     _SCANNED_TREES_CACHE.clear()
     _ROUTER_CONTRACT_CACHE.clear()
     _CACHED_ROUTERS.clear()
+    _routed_skip_names.held = None
 
 
 settings_reloaded.connect(reset_router_manager_cache)
@@ -243,6 +263,14 @@ def _read_skip_dir_names(router: RouterBackend) -> frozenset[str]:
         return frozenset()
 
 
+def _read_contract(router: RouterBackend) -> _RouterContract:
+    """Ask `router` for its walk contract."""
+    return _RouterContract(
+        components_folder=_read_components_folder_name(router),
+        skip_names=_read_skip_dir_names(router),
+    )
+
+
 def _router_contract(router: RouterBackend) -> _RouterContract:
     """Return the per-run reading of `router`'s walk contract, taking it once.
 
@@ -251,12 +279,16 @@ def _router_contract(router: RouterBackend) -> _RouterContract:
     key = id(router)
     contract = _ROUTER_CONTRACT_CACHE.get(key)
     if contract is None:
-        contract = _RouterContract(
-            components_folder=_read_components_folder_name(router),
-            skip_names=_read_skip_dir_names(router),
-        )
+        contract = _read_contract(router)
         _ROUTER_CONTRACT_CACHE[_keep_alive(router)] = contract
     return contract
+
+
+def _skip_names(contract: _RouterContract) -> frozenset[str]:
+    """Return the names a contract refuses, its components folder included."""
+    if contract.components_folder is None:
+        return contract.skip_names
+    return contract.skip_names | {contract.components_folder}
 
 
 def page_tree_skip_names(router: RouterBackend) -> frozenset[str]:
@@ -265,10 +297,44 @@ def page_tree_skip_names(router: RouterBackend) -> frozenset[str]:
     Both halves come from that router alone, so the walk never refuses a name another
     `PAGE_BACKENDS` entry declared for a tree this router does not serve.
     """
-    contract = _router_contract(router)
-    if contract.components_folder is None:
-        return contract.skip_names
-    return contract.skip_names | {contract.components_folder}
+    return _skip_names(_router_contract(router))
+
+
+def _skip_names_by_router(
+    manager: RouterManager, routers: tuple[RouterBackend, ...]
+) -> dict[int, frozenset[str]]:
+    """Return the skip names of every router of `manager`, read once per version.
+
+    Keyed on the manager version rather than the check-run cache, so a reload of the
+    routers replaces the memo instead of adding the new routers to it.
+    """
+    # Read after `backends`, since the first read of the backends loads them and
+    # moves the version.
+    version = manager.version
+    held = _routed_skip_names.held
+    if held is not None and held[0] == version:
+        return held[1]
+    names = {id(router): _skip_names(_read_contract(router)) for router in routers}
+    _routed_skip_names.held = (version, names)
+    return names
+
+
+def _routed_roots(router: RouterBackend) -> list[PageRoot]:
+    """Return the page trees `router` reports, none when it fails to report them.
+
+    A request reads the trees, so the failure goes through `FailureLog.contain`.
+    """
+    try:
+        return read_page_roots(router)
+    except PageRootsError as exc:
+        _failures.contain(
+            exc,
+            ("page_roots", type(router)),
+            "%s, so the scripts.py and SEO sources of its page trees are not "
+            "loaded. Make page_roots() return a list of next.urls.PageRoot.",
+            exc,
+        )
+        return []
 
 
 def routed_page_trees(manager: RouterManager) -> list[tuple[PageRoot, frozenset[str]]]:
@@ -276,13 +342,15 @@ def routed_page_trees(manager: RouterManager) -> list[tuple[PageRoot, frozenset[
 
     The `scripts.py` and SEO sources at the top of each tree are discovered from it.
     """
+    routers = manager.backends
+    skip_names_of = _skip_names_by_router(manager, routers)
     seen: set[Path] = set()
     found: list[tuple[PageRoot, frozenset[str]]] = []
-    for router in manager.backends:
-        skip_names = page_tree_skip_names(router)
+    for router in routers:
+        skip_names = skip_names_of[id(router)]
         found.extend(
             (root, skip_names)
-            for root in get_page_roots(router)
+            for root in _routed_roots(router)
             if first_visit(root.path, seen)
         )
     return found

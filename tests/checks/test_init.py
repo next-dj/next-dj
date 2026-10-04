@@ -53,7 +53,7 @@ def _check_id_literals() -> dict[str, set[str]]:
 _CHECK_ID_LITERALS = _check_id_literals()
 
 _RETIRED_IDS = frozenset(
-    {"next.E001", "next.E091"}
+    {"next.E001", "next.E066", "next.E091", "next.E109"}
     | {f"next.W{number:03d}" for number in range(3, 30)}
     | {f"next.W{number:03d}" for number in range(32, 42)}
     | {"next.W044", "next.W045"}

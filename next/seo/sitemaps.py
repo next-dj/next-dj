@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import datetime
 import functools
-import logging
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -16,16 +15,14 @@ from typing import TYPE_CHECKING, Any, Final, NamedTuple, override
 from django.conf import settings
 from django.contrib.sitemaps import Sitemap
 from django.core.paginator import Paginator
-from django.db.models import Max, QuerySet
+from django.db.models import Count, Max, Q, QuerySet
 from django.urls import NoReverseMatch
 from django.utils import timezone, translation
 
 from next.caches import DEFAULT_CACHE_SIZE
 from next.deps.resolver import current_resolver
-from next.diagnostics import FailureLog
 from next.introspect import describe_callable
 from next.pages import page
-from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.metadata.hreflang import x_default_url
 from next.pages.metadata.normalize import X_DEFAULT
 from next.urls.reverse import page_reverse
@@ -53,9 +50,6 @@ if TYPE_CHECKING:
     from .pagination import Rows
     from .registry import SitemapItemsEntry
 
-
-logger = logging.getLogger(__name__)
-_refusals: Final = FailureLog(logger)
 
 MAX_LIMIT: Final = 50000
 """The most URLs one sitemap document may list, by the sitemap protocol."""
@@ -171,39 +165,32 @@ def lastmod_datetime(value: datetime.date) -> datetime.datetime:
 
 
 def static_noindex(page_path: Path) -> bool:
-    """Whether the static metadata of a page sets noindex.
+    """Whether the static metadata of a page sets noindex, for the sitemap view.
 
-    Metadata the schema rejects reads as indexed, with one warning per file version.
+    A chain the schema refuses reads as noindex, so the sitemap leaves the page out.
+    The refusal is contained as `contained_chain` describes, so it raises under
+    `DEBUG`. A system check reads the chain through a strict read instead.
     """
-    try:
-        return page.static_metadata(page_path).noindex
-    except (PageMetadataShapeError, PageMetadataConflictError) as exc:
-        _refusals.warn(
-            (page_path, _mtime(page_path)),
-            "The metadata of %s is refused (%s), so the sitemap reads it as indexed. "
-            "Run manage.py check to see what to fix.",
-            page_path,
-            exc,
-        )
-        return False
+    return page.static_metadata(page_path).metadata.noindex
 
 
-def _mtime(page_path: Path) -> float | None:
-    """Return the modification time of `page_path`, `None` when it is missing."""
-    try:
-        return page_path.stat().st_mtime
-    except OSError:
-        return None
+def listed_trails(
+    trails: Mapping[str, Path],
+    exclude: Sequence[str],
+    *,
+    noindex: Callable[[Path], bool] = static_noindex,
+) -> list[str]:
+    """Return the static trails a sitemap lists, without excluded and noindex pages.
 
-
-def listed_trails(trails: Mapping[str, Path], exclude: Sequence[str]) -> list[str]:
-    """Return the static trails a sitemap lists, without excluded and noindex pages."""
+    `noindex` reads whether a page sets noindex. A system check passes a read that
+    does not raise for a refused chain.
+    """
     return [
         trail
         for trail, page_path in trails.items()
         if not is_dynamic_trail(trail)
         and not is_excluded(trail, exclude)
-        and not static_noindex(page_path)
+        and not noindex(page_path)
     ]
 
 
@@ -429,11 +416,20 @@ class PageTreeSitemap(_SitemapBase):
         return latest
 
     def _part_latest(self, part: Part[SitemapItem]) -> datetime.datetime | None:
-        """Return the latest `lastmod` of one part, `None` when it has no known date."""
+        """Return the latest `lastmod` of one part, `None` unless every row has a date.
+
+        A `QuerySet` part reads the latest date and the undated rows in one query.
+        """
         field = part.lastmod_field
         if field is not None and isinstance(part.rows, QuerySet):
-            value = part.rows.aggregate(latest=Max(field))["latest"]
-            return value if value is None else lastmod_datetime(value)
+            undated = Q(**{f"{field}__isnull": True})
+            found = part.rows.aggregate(
+                latest=Max(field), undated=Count("pk", filter=undated)
+            )
+            value = found["latest"]
+            if value is None or found["undated"]:
+                return None
+            return lastmod_datetime(value)
         if field is None and isinstance(part.rows, QuerySet):
             # Without a named field, the rows of a model carry no lastmod.
             return None

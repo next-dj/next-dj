@@ -6,8 +6,9 @@ import logging
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
+from next.conf.settings import fail_loudly
 from next.deps.resolver import current_resolver
-from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog
+from next.diagnostics import FailureLog
 from next.introspect import callable_name
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.loaders import AncestorStamps, load_page_module
@@ -16,15 +17,20 @@ from .fold import (
     EMPTY_STATE,
     FoldState,
     finish,
-    fold_metadata,
     fold_segment,
     fold_segments,
     merge_segments,
     trace_origins,
 )
-from .markers import Metadata, Segment
+from .markers import REFUSED_ROBOTS, Metadata, Segment, refused_robots
 from .normalize import normalize_metadata
-from .scope import SITE_SOURCE, site_name_source, site_segment
+from .scope import (
+    SITE_SOURCE,
+    contain_site_refusal,
+    site_name_source,
+    site_segment,
+    site_tier,
+)
 
 
 if TYPE_CHECKING:
@@ -38,6 +44,9 @@ if TYPE_CHECKING:
 
 
 _failures: Final = FailureLog(logging.getLogger(__name__))
+
+type ChainRefusal = PageMetadataShapeError | PageMetadataConflictError
+_REFUSALS: Final = (PageMetadataShapeError, PageMetadataConflictError)
 
 
 class MetadataDeclaration(NamedTuple):
@@ -80,6 +89,8 @@ class ChainEntry:
     """The memoised chain of one page with the stamps that validate it.
 
     A request folds only `tail` over `prefix`. `folded` is set for a static chain.
+    A chain the schema refuses carries the `refusal` and folds the site defaults under
+    `REFUSED_ROBOTS`, so the refusal is memoised like any other chain.
     """
 
     ancestors: AncestorStamps
@@ -92,11 +103,35 @@ class ChainEntry:
     static: Metadata
     folded: Metadata | None
     trail: str = ""
+    refusal: ChainRefusal | None = None
 
     @property
     def paths(self) -> tuple[Path, ...]:
         """Return the `page.py` paths of the chain, root first."""
         return self.ancestors.paths
+
+
+class StaticMetadata(NamedTuple):
+    """The metadata of a page readable without a request, and whether it was refused."""
+
+    metadata: Metadata
+    refused: bool
+
+
+class _Walk(NamedTuple):
+    """The ancestor modules one build reads, with the stamps taken before reading."""
+
+    ancestors: AncestorStamps
+    modules: tuple[types.ModuleType | None, ...]
+    registry_version: int
+    registry_stamps: tuple[int | None, ...]
+
+
+def _begin(registry: PageMetadataRegistry, file_path: Path) -> _Walk:
+    """Load the ancestors of `file_path` and stamp the loads and the registry."""
+    ancestors, modules = AncestorStamps.begin(file_path).loaded()
+    registry_version = registry.version
+    return _Walk(ancestors, modules, registry_version, registry.stamps(ancestors.paths))
 
 
 def _page_source(
@@ -124,20 +159,18 @@ def _trail(directory: Path, root: Path) -> str:
 
 
 def _build_chain(
-    registry: PageMetadataRegistry, file_path: Path, site: Segment
+    registry: PageMetadataRegistry, file_path: Path, site: Segment, walk: _Walk
 ) -> ChainEntry:
-    """Walk the ancestors in the page tree, root first, and fold what each declares.
+    """Fold what each ancestor of `walk` declares, root first, over the `site` segment.
 
-    The entry records the stamps of the module loads it folded.
+    The entry records the stamps of the module loads it folded. A refused declaration
+    raises.
     """
-    ancestors, modules = AncestorStamps.begin(file_path).loaded()
-    paths = ancestors.paths
-    registry_version = registry.version
-    registry_stamps = registry.stamps(paths)
+    paths = walk.ancestors.paths
     root = paths[0].parent
     sources: list[ChainSource] = []
     trail = ""
-    for ancestor, module in zip(paths, modules, strict=True):
+    for ancestor, module in zip(paths, walk.modules, strict=True):
         trail = _trail(ancestor.parent, root)
         found = _page_source(registry, ancestor, module, file_path, trail)
         if found is not None:
@@ -151,9 +184,9 @@ def _build_chain(
     static = finish(state)
     tail = tuple(sources[split:])
     return ChainEntry(
-        ancestors=ancestors,
-        registry_stamps=registry_stamps,
-        registry_version=registry_version,
+        ancestors=walk.ancestors,
+        registry_stamps=walk.registry_stamps,
+        registry_version=walk.registry_version,
         site=site,
         sources=tuple(sources),
         prefix=prefix,
@@ -161,6 +194,25 @@ def _build_chain(
         static=static,
         folded=None if tail else static,
         trail=trail,
+    )
+
+
+def _refused_entry(site: Segment, walk: _Walk, refusal: ChainRefusal) -> ChainEntry:
+    """Return the entry of a refused chain, the site defaults under `REFUSED_ROBOTS`."""
+    prefix = fold_segments((site,))
+    folded = finish(prefix)
+    static = replace(folded, robots=refused_robots(folded.robots))
+    return ChainEntry(
+        ancestors=walk.ancestors,
+        registry_stamps=walk.registry_stamps,
+        registry_version=walk.registry_version,
+        site=site,
+        sources=(),
+        prefix=prefix,
+        tail=(),
+        static=static,
+        folded=static,
+        refusal=refusal,
     )
 
 
@@ -182,16 +234,92 @@ def _revalidated(
     return replace(entry, ancestors=ancestors, registry_version=registry_version)
 
 
-def chain_entry(registry: PageMetadataRegistry, file_path: Path) -> ChainEntry:
-    """Return the memoised chain of `file_path`, rebuilt once a source moved."""
+def _memoised_entry(registry: PageMetadataRegistry, file_path: Path) -> ChainEntry:
+    """Return the memoised chain of `file_path`, rebuilt once a source changed.
+
+    A refused chain is memoised as an entry that carries its refusal.
+    """
     site = site_segment()
     stored = registry.chain(file_path)
     entry = None if stored is None else _revalidated(stored, registry, site)
     if entry is None:
-        entry = _build_chain(registry, file_path, site)
+        walk = _begin(registry, file_path)
+        try:
+            entry = _build_chain(registry, file_path, site, walk)
+        except _REFUSALS as exc:
+            entry = _refused_entry(site, walk, exc)
     if entry is not stored:
         registry.remember(file_path, entry)
     return entry
+
+
+def chain_entry(registry: PageMetadataRegistry, file_path: Path) -> ChainEntry:
+    """Return the memoised chain of `file_path`, raising when the schema refuses it.
+
+    A refused chain is walked again, so each call raises a new exception, since a
+    re-raised instance grows its traceback and its notes.
+    """
+    entry = _memoised_entry(registry, file_path)
+    if entry.refusal is None:
+        return entry
+    return _build_chain(registry, file_path, entry.site, _begin(registry, file_path))
+
+
+def contained_chain(registry: PageMetadataRegistry, file_path: Path) -> ChainEntry:
+    """Return the memoised chain of `file_path` for a response, containing a refusal.
+
+    A refused chain renders the site defaults under `REFUSED_ROBOTS`. Its refusal
+    raises under `DEBUG` or `STRICT_LOADING`. Otherwise every read marks the render
+    degraded, and the refusal is logged at the `FailureLog` rate. A refused
+    `DEFAULTS` is contained the same way, as `contain_site_refusal` describes.
+    """
+    entry = _memoised_entry(registry, file_path)
+    refusal = entry.refusal
+    if refusal is not None:
+        _contain_refusal(registry, file_path, refusal)
+    contain_site_refusal()
+    return entry
+
+
+def _contain_refusal(
+    registry: PageMetadataRegistry, file_path: Path, refusal: ChainRefusal
+) -> None:
+    """Report the memoised `refusal` of the chain of `file_path` through `contain`."""
+    try:
+        if fail_loudly():
+            chain_entry(registry, file_path)
+        raise _fresh(refusal)
+    except _REFUSALS as exc:
+        _failures.contain(
+            exc,
+            (file_path, type(exc)),
+            "The metadata chain of %s is refused (%s), so the page renders the "
+            "site defaults under noindex. Run manage.py check to see what to fix.",
+            file_path,
+            exc,
+        )
+
+
+def _fresh(refusal: ChainRefusal) -> ChainRefusal:
+    """Return a copy of `refusal` with no traceback, so no two raises share state.
+
+    The memoised instance is never raised, since concurrent requests would each
+    rewrite its traceback while a log handler formats it.
+    """
+    fresh = type(refusal).__new__(type(refusal), *refusal.args)
+    vars(fresh).update(vars(refusal))
+    fresh.__cause__ = refusal.__cause__
+    return fresh
+
+
+def static_metadata(registry: PageMetadataRegistry, file_path: Path) -> StaticMetadata:
+    """Return the metadata of `file_path` readable without a request, contained.
+
+    It reads as refused when the chain or the `DEFAULTS` tier above it is refused.
+    """
+    entry = contained_chain(registry, file_path)
+    refused = entry.refusal is not None or site_tier().refusal is not None
+    return StaticMetadata(entry.static, refused)
 
 
 def _fold_tail(
@@ -226,8 +354,6 @@ def _fold_tail(
                 **url_kwargs,
             )
             segment = normalize_metadata(func(**resolved), source=source_name)
-        except INTENDED_EXCEPTIONS:
-            raise
         except Exception as exc:
             if not contain:
                 raise
@@ -346,19 +472,16 @@ class MetadataThunk:
     def folded(self) -> Metadata | None:
         """Return the fold of a chain without callables, `None` when one must run.
 
-        A chain the schema refuses folds to the site defaults alone, see `_refused`.
+        A chain the schema refuses folds as `contained_chain` describes.
         """
-        try:
-            return chain_entry(self.registry, self.file_path).folded
-        except (PageMetadataShapeError, PageMetadataConflictError) as exc:
-            return self._refused(exc)
+        return contained_chain(self.registry, self.file_path).folded
 
     def fold(self, context_data: MutableMapping[str, object]) -> Metadata:
         """Fold the chain of the render, its callables reading `context_data`.
 
         A callable that fails is left out, and the rest of the chain still renders.
         """
-        entry = chain_entry(self.registry, self.file_path)
+        entry = contained_chain(self.registry, self.file_path)
         if entry.folded is not None:
             return entry.folded
         state = _fold_tail(
@@ -372,29 +495,20 @@ class MetadataThunk:
         )
         return finish(state)
 
-    def _refused(
-        self, exc: PageMetadataShapeError | PageMetadataConflictError
-    ) -> Metadata:
-        """Report a chain the schema refuses once, and fold the site defaults alone."""
-        _failures.contain(
-            exc,
-            (self.file_path, type(exc)),
-            "The metadata chain of %s is refused (%s), so the page renders the "
-            "site defaults alone. Run manage.py check to see what to fix.",
-            self.file_path,
-            exc,
-        )
-        return fold_metadata((site_segment(),))
-
 
 __all__ = [
+    "REFUSED_ROBOTS",
     "ChainEntry",
+    "ChainRefusal",
     "ChainSource",
     "MetadataDeclaration",
     "MetadataOrigin",
     "MetadataThunk",
+    "StaticMetadata",
     "chain_entry",
+    "contained_chain",
     "declared_metadata",
     "fold_chain",
     "metadata_origins",
+    "static_metadata",
 ]

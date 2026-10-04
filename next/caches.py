@@ -5,8 +5,10 @@ Each cache holds its own bound and eviction policy, so a caller manages neither.
 
 from __future__ import annotations
 
+import threading
 from collections import OrderedDict
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, ClassVar, Final, override
+from weakref import WeakSet
 
 
 if TYPE_CHECKING:
@@ -16,6 +18,12 @@ if TYPE_CHECKING:
 # The default bound of a path-keyed cache, far above the page count of a project.
 # It limits memory when a caller creates keys without end, rather than ranking entries.
 DEFAULT_CACHE_SIZE = 2048
+
+PAGE_HEADROOM: Final = 2
+"""The entries a `PageCache` holds per routed page, covering its ancestor entries."""
+
+# Serialises `PageCache.fit`, so every page cache ends with the bound of the same call.
+_FIT_LOCK = threading.Lock()
 
 
 class BoundedCache[K, V]:
@@ -68,6 +76,49 @@ class BoundedCache[K, V]:
         self._entries.clear()
 
 
+class PageCache[K, V](BoundedCache[K, V]):
+    """A FIFO cache keyed by page, whose bound follows the routed page count.
+
+    A FIFO bound below the page count evicts every entry before its next read under
+    uniform traffic, so the URL build reports the count through `fit`.
+    """
+
+    __slots__ = ("__weakref__",)
+
+    _bound: ClassVar[int] = DEFAULT_CACHE_SIZE
+    _instances: ClassVar[WeakSet[PageCache[Any, Any]]] = WeakSet()
+
+    def __init__(self) -> None:
+        """Start at the bound that the last URL build set."""
+        super().__init__(PageCache._bound)
+        PageCache._instances.add(self)
+
+    @staticmethod
+    def fit(page_count: int) -> None:
+        """Set the bound of every page cache to `PAGE_HEADROOM` entries per routed page.
+
+        The bound never falls below `DEFAULT_CACHE_SIZE`. A lower bound drops the oldest
+        entries of each cache at once, so the pages of an earlier build are not held.
+        """
+        bound = max(DEFAULT_CACHE_SIZE, page_count * PAGE_HEADROOM)
+        with _FIT_LOCK:
+            if bound == PageCache._bound:
+                return
+            PageCache._bound = bound
+            for cache in list(PageCache._instances):
+                cache._maxsize = bound
+                cache._trim()
+
+    def _trim(self) -> None:
+        """Drop the oldest entries until the cache is within its bound."""
+        entries = self._entries
+        while len(entries) > self._maxsize:
+            try:
+                entries.popitem(last=False)
+            except KeyError:
+                return
+
+
 class LruCache[K, V](BoundedCache[K, V]):
     """A bounded cache that evicts the least recently read entry first."""
 
@@ -112,4 +163,10 @@ class LruCache[K, V](BoundedCache[K, V]):
         return value
 
 
-__all__ = ["DEFAULT_CACHE_SIZE", "BoundedCache", "LruCache"]
+__all__ = [
+    "DEFAULT_CACHE_SIZE",
+    "PAGE_HEADROOM",
+    "BoundedCache",
+    "LruCache",
+    "PageCache",
+]

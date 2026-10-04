@@ -4,6 +4,7 @@ from django.template.base import Template
 from django.test import RequestFactory
 
 from next.partial import register_patch_op, zone_requested
+from next.partial.errors import BuiltinPatchOpError
 from next.partial.registry import (
     BUILTIN_OPS,
     PatchOpRegistry,
@@ -68,12 +69,28 @@ class TestRegisterPatchOp:
         registry.register("confetti")
         assert registry.custom_names() == frozenset({"confetti"})
 
-    def test_a_name_shadowing_a_builtin_stays_visible(self) -> None:
-        # the check that reports the shadowing reads custom_names, so a
-        # registration dropped here would leave it with nothing to report
+    @pytest.mark.parametrize("verb", sorted(BUILTIN_OPS))
+    def test_a_builtin_verb_is_refused_at_registration(self, verb: str) -> None:
         registry = PatchOpRegistry()
-        registry.register("morph")
-        assert registry.custom_names() == frozenset({"morph"})
+        with pytest.raises(BuiltinPatchOpError) as caught:
+            registry.register(verb)
+        assert caught.value.name == verb
+        assert registry.custom_names() == frozenset()
+        assert registry.version == 0
+
+    def test_a_refused_builtin_sends_no_signal(self) -> None:
+        with (
+            capture_signals(patch_op_registered) as recorded,
+            pytest.raises(BuiltinPatchOpError),
+        ):
+            PatchOpRegistry().register("meta")
+        assert len(recorded) == 0
+
+    @pytest.mark.usefixtures("restored_op_registry")
+    def test_the_facade_refuses_a_builtin_verb(self) -> None:
+        with pytest.raises(BuiltinPatchOpError, match='"morph" is built in'):
+            register_patch_op("morph")
+        assert "morph" not in patch_op_registry.custom_names()
 
 
 class TestRegistryRecords:

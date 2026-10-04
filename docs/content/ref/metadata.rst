@@ -7,7 +7,7 @@ Module summary
 --------------
 
 ``next.pages.metadata`` holds the page metadata of :doc:`/content/topics/seo/metadata`, the input dicts a ``page.py`` and the settings declare, the frozen value objects the merge produces, the ``Replace`` and ``RESET`` markers, the resolve stage, the renderer contract, and the JSON-LD nodes of ``next.pages.metadata.ld``.
-``next.pages`` re-exports the names a page module uses most, ``MetadataDict``, ``SiteMetadataDict``, ``Metadata``, ``ResolvedMetadata``, ``Replace``, ``RESET``, ``MetadataRenderer``, ``HtmlMetadataRenderer``, and ``ld``.
+``next.pages`` re-exports the names a page module uses most, ``MetadataDict``, ``ResolvedMetadata``, ``Replace``, ``RESET``, ``MetadataRenderer``, ``HtmlMetadataRenderer``, and ``ld``, while ``Metadata`` and ``SiteMetadataDict`` are imported from ``next.pages.metadata``.
 Everything else of the package, the ``chain``, ``fold``, ``registry``, and ``normalize`` modules among them, is internal, see :doc:`/content/internals/seo-pipeline`.
 
 Keys and tags
@@ -69,7 +69,7 @@ Input dicts
 ``MetadataDict`` is what a ``page.py`` declares and a ``@page.metadata`` callable returns, and ``SiteMetadataDict`` is what ``DEFAULTS`` declares, the same keys less ``breadcrumb`` and with the title limited to ``template`` and ``default``.
 Every value of a nested block may be wrapped in ``Replace``, ``Text`` is a string or a lazy translation, and ``Url`` is a string or a lazy URL from :func:`~django.urls.reverse_lazy` or ``page_reverse_lazy``.
 A lazy URL stays unforced in the merge and is forced and checked for its scheme on every render, so a static ``metadata`` dict names a route before the URLconf loads.
-A forced URL on a scheme outside http and https leaves out the tag carrying it, logged once, and a whole hreflang set when it is one of the alternates.
+A forced URL on a scheme outside http and https leaves out the tag carrying it, logged at most once every ten minutes, and a whole hreflang set when it is one of the alternates.
 ``RobotsDict`` takes the directives of ``GooglebotDict`` and a ``googlebot`` key, a string or a ``GooglebotDict``, so the Googlebot directives nest one level and no deeper.
 
 .. automodule:: next.pages.metadata.dicts
@@ -125,8 +125,10 @@ It answers the head markup as a ``SafeString``.
            return (format_html('<meta name="generator" content="{}">', "Acme CMS"),)
 
 ``NEXT_FRAMEWORK["METADATA"]["RENDERER"] = "site.metadata.SiteRenderer"`` installs it, and the framework builds it without arguments once and again on every ``settings_reloaded``.
-A path that does not import, names no concrete subclass, or a class whose constructor raises leaves the page on ``HtmlMetadataRenderer``, logged once, and ``next.E107`` reports the path before the first render.
+A path that does not import, names no concrete subclass, or a class whose constructor raises leaves the page on ``HtmlMetadataRenderer``, logged at most once every ten minutes, and ``next.E107`` reports the path before the first render.
 Under ``DEBUG`` or ``STRICT_LOADING`` the render raises instead.
+A ``render`` that raises leaves the head empty, logged at most once every ten minutes per renderer class and exception type, and the response is sent with ``Cache-Control: private, no-store``.
+Under ``DEBUG`` or ``STRICT_LOADING`` it raises with a note naming the renderer.
 
 .. automodule:: next.pages.metadata.backends
    :members: MetadataRenderer, HtmlMetadataRenderer
@@ -144,7 +146,8 @@ Page accessors
 --------------
 
 ``Page.metadata`` is the decorator behind ``@page.metadata``, with ``inherit=True`` running the callable for the descendants too.
-``Page.static_metadata(path)`` answers the ``Metadata`` readable without a request, ``DEFAULTS`` and every ``metadata`` dict of the page and its ancestors.
+``Page.static_metadata(path)`` returns a ``StaticMetadata`` pair, the ``Metadata`` readable without a request, ``DEFAULTS`` and every ``metadata`` dict of the page and its ancestors, and whether the schema refused that chain.
+A refused chain reads as ``DEFAULTS`` under ``noindex`` with the other robots directives of ``DEFAULTS`` kept, the pair reads as refused when ``DEFAULTS`` itself is refused, and the refusal raises under ``DEBUG`` or ``STRICT_LOADING`` and is logged at most once every ten minutes otherwise.
 The metadata a request resolves is read from a rendered response, through ``assert_metadata`` of :doc:`testing`.
 ``metadata_declaration``, ``metadata_chain``, ``metadata_registrations``, and ``fold_metadata`` serve the checks, ``showmetadata``, and the ``meta`` patch verb as part of the cross-area contract of :doc:`pages`.
 

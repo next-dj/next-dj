@@ -19,9 +19,17 @@ from django.http import (
 )
 from django.http.request import HttpHeaders
 from django.middleware.csrf import get_token
-from django.urls import NoReverseMatch, reverse
+from django.urls import (
+    NoReverseMatch,
+    get_resolver,
+    get_script_prefix,
+    get_urlconf,
+    reverse,
+)
+from django.utils import translation
 from django.utils.cache import add_never_cache_headers, patch_vary_headers
 
+from next.caches import BoundedCache
 from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
 from next.diagnostics import FailureLog
@@ -65,8 +73,9 @@ def csrf_delivery() -> CsrfDelivery:
 
 
 def forget_csrf_delivery(**kwargs) -> None:
-    """Drop the memoised delivery mode, so a settings reload takes effect."""
+    """Drop the memoised delivery mode and endpoint URL after a settings reload."""
     csrf_delivery.cache_clear()
+    _urls.clear()
 
 
 settings_reloaded.connect(forget_csrf_delivery)
@@ -100,12 +109,35 @@ def csrf_token_payload(request: HttpRequest) -> dict[str, str]:
     return {"header": csrf_header_name(), "token": get_token(request)}
 
 
+_urls: Final[BoundedCache[tuple[str | None, str, str | None], tuple[object, str]]] = (
+    BoundedCache()
+)
+"""The reversed endpoint per URLconf, script prefix and language, with its resolver.
+
+`clear_url_caches()` drops the resolver whenever the routes change, so a held resolver
+that is not the current one marks a stale address.
+"""
+
+
 def csrf_url() -> str:
-    """Return the token endpoint, under the `next` namespace or bare as the root."""
+    """Return the token endpoint, reversed once per URLconf, script prefix and language.
+
+    The endpoint is named `csrf` under the `next` namespace. Where `next.urls` is the
+    root URLconf it has no namespace, so the address of `csrf_view` itself is used,
+    never a project pattern that is also named `csrf`.
+    """
+    urlconf = get_urlconf()
+    resolver = get_resolver(urlconf)
+    key = (urlconf, get_script_prefix(), translation.get_language())
+    held = _urls.get(key)
+    if held is not None and held[0] is resolver:
+        return held[1]
     try:
-        return reverse(f"next:{CSRF_URL_NAME}")
+        url = reverse(f"next:{CSRF_URL_NAME}")
     except NoReverseMatch:
-        return reverse(CSRF_URL_NAME)
+        url = reverse(csrf_view)
+    _urls[key] = (resolver, url)
+    return url
 
 
 def csrf_payload(request: HttpRequest) -> dict[str, str]:

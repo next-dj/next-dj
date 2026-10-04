@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Final
 from django.utils.cache import patch_vary_headers
 from django.utils.deprecation import MiddlewareMixin
 
-from next.caches import BoundedCache
-from next.conf.signals import settings_reloaded
+from next.diagnostics import FailureLog
+from next.pages.responses import CDN_HEADERS, drop_cdn_headers
 
 
 if TYPE_CHECKING:
@@ -18,26 +18,11 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+_failures = FailureLog(logger)
 
 _SHARED_DIRECTIVES: Final = frozenset({"public", "s-maxage"})
 _PRIVATE_DIRECTIVES: Final = frozenset({"private", "no-store"})
 _DROPPED_DIRECTIVES: Final = _SHARED_DIRECTIVES | {"private"}
-_CDN_HEADERS: Final = (
-    "CDN-Cache-Control",
-    "Cloudflare-CDN-Cache-Control",
-    "Surrogate-Control",
-)
-"""The headers a CDN reads in place of `Cache-Control`, removed when made private."""
-
-_WARNED: BoundedCache[str, bool] = BoundedCache()
-
-
-def _forget_warnings(**kwargs) -> None:
-    """Clear the warned paths, so a path is logged again after a reconfiguration."""
-    _WARNED.clear()
-
-
-settings_reloaded.connect(_forget_warnings)
 
 
 def _directive_name(directive: str) -> str:
@@ -54,11 +39,20 @@ def _shared(response: HttpResponseBase, names: set[str]) -> bool:
     """
     if not _SHARED_DIRECTIVES.isdisjoint(names):
         return True
-    if any(name in response for name in _CDN_HEADERS):
+    if any(name in response for name in CDN_HEADERS):
         return True
     if not _PRIVATE_DIRECTIVES.isdisjoint(names):
         return False
     return "max-age" in names or "Expires" in response
+
+
+def _route(request: HttpRequest) -> str:
+    """Return the URL pattern `request` resolved to, or its path when it resolved none.
+
+    A dynamic route serves many paths for one cause, so the warning is keyed by route.
+    """
+    match = getattr(request, "resolver_match", None)
+    return request.path if match is None else match.route
 
 
 def guard_shared_cache(
@@ -67,8 +61,9 @@ def guard_shared_cache(
     """Make `response` private when it sets a cookie that a shared cache would store.
 
     `public` and `s-maxage` are removed from `Cache-Control` and `private` is put first,
-    the CDN headers are removed, and `Vary` gains `Cookie`. Each path is logged once,
-    since every later request has the same cause.
+    the CDN headers are removed, and `Vary` gains `Cookie`. The warning is keyed by
+    route and logged at the `FailureLog` rate, since every request to a route has the
+    same cause.
     """
     if not response.cookies:
         return response
@@ -84,24 +79,22 @@ def guard_shared_cache(
         part for part in directives if _directive_name(part) not in _DROPPED_DIRECTIVES
     ]
     response["Cache-Control"] = ", ".join(("private", *kept))
-    for name in _CDN_HEADERS:
-        response.headers.pop(name, None)
+    drop_cdn_headers(response)
     patch_vary_headers(response, ("Cookie",))
-    if request.path not in _WARNED:
-        _WARNED[request.path] = True
-        logger.warning(
-            "The response to %s set a cookie under a shared Cache-Control, so "
-            "SharedCacheGuardMiddleware made it private. Find the view or middleware "
-            "that sets the cookie, or drop the shared cache of that response.",
-            request.path,
-        )
+    _failures.warn(
+        _route(request),
+        "The response to %s set a cookie under a shared Cache-Control, so "
+        "SharedCacheGuardMiddleware made it private. Find the view or middleware "
+        "that sets the cookie, or drop the shared cache of that response.",
+        request.path,
+    )
     return response
 
 
 class SharedCacheGuardMiddleware(MiddlewareMixin):
     """Make private every response that sets a cookie while a shared cache may store it.
 
-    A page makes its own cache private when a cookie is set, but a third-party
+    A page makes its own response private when a cookie is set, but a third-party
     middleware or a 304 built above the page can still combine the two. List it first
     in `MIDDLEWARE`, or directly below `UpdateCacheMiddleware`, so it sees every cookie.
     """

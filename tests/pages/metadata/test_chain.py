@@ -13,6 +13,7 @@ from django.test import override_settings
 import next.pages.loaders as loaders_module
 from next.caches import BoundedCache
 from next.deps import Depends
+from next.diagnostics import degraded, watch_degraded
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.loaders import (
     forget_page_roots,
@@ -22,15 +23,18 @@ from next.pages.loaders import (
 )
 from next.pages.metadata import RESET, OpenGraph, Robots
 from next.pages.metadata.chain import (
+    REFUSED_ROBOTS,
     ChainEntry,
     MetadataDeclaration,
     MetadataOrigin,
     MetadataThunk,
     _failures,
     chain_entry,
+    contained_chain,
     declared_metadata,
     fold_chain,
     metadata_origins,
+    static_metadata as read_static_metadata,
 )
 from next.pages.metadata.markers import Metadata, Segment, TitleSpec
 from next.pages.metadata.normalize import normalize_metadata
@@ -53,6 +57,8 @@ ROOT_OG = (
 MID = 'metadata = {"description": "Mid"}\n'
 LEAF = 'metadata = {"title": "Leaf", "og": {"type": "website"}}\n'
 PLAIN = "x = 1\n"
+UNKNOWN_KEY = "headline"
+REFUSED = f'metadata = {{"{UNKNOWN_KEY}": "Refused"}}\n'
 NAMED_METADATA = """
 def metadata() -> dict:
     return {"title": "Named"}
@@ -544,11 +550,84 @@ class TestContainedFailures:
         with caplog.at_level("ERROR", logger="next.pages.metadata.chain"):
             first = thunk.folded()
             second = thunk.folded()
-        assert first == second
+        assert first is second
         assert first is not None
         assert first.title is None
+        assert first.noindex
         assert len(caplog.records) == 1
-        assert "renders the site defaults alone" in caplog.text
+        assert "renders the site defaults under noindex" in caplog.text
+
+    def test_a_refusal_is_memoised_and_degrades_every_read(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", REFUSED)])
+        with patch(
+            "next.pages.metadata.chain.normalize_metadata",
+            side_effect=normalize_metadata,
+        ) as normalize:
+            first = contained_chain(registry, leaf)
+            watch_degraded()
+            second = contained_chain(registry, leaf)
+        assert normalize.call_count == 1
+        assert second is first
+        assert degraded()
+        assert isinstance(first.refusal, PageMetadataShapeError)
+
+    def test_a_fixed_page_drops_the_refusal(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", REFUSED)])
+        assert contained_chain(registry, leaf).refusal is not None
+        touch_later(leaf, LEAF)
+        load_page_module(leaf)
+        entry = contained_chain(registry, leaf)
+        assert entry.refusal is None
+        assert str(entry.static.title) == "Leaf"
+
+    def test_the_strict_read_raises_a_new_exception_per_call(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", REFUSED)])
+        contained_chain(registry, leaf)
+        raised = []
+        for _ in range(2):
+            with pytest.raises(PageMetadataShapeError) as caught:
+                chain_entry(registry, leaf)
+            raised.append(caught.value)
+        assert raised[0] is not raised[1]
+        assert registry.chain(leaf) is not None
+
+    def test_the_static_read_reports_the_refusal(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", REFUSED)])
+        meta, refused = read_static_metadata(registry, leaf)
+        assert refused
+        assert meta.robots == REFUSED_ROBOTS
+
+    @override_settings(
+        NEXT_FRAMEWORK={"METADATA": {"DEFAULTS": {"robots": "noindex, nofollow"}}}
+    )
+    def test_a_refusal_keeps_the_declared_site_directives(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", REFUSED)])
+        assert read_static_metadata(registry, leaf).metadata.robots == (
+            "noindex, nofollow"
+        )
+
+    def test_every_contained_read_reports_a_new_exception(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", REFUSED)])
+        with patch.object(_failures, "contain") as contain:
+            entry = contained_chain(registry, leaf)
+            contained_chain(registry, leaf)
+        first, second = (call.args[0] for call in contain.call_args_list)
+        assert first is not second
+        assert entry.refusal not in (first, second)
+        assert str(first) == str(second) == str(entry.refusal)
+        assert first.source == entry.refusal.source
 
     @override_settings(DEBUG=True)
     def test_a_refused_chain_fails_loudly_under_debug(

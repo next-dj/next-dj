@@ -16,7 +16,7 @@ from next.static.serializers import (
 
 
 class TestJsonJsContextSerializer:
-    """Default serializer handles the same types as the legacy inline code."""
+    """The default serializer encodes plain values, dates and pydantic models."""
 
     def test_dumps_plain_dict(self) -> None:
         payload = JsonJsContextSerializer().dumps({"a": 1, "b": [1, 2]})

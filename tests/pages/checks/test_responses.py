@@ -216,6 +216,7 @@ class TestConditionalGetOrder:
             [warning] = check_conditional_get_order()
         assert warning.id == "next.W124"
         assert warning.msg.startswith(f"settings.MIDDLEWARE lists {SESSIONS} above")
+        assert "after the page made its response private" in warning.msg
         assert "p0" in warning.msg
         assert GUARD in warning.hint
 

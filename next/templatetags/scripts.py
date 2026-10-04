@@ -14,8 +14,9 @@ from django.template.base import NodeList
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 
-from next.consent import consent_categories, get_consent, joint_category
+from next.consent import consent_categories, get_consent
 from next.consent.manager import consent_configured, server_mode
+from next.consent.markers import joint_category
 from next.diagnostics import FailureLog
 from next.pages.responses import vary_on_cookie
 from next.scripts.manager import CONSENT_NOTE, GATED_NOTE, SCRIPT_NOTE, GatedNote

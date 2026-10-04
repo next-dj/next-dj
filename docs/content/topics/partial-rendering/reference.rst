@@ -154,7 +154,8 @@ Draining marks the messages read, so a later full navigation does not replay the
 
 A verb beyond this set is registered on both sides.
 ``register_patch_op("confetti")`` on the server registers the name and earns the generic ``op()`` channel on the builder.
-``manage.py check`` reads the registered names, reporting ``next.E066`` for a name that shadows a built-in verb and ``next.E090`` for a name that is not a valid verb token.
+``register_patch_op`` raises ``BuiltinPatchOpError`` for a built-in verb name, because the client applies the built-in verb and a custom handler under that name would never run.
+``manage.py check`` reads the registered names and reports ``next.E090`` for a name that is not a valid verb token.
 An unregistered name fails at runtime with ``UnknownPatchOpError``.
 ``Next.partial.defineOp("confetti", handler)`` on the client supplies the handler.
 See :doc:`extending` for the end-to-end recipe, the ``context`` and ``event`` seams, and the custom-verb exceptions.
@@ -467,9 +468,9 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
    * - ``partial:error``
      - No
      - A discriminated union on ``kind``, where each cause carries only its own fields.
-       ``{kind: "network", error, url?}`` is a fetch reject, a dropped stream connection, a zone that still answers a non-envelope after the navigate-once fallback already navigated, or a target off the page's origin refused unsent, where ``url`` is present only on that refusal.
+       ``{kind: "network", error, url?}`` is a fetch reject, a response body whose read fails after the headers arrived, a dropped stream connection, a zone that still answers a non-envelope after the navigate-once fallback already navigated, or a target off the page's origin refused unsent, where ``url`` is present only on that refusal.
        ``{kind: "http", status, body}`` is a 5xx or a mutating reply that is not an envelope.
-       ``{kind: "parse", body, error}`` is a malformed JSON body.
+       ``{kind: "parse", body, error}`` is a malformed JSON body, a JSON body that is not an envelope, or a body a parse hook rejects.
        ``{kind: "op", op, error, target?}`` is a thrown or unknown verb mid-apply, where ``op`` names the verb and ``target`` is the human-readable address of the patch, present only when the op carried a recognised target.
        ``{kind: "asset", error, url?}`` is a stylesheet that failed to load, a version mismatch surviving a reload, a reload target off the page's origin, or a runtime chunk that failed to load, where ``url`` is present on all but the first.
        ``{kind: "csrf", error, url?}`` is a deferred CSRF token the runtime could not fetch, where ``url`` names the mutation that never left.

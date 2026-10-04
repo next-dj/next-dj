@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, ClassVar, override
 
 from django.core.signals import setting_changed
 
-from next.caches import BoundedCache
+from next.caches import PageCache
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
 from next.conf.signals import settings_reloaded
@@ -59,7 +59,7 @@ class _PageLoad:
     error: Exception | None
 
 
-_MODULE_MEMO: BoundedCache[Path, _PageLoad] = BoundedCache()
+_MODULE_MEMO: PageCache[Path, _PageLoad] = PageCache()
 _FAILED_PATHS: set[Path] = set()
 _MEMO_WRITE_LOCK = threading.Lock()
 
@@ -348,7 +348,7 @@ settings_reloaded.connect(forget_page_roots)
 setting_changed.connect(_on_setting_changed)
 
 
-_TREE_DEPTHS: BoundedCache[Path, tuple[tuple[Path, ...], int]] = BoundedCache()
+_TREE_DEPTHS: PageCache[Path, tuple[tuple[Path, ...], int]] = PageCache()
 
 
 def page_tree_depth(start_dir: Path) -> int:

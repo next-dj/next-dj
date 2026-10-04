@@ -1,4 +1,4 @@
-# `_template` — starter scaffold for a next.dj example
+# `_template`: starter scaffold for a next.dj example
 
 The skeleton copied for every new example in this repository. It runs and its test passes, but it demonstrates nothing on its own. Copy the folder, work through the rename checklist, then fill in the feature you want to show.
 
@@ -43,5 +43,5 @@ The smoke tests in `tests/test_integration.py` fetch `/`, assert the welcome ban
 
 ## Further reading
 
-- [`../README.md`](../README.md) — the catalog of finished examples and the conventions they share.
-- [`../shortener/README.md`](../shortener/README.md) — the walkthrough example to read first. It covers routing, context callables, forms, and components end to end.
+- [`../README.md`](../README.md): the catalog of finished examples and the conventions they share.
+- [`../shortener/README.md`](../shortener/README.md): the walkthrough example to read first. It covers routing, context callables, forms, and components end to end.

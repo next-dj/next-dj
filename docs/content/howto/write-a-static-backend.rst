@@ -65,7 +65,7 @@ When the URL itself must change per request, subclass ``StaticFilesBackend`` and
 ``asset_url`` receives the URL and an optional ``request`` keyword.
 One override covers ``.css``, ``.js``, and ``.mjs`` assets plus the ``next.min.js`` runtime bundle and its preload hint, in a full-page render and in the asset manifest of a partial patch envelope alike.
 The configured tag templates still shape the markup around the rewritten URL.
-A subclass that overrides a renderer such as ``render_script_tag`` keeps its signature, ``(self, url, *, request=None, nonce=None)``, since the injector passes both keywords, and ``manage.py check`` reports a renderer without them.
+A subclass that overrides a renderer such as ``render_script_tag`` keeps its signature, ``(self, url, *, request=None, nonce=None)``, since the injector always passes ``request`` and passes ``nonce`` whenever the request carries a CSP nonce, and ``manage.py check`` reports a renderer without them.
 
 Register the backend.
 

@@ -248,7 +248,7 @@ The provider matches the bare ``DTenant`` annotation when a request carries a te
            return get_active_tenant(context.request)
 
 Unlike ``DFlag[Flag]``, ``DTenant`` is matched by class identity rather than ``get_origin``, so it carries no type parameter and the provider compares ``param.annotation`` to the class directly.
-``static_can_handle`` settles the parameter from the annotation alone, so the plan claims it at compile time and no other provider is consulted for it per request.
+``static_can_handle`` decides the parameter from the annotation alone, so the plan claims it at compile time and no other provider is consulted for it per request.
 
 Import the module from ``AppConfig.ready`` so the auto-registry wires the provider once the app registry is populated.
 ``RegisteredParameterProvider`` registers the provider as a side effect of class definition, so importing the module is the whole registration step.

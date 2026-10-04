@@ -20,25 +20,23 @@ from .manager import Page, context, page
 from .metadata import (
     RESET,
     HtmlMetadataRenderer,
-    Metadata,
     MetadataDict,
     MetadataRenderer,
     Replace,
     ResolvedMetadata,
-    SiteMetadataDict,
     ld,
 )
-from .responses import CacheDict, HeadersDict
+from .responses import CacheControl, CacheDict, HeadersDict
 
 
 __all__ = [
     "RESET",
+    "CacheControl",
     "CacheDict",
     "Context",
     "ContextResult",
     "HeadersDict",
     "HtmlMetadataRenderer",
-    "Metadata",
     "MetadataDict",
     "MetadataRenderer",
     "Page",
@@ -50,7 +48,6 @@ __all__ = [
     "PageModuleImportError",
     "Replace",
     "ResolvedMetadata",
-    "SiteMetadataDict",
     "checks",
     "context",
     "ld",

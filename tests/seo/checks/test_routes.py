@@ -32,6 +32,18 @@ class TestRouteCollisions:
             str(root / "robots.txt" / "page.py"),
         }
 
+    def test_the_message_names_the_page_path_and_the_served_address(
+        self, tmp_path
+    ) -> None:
+        root = write_tree(tmp_path / "pages", pages=("sitemap.xml",), sitemap="")
+        with routed(root):
+            [message] = check_seo_route_collisions()
+        assert message.msg == (
+            f"{root / 'sitemap.xml' / 'page.py'} routes /sitemap.xml/, beside the "
+            "/sitemap.xml the framework serves from the SEO sources, so crawlers and "
+            "visitors reach two different documents. Rename the directory."
+        )
+
     def test_a_nested_trail_takes_no_section_address(self, tmp_path) -> None:
         root = write_tree(
             tmp_path / "pages", pages=("sitemap-a/b.xml", "sitemap-.xml"), sitemap=""

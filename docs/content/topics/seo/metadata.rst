@@ -90,8 +90,9 @@ It shares the dependency cache of the render with ``render()`` and the ``@contex
 A callable that raises :exc:`~django.http.Http404` turns the whole page into a 404, which is what a metadata lookup that finds no row should answer.
 :exc:`~django.core.exceptions.PermissionDenied` passes through the same way.
 Any other exception, or a returned value the schema refuses, leaves that callable out of the merge, and the page renders what the rest of the chain declares.
-The failure is logged once per file and exception type, and under ``DEBUG`` or ``STRICT_LOADING`` it raises with a note naming the callable and its file.
-A chain the schema refuses as a whole, such as a file declaring both forms, renders the ``DEFAULTS`` alone, logged the same way, and ``manage.py check`` names the cause.
+The failure is logged at most once every ten minutes per file and exception type, and under ``DEBUG`` or ``STRICT_LOADING`` it raises with a note naming the callable and its file.
+A chain the schema refuses as a whole, such as a misspelt key in a ``metadata`` dict or a file declaring both forms, renders the ``DEFAULTS`` under ``noindex``, logged the same way, and ``manage.py check`` names the cause.
+The ``X-Robots-Tag`` and the sitemap read the same ``noindex``, so a page whose own declaration fails is not indexed by accident.
 A JSON-LD node a callable builds with a value JSON cannot hold, such as ``nan`` or a set, is left out of the graph the same way.
 A zone GET renders no head, and a ``render()`` returning an :class:`~django.http.HttpResponse` short-circuits the layout, so neither path runs the callable.
 
@@ -175,11 +176,12 @@ Open Graph, Twitter, and JSON-LD stay as first rendered, because the crawlers th
            note = self.save()
            return Patches(request).morph_zone("note").meta(note.title).response()
 
-An inherited ancestor callable runs as the render would, so ``meta()`` first runs the ``render()`` guard of the origin page, raising ``ForeignPageNotAuthorizedError`` on a denial.
-An inherited callable that raises anything else drops the ``meta`` operation alone, logged once, so the rest of the patch still applies, and under ``DEBUG`` or ``STRICT_LOADING`` it raises.
+An inherited ancestor callable runs as the render would, against a GET visit of the origin URL or of the URL a queued ``push_url()`` or ``replace_url()`` names, so ``meta()`` first runs the ``render()`` guard of the origin page, raising ``ForeignPageNotAuthorizedError`` on a denial.
+An inherited callable that raises anything else drops the ``meta`` operation alone, logged at most once every ten minutes, so the rest of the patch still applies, and under ``DEBUG`` or ``STRICT_LOADING`` it raises.
 A value the action passes to ``meta()`` that the schema refuses raises ``PageMetadataShapeError`` every time, since it is a bug in the action itself.
 Custom tags a ``MetadataRenderer`` adds are not synced, only the four tags above travel in the envelope.
-A builder without an origin page merges the value over ``DEFAULTS`` alone and sends no ``canonical`` key when the canonical names the page itself, so the client keeps the tag it has rather than pointing it at the action endpoint.
+A builder without an origin page merges the value over ``DEFAULTS`` alone and leaves out every tag that stays unset, so the client keeps the tag it has.
+A canonical that names the page itself is left out too, rather than pointing at the action endpoint.
 A ``push_url()`` or ``replace_url()`` queued before ``meta()`` names the address the canonical is built from, so the tag follows the URL the same envelope moves the browser to.
 The tags belong to the page whose envelope carried them, so a ``meta`` for a URL that is neither the page nor an open layer is dropped, see :doc:`/content/topics/partial-rendering/layers`.
 The verb sits beside ``push_url()`` in the verbs table of :doc:`/content/topics/partial-rendering/reference`.

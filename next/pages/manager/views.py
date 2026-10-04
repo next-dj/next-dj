@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Final, Protocol, cast
 
 from django.http import Http404, HttpResponse
-from django.urls import path
+from django.urls import URLPattern, path
 
+from next.caches import PageCache
 from next.conf import fail_loudly, next_framework_settings
 from next.deps.cache import render_dep_cache
+from next.diagnostics import watch_degraded
 from next.pages.loaders import (
     build_registered_loaders,
     has_load_errors,
@@ -20,22 +22,27 @@ from next.pages.responses import (
     finish_zone_response,
     prepare_page_render,
     response_policy,
+    zone_policy,
 )
 from next.ports import partial_shaper_slot
 
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
     from pathlib import Path
 
     from django.http import HttpRequest
     from django.http.response import HttpResponseBase
-    from django.urls import URLPattern
 
+    from next.pages.responses import ResponsePolicy
+    from next.ports import PartialShaper
     from next.urls import URLPatternParser
 
     from . import Page
+
+
+_SUCCESS: Final = range(200, 300)
 
 
 class _RoutedPageView(Protocol):
@@ -95,18 +102,19 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
     """
 
     def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
+        watch_degraded()
         _raise_load_error(file_path)
-        dep_cache = render_dep_cache(request)
-        policy = response_policy(
-            page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
-        )
         shaper = partial_shaper_slot.get()
         intent = shaper.intent(request)
         if intent.zones:
             zone = shaper.zone_response(
                 file_path, request, intent, dynamic_body=False, url_kwargs=dict(kwargs)
             )
-            return finish_zone_response(zone, policy, request)
+            return finish_zone_response(zone, zone_policy(page, file_path), request)
+        dep_cache = render_dep_cache(request)
+        policy = response_policy(
+            page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
+        )
         prepare_page_render(policy, request)
         response = HttpResponse(
             page.render(file_path, request, _dep_cache=dep_cache, **kwargs)
@@ -132,18 +140,21 @@ def _resolving_view(
     """
 
     def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
+        watch_degraded()
         if broken_at_build:
             active_module = _reloaded_module(file_path)
         else:
             _raise_load_error(file_path)
             active_module = module
         dep_cache = render_dep_cache(request)
-        policy = response_policy(
-            page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
-        )
         shaper = partial_shaper_slot.get()
         intent = shaper.intent(request)
-        if not intent.zones:
+        if intent.zones:
+            policy = zone_policy(page, file_path)
+        else:
+            policy = response_policy(
+                page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
+            )
             prepare_page_render(policy, request)
         resolution = page._resolve_page_body(
             file_path, active_module, request, _dep_cache=dep_cache, **kwargs
@@ -151,7 +162,9 @@ def _resolving_view(
         if resolution.http_response is not None:
             if intent.zones:
                 return finish_zone_response(resolution.http_response, policy, request)
-            return finish_response(resolution.http_response, policy, request, file_path)
+            return _finish_render_response(
+                resolution.http_response, policy, request, file_path, shaper
+            )
         if intent.zones:
             zone = shaper.zone_response(
                 file_path,
@@ -172,6 +185,28 @@ def _resolving_view(
         return response
 
     return view
+
+
+def _finish_render_response(
+    response: HttpResponseBase,
+    policy: ResponsePolicy,
+    request: HttpRequest,
+    file_path: Path,
+    shaper: PartialShaper,
+) -> HttpResponseBase:
+    """Finish the full-page response `render()` returned, varying a cacheable one.
+
+    A browser may serve a stored full page in place of a zone fetch to the same URL,
+    so a successful response that carries `Cache-Control` gets the partial `Vary`.
+    """
+    finish_response(response, policy, request, file_path)
+    if (
+        isinstance(response, HttpResponse)
+        and response.status_code in _SUCCESS
+        and response.has_header("Cache-Control")
+    ):
+        shaper.set_vary(response)
+    return response
 
 
 def _has_body_source(
@@ -230,4 +265,19 @@ def create_url_pattern(
     )
 
 
-__all__ = ["create_url_pattern", "unified_view"]
+def fit_page_caches(patterns: Iterable[object]) -> None:
+    """Size the page-keyed memos by the pages that `patterns` mount.
+
+    The URL build calls it once with the router patterns it built. A router reuses its
+    patterns between builds, so the count is read from the views they hold.
+    """
+    pages = {
+        page_path
+        for pattern in patterns
+        if isinstance(pattern, URLPattern)
+        and (page_path := getattr(pattern.callback, "next_page_path", None)) is not None
+    }
+    PageCache.fit(len(pages))
+
+
+__all__ = ["create_url_pattern", "fit_page_caches", "unified_view"]

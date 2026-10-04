@@ -838,6 +838,40 @@ describe("a layer whose push throws stays open without an entry", () => {
     expect(replaced).toEqual([]);
     expect(dispatched.some((d) => d.event === "next:navigated")).toBe(false);
   });
+
+  it("a popstate of another entry leaves the layer that pushed nothing open", async () => {
+    let handler: (() => void) | null = null;
+    const dispatch = (): void => undefined;
+    const navigation = createNavigation({
+      dispatch,
+      document,
+      history: {
+        push: () => {
+          throw new Error("pushState rate limited");
+        },
+        replace: () => undefined,
+      },
+    });
+    const layers = createTrackedLayers({
+      dispatch,
+      fetch: async () => undefined,
+      document,
+      dialog: mockDialog().adapter,
+      popstate: {
+        listen(h) {
+          handler = h;
+          return () => {
+            handler = null;
+          };
+        },
+      },
+      navigation,
+    });
+    layers.install(document);
+    await layers.open(null, "/photos/1/", "photo");
+    handler!();
+    expect(layers.size()).toBe(1);
+  });
 });
 
 describe("a server-initiated open seeds a zone, an href, both, or neither", () => {
@@ -1304,8 +1338,9 @@ describe("layer open is single-flight and pushes as it opens", () => {
         replace: () => undefined,
       },
     });
-    const drop = navigation.hold("/photos/1/", "/photos/1/", () => undefined);
-    drop();
+    expect(
+      navigation.hold("/photos/1/", "/photos/1/", () => undefined),
+    ).toBeUndefined();
     expect(window.location.pathname).toBe("/feed/");
   });
 });

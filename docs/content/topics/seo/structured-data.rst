@@ -118,7 +118,7 @@ The graph
 
 Every node renders into a single ``<script type="application/ld+json">`` carrying ``{"@context": "https://schema.org", "@graph": [...]}``.
 The JSON is written by :class:`~django.core.serializers.json.DjangoJSONEncoder` with ``allow_nan=False``, and ``<``, ``>``, and ``&`` are escaped so a value can never close the script.
-A node a ``@page.metadata`` callable builds with a value JSON cannot hold is left out of the graph and logged once, and under ``DEBUG`` or ``STRICT_LOADING`` the render raises.
+A node a ``@page.metadata`` callable builds with a value JSON cannot hold is left out of the graph and logged at most once every ten minutes, and under ``DEBUG`` or ``STRICT_LOADING`` the render raises.
 
 ``jsonld`` merges by ``@id`` along the tree.
 A node whose raw ``@id`` an ancestor declared replaces that node in place, and a node without an ``@id`` appends.

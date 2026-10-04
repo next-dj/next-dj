@@ -36,7 +36,8 @@ The checks run without a request, so the indexability rule reads as it does for 
 Where a key comes from
 ----------------------
 
-``manage.py showmetadata`` resolves a URL path to its page and prints which layer settles each key of its static metadata, ``DEFAULTS`` or a ``page.py``, with every ``@page.metadata`` callable of the page listed after them.
+``manage.py showmetadata`` resolves a URL path to its page and prints which layer sets each key of its static metadata, ``DEFAULTS`` or a ``page.py``, with every ``@page.metadata`` callable of the page listed after them.
+A chain the schema refuses ends the command with the shape or conflict error.
 
 .. code-block:: bash
    :caption: shell

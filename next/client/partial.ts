@@ -249,8 +249,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
         snapshot: number,
         key: string | undefined,
         page: string | undefined,
+        owner: string | undefined,
       ) => {
-        const envelope = applier.apply(raw, { snapshot, key, page });
+        // A mutation scopes no zones, but its meta op belongs to the submitting page.
+        const envelope = applier.apply(raw, { snapshot, key, page, owner });
         // A csrf meta rotates the token so the next mutation submits the fresh
         // one, not just the forms already in the document.
         if (envelope.csrf) csrf.set(envelope.csrf);

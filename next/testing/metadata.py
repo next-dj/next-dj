@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Final, override
 
-from .seo import response_text
+from .responses import response_text
 
 
 if TYPE_CHECKING:

@@ -41,7 +41,7 @@ Each segment records its directory below the tree root as its ``trail``, which t
 Normalisation
 ~~~~~~~~~~~~~
 
-``normalize.py`` compiles the accepted shapes once at import, by reflection over the annotations of ``MetadataDict``, ``SiteMetadataDict``, and every input dict they reach.
+``normalize.py`` compiles the accepted shapes once at import, by reflection over the annotations of ``MetadataDict``, ``SiteMetadataDict``, and every input dict they reach, into the shape validators of ``shapes.py``.
 Each annotated key becomes a ``_Kind``, which names itself for a message, says cheaply whether a value fits, and coerces the value or fails with the key path.
 A union becomes an ``_Either`` that coerces through the first option that fits, a ``Sequence`` an ``_Items``, a ``Literal`` a choice leaf, and a nested dict a ``_Block`` that builds its value object.
 ``RobotsDict`` reaches ``GooglebotDict`` under ``googlebot`` rather than itself, so the reflection never meets a cycle.
@@ -72,7 +72,7 @@ The top level, a nested block, and ``merge_segments`` all merge field by field t
 The ``@id`` a node is merged by passes through ``node_id``, so ``#org`` and ``/#org`` name one node in the fold, in ``next.W103``, and in ``next.E101``.
 
 ``fold_metadata`` with an ``overlay`` replaces the page's own callable with the given segment, laid over the page's own dict, and refolds from the settings tier.
-An inherited callable of an ancestor runs as it does in the render, against a context the caller's factory builds only at that point, which is how ``Patches.meta`` runs the guard of the origin page and builds its render context on demand.
+An inherited callable of an ancestor runs as it does in the render, against a GET visit of the origin URL and a context the caller's factory builds only at that point, which is how ``Patches.meta`` runs the guard of the origin page and builds its render context on demand.
 
 Freshness
 ~~~~~~~~~
@@ -86,9 +86,11 @@ Failures
 ~~~~~~~~
 
 A ``@page.metadata`` callable is user code that runs on every request, so the render contains what it raises through the ``FailureLog`` of ``next.diagnostics``.
-``MetadataThunk.fold`` leaves a callable that raises, or returns a shape the schema refuses, out of the fold and logs it once per file and exception type.
+``MetadataThunk.fold`` leaves a callable that raises, or returns a shape the schema refuses, out of the fold and logs it at most once every ten minutes per file and exception type.
 :exc:`~django.http.Http404` and :exc:`~django.core.exceptions.PermissionDenied` pass through, and under ``DEBUG`` or ``STRICT_LOADING`` every failure raises with a note naming the callable and its file.
-A chain the schema refuses as a whole, a shape error in a ``page.py`` dict or a file declaring both forms, folds to the settings tier alone.
+A chain the schema refuses as a whole, a shape error in a ``page.py`` dict or a file declaring both forms, folds to the settings tier under ``noindex``.
+The refusal is memoised in the ``ChainEntry``, so ``contained_chain``, which the thunk, the response policy, and the sitemap read, reports it on every read without walking the ancestors again.
+``chain_entry`` walks again and raises a new exception for the checks, ``showmetadata``, and ``Patches.meta``.
 ``fold_metadata``, the call ``Patches.meta`` makes, does not contain, so the caller decides what a failure costs, and ``meta()`` drops its own operation.
 
 The resolve contains two more failures that only a render can meet.
@@ -99,8 +101,8 @@ JSON-LD values
 ~~~~~~~~~~~~~~
 
 ``ld.to_json`` is the one walk from a node or a raw value to its JSON form.
-It renders a nested ``Node`` or ``Ref`` in place, passes every ``@id`` through the ``ids`` map and the strings of a URL property through ``urls``, writes an enum as its value, places a naive datetime in the current time zone, and raises ``ValueError`` for a leaf JSON cannot hold.
-``ld.iter_json`` yields every value of a raw value with its key path, which ``normalize.py`` reads to refuse a bad leaf or key with its path at load time.
+It renders a nested ``Node`` or ``Ref`` in place, passes every ``@id`` through the ``ids`` map and the strings of a URL property through ``urls``, writes an enum as its value, places a naive datetime in the current time zone, and raises ``ValueError`` for a leaf JSON cannot hold and for a mapping key other than text, a number, a bool, or ``None``.
+``ld.iter_json`` yields every value of a raw value with its key path, which ``shapes.py`` reads to refuse a bad leaf or key with its path at load time.
 ``backends.dump_jsonld`` writes the JSON of one script, ``allow_nan=False`` and the characters that could close it escaped, and ``next.E127`` serialises a declared node through ``to_json`` and ``dump_jsonld`` with the same ``@id`` map, so the check and the renderer cannot disagree.
 
 The render
@@ -113,12 +115,16 @@ The resolve is memoised in the root layer of the template's render context, whic
 The ``ResolvedMetadata`` is published on the request, and the response layer repeats its blocking robots directives as ``X-Robots-Tag``.
 
 ``resolve_metadata`` reads ``site_url`` and ``site_indexable`` from ``next.site``, makes every URL absolute, fills the self canonical and the translated hreflang alternates, derives the Open Graph fallbacks and locale, places naive times in the current time zone, and appends the ``BreadcrumbList`` node when the page has at least two crumbs.
+The translated alternates are memoised per route and URL arguments in one entry that holds the path under every language, so every language variant and query of a page shares it.
+A page view passes the resolver match of its request, so the path is not resolved again, and a path that no named route resolves has no alternates.
 ``ResolvedMetadata.crumbs`` holds a lazy ``Breadcrumbs``, and its ``breadcrumbs`` property reverses the crumb URLs on the first read under the URLconf of the request.
 The URL name and the parameter names of a crumb's route are memoised per ``trail`` and ``URL_NAME_TEMPLATE``, so a warm render parses no route and reverses only the crumbs it shows.
+The memo is dropped on ``settings_reloaded``.
 
 ``metadata_renderer`` builds the class ``NEXT_FRAMEWORK["METADATA"]["RENDERER"]`` names once, through ``resolve_setting_class``, and again on ``settings_reloaded``.
 A path that does not resolve, or a constructor that raises, leaves the render on ``HtmlMetadataRenderer`` with one logged error, and ``next.E107`` resolves the same path at check time without building the class.
-``HtmlMetadataRenderer`` walks its ``sections`` in order and joins what each ``render_<name>`` hook answers, which is the seam a subclass reorders or extends, see :doc:`/content/ref/metadata`.
+``HtmlMetadataRenderer`` binds the ``render_<name>`` hook of each of its ``sections`` once per instance and joins what each returns, which is the seam a subclass reorders or extends, see :doc:`/content/ref/metadata`.
+``MetadataNode.render`` contains a ``render`` that raises, leaving the head empty.
 
 Crawler documents
 -----------------
@@ -146,7 +152,7 @@ Components
 Discovery
 ~~~~~~~~~
 
-``page_tree_roots`` walks the backends of the router manager once per reset and, for each page root a backend reports, probes the three source names at the top of the tree, ``sitemap.py``, ``robots.py``, and ``robots.txt``.
+``page_tree_roots`` walks the backends of the router manager once per ``seo_routes_version``, under a lock so concurrent first requests discover once, and, for each page root a backend reports, probes the three source names at the top of the tree, ``sitemap.py``, ``robots.py``, and ``robots.txt``.
 A root two backends report is visited once, and the roots keep router order, which is the order the source selection and the sitemap index follow.
 Each root becomes a ``SeoRoot`` carrying the page root, its label and section, its routed trails walked once, the two Python sources, the path of the static ``robots.txt``, and the stamps of all three.
 
@@ -155,7 +161,7 @@ The answer is a ``TreeSource`` carrying the module or the failure and the modifi
 A source that raises is logged once and keeps a ``SeoSourceImportError`` on its ``SeoSource`` for the checks, and its route keeps a ``BrokenSource`` rather than falling back to another source, a sitemap answering 404 and a robots file 503.
 The page module memo and its failure record never see an SEO source, so a broken ``robots.py`` leaves ``has_load_errors`` of the pages untouched.
 
-The section of a root is the ``section`` its ``sitemap.py`` declares, else the label of the innermost installed application holding the root, else the slugified directory, and ``unique_labels`` hands out the lowest free ``-N`` suffix to a repeat.
+The section of a root is the ``section`` its ``sitemap.py`` declares, else the label of the innermost installed application holding the root, else the slugified directory, and ``unique_labels`` of ``next.seo.discovery`` hands out the lowest free ``-N`` suffix to a repeat.
 
 Registry
 ~~~~~~~~
@@ -171,7 +177,7 @@ Manager and backends
 ``fingerprint`` hashes the bytes of every source file, the backend entries, and the site config, and prefixes the ``cache_page`` keys with it, so an edited source never answers from a stale copy.
 The entries and the config are spelled through ``stable_repr``, sorted collections, a callable as its dotted name, and a lazy string as its text, so every worker computes the same key.
 Its ``version`` reads ``seo_routes_version`` of ``next.urls.manager``, which every reset moves, and keys the cached views and the route filter.
-``cache_control`` settles the caches of several backends through ``shortest_cache``, keyed on whether a cache may store at all and then on the shortest age.
+``cache_control`` combines the caches of several backends through ``shortest_cache``, keyed on whether a cache may store at all and then on the shortest age.
 
 ``PageTreeSitemapBackend`` answers one ``PageTreeSitemap`` per root with a ``sitemap.py``, plus one per ``section=`` its items name, and drops the items of a trail an ``exclude`` glob covers.
 The static trails of a root are listed through ``listed_trails``, which leaves out a dynamic trail, an excluded one, and one whose static fold is ``noindex``, and the list is memoised against the module version of ``next.pages.loaders``.
@@ -187,7 +193,7 @@ A ``QuerySet`` answer stays a query, ordered by primary key when unordered, a se
 The paginator is the public ``paginator`` property of the Django sitemap, overridden to paginate the chained sequence rather than a list.
 ``count`` sums the count of every part, a ``QuerySet`` answering with one ``COUNT``, and a page slice maps onto the parts it spans and slices each, so a page of a large table reads one ``LIMIT`` and ``OFFSET`` query.
 Under ``i18n`` a ``LanguagePairs`` sequence pairs every entry with every language, and its count is the product.
-``get_latest_lastmod`` answers a ``QuerySet`` part with one ``Max`` aggregate on the ``lastmod`` column, and a materialised part with the newest date it holds.
+``get_latest_lastmod`` answers a ``QuerySet`` part with one aggregate query that reads the ``Max`` of the ``lastmod`` column and counts the undated rows, ``None`` when any row has no date, and a materialised part with the newest date it holds when every entry has one.
 
 ``location`` reverses through ``page_reverse`` per call, so the language active in Django's ``i18n`` loop appears in the path.
 Without ``i18n``, ``get_urls`` runs under ``LANGUAGE_CODE``, so the document never depends on the language of the crawler.
@@ -202,15 +208,17 @@ The URL slot
 ``_LazyUrlPatterns`` concatenates the router patterns, the form-action patterns, the ``/_next/csrf/`` route, and the slot's patterns, and its ``version_token`` is the triple of the router version, the form-action version, and ``seo_routes_version``.
 ``seo_routes_version`` is a ``SeoRoutesVersion`` in ``next.urls.manager``, moved by ``NextFrameworkConfig.ready()`` right after it binds the slot and by the seo manager on every reset, so a resolve reads the token as a plain attribute and the port carries no version.
 ``patterns`` answers only the routes whose source exists, so an empty answer leaves a project's own pattern below ``include("next.urls")`` in charge of that address.
+A source lookup that raises while the routes are filtered, ``Http404`` included, goes through ``FailureLog.contain`` with ``pass_through=()``, keeping the route mounted to answer 503, or raising with a note under ``DEBUG`` or ``STRICT_LOADING``.
 ``next.seo.urls`` serves the same routes through ``SeoPatterns``, a lazy sequence refiltered whenever the manager version moves.
 
 Views
 ~~~~~
 
 Every view answers ``GET`` and ``HEAD`` alone, answers a miss through ``_not_found`` with a constant reason, a plain-text 404 that skips the project's 404 handler, and stamps ``X-Robots-Tag: noindex, nofollow`` on a site closed to search.
-Any other exception, from an items callable, a backend, a ``rules`` callable, or a reverse, goes through ``FailureLog.contain`` of ``next.diagnostics``, answering 503 with ``Retry-After`` and logging once, or raising with a note under ``DEBUG`` or ``STRICT_LOADING``.
+Any other exception, from an items callable, a backend, a ``rules`` callable, or a reverse, goes through ``FailureLog.contain`` of ``next.diagnostics``, answering 503 with ``Retry-After`` and logging at most once every ten minutes, or raising with a note under ``DEBUG`` or ``STRICT_LOADING``.
 A view reached through a mount other than ``next_seo`` while ``next.seo.urls`` serves that route at another address answers 404, so each document has one address.
 The sitemap and robots views sit behind a wrapper that applies the declared ``Cache-Control`` to a 200 and, for a storable cache with an age, :func:`~django.views.decorators.cache.cache_page` keyed on the fingerprint and the indexability of the request, one wrap per indexability, rebuilt when the manager version moves.
+The cache control is read once per manager version, and the indexability of the request is read only when a copy is stored.
 
 The sitemap view answers the only section as a urlset, or the index once there are several sections or a section paginates, rendering the templates of ``django.contrib.sitemaps`` with Django's ``SitemapIndexItem``.
 The robots view answers the fixed open document on a closed site, the bytes of a static file, or the rendered rules with the project's own ``Sitemap:`` line first.

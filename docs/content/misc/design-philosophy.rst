@@ -76,7 +76,7 @@ A custom verb is registered on the server with ``register_patch_op`` and supplie
 The gain is that a response cannot ask a page to do anything the application never named.
 ``Patches.op()`` refuses an unregistered verb on the call that builds it, so the op never reaches the browser.
 Two system checks cover the registry side at ``manage.py check``.
-``next.E066`` reports a custom verb that shadows a built-in one, and ``next.E090`` reports a name that is not a valid verb token.
+``register_patch_op`` refuses a name that shadows a built-in verb, and ``next.E090`` reports a name that is not a valid verb token.
 See :doc:`/content/topics/partial-rendering/extending` for the three seams and :doc:`/content/topics/partial-rendering/limitations` for what the closed set does not cover.
 
 Stable URLs

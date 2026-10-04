@@ -215,7 +215,9 @@ def check_gated_blocking_scripts(*args, **kwargs) -> list[CheckMessage]:
         DjangoWarning(
             f"{source.path} declares the blocking script {script.name!r} in the "
             f"category {script.category!r}. On a page the runtime renders consent "
-            "for, it loads after the page, so it blocks nothing.",
+            "for, it loads after the page, so it blocks nothing. Declare it "
+            "Strategy.ASYNC or Strategy.DEFER, or set "
+            "NEXT_FRAMEWORK['CONSENT']['SERVER_RENDER'] to True.",
             obj=str(source.path),
             id="next.W116",
         )
@@ -306,7 +308,8 @@ def check_script_deploy(*args, **kwargs) -> list[CheckMessage]:
     return [
         DjangoWarning(
             f"{source.path} loads the script {script.name!r} over plain HTTP, "
-            "which an https page blocks as mixed content.",
+            "which an https page blocks as mixed content. Load its src over "
+            "https://.",
             obj=str(source.path),
             id="next.W118",
         )

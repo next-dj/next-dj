@@ -1,4 +1,4 @@
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.test import RequestFactory, override_settings
 
 from next.site.middleware import RobotsHeaderMiddleware
@@ -10,6 +10,10 @@ def _live_only(request: HttpRequest | None) -> bool:
 
 def _raising(request: HttpRequest | None) -> bool:
     raise RuntimeError
+
+
+def _not_found(request: HttpRequest | None) -> bool:
+    raise Http404
 
 
 def _blank(request) -> HttpResponse:
@@ -51,4 +55,11 @@ class TestRobotsHeaderMiddleware:
         middleware = RobotsHeaderMiddleware(_answer)
         with override_settings(NEXT_FRAMEWORK={"SITE": {"INDEXABLE": _raising}}):
             response = middleware(RequestFactory().get("/admin/"))
+        assert response["X-Robots-Tag"] == "noindex, nofollow"
+
+    def test_a_404_from_the_rule_closes_the_response(self) -> None:
+        middleware = RobotsHeaderMiddleware(_answer)
+        with override_settings(NEXT_FRAMEWORK={"SITE": {"INDEXABLE": _not_found}}):
+            response = middleware(RequestFactory().get("/admin/"))
+        assert response.status_code == 200
         assert response["X-Robots-Tag"] == "noindex, nofollow"

@@ -8,9 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Final
 
-from next.utils import UNSET
-
 from .frozen import freeze
+from .sentinels import UNSET
 
 
 if TYPE_CHECKING:
