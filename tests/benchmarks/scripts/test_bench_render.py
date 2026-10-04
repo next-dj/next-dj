@@ -50,7 +50,7 @@ class TestBenchScriptsRender:
         page = root / "page.py"
         benchmark(
             lambda: manager.render(
-                StaticCollector(), page_path=page, request=None, nonce=None
+                StaticCollector(), page_path=page, request=None, nonce=lambda: None
             )
         )
 
@@ -65,7 +65,7 @@ class TestBenchScriptsRender:
                 StaticCollector(),
                 page_path=page,
                 request=consent_request(None),
-                nonce="n0",
+                nonce=lambda: "n0",
             )
         )
 
@@ -80,6 +80,6 @@ class TestBenchScriptsRender:
                 StaticCollector(),
                 page_path=page,
                 request=consent_request("1:analytics,marketing:1"),
-                nonce="n0",
+                nonce=lambda: "n0",
             )
         )

@@ -143,7 +143,10 @@ def usable_template(
 
     A template that cannot format would fail every render, so the default replaces it.
     The error is raised under `DEBUG` and otherwise logged at the `FailureLog` rate.
+    The default itself is known to format, so it is returned without a dry run.
     """
+    if template == default:
+        return default
     try:
         dry_run_template(template, fields)
     except TEMPLATE_ERRORS as exc:
