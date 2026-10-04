@@ -159,11 +159,11 @@ Response policy
 
 ``next.pages.responses`` reads the ``cache`` and ``headers`` a ``page.py`` declares and stamps them, with the ``X-Robots-Tag`` the metadata calls for, on the page response.
 ``CacheDict`` is the dict form of ``cache`` and ``HeadersDict`` the mapping ``headers`` takes, both exported from ``next.pages``.
-A shared ``cache`` applies to a ``GET`` or a ``HEAD`` alone and goes out ``private`` when the response follows the visitor, through a cookie, a session read, a CSRF cookie, a consent read, a CSP nonce, or an ``Authorization`` header on the request.
+A shared ``cache`` applies to a ``GET`` or a ``HEAD`` alone and is sent with ``private`` when the response depends on the visitor, through a cookie, a session read, a CSRF cookie, a consent read, a CSP nonce, or an ``Authorization`` header on the request.
 ``headers`` may not name a caching header, ``Cache-Control``, ``CDN-Cache-Control``, ``Surrogate-Control``, ``Cloudflare-CDN-Cache-Control``, ``Expires``, ``Age``, or ``Vary``, which ``cache`` owns.
-``SharedCookies`` is the cookie jar a shared response carries in place of Django's, so a cookie a middleware sets after the view, the session and CSRF cookies among them, still takes the cache private, and a post-render callback settles a lazily rendered response the same way.
+``SharedCookies`` is the cookie jar a shared response carries in place of Django's, so a cookie a middleware sets after the view, the session and CSRF cookies among them, still makes the response private, and a post-render callback settles a lazily rendered response the same way.
 A zone response carries the ``headers`` of its page and ``private, no-store``.
-A callable ``cache`` that raises or answers a wrong shape sends the page out ``private, no-store`` and logs once, raising under ``DEBUG``.
+A callable ``cache`` that raises or answers a wrong shape sends the page with ``private, no-store`` and logs once, raising under ``DEBUG`` or ``STRICT_LOADING``.
 See :doc:`/content/topics/caching` for the rules.
 
 .. autoclass:: next.pages.CacheDict

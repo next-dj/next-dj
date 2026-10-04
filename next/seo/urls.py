@@ -1,6 +1,6 @@
-"""The SEO routes for mounting at the host root when `next.urls` sits under a prefix.
+"""The SEO routes to mount at the host root when `next.urls` is under a prefix.
 
-Only the routes a source backs are served, so a project view below still answers.
+Only routes whose source exists are mounted, so a later project view still answers.
 """
 
 from typing import Final

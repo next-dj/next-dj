@@ -119,6 +119,7 @@ class TestDeclarations:
             "Script('a', src='https://cdn.example/a.js')",
             "Script('b', src='http://cdn.example/b.js')",
             "Script('c', src='found/c.js')",
+            "Script('d', init='for(i=0;i<scripts.length;i++);')",
         )
         with patch("next.scripts.checks.finders.find", return_value="/found/c.js"):
             assert _run(tmp_path, check_script_declarations, scripts) == []

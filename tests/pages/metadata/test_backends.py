@@ -360,7 +360,7 @@ class BrokenRenderer(HtmlMetadataRenderer):
 
 
 class TestRendererFallback:
-    """A renderer that cannot be built gives way to the HTML one, logged once."""
+    """A renderer that cannot be built is replaced by the HTML renderer, logged once."""
 
     @pytest.fixture(autouse=True)
     def _armed(self) -> None:

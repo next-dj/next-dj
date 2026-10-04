@@ -73,9 +73,9 @@ def defining_file(obj: object) -> Path:
 
 
 def registering_file() -> Path:
-    """Return the file that called the decorator factory calling this helper.
+    """Return the file that called the decorator factory which calls this helper.
 
-    Read before the decorator runs, so the bare and the called spelling see one file.
+    It is read before the decorator runs, so `@deco` and `@deco()` report one file.
     """
     return Path(sys._getframe(2).f_code.co_filename)
 
@@ -115,7 +115,7 @@ class MisattributedContext(NamedTuple):
     """One registration whose callable was declared outside the file running it.
 
     Both files are kept because a diagnostic has to name the file that
-    expected the value and the one the registration landed on.
+    expected the value and the one the registration is bound to.
     """
 
     registered_from: Path
@@ -135,7 +135,7 @@ class MisattributionLog:
     def record(
         self, registered_from: Path, declared_in: Path, func: Callable[..., Any]
     ) -> None:
-        """Note that `func` bound to `declared_in` while `registered_from` ran."""
+        """Record that `func` was bound to `declared_in` while `registered_from` ran."""
         entry = MisattributedContext(
             registered_from=registered_from,
             declared_in=declared_in,

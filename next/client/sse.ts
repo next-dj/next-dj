@@ -1,6 +1,6 @@
-// The SSE bridge opens an EventSource for each data-next-sse container and rides
-// its events through the same apply pipeline as an HTTP response. An echo ring of
-// own request ids drops self-echoes, and a background tab pauses then resumes.
+// The SSE bridge opens an EventSource for each data-next-sse container and applies
+// its events through the same pipeline as an HTTP response. A ring of the client's
+// own request ids drops their echoes, and a background tab pauses the streams.
 
 import { defaultEventSource, defaultVisibility } from "./adapters";
 import { ATTR_SSE, asString, currentUrl, isRecord, matching } from "./protocol";
@@ -10,7 +10,7 @@ import type { PartialError } from "./protocol";
 // re-GETs, so flicking between tabs does not storm the server.
 const RESUME_REVALIDATE_MS = 3000;
 // The last 25 own request ids, matching the server-side echo window. Overflow is
-// safe: a dropped id yields an extra refresh, not a break.
+// safe, since a dropped id only causes an extra refresh.
 const ECHO_LIMIT = 25;
 // The cap on zones a connection tracks, so a long background sleep does not make
 // resume re-GET an unbounded backlog at once. A plain cap, not an LRU.
@@ -43,7 +43,7 @@ export interface VisibilityAdapter {
 
 /** The seams the bridge draws on, injectable so jsdom-blind pieces stay testable. */
 export interface SseDeps {
-  // A parsed envelope rides the same apply pipeline as an HTTP response.
+  // A parsed envelope goes through the same apply pipeline as an HTTP response.
   apply: (raw: unknown, page: string) => void;
   // The zone re-GET that revalidates bound zones on resume, intent not headers.
   fetch: (request: { url: string; zone: string }) => void;
@@ -184,8 +184,7 @@ export function createSse(deps: SseDeps): Sse {
 
   function scan(root: ParentNode): void {
     for (const el of matching(root, `[${ATTR_SSE}]`)) {
-      // A container a later patch removed, while the chunk was still loading for the
-      // scan that found it, opens no stream.
+      // A container a patch removed while the chunk was loading opens no stream.
       if (!el.isConnected) continue;
       const url = el.getAttribute(ATTR_SSE);
       if (url !== null && url !== "") openConnection(url, pageUrl(el));

@@ -58,7 +58,9 @@ _NOT_FOUND: Final = "Not found"
 _PREFIXED_COPY: Final = (
     "The SEO routes are served at the host root through next.seo.urls"
 )
-_BROKEN_SITEMAP: Final = "A sitemap.py failed to import, so no partial sitemap ships"
+_BROKEN_SITEMAP: Final = (
+    "A sitemap.py failed to import, so no partial sitemap is served"
+)
 _NO_SITEMAP: Final = "No backend lists a sitemap, or the site is closed to search"
 _NO_SECTION: Final = "No sitemap section by that name"
 _NO_PAGE: Final = "No sitemap page by that number"
@@ -69,7 +71,7 @@ type View = Callable[..., HttpResponse]
 
 
 def _namespace(request: HttpRequest) -> str:
-    """Return the namespace the request reached the SEO routes through."""
+    """Return the URL namespace the request resolved through."""
     match = request.resolver_match
     return (
         match.namespace if match is not None and match.namespace else DEFAULT_NAMESPACE
@@ -77,7 +79,7 @@ def _namespace(request: HttpRequest) -> str:
 
 
 def _is_prefixed_copy(request: HttpRequest) -> bool:
-    """Whether `next.seo.urls` serves this route elsewhere, so this copy answers 404."""
+    """Whether `next.seo.urls` serves the route elsewhere, so this copy answers 404."""
     match = request.resolver_match
     if match is None or match.namespace == HOST_ROOT_NAMESPACE:
         return False
@@ -91,7 +93,7 @@ def _is_prefixed_copy(request: HttpRequest) -> bool:
 
 
 def _not_found(reason: str) -> HttpResponse:
-    """Answer a plain 404, its body naming `reason` only under `DEBUG`.
+    """Return a plain 404 whose body names `reason` only under `DEBUG`.
 
     `reason` is one of the constants above, never the text of an exception.
     """
@@ -100,10 +102,10 @@ def _not_found(reason: str) -> HttpResponse:
 
 
 def _unavailable() -> HttpResponse:
-    """Answer 503 with `Retry-After`, which tells a crawler to come back later.
+    """Return a 503 with `Retry-After`, which asks crawlers to retry later.
 
-    A crawler backs off a 5xx and keeps what it read before, where it reads a 4xx on
-    `/robots.txt` as no restriction at all under RFC 9309.
+    Under RFC 9309 a crawler keeps its last copy on a 5xx, while it reads a 4xx on
+    `/robots.txt` as no restriction.
     """
     response = HttpResponse(status=503, content_type=TEXT_CONTENT_TYPE)
     response.headers["Retry-After"] = str(RETRY_AFTER_SECONDS)
@@ -111,7 +113,7 @@ def _unavailable() -> HttpResponse:
 
 
 def _later(current: datetime.datetime | None, new: datetime.date) -> datetime.datetime:
-    """Return the later of two lastmod values, read the way the sections read them."""
+    """Return the later of two lastmod values, both read with `lastmod_datetime`."""
     stamp = lastmod_datetime(new)
     return stamp if current is None else max(current, stamp)
 
@@ -131,7 +133,7 @@ def _last_modified(latest: datetime.datetime | None) -> dict[str, str] | None:
 def _index(
     request: HttpRequest, sections: Mapping[str, Sitemap[Any]], origin: Origin
 ) -> HttpResponse:
-    """Answer the index, linking every section and every page past its first."""
+    """Return the index, linking every section and each of its pages after the first."""
     namespace = _namespace(request)
     items: list[SitemapIndexItem] = []
     every_dated = True
@@ -145,7 +147,7 @@ def _index(
             every_dated = False
         elif every_dated:
             latest = _later(latest, section_lastmod)
-        # django-stubs types `last_mod` as a bool, the template reads a date.
+        # django-stubs types `last_mod` as a bool, but the template renders a date.
         stamp = cast("bool | None", section_lastmod)
         items.append(SitemapIndexItem(absolute, stamp))
         items.extend(
@@ -165,7 +167,7 @@ def _index(
 def _urlset(
     request: HttpRequest, section: Sitemap[Any], origin: Origin
 ) -> HttpResponse:
-    """Answer one page of one section, through the template the section names."""
+    """Return one page of one section, rendered with the template of the section."""
     page = request.GET.get("p", 1)
     try:
         urls = section.get_urls(page=page, site=origin.site, protocol=origin.scheme)
@@ -182,9 +184,9 @@ def _urlset(
 
 
 def _sitemap_refusal(request: HttpRequest) -> HttpResponse | None:
-    """Return what answers in place of the sitemap, `None` while it can be built.
+    """Return the response replacing the sitemap, or `None` when it can be built.
 
-    A broken `sitemap.py` answers 404, so no sitemap missing its URLs ever ships.
+    A broken `sitemap.py` answers 404, so a sitemap missing its URLs is never served.
     """
     if _is_prefixed_copy(request):
         return _not_found(_PREFIXED_COPY)
@@ -194,7 +196,7 @@ def _sitemap_refusal(request: HttpRequest) -> HttpResponse | None:
 
 
 def _sitemap(request: HttpRequest, section: str | None = None) -> HttpResponse:
-    """Answer one section, the only one, or the index when the set needs one."""
+    """Return the named section, the only section, or the index when one is needed."""
     refused = _sitemap_refusal(request)
     if refused is not None:
         return refused
@@ -211,7 +213,7 @@ def _sitemap(request: HttpRequest, section: str | None = None) -> HttpResponse:
 
 
 def _own_sitemap_url(request: HttpRequest) -> str | None:
-    """Return the absolute `sitemap.xml` for the `Sitemap:` line, when one is served."""
+    """Return the absolute `sitemap.xml` URL for the `Sitemap:` line, or `None`."""
     if not seo_manager.serves_sitemap():
         return None
     path = reverse(f"{_namespace(request)}:{SITEMAP_NAME}")
@@ -219,7 +221,7 @@ def _own_sitemap_url(request: HttpRequest) -> str | None:
 
 
 def _file_response(source: TextFile) -> HttpResponse:
-    """Answer a static text file, 404 once it is gone and 503 while it fails to read."""
+    """Return a static text file, 404 when it is missing and 503 when unreadable."""
     try:
         content = source.read()
     except OSError:
@@ -231,27 +233,28 @@ def _file_response(source: TextFile) -> HttpResponse:
 
 
 def _robots(request: HttpRequest) -> HttpResponse:
-    """Answer the declared robots, or the fixed open document on a closed site.
+    """Return the declared robots, or the fixed permissive document on a closed site.
 
-    Crawlers get in to read each noindex, and a site only `DEBUG` closes shows its own.
-    A `robots.py` that failed to import answers 503, since a 404 reads as allow all.
+    The permissive document lets crawlers read each noindex tag, and a site that only
+    `DEBUG` closes serves its own rules. A `robots.py` that failed to import answers
+    503, since crawlers read a 404 as allowing everything.
     """
     if _is_prefixed_copy(request):
         return _not_found(_PREFIXED_COPY)
     source = seo_manager.robots_source()
     if source is None:
         return _not_found(_NO_ROBOTS)
-    if isinstance(source, BrokenSource):
-        return _unavailable()
     if site_closed_to_crawlers(request):
         return HttpResponse(CLOSED_ROBOTS_TXT, content_type=TEXT_CONTENT_TYPE)
+    if isinstance(source, BrokenSource):
+        return _unavailable()
     return _source_response(request, source)
 
 
 def _source_response(
     request: HttpRequest, source: DeclaredRobots | TextFile
 ) -> HttpResponse:
-    """Answer what a robots source serves, 503 while the site URL fails to answer."""
+    """Return the response of a robots source, 503 when the site URL fails."""
     if isinstance(source, TextFile):
         return _file_response(source)
     if site_url_failed(request):
@@ -263,17 +266,17 @@ def _source_response(
 
 
 class _CachedView:
-    """One view under `cache_page` while its source asks, rebuilt per manager version.
+    """A view wrapped in `cache_page` when its source declares a cache.
 
-    The key prefix carries the source fingerprint, so an edit never serves a stale
-    copy, and the indexability of the request, so a closed host never reads an open
-    one.
+    The wrapper is rebuilt per manager version. The key prefix holds the source
+    fingerprint, so a copy cached before an edit is never served, and the request
+    indexability, so a closed request never reads the copy of an open one.
     """
 
     __slots__ = ("control", "held", "view")
 
     def __init__(self, view: View, control: Callable[[], CacheControl | None]) -> None:
-        """Wrap nothing until the first request."""
+        """Store the view and the cache control reader, wrapping nothing yet."""
         self.view = view
         self.control = control
         self.held: tuple[int, dict[int, View]] = (-1, {})
@@ -291,6 +294,7 @@ class _CachedView:
         return view
 
     def _wrap(self, indexable: int) -> View:
+        """Return the view with the declared cache control and `cache_page` applied."""
         control = self.control()
         view = self.view
         if control is not None:
@@ -303,9 +307,9 @@ class _CachedView:
 
 
 def _with_cache(view: View, control: CacheControl) -> View:
-    """Wrap `view` so a 200 it answers carries the declared `Cache-Control`.
+    """Wrap `view` so its 200 responses carry the declared `Cache-Control`.
 
-    A 404 or a 503 carries none, so no shared cache keeps a failure for its age.
+    Other statuses carry none, so no shared cache stores a failure.
     """
 
     @functools.wraps(view)
@@ -328,7 +332,7 @@ _cached_robots = _CachedView(_robots, _robots_cache)
 
 
 def _culprit(exc: BaseException) -> str:
-    """Return the source the notes on `exc` name, its type when it carries none."""
+    """Return the notes of `exc`, or its type name when it has none."""
     notes = getattr(exc, "__notes__", None)
     return " ".join(notes) if notes else type(exc).__name__
 
@@ -337,11 +341,11 @@ type _Route[**P] = Callable[Concatenate[HttpRequest, P], HttpResponse]
 
 
 def _seo_view[**P](route: str) -> Callable[[_Route[P]], _Route[P]]:
-    """Answer `GET` and `HEAD` only, a miss as a plain 404 and a failure as a 503.
+    """Restrict an SEO view to `GET` and `HEAD`, with a plain 404 and a 503 on failure.
 
-    A route runs project code, a backend, an items callable, or a `rules` callable,
-    and a 503 tells a crawler to retry where a 500 reads as a failing site. Only
-    `DEBUG` raises the failure instead, a note naming its source.
+    The view runs project code, such as a backend, an items callable or a `rules`
+    callable. A 503 asks crawlers to retry, while a 500 reads as a failing site.
+    Under `DEBUG` the exception propagates with a note naming its source.
     """
 
     def decorate(view: _Route[P]) -> _Route[P]:

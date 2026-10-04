@@ -25,7 +25,7 @@ URLSET = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 class TestParseSitemap:
-    """A sitemap response reads back into its URLs, parsed rather than matched."""
+    """A sitemap response is parsed as XML into its URLs."""
 
     def test_a_served_sitemap_reads_back(self, tmp_path) -> None:
         root = write_tree(

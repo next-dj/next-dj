@@ -202,7 +202,7 @@ class TestCheckUrlPatterns:
         assert e028[0].obj == str(page_file)
 
     def test_e028_message_lists_every_duplicate_name(self, tmp_path) -> None:
-        """Two independent duplicates in one route both land in the message."""
+        """Two independent duplicates in one route both appear in the message."""
         page_file = write_page(tmp_path, "a/[id]/[int:id]/[slug]/[slug]")
         router = _TreeRouter(root_trees=[tmp_path])
 

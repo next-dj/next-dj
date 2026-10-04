@@ -185,7 +185,7 @@ export interface Asset {
   inline?: string;
 }
 
-// A wire load spelling anything outside the three verbs must not ride into assets.
+// A wire load value outside the three verbs must not reach the asset loader.
 function isAssetLoad(value: unknown): value is AssetLoad {
   return value === "link" || value === "script" || value === "module";
 }
@@ -305,12 +305,12 @@ interface ApplyState {
   owner: string | undefined;
   touched: Element[];
   // The meta and url ops, held for the commit phase so their order in the envelope
-  // cannot decide which history entry a title lands on.
+  // cannot decide which history entry receives the title.
   head: HeadPatch | undefined;
   intents: Intent[];
 }
 
-/** What an apply knows about the request it answers. */
+/** The request context of one apply. */
 export interface ApplyOptions {
   snapshot?: number | undefined;
   key?: string | undefined;
@@ -326,13 +326,13 @@ export interface ApplyDeps {
   document?: Document;
   // The dev flag custom ops read, a getter so the owner can flip it.
   dev?: DevFlag;
-  // The dev channel once its chunk lands. Absent or undefined, nothing is reported.
+  // The dev diagnostics once their chunk loads. Absent or undefined, nothing reports.
   diagnostics?: () => Diagnostics | undefined;
   // The morph dirty predicate from a request snapshot. Absent, no field is dirty.
   dirtySince?: (snapshot: number) => (field: Element) => boolean;
   // Whether an element was ever touched, carrying <details> open state past a patch.
   isTouched?: (el: Element) => boolean;
-  // The four seams below are read through a call, not captured: the owner rebuilds
+  // The four seams below are read through a call, not captured. The owner rebuilds
   // them under a live applier, and a captured instance would be the outgoing one.
   // The layer stack. Absent, zone resolve falls back to the document.
   layers?: () => LayerBridge;
@@ -510,7 +510,7 @@ export class Applier {
     // Opened before the ops, so a layer.close writing history folds into this commit.
     const commit = this.#navigation()?.begin();
     try {
-      // ok flips on any contained failure, so partial:applied carries an honest signal.
+      // ok becomes false on any caught failure, and partial:applied reports it.
       let ok = true;
       for (const op of envelope.ops) {
         // A failing op is contained, the rest apply and it surfaces as partial:error.
@@ -526,7 +526,7 @@ export class Applier {
       for (const intent of state.intents) commit?.write(intent);
       if (state.head !== undefined) this.#commitHead(state.head, state);
       if (envelope.csrf) this.#rotateCsrf(envelope.csrf);
-      // JS after the ops: the target DOM is in place, each URL runs once.
+      // JS after the ops, so the target DOM is in place. Each URL runs once.
       this.#assets()?.loadJs(envelope.assets);
       this.#assets()?.acceptVersion(envelope.version);
       mountNodes(state.touched, this.#mount);
@@ -536,8 +536,8 @@ export class Applier {
     }
   }
 
-  // Against the stack as the ops left it. An envelope moving the address bar speaks
-  // for the page it moves to, the top of the stack, not the page it was fetched for.
+  // Applied to the stack as the ops left it. An envelope that changes the URL sets the
+  // head of the page it moves to, the top of the stack, not of the page it fetched.
   #commitHead(head: HeadPatch, state: ApplyState): void {
     const layers = this.#layers();
     if (layers === undefined) writeHead(this.#document, head);
@@ -658,8 +658,8 @@ export class Applier {
   }
 
   #layerClose(patch: LayerClosePatch): void {
-    // A validation error addresses no layer, so the modal survives by
-    // construction: only an explicit close patch reaches the stack.
+    // Only an explicit close patch reaches the stack, so a validation error, which
+    // addresses no layer, leaves the modal open.
     this.#layers()?.close({
       result: patch.result,
       dismiss: patch.dismiss === true,
@@ -691,8 +691,8 @@ export class Applier {
     if (isRecord(patch.data)) this.#mergeContext(patch.data);
   }
 
-  // A later meta op overrides an earlier one tag by tag. One naming no readable tag
-  // is dropped, so it cannot mark a layer as carrying its own head.
+  // A later meta op overrides an earlier one tag by tag. One with no readable tag is
+  // dropped, so it cannot mark a layer as titled.
   #meta(patch: MetaPatch, state: ApplyState): void {
     const head = readPatch(patch);
     if (Object.keys(head).length > 0) state.head = { ...state.head, ...head };
@@ -804,8 +804,8 @@ export class Applier {
         continue;
       }
       existing.replaceWith(child);
-      // A live scan would find the replacement from here on, so a later row
-      // carrying the same key replaces what just landed, not the detached node.
+      // A live scan would find the replacement from here on, so a later row with the
+      // same key replaces the row just inserted, not the detached node.
       index.set(key, child);
     }
     if (fired && missed.length > 0) this.#reconcile(node, missed, mode);
@@ -822,8 +822,8 @@ export class Applier {
       const existing = live.get(key);
       if (existing === undefined) continue;
       fireRemoved(existing);
-      // A hook here can still detach its own row, and the fresh fragment holds
-      // the replacement, so an unreplaced row lands at the edge.
+      // A hook here can still detach its own row, and the fresh fragment holds the
+      // replacement, so a row that replaced nothing is inserted at the edge.
       if (existing.parentNode !== node) continue;
       existing.replaceWith(child);
       live.set(key, child);
@@ -871,9 +871,9 @@ export class Applier {
       script.remove();
       this.#diagnostics()?.stripped(describeTarget(target));
     }
-    // A template's content sits outside querySelectorAll, and a consented block's
-    // body runs its scripts as it is revealed, so each one is swept as well. The same
-    // block rendered with the page keeps its embed script, since no patch runs one.
+    // querySelectorAll does not reach template content, and a consented block runs
+    // its scripts when revealed, so template content is cleaned as well. A block
+    // rendered with the page keeps its scripts, since it did not come from a patch.
     for (const template of Array.from(root.querySelectorAll("template"))) {
       this.#neutraliseScripts(template.content, target);
     }
@@ -979,7 +979,7 @@ function matchByTag(parsed: Document, target: Element): Element | null {
 
 // The dedup key of a list row. "key" reads data-next-key then falls back to id, "id"
 // reads only id, so a row with a key but no id has no identity and always inserts.
-// The id comes off the attribute, as morph reads it: the property is subject to DOM
+// The id is read from the attribute, as morph reads it. The property is subject to DOM
 // clobbering, where an <input name="id"> shadows form.id with the field itself.
 function keyOf(el: Element, mode: DedupeMode): string | null {
   const raw = el.getAttribute("id") ?? "";

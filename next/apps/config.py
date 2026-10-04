@@ -47,9 +47,8 @@ class NextFrameworkConfig(AppConfig):
     def ready(self) -> None:
         """Register checks, install every startup hook, and compose the ports."""
         _register_checks()
-        # A reload from code replaces the routers the URL resolver serves
-        # without touching settings, and every memo of what those routers
-        # report has to go with them or the layers answer for two generations.
+        # A reload from code replaces the routers without changing settings, so every
+        # memo derived from the old routers is dropped with them.
         router_reloaded.connect(forget_watch_state)
         router_reloaded.connect(forget_page_roots)
         router_reloaded.connect(forget_manager_page_roots)
@@ -64,9 +63,9 @@ class NextFrameworkConfig(AppConfig):
         # Ahead of every install, because component discovery and form autodiscovery
         # import user modules that must see the configured resolver, not the base one.
         apply_resolver_setting()
-        # For the same reason, and so a discovery failure leaves no process behind
-        # with an unbound port. The static handle stays lazy, because binding it
-        # stores the handle rather than reading through it.
+        # The ports are bound before the installs for the same reason, and so a
+        # discovery failure cannot leave a port unbound. Binding the static port
+        # stores the lazy handle without building the manager.
         page_scan_slot.set(PageScanImpl())
         partial_shaper_slot.set(PartialShaperImpl())
         router_access_slot.set(RouterAccessImpl())

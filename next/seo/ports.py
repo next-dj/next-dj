@@ -13,11 +13,11 @@ if TYPE_CHECKING:
 
 
 class SeoRoutesImpl(SeoRoutes):
-    """Answer the SEO routes the sources back."""
+    """Provide the SEO URL patterns whose source exists."""
 
     @override
     def patterns(self) -> "list[URLPattern]":
-        """Return the routes of `next.seo.urls` whose source a page tree declares."""
+        """Return the patterns of `next.seo.urls` whose source exists."""
         return served_patterns(PATTERNS)
 
 

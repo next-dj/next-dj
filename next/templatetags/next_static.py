@@ -43,7 +43,7 @@ def _slot_token(name: str) -> str:
 
 @register.simple_tag
 def collect_head() -> SafeString:
-    """Mark where the head scripts go, the end of `<head>` when the mark is absent."""
+    """Mark where head scripts are injected, before `</head>` without the mark."""
     return SafeString(_slot_token("head"))
 
 

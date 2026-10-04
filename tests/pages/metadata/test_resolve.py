@@ -409,7 +409,7 @@ class TestAlternates:
 
 
 class TestOpenGraph:
-    """The og block borrows from the page only when it exists, twitter never."""
+    """A declared og block falls back to the page values, a twitter block never does."""
 
     def test_no_og_block_resolves_none(self) -> None:
         meta = Metadata(title="T", description="D", site_name="S", canonical="/x/")
@@ -718,7 +718,7 @@ class TestHeadSections:
             icons=(Icon("icon", "/i.svg", sizes="any"),),
             links=(
                 Link("preconnect", "https://fonts.gstatic.com"),
-                Link("dns-prefetch", "//cdn.example"),
+                Link("DNS-Prefetch", "//cdn.example"),
                 Link("preload", "/font.woff2", (("as", "font"),)),
             ),
             alternates=Alternates(
@@ -734,7 +734,7 @@ class TestHeadSections:
         assert resolved.icons == (Icon("icon", f"{BASE}/i.svg", sizes="any"),)
         assert resolved.links == (
             Link("preconnect", "https://fonts.gstatic.com"),
-            Link("dns-prefetch", "//cdn.example"),
+            Link("DNS-Prefetch", "//cdn.example"),
             Link("preload", f"{BASE}/font.woff2", (("as", "font"),)),
         )
         assert resolved.feeds == (
@@ -787,7 +787,7 @@ _FORCED_URL_CASES = tuple(case for case in URL_SCHEME_CASES if case.id != "x_def
 
 @pytest.mark.usefixtures("with_base")
 class TestLazyUrls:
-    """A lazy URL is forced per resolve and lands where the plain string would."""
+    """A lazy URL is forced per resolve and resolves to what the plain string would."""
 
     @pytest.mark.parametrize(
         "case", URL_SCHEME_CASES, ids=[case.id for case in URL_SCHEME_CASES]

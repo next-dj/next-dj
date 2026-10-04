@@ -4,7 +4,7 @@ Guidelines for code, tests, and pull requests. Read this before opening a PR.
 
 ## Prerequisites
 
-- Python 3.12+. See `requires-python` in `pyproject.toml`. CI runs Python 3.12–3.14 against Django 5.2, 6.0, and 6.1 (with matrix exclusions — 3.14 skips 5.2).
+- Python 3.12+. See `requires-python` in `pyproject.toml`. CI runs Python 3.12–3.14 against Django 5.2, 6.0, and 6.1 (with matrix exclusions, 3.14 skips 5.2).
 - [uv](https://docs.astral.sh/uv/) for Python dependencies.
 - Node.js 24 + npm for the TypeScript bundle. The client runtime sources live in [next/client/](next/client/) and esbuild emits the bundle to `next/static/next/next.min.js`. CI uses Node 24.
 - Git.
@@ -21,18 +21,31 @@ Skim this map before changing code. Each `next/<area>/` module owns one framewor
 | [next/checks/](next/checks/) + per-module `checks.py` | Django system checks. Registered via `next/checks/common.py` and per-area files (`next/<area>/checks.py`). |
 | [next/components/](next/components/) | Reusable template components: registry, loader, scanner, backends, watcher. |
 | [next/conf/](next/conf/) | `NEXT_FRAMEWORK` settings object, defaults, signals, and settings checks. |
+| [next/consent/](next/consent/) | The consent a visitor gives per category, read on the server and sent to the runtime. |
 | [next/deps/](next/deps/) | Dependency injection: providers, resolver, markers, cache. |
 | [next/forms/](next/forms/) | Forms pipeline: action registry, dispatch, rendering, uid generation. |
-| [next/pages/](next/pages/) | `Page`, template loaders (`DjxTemplateLoader`, `PythonTemplateLoader`), layouts, page registry. |
+| [next/management/](next/management/) | The management commands the next app adds to `manage.py`. |
+| [next/pages/](next/pages/) | `Page`, template loaders (`DjxTemplateLoader`, `PythonTemplateLoader`), layouts, page registry, and the page metadata chain under `metadata/`. |
 | [next/partial/](next/partial/) | Partial rendering: zones, patch envelope, wire headers, SSE. |
+| [next/scripts/](next/scripts/) | Third-party scripts a page tree declares in `scripts.py`, gated by consent. |
+| [next/seo/](next/seo/) | Sitemap and robots built from the page trees and the sitemap backends. |
 | [next/server/](next/server/) | Dev-server autoreload (`NextStatReloader`) and filesystem watcher. |
+| [next/site/](next/site/) | The site identity, its origin, name and indexability, shared by every head and route. |
 | [next/static/](next/static/) | Static asset discovery, collector, finders, backends, template-tag scripts. |
 | [next/client/](next/client/) | TypeScript client runtime sources and their co-located vitest tests, bundled by esbuild to `next/static/next/next.min.js`. |
-| [next/templatetags/](next/templatetags/) | Django template tag libraries for components, forms, and `{% next_static %}`. |
+| [next/templatetags/](next/templatetags/) | Django template tag libraries for components, forms, static assets, page heads and breadcrumbs, zones, and consent-gated scripts. |
 | [next/testing/](next/testing/) | Public test toolkit: client, isolation, signal capture, rendering, patching. |
 | [next/urls/](next/urls/) | File-router backends, URL-pattern parser, dispatcher, markers (`DUrl`). |
 | [next/backends.py](next/backends.py) | Shared backend-loading machinery used by every area. |
+| [next/caches.py](next/caches.py) | Bounded caches the layers of the framework key their own way. |
+| [next/csrf.py](next/csrf.py) | How a page hands the CSRF token to its runtime and forms, and the token endpoint. |
+| [next/diagnostics.py](next/diagnostics.py) | Failures of user and third-party code, raised under `DEBUG` and otherwise logged once. |
+| [next/discovery.py](next/discovery.py) | Discovery of the configured routers and of the page trees they route. |
+| [next/errors.py](next/errors.py) | Exceptions a misconfigured project raises across every area. |
+| [next/introspect.py](next/introspect.py) | Name a callable and the file it was declared in, for decorator registration. |
+| [next/middleware.py](next/middleware.py) | The middleware that keeps a response carrying a cookie out of every shared cache. |
 | [next/ports.py](next/ports.py) | Narrow Protocol ports and their slots, composed in `AppConfig.ready()`. |
+| [next/seeding.py](next/seeding.py) | The render-context keys every area shares and the ambient frame a render inherits. |
 | [next/signals.py](next/signals.py) | Aggregate re-export of every framework signal. |
 | [next/utils.py](next/utils.py) | Small shared utilities. |
 
@@ -42,7 +55,7 @@ Tests mirror this layout:
 | --- | --- |
 | [tests/conftest.py](tests/conftest.py) | Calls `tests.django_setup.setup()` at import time and loads `tests.fixtures` as a plugin. |
 | [tests/django_setup.py](tests/django_setup.py) | Idempotent Django settings configuration for the whole suite. |
-| [tests/fixtures.py](tests/fixtures.py) | Shared fixtures: `client`, `mock_http_request`, `page_instance`, `dependency_resolver`, `reloader_tick_scenario`, etc. Registered as a pytest plugin — no need to import. |
+| [tests/fixtures.py](tests/fixtures.py) | Shared fixtures: `client`, `mock_http_request`, `page_instance`, `dependency_resolver`, `reloader_tick_scenario`, etc. Registered as a pytest plugin, so tests do not import it. |
 | [tests/support/](tests/support/) | Helpers, dataclass-based parametrize cases, scenarios, and `unittest.mock` patch utilities. Prefer reusing these before writing ad-hoc helpers. |
 | [tests/site_pages/](tests/site_pages/) | Sample pages directory registered as `DIRS` in the test `NEXT_FRAMEWORK` config. |
 | [tests/benchmarks/](tests/benchmarks/) | Micro-benchmarks covering every `next/<area>/` module. **Opt-in** via the `perf` marker. Excluded from the default run with `--ignore=tests/benchmarks`. See [Benchmarks](#benchmarks). |
@@ -56,7 +69,7 @@ Tests mirror this layout:
 | --- | --- |
 | `make install` | Sync runtime deps from `uv.lock` (`uv sync --locked --no-dev`). Editable, no dev group. |
 | `make dev-setup` | Full dev environment: `uv sync --locked --dev`, build the JS bundle (`make build-js`), install pre-commit hooks. Use this for day-to-day work. |
-| `make install-js` | `npm ci` only — install the Node toolchain without a rebuild. |
+| `make install-js` | `npm ci` only. Installs the Node toolchain without a rebuild. |
 
 ### Tests
 
@@ -84,7 +97,7 @@ Tests mirror this layout:
 | Command | Purpose |
 | --- | --- |
 | `make build-js` | Bundle `next/client/next.ts` → `next/static/next/next.min.js` via esbuild. |
-| `make build` | `uv build` — wheel + sdist. Invokes [build_hooks.py](build_hooks.py), which shells out to `npm ci && npm run build:next` so the packaged artifact contains a fresh `next.min.js`. Set `NEXT_DJ_SKIP_JS_BUILD=1` to bypass (only when the bundle is already present — used by CI between the dedicated build job and matrix jobs). |
+| `make build` | `uv build`, wheel and sdist. Invokes [build_hooks.py](build_hooks.py), which shells out to `npm ci && npm run build:next` so the packaged artifact contains a fresh `next.min.js`. Set `NEXT_DJ_SKIP_JS_BUILD=1` to bypass (only when the bundle is already present, as CI does between the dedicated build job and the matrix jobs). |
 
 ### Docs and hooks
 
@@ -108,7 +121,7 @@ GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) additional
 - On pull requests: dependency review (`dependency-review` job).
 - In CI, `lint` runs on **`next/` only**. Locally, `make lint` also covers `tests/` and `examples/`. Keep those directories clean so you do not surprise reviewers.
 - The test matrix installs a specific Django with `uv pip install "django==…"` **after** installing the wheel. That override is intentional, not a broken lockfile.
-- A dedicated **Benchmarks** workflow ([.github/workflows/bench.yml](.github/workflows/bench.yml)) runs on every PR and posts a comment with side-by-side deltas. The `bench` job has a hard gate at `median:99%` (≈×2 slowdown) — the job fails and blocks merge if the gate trips. On `main`, HEAD numbers are pushed to `gh-pages` with an informational `alert-threshold: 200%` that never blocks. See [Benchmarks](#benchmarks).
+- A dedicated **Benchmarks** workflow ([.github/workflows/bench.yml](.github/workflows/bench.yml)) runs on every PR and posts a comment with side-by-side deltas. The `bench` job has a hard gate at `median:99%` (≈×2 slowdown). The job fails and blocks merge if the gate trips. On `main`, HEAD numbers are pushed to `gh-pages` with an informational `alert-threshold: 200%` that never blocks. See [Benchmarks](#benchmarks).
 
 Ruff uses `select = ["ALL"]` with ignores and per-file rules in [pyproject.toml](pyproject.toml) (line length 88, isort with `known-first-party = ["next"]`, relaxed rules for `examples/`, `tests/`, and `conftest.py`).
 
@@ -164,7 +177,7 @@ Major pieces (template loaders, router backends, factories) should stay **replac
 
 - Pytest discovers `test_*.py`, `*_test.py`, and `tests.py` (see `python_files` in `pyproject.toml`). In the main tree, prefer `tests/<area>/test_<thing>.py`.
 - Classes named `Test…` with `test_*` methods are common but not required.
-- Prefer `@pytest.mark.parametrize` for matrix-style cases over copy-pasted tests. `tests/support/cases.py` holds dataclass-based parametrize rows — reuse and extend them.
+- Prefer `@pytest.mark.parametrize` for matrix-style cases over copy-pasted tests. `tests/support/cases.py` holds dataclass-based parametrize rows. Reuse and extend them.
 - Use **`django.test.Client`** (the `client` fixture) for HTTP-level checks. Do not use the DRF API client unless the example explicitly adds DRF.
 - For deps/forms/urls internals, reuse `dependency_resolver`, `csrf_request`, `form_engine`, and the helpers in `tests/support/`.
 - The suite expects a pre-configured Django. Do not call `django.setup()` yourself. `tests/django_setup.py` handles it.
@@ -182,8 +195,8 @@ Micro-benchmarks in [tests/benchmarks/](tests/benchmarks/) guard the hot paths i
 
 **Running locally**
 
-- `make bench` — runs all benchmarks with the `perf` marker using the same flags as CI (warmup=1000, min-rounds=10, gc disabled, results stored in `.benchmarks/`). For a before/after comparison: `make bench BENCH_EXTRA="--benchmark-save=before"`, apply your change, then `make bench BENCH_EXTRA="--benchmark-save=after --benchmark-compare='*_before'"`. JSON files land under `.benchmarks/`.
-- Benchmarks are **excluded from `make test`** (ignored via `addopts`) and auto-marked `perf` by [tests/benchmarks/conftest.py](tests/benchmarks/conftest.py) — no need to decorate tests yourself.
+- `make bench` runs all benchmarks with the `perf` marker using the same flags as CI (warmup=1000, min-rounds=10, gc disabled, results stored in `.benchmarks/`). For a before/after comparison: `make bench BENCH_EXTRA="--benchmark-save=before"`, apply your change, then `make bench BENCH_EXTRA="--benchmark-save=after --benchmark-compare='*_before'"`. JSON files land under `.benchmarks/`.
+- Benchmarks are **excluded from `make test`** (ignored via `addopts`) and auto-marked `perf` by [tests/benchmarks/conftest.py](tests/benchmarks/conftest.py), so tests need no decorator of their own.
 - Numbers are **only comparable on the same machine**. Do not cite local deltas in the PR. The CI workflow below does the machine-stable comparison.
 
 **CI integration**
@@ -191,22 +204,22 @@ Micro-benchmarks in [tests/benchmarks/](tests/benchmarks/) guard the hot paths i
 The [Benchmarks workflow](.github/workflows/bench.yml) runs on every PR and every push to `main`:
 
 - On `main`: writes a baseline into `gh-pages` under `dev/bench/`.
-- On PRs: runs the same benchmarks and posts a comment with side-by-side deltas. A hard gate at `median:99%` (≈×2 of base — the strictest value the flag parser accepts) fails the `bench` job and blocks merge on a detected regression. Put `[skip bench]` in the PR title or commit message to bypass.
+- On PRs: runs the same benchmarks and posts a comment with side-by-side deltas. A hard gate at `median:99%` (≈×2 of base, the strictest value the flag parser accepts) fails the `bench` job and blocks merge on a detected regression. Put `[skip bench]` in the PR title or commit message to bypass.
 - Uses a single Python/Django version (3.13 / latest) so cross-matrix noise does not pollute comparisons.
 
 **Adding a benchmark**
 
 1. Mirror the `next/<area>/` layout: put the file at `tests/benchmarks/<area>/test_bench_<topic>.py`.
-2. Set the group via `@pytest.mark.benchmark(group="<area>.<aspect>")` — one bar chart per group in the PR comment.
+2. Set the group via `@pytest.mark.benchmark(group="<area>.<aspect>")`. The PR comment draws one bar chart per group.
 3. Reuse scaffolding: tree builders in [tests/benchmarks/factories.py](tests/benchmarks/factories.py), shared fixtures from [tests/fixtures.py](tests/fixtures.py) (loaded automatically).
 4. Cover **both cold and warm** cases when the code has a cache (e.g. `mtime_hit`, `resolve_cached`). Deltas on hit paths are where regressions hide.
 5. Keep each round cheap. A single bench should complete well under a second so the whole suite stays near a minute.
 
 **Interpreting the numbers**
 
-- Trust **Min** and **Median** for comparisons — `Max` is almost always a GC pause, not a signal.
+- Trust **Min** and **Median** for comparisons. `Max` is almost always a GC pause, not a signal.
 - If `StdDev > Median`, the measurement is inherently noisy (GC, lazy rebuild). Cite **Min** only for those cases.
-- `Rounds × Iterations` tells you how much the harness amortised the measurement — higher is more stable.
+- `Rounds × Iterations` tells you how much the harness amortised the measurement. Higher is more stable.
 - Units (`ns` / `μs` / `ms`) are per-group and auto-scaled. Only rows within the same group table are directly comparable.
 
 **When to run**
@@ -277,12 +290,12 @@ Maintainers check style with Ruff and mypy, review tests, and assess how the cha
 
 ## First contributions
 
-Issues labeled [good first issue](https://github.com/next-dj/next-dj/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) are the entry point for newcomers — small, atomic tasks that touch one area and carry enough context to start without deep framework knowledge. Discuss questions and the intended approach in the issue thread before opening a PR.
+Issues labeled [good first issue](https://github.com/next-dj/next-dj/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) are the entry point for newcomers: small, atomic tasks that touch one area and carry enough context to start without deep framework knowledge. Discuss questions and the intended approach in the issue thread before opening a PR.
 
 ## Help
 
 - Search [issues](https://github.com/next-dj/next-dj/issues) and prior PRs.
-- Areas share a backbone (`registry.py`, `manager.py`, `backends.py` where they apply), but each area picks its own module set — copy the closest existing area, not a fixed template.
+- Areas share a backbone (`registry.py`, `manager.py`, `backends.py` where they apply), but each area picks its own module set. Copy the closest existing area, not a fixed template.
 - For failing coverage after `make test`, inspect terminal output and `htmlcov/index.html`.
 - For quick test loops, run `uv run pytest tests/ -n auto` without coverage flags.
 - If `uv build` fails on the JS step with a clear `npm` error, ensure Node 24 is on `PATH` or set `NEXT_DJ_SKIP_JS_BUILD=1` when a valid bundle already exists.

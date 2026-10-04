@@ -9,8 +9,8 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 
 _SOURCEMAP_REFERENCE = "//# sourceMappingURL="
-# The outputs of `npm run build:next`, held to every other list of the chunks by
-# tests/static/test_chunk_sync.py.
+# The outputs of `npm run build:next`. tests/static/test_chunk_sync.py keeps this list
+# equal to every other list of the chunks.
 _BUNDLES = (
     "next.min.js",
     "next.scripts.min.js",
@@ -45,7 +45,7 @@ def _verify_built(outputs: list[Path]) -> None:
 
 
 class NextJsBuildHook(BuildHookInterface):
-    """Compile the client runtime and its scripts and diagnostics chunks via esbuild."""
+    """Compile the client runtime and its lazy chunks via esbuild."""
 
     PLUGIN_NAME = "next-js-build"
 

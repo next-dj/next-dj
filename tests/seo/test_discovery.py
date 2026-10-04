@@ -1,12 +1,13 @@
 import logging
 from types import ModuleType
+from unittest.mock import patch
 
 import pytest
 from django.test import override_settings
 
 from next.discovery import get_router_manager
 from next.pages.loaders import has_load_errors
-from next.seo import SeoSourceImportError, seo_manager
+from next.seo import SeoSourceImportError, discovery as seo_discovery, seo_manager
 from next.seo.discovery import (
     SOURCE_NAMES,
     SeoRoot,
@@ -128,6 +129,17 @@ class TestDiscoverSeoRoots:
             [fresh] = _roots()
         assert sorted(fresh.trails) == ["", "about", "late"]
 
+    def test_the_trails_are_sorted_whatever_the_walk_order(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", pages=("team", "", "about", "blog"))
+        real = seo_discovery.walk_page_tree
+
+        def reversed_walk(*args, **kwargs):
+            return reversed(list(real(*args, **kwargs)))
+
+        with routed(root), patch.object(seo_discovery, "walk_page_tree", reversed_walk):
+            [seo_root] = _roots()
+        assert list(seo_root.trails) == ["", "about", "blog", "team"]
+
     def test_the_items_entries_are_those_of_the_root_sitemap(self, tmp_path) -> None:
         root = write_tree(
             tmp_path / "pages", pages=("posts/[slug]",), sitemap=POSTS_ITEMS
@@ -192,7 +204,7 @@ class TestLoadSource:
 
 
 class TestSourceStamps:
-    """A discovered tree tells whether a source file moved since it was read."""
+    """A discovered tree reports whether a source file changed since discovery."""
 
     def test_the_stamps_follow_the_source_names(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", robots="")

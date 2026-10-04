@@ -1,7 +1,7 @@
-"""Pluggable builder for the `next.min.js` preload, script, and init tags.
+"""Build the `next.min.js` preload, script and init tags, and name its lazy chunks.
 
-Every template is an instance attribute, overridable without subclassing, and an
-injection policy decides whether the tags are emitted at all.
+The tag templates are constructor arguments, so a project overrides them without
+subclassing. An injection policy decides whether the tags are emitted.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ SSE_CHUNK_STATIC_PATH: Final = "next/next.sse.min.js"
 """The server-sent events bridge, fetched once a page marks an element to stream."""
 
 CSRF_CHUNK_STATIC_PATH: Final = "next/next.csrf.min.js"
-"""The deferred CSRF minter, fetched once a page that carries no token posts."""
+"""The deferred CSRF token loader, fetched on the first post from a page without one."""
 
 POLL_CHUNK_STATIC_PATH: Final = "next/next.poll.min.js"
 """The zone poller, fetched once a page marks a zone to poll."""
@@ -64,7 +64,7 @@ CHUNK_STATIC_PATHS: Final[Mapping[str, str]] = MappingProxyType(
 
 CSRF_PAYLOAD_KEY: Final = "$csrf"
 
-# Present in the init payload only under `DEBUG`, so production carries no dev bytes.
+# Sent only under `DEBUG`, so a production payload never requests the dev chunk.
 DEV_PAYLOAD_KEY: Final = "$dev"
 
 CHUNKS_PAYLOAD_KEY: Final = "$chunks"
@@ -89,16 +89,17 @@ SCRIPT_ESCAPES: Final[dict[int, str]] = {
 }
 """Escapes for JSON inside a `<script>`, mirroring Django's `json_script`.
 
-The code points only appear inside JSON strings, so escaping them changes nothing.
+These code points occur only inside JSON strings, so the escaped payload decodes to
+the same value.
 """
 
 _ESCAPED: Final = re.compile(f"[{re.escape(''.join(map(chr, SCRIPT_ESCAPES)))}]")
-"""Finds a character `SCRIPT_ESCAPES` rewrites, a scan far cheaper than `translate`."""
+"""Matches a character `SCRIPT_ESCAPES` rewrites, a cheaper test than `translate`."""
 
 
 @functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
 def _encoded_key(key: str) -> str:
-    """Return a payload key as JSON, since `json.dumps` builds an encoder per call."""
+    """Return a payload key encoded as JSON, memoised as `json.dumps` is costly."""
     return json.dumps(key, separators=(",", ":"))
 
 
@@ -110,8 +111,7 @@ def nonce_attr(nonce: str | None) -> str:
 def csrf_payload_for(request: HttpRequest | None) -> dict[str, str] | None:
     """Return the `$csrf` payload, or None when the request cannot mint a token.
 
-    A request whose `META` is not a real mapping yields no payload, so a render from a
-    test stand-in stays byte-identical to the pre-partial output.
+    A request whose `META` is not a dict, such as a test double, yields no payload.
     """
     if request is None or not isinstance(getattr(request, "META", None), dict):
         return None
@@ -125,7 +125,7 @@ INIT_FIELDS: Final = ("payload", "nonce_attr")
 """The fields the init script template is formatted with."""
 
 TEMPLATE_ERRORS: Final = (KeyError, IndexError, ValueError, AttributeError)
-"""What `str.format` raises for a stray brace or a field it is not given."""
+"""The exceptions `str.format` raises for an unbalanced brace or an unknown field."""
 
 
 def dry_run_template(template: str, fields: Iterable[str]) -> None:
@@ -138,8 +138,8 @@ def usable_template(
 ) -> str:
     """Return `template` when it formats with `fields`, else `default`.
 
-    A template that cannot format would fail every render that reaches it, so the
-    default stands in, loud under `DEBUG` and logged once otherwise.
+    A template that cannot format would fail every render, so the default replaces it.
+    The error is raised under `DEBUG` and logged once otherwise.
     """
     try:
         dry_run_template(template, fields)
@@ -172,8 +172,9 @@ class ScriptInjectionPolicy(enum.Enum):
 class NextScriptBuilder:
     """Builds the preload hint, script tag, and init script for `window.Next`.
 
-    `preload_template`, `script_tag_template`, and `init_template` override the
-    defaults, the first two needing `{url}`, the last `{payload}`, all `{nonce_attr}`.
+    `preload_template`, `script_tag_template` and `init_template` override the
+    defaults. The first two take `{url}`, the last takes `{payload}`, and all three
+    take `{nonce_attr}`.
     """
 
     DEFAULT_PRELOAD: ClassVar[str] = (
@@ -193,7 +194,7 @@ class NextScriptBuilder:
     ) -> None:
         """Store the URL, tag templates, and injection policy.
 
-        A template that cannot format gives way to the default, see `usable_template`.
+        `usable_template` replaces a template that cannot format with the default.
         """
         self._url = next_js_url
         self._preload_template = usable_template(
@@ -229,8 +230,8 @@ class NextScriptBuilder:
     def preload_link(self, url: str | None = None, *, nonce: str | None = None) -> str:
         """Return the preload hint tag for early browser download.
 
-        The optional `url` overrides the resolved runtime URL, which lets the
-        static manager pass the answer of a request-aware backend.
+        An explicit `url` replaces the resolved runtime URL, so the injector can pass
+        the URL a request-aware backend rewrote.
         """
         return self._preload_template.format(
             url=escape(str(url or self._url)), nonce_attr=nonce_attr(nonce)
@@ -239,8 +240,8 @@ class NextScriptBuilder:
     def script_tag(self, url: str | None = None, *, nonce: str | None = None) -> str:
         """Return the blocking script tag that executes `next.min.js`.
 
-        The optional `url` overrides the resolved runtime URL, which lets the
-        static manager pass the answer of a request-aware backend.
+        An explicit `url` replaces the resolved runtime URL, so the injector can pass
+        the URL a request-aware backend rewrote.
         """
         return self._script_tag_template.format(
             url=escape(str(url or self._url)), nonce_attr=nonce_attr(nonce)
@@ -256,8 +257,8 @@ class NextScriptBuilder:
     ) -> str:
         """Return the inline script that passes the context to `Next._init`.
 
-        An already-encoded value is reused rather than serialised twice, and the payload
-        is escaped so a `</script>` inside it cannot break out of the element.
+        A value in `encoded` is reused instead of serialised again. The payload is
+        escaped so a `</script>` inside it cannot close the element.
         """
         default = resolve_serializer()
         serializers = key_serializers or {}

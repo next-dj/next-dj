@@ -11,7 +11,7 @@ from next.pages import MetadataDict
 
 metadata: MetadataDict = {"title": "Live stats"}
 
-# Page level, not next to the widget, because it must land first.
+# Page level, not next to the widget, because it must load first.
 scripts = [
     "https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js",
     "dashboards/js/chart_theme.js",

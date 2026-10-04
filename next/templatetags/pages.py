@@ -1,7 +1,7 @@
 """Template tags of the page dialect, the layout placeholder, head and breadcrumbs.
 
 The placeholder is an unnamed slot, so it takes the dialect's single and paired grammar,
-and the paired body is the fallback shown where composition never reached.
+and the paired body is the fallback rendered when no composition fills it.
 """
 
 from __future__ import annotations

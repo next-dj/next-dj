@@ -211,8 +211,8 @@ class TestNonPageHeaderOrigin:
 class TestLayerOriginMorphsTheHostNotTheStep:
     """A layer carries its host in `X-Next-Origin`, the OOB morph renders it.
 
-    The end-to-end of the layer seam: the request posts from the wizard
-    step page while the layer host rides `X-Next-Origin`. The resolver
+    This covers the layer path end to end. The request posts from the wizard
+    step page while `X-Next-Origin` carries the layer host. The resolver
     prefers the header, so a `done` handler that morphs `page=origin`
     re-renders the host page's zone, not the step page the form lived on.
     """

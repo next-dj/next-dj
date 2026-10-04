@@ -72,12 +72,12 @@ class InjectionProvider(Protocol):
         raise NotImplementedError
 
     def chunk_url(self, name: str) -> str | None:
-        """Return the URL of the lazy chunk `$chunks` names `name`, if stored."""
+        """Return the URL of the lazy chunk `name`, or None if the storage lacks it."""
         raise NotImplementedError
 
 
 class _Render:
-    """What one injection settles before it renders a slot."""
+    """The per-injection values computed once before the slots render."""
 
     __slots__ = ("head", "nonce", "payload", "request", "runtime_url")
 
@@ -113,8 +113,8 @@ class PlaceholderInjector:
     ) -> str:
         """Replace every registered placeholder token with rendered tags.
 
-        Every URL passes `asset_url` first, so a per-request rewrite reaches every
-        renderer and both signals alike. A new kind needs no change here.
+        Every URL passes through `asset_url` first, so a per-request rewrite applies to
+        every renderer and both signals. A new asset kind needs no change here.
         """
         sender = self._provider
         collector_finalized.send(sender=collector, page_path=page_path, request=request)
@@ -126,8 +126,8 @@ class PlaceholderInjector:
             )
         backend = sender.default_backend
         builder = sender.script_builder()
-        # Settled once for the render, so the script tag and the preload hint
-        # cannot disagree and a backend doing real work in the hook pays for one.
+        # Resolved once per render, so the script tag and the preload hint share one
+        # URL and the backend hook runs once.
         runtime_url = (
             sender.asset_url(builder.url, request=request)
             if builder.policy is ScriptInjectionPolicy.AUTO
@@ -196,10 +196,11 @@ class PlaceholderInjector:
     def _chunks_entry(
         self, request: HttpRequest | None, *, dev: bool
     ) -> tuple[dict[str, str], str]:
-        """Return the `$chunks` entry and its encoding, reused while its URLs hold.
+        """Return the `$chunks` entry and its encoding, reused while the URLs match.
 
-        Only `DEBUG` adds the dev chunk, while a later patch may need any other one.
-        A chunk the storage lacks is left out, the runtime looking beside itself.
+        Every chunk is listed because a later patch may need any of them, except the
+        dev chunk, which only `DEBUG` lists. A chunk the storage lacks is omitted, and
+        the runtime then loads it from its own directory.
         """
         provider = self._provider
         urls = {

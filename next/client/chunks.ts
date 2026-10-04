@@ -1,7 +1,7 @@
-// The core side of the lazy chunks. Consent and third-party scripts ship in
-// next.scripts.min.js, fetched only when the payload carries them, so a site without
-// them never downloads it. Their surfaces exist once it lands, Next.ready awaits that.
-// The stream bridge and the CSRF mint each ship alone, fetched on their first need.
+// The runtime side of the lazy chunks. Consent and third-party scripts ship in
+// next.scripts.min.js, fetched only when the payload carries them, and Next.ready
+// resolves once it has loaded. The SSE bridge, the CSRF token fetch, the poller and
+// the dev diagnostics each ship in a chunk of their own, fetched on first use.
 
 import type { Consent } from "./consent";
 import { asString, fire, isRecord } from "./protocol";
@@ -11,81 +11,84 @@ import type { Scripts } from "./scripts";
 // The payload keys that need the chunk on this page.
 const CHUNK_KEYS = ["$scripts", "$consent"];
 
-// How long a chunk fetch may stall before it counts as failed, so a hung request
-// cannot hold Next.ready, a deferred CSRF mint, or a stream open for good.
+// How long a chunk fetch may run before it counts as failed, so a stalled request
+// cannot block Next.ready, a deferred CSRF token or a stream indefinitely.
 export const CHUNK_TIMEOUT = 15e3;
 
-/** What the core lends the chunk. */
+/** The runtime functions exposed to the scripts chunk. */
 export interface ExtrasHost {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   nonce: string | undefined;
-  // The post-morph mount pass, so revealed markup mounts like any inserted markup.
+  // The post-morph mount pass, run over revealed consent markup like inserted markup.
   mount: (nodes: readonly Element[]) => void;
 }
 
-/** The public surfaces of the scripts chunk, what Next.ready("scripts") answers. */
+/** The public surfaces of the scripts chunk, resolved by Next.ready("scripts"). */
 export interface ScriptsChunk {
   consent: Pick<Consent, "get" | "decided" | "update" | "acceptAll" | "rejectAll">;
   scripts: Pick<Scripts, "load" | "status">;
 }
 
-/** What the chunk hands back once it runs. */
+/** The surfaces the scripts chunk factory returns. */
 export interface Extras extends ScriptsChunk {
   consent: Consent;
   scripts: Scripts;
-  /** Seed from an init payload and announce the starting consent. */
+  /** Configure from an init payload and announce the initial consent state. */
   configure(context: Record<string, unknown>): void;
 }
 
 export type ExtrasFactory = (host: ExtrasHost) => Extras;
 
+/** The runtime's loader of the scripts chunk. */
 export interface ExtrasLoader {
-  /** Resolve once the chunk has landed and taken the payload, fetching it as needed. */
+  /** Resolve once the chunk has loaded and been configured, fetching it if needed. */
   ready(): Promise<ScriptsChunk>;
-  /** Take an init payload, fetching the chunk when the payload needs it. */
+  /** Store an init payload, fetching the chunk when the payload requires it. */
   init(context: Record<string, unknown>): void;
 }
 
-/** What a chunk fetch needs from the runtime. */
+/** The runtime dependencies of a chunk loader. */
 export interface ChunkDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   document?: Document;
-  // The running runtime's script, read while it still executes. Null for an inline
-  // bootstrap, which leaves the payload key as the only way to a chunk.
+  // The runtime's own script element, read during evaluation. Null for an inline
+  // bootstrap, where $chunks is the only source of a chunk URL.
   runtime: Element | null;
   nonce: string | undefined;
-  // The seeded init payload, read as a chunk is fetched for its $chunks.
+  // The seeded init payload, read at fetch time for its $chunks map.
   context: () => Record<string, unknown>;
 }
 
 export interface ExtrasDeps extends ChunkDeps {
   mount: (nodes: readonly Element[]) => void;
-  // Publishes the landed surfaces before they take the payload, so a listener of the
-  // starting next:consent can already reach them.
+  // Publishes the chunk surfaces before they are configured, so a listener of the
+  // initial next:consent can already call them.
   install: (chunk: ScriptsChunk) => void;
 }
 
-/** A module a lazy chunk hands over, what the core awaits before it uses it. */
+/** Read access to the module a lazy chunk exports. */
 export interface LazyModule<T> {
-  /** The landed module, undefined until its chunk evaluates. */
+  /** The module, undefined until its chunk has evaluated. */
   get(): T | undefined;
-  /** Resolve with the module, fetching its chunk as needed, undefined when it cannot. */
+  /** Resolve with the module, fetching its chunk if needed, or undefined on failure. */
   load(): Promise<T | undefined>;
 }
 
+/** A lazy module plus the registration call its chunk makes. */
 export interface Lazy<T> extends LazyModule<T> {
-  /** The chunk's handshake, the first copy to evaluate wins. */
+  /** Store the module the chunk exports. The first copy to evaluate is kept. */
   land(value: T): void;
 }
 
 /**
- * A chunk carrying one module, fetched at most once on its first need.
+ * A loader for a chunk carrying one module, with at most one fetch in flight.
  *
- * The URL is the `$chunks` key of the seeded payload, or next.<key>.min.js beside the
- * runtime. The payload key wins, since a hashed storage renames the runtime but not
- * the sibling. An unaddressable or failed fetch answers undefined, and a failed one
- * is fetched again on the next need. A file that loads without landing has failed,
- * and so has one that has not landed within CHUNK_TIMEOUT.
+ * The URL is the chunk's `$chunks` entry in the seeded payload, or next.<key>.min.js
+ * beside the runtime script when the payload has none. The entry takes precedence
+ * because a hashing storage serves the chunk under a name the sibling URL cannot
+ * derive. A missing URL or a failed fetch resolves undefined, and a failed fetch is
+ * retried on the next call. A file that loads without registering its module counts
+ * as failed, as does one that has not registered it within CHUNK_TIMEOUT.
  */
 export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
   const doc = deps.document ?? document;
@@ -108,9 +111,9 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
       const el = doc.createElement("script");
       if (deps.nonce !== undefined) el.nonce = deps.nonce;
       const fail = (): void => {
-        // A landed chunk, or an attempt already failed, has nothing left to fail.
+        // Nothing to do once the module is registered or this attempt has failed.
         if (value !== undefined || !el.isConnected) return;
-        // A retry appends its own tag, so the failed one leaves rather than piling up.
+        // A retry appends a new tag, so the failed one is removed.
         el.remove();
         pending = undefined;
         settle?.(undefined);
@@ -121,7 +124,7 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
         } satisfies PartialError);
       };
       el.onerror = fail;
-      // A file that ran without handing its module over fails too, or the need hangs.
+      // A file that ran without registering its module fails too, so no caller hangs.
       el.onload = fail;
       el.src = url;
       doc.head.append(el);
@@ -137,27 +140,28 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
   };
 }
 
+/** Build the scripts chunk loader, which configures the chunk with each payload. */
 export function createExtras(
   deps: ExtrasDeps,
   chunk: LazyModule<ExtrasFactory>,
 ): ExtrasLoader {
   let extras: Extras | undefined;
-  // Set by the first init, from when the latest payload lives in deps.context.
+  // Set by the first init. From then on deps.context returns the latest payload.
   let seeded = false;
-  // The ready calls made before init, which fetches for them once the payload is known.
+  // The ready calls made before init, resolved by init once the payload is known.
   const early: ((landing: Promise<ScriptsChunk>) => void)[] = [];
 
-  // Called only once init has stored a payload, the latest of which seeds the chunk.
+  // Called only after init stored a payload. The chunk is configured with the latest.
   async function land(): Promise<ScriptsChunk> {
-    // A landed chunk builds at once, so its surfaces exist as the payload seeds them.
+    // A chunk that has already loaded is built synchronously, without an await.
     const factory = chunk.get() ?? (await chunk.load());
     if (factory === undefined)
       throw new Error("[next] the scripts chunk is unavailable");
-    // A second need of a landed chunk takes the surfaces it already built.
+    // Later calls reuse the surfaces built the first time.
     if (extras === undefined) {
       extras = factory(deps);
       deps.install(extras);
-      // The payload read after the await, since init may have replaced it meanwhile.
+      // Read after the await, since init may have stored a newer payload meanwhile.
       extras.configure(deps.context());
     }
     return extras;
@@ -173,7 +177,7 @@ export function createExtras(
       if (extras !== undefined) extras.configure(next);
       else if (early.length > 0 || CHUNK_KEYS.some((key) => next[key] !== undefined)) {
         const landing = land();
-        // A failure nobody awaits is already reported as an asset error.
+        // The loader already reported the failure as a partial:error.
         landing.catch(() => undefined);
         for (const resolve of early.splice(0)) resolve(landing);
       }

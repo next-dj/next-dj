@@ -110,7 +110,7 @@ class TestRequiresRuntime:
         ["runtime_only_signup_form", "runtime_only_wizard", "runtime_only_vote"],
         ids=["form-meta", "wizard-meta", "action-kwarg"],
     )
-    def test_the_declaration_lands_in_the_registry(self, name: str) -> None:
+    def test_the_declaration_is_recorded_in_the_registry(self, name: str) -> None:
         meta = form_action_manager.get_action_meta(name)
         assert meta is not None
         assert meta.get("requires_runtime") is True
@@ -177,7 +177,7 @@ class TestSharedPageForms:
         with routed(_tree(tmp_path, source, RUNTIME), CSRF_DELIVERY="eager"):
             assert check_shared_page_forms() == []
 
-    def test_a_shared_form_without_js_is_w124(self, tmp_path) -> None:
+    def test_a_shared_form_without_js_is_w115(self, tmp_path) -> None:
         with routed(_tree(tmp_path, FORM_PAGE)):
             assert check_ids(check_shared_page_forms()) == ["next.W115"]
 
@@ -192,7 +192,7 @@ class TestSharedPageForms:
         with override_settings(BASE_DIR=tmp_path), routed(_tree(tmp_path, source)):
             assert check_shared_page_forms() == []
 
-    def test_one_form_that_may_post_bare_keeps_w124(self, tmp_path) -> None:
+    def test_one_form_that_may_post_bare_keeps_w115(self, tmp_path) -> None:
         source = (
             RUNTIME_FORM_PAGE.replace(
                 "{% endform %}'", '{% endform %}{% form "pong" %}{% endform %}\''
@@ -209,7 +209,7 @@ class TestSharedPageForms:
         [(FORM_PAGE, "{% template %}"), ("template = 'x'\ncache = 60\n", RUNTIME)],
         ids=["form", "runtime"],
     )
-    def test_eager_delivery_on_a_shared_page_is_w121(
+    def test_eager_delivery_on_a_shared_page_is_w112(
         self, tmp_path, source, layout
     ) -> None:
         with routed(_tree(tmp_path, source, layout), CSRF_DELIVERY="eager"):

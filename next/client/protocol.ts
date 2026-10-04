@@ -19,26 +19,26 @@ export const HEADER_ORIGIN = "X-Next-Origin";
 export const MIN_POLL_MS = 1000;
 export const MAX_POLL_MS = 2147483647;
 
-// The poll interval an attribute spells under a strict decimal grammar: only an
-// all-digit value in the server tag's bounds is one, so parseInt("5s")=5 is rejected.
+// Parse a poll interval attribute. Only an all-digit value within the server bounds
+// is accepted, so "5s" is rejected rather than read as 5.
 export function pollInterval(raw: string | null): number | null {
   if (raw === null || !/^\d+$/.test(raw)) return null;
   const ms = Number(raw);
   return ms >= MIN_POLL_MS && ms <= MAX_POLL_MS ? ms : null;
 }
 
-/** The dev channel's reports, lent by next.dev.min.js once it lands under $dev. */
+/** The dev diagnostics, provided by next.dev.min.js once it loads for a $dev page. */
 export interface Diagnostics {
   /** Report what the envelope boundary dropped from a raw wire envelope. */
   dropped(wire: Record<string, unknown>): void;
-  /** Time one op under a user-timing span, answering what the op answers. */
+  /** Time one op under a user timing span and return the op's result. */
   timed(
     patch: { op: string; target?: unknown; zone?: unknown },
     run: () => boolean,
   ): boolean;
   /** Warn that a script was stripped from a patch aimed at the described address. */
   stripped(address: string | undefined): void;
-  /** Warn that one node carries both data-next-key and id, handed to morph as is. */
+  /** Warn that one node carries both data-next-key and id. */
   keyed: (el: Element) => void;
   /** Warn on the hand-written trigger attributes the runtime ignores. */
   attrs(root: ParentNode): void;
@@ -95,7 +95,7 @@ export function currentUrl(doc: Document): string {
   return doc.location.pathname + doc.location.search;
 }
 
-/** Resolve `url` on the page's origin, a leading `//` read as a path, or undefined off it. */
+/** Resolve `url` on the page origin, a leading `//` read as a path, else undefined. */
 export function sameOrigin(url: string, doc: Document): string | undefined {
   const origin = doc.location.origin;
   let target: URL;
@@ -127,10 +127,10 @@ export function fire(
 }
 
 /**
- * The bootstrap nonce, read at module evaluation since currentScript is null later.
+ * The CSP nonce of the runtime script, read at module evaluation.
  *
- * A module runtime has no currentScript either, so it takes the nonce of the first
- * nonced script, which a policy issuing one nonce per response shares with it.
+ * currentScript is null after evaluation and in a module script, so the nonce of the
+ * first script that has one is used instead. A policy issues one nonce per response.
  */
 export function scriptNonce(doc: Document): string | undefined {
   const current = doc.currentScript ?? doc.querySelector("script[nonce]");
@@ -138,8 +138,8 @@ export function scriptNonce(doc: Document): string | undefined {
   return value === "" ? undefined : value;
 }
 
-// A fresh request or event id, timestamp-based on a plain-HTTP origin where
-// crypto.randomUUID is absent and the runtime object is narrower than its lib type.
+// A new request id. crypto.randomUUID is missing on a plain-HTTP origin although the
+// lib type declares it, so a timestamp id is the fallback.
 export function newId(): string {
   const impl = globalThis.crypto as { randomUUID?: () => string } | undefined;
   return impl?.randomUUID

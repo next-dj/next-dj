@@ -1,6 +1,6 @@
 """The resolve stage that turns a fold into the `ResolvedMetadata` of one response.
 
-Request and settings are read here, so a custom renderer cannot lose a policy.
+The request and the settings are read here, so a custom renderer cannot skip a policy.
 """
 
 import locale
@@ -123,13 +123,14 @@ SCHEMA_CONTEXTS: Final = frozenset(
         "http://schema.org/",
     }
 )
-"""The `@context` values the single graph stands for."""
+"""The `@context` values the shared schema.org graph replaces."""
 
 CONTEXT: Final = "@context"
 _failures: Final = FailureLog(logging.getLogger(__name__))
 _BREADCRUMB_LIST: Final = "BreadcrumbList"
 _ENOUGH_CRUMBS: Final = 2
 _ROUTE_MEMO: Final = 1024
+_LOCALE_MEMO: Final = 256
 
 type UrlMap = Callable[[Url], str]
 type IdMap = Callable[[str], str]
@@ -187,7 +188,7 @@ def _or_none[T](convert: Callable[[], T]) -> T | None:
 
 
 def absolute_url(url: str, *, request: HttpRequest | None = None) -> str:
-    """Return `url` absolute on the site origin, the one the sitemap lists on.
+    """Return `url` made absolute on the site origin, the one the sitemap uses.
 
     A URL with a scheme keeps its origin, and a protocol-relative one takes a scheme,
     each encoded the way a relative one is.
@@ -274,7 +275,7 @@ def _alternates(
 ) -> tuple[tuple[str, str], ...]:
     """Return the hreflang pairs with exactly one x-default, last, or none at all.
 
-    The pairs answer one another, so a lazy URL that fails drops the whole set.
+    The pairs reference one another, so a lazy URL that fails drops the whole set.
     """
     return _or_none(partial(_hreflang_pairs, meta, request)) or ()
 
@@ -335,6 +336,7 @@ def _first(value: Text | None, fallback: Text | None) -> Text | None:
     return fallback if value is None else value
 
 
+@lru_cache(maxsize=_LOCALE_MEMO)
 def og_locale(language: str | None) -> str | None:
     """Return the `ll_CC` Open Graph locale of a language code, `None` without one.
 
@@ -476,7 +478,7 @@ def _links(links: tuple[Link, ...], url: UrlMap) -> tuple[Link, ...]:
         links,
         lambda link: (
             link
-            if ORIGIN_RELS.intersection(link.rel.split())
+            if not ORIGIN_RELS.isdisjoint(link.rel.lower().split())
             else replace(link, href=url(link.href))
         ),
     )

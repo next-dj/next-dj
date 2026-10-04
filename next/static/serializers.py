@@ -132,8 +132,9 @@ def _instantiate(path: str) -> JsContextSerializer:
 def _build_serializer(path: str) -> JsContextSerializer:
     """Import and instantiate the serializer `path` names, the default on a failure.
 
-    A broken serializer would fail every render, so the default stands in, loud under
-    `DEBUG` and logged once otherwise, and `next.W079` to `next.W082` name the cause.
+    A broken serializer would fail every render, so the JSON default replaces it. The
+    error is raised under `DEBUG` and logged once otherwise, and `next.W079` to
+    `next.W082` report the cause.
     """
     try:
         instance = _instantiate(path)
@@ -142,7 +143,7 @@ def _build_serializer(path: str) -> JsContextSerializer:
             exc,
             path,
             "JS_CONTEXT_SERIALIZER %r cannot serialize, so the JSON serializer "
-            "stands in. Point it at a class whose instances have a "
+            "is used instead. Point it at a class whose instances have a "
             "dumps(value) -> str method.",
             path,
         )

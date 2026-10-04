@@ -10,7 +10,7 @@ interface Dispatched {
   detail: Record<string, unknown>;
 }
 
-// A dev applier carries the dev chunk's diagnostics, as it does once the chunk lands.
+// A dev applier carries the dev chunk's diagnostics, as it does once the chunk loads.
 function makeApplier(dev = false) {
   const dispatched: Dispatched[] = [];
   const merged: Record<string, unknown>[] = [];

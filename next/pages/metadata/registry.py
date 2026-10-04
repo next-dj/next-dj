@@ -25,7 +25,7 @@ class PageMetadataEntry(NamedTuple):
 
 
 class MetadataRegistrations(NamedTuple):
-    """What the registry holds for the diagnostics, read in one call."""
+    """The registered callable names and misattributions, read together for checks."""
 
     names: dict[Path, tuple[str, ...]]
     misattributed: tuple[MisattributedContext, ...]
@@ -47,7 +47,7 @@ def _one_run(first: Callable[..., Any], second: Callable[..., Any]) -> bool:
 class PageMetadataRegistry:
     """Register the metadata callable of each `page.py` and memoise the chains.
 
-    A per-file stamp moves only when a registration changes what the chain runs.
+    A per-file stamp changes only when a registration changes the callable a chain runs.
     """
 
     def __init__(self) -> None:
@@ -64,11 +64,11 @@ class PageMetadataRegistry:
         return self._version
 
     def _bump(self) -> None:
-        """Move the version every write moves."""
+        """Increment the version after a write."""
         self._version += 1
 
     def _stamp(self, file_path: Path) -> None:
-        """Move the stamp of `file_path` past every stamp handed out so far."""
+        """Set the stamp of `file_path` above every stamp issued so far."""
         self._stamps[file_path] = self._version + 1
 
     def reset(self) -> None:
@@ -85,7 +85,7 @@ class PageMetadataRegistry:
         return tuple(stamps.get(path) for path in paths)
 
     def chain(self, file_path: Path) -> ChainEntry | None:
-        """Return the memoised chain of `file_path`, whatever tokens it was built at."""
+        """Return the memoised chain of `file_path` without revalidating it."""
         return self._chains.get(file_path)
 
     def remember(self, file_path: Path, entry: ChainEntry) -> None:

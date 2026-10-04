@@ -77,7 +77,8 @@ Reading the context value by its parameter name is the idiom, because the row a 
    def note_metadata(note: Note) -> MetadataDict:
        return {"title": note.title, "description": note.summary}
 
-A value of ``None`` means unset, so ``"description": note.summary`` with an empty summary keeps the description an ancestor declared rather than erasing it.
+A value of ``None`` means unset, so ``"description": note.summary`` with a summary of ``None`` keeps the description an ancestor declared rather than erasing it.
+An empty string is a value and renders an empty description.
 :doc:`merge` covers how the returned dict merges over the ancestors, and ``RESET`` for the case where an inherited value must go.
 
 A callable is local to its own page unless it is registered with ``@page.metadata(inherit=True)``, which runs it for every descendant page as well, ahead of the descendant's own metadata.
@@ -175,7 +176,7 @@ Open Graph, Twitter, and JSON-LD stay as first rendered, because the crawlers th
            return Patches(request).morph_zone("note").meta(note.title).response()
 
 An inherited ancestor callable runs as the render would, so ``meta()`` first runs the ``render()`` guard of the origin page, raising ``ForeignPageNotAuthorizedError`` on a denial.
-An inherited callable that raises anything else drops the ``meta`` operation alone, logged once, so the rest of the patch still applies, and under ``DEBUG`` it raises.
+An inherited callable that raises anything else drops the ``meta`` operation alone, logged once, so the rest of the patch still applies, and under ``DEBUG`` or ``STRICT_LOADING`` it raises.
 A value the action passes to ``meta()`` that the schema refuses raises ``PageMetadataShapeError`` every time, since it is a bug in the action itself.
 Custom tags a ``MetadataRenderer`` adds are not synced, only the four tags above travel in the envelope.
 A builder without an origin page merges the value over ``DEFAULTS`` alone and sends no ``canonical`` key when the canonical names the page itself, so the client keeps the tag it has rather than pointing it at the action endpoint.

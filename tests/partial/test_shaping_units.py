@@ -208,7 +208,7 @@ class TestPlainFormScrubbing:
 
 
 class TestCsrfRotation:
-    """The CSRF meta rides only on a rotated token."""
+    """The CSRF meta is attached only when the token rotated."""
 
     def test_non_dict_meta_reads_as_not_rotated(self) -> None:
         request = RequestFactory().post("/")

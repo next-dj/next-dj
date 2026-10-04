@@ -1,4 +1,4 @@
-"""The `sitemap` object a `sitemap.py` declares the URLs of its dynamic trails with."""
+"""The `sitemap` object that a `sitemap.py` declares the URLs of dynamic trails with."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 class SitemapDeclaration:
-    """The `sitemap` object a `sitemap.py` decorates its items callables with."""
+    """The decorators a `sitemap.py` applies to its items callables."""
 
     def items[F: Callable[..., Any]](
         self,
@@ -26,9 +26,9 @@ class SitemapDeclaration:
         lastmod: str | None = None,
         section: str | None = None,
     ) -> Callable[[F], F]:
-        """Register the decorated callable as the URLs of `trail` in this tree.
+        """Register the decorated callable as the URL source of `trail`.
 
-        The tree is the one of the running `sitemap.py`, wherever the callable lives.
+        The entry belongs to the file running the decorator, not the callable module.
         """
         registered_from = registering_file()
 

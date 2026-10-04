@@ -66,7 +66,7 @@ function makeLoader(
     { ...deps, mount, install: (landed) => installed.push(landed) },
     chunk,
   );
-  // The runtime seeds its context before init, and the chunk lands through _land.
+  // The runtime seeds its context before init, and the chunk registers through _land.
   const loader = {
     ready: () => extras.ready(),
     init(next: Record<string, unknown>) {
@@ -159,7 +159,7 @@ describe("waiting for the scripts chunk", () => {
       ["configure", { $chunks: { scripts: "/static/next/next.scripts.abc.js" } }],
     ]);
     expect(hosts[0]!.nonce).toBe("boot");
-    // The chunk's events ride the runtime's own bus.
+    // The chunk's events go through the runtime's own bus.
     hosts[0]!.dispatch("next:consent", { changed: [] });
     expect(dispatched).toEqual([{ event: "next:consent", detail: { changed: [] } }]);
   });

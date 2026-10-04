@@ -252,7 +252,7 @@ Terms used throughout the next.dj documentation.
 
    shared page
       A page whose ``cache`` lets a shared cache such as a CDN keep its response, through ``public`` or ``s_maxage``, so its HTML carries no CSRF token and shows no visitor's consent.
-      A render that shows one visitor anyway, through a cookie, the session, a CSP nonce, or an ``Authorization`` header, goes out private.
+      A render that depends on one visitor anyway, through a cookie, the session, a CSP nonce, or an ``Authorization`` header, is sent with ``Cache-Control: private``.
       See :doc:`/content/topics/caching`.
 
    site indexability

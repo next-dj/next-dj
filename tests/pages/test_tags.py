@@ -12,7 +12,7 @@ def _render(source: str, **ctx) -> str:
 
 
 class TestTemplatePlaceholderTag:
-    """``{% template %}`` marks the hole a composed layout fills."""
+    """``{% template %}`` marks the placeholder a composed layout fills."""
 
     @pytest.mark.parametrize(
         "source",

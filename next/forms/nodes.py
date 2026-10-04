@@ -119,9 +119,9 @@ class FormNode(template.Node):
     def _build_hidden_inputs(
         self, context: template.Context, request: "HttpRequest"
     ) -> str:
-        """Build the CSRF and origin hidden inputs, the token left out when deferred.
+        """Build the CSRF and origin hidden inputs, omitting a deferred CSRF token.
 
-        Django reads the header once the field is absent, so the runtime supplies it.
+        Without the field Django reads the token from the header the runtime sends.
         """
         inputs: list[str] = []
         if not token_deferred(request):

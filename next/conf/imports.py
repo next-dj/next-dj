@@ -1,4 +1,4 @@
-"""The dotted-path imports every settings key that names a class or a callable uses.
+"""Dotted-path imports for the settings keys that name a class or a callable.
 
 `import_class_cached` imports a backend once per process until a settings reload.
 """
@@ -22,7 +22,7 @@ def import_class_cached(dotted_path: str) -> type[Any]:
 
 
 def import_callable(dotted: str) -> Callable[..., object] | None:
-    """Return the callable a dotted path names, `None` when it names none."""
+    """Return the callable a dotted path names, `None` when it does not import one."""
     try:
         target = import_string(dotted)
     except ImportError:

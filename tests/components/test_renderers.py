@@ -189,7 +189,7 @@ class TestKeylessContextMerges:
     """Names outside the guarded domain keep merging silently."""
 
     def test_non_conflicting_keys_merge(self, tmp_path: Path) -> None:
-        """A dict touching nothing guarded lands in the context."""
+        """A dict that sets no guarded key is merged into the context."""
         mgr, info, module_path = build_composite_component(tmp_path)
         mgr._registry.register(module_path, None, lambda: {"env": "prod"})
         context_data = {COMPONENT_PROPS_CONTEXT_KEY: frozenset({"title"})}
@@ -361,7 +361,7 @@ class TestCallerContextOwnership:
     def test_simple_render_leaves_the_caller_dict_untouched(
         self, tmp_path: Path
     ) -> None:
-        """The request and csrf keys land in the render copy, not in the argument."""
+        """The request and csrf keys are set on the render copy, not on the argument."""
         (tmp_path / "card.djx").write_text("<div>{{ title }} {{ csrf_token }}</div>")
         info = ComponentInfo(
             name="card",

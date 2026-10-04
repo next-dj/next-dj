@@ -323,7 +323,7 @@ class TestSourcesOnAClosedSite:
         ],
         ids=["sitemap", "robots-txt", "robots-py"],
     )
-    def test_a_closed_site_publishing_for_crawlers_is_w120(
+    def test_a_closed_site_publishing_for_crawlers_is_w111(
         self, tmp_path, sources: dict[str, object], named: str
     ) -> None:
         root = write_tree(tmp_path / "pages", **sources)
@@ -342,7 +342,7 @@ class TestSourcesOnAClosedSite:
             [message] = check_seo_sources_on_closed_site()
         assert "publishes a sitemap for crawlers" in message.msg
 
-    def test_debug_does_not_silence_w120(self, tmp_path) -> None:
+    def test_debug_does_not_silence_w111(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", sitemap="")
         with routed(root, SITE={"INDEXABLE": False}), override_settings(DEBUG=True):
             assert check_ids(check_seo_sources_on_closed_site()) == ["next.W111"]

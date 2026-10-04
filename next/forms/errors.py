@@ -35,7 +35,7 @@ class FormActionNotFoundError(LookupError):
     ) -> None:
         """Store the lookup context, deferring close-match work until rendered."""
         # The manager probes backends by catching this, so raising stays cheap.
-        # One record now, difflib and the message only when rendered.
+        # The close-match search and the message run only when the error is rendered.
         self._context = _LookupContext(name, page_path, candidates, registry_empty)
         if message is None:
             super().__init__()

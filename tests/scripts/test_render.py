@@ -11,10 +11,14 @@ class TestInlineBody:
         ("body", "safe"),
         [
             ("a('</script>')", "a('<\\/script>')"),
-            ("a('</SCRIPT')", "a('<\\/SCRIPT')"),
+            ("a('</SCRIPT>')", "a('<\\/SCRIPT>')"),
             ("a('</div>')", "a('</div>')"),
             ("a('<!--')", "a('<\\!--')"),
             ("a('<script>')", "a('<\\script>')"),
+            ("a('<script src=x>')", "a('<\\script src=x>')"),
+            ("a('</script\n>')", "a('<\\/script\n>')"),
+            ("for(i=0;i<scripts.length;i++);", "for(i=0;i<scripts.length;i++);"),
+            ("a('</scripts>')", "a('</scripts>')"),
         ],
     )
     def test_a_closing_tag_is_broken(self, body: str, safe: str) -> None:

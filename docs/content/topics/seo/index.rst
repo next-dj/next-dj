@@ -11,7 +11,7 @@ Metadata belongs to the pages the file router serves, and a plain Django view re
 .. rubric:: Start here
 
 :doc:`quickstart`
-   The settings, the head tag, a title per page, a sitemap, and a robots file, in five minutes.
+   The settings, the head tag, a title per page, a sitemap, and a robots file, in one walkthrough.
 
 .. rubric:: Declaring
 

@@ -10,9 +10,11 @@ from next.consent import NECESSARY
 
 
 class Strategy(enum.StrEnum):
-    """When a script loads, the head strategies rendered by the server when allowed.
+    """When a script loads.
 
-    The rest ride the manifest, `IDLE` after load, `INTERACTION` on the first input.
+    The server renders `BLOCKING`, `ASYNC` and `DEFER` in the head when consent allows.
+    The runtime loads the rest from the manifest, `IDLE` after the load event,
+    `INTERACTION` on the first input, and `MANUAL` when the page asks for it.
     """
 
     BLOCKING = "blocking"
@@ -46,7 +48,7 @@ def allowed_attr(name: object) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class Script:
-    """One third-party script, its `init` body running before its `src` loads."""
+    """One third-party script. Its `init` body runs before its `src` loads."""
 
     name: str
     src: str | None = None

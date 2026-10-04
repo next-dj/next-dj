@@ -1,7 +1,7 @@
 """Collector, dedup strategies, JS context policies, and placeholder slots.
 
-A fresh collector rides in the template context per request. It is fully type-agnostic,
-routing each asset to a slot named in `KindRegistry` with no built-in kind knowledge.
+Each render holds a fresh collector in its template context. The collector routes each
+asset to the slot `KindRegistry` names for its kind and knows no built-in kind.
 """
 
 from __future__ import annotations
@@ -316,7 +316,7 @@ class StaticCollector:
         return self._buckets.get(name, _EMPTY)
 
     def note(self, key: str, value: object) -> None:
-        """Leave `value` under `key` for an area reading this render at injection."""
+        """Append `value` under `key` for another area to read at injection time."""
         self._notes.setdefault(key, []).append(value)
 
     def notes(self, key: str) -> Sequence[object]:

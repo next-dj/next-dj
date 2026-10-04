@@ -1,5 +1,5 @@
-// The global `Next` facade every page reaches. Owns the context store, the event bus,
-// the plugin hook, mounts Next.partial, and publishes the optional scripts chunk.
+// The global `Next` facade. It owns the context store, the event bus and the plugin
+// hook, mounts Next.partial, and exposes the surfaces of the lazy scripts chunk.
 
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
@@ -26,7 +26,7 @@ export type { ConsentChange } from "./consent";
 export type { ScriptsChunk } from "./chunks";
 export type { ScriptStatus } from "./scripts";
 
-/** The modules the single-module chunks hand over through Next._land. */
+/** The module each single-module chunk registers through Next._land, by chunk name. */
 interface NextModules {
   scripts: ExtrasFactory;
   sse: SseFactory;
@@ -46,7 +46,7 @@ export interface NextChunks {
  */
 export interface NextEventMap {
   ready: NextContext;
-  // changed lists only the delta keys, so an island can skip a foreign re-render.
+  // changed lists only the keys that changed, so an island can skip an unrelated one.
   "context-updated": { context: NextContext; changed: string[] };
   "partial:before-request": {
     url: string;
@@ -54,9 +54,8 @@ export interface NextEventMap {
     intent: { zone?: string; uid?: string };
   };
   "partial:before-apply": { envelope: Envelope };
-  // ok is false when any op threw or was an unknown verb, so a listener can
-  // tell a clean apply from a degraded one that still mounted what changed.
-  // nodes are the roots the ops inserted or morphed, the ones the mount pass ran over.
+  // ok is false when any op threw or named an unknown verb. nodes are the roots the
+  // ops inserted or morphed, which the mount pass ran over.
   "partial:applied": { envelope: Envelope; ok: boolean; nodes: readonly Element[] };
   "partial:error": PartialError;
   "partial:layer-opened": { opener: HTMLElement | null };
@@ -72,9 +71,9 @@ export interface NextEventMap {
 type NextListener = (payload: Record<string, unknown>) => void;
 type NextPlugin<T> = (next: typeof Next) => T;
 
-// The bus rides an EventTarget, so the fan-out snapshot and the removal are the
-// platform's. The try is ours: an EventTarget hands a throw to the global handler.
-// The ready replay reaches a listener outside the bus, so it gets the same containment.
+// The bus is an EventTarget, which snapshots its listeners per dispatch and handles
+// removal. deliver logs a listener's exception instead of passing it to the global
+// error handler, and the ready replay, which calls a listener directly, uses it too.
 function deliver(listener: NextListener, payload: Record<string, unknown>): void {
   try {
     listener(payload);
@@ -100,7 +99,7 @@ class NextBus extends EventTarget {
   }
 }
 
-// Read while the runtime script still executes, the base its chunks resolve against.
+// Read during module evaluation, the only time document.currentScript is set.
 const RUNTIME = document.currentScript;
 const NONCE = scriptNonce(document);
 
@@ -110,7 +109,7 @@ class Next {
   static #bus = new NextBus();
   static #ready = false;
 
-  // What every chunk fetch reads, the base its URL resolves against.
+  // The dependencies shared by every chunk loader.
   static #chunk: ChunkDeps = {
     dispatch: (event, payload) => Next.#bus.emit(event, payload),
     runtime: RUNTIME,
@@ -118,7 +117,7 @@ class Next {
     context: () => Next.#context,
   };
 
-  // The dev chunk is fetched only for a page rendered under $dev.
+  // One loader per chunk. The dev chunk is fetched only when the payload has $dev.
   static #modules = Object.fromEntries(
     ["scripts", "sse", "csrf", "poll", "dev"].map((key) => [
       key,
@@ -134,10 +133,10 @@ class Next {
     poll: Next.#modules.poll,
   });
 
-  /** Consent per category, set once the scripts chunk lands. */
+  /** Consent per category, set once the scripts chunk has loaded. */
   static consent: ScriptsChunk["consent"] | undefined;
 
-  /** Third-party scripts, set once the scripts chunk lands. */
+  /** Third-party scripts, set once the scripts chunk has loaded. */
   static scripts: ScriptsChunk["scripts"] | undefined;
 
   static #extras = createExtras(
@@ -166,11 +165,11 @@ class Next {
 
   /** Bootstrap called once per page, seeding context and mounting before ready runs. */
   static _init(context: Record<string, unknown>): void {
-    // Seeded first, the payload the chunk fetches below resolve against.
+    // Stored first, since the chunk loaders below read $chunks from it.
     Next.#context = context;
-    // Only the literal true opens the dev channel, so a stray "true" string
-    // leaves production quiet. Runs before the initial trigger scan, and the
-    // diagnostics the dev chunk carries join once it lands.
+    // Only the boolean true enables the dev channel, a "true" string does not. It is
+    // enabled before the initial trigger scan, and the diagnostics are attached once
+    // the dev chunk has loaded.
     if (context.$dev === true) {
       Next.partial._configure({ dev: true });
       void Next.#modules.dev.load().then((diagnostics) => {
@@ -178,38 +177,37 @@ class Next {
           Next.partial._configure({ dev: true, diagnostics });
       });
     }
-    // A page without a mintable token carries no $csrf, so an absent key keeps
-    // whatever an envelope already rotated in rather than clearing it.
-    // A malformed one is warned about by the dev chunk once it lands.
+    // A page that cannot mint a token carries no $csrf, so an absent key keeps a
+    // token an envelope already rotated in. The dev chunk warns about a malformed one.
     const csrf = readCsrf(context.$csrf);
     if (csrf !== undefined) Next.partial.setCsrf(csrf);
     Next.#ready = true;
-    // The initial seed is one big delta, so every seeded key is changed.
+    // Every seeded key counts as changed on the initial seed.
     Next.#bus.emit("context-updated", { context, changed: Object.keys(context) });
     // Mount before ready listeners run, so a ready handler sees a mounted document.
     Next.partial.ready();
     Next.#bus.emit("ready", context);
-    // After ready, so a next:consent listener a ready handler binds hears the start.
+    // Last, so a next:consent listener bound in a ready handler gets the first event.
     Next.#extras.init(context);
   }
 
   /**
-   * Resolve with a lazy chunk's surfaces once it has landed and taken the payload.
+   * Resolve with the surfaces of a lazy chunk once it has loaded and been configured.
    *
-   * Fetches the chunk if the page did not, and rejects when it cannot load.
+   * Fetches the chunk when the page has not, and rejects when it cannot be loaded.
    */
   static ready<K extends keyof NextChunks>(chunk: K): Promise<NextChunks[K]> {
     return Next.#chunks[chunk]();
   }
 
-  /** A lazy chunk's handshake, handing over the module it carries. */
+  /** Register the module a lazy chunk exports, called by the chunk as it evaluates. */
   static _land<K extends keyof NextModules>(key: K, value: NextModules[K]): void {
-    // A stale chunk from another release may name a module this runtime lacks.
+    // A chunk from another release may name a module this runtime does not know.
     (Next.#modules[key] as Lazy<NextModules[K]> | undefined)?.land(value);
   }
 
   /** Subscribe to a runtime event, returning an unsubscribe function. */
-  // The overloads are a type-only narrowing, every listener lands on one bus.
+  // The overloads only narrow the payload type. Every listener is added to one bus.
   static on<K extends keyof NextEventMap>(
     event: K,
     listener: (payload: NextEventMap[K]) => void,
@@ -217,7 +215,7 @@ class Next {
   static on(event: string, listener: (payload: unknown) => void): () => void;
   static on(event: string, listener: NextListener): () => void {
     const off = Next.#bus.subscribe(event, listener);
-    // ready alone describes a state, not a moment, so a late subscriber gets a replay.
+    // ready describes a state, not a moment, so a late subscriber is called at once.
     if (event === "ready" && Next.#ready) deliver(listener, { ...Next.#context });
     return off;
   }
@@ -226,7 +224,7 @@ class Next {
     return plugin(Next);
   }
 
-  // The context op and csrf meta merge into the store _init owns, one snapshot.
+  // A merge replaces the store with a new object, leaving earlier snapshots intact.
   static #mergeContext(data: Record<string, unknown>): void {
     const changed = Object.keys(data);
     Next.#context = { ...Next.#context, ...data };

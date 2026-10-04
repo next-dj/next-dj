@@ -1348,7 +1348,7 @@ class TestRealFileRouterBackend:
 
 
 class TestSkippedDirectoriesLeaveThePageChecks:
-    """A directory the router refuses answers no URL, so no page check names it."""
+    """A directory the router skips serves no URL, so no page check names it."""
 
     def _write_bodyless_page(self, tree: Path, route: str) -> Path:
         directory = tree / route

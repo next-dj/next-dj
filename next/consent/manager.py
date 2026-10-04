@@ -47,7 +47,7 @@ consent_backend_manager: SingleBackendManager[ConsentBackend] = SingleBackendMan
 
 @functools.cache
 def consent_configured() -> bool:
-    """Whether the project sets `CONSENT`, so every page tells the runtime of it."""
+    """Whether the project sets `CONSENT`, so every page sends `$consent`."""
     raw = getattr(settings, USER_SETTING, None)
     return isinstance(raw, dict) and "CONSENT" in raw
 
@@ -80,9 +80,9 @@ def forget_consent_settings(**kwargs) -> None:
 
 
 def get_consent(request: HttpRequest | None) -> Consent:
-    """Return the consent `request` carries, read once and kept to the categories.
+    """Return the consent `request` carries, read once and limited to the categories.
 
-    Anything but a real request is an undecided visitor.
+    Anything other than an `HttpRequest` reads as an undecided visitor.
     """
     if not isinstance(request, HttpRequest):
         return UNDECIDED
@@ -117,7 +117,7 @@ def _backend() -> ConsentBackend | None:
 
 
 def _read(backend: ConsentBackend, request: HttpRequest) -> Consent:
-    """Return what `backend` reads off `request`, undecided where it cannot answer."""
+    """Return what `backend` reads from `request`, undecided when the read fails."""
     source = type(backend).__qualname__
     try:
         read: object = backend.read(request)
@@ -147,7 +147,7 @@ def _read(backend: ConsentBackend, request: HttpRequest) -> Consent:
 
 
 def _client_config(backend: ConsentBackend) -> Mapping[str, object]:
-    """Return what `backend` adds to `$consent`, nothing where it cannot answer."""
+    """Return what `backend` adds to `$consent`, nothing when the call fails."""
     source = type(backend).__qualname__
     try:
         config: object = backend.client_config()
@@ -175,9 +175,9 @@ def _client_config(backend: ConsentBackend) -> Mapping[str, object]:
 
 
 def server_mode(request: HttpRequest | None) -> bool:
-    """Whether this render follows the consent cookie rather than the runtime.
+    """Whether the server applies the consent cookie to this render, not the runtime.
 
-    `"auto"` keeps a page a shared cache holds independent of the cookie.
+    Under `"auto"` a render a shared cache may store does not read the cookie.
     """
     mode = server_render()
     if mode is not None:
@@ -188,7 +188,7 @@ def server_mode(request: HttpRequest | None) -> bool:
 def consent_payload(consent: Consent) -> dict[str, object]:
     """Return the `$consent` entry for the runtime, the backend's own entries included.
 
-    The choice wins over a backend entry of the same name, so the runtime always
+    The choice overrides a backend entry of the same name, so the runtime always
     starts from the state the server read.
     """
     categories = consent_categories()

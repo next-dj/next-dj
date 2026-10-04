@@ -127,7 +127,7 @@ def _render(meta: Metadata, request: object) -> str:
 
 
 def _wallet() -> str:
-    """Answer the dependency the dynamic leaf reads, priced near zero."""
+    """Return the dependency the dynamic leaf reads, at negligible cost."""
     return "wallet"
 
 

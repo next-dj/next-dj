@@ -418,7 +418,7 @@ class TestLaziness:
 
 
 class TestTraceOrigins:
-    """Every settled key names the segment that settled it, as `showmetadata` reads."""
+    """Every folded key names the segment that set it, as `showmetadata` prints."""
 
     def test_the_nearest_source_of_each_key_is_named(self) -> None:
         origins = trace_origins(

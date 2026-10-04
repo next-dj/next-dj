@@ -178,8 +178,8 @@ class _HeadParser(HTMLParser):
 def head_tags(html: str) -> HeadTags:
     """Return the metadata tags the head of `html` carries, the whole of a fragment.
 
-    A tag rendered twice that a head carries once, or a JSON-LD body that is no
-    JSON, raises `HeadParseError`.
+    A single-valued tag rendered twice or a JSON-LD body that is not JSON raises
+    `HeadParseError`, the first failure the parser meets.
     """
     parser = _HeadParser()
     parser.feed(html)
@@ -190,7 +190,7 @@ def head_tags(html: str) -> HeadTags:
 def _prefixed(tags: HeadTags, block: str, expected: object) -> object:
     """Return the tags of an `og` or `twitter` block, the suffixes `expected` names.
 
-    Without a mapping the whole block answers, `None` when the head has none of it.
+    Without a mapping the whole block is returned, `None` when the head has no tag of it.
     """
     attribute, prefix = _PREFIXED[block]
     found = tags.properties if attribute == "property" else tags.names

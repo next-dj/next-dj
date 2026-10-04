@@ -1,6 +1,6 @@
-"""Value objects a `sitemap.py` and a `robots.py` declare their entries with.
+"""Value objects that a `sitemap.py` and a `robots.py` declare their entries with.
 
-Both validate on construction, so a value that would break the document never renders.
+Both validate on construction, so an invalid value is never rendered.
 """
 
 import math
@@ -41,7 +41,7 @@ class SitemapEntry:
     priority: float | None = None
 
     def __post_init__(self) -> None:
-        """Pin the kwargs read-only and refuse a value the protocol has no place for."""
+        """Freeze the kwargs and reject values the sitemap protocol does not allow."""
         object.__setattr__(self, "kwargs", MappingProxyType(dict(self.kwargs)))
         if self.lastmod is not None and not isinstance(self.lastmod, date):
             raise SitemapEntryError(
@@ -61,12 +61,12 @@ class SitemapEntry:
 
 
 def _as_tuple(value: str | Sequence[str]) -> tuple[str, ...]:
-    """Return the strings of `value`, a bare string read as one."""
+    """Return `value` as a tuple of strings, treating a bare string as one item."""
     return (value,) if isinstance(value, str) else tuple(value)
 
 
 def _check_path(name: str, path: object) -> None:
-    """Refuse a path that is no string, starts nowhere or carries a line break."""
+    """Reject a path that is not a string or breaks the robots.txt path grammar."""
     if (
         not isinstance(path, str)
         or not path.startswith(_PATH_START)
@@ -83,9 +83,9 @@ def _check_path(name: str, path: object) -> None:
 
 @dataclass(frozen=True, slots=True)
 class RobotsRule:
-    """One `User-agent` group of a `robots.py`, a bare string read as one value.
+    """One `User-agent` group of a `robots.py`.
 
-    A string or a sequence is accepted, and every field holds a tuple once built.
+    Each string field accepts a string or a sequence of strings and stores a tuple.
     """
 
     user_agent: str | Sequence[str] = "*"
@@ -94,7 +94,7 @@ class RobotsRule:
     crawl_delay: float | None = None
 
     def __post_init__(self) -> None:
-        """Pin every value as a tuple and refuse one that would break the group."""
+        """Store every field as a tuple and reject values that would break the group."""
         agents = _as_tuple(self.user_agent)
         if not agents or any(
             not isinstance(agent, str) or _AGENT.fullmatch(agent) is None
@@ -117,7 +117,7 @@ class RobotsRule:
 
     @property
     def user_agents(self) -> tuple[str, ...]:
-        """Return the agents of the group, the tuple construction pinned."""
+        """Return the user agents of the group as the tuple stored at construction."""
         return cast("tuple[str, ...]", self.user_agent)
 
 

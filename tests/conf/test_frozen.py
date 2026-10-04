@@ -413,7 +413,7 @@ class TestFreeze:
     def test_mutable_leaf_stays_editable_inside_the_frozen_value(self) -> None:
         """The freeze reaches lists and dicts only, so a set leaf still edits.
 
-        Nothing leaks back to the caller, the leaf itself is just not frozen.
+        Nothing leaks back to the caller, since only the leaf itself is not frozen.
         """
         tags = {"a"}
         frozen = freeze({"OPTIONS": {"TAGS": tags}})

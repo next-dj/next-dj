@@ -1,6 +1,6 @@
-"""The addresses and names of the SEO routes and the lazy set a source backs.
+"""The paths and names of the SEO routes, and the lazy patterns filtered by source.
 
-A route without its source stays out, so a project view at that address still answers.
+A route without a source is not mounted, so a project view at that path answers.
 """
 
 from __future__ import annotations
@@ -40,25 +40,25 @@ _failures = FailureLog(logger)
 
 
 def _served(route: str, probe: Callable[[], bool]) -> bool:
-    """Whether `probe` routes `route`, a probe that raises keeping the route.
+    """Whether `probe` mounts `route`, a probe that raises keeping the route.
 
-    It runs while every URL resolves, so a failure must not take the other routes
-    down, and the view behind the route answers 503 on the same failure.
+    It runs during URL resolution, so a failure must not break the other routes,
+    and the view of the route answers 503 for the same failure.
     """
     try:
         return probe()
     except Exception:
         if _failures.first_failure(route):
             logger.exception(
-                "Deciding whether to route /%s raised, so the route stays and "
-                "answers 503 until its source loads.",
+                "Deciding whether to mount /%s raised, so the route stays mounted "
+                "and answers 503 until its source loads.",
                 route,
             )
         return True
 
 
 def served_names() -> frozenset[str]:
-    """Return the names of the routes whose source a page tree or a backend backs."""
+    """Return the names of the routes whose source a page tree or a backend has."""
     names: set[str] = set()
     if _served(SITEMAP_ROUTE, seo_manager.serves_sitemap):
         names.update((SITEMAP_NAME, SECTION_NAME))
@@ -68,16 +68,16 @@ def served_names() -> frozenset[str]:
 
 
 def served_patterns(patterns: Iterable[URLPattern]) -> list[URLPattern]:
-    """Return the patterns among `patterns` whose source is there."""
+    """Return the patterns among `patterns` whose source exists."""
     names = served_names()
     return [pattern for pattern in patterns if pattern.name in names]
 
 
 class SeoPatterns(Sequence["URLPattern"]):
-    """The SEO routes filtered by their sources, refiltered when the manager resets."""
+    """The SEO patterns filtered by source, filtered again after a manager reset."""
 
     def __init__(self, patterns: Iterable[URLPattern]) -> None:
-        """Hold every route, filtering none yet."""
+        """Store every pattern without filtering."""
         self.patterns = tuple(patterns)
         self._held: tuple[int, tuple[URLPattern, ...]] | None = None
 

@@ -26,13 +26,13 @@ if TYPE_CHECKING:
 
 
 def _freshness(control: CacheControl) -> tuple[bool, float]:
-    """Rank no store first, then the shortest age, a cache naming none ranking last."""
+    """Return the sort key ordering no-store first, then by age, with no age last."""
     seconds = control.seconds
     return control.stores, math.inf if seconds is None else seconds
 
 
 def shortest_cache(controls: Iterable[CacheControl | None]) -> CacheControl | None:
-    """Return the cache keeping a copy for the shortest time, no store ranking first."""
+    """Return the cache control with the shortest lifetime, no-store first."""
     return min(
         (control for control in controls if control is not None),
         key=_freshness,
@@ -41,7 +41,7 @@ def shortest_cache(controls: Iterable[CacheControl | None]) -> CacheControl | No
 
 
 def backend_path(backend: object) -> str:
-    """Return the dotted path of the class of `backend`, the name a report gives it."""
+    """Return the dotted path of the class of `backend`, for log and check messages."""
     kind = type(backend)
     return f"{kind.__module__}.{kind.__qualname__}"
 
@@ -50,28 +50,28 @@ class SitemapBackend(ABC):
     """One source of sitemap sections, configured by a `SITEMAP_BACKENDS` entry."""
 
     def __init__(self, config: Mapping[str, Any]) -> None:
-        """Keep the entry and its `OPTIONS`."""
+        """Store the entry and its `OPTIONS` mapping."""
         self.config = config
         self.options: Mapping[str, Any] = config.get("OPTIONS") or {}
 
     @abstractmethod
     def sections(self, request: HttpRequest | None) -> Mapping[str, Sitemap[Any]]:
-        """Return fresh Django sitemaps by slug, `None` for the request of a check."""
+        """Return new Django sitemaps by slug, `request` being `None` in a check."""
 
     def serves(self) -> bool:
-        """Whether the backend has sections to serve, so `/sitemap.xml` is routed."""
+        """Whether the backend has sections to serve, which mounts `/sitemap.xml`."""
         return True
 
     def cache_control(self) -> CacheControl | None:
-        """Return the cache the sitemap views carry, `None` for none at all."""
+        """Return the cache control of the sitemap responses, `None` for no caching."""
         return None
 
 
 class PageTreeSitemapBackend(SitemapBackend):
-    """The sections the `sitemap.py` at the top of each routed page tree declares."""
+    """Serve the sections the `sitemap.py` at the top of each routed tree declares."""
 
     def __init__(self, config: Mapping[str, Any]) -> None:
-        """Start with no static trails listed yet."""
+        """Create the backend with an empty static trail memo."""
         super().__init__(config)
         self._static: dict[Path, tuple[int, tuple[str, ...]]] = {}
 
@@ -81,7 +81,7 @@ class PageTreeSitemapBackend(SitemapBackend):
 
     @override
     def serves(self) -> bool:
-        """Whether a page tree carries a `sitemap.py`, even one failing to import."""
+        """Whether a page tree has a `sitemap.py`, including one failing to import."""
         return any(root.sitemap is not None for root in self.roots())
 
     @override
@@ -95,9 +95,10 @@ class PageTreeSitemapBackend(SitemapBackend):
 
     @override
     def sections(self, request: HttpRequest | None) -> dict[str, Sitemap[Any]]:
-        """Return a section per tree plus one per `section=` its items name.
+        """Return one section per tree plus one per `section=` its items name.
 
-        A trail an `exclude` glob covers drops its items, and a claimed trail its route.
+        Items on a trail `exclude` matches are dropped, and so is a static route that
+        an items callable claims.
         """
         sections: dict[str, Sitemap[Any]] = {}
         for root in self.roots():
@@ -122,9 +123,10 @@ class PageTreeSitemapBackend(SitemapBackend):
         return sections
 
     def static_trails(self, root: SeoRoot, options: SitemapOptions) -> tuple[str, ...]:
-        """Return the static routes of `root` no items callable claims, memoised.
+        """Return the static trails of `root` that no items callable claims.
 
-        Reading noindex folds a chain per page, so the list waits for a module reload.
+        The noindex test resolves the metadata of every page, so the result is
+        memoised per module version.
         """
         version = module_version()
         held = self._static.get(root.path)

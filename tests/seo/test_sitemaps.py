@@ -59,7 +59,7 @@ def _items(source: str) -> str:
 
 
 class TestSitemapOptions:
-    """One lenient reader serves the sitemap attributes and the cache lifetime."""
+    """`SitemapOptions.read` keeps each attribute of a valid shape and drops the rest."""
 
     def test_a_module_declaring_nothing_reads_the_defaults(self) -> None:
         assert SitemapOptions.read(types.ModuleType("sitemap")) == SitemapOptions()
@@ -424,7 +424,7 @@ USERS = _items(
 @pytest.mark.django_db()
 @pytest.mark.usefixtures("users")
 class TestQuerySetItems:
-    """A `QuerySet` part reads a count, a page and an aggregate, never the table."""
+    """A `QuerySet` part costs a count, a page and an aggregate, never a full read."""
 
     def test_a_page_reads_one_count_and_one_slice(
         self, tmp_path, django_assert_max_num_queries
@@ -507,7 +507,7 @@ class TestQuerySetItems:
 
 
 class TestLatestLastmod:
-    """The latest date needs every listed item dated, an empty part aside."""
+    """The latest date needs a date on every listed item, empty parts excepted."""
 
     def test_every_item_dated_answers_the_latest(self, tmp_path) -> None:
         root = write_tree(

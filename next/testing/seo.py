@@ -25,7 +25,7 @@ class SitemapUrl:
 
 
 def _local(tag: str) -> str:
-    """Return a tag without its namespace, so a bare test fixture reads the same."""
+    """Return a tag without its namespace, so a fixture without one parses alike."""
     return tag.rpartition("}")[2]
 
 
@@ -63,7 +63,7 @@ def parse_sitemap(response: HttpResponseBase) -> list[SitemapUrl]:
 
     A body that is no well-formed XML raises `ET.ParseError`, failing the test.
     """
-    # A test reads the response of its own site, so the stdlib parser is fine here.
+    # The body comes from the project under test, so the stdlib parser is safe.
     root = ET.fromstring(response_text(response))  # noqa: S314
     return [_entry(entry) for entry in root if _local(entry.tag) in _ENTRIES]
 

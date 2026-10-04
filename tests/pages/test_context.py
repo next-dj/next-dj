@@ -208,7 +208,7 @@ class TestUrlKwargNamedLikeTheBatch:
     def test_zone_get_keeps_both_the_batch_and_the_url_kwarg(
         self, page_instance, tmp_path
     ) -> None:
-        """The batch narrows the callables while the kwarg lands in the context."""
+        """The batch narrows the callables while the kwarg reaches the context."""
         page_path = tmp_path / "page.py"
         page_instance._context_manager.register_context(
             page_path, "a", lambda: "a-value", zone="a"

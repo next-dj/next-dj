@@ -17,7 +17,7 @@ from tests.support import TITLE_TEMPLATE_CASES, TitleTemplateCase
 
 
 class TestTemplates:
-    """Only bare `{title}` and `{site_name}` survive the parser."""
+    """The parser accepts only the bare `{title}` and `{site_name}` placeholders."""
 
     def test_the_placeholders_are_the_two_names(self) -> None:
         assert frozenset({"title", "site_name"}) == PLACEHOLDERS

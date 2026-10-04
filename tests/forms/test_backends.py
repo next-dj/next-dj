@@ -1243,7 +1243,7 @@ class TestFileToDottedModule:
     """file_to_dotted_module returns dotted module path for files inside packages."""
 
     def test_standalone_file_returns_stem(self, tmp_path) -> None:
-        """File not in a package returns just the file stem."""
+        """File not in a package returns only the file stem."""
         f = tmp_path / "mymodule.py"
         f.write_text("")
         assert file_to_dotted_module(str(f)) == "mymodule"

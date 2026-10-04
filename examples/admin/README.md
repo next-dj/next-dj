@@ -234,9 +234,9 @@ Every tag the admin puts in `<head>` comes from `NEXT_FRAMEWORK["SITE"]` and `NE
 },
 ```
 
-`SITE["NAME"]` fills `{site_name}` and `SITE["URL"]` is the origin the icon link is absolute on. `SITE["INDEXABLE"] = False` closes the whole site in one place, whatever `DEBUG` says and whatever a page declares. `check --deploy` stays quiet about it here: its warning about a closed site fires only when the site also publishes a sitemap or a robots file, the sign of a staging setting leaking into production, and the admin publishes none.
+`SITE["NAME"]` fills `{site_name}` and `SITE["URL"]` is the origin the icon link is absolute on. `SITE["INDEXABLE"] = False` closes the whole site in one place, whatever `DEBUG` says and whatever a page declares. `check --deploy` reports nothing about it here. Its warning about a closed site fires only when the site also publishes a sitemap or a robots file, the sign of a staging setting leaking into production, and the admin publishes none.
 
-[`chrome/layout.djx`](chrome/layout.djx) calls the shared `page_head` component without a title, and the component renders the builtin `{% metadata %}` tag. The site rule sits over every fold, so every page, the login screen included, carries `<meta name="robots" content="noindex, nofollow">`, and every response carries the same `X-Robots-Tag` header. `nofollow` earns its place on the one page a crawler can reach. `AdminPermissionMiddleware` of section 12 sends every anonymous request under `/admin/` to `/admin/login/`, and the tag stops a crawler that lands there from following its links any further.
+[`chrome/layout.djx`](chrome/layout.djx) calls the shared `page_head` component without a title, and the component renders the builtin `{% metadata %}` tag. The site rule sits over every fold, so every page, the login screen included, carries `<meta name="robots" content="noindex, nofollow">`, and every response carries the same `X-Robots-Tag` header. `nofollow` matters on the one page a crawler can reach. `AdminPermissionMiddleware` of section 12 sends every anonymous request under `/admin/` to `/admin/login/`, and the tag stops a crawler that arrives there from following its links any further.
 
 The one dynamic tier is `changelist_meta` in [`[str:model_name]/page.py`](shadcn_admin/surfaces/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/page.py):
 

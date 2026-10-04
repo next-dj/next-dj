@@ -26,7 +26,7 @@ def check_custom_patch_ops_well_formed(*args, **kwargs) -> list[CheckMessage]:
             messages.append(
                 Error(
                     f'Custom patch op "{name}" shadows a built-in verb. The '
-                    "built-in verb wins on the wire, so the custom handler "
+                    "client applies the built-in verb, so the custom handler "
                     "never runs. Register the op under a different name.",
                     id=E_OP_SHADOWS_BUILTIN,
                 )

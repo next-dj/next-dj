@@ -35,9 +35,10 @@ class _Resolved(NamedTuple):
 
 
 def context_metadata(context: Context) -> ResolvedMetadata | None:
-    """Fold and resolve once per template render, publishing on the request.
+    """Return the resolved metadata of the page render, `None` outside a page render.
 
-    The memo sits in the root render-context layer, which an `{% include %}` shares.
+    The result is published on the request and memoised in the root render-context
+    layer, so an `{% include %}` reuses it instead of folding the chain again.
     """
     thunk = context.get(METADATA_KEY)
     if not isinstance(thunk, MetadataThunk):
@@ -62,7 +63,7 @@ class MetadataNode(Node):
 
     @override
     def render(self, context: Context) -> str:
-        """Render the resolve of the thunk, outside a page render nothing at all."""
+        """Render the head tags of the page, the empty string outside a page render."""
         resolved = context_metadata(context)
         return "" if resolved is None else metadata_renderer().render(resolved)
 
@@ -86,12 +87,12 @@ class BreadcrumbsNode(Node):
     """Renders the breadcrumbs of the page, or stores them under `target`."""
 
     def __init__(self, target: str | None = None) -> None:
-        """Remember the context name `as` names, `None` for the rendered form."""
+        """Store the variable name of the `as` form, `None` to render the trail."""
         self.target = target
 
     @override
     def render(self, context: Context) -> str:
-        """Render the trail, or bind the `Breadcrumb` tuple and render nothing."""
+        """Render the trail, or store the `Breadcrumb` tuple under `target`."""
         resolved = context_metadata(context)
         crumbs = () if resolved is None else resolved.breadcrumbs
         if self.target is None:

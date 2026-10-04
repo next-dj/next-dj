@@ -605,9 +605,9 @@ class TestLiveFilterMorphsTheWholeListing:
 
 
 class TestPageMetadata:
-    """One title template spans the landing, the listings and the product page."""
+    """One title template spans the home page, the listings and the product page."""
 
-    def test_landing_uses_the_site_default(self, next_client, demo_data) -> None:
+    def test_home_page_uses_the_site_default(self, next_client, demo_data) -> None:
         assert_metadata(
             next_client.get("/"),
             title="next.dj — Search catalog",

@@ -250,8 +250,22 @@ METADATA_SHAPE_CASES: tuple[MetadataShapeCase, ...] = (
         "alternates_languages_wrong_values",
         {"alternates": {"languages": {"en": 1}}},
         False,
-        "declares metadata key 'alternates.languages' as 'dict', expected a bool "
-        "or a mapping of language codes to URLs",
+        "declares metadata key 'alternates.languages.en' as 'int', expected a URL "
+        "string",
+    ),
+    MetadataShapeCase(
+        "alternates_languages_not_mapping",
+        {"alternates": {"languages": "en"}},
+        False,
+        "declares metadata key 'alternates.languages' as 'str', expected a bool or "
+        "a mapping of language codes to URLs",
+    ),
+    MetadataShapeCase(
+        "alternates_languages_key_not_str",
+        {"alternates": {"languages": {1: "/"}}},
+        False,
+        "declares metadata key 'alternates.languages' with the key 1, expected "
+        "string keys",
     ),
     MetadataShapeCase(
         "alternates_two_x_defaults",
@@ -290,32 +304,31 @@ METADATA_SHAPE_CASES: tuple[MetadataShapeCase, ...] = (
         "other_value_not_text",
         {"other": {"a": 1}},
         False,
-        "declares metadata key 'other' as 'dict', expected a mapping of names to "
-        "text or sequences of text",
+        "declares metadata key 'other.a' as 'int', expected text or a sequence of text",
     ),
     MetadataShapeCase(
         "other_sequence_with_a_number",
         {"other": {"a": ["x", 1]}},
         False,
-        "declares metadata key 'other' as 'dict', expected a mapping",
+        "declares metadata key 'other.a' as 'list', expected text or a sequence",
     ),
     MetadataShapeCase(
         "other_replaced_value_not_text",
         {"other": {"a": Replace(1)}},
         False,
-        "declares metadata key 'other' as 'dict', expected a mapping",
+        "declares metadata key 'other.a' as 'int', expected text",
     ),
     MetadataShapeCase(
         "other_value_bytes",
         {"other": {"a": b"x"}},
         False,
-        "declares metadata key 'other' as 'dict', expected a mapping",
+        "declares metadata key 'other.a' as 'bytes', expected text",
     ),
     MetadataShapeCase(
         "other_key_not_str",
         {"other": {1: "x"}},
         False,
-        "declares metadata key 'other' as 'dict', expected a mapping",
+        "declares metadata key 'other' with the key 1, expected string keys",
     ),
     MetadataShapeCase(
         "jsonld_wrong_type",
@@ -493,7 +506,7 @@ METADATA_SHAPE_CASES: tuple[MetadataShapeCase, ...] = (
         "verification_other_not_text",
         {"verification": {"other": {"baidu": 1}}},
         False,
-        "declares metadata key 'verification.other' as 'dict', expected a mapping",
+        "declares metadata key 'verification.other.baidu' as 'int', expected text",
     ),
     MetadataShapeCase(
         "jsonld_key_not_str",
@@ -590,7 +603,7 @@ URL_SCHEME_CASES: tuple[UrlSchemeCase, ...] = (
 
 @dataclass(frozen=True, slots=True)
 class MetadataMergeCase:
-    """One chain of raw segments and the folded values it must settle on."""
+    """One chain of raw segments and the folded values it must produce."""
 
     id: str
     segments_raw: tuple[object, ...]

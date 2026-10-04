@@ -64,7 +64,7 @@ Review these when a page root carries a ``sitemap.py``, a ``robots.py``, or a ``
 - Fetch ``/sitemap.xml`` and ``/robots.txt`` on the deployed host and read the first ``<loc>`` and the ``Sitemap:`` line for the public origin.
 - A sitemap over a large table answers a ``QuerySet`` from its items callable, declares ``cache``, and the default cache is shared across every worker.
 - A page a CDN caches declares ``cache`` with ``public`` or ``s_maxage``, and the CDN bypasses requests that carry ``X-Next-Request``, see :doc:`/content/howto/cache-pages-on-a-cdn`.
-- ``CSRF_USE_SESSIONS`` stays off and no CSP nonce is active beside shared pages, since either takes every one of them private, which ``next.W121`` and ``next.W120`` report.
+- ``CSRF_USE_SESSIONS`` stays off and no CSP nonce is active beside shared pages, since either makes every one of them private, which ``next.W121`` and ``next.W120`` report.
 
 See :doc:`/content/topics/seo/sitemaps` and :doc:`/content/topics/seo/robots` for the two files.
 

@@ -15,7 +15,7 @@ Where the nonce comes from
 --------------------------
 
 ``NEXT_FRAMEWORK["CSP_NONCE"]`` is a bool, ``True`` by default, and ``False`` turns nonces off.
-While it is on, the framework reads ``request.csp_nonce`` from django-csp and falls back to ``get_nonce`` of Django's own CSP middleware, which Django 6.0 added and Django 5.2 lacks.
+While it is on, the framework reads ``request.csp_nonce`` from django-csp and falls back to ``get_nonce`` of Django's own CSP middleware where the installed Django provides one.
 Reading the nonce is what makes either middleware mint it, so the header they send names the same value.
 The nonce is read once per request, and without either middleware installed no tag carries one.
 
@@ -83,7 +83,7 @@ Cached pages
 ------------
 
 A nonce is meant to be unique per response, and a page a CDN caches would repeat the one nonce its copy was rendered with for every visitor who receives that copy.
-The framework therefore treats a minted nonce as one visitor's, and a render that carries one goes out ``private`` even when its ``cache`` lets a shared cache keep it.
+The framework therefore treats a minted nonce as one visitor's, and a response whose render carries one is sent with ``Cache-Control: private`` even when its ``cache`` lets a shared cache keep it.
 While a nonce is active, ``manage.py check`` warns about every page whose ``cache`` a CDN may hold, since none of them reaches the edge.
 A site that caches pages on a CDN sets ``CSP_NONCE`` to ``False`` and admits its scripts by hash or by source instead, see :doc:`/content/howto/cache-pages-on-a-cdn`.
 

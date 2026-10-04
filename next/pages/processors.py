@@ -1,6 +1,6 @@
 """Context-processor discovery and loading.
 
-Sourced from `PAGE_BACKENDS` and Django's `TEMPLATES`, Next-router entries winning ties.
+Processors come from `PAGE_BACKENDS` and Django's `TEMPLATES`, `PAGE_BACKENDS` first.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 def _import_context_processor(
     processor_path: str,
 ) -> Callable[[Any], dict[str, Any]] | None:
-    """Import a context processor callable, warning and answering `None` on failure."""
+    """Import a context processor callable, warning and returning `None` on failure."""
     processor = import_callable(processor_path)
     if processor is None:
         logger.warning("Could not import context processor %s", processor_path)

@@ -31,15 +31,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 CLOSED_ROBOTS_TXT: Final = "User-agent: *\nDisallow:\n"
-"""What `/robots.txt` answers on a site closed to search, so crawlers read noindex."""
+"""The `/robots.txt` body of a site closed to search, so crawlers can read noindex."""
 
 _BREAKS: Final = re.compile(r"[\r\n]")
 
 
 def render_group(rule: RobotsRule) -> str:
-    """Render one `User-agent` group, an empty one allowing everything explicitly.
+    """Render one `User-agent` group, adding `Disallow:` to a group without rules.
 
-    A group of agents alone would merge into the next group under RFC 9309.
+    Under RFC 9309 a group of agent lines alone merges into the next group.
     """
     lines = [f"User-agent: {agent}" for agent in rule.user_agents]
     lines.extend(f"Allow: {path}" for path in rule.allow)
@@ -52,7 +52,7 @@ def render_group(rule: RobotsRule) -> str:
 
 
 def render_robots(rules: Sequence[RobotsRule], sitemaps: Sequence[str]) -> str:
-    """Render the groups, every crawler allowed without one, then the sitemap lines."""
+    """Render the groups, or one allowing every crawler, then the sitemap lines."""
     blocks = [render_group(rule) for rule in rules or (RobotsRule(),)]
     if sitemaps:
         blocks.append("\n".join(f"Sitemap: {url}" for url in sitemaps))
@@ -60,7 +60,7 @@ def render_robots(rules: Sequence[RobotsRule], sitemaps: Sequence[str]) -> str:
 
 
 def rules_of(value: object) -> tuple[RobotsRule, ...]:
-    """Return the `RobotsRule` groups of a declared value, anything else as none."""
+    """Return the `RobotsRule` items of a declared list or tuple, ignoring the rest."""
     if not isinstance(value, list | tuple):
         return ()
     return tuple(rule for rule in value if isinstance(rule, RobotsRule))
@@ -73,17 +73,18 @@ def declared_rules(module: types.ModuleType) -> tuple[RobotsRule, ...]:
 
 def is_sitemap_url(value: object) -> bool:
     """Whether a declared `Sitemap:` line is an absolute http or https URL."""
-    return (
-        isinstance(value, str)
-        and _BREAKS.search(value) is None
-        and urlsplit(value).scheme in WEB_SCHEMES
-        and bool(urlsplit(value).netloc)
-    )
+    if not isinstance(value, str) or _BREAKS.search(value) is not None:
+        return False
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return False
+    return parts.scheme in WEB_SCHEMES and bool(parts.netloc)
 
 
 @dataclass(frozen=True, slots=True)
 class DeclaredRobots:
-    """A `robots.py`, its `rules` a list or a callable resolved per request."""
+    """A `robots.py` whose `rules` is a list or a callable resolved per request."""
 
     path: Path
     module: types.ModuleType
@@ -115,29 +116,29 @@ class DeclaredRobots:
 
     @property
     def cache(self) -> CacheControl | None:
-        """Return the cache the module asks the response to carry."""
+        """Return the cache control the module declares for the response."""
         return declared_cache(self.module)
 
     def render(self, request: HttpRequest | None, sitemap_url: str | None) -> str:
-        """Render the groups, then the own sitemap ahead of the declared ones."""
+        """Render the groups, then the framework sitemap ahead of the declared ones."""
         own = () if sitemap_url is None else (sitemap_url,)
         return render_robots(self.rules(request), (*own, *self.sitemaps))
 
 
 class TextFile:
-    """A static text file served byte for byte and re-read when its mtime moves."""
+    """A static text file served unchanged and read again when its mtime changes."""
 
     __slots__ = ("_held", "path")
 
     def __init__(self, path: Path) -> None:
-        """Hold nothing until the first read."""
+        """Store the path without reading the file."""
         self.path = path
         self._held: tuple[int, bytes] | None = None
 
     def read(self) -> bytes | None:
-        """Return the bytes of the file, `None` once it is gone.
+        """Return the bytes of the file, `None` once it no longer exists.
 
-        A read that fails answers the last good bytes, and raises only without them.
+        A failed read returns the last content read and raises only when there is none.
         """
         try:
             return self._read()
@@ -148,7 +149,9 @@ class TextFile:
             held = self._held
             if held is None:
                 raise
-            logger.exception("%s failed to read, the last good copy answers", self.path)
+            logger.exception(
+                "%s failed to read, so the last copy read is served", self.path
+            )
             return held[1]
 
     def _read(self) -> bytes:
@@ -167,9 +170,10 @@ type RobotsSource = DeclaredRobots | TextFile | BrokenSource
 def robots_candidates(
     roots: Iterable[SeoRoot],
 ) -> tuple[tuple[Path, RobotsSource], ...]:
-    """Pair every `/robots.txt` source with what it serves, in the order preferred.
+    """Return every `/robots.txt` source with what it serves, in order of precedence.
 
-    A `robots.py` precedes its `robots.txt` and holds the route when its import failed.
+    A `robots.py` precedes the `robots.txt` beside it and keeps the route even when
+    its import failed.
     """
     candidates: list[tuple[Path, RobotsSource]] = []
     for root in roots:

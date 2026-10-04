@@ -85,7 +85,7 @@ export function stubBridge(overrides: Partial<LayerBridge> = {}): LayerBridge {
   };
 }
 
-// A chunk module as already landed, so a suite drives the core synchronously.
+// A chunk module that has already loaded, so a suite runs the runtime synchronously.
 export function landed<T>(value: T): LazyModule<T> {
   return { get: () => value, load: () => Promise.resolve(value) };
 }

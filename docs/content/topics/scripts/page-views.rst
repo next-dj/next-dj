@@ -3,7 +3,7 @@
 Page views
 ==========
 
-An analytics vendor counts a page view each time the visitor lands somewhere new.
+An analytics vendor counts a page view each time the visitor reaches a new address.
 Partial rendering changes the address without a page load, a filter replaces it and a layer pushes one, so a vendor tag that counts only page loads misses those views.
 The runtime announces every such change as one ``next:navigated`` event, and a vendor adapter turns it into a page view.
 

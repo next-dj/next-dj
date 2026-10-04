@@ -1,6 +1,6 @@
-"""Lazy sequences a sitemap paginates, sliced part by part instead of materialised.
+"""Lazy sequences a sitemap paginates without reading every row.
 
-A page of a sitemap over a `QuerySet` costs one `COUNT` and one `LIMIT`/`OFFSET` read.
+A sitemap page over a `QuerySet` costs one `COUNT` and one `LIMIT`/`OFFSET` query.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 class Rows(Protocol):
-    """What a part slices its rows from, a list, a range or a `QuerySet`."""
+    """The sliceable rows of a part, such as a list, a range or a `QuerySet`."""
 
     def __getitem__(self, key: slice, /) -> Iterable[Any]:
         """Return the rows between two offsets."""
@@ -41,9 +41,9 @@ def count_rows(rows: Rows) -> int:
 
 
 class Part[T]:
-    """One run of rows a sitemap lists, each converted to an item as it is sliced.
+    """One sequence of rows a sitemap lists, each row converted when it is sliced.
 
-    `lastmod_field` names the column a `QuerySet` part reads its latest date from.
+    `lastmod_field` names the field a `QuerySet` part aggregates for its latest date.
     """
 
     __slots__ = ("_count", "convert", "lastmod_field", "rows")
@@ -55,14 +55,14 @@ class Part[T]:
         *,
         lastmod_field: str | None = None,
     ) -> None:
-        """Hold the rows unread until a count or a slice asks for them."""
+        """Store the rows without reading them."""
         self.rows = rows
         self.convert = convert
         self.lastmod_field = lastmod_field
         self._count: int | None = None
 
     def count(self) -> int:
-        """Return how many rows the part holds, counted once."""
+        """Return the number of rows, counted on the first call only."""
         held = self._count
         if held is None:
             held = self._count = count_rows(self.rows)
@@ -74,7 +74,7 @@ class Part[T]:
 
 
 class LazyRows[T](ABC):
-    """A sequence counted and sliced on demand, the shape the Django paginator reads."""
+    """A sequence counted and sliced on demand, as the Django paginator expects."""
 
     __slots__ = ()
 
@@ -91,7 +91,7 @@ class LazyRows[T](ABC):
         return self.count()
 
     def __iter__(self) -> Iterator[T]:
-        """Yield every item, read in one pass."""
+        """Iterate over every item, read in one slice."""
         return iter(self.between(0, self.count()))
 
     @overload
@@ -117,7 +117,7 @@ class LazyRows[T](ABC):
 
 
 class ChainedEntries[T](LazyRows[T]):
-    """The parts of one sitemap read as a single sequence, sliced across their seams."""
+    """The parts of one sitemap as a single sequence, sliced across part boundaries."""
 
     __slots__ = ("parts",)
 
@@ -127,7 +127,7 @@ class ChainedEntries[T](LazyRows[T]):
 
     @override
     def count(self) -> int:
-        """Return the rows of every part together."""
+        """Return the total number of rows of every part."""
         return sum(part.count() for part in self.parts)
 
     @override
@@ -165,6 +165,8 @@ class LanguagePairs[T](LazyRows[tuple[T, str]]):
     def between(self, start: int, stop: int) -> list[tuple[T, str]]:
         """Return the pairs between two offsets, slicing only the entries they need."""
         width = len(self.languages)
+        if width == 0 or start >= stop:
+            return []
         first, last = start // width, -(-stop // width)
         pairs = [
             (entry, code)

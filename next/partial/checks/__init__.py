@@ -50,9 +50,9 @@ from .zones import (
 
 
 def reset_composed_pages_memo(**kwargs) -> None:
-    """Drop the composed pages every check run shares.
+    """Drop the run memos of the checks, the composed pages among them.
 
-    Deprecated, `next.checks.reset_check_caches` drops this memo with the rest.
+    Deprecated. Call `next.checks.reset_check_caches`, which also drops these memos.
     """
     warnings.warn(
         "reset_composed_pages_memo is deprecated, call next.checks.reset_check_caches",

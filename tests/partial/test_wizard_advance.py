@@ -138,8 +138,8 @@ class TestWizardAdvanceCsrfMeta:
 class TestWizardInvalidStepZoneMorph:
     """An invalid wizard step morphs the bound form with errors into the zone.
 
-    The submitted value rides the bound form into the zone body, so the
-    error state renders rather than an empty unbound step.
+    The bound form carries the submitted value into the zone body, so the error
+    state renders rather than an empty unbound step.
     """
 
     def test_invalid_step_zone_carries_bound_submitted_value(

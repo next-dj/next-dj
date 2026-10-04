@@ -115,7 +115,7 @@ class TestRegistration:
 
 
 class TestStamps:
-    """A stamp moves only when a registration changes what the chain would run."""
+    """A stamp changes only when a registration changes the callable a chain runs."""
 
     def test_an_unregistered_path_has_no_stamp(
         self, registry: PageMetadataRegistry, page_file: Path
@@ -180,7 +180,7 @@ class TestRegistrations:
 
 
 class TestMisattribution:
-    """A callable declared outside the decorating file lands in the log."""
+    """A callable declared outside the decorating file is recorded in the log."""
 
     def test_note_records_the_pair_once(
         self, registry: PageMetadataRegistry, tmp_path: Path
@@ -196,7 +196,7 @@ class TestMisattribution:
 
 
 class TestReset:
-    """A reset drops every record and memoised chain and moves the version on."""
+    """A reset drops every record and memoised chain and increments the version."""
 
     def test_reset_clears_entries_and_misattributions(
         self, registry: PageMetadataRegistry, page_file: Path, tmp_path: Path

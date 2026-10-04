@@ -50,9 +50,9 @@ _COOKIELESS_MIDDLEWARE: Final = frozenset(
         "next.site.middleware.RobotsHeaderMiddleware",
     }
 )
-"""Middleware known to set no cookie, so it may wrap `ConditionalGetMiddleware`.
+"""Middleware known to set no cookie, so it may sit above `ConditionalGetMiddleware`.
 
-A subclass counts as its base, since it overrides no cookie into the response.
+A subclass counts as its base class.
 """
 _RUNTIME_TAG: Final = "collect_scripts"
 _MIN_LANGUAGES: Final = 2
@@ -122,7 +122,7 @@ def check_csrf_delivery(*args, **kwargs) -> list[CheckMessage]:
 def check_csrf_endpoint_reversible(*args, **kwargs) -> list[CheckMessage]:
     """Require the token endpoint wherever a page may defer its token (`next.E148`).
 
-    `auto` defers only on a page a shared cache may hold, so it needs one such page.
+    `auto` defers only on a page a shared cache may store, so it needs one such page.
     """
     mode = csrf_delivery()
     if mode is CsrfDelivery.EAGER:
@@ -146,9 +146,9 @@ def check_csrf_endpoint_reversible(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _declared_shared(cache: object) -> bool:
-    """Whether a `cache` may let a shared cache hold the page.
+    """Whether a `cache` may let a shared cache store the page.
 
-    A callable answers per request, so the check counts it as one that may.
+    A callable returns its value per request, so the check counts it as shared.
     """
     if callable(cache):
         return True
@@ -157,7 +157,7 @@ def _declared_shared(cache: object) -> bool:
 
 
 def _named(page_path: Path) -> str:
-    """Name a page, marked when only its callable `cache` makes it possibly shared."""
+    """Return the name of a page, marked when its `cache` is a callable."""
     module = _load_python_module_memo(page_path)
     if callable(getattr(module, "cache", None)):
         return f"{page_path} (callable cache)"
@@ -165,28 +165,28 @@ def _named(page_path: Path) -> str:
 
 
 def _listed(pages: list[Path]) -> str:
-    """Name the first few pages, counting the rest."""
+    """Return the names of the first few pages and the count of the rest."""
     named = ", ".join(_named(path) for path in pages[:_NAMED_PAGES])
     rest = len(pages) - _NAMED_PAGES
     return f"{named} and {rest} more" if rest > 0 else named
 
 
 def shared_page_paths() -> list[Path]:
-    """Return each routed page whose `cache` may let a shared cache hold it."""
+    """Return each routed page whose `cache` may let a shared cache store it."""
     return [
         path for path, cache, _headers in _page_modules() if _declared_shared(cache)
     ]
 
 
 def private_pages_warning(cause: str, check_id: str) -> list[CheckMessage]:
-    """Warn that a setting takes every page a CDN may hold private, as `cause` says."""
+    """Warn that a setting makes every page a CDN may store private, for `cause`."""
     pages = shared_page_paths()
     if not pages:
         return []
     return [
         DjangoWarning(
-            f"Every page declaring a cache a CDN may hold goes out private, since "
-            f"{cause} Pages affected: {_listed(pages)}.",
+            "Every page declaring a cache a CDN may hold is sent with Cache-Control: "
+            f"private, since {cause} Pages affected: {_listed(pages)}.",
             obj=settings,
             id=check_id,
         )
@@ -195,7 +195,7 @@ def private_pages_warning(cause: str, check_id: str) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_csrf_in_session(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when `CSRF_USE_SESSIONS` takes every shared page private (`next.W121`)."""
+    """Warn when `CSRF_USE_SESSIONS` makes every shared page private (`next.W121`)."""
     if not getattr(settings, "CSRF_USE_SESSIONS", False):
         return []
     return private_pages_warning(
@@ -206,11 +206,11 @@ def check_csrf_in_session(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _guarded(middleware: list[object]) -> bool:
-    """Whether `SharedCacheGuardMiddleware` sees every response a cookie lands on.
+    """Whether `SharedCacheGuardMiddleware` sees every response a cookie is set on.
 
-    Only `UpdateCacheMiddleware` may sit above it, so the copy that middleware
+    Only `UpdateCacheMiddleware` may be listed above it, so the copy that middleware
     stores is the private one. Listed above `UpdateCacheMiddleware`, the guard runs
-    after the public copy is already stored and replayed.
+    after the public copy is already stored.
     """
     index = middleware_index(middleware, _CACHE_GUARD)
     if index is None:
@@ -223,10 +223,10 @@ def _guarded(middleware: list[object]) -> bool:
 
 @register(NEXT)
 def check_conditional_get_order(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when a cookie may land on a shared 304 (`next.W124`).
+    """Warn when a cookie may be set on a shared 304 (`next.W124`).
 
     `ConditionalGetMiddleware` copies the cache of a shared page onto the 304 it
-    answers, so a cookie a middleware outside it sets later rides a public response.
+    builds, so a cookie that an outer middleware sets later is sent on a public 304.
     """
     middleware = list(getattr(settings, "MIDDLEWARE", None) or ())
     position = middleware_index(middleware, _CONDITIONAL_GET)
@@ -243,12 +243,13 @@ def check_conditional_get_order(*args, **kwargs) -> list[CheckMessage]:
     return [
         DjangoWarning(
             f"settings.MIDDLEWARE lists {', '.join(outer)} above "
-            "ConditionalGetMiddleware, and it may set a cookie on the 304 it answers "
-            "after the page took its cache private, so a public 304 could carry "
-            f"Set-Cookie into a shared cache. Pages affected: {_listed(pages)}.",
+            "ConditionalGetMiddleware, and it may set a cookie on the 304 that "
+            "middleware builds after the page made its cache private, so a public "
+            "304 could carry Set-Cookie into a shared cache. Pages affected: "
+            f"{_listed(pages)}.",
             hint=(
                 "List ConditionalGetMiddleware above it in settings.MIDDLEWARE, or "
-                f"list {_CACHE_GUARD} first, which sends such a response private."
+                f"list {_CACHE_GUARD} first, which makes such a response private."
             ),
             obj=settings,
             id="next.W124",
@@ -257,7 +258,7 @@ def check_conditional_get_order(*args, **kwargs) -> list[CheckMessage]:
 
 
 def shared_pages() -> Iterator[tuple[Path, Template]]:
-    """Yield each page whose `cache` may let a shared cache hold it."""
+    """Yield each page whose `cache` may let a shared cache store it."""
     for page_path, template in iter_composed_pages():
         module = _load_python_module_memo(page_path)
         if _declared_shared(getattr(module, "cache", None)):
@@ -271,7 +272,7 @@ def renders_runtime(template: Template) -> bool:
 
 
 def shared_warning(page_path: Path, text: str, check_id: str) -> CheckMessage:
-    """Return a warning about a page a CDN may hold, `text` saying what goes wrong."""
+    """Return a warning about a page a CDN may store, `text` naming the problem."""
     return DjangoWarning(
         f"{_named(page_path)} declares a cache a CDN may hold, but {text}",
         obj=str(page_path),
@@ -286,16 +287,16 @@ def _csrf_token_tag(page_path: Path, template: Template) -> CheckMessage | None:
     return shared_warning(
         page_path,
         "it renders {% csrf_token %}, which sets the CSRF cookie, so every response "
-        "goes out private. Post through {% form %}, which leaves the token to the "
-        "runtime.",
+        "is sent with Cache-Control: private. Post through {% form %}, which leaves "
+        "the token to the runtime.",
         "next.W113",
     )
 
 
 def _pages_language_prefixed() -> bool | None:
-    """Whether the page routes carry a language prefix, `None` when unanswerable.
+    """Whether the page routes carry a language prefix, `None` when it is unknown.
 
-    The token endpoint shares the include of the pages, so its address stands in.
+    The token endpoint shares the include of the pages, so its address is checked.
     """
     codes = [code for code, _name in settings.LANGUAGES][:_MIN_LANGUAGES]
     addresses: set[str] = set()
@@ -309,7 +310,7 @@ def _pages_language_prefixed() -> bool | None:
 
 
 def _mixed_languages() -> bool:
-    """Whether one URL answers in several languages, which a shared cache would mix."""
+    """Whether one URL serves several languages, which a shared cache would mix."""
     if not middleware_listed(settings.MIDDLEWARE, _LOCALE_MIDDLEWARE):
         return False
     if len(settings.LANGUAGES) < _MIN_LANGUAGES:
@@ -319,7 +320,7 @@ def _mixed_languages() -> bool:
 
 @register(Tags.templates, NEXT)
 def check_shared_page_responses(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about a page a CDN may hold that sets the CSRF cookie or mixes languages."""
+    """Warn about a shared page that sets the CSRF cookie or mixes languages."""
     warnings: list[CheckMessage] = []
     mixed = _mixed_languages()
     for page_path, template in shared_pages():

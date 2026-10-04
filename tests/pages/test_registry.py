@@ -327,7 +327,7 @@ class TestPageContextRegistry:
 
 
 class TestKeylessContextShape:
-    """A keyless ``@context`` that answers no mapping names itself before failing."""
+    """A keyless ``@context`` that returns no mapping names itself before failing."""
 
     def test_keyless_context_returning_a_list_names_the_callable(
         self, context_manager, test_file_path
@@ -553,7 +553,7 @@ class TestContextMarker:
     def test_context_provider_resolve_returns_none_when_default_not_context(
         self,
     ) -> None:
-        """``ContextByDefaultProvider.resolve`` answers ``None`` for another default."""
+        """``ContextByDefaultProvider.resolve`` returns ``None`` for another default."""
         provider = ContextByDefaultProvider(DependencyResolver())
         param = inspect_parameter("x", int, default=123)
         ctx = MagicMock()

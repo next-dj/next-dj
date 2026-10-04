@@ -12,6 +12,7 @@ from next.diagnostics import (
     degraded,
     watch_degraded,
 )
+from next.testing import override_next_settings
 
 
 class _Backend:
@@ -164,6 +165,19 @@ class TestFailureLog:
         assert "items() in sitemap.py raised" in info.value.__notes__
         del info.value.__notes__
 
+    def test_strict_loading_reraises_outside_debug(
+        self, failures: FailureLog, settings
+    ) -> None:
+        settings.DEBUG = False
+        with (
+            override_next_settings(STRICT_LOADING=True),
+            pytest.raises(RuntimeError) as info,
+        ):
+            _contained(failures, "items")
+
+        assert "items() in sitemap.py raised" in info.value.__notes__
+        del info.value.__notes__
+
     def test_a_reconfigure_rearms_the_report(
         self, failures: FailureLog, caplog: pytest.LogCaptureFixture, settings
     ) -> None:
@@ -185,6 +199,11 @@ class TestFailureLog:
 
         assert caplog.text.count("missing x.js") == 1
         assert "missing y.js" in caplog.text
+
+    def test_warn_degrades_nothing(self, failures: FailureLog) -> None:
+        watch_degraded()
+        failures.warn("a", "missing %s", "x.js")
+        assert degraded() is False
 
     def test_intended_exceptions_name_the_http_answers(self) -> None:
         assert set(INTENDED_EXCEPTIONS) == {

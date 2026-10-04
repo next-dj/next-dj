@@ -71,7 +71,7 @@ def _first_served[P: tuple[Path, object]](
 ) -> P | None:
     """Return the first candidate that serves, warning about the rest under `DEBUG`.
 
-    `next.E114` names the same choice, so production logs it nowhere but the checks.
+    In production only the `next.E114` check reports the ignored sources.
     """
     served = next((pair for pair in candidates if pair[1] is not None), None)
     if served is not None and len(candidates) > 1 and settings.DEBUG:
@@ -99,7 +99,10 @@ def _source_bytes(roots: Sequence[SeoRoot]) -> bytes:
 
 
 def _spelled_collection(value: object) -> str | None:
-    """Spell a mapping or a set in sorted order, a sequence in its own."""
+    """Return the stable text of a collection, `None` for any other value.
+
+    A mapping or a set is sorted, and a list or a tuple keeps its order.
+    """
     if isinstance(value, Mapping):
         pairs = (f"{stable_repr(key)}:{stable_repr(val)}" for key, val in value.items())
         return "{" + ",".join(sorted(pairs)) + "}"
@@ -111,9 +114,9 @@ def _spelled_collection(value: object) -> str | None:
 
 
 def stable_repr(value: object) -> str:
-    """Spell `value` alike in every process, whatever its set order or its address.
+    """Return a representation of `value` that is identical in every process.
 
-    Collections sort, a callable reads as its dotted name, a lazy string as its text.
+    It sorts collections, names callables by dotted path and evaluates lazy strings.
     """
     if isinstance(value, Promise):
         return repr(str(value))
@@ -130,14 +133,14 @@ def stable_repr(value: object) -> str:
 
 
 def _serves(backend: SitemapBackend) -> bool:
-    """Whether `backend` serves, a backend that raises counted as serving."""
+    """Whether `backend` serves, an exception counting as serving."""
     try:
         return bool(backend.serves())
     except Exception:
         if _failures.first_failure(backend_path(backend), "serves"):
             logger.exception(
-                "%s.serves() raised, so /sitemap.xml stays routed and answers 503 "
-                "while its sections fail too. Make serves() answer without raising.",
+                "%s.serves() raised, so /sitemap.xml stays mounted and answers 503 "
+                "while its sections fail too. Make serves() return without raising.",
                 backend_path(backend),
             )
         return True
@@ -147,14 +150,14 @@ class SeoManager(BackendListManager[SitemapBackend]):
     """Load the sitemap backends and memoise the robots source."""
 
     def __init__(self) -> None:
-        """Start with nothing loaded or discovered."""
+        """Create the manager with no backend loaded and no source discovered."""
         super().__init__()
         self._robots: RobotsSource | Literal[Unset.UNSET] | None = UNSET
         self._fingerprint: str | None = None
 
     @property
     def version(self) -> int:
-        """Return the routes token every reset moves, keying the cached views too."""
+        """Return the SEO routes version, which every reset changes."""
         return seo_routes_version.value
 
     @override
@@ -175,9 +178,9 @@ class SeoManager(BackendListManager[SitemapBackend]):
         return tuple(self._backends)
 
     def reset(self, **kwargs) -> None:
-        """Drop the backends and every discovered source, moving the version.
+        """Clear the backends and every discovered source, and change the version.
 
-        The route set may follow the sources, so the URL caches go and the token moves.
+        The mounted routes depend on the sources, so the URL caches are cleared too.
         """
         with self._lock:
             seo_routes_version.move()
@@ -189,9 +192,9 @@ class SeoManager(BackendListManager[SitemapBackend]):
         clear_url_caches()
 
     def refresh(self) -> None:
-        """Under a watch, drop every source once a file of one moved on disk.
+        """Reset the sources under `DEBUG` once a source file changed on disk.
 
-        Every entry point asks first, so an edit shows without a reload, as for scripts.
+        Every entry point calls it first, so an edit applies without a process reload.
         """
         if template_edits_watched() and any(root.stale() for root in self.roots()):
             self.reset()
@@ -201,17 +204,17 @@ class SeoManager(BackendListManager[SitemapBackend]):
         return page_tree_roots()
 
     def serves_sitemap(self) -> bool:
-        """Whether a backend has sections, which routes `/sitemap.xml`.
+        """Whether a backend has sections, which mounts `/sitemap.xml`.
 
-        It runs while URLs resolve, so a backend that raises counts as serving and
-        its route answers 503 rather than taking every other route down with it.
+        It runs during URL resolution, so a backend that raises counts as serving,
+        and its route answers 503 instead of failing every other route.
         """
         return any(_serves(backend) for backend in self.backends)
 
     def broken_sitemap(self) -> BrokenSource | None:
-        """Return the first `sitemap.py` that failed to import, `None` when all ran.
+        """Return the first `sitemap.py` that failed to import, or `None`.
 
-        One broken tree answers 404 for the whole sitemap, so no partial one ships.
+        One broken tree makes the whole sitemap answer 404, so no partial one is served.
         """
         return next(
             (
@@ -223,9 +226,10 @@ class SeoManager(BackendListManager[SitemapBackend]):
         )
 
     def sections(self, request: HttpRequest | None) -> dict[str, Sitemap[Any]]:
-        """Return the sections of every backend, the first one winning a shared name.
+        """Return the sections of every backend, keeping the first for a shared name.
 
-        A closed site lists none, save one only `DEBUG` closes, previewed under noindex.
+        A site closed to crawlers lists none. A site that only `DEBUG` closes lists
+        its sections for a preview under noindex.
         """
         if site_closed_to_crawlers(request):
             return {}
@@ -241,33 +245,43 @@ class SeoManager(BackendListManager[SitemapBackend]):
         return merged
 
     def cache_control(self) -> CacheControl | None:
-        """Return the cache of the backend asking for the shortest, `None` if none asks.
+        """Return the shortest cache control a backend declares, or `None`.
 
-        A backend asking for no store at all wins, since a shared copy would leak it.
+        No-store takes precedence, since a shared copy would expose that backend.
         """
         return shortest_cache(backend.cache_control() for backend in self.backends)
 
     def robots_source(self) -> RobotsSource | None:
-        """Return the one `/robots.txt` source, warning once about the rest."""
+        """Return the `/robots.txt` source, warning once about the ignored ones.
+
+        A source found while a reset happens is returned but not memoised.
+        """
         held = self._robots
         if held is not UNSET:
             return held
+        version = self.version
         served = _first_served("/robots.txt", robots_candidates(self.roots()))
         found = None if served is None else served[1]
-        self._robots = found
+        if self.version == version:
+            self._robots = found
         return found
 
     def fingerprint(self) -> str:
         """Return a digest of the sources and the settings the SEO responses read.
 
-        It prefixes the cache keys, so an edit never serves a response built before.
+        It prefixes the cache keys, so a response cached before an edit is never
+        served. A digest taken while a reset happens is not memoised.
         """
         held = self._fingerprint
-        if held is None:
-            digest = hashlib.sha256(_source_bytes(self.roots()))
-            digest.update(stable_repr(sitemap_backend_entries()).encode())
-            digest.update(stable_repr(site_config()).encode())
-            held = self._fingerprint = digest.hexdigest()[:_FINGERPRINT_WIDTH]
+        if held is not None:
+            return held
+        version = self.version
+        digest = hashlib.sha256(_source_bytes(self.roots()))
+        digest.update(stable_repr(sitemap_backend_entries()).encode())
+        digest.update(stable_repr(site_config()).encode())
+        held = digest.hexdigest()[:_FINGERPRINT_WIDTH]
+        if self.version == version:
+            self._fingerprint = held
         return held
 
 
@@ -275,7 +289,7 @@ seo_manager = SeoManager()
 
 
 def forget_seo_sources(**kwargs) -> None:
-    """Drop the backends and every discovered source, so a reload takes effect."""
+    """Reset the SEO manager, as the receiver of the settings and router reloads."""
     seo_manager.reset()
 
 
@@ -283,7 +297,7 @@ settings_reloaded.connect(forget_seo_sources)
 
 
 def reset_seo_sources() -> None:
-    """Drop the discovered SEO sources and every `@sitemap.items` registration."""
+    """Clear the discovered SEO sources and every `@sitemap.items` registration."""
     seo_manager.reset()
     sitemap_items_registry.reset()
 

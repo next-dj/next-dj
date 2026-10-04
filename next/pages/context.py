@@ -1,6 +1,7 @@
-"""Context annotation marker and providers that feed `context_data` into DI.
+"""The `Context` parameter marker and the providers that inject `context_data` values.
 
-Values inject via an explicit `Context` default, or by name against an existing key.
+A value is injected through an explicit `Context` default, or by a parameter name that
+matches an existing key.
 """
 
 from __future__ import annotations
@@ -37,8 +38,8 @@ class Context:
 class ContextResult:
     """Hold the full template context and its JavaScript-serializable subset.
 
-    Only the keys a context marked for serialization cross to the client, each
-    through its own serializer, so the subset travels apart from the whole.
+    Only the keys of a context marked for serialization reach the client, each through
+    its own serializer, so that subset is held separately.
     """
 
     context_data: dict[str, Any]
@@ -62,15 +63,15 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
 
     @override
     def static_can_handle(self, param: inspect.Parameter) -> bool:
-        """Settle on the default alone. The marker never depends on the context."""
+        """Decide from the default alone, which no resolution context changes."""
         return isinstance(param.default, Context)
 
     @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
-        """Fill the parameter through the very plan the compiler builds for it.
+        """Fill the parameter through the same filler the plan compiler builds for it.
 
-        One decision tree serves both paths, so a marker the compiler learns to read
-        cannot mean one thing in a compiled plan and another in a plan-free resolve.
+        Both paths share one decision tree, so a marker cannot resolve differently in a
+        compiled plan and in a resolve without a plan.
         """
         if not isinstance(param.default, Context):
             return None
@@ -78,7 +79,7 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
 
     @override
     def compile_resolve(self, param: inspect.Parameter) -> ParameterFiller:
-        """Settle the source and the default of the marker, once per plan.
+        """Read the source and the default of the marker once per plan.
 
         A reserved key never reaches the marker, so the parameter takes its default.
         """

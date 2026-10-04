@@ -22,6 +22,7 @@ from next.pages.checks.composed import iter_composed_pages
 from next.pages.metadata.resolve import (
     MISSPELT_OG_LOCALES,
     OG_LOCALE,
+    ORIGIN_RELS,
     og_locale,
     viewport_content,
 )
@@ -173,7 +174,7 @@ def _link_errors(item: DeclaredSegment) -> list[CheckMessage]:
         )
         href = link.href
         if (
-            {"preconnect", "dns-prefetch"} & set(rels)
+            not ORIGIN_RELS.isdisjoint(rels)
             and isinstance(href, str)
             and not _origin(href)
         ):

@@ -1,4 +1,4 @@
-"""The middleware that keeps a response carrying a cookie out of every shared cache."""
+"""Middleware that makes a response setting a cookie private for every shared cache."""
 
 from __future__ import annotations
 
@@ -27,13 +27,13 @@ _CDN_HEADERS: Final = (
     "Cloudflare-CDN-Cache-Control",
     "Surrogate-Control",
 )
-"""The headers a CDN reads ahead of `Cache-Control`, so a private answer drops them."""
+"""The headers a CDN reads in place of `Cache-Control`, removed when made private."""
 
 _WARNED: BoundedCache[str, bool] = BoundedCache()
 
 
 def _forget_warnings(**kwargs) -> None:
-    """Re-arm the warning of every path, so a reconfigure is reported afresh."""
+    """Clear the warned paths, so a path is logged again after a reconfiguration."""
     _WARNED.clear()
 
 
@@ -41,15 +41,16 @@ settings_reloaded.connect(_forget_warnings)
 
 
 def _directive_name(directive: str) -> str:
+    """Return the lower-cased name of one `Cache-Control` directive."""
     return directive.split("=", 1)[0].strip().lower()
 
 
 def _shared(response: HttpResponseBase, names: set[str]) -> bool:
-    """Whether a shared cache may keep `response` as its headers stand.
+    """Whether a shared cache may store `response` under its current headers.
 
-    `public` and `s-maxage` say so outright, and a CDN header speaks to the CDN
-    alone. Without `private` or `no-store`, a freshness lifetime from `max-age` or
-    `Expires` lets a shared cache store it too, as `cache_page` emits it.
+    `public`, `s-maxage` and a CDN header permit it explicitly. Without `private` or
+    `no-store`, a freshness lifetime from `max-age` or `Expires` permits it too, which
+    is the form `cache_page` emits.
     """
     if not _SHARED_DIRECTIVES.isdisjoint(names):
         return True
@@ -63,11 +64,11 @@ def _shared(response: HttpResponseBase, names: set[str]) -> bool:
 def guard_shared_cache(
     request: HttpRequest, response: HttpResponseBase
 ) -> HttpResponseBase:
-    """Take `response` private when it sets a cookie a shared cache would hand out.
+    """Make `response` private when it sets a cookie that a shared cache would store.
 
-    `public` and `s-maxage` leave `Cache-Control`, `private` leads it, the CDN
-    headers go, and `Vary` gains `Cookie`. A path is reported once, since every hit
-    repeats the same cause.
+    `public` and `s-maxage` are removed from `Cache-Control` and `private` is put first,
+    the CDN headers are removed, and `Vary` gains `Cookie`. Each path is logged once,
+    since every later request has the same cause.
     """
     if not response.cookies:
         return response
@@ -90,7 +91,7 @@ def guard_shared_cache(
         _WARNED[request.path] = True
         logger.warning(
             "The response to %s set a cookie under a shared Cache-Control, so "
-            "SharedCacheGuardMiddleware sent it private. Find the view or middleware "
+            "SharedCacheGuardMiddleware made it private. Find the view or middleware "
             "that sets the cookie, or drop the shared cache of that response.",
             request.path,
         )
@@ -98,11 +99,11 @@ def guard_shared_cache(
 
 
 class SharedCacheGuardMiddleware(MiddlewareMixin):
-    """Send private every response that sets a cookie while a shared cache may keep it.
+    """Make private every response that sets a cookie while a shared cache may store it.
 
-    A page takes its own cache private when a cookie lands, but a third-party
-    middleware or a 304 answered above the page can still pair the two. List it first
-    in `MIDDLEWARE`, below `UpdateCacheMiddleware` alone, so it sees every cookie.
+    A page makes its own cache private when a cookie is set, but a third-party
+    middleware or a 304 built above the page can still combine the two. List it first
+    in `MIDDLEWARE`, or directly below `UpdateCacheMiddleware`, so it sees every cookie.
     """
 
     def process_response(

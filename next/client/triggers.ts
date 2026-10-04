@@ -1,6 +1,6 @@
 // Delegated handlers for the data-next-* triggers, bound once on the document.
-// Lazy-zone activation runs per inserted subtree after each apply: load zones
-// batch on ready, revealed zones and pagination sentinels wait for the observer.
+// Lazy-zone activation runs per inserted subtree after each apply. Load zones are
+// batched on ready, revealed zones and pagination sentinels wait for the observer.
 
 import {
   defaultClock,
@@ -67,7 +67,7 @@ export interface TriggerDeps {
   observer?: IntersectionAdapter;
   // The tab-visibility seam the SSE bridge shares, a hidden tab holds no poll timers.
   visibility?: VisibilityAdapter;
-  // The zone poller, held by the poll chunk.
+  // The zone poller, exported by the poll chunk.
   poll: LazyModule<PollFactory>;
   // The owning page of an element. Absent, lazy and poll GETs read the address bar.
   pageUrl?: (el: Element) => string;
@@ -78,8 +78,8 @@ export interface TriggerDeps {
   confirm?: ConfirmAdapter;
   // The address-bar seam a filter submit syncs through, shared with the url verb.
   history?: HistoryAdapter;
-  // Moves the URL of the page a filter form sits on, answered by the layer stack.
-  // False keeps the bar still, since it shows another page. Absent, the bar follows.
+  // Records a new URL for the page a filter form is on, and answers false when the
+  // address bar shows another page and must stay. Absent, the bar is always updated.
   rewrite?: (el: Element, href: string) => boolean;
   // The dev channel that warns on a hand-written value outside its closed set, read
   // through a call so it arrives without rebuilding the listeners and timers.
@@ -113,8 +113,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   // Live observer teardowns by element. A one-shot reveal drops its own entry as it
   // fires, so an infinite scroll does not pile them up for the life of the page.
   const observed = new Map<Element, () => void>();
-  // A form's pending validation: the debounce timer and the POST it would fire ride
-  // one controller, so a submit cancels the half that is live, whichever it is.
+  // A form's pending validation. The debounce timer and the POST it would send share
+  // one controller, so a submit cancels whichever of the two is pending.
   const validations = new WeakMap<HTMLFormElement, AbortController>();
   let detach: (() => void) | null = null;
 
@@ -235,8 +235,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     deps.fetch({
       url: form.getAttribute("action") ?? here(),
       method: "POST",
-      // The validate POST carries a body but mutates nothing: an abortable queue of its
-      // own, never the uid lock, so a fresh blur or submit aborts it.
+      // The validate POST carries a body but mutates nothing. It uses an abortable
+      // queue of its own, never the uid lock, so a new blur or submit aborts it.
       queue: validateQueue(uid),
       // The declared zone, so the server can answer a validation with a zone morph.
       ...(zone !== null ? { zone } : {}),
@@ -361,10 +361,10 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     observed.set(el, stop);
   }
 
-  // The poller once its chunk landed, built on first need.
+  // The poller, built on first use once its chunk has loaded.
   let poller: Poller | undefined;
 
-  // Arm the elements on the landed poller, false while its chunk has not landed.
+  // Start polling the elements, false while the poll chunk has not loaded.
   function startPolls(els: Element[]): boolean {
     const factory = deps.poll.get();
     if (factory === undefined) return false;
@@ -416,8 +416,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     target.addEventListener("blur", onBlur, { capture: true, signal });
     target.addEventListener("submit", onSubmit, { capture: true, signal });
     target.addEventListener("click", onClick, { capture: true, signal });
-    // The visibility subscription pauses and resumes the poll timers. It hands back
-    // its own teardown, so the signal carries it and a second detach stays a no-op.
+    // The visibility subscription pauses and resumes the poll timers. Its teardown
+    // runs on the signal, so a second detach stays a no-op.
     const stopVisibility = visibility.onChange(() => poller?.wake());
     signal.addEventListener("abort", stopVisibility, { once: true });
     detach = () => controller.abort();
@@ -437,7 +437,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       for (const stop of observed.values()) stop();
       observed.clear();
       poller?._reset();
-      // Drop the listeners install bound too, so a reset stack answers no event.
+      // Also remove the listeners install added, so a reset instance handles no event.
       detach?.();
       detach = null;
     },

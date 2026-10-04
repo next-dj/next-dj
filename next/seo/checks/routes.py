@@ -40,7 +40,7 @@ def _resolved(url: str) -> ResolverMatch | None:
 
 
 def _served(roots: tuple[SeoRoot, ...]) -> list[tuple[str, Callable[..., Any], str]]:
-    """Return the addresses the sources call for, each with its view and its source."""
+    """Return the served SEO paths, each with its view and a source description."""
     served: list[tuple[str, Callable[..., Any], str]] = []
     if serves_sitemap():
         served.append((SITEMAP_ROUTE, sitemap_view, "a sitemap backend"))
@@ -50,7 +50,7 @@ def _served(roots: tuple[SeoRoot, ...]) -> list[tuple[str, Callable[..., Any], s
 
 
 def _trail_address(trail: str, served: list[str]) -> str | None:
-    """Return the served address a page trail takes, or `None` when it takes none."""
+    """Return the served SEO path a page trail collides with, or `None`."""
     if trail in served:
         return f"/{trail}"
     if SITEMAP_ROUTE in served and _SECTION_TRAIL.fullmatch(trail) is not None:
@@ -83,9 +83,9 @@ def check_seo_route_collisions(*args, **kwargs) -> list[CheckMessage]:
 
 @register(Tags.urls, NEXT, SEO)
 def check_seo_routes_at_host_root(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when a declared SEO route is not the framework's at the host root (W094).
+    """Warn when a served SEO path does not reach the framework view (`next.W094`).
 
-    A `next.urls` include under a prefix or `i18n_patterns()` moves the routes with it.
+    An include of `next.urls` under a prefix or `i18n_patterns()` moves the routes.
     """
     roots = loaded_seo_roots()
     warnings: list[CheckMessage] = []

@@ -220,8 +220,8 @@ export function createAssets(deps: AssetsDeps): Assets {
     return el;
   }
 
-  // done rides inside the parse gate with the delta, so an envelope that lands
-  // mid-parse applies its ops once the document is whole.
+  // done runs inside the parse gate with the delta, so an envelope that arrives
+  // mid-parse applies its ops once the document is fully parsed.
   function loadCss(manifest: readonly Asset[], done: () => void): void {
     whenParsed(() => {
       catchUp();

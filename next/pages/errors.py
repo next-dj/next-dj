@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 class PageModuleImportError(Exception):
     """A `page.py` body raised while importing.
 
-    The original exception travels as `__cause__` and the offending path as `file_path`.
+    The original exception is the `__cause__`, and `file_path` names the failing file.
     """
 
     def __init__(self, file_path: Path) -> None:
@@ -22,7 +22,7 @@ class PageModuleImportError(Exception):
 
 
 class PageContextShapeError(TypeError):
-    """A keyless `@context` answered something other than a mapping.
+    """A keyless `@context` returned something other than a mapping.
 
     The merge would otherwise fail inside `dict.update` without naming the callable.
     """

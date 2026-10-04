@@ -71,7 +71,7 @@ class TestBoundedCache:
         assert list(cache) == ["first", "second"]
 
     def test_a_miss_answers_the_default(self) -> None:
-        """A key no entry is held under answers what the caller asked for."""
+        """A missing key returns the default the caller passed."""
         cache: BoundedCache[str, int] = BoundedCache()
         assert cache.get("absent") is None
         assert cache.get("absent", 7) == 7
@@ -84,7 +84,7 @@ class TestBoundedCache:
         assert cache["only"] == 1
 
     def test_membership_and_length_report_what_is_held(self) -> None:
-        """The dunders answer for the entries, not for the mapping behind them."""
+        """The dunder methods report the entries, not the mapping behind them."""
         cache: BoundedCache[str, int] = BoundedCache()
         cache["only"] = 1
         assert "only" in cache
@@ -100,7 +100,7 @@ class TestBoundedCache:
         assert not cache
 
     def test_clearing_drops_every_entry(self) -> None:
-        """A cleared cache answers as an empty one."""
+        """A cleared cache behaves as an empty one."""
         cache: BoundedCache[str, int] = BoundedCache()
         cache["only"] = 1
         cache.clear()
@@ -113,7 +113,7 @@ class TestBoundedCache:
 
 
 class TestLruCache:
-    """The cache where a read makes its entry the freshest one."""
+    """The cache where a read makes its entry the most recent one."""
 
     def test_a_rewrite_keeps_the_key_and_makes_it_the_freshest(self) -> None:
         """A key already held stays readable while it moves to the end."""
@@ -140,7 +140,7 @@ class TestLruCache:
         assert list(cache) == ["second", "first"]
 
     def test_a_miss_answers_the_default(self) -> None:
-        """A key no entry is held under answers what the caller asked for."""
+        """A missing key returns the default the caller passed."""
         cache: LruCache[str, int] = LruCache()
         assert cache.get("absent") is None
         assert cache.get("absent", 7) == 7
@@ -172,7 +172,7 @@ class TestLruCache:
         assert cache.get("only") is None
 
     def test_a_key_no_mapping_can_hold_raises_rather_than_missing(self) -> None:
-        """The TypeError is what tells a caller to inspect its callable afresh."""
+        """The TypeError tells a caller to bypass the cache for its callable."""
         cache: LruCache[object, int] = LruCache()
         unhashable: dict[str, str] = {}
         with pytest.raises(TypeError):

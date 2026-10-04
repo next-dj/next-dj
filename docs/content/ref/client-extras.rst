@@ -9,7 +9,7 @@ Module summary
 This page records the parts of ``window.Next`` that serve third-party scripts, consent, and navigation, next to :doc:`client`, which records the partial surface and the attribute contract.
 ``Next.navigation`` lives in the core bundle, ``next.min.js``.
 ``Next.consent`` and ``Next.scripts`` live in the scripts chunk, ``next.scripts.min.js``, which the runtime fetches only when the init payload carries ``$scripts`` or ``$consent``, or when page code calls ``Next.ready("scripts")``.
-Both stay ``undefined`` until the chunk lands, and nothing answers for them before it does.
+Both stay ``undefined`` until the chunk loads, and nothing answers for them before it does.
 
 Public API
 ----------
@@ -17,9 +17,9 @@ Public API
 Next.ready("scripts")
 ~~~~~~~~~~~~~~~~~~~~~
 
-``Next.ready("scripts")`` returns a ``Promise<ScriptsChunk>`` that resolves with ``{consent, scripts}`` once the chunk has landed and taken the page's init payload.
+``Next.ready("scripts")`` returns a ``Promise<ScriptsChunk>`` that resolves with ``{consent, scripts}`` once the chunk has loaded and taken the page's init payload.
 It fetches the chunk on a page that did not, and a call made before the init payload arrives waits for it.
-It rejects when the chunk cannot load or has not landed within 15 seconds, and a failed fetch also fires ``partial:error`` of kind ``asset``, so a banner never records a choice nothing keeps.
+It rejects when the chunk cannot load or has not loaded within 15 seconds, and a failed fetch also fires ``partial:error`` of kind ``asset``, so a banner never records a choice nothing keeps.
 A later call after a failure fetches the chunk again.
 The chunk takes the latest payload ``Next._init`` received, even one that arrived while it was still loading.
 
@@ -50,14 +50,14 @@ Next.consent
      - ``void``
      - Grant or deny the named categories, keep the others, write the cookie, reveal the consented markup, and fire ``next:consent``.
        ``reload: true`` reloads the page when a category changed.
-       A call that changes nothing for a visitor who already decided is a no-op, with no cookie write and no event, so a banner that re-affirms the decision on every load moves nothing.
+       A call that changes nothing for a visitor who already decided is a no-op, with no cookie write and no event, so a banner that repeats the decision on every load changes nothing.
    * - ``acceptAll()``, ``rejectAll()``
      - ``void``
      - ``update`` with every category granted or denied.
 
 The cookie the runtime writes is described by the ``cookie`` entry of ``$consent``, its name, ``max_age``, ``samesite``, ``domain``, ``path``, and ``secure``, which follows the page scheme when ``null``.
 A backend whose ``client_config()`` adds no ``cookie`` entry leaves the runtime writing ``next_consent`` with the default age.
-The runtime writes ``2:<a>|<b>:<seconds>`` and reads that and the ``1:<a>,<b>:<seconds>`` format earlier runtimes wrote.
+The runtime writes ``2:<a>|<b>:<seconds>`` and reads both that format and ``1:<a>,<b>:<seconds>``.
 
 A revoke stops the manifest scripts still waiting on their strategy, which move to ``blocked`` and reject any ``load()`` waiting on them, and a later grant schedules them again.
 A script that already runs keeps running, and the cookies it set stay until a ``next:consent`` listener clears them, see :doc:`/content/howto/write-a-vendor-adapter`.

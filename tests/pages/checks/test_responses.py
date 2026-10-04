@@ -66,9 +66,9 @@ class TestDeclarations:
         [
             ("cache = -1\n", "cache = -1, and the age is negative"),
             ("cache = {'public': True, 'no_store': True}\n", "public contradicts"),
-            ("headers = {'Vary': 'Cookie'}\n", "Vary follows cache"),
+            ("headers = {'Vary': 'Cookie'}\n", "Vary is set by cache"),
             ("headers = {'Surrogate-Control': 'max-age=9'}\n", "declare the caching"),
-            ("headers = {'Set-Cookie': 'a=b'}\n", "Set-Cookie belongs to the"),
+            ("headers = {'Set-Cookie': 'a=b'}\n", "Set-Cookie is set by the"),
             ("headers = {'X-A': 'a\\nb'}\n", "must be ASCII text on one line"),
         ],
         ids=["negative", "contradiction", "vary", "cdn", "forbidden", "break"],

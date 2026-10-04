@@ -18,7 +18,7 @@ type KwargsOf = Callable[[Any], Mapping[str, object]]
 class SitemapItemsEntry(NamedTuple):
     """One callable registered for a trail by the file running `@sitemap.items`.
 
-    `kwargs` and `lastmod` read the URL kwargs and the date off each row it lists.
+    `kwargs` and `lastmod` extract the URL kwargs and the date from each listed row.
     """
 
     file: Path
@@ -30,7 +30,7 @@ class SitemapItemsEntry(NamedTuple):
 
 
 class SitemapItemsConflict(NamedTuple):
-    """Two callables one file registered for the same trail, the later one listing."""
+    """Two callables one file registered for the same trail, the later one kept."""
 
     file: Path
     trail: str
@@ -39,13 +39,13 @@ class SitemapItemsConflict(NamedTuple):
 
 
 class SitemapItemsRegistry:
-    """Hold the items callables in registration order, the last one per key winning.
+    """Store the items callables in registration order, the last one per key kept.
 
-    A second callable on one trail of one file is a conflict the checks report.
+    A second callable for one trail of one file is recorded as a conflict.
     """
 
     def __init__(self) -> None:
-        """Start empty."""
+        """Create an empty registry."""
         self._entries: list[SitemapItemsEntry] = []
         self._index: dict[tuple[Path, str], SitemapItemsEntry] = {}
         self._conflicts: list[SitemapItemsConflict] = []
@@ -53,7 +53,7 @@ class SitemapItemsRegistry:
     def register(self, entry: SitemapItemsEntry) -> None:
         """Bind the callable of `entry` to its trail, replacing an earlier binding.
 
-        A re-executed `sitemap.py` forgets its file first, so a repeat is a conflict.
+        A re-executed `sitemap.py` is forgotten first, so a repeat is a conflict.
         """
         key = (entry.file, entry.trail)
         existing = self._index.get(key)
@@ -73,7 +73,7 @@ class SitemapItemsRegistry:
         self._index[key] = entry
 
     def forget(self, file: Path) -> None:
-        """Drop what `file` registered, so executing it again starts from nothing."""
+        """Remove every entry and conflict that `file` registered."""
         self._conflicts = [item for item in self._conflicts if item.file != file]
         kept = [entry for entry in self._entries if entry.file != file]
         if len(kept) == len(self._entries):
@@ -89,7 +89,7 @@ class SitemapItemsRegistry:
         return {file: tuple(found) for file, found in names.items()}
 
     def conflicts(self) -> tuple[SitemapItemsConflict, ...]:
-        """Return every trail a file bound twice, for the checks."""
+        """Return every trail that one file registered twice, for the checks."""
         return tuple(self._conflicts)
 
     def entries_for(self, file: Path) -> tuple[SitemapItemsEntry, ...]:
@@ -97,7 +97,7 @@ class SitemapItemsRegistry:
         return tuple(entry for entry in self._entries if entry.file == file)
 
     def reset(self) -> None:
-        """Drop every registration so a re-executed `sitemap.py` repopulates it."""
+        """Remove every registration and conflict."""
         self._entries.clear()
         self._index.clear()
         self._conflicts.clear()

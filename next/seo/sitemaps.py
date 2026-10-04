@@ -1,6 +1,6 @@
-"""`PageTreeSitemap`, the Django sitemap a page tree builds from its routes and items.
+"""`PageTreeSitemap`, the Django sitemap built from the routes and items of a tree.
 
-The items stay lazy, so a page of a million rows reads only the rows it lists.
+The items are read lazily, so a sitemap page reads only the rows it lists.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ _GLOB_WILDCARDS: Final = {"*": ".*", "?": "."}
 
 
 class SitemapItem(NamedTuple):
-    """One URL of a `PageTreeSitemap`, a trail with the entry that reverses it."""
+    """One URL of a `PageTreeSitemap`, as a trail and the entry it reverses with."""
 
     trail: str
     entry: SitemapEntry
@@ -77,20 +77,20 @@ else:
 
 
 def _string_list(value: object) -> tuple[str, ...]:
-    """Return the strings of a declared list, anything else reads as none."""
+    """Return the strings of a declared list or tuple, or an empty tuple."""
     if not isinstance(value, list | tuple):
         return ()
     return tuple(item for item in value if isinstance(item, str))
 
 
 def _string(value: object) -> str | None:
-    """Return a declared non-empty string, anything else reads as none."""
+    """Return `value` when it is a non-empty string, else `None`."""
     return value if isinstance(value, str) and value else None
 
 
 @dataclass(frozen=True, slots=True)
 class SitemapOptions:
-    """The attributes a `sitemap.py` declares, a wrong shape read as unset."""
+    """The attributes a `sitemap.py` declares, an invalid value read as unset."""
 
     changefreq: str | None = None
     priority: float | None = None
@@ -105,7 +105,7 @@ class SitemapOptions:
 
     @classmethod
     def read(cls, module: types.ModuleType) -> SitemapOptions:
-        """Read the attributes of `module`, the checks report the wrong shapes."""
+        """Read the attributes of `module`, leaving invalid values to `next.E113`."""
         priority = getattr(module, "priority", None)
         limit = getattr(module, "limit", None)
         languages = getattr(module, "languages", None)
@@ -131,10 +131,10 @@ def sitemap_languages(options: SitemapOptions) -> list[str]:
 
 
 def effective_limit(options: SitemapOptions, languages: Sequence[str]) -> int:
-    """Return how many URLs one page lists, fewer while each carries its alternates.
+    """Return how many URLs one page lists, reduced while URLs carry alternates.
 
-    Every URL then links each language and `x-default` too, so a page of 50000 would
-    outgrow the 50 MB a sitemap document may weigh, and the page shrinks to fit.
+    Each URL then links every language and `x-default`, so a page of 50000 URLs
+    could exceed the 50 MB limit of a sitemap document.
     """
     if not (options.i18n and options.alternates):
         return options.limit
@@ -161,7 +161,7 @@ def is_excluded(trail: str, exclude: Sequence[str]) -> bool:
 def lastmod_datetime(value: datetime.date) -> datetime.datetime:
     """Return a `lastmod` as an aware datetime, so dates and datetimes compare.
 
-    A date or a naive value reads in the current time zone, keeping the day declared.
+    A date or a naive datetime is read in the current time zone.
     """
     if not isinstance(value, datetime.datetime):
         value = datetime.datetime.combine(value, datetime.time.min)
@@ -171,10 +171,9 @@ def lastmod_datetime(value: datetime.date) -> datetime.datetime:
 
 
 def static_noindex(page_path: Path) -> bool:
-    """Whether the static metadata of a page keeps it out of the index.
+    """Whether the static metadata of a page sets noindex.
 
-    A chain the schema refuses reads as indexed with one warning per edit of the
-    file, and the checks report it.
+    Metadata the schema rejects reads as indexed, with one warning per file version.
     """
     try:
         return page.static_metadata(page_path).noindex
@@ -190,7 +189,7 @@ def static_noindex(page_path: Path) -> bool:
 
 
 def _mtime(page_path: Path) -> float | None:
-    """Return when `page_path` last changed, `None` once it is gone."""
+    """Return the modification time of `page_path`, `None` when it is missing."""
     try:
         return page_path.stat().st_mtime
     except OSError:
@@ -198,7 +197,7 @@ def _mtime(page_path: Path) -> float | None:
 
 
 def listed_trails(trails: Mapping[str, Path], exclude: Sequence[str]) -> list[str]:
-    """List the static trails a sitemap carries, dropping excluded and noindex pages."""
+    """Return the static trails a sitemap lists, without excluded and noindex pages."""
     return [
         trail
         for trail, page_path in trails.items()
@@ -209,9 +208,10 @@ def listed_trails(trails: Mapping[str, Path], exclude: Sequence[str]) -> list[st
 
 
 def _rows(value: object, func: Callable[..., Any]) -> Rows:
-    """Return what an items callable answered as rows a part can slice.
+    """Return the value an items callable returned as sliceable rows.
 
-    A `QuerySet` stays lazy and gains an order, and an iterator is read to a list.
+    An unordered `QuerySet` stays lazy and is ordered by primary key, and an
+    iterator is read into a list.
     """
     if isinstance(value, QuerySet):
         if value.ordered:
@@ -233,7 +233,7 @@ def _rows(value: object, func: Callable[..., Any]) -> Rows:
 
 
 def _stamp(row: object, field: str | None) -> datetime.date | None:
-    """Return the `lastmod` column of one row, when the declaration names one."""
+    """Return the `lastmod` field of one row, when the declaration names one."""
     if field is None:
         return None
     value = row.get(field) if isinstance(row, Mapping) else getattr(row, field, None)
@@ -241,7 +241,7 @@ def _stamp(row: object, field: str | None) -> datetime.date | None:
 
 
 def _items_note(entry: SitemapItemsEntry, what: str) -> str:
-    """Name the `@sitemap.items` declaration an exception escaped, for its report."""
+    """Return the exception note naming the failing `@sitemap.items` declaration."""
     return (
         f"Raised by {what} of @sitemap.items({entry.trail!r}) on "
         f"{describe_callable(entry.func)}."
@@ -253,7 +253,7 @@ def _same(item: SitemapItem) -> SitemapItem:
 
 
 def _converter(entry: SitemapItemsEntry) -> Callable[[object], SitemapItem]:
-    """Return how one row of an items callable becomes an item of its trail."""
+    """Return the function converting one row of an items callable to an item."""
 
     def convert(row: object) -> SitemapItem:
         if isinstance(row, SitemapEntry):
@@ -281,9 +281,9 @@ def _converter(entry: SitemapItemsEntry) -> Callable[[object], SitemapItem]:
 
 
 class PageTreeSitemap(_SitemapBase):
-    """One section of the sitemap of a page tree, static routes then declared items.
+    """One sitemap section of a page tree, static routes first, then declared items.
 
-    One instance serves one request, so the parts are built once on the instance.
+    One instance serves one request, so the parts are built once per instance.
     """
 
     def __init__(
@@ -295,7 +295,7 @@ class PageTreeSitemap(_SitemapBase):
         items: Sequence[SitemapItemsEntry] = (),
         request: HttpRequest | None = None,
     ) -> None:
-        """Hold the routes and the declarations, calling no items callable yet."""
+        """Store the routes and the declarations without calling an items callable."""
         self.seo_root = seo_root
         self.options = options
         self.request = request
@@ -304,15 +304,15 @@ class PageTreeSitemap(_SitemapBase):
         self.languages = None if options.languages is None else list(options.languages)
         self.limit = effective_limit(options, self.language_codes())
         self.alternates = options.alternates
-        # The Django variant strips the language prefix from the default URL, while
-        # the head names the URL of the default language, which is the one kept.
+        # Django strips the language prefix from its x-default URL, while the page
+        # head names the URL of the default language, so `get_urls` adds that one.
         self.x_default = False
         self._static = tuple(static)
         self._declared = tuple(items)
         self._entries: ChainedEntries[SitemapItem] | None = None
 
     def entries(self) -> ChainedEntries[SitemapItem]:
-        """Return the static routes and every declared part, built on first read."""
+        """Return the static routes and every declared part, built on the first call."""
         entries = self._entries
         if entries is None:
             static = [SitemapItem(trail, SitemapEntry()) for trail in self._static]
@@ -321,7 +321,7 @@ class PageTreeSitemap(_SitemapBase):
         return entries
 
     def _part(self, entry: SitemapItemsEntry) -> Part[SitemapItem]:
-        """Call one items callable through the resolver and hold what it answers."""
+        """Call one items callable through the dependency resolver and wrap its rows."""
         if entry.trail not in self.seo_root.trails:
             raise SitemapTrailError(self.seo_root.sitemap_path, entry.trail)
         try:
@@ -356,7 +356,7 @@ class PageTreeSitemap(_SitemapBase):
 
     @override
     def location(self, item: SitemapItem) -> str:
-        """Reverse the item lazily, so an active language prefix lands in the path."""
+        """Reverse the item under the active language, so its prefix is in the path."""
         kwargs: dict[str, Any] = dict(item.entry.kwargs)
         try:
             return page_reverse(item.trail, **kwargs)
@@ -373,17 +373,17 @@ class PageTreeSitemap(_SitemapBase):
         return None if stamp is None else lastmod_datetime(stamp)
 
     def changefreq(self, item: SitemapItem) -> str | None:
-        """Return the item value ahead of the module default."""
+        """Return the item value, falling back to the module default."""
         return item.entry.changefreq or self.options.changefreq
 
     def priority(self, item: SitemapItem) -> float | None:
-        """Return the item value ahead of the module default."""
+        """Return the item value, falling back to the module default."""
         own = item.entry.priority
         return self.options.priority if own is None else own
 
     @override
     def get_domain(self, site: Site | RequestSite | None = None) -> str:
-        """Prefer the site handed in, then the origin of the request or the site URL."""
+        """Return the domain of `site`, else of the request origin or the site URL."""
         if site is not None:
             return str(site.domain)
         return request_origin(self.request).domain
@@ -395,9 +395,9 @@ class PageTreeSitemap(_SitemapBase):
         site: Site | RequestSite | None = None,
         protocol: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Build one page of URLs, pinned to the default language without `i18n`.
+        """Return one page of URLs, in the default language unless `i18n` is set.
 
-        The `x-default` alternate names the default language URL, as the head does.
+        The `x-default` alternate is the default language URL, as in the page head.
         """
         if not self.i18n:
             with translation.override(settings.LANGUAGE_CODE):
@@ -414,9 +414,9 @@ class PageTreeSitemap(_SitemapBase):
 
     @override
     def get_latest_lastmod(self) -> datetime.datetime | None:
-        """Return the latest date the items carry, `None` unless every one carries one.
+        """Return the latest `lastmod` of the items, `None` unless every item has one.
 
-        A `QuerySet` part with a `lastmod` column answers in one aggregate query.
+        A `QuerySet` part with a `lastmod` field costs one aggregate query.
         """
         latest: datetime.datetime | None = None
         for part in self.entries().parts:
@@ -429,12 +429,13 @@ class PageTreeSitemap(_SitemapBase):
         return latest
 
     def _part_latest(self, part: Part[SitemapItem]) -> datetime.datetime | None:
+        """Return the latest `lastmod` of one part, `None` when it has no known date."""
         field = part.lastmod_field
         if field is not None and isinstance(part.rows, QuerySet):
             value = part.rows.aggregate(latest=Max(field))["latest"]
             return value if value is None else lastmod_datetime(value)
         if field is None and isinstance(part.rows, QuerySet):
-            # A row of a model only reaches a lastmod through the column it names.
+            # Without a named field, the rows of a model carry no lastmod.
             return None
         if part.count() > self.limit:
             return None

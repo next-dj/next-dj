@@ -27,7 +27,7 @@ _STRATEGIES: dict[type, Strategies] = {}
 def strategies(cls: type) -> Strategies:
     """Return each field of a metadata dataclass with the strategy that folds it.
 
-    Read once per class, so the fold walks a tuple, and empty for a class with none.
+    Computed once per class, and empty for a class that is not a dataclass.
     """
     held = _STRATEGIES.get(cls)
     if held is None:
@@ -53,7 +53,7 @@ _VALUES: Final[Callable[[Metadata], tuple[object, ...]]] = attrgetter(*_NAMES)
 
 @dataclass(frozen=True, slots=True)
 class FoldState:
-    """The chain folded so far, its title still waiting for the final site name.
+    """The chain folded so far, its title not yet templated with the final site name.
 
     `wrap` is the template the title text sits under and `template` the one in effect.
     """
@@ -126,7 +126,7 @@ def _merge_values(
     prefix: str,
     replaced: frozenset[str],
 ) -> tuple[object, ...]:
-    """Merge two values field by field, the plain nearest-wins inline.
+    """Merge two values field by field, a plain `REPLACE` field inline as nearest-wins.
 
     `prefix` spells the path of the block, `""` at the top and `"og."` below it.
     """
@@ -253,9 +253,9 @@ def fold_metadata(segments: Iterable[Segment]) -> Metadata:
 
 
 def merge_segments(base: Segment, over: Segment) -> Segment:
-    """Lay `over` onto `base` as one segment, the title of `over` taking its place.
+    """Merge `over` onto `base` as one segment, the title of `over` taking precedence.
 
-    A key `over` replaces drops what `base` declares, and still drops the inherited.
+    A key `over` replaces drops both what `base` declares and the inherited value.
     """
     replaced = over.replaced
     merged = _merge_values(
@@ -284,7 +284,7 @@ def _forget_below(origins: dict[str, str], path: str) -> None:
 def _trace(
     strategy: Merge, value: object, path: str, source: str, origins: dict[str, str]
 ) -> None:
-    """Record `source` as the origin of every key `value` settles under `path`."""
+    """Record `source` as the origin of every key `value` sets under `path`."""
     if _unset(value):
         return
     inner_strategies = strategies(type(value)) if strategy is Merge.DEEP else ()
@@ -315,7 +315,7 @@ def _trace(
 
 
 def trace_origins(segments: Iterable[Segment]) -> dict[str, str]:
-    """Map every key path the chain settles to the source of the segment settling it.
+    """Map every key path the chain sets to the source of the segment that sets it.
 
     A reset key names the segment that dropped it, since that is where to look.
     """

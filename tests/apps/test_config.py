@@ -493,14 +493,14 @@ class TestDependencyResolverInstall:
             StaticAssetsImpl,
         ]
 
-    def test_ready_moves_the_token_of_the_spliced_routes(self) -> None:
-        """A resolve made before the port bound built without the SEO routes."""
+    def test_ready_bumps_the_seo_routes_version(self) -> None:
+        """URL patterns built before the SEO port was bound lack the SEO routes."""
         before = seo_routes_version.value
         apps.get_app_config("next").ready()
         assert seo_routes_version.value not in {0, before}
 
     def test_a_router_reload_resets_the_seo_manager(self) -> None:
-        """The SEO routes follow the routers, so their memo goes with a reload."""
+        """The SEO routes follow the routers, so a router reload drops their memo."""
         apps.get_app_config("next").ready()
         before = seo_manager.version
 

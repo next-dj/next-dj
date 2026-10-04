@@ -1215,7 +1215,7 @@ describe("zone polling", () => {
   });
 });
 
-// The dev chunk's channel, as the triggers read it once the chunk lands.
+// The dev chunk's diagnostics, as the triggers read them once the chunk loads.
 const DEV = createDiagnostics();
 
 describe("dev attribute validation", () => {

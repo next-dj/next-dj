@@ -35,7 +35,7 @@ class TestPageReverse:
             assert page_reverse(path_template, **kwargs) == expected
 
     def test_a_custom_namespace_reaches_the_pages_mounted_under_it(self) -> None:
-        """The namespace is the mount point, so the prefix lands in the answer."""
+        """The namespace is the mount point, so the reversed URL carries the prefix."""
         with override_settings(ROOT_URLCONF=CUSTOM_NAMESPACE_URLCONF):
             assert page_reverse("login", namespace="dashboard") == "/dash/login/"
 

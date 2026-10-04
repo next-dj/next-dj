@@ -37,7 +37,7 @@ def i18n() -> Iterator[None]:
 
 @pytest.mark.usefixtures("i18n")
 class TestHreflangUrls:
-    """A path lists every language its route answers, or nothing below two."""
+    """A path lists every language its route resolves under, or nothing below two."""
 
     def test_every_language_is_listed_in_settings_order(self) -> None:
         assert hreflang_urls("/headed/") == (("en", "/headed/"), ("de", "/de/headed/"))

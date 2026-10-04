@@ -117,7 +117,7 @@ Reload the page and inspect the HTML source.
 A script tag points at the JSX file.
 
 Run ``uv run python manage.py check``.
-The walkthrough registration reports no warnings, and the custom-renderer variant draws one warning for the ``jsx`` kind, the missing insertion verb.
+The walkthrough registration reports no warnings, and the custom-renderer variant reports one warning for the ``jsx`` kind, the missing insertion verb.
 
 See also
 --------

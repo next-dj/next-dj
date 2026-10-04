@@ -45,7 +45,7 @@ _site_defaults: RunMemo[_SiteDefaults] = RunMemo()
 
 
 def site_defaults(scope: dict[str, Any]) -> _SiteDefaults:
-    """Normalise the raw `DEFAULTS` once per check run, or answer its `next.E098`."""
+    """Normalise the raw `DEFAULTS` once per check run, or return its `next.E098`."""
     return _site_defaults.get(scope, lambda: _normalised_defaults(scope))
 
 

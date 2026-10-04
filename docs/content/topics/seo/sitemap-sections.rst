@@ -87,10 +87,10 @@ The sections of every backend merge in list order, the first holder of a name wi
 Each backend built sends ``sitemap_backend_loaded``.
 
 ``manage.py check`` calls ``sections(None)`` on every backend but the page trees, to compare its section names with the others, so the method runs without a request and may reach the database there.
-One that raises draws ``next.W089`` and takes no part in the comparison.
+One that raises triggers ``next.W089`` and takes no part in the comparison.
 
 A backend that raises never takes the site down.
-``sections()`` raising, or a section raising while it lists its URLs, answers 503 with ``Retry-After`` and logs the failure once, and under ``DEBUG`` the exception reaches the technical page with a note naming the backend.
+``sections()`` raising, or a section raising while it lists its URLs, answers 503 with ``Retry-After`` and logs the failure once, and under ``DEBUG`` or ``STRICT_LOADING`` the exception reaches the technical page with a note naming the backend.
 ``Http404`` and ``PermissionDenied`` pass through as the answers they ask for.
 ``serves()`` runs while every URL of the site resolves, so one that raises is logged once and counts as serving, and ``/sitemap.xml`` answers 503 rather than every route failing with it.
 

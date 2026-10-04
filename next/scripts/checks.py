@@ -54,7 +54,7 @@ def check_scripts_sources(*args, **kwargs) -> list[CheckMessage]:
             messages.append(
                 Error(
                     f"{source.error}: {source.error.__cause__!r}. Fix the error the "
-                    "import raises, the pages of the tree render meanwhile without "
+                    "import raises. Until then the pages of the tree render without "
                     "these scripts.",
                     obj=str(source.path),
                     id="next.E133",
@@ -98,7 +98,7 @@ def check_script_names(*args, **kwargs) -> list[CheckMessage]:
 def check_script_categories(*args, **kwargs) -> list[CheckMessage]:
     """Report a script in a category the list leaves out (`next.E140`).
 
-    A list `next.E135` reports is fixed first, so it draws no error per script.
+    While `next.E135` reports the list itself, no script is reported against it.
     """
     if category_list_problem() is not None:
         return []
@@ -119,10 +119,12 @@ def check_script_categories(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _src_problem(src: str) -> str | None:
-    """Return why `src` cannot load, `None` for https or a staticfiles name found."""
+    """Return why `src` cannot load, `None` for an http(s) URL or a found name."""
     parts = urlsplit(src)
     if parts.scheme or parts.netloc:
-        return None if parts.scheme in {"https", "http"} and parts.netloc else "a URL"
+        if parts.scheme in {"https", "http"} and parts.netloc:
+            return None
+        return "a URL that is not an absolute http or https URL"
     try:
         name = static_name(src)
     except StaticAssetTraversalError:
@@ -148,8 +150,8 @@ def _script_problems(script: Script) -> list[tuple[str, str]]:
             (
                 (
                     "holds </script, <script or <!-- in its init, which the HTML "
-                    "parser reads as markup, so the element closes early or "
-                    "swallows the page"
+                    "parser reads as markup, so the element closes early or hides "
+                    "the rest of the page"
                 ),
                 "next.E142",
             )
@@ -231,7 +233,7 @@ def _renders_consented(nodelist: NodeList) -> bool:
 def check_consented_needs_consent(*args, **kwargs) -> list[CheckMessage]:
     """Warn about `{% #consented %}` while `CONSENT` stays unset (`next.W123`).
 
-    A partial answer never carries the consent, so only the setting reaches every page.
+    A partial response never carries `$consent`, so only the setting enables it.
     """
     if consent_configured():
         return []
@@ -261,7 +263,7 @@ def check_consented_needs_consent(*args, **kwargs) -> list[CheckMessage]:
 def check_consented_categories(*args, **kwargs) -> list[CheckMessage]:
     """Warn about `{% #consented %}` naming an unlisted category (`next.W091`).
 
-    Only a literal name is read, the first page reaching it named in the message.
+    Only a literal name is read, and the message names the first page that renders it.
     """
     if not consent_configured() or category_list_problem() is not None:
         return []
@@ -277,7 +279,7 @@ def check_consented_categories(*args, **kwargs) -> list[CheckMessage]:
             name = node.literal_category()
             if name is not None and name not in categories:
                 unknown.setdefault(name, page)
-        # Never a match, so the search walks every template the page reaches.
+        # No match is reported, so the search visits every template the page reaches.
         return False
 
     search = TemplateSearch(collect)
@@ -304,7 +306,7 @@ def check_script_deploy(*args, **kwargs) -> list[CheckMessage]:
     return [
         DjangoWarning(
             f"{source.path} loads the script {script.name!r} over plain HTTP, "
-            "which a https page blocks as mixed content.",
+            "which an https page blocks as mixed content.",
             obj=str(source.path),
             id="next.W118",
         )

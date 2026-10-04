@@ -1,26 +1,26 @@
-// The zone poller behind data-next-poll. Every zone on one cadence rides one timer
-// chain and one batched GET per owning page, and a hidden tab holds no timers. It
+// The zone poller behind data-next-poll. Zones with the same interval share one timer
+// chain and one batched GET per owning page, and a hidden tab keeps no timers. It
 // ships in next.poll.min.js, which the runtime fetches once a scan finds a poll zone.
 
 import { ATTR_POLL, ATTR_ZONE, addZone, pollInterval } from "./protocol";
 import type { VisibilityAdapter } from "./sse";
 import type { Clock } from "./wire";
 
-// One interval group of the poller, where every zone on the cadence rides one timer
-// chain and one batched GET. lastFire anchors the resume, a null handle sleeps.
+// The zones polled at one interval. lastFire is the reference point of a resume, and
+// a null handle means the group is paused.
 interface PollGroup {
   handle: number | null;
   lastFire: number;
   elements: Set<Element>;
 }
 
-/** The seams the poller draws on, lent by the triggers. */
+/** The dependencies the triggers pass to the poller. */
 export interface PollDeps {
   clock: Clock;
   visibility: VisibilityAdapter;
   // The owning page of a zone, the URL its tick GETs.
   pageUrl: (el: Element) => string;
-  // One zone GET, the zones comma-joined.
+  // One zone GET, several zones joined by commas.
   fetch: (url: string, zone: string) => void;
 }
 
@@ -39,9 +39,9 @@ export type PollFactory = (deps: PollDeps) => Poller;
 /** Build the poller over the given seams. */
 export function createPoller(deps: PollDeps): Poller {
   const { clock, visibility, pageUrl } = deps;
-  // Poll groups by interval, with each element's group so a re-scan arms no new timer.
+  // Poll groups by interval, so a re-scan starts no second timer.
   const groups = new Map<number, PollGroup>();
-  // Membership only answers "already polling", so the elements are held weakly.
+  // Only answers whether an element already polls, so it holds elements weakly.
   let membership = new WeakSet<Element>();
 
   function pollMs(el: Element): number | null {
@@ -65,13 +65,13 @@ export function createPoller(deps: PollDeps): Poller {
     });
   }
 
-  // Each element is re-read live, a wrapper missing either attribute was morphed
-  // away and tears down, a changed interval migrates, a vanished group returns.
+  // Re-reads each element. One that left the document or lost either attribute is
+  // dropped, one with a changed interval moves group, and a deleted group does nothing.
   function pollTick(interval: number): void {
     const group = groups.get(interval);
     if (group === undefined) return;
     if (visibility.hidden()) {
-      // Safety net for a missed visibilitychange, the visible flip wakes the group.
+      // Covers a missed visibilitychange. The next visible change resumes the group.
       group.handle = null;
       return;
     }
@@ -108,8 +108,8 @@ export function createPoller(deps: PollDeps): Poller {
       if (ms === null) return;
       joinPoll(el, ms);
     },
-    // On hidden, live timers are silenced and the groups sleep. On visible, elapsed
-    // against lastFire runs due ticks at once and resumes the rest with the time left.
+    // When hidden, clears every timer. When visible, runs each group whose interval
+    // has elapsed since lastFire and schedules the others for the remaining time.
     wake() {
       if (visibility.hidden()) {
         for (const group of groups.values()) {

@@ -40,7 +40,8 @@ Declaring scripts
 ``scripts`` is any iterable of ``Script``.
 The manual Plausible variant sends a page view only when a script asks it to, which a small adapter does on every navigation, see :doc:`/content/howto/write-a-vendor-adapter`.
 The file loads with the tree, and while ``DEBUG`` is on a render reads it again once its mtime moves, so an edit needs no restart.
-A file that fails to import, or a ``scripts`` that holds anything but ``Script`` values, costs the tree all of its scripts, and ``manage.py check`` names the cause.
+A file that fails to import, or a ``scripts`` that is no iterable, gives the tree no scripts at all.
+A ``scripts`` that holds other values beside ``Script`` values keeps the ``Script`` values and drops the rest, and ``manage.py check`` names the cause in both cases.
 
 A ``Script`` takes these fields.
 
@@ -53,7 +54,7 @@ A ``Script`` takes these fields.
    * - ``name``
      - The key ``{% script %}``, the runtime, and the ``data-next-script`` attribute know the script by, unique in the tree.
    * - ``src``
-     - An absolute ``https`` URL or a staticfiles name, which the static pipeline resolves to its public URL.
+     - An absolute ``http`` or ``https`` URL or a staticfiles name, which the static pipeline resolves to its public URL, and ``manage.py check --deploy`` warns about plain ``http``.
    * - ``init``
      - Trusted inline JavaScript that runs before ``src`` loads, such as a vendor's queue stub.
    * - ``strategy``
@@ -90,7 +91,7 @@ Strategies
    * - ``MANUAL``
      - From the runtime, when page code calls ``Next.scripts.load(name)``.
 
-The first three render as ``<script>`` tags in the head when the visitor may run the script's category, and every other script rides the ``$scripts`` manifest of the init payload.
+The first three render as ``<script>`` tags in the head when the visitor may run the script's category, and every other script travels in the ``$scripts`` manifest of the init payload.
 The runtime inserts a manifest entry once its strategy fires and its category is granted, the ``init`` body before the ``src``, and a tag the server already rendered is never inserted a second time.
 A ``BLOCKING`` or ``DEFER`` entry the runtime inserts keeps its place among the others inserted with it, so a vendor loader declared before its adapter still runs first.
 The runtime-loaded strategies need the runtime on the page, so they never run while ``NEXT_JS_OPTIONS["policy"]`` is ``disabled``.

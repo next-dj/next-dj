@@ -436,7 +436,7 @@ def check_nonce_templates(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_nonce_on_shared_pages(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when a CSP nonce takes every page a CDN may hold private (`next.W120`)."""
+    """Warn that an active CSP nonce makes shared-cache pages private (`next.W120`)."""
     if not nonce_active():
         return []
     return private_pages_warning(

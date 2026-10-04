@@ -17,14 +17,14 @@ from next.conf.signals import settings_reloaded
 _URLCONF_SETTINGS: Final = frozenset({"ROOT_URLCONF", "LANGUAGES", "LANGUAGE_CODE"})
 _ENOUGH: Final = 2
 
-# An empty string marks a code the path has no route under, which no URL ever is.
+# An empty string marks a code with no route for the path, since no URL is empty.
 _translated: Final[LruCache[tuple[str, str, str, str], str]] = LruCache()
 
 
 def _translate(path: str, code: str, prefix: str) -> str:
-    """Translate `path` from its own language, empty when no route answers `code`.
+    """Translate `path` from its own language, empty when `code` has no route.
 
-    Resolving under the language of the path keeps the answer off the active one.
+    The path resolves under its own language, so the active one does not matter.
     """
     parts = urlsplit(path)
     if not parts.path.startswith(prefix):
@@ -40,7 +40,7 @@ def _translate(path: str, code: str, prefix: str) -> str:
 
 
 def translated_url(path: str, code: str, *, urlconf: str, prefix: str) -> str | None:
-    """Return `path` under the language `code`, `None` when no route answers it."""
+    """Return `path` under the language `code`, `None` when it has no route."""
     key = (urlconf, prefix, path, code)
     url = _translated.get(key)
     if url is None:
@@ -52,7 +52,7 @@ def translated_url(path: str, code: str, *, urlconf: str, prefix: str) -> str | 
 def hreflang_urls(path: str) -> tuple[tuple[str, str], ...]:
     """Return `path` under every `LANGUAGES` code it translates to, empty below two.
 
-    A URLconf without `i18n_patterns()` has no language to switch, so it answers none.
+    A URLconf without `i18n_patterns()` has no language prefix, so it returns none.
     """
     urlconf = get_urlconf() or str(getattr(settings, "ROOT_URLCONF", ""))
     if not is_language_prefix_patterns_used(urlconf)[0]:
@@ -72,7 +72,7 @@ def x_default_url(pairs: Sequence[tuple[str, str]]) -> str | None:
 
 
 def forget_translated_urls(**kwargs) -> None:
-    """Drop the hreflang memo, which a URLconf, router or language change stales."""
+    """Drop the hreflang memo after a URLconf, router or language change."""
     _translated.clear()
 
 

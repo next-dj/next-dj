@@ -238,7 +238,7 @@ class TestLoadTreeSource:
         assert source.error is None
         assert source.stamp == path.stat().st_mtime_ns
 
-    def test_a_failure_rides_the_source_with_its_cause(self, tmp_path, caplog) -> None:
+    def test_a_failure_is_kept_with_its_cause(self, tmp_path, caplog) -> None:
         path = tmp_path / "x.py"
         path.write_text("raise RuntimeError('boom')\n")
         source = load_tree_source(path, "probe", _SourceError)
@@ -272,7 +272,7 @@ class TestExecModuleFile:
 
 
 class TestTreeSource:
-    """A source is stale once its file moves or goes."""
+    """A source is stale once its file is rewritten or deleted."""
 
     def test_an_unmoved_file_is_fresh(self, tmp_path) -> None:
         path = tmp_path / "x.py"

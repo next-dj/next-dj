@@ -37,9 +37,9 @@ type VersionToken = tuple[int, int, int]
 
 
 class SeoRoutesVersion:
-    """The version of the SEO routes `seo_routes_slot` splices after the page routes.
+    """The version of the SEO routes `seo_routes_slot` appends after the page routes.
 
-    A plain attribute keeps the pattern token free of any call across the port.
+    The value is a plain attribute, so reading the version token makes no port call.
     """
 
     __slots__ = ("value",)
@@ -49,7 +49,7 @@ class SeoRoutesVersion:
         self.value = 0
 
     def move(self) -> None:
-        """Take a version no earlier state of these routes carried."""
+        """Advance to a version that no earlier state of these routes carried."""
         self.value = next(_version_counter)
 
 
@@ -106,8 +106,8 @@ class RouterManager:
     def __repr__(self) -> str:
         """Debug representation with backend count and load state.
 
-        It reports the raw state instead of loading, because a repr that
-        rebuilt routes and fired signals would be a trap under a debugger.
+        It reports the raw state instead of loading, so a debugger displaying the
+        manager neither rebuilds routes nor sends signals.
         """
         return (
             f"<{self.__class__.__name__} backends={len(self._backends)} "
@@ -190,7 +190,7 @@ setting_changed.connect(_on_setting_changed)
 
 
 _CSRF_PATTERN = path("_next/csrf/", csrf_view, name=CSRF_URL_NAME)
-"""The token endpoint a page whose HTML defers its CSRF token hands its runtime."""
+"""The endpoint the runtime fetches a CSRF token from when the page HTML omits it."""
 
 
 class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
@@ -205,7 +205,7 @@ class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
         self._cache: tuple[VersionToken, list[URLPattern | URLResolver]] | None = None
 
     def version_token(self) -> VersionToken:
-        """Router, form-action and spliced route versions keying derived caches."""
+        """Return the router, form-action and SEO route versions keying caches."""
         return (
             router_manager.version,
             form_action_manager.version,
@@ -217,8 +217,8 @@ class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
         if cache is not None and cache[0] == self.version_token():
             return cache[1]
         seo_routes = seo_routes_slot.peek()
-        # The pages expand first, since a page module registers its form actions as
-        # it loads, yet the framework routes lead so a root catch-all cannot take them.
+        # Pages expand first because loading a page module registers its form actions.
+        # The framework routes still lead, so a root catch-all cannot match them.
         pages = list(router_manager)
         patterns: list[URLPattern | URLResolver] = [
             _CSRF_PATTERN,
@@ -227,6 +227,7 @@ class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
             *(() if seo_routes is None else seo_routes.patterns()),
         ]
         if seo_routes is None:
+            # Before `ready()` binds the port the list is incomplete and stays uncached.
             return patterns
         # Versions are read after the build because expanding pages can
         # register form actions and bump the forms version mid-build.

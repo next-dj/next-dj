@@ -18,21 +18,15 @@ A bound page renders ``<input type="hidden" name="csrfmiddlewaretoken" value="..
 Django's :doc:`CsrfViewMiddleware <django:ref/csrf>` validates the token on every POST to ``/_next/form/<uid>/``.
 A missing or stale token returns HTTP 403.
 
+The tag also depends on ``request`` existing in the template context so Django can render the CSRF field.
+If ``manage.py check`` reports a missing ``request`` context processor, add ``django.template.context_processors.request`` to the ``OPTIONS.context_processors`` list of your Django ``TEMPLATES`` entry.
+An equivalent processor that supplies ``request`` works as well, so layouts receive ``request``.
+
 Token delivery
 --------------
 
 A token in the HTML sets the CSRF cookie and ``Vary: Cookie``, which keeps a CDN from caching the page, and a token baked into a cached copy goes stale.
-``NEXT_FRAMEWORK["CSRF_DELIVERY"]`` decides where a rendered page puts it.
-
-``"auto"``
-   The default.
-   A page whose ``cache`` lets a shared cache keep it defers the token, and every other page embeds it.
-
-``"eager"``
-   Every page embeds the token in its forms and in the ``$csrf`` entry of the init payload.
-
-``"lazy"``
-   No page embeds it.
+``NEXT_FRAMEWORK["CSRF_DELIVERY"]`` decides where a rendered page puts it, and its default ``"auto"`` defers the token on a page whose ``cache`` lets a shared cache keep it, see :doc:`/content/ref/settings` for the three modes.
 
 A deferred page renders ``{% form %}`` without the hidden field and hands the runtime ``{"header": ..., "url": "/_next/csrf/"}`` in place of the token.
 The runtime fetches ``/_next/csrf/`` once, on the first focus or press inside a form and before the first unsafe request at the latest, and sends the token in the CSRF header, which Django reads when the form field is absent.
@@ -42,14 +36,9 @@ A browser without JavaScript posts no token and gets 403, which ``next.W115`` re
 The token endpoint
 ------------------
 
-``/_next/csrf/`` answers ``GET`` and ``HEAD`` alone, with a freshly masked token as ``{"header": ..., "token": ...}``.
-It requires ``X-Next-Request: 1``, a custom header no cross-site form can send and a cross-site ``fetch`` cannot send without a CORS preflight the endpoint never grants, and it refuses a ``Sec-Fetch-Site`` other than ``same-origin`` with 403.
-The response is ``private, no-store``, varies on ``Cookie``, carries ``X-Content-Type-Options: nosniff`` and ``Cross-Origin-Resource-Policy: same-origin``, and is never indexed.
+``/_next/csrf/`` requires ``X-Next-Request: 1``, a custom header no cross-site form can send and a cross-site ``fetch`` cannot send without a CORS preflight the endpoint never grants.
+:doc:`/content/ref/csrf` lists its answers and response headers.
 A project that loosens CORS for the site keeps the endpoint out of it, since a CORS policy that admits another origin with credentials hands that origin a token.
-
-The tag also depends on ``request`` existing in the template context so Django can render the CSRF field.
-If ``manage.py check`` reports a missing ``request`` context processor, add ``django.template.context_processors.request`` to the ``OPTIONS.context_processors`` list of your Django ``TEMPLATES`` entry.
-An equivalent processor that supplies ``request`` works as well, so layouts receive ``request``.
 
 Origin validation
 -----------------
@@ -190,7 +179,7 @@ The value of the flag is that an attacker who can read cookies through another c
 
 The bundled runtime takes its token from the ``$csrf`` payload or the endpoint rather than from the cookie, so a project that leaves unsafe requests to the runtime keeps the flag on with nothing to change.
 The endpoint reads the token through Django, so ``CSRF_USE_SESSIONS`` works as well.
-It reads the session on every request, though, which takes every page a CDN may hold private, and ``manage.py check`` warns about it while such pages exist.
+It reads the session on every request, though, which makes every page a CDN may hold private, and ``manage.py check`` warns about it while such pages exist.
 
 .. code-block:: python
    :caption: config/settings.py, when project JavaScript reads the cookie directly

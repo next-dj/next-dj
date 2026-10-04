@@ -64,7 +64,7 @@ class TestPartialShaperPort:
         )
 
     def test_set_vary_declares_the_partial_request_headers(self) -> None:
-        """A shared cache serves one shape where the other belongs without this."""
+        """Without these headers a shared cache could serve a partial body as a page."""
         response = HttpResponse("<p>ok</p>")
 
         PartialShaperImpl().set_vary(response)

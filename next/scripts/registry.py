@@ -17,7 +17,7 @@ class ScriptsRegistry:
     def register(self, root: Path, source: ScriptsSource | None) -> None:
         """Bind the source of the tree at `root`, `None` for a tree without one.
 
-        `scripts_registered` announces a tree holding a `scripts.py`, the rest pass.
+        `scripts_registered` is sent only for a tree that holds a `scripts.py`.
         """
         if root not in self._index:
             self._roots.append(root)

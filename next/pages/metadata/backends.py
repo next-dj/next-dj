@@ -1,6 +1,6 @@
 """The head markup of a `ResolvedMetadata`, one tag per line in section order.
 
-A renderer sees no request, so every policy is settled before it runs.
+A renderer receives no request, so every policy is applied before it runs.
 """
 
 import functools
@@ -58,8 +58,9 @@ type _MediaGroup = tuple[str, tuple[_Media, ...], tuple[str, ...]]
 
 
 def dump_jsonld(obj: object) -> SafeString:
-    """Return `obj` as the JSON a JSON-LD script carries, closed against `</script>`.
+    """Return `obj` as JSON-LD script content, with `<`, `>` and `&` escaped.
 
+    The escapes keep `</script>` and `<!--` in a value from ending the script.
     `manage.py check` serialises a declared node through this same call.
     """
     text = json.dumps(obj, cls=DjangoJSONEncoder, allow_nan=False)
@@ -385,8 +386,8 @@ def configured_renderer_class() -> type[MetadataRenderer]:
 def metadata_renderer() -> MetadataRenderer:
     """Return the renderer `METADATA["RENDERER"]` names, built once per reload.
 
-    One that cannot be resolved or built gives way to `HtmlMetadataRenderer`, so a
-    typo costs the custom markup, logged once, rather than every page.
+    A renderer that cannot be resolved or built is replaced by `HtmlMetadataRenderer`
+    and logged once, so a wrong path does not fail every page. It raises under `DEBUG`.
     """
     try:
         return configured_renderer_class()()

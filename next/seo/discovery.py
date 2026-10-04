@@ -1,6 +1,6 @@
 """Discovery of the SEO sources at the top of every routed page tree.
 
-The sources load through their own loader, so a broken one never marks a page broken.
+The sources use their own loader, so an import failure never flags a page as broken.
 """
 
 from __future__ import annotations
@@ -45,18 +45,18 @@ SOURCE_NAMES: Final = (SITEMAP_MODULE, ROBOTS_MODULE, ROBOTS_FILE)
 """Every file the top of a page tree may hold for the SEO routes."""
 
 SLUG: Final = re.compile(r"[-a-zA-Z0-9_]+")
-"""What a sitemap section name matches, the Django `slug` converter."""
+"""The pattern of a sitemap section name, the one of the Django `slug` converter."""
 
 
 SeoSource = TreeSource[SeoSourceImportError]
-"""One Python SEO source with the module it loaded to, or its import failure."""
+"""One Python SEO source with its loaded module or its import error."""
 
 
 @dataclass(frozen=True, slots=True)
 class BrokenSource:
-    """A Python source that failed to import, keeping its route to answer 404.
+    """A Python source that failed to import, whose route stays mounted.
 
-    Falling back to another source would serve rules nobody wrote.
+    Falling back to another source would serve rules the project did not declare.
     """
 
     path: Path
@@ -78,30 +78,30 @@ class SeoRoot:
 
     @property
     def path(self) -> Path:
-        """Return the page tree the sources sit in."""
+        """Return the directory of the page tree."""
         return self.root.path
 
     @property
     def sitemap_path(self) -> Path:
-        """Return where the `sitemap.py` of the tree sits, present or not."""
+        """Return the path of the `sitemap.py` of the tree, whether it exists or not."""
         return self.path / SITEMAP_MODULE
 
     @property
     def sitemap_module(self) -> types.ModuleType | None:
-        """Return the `sitemap.py` of the tree when one imported."""
+        """Return the imported `sitemap.py` module of the tree, or `None`."""
         return None if self.sitemap is None else self.sitemap.module
 
     @property
     def robots_module(self) -> types.ModuleType | None:
-        """Return the `robots.py` of the tree when one imported."""
+        """Return the imported `robots.py` module of the tree, or `None`."""
         return None if self.robots is None else self.robots.module
 
     def items_entries(self) -> tuple[SitemapItemsEntry, ...]:
-        """Return every `@sitemap.items` the `sitemap.py` of the tree ran."""
+        """Return the `@sitemap.items` entries the `sitemap.py` of the tree ran."""
         return sitemap_items_registry.entries_for(self.sitemap_path)
 
     def stale(self) -> bool:
-        """Whether a source file appeared, went or moved on disk since the discovery."""
+        """Whether a source file was created, deleted or modified since discovery."""
         return source_stamps(self.path) != self.stamps
 
 
@@ -111,9 +111,9 @@ def source_stamps(tree: Path) -> tuple[int | None, ...]:
 
 
 def load_source(path: Path) -> SeoSource | None:
-    """Execute the source at `path`, or answer `None` when no file sits there.
+    """Execute the source at `path`, or return `None` when the file does not exist.
 
-    A failure stays on the source for the checks to report, so the routes still build.
+    An import error is kept on the result for the checks, so the routes still build.
     """
     if path.is_file():
         sitemap_items_registry.forget(path)
@@ -127,18 +127,18 @@ def declared_section(module: types.ModuleType | None) -> str | None:
 
 
 def declared_cache(module: types.ModuleType) -> CacheControl | None:
-    """Return the `cache` a source module declares, in any form a page takes but one.
+    """Return the `cache` a source module declares, in any static form a page accepts.
 
-    A callable is left out, since the response is cached before a request calls it.
+    A callable is ignored, since the cache wrapper is built before any request.
     """
     value = getattr(module, "cache", None)
     return None if callable(value) else cache_control(value)
 
 
 def section_label(path: Path, module: types.ModuleType | None = None) -> str:
-    """Return the section a page tree is addressed by in the sitemap index.
+    """Return the section name of a page tree in the sitemap index.
 
-    The `section` of its `sitemap.py` wins, then the app label, then the directory.
+    The `section` of its `sitemap.py` comes first, then the app label, then the name.
     """
     return declared_section(module) or tree_label(path)
 
@@ -148,7 +148,10 @@ def _file(path: Path) -> Path | None:
 
 
 def discover_seo_roots(manager: RouterManager) -> tuple[SeoRoot, ...]:
-    """Return every page tree in router order, each with its SEO sources loaded."""
+    """Return every page tree in router order, each with its SEO sources loaded.
+
+    The trails are sorted, so their order never depends on the directory listing.
+    """
     found = routed_page_trees(manager)
     stamps = [source_stamps(root.path) for root, _skip in found]
     sitemaps = [load_source(root.path / SITEMAP_MODULE) for root, _skip in found]
@@ -181,7 +184,7 @@ def page_tree_roots() -> tuple[SeoRoot, ...]:
 
 
 def forget_page_tree_roots() -> None:
-    """Drop the discovered trees, so the next read loads every source again."""
+    """Clear the discovered trees, so the next call loads every source again."""
     page_tree_roots.cache_clear()
 
 

@@ -88,7 +88,7 @@ A dynamic route whose row changes its slug records the move when it saves.
                    defaults={"new_path": f"/posts/{self.slug}/"},
                )
 
-The page's ``@context`` callable raises :exc:`~django.http.Http404` for the old slug, the middleware finds the row, and the visitor lands on the new URL.
+The page's ``@context`` callable raises :exc:`~django.http.Http404` for the old slug, the middleware finds the row, and the visitor is redirected to the new URL.
 
 Remove a page for good
 ~~~~~~~~~~~~~~~~~~~~~~

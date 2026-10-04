@@ -28,8 +28,8 @@ if TYPE_CHECKING:
 class PageContextEntry(NamedTuple):
     """One context callable registered for a `page.py` file.
 
-    `zones` binds the callable to the named zones, so a GET for a foreign zone never
-    calls it, and a `NamedTuple` keeps `register_context` allocating a plain tuple.
+    `zones` binds the callable to the named zones, so a GET for another zone skips it.
+    A `NamedTuple` keeps each registration as cheap as a plain tuple.
     """
 
     func: Callable[..., Any]
@@ -40,9 +40,9 @@ class PageContextEntry(NamedTuple):
 
 
 class ZoneBinding(NamedTuple):
-    """One registered `@context` seen through its zone binding.
+    """One registered `@context` with its zone binding, as the checks read it.
 
-    Zones travel apart from the entry, and `zones=None` means every render runs it.
+    `zones=None` means every render runs the callable.
     """
 
     key: str | None
@@ -68,9 +68,10 @@ def _in_merge_order(entries: dict[str | None, PageContextEntry]) -> _OrderedEntr
 
 
 class _PageOrder(NamedTuple):
-    """The callables of the page itself in run order, with the keys its merge spares.
+    """The callables of the page itself in run order, with the keys the merge keeps.
 
-    `shielded` names the keyed values set ahead of the dict merge, which spares them.
+    `shielded` names the keyed values set before the keyless callable runs, which its
+    dict merge does not overwrite.
     """
 
     entries: _OrderedEntries
@@ -78,9 +79,10 @@ class _PageOrder(NamedTuple):
 
 
 def _page_order(entries: dict[str | None, PageContextEntry]) -> _PageOrder:
-    """Order the page callables, the inheritable ones first and as the file lists them.
+    """Order the page callables, the inheritable ones first in declaration order.
 
-    Descendants run those in declaration order too, so the page sees what they see.
+    Descendants run the inheritable ones in the same order, so they see the same values
+    as the page.
     """
     inherited = tuple(item for item in entries.items() if item[1].inherit_context)
     if not inherited:
@@ -107,7 +109,7 @@ def _keyless_shape_error(
 def _keyless_result(
     result: object, entry: PageContextEntry, file_path: Path, shielded: frozenset[str]
 ) -> dict[str, Any]:
-    """Return the mapping a keyless callable answered, less the shielded keys."""
+    """Return the mapping a keyless callable returned, without the shielded keys."""
     if not isinstance(result, dict):
         raise _keyless_shape_error(entry.func, file_path)
     if not shielded:
@@ -127,8 +129,8 @@ class PageContextRegistry:
         self._misattributions = MisattributionLog()
         self._version = 0
         self._memo_version = 0
-        # Bounded, because a router is free to name page paths without end while
-        # the registry itself only ever holds the files a `@context` ran in.
+        # Bounded, because a router may name page paths without end, while the
+        # registry holds only the files a `@context` ran in.
         self._merge_order: BoundedCache[Path, _PageOrder] = BoundedCache()
         self._inheritable: BoundedCache[Path, tuple[_OrderedEntries, ...]] = (
             BoundedCache()
@@ -136,14 +138,14 @@ class PageContextRegistry:
 
     @property
     def version(self) -> int:
-        """Monotonic counter bumped on every write to the registry.
+        """Return a monotonic counter incremented on every write to the registry.
 
-        The per-path memos key off it, so every write to the registry bumps it.
+        The per-path memos compare it to detect a write since they were built.
         """
         return self._version
 
     def _bump(self) -> None:
-        """Mark the registry as moved so the per-path memos rebuild."""
+        """Increment the version so the per-path memos rebuild."""
         self._version += 1
 
     def reset(self) -> None:
@@ -282,8 +284,8 @@ class PageContextRegistry:
         )
         context_data.update(inherited_context)
 
-        # Read once for the whole merge, because every attribute taken off the
-        # shared holder is a call forwarded to the object behind it.
+        # Read once for the whole merge, because each attribute read on the shared
+        # holder is forwarded to the active resolver.
         active = current_resolver()
         order = self._page_order(file_path)
         for key, entry in order.entries:
@@ -367,7 +369,7 @@ class PageContextRegistry:
         return inherited_context
 
     def _sync_memos(self) -> None:
-        """Drop the per-path memos once the registry has moved under them."""
+        """Drop the per-path memos once the registry changed after they were built."""
         if self._memo_version != self._version:
             self._merge_order.clear()
             self._inheritable.clear()
@@ -395,7 +397,7 @@ class PageContextRegistry:
         return groups
 
     def _build_inheritable_groups(self, file_path: Path) -> Iterator[_OrderedEntries]:
-        """Yield the inheritable callables of each ancestor file off the registry.
+        """Yield the inheritable callables of each ancestor file from the registry.
 
         No directory is probed, so a deleted `page.py` contributes until a reload.
         """

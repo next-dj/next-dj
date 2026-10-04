@@ -1,5 +1,5 @@
-// The entry of next.sse.min.js, the stream bridge. The runtime fetches it once a scan
-// finds a data-next-sse container, and this module hands itself over on evaluation.
+// The entry point of next.sse.min.js, the server-sent events bridge. The runtime
+// fetches it once a scan finds a data-next-sse container.
 
 import { createSse } from "./sse";
 

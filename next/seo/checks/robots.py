@@ -82,7 +82,7 @@ def _file_text(file_path: Path) -> tuple[str | None, CheckMessage | None]:
     except UnicodeDecodeError as exc:
         return None, Error(
             f"{file_path} does not decode as UTF-8 ({exc.reason} at byte "
-            f"{exc.start}), so crawlers read garbage. Save the file as UTF-8.",
+            f"{exc.start}), so crawlers misread its rules. Save the file as UTF-8.",
             obj=str(file_path),
             id="next.E117",
         )
@@ -96,9 +96,9 @@ def _names_sitemap(text: str) -> bool:
 
 @register(Tags.urls, NEXT, SEO)
 def check_seo_text_files(*args, **kwargs) -> list[CheckMessage]:
-    """Read every static `robots.txt` (`next.E117`, `next.W098`).
+    """Validate every static `robots.txt` (`next.E117`, `next.W098`).
 
-    The files are served byte for byte, so a missing `Sitemap:` line stays missing.
+    The files are served unchanged, so the framework cannot add a `Sitemap:` line.
     """
     roots = loaded_seo_roots()
     messages: list[CheckMessage] = []
@@ -138,7 +138,7 @@ def _route(trail: str) -> str | None:
 
 
 def _placeholder(converter_name: str) -> tuple[object, str] | None:
-    """Return a value the named converter takes, with the text it reverses to."""
+    """Return a value the named converter accepts, with its URL text."""
     converter = get_converters().get(converter_name)
     if converter is None:
         return None
@@ -153,9 +153,9 @@ def _placeholder(converter_name: str) -> tuple[object, str] | None:
 
 
 def _route_path(trail: str) -> str | None:
-    """Return the URL path of `trail` cut at its first parameter, or `None` if unknown.
+    """Return the URL path of `trail` up to its first parameter, `None` if unknown.
 
-    Placeholders fill the parameters, so a trail reverses without a static sibling.
+    Placeholder values fill the parameters, so a dynamic trail reverses on its own.
     """
     route = _route(trail)
     if route is None:
@@ -175,7 +175,7 @@ def _route_path(trail: str) -> str | None:
 
 
 def route_paths(root: SeoRoot) -> dict[str, str]:
-    """Return the URL path of every trail, a dynamic one cut at its first parameter."""
+    """Return the URL path of every trail, a dynamic one up to its first parameter."""
     paths: dict[str, str] = {}
     for trail in root.trails:
         path = _route_path(trail)
@@ -203,9 +203,9 @@ def _star_rules(module: types.ModuleType) -> tuple[list[str], list[str]]:
 
 
 def _covered(prefix: str, paths: set[str], allows: list[str]) -> list[str]:
-    """Return the paths `prefix` blocks, an `Allow` as long or longer letting one in.
+    """Return the paths `prefix` blocks, minus those an equal or longer `Allow` matches.
 
-    RFC 9309 picks the longest matching rule, and `Allow` wins a tie.
+    RFC 9309 applies the longest matching rule, and `Allow` takes precedence on a tie.
     """
     regex = rule_pattern(prefix)
     rivals = [rule_pattern(allow) for allow in allows if len(allow) >= len(prefix)]
@@ -238,9 +238,10 @@ def _listed_paths(roots: tuple[SeoRoot, ...]) -> set[str]:
 
 @register(Tags.urls, NEXT, SEO)
 def check_robots_disallow(*args, **kwargs) -> list[CheckMessage]:
-    """Read every static `*` group `Disallow` against the sitemap and noindex pages.
+    """Compare the `Disallow` rules of static `*` groups with the listed URLs.
 
-    `next.W095` flags a listed URL, `next.W096` a noindex page whose tag goes unread.
+    `next.W095` flags a URL the sitemap lists, and `next.W096` a noindex page whose
+    tag crawlers cannot read.
     """
     roots = loaded_seo_roots()
     warnings: list[CheckMessage] = []
@@ -260,7 +261,7 @@ def check_robots_disallow(*args, **kwargs) -> list[CheckMessage]:
             warnings.append(
                 DjangoWarning(
                     f"{source} disallows {prefix!r}, which covers "
-                    f"{', '.join(invited)}, URLs the sitemap invites crawlers to. "
+                    f"{', '.join(invited)}, URLs the sitemap lists for crawlers. "
                     "Narrow the Disallow, or drop the URLs from the sitemap through "
                     "exclude.",
                     obj=str(source),
@@ -272,9 +273,9 @@ def check_robots_disallow(*args, **kwargs) -> list[CheckMessage]:
             warnings.append(
                 DjangoWarning(
                     f"{source} disallows {prefix!r}, which covers the noindex pages "
-                    f"{', '.join(hidden)}. A crawler kept out never sees the "
-                    "noindex, so the page stays indexed from outside links. Let the "
-                    "crawler in and keep the noindex.",
+                    f"{', '.join(hidden)}. A blocked crawler never reads the noindex, "
+                    "so links from other sites keep the page indexed. Allow the "
+                    "path and keep the noindex.",
                     obj=str(source),
                     id="next.W096",
                 )

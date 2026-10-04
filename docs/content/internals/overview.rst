@@ -226,7 +226,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.seeding``
      - A single flat module holding the render-context keys every area shares and the ``RenderFrame`` a component render inherits from the page around it.
    * - ``next.diagnostics``
-     - A single flat module holding the containment of user and third-party code that raises: loud under ``DEBUG``, logged once per source otherwise.
+     - A single flat module holding the containment of user and third-party code that raises, which is raised under ``DEBUG`` or ``STRICT_LOADING`` and logged once per source otherwise.
    * - ``next.errors``
      - A single flat module holding the exceptions more than one subsystem raises, the ``DIRS`` shape refusal and the six a backend the loader cannot resolve produces.
    * - ``next.signals``

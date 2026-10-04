@@ -162,7 +162,7 @@ class TestReplacementIsWhole:
         assert merged[key] == user_value
 
     def test_wizard_backend_keeps_no_default_backend_path(self) -> None:
-        """The one key whose merge used to fill `BACKEND` in now replaces whole."""
+        """A user `FORM_WIZARD_BACKEND` replaces the default whole, `BACKEND` included."""
         merged = merge_user_settings(
             DEFAULTS, {"FORM_WIZARD_BACKEND": {"OPTIONS": {"TIMEOUT": 60}}}
         )

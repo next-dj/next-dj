@@ -181,7 +181,7 @@ Context resolution
 The dependency resolver shares one cache between the inherited and page-level sub-steps of a single ``collect_context`` call, so a value resolved at an ancestor is not recomputed for the page.
 On a regular GET that cache does not extend to components, and each component render starts its own cache.
 A cache that spans the page and its components exists only on the form-dispatch re-render after a validation failure, where the dispatcher attaches its cache to the request.
-Within one page view a single cache serves ``render()`` when the page has one, the context build, and the metadata thunk, and it never lands on the request, so a ``Depends`` value resolves once across them.
+Within one page view a single cache serves ``render()`` when the page has one, the context build, and the metadata thunk, and it is never stored on the request, so a ``Depends`` value resolves once across them.
 
 The canonical description is in :doc:`/content/topics/context`.
 This page focuses on which module performs each step.

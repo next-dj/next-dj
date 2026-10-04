@@ -52,7 +52,7 @@ An answer of ``None`` falls through to the ``Site`` row and the request host.
 Any other answer goes through the same validation as a literal, and a callable takes the request as its one positional argument, which ``manage.py check`` reads off its signature without calling it.
 
 A callable that raises or answers a value that is no origin is a configuration error.
-Under ``DEBUG`` it raises ``ImproperlyConfigured`` naming the setting and the value.
+Under ``DEBUG`` or ``STRICT_LOADING`` it raises ``ImproperlyConfigured`` naming the setting and the value.
 In production it is logged once, a page falls back to the request host, and ``/sitemap.xml`` and a ``robots.py`` answer 503 with ``Retry-After``, so no crawler document is built on a host a ``Host`` header chose.
 
 .. code-block:: python
@@ -83,7 +83,7 @@ Indexability
      - Indexable when
    * - ``"auto"``
      - ``DEBUG`` is off.
-       The host is not compared, because a production site silently closed behind a proxy that rewrites the host costs more than an indexed staging host.
+       The host is not compared, because a proxy that rewrites the host would then close a production site without notice, which does more harm than an indexed staging host.
    * - ``True`` or ``False``
      - Always, or never.
        ``manage.py check --deploy`` warns about ``False`` while the site still publishes a sitemap or a robots source.
@@ -113,7 +113,7 @@ A callable is the recipe for preview deployments that share the production setti
 A request for ``https://pr-42.preview.notes.example/`` renders ``noindex, nofollow`` on every page, while the production host renders the robots directives the pages declare.
 
 A callable that raises fails closed, so a broken rule never opens a preview host to search.
-In production the request reads as not indexable and the failure is logged once, and under ``DEBUG`` the exception reaches the technical page with a note naming the setting.
+The request reads as not indexable and the failure is logged once, and under ``DEBUG`` or ``STRICT_LOADING`` the exception reaches the technical page with a note naming the setting.
 The answer is cached with the SEO responses per indexability, so a closed host never reads the copy an open one stored.
 
 A site closed to search
@@ -159,8 +159,7 @@ See also
 
 .. seealso::
 
-   :doc:`social-and-canonical` for the page-level robots directives.
-   :doc:`social-and-canonical` for the page-level ``X-Robots-Tag``.
+   :doc:`social-and-canonical` for the page-level robots directives and ``X-Robots-Tag``.
    :doc:`robots` for the robots file on an open site.
    :doc:`/content/ref/site` for ``site_url``, ``site_indexable``, and the middleware.
    :doc:`/content/ref/settings` for the ``SITE`` defaults.
