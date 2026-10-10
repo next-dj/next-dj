@@ -111,4 +111,15 @@ NEXT_FRAMEWORK = {
         }
     ],
     "JS_CONTEXT_SERIALIZER": "obs.serializers.PydanticJsContextSerializer",
+    "SITE": {"URL": "https://observability.example", "NAME": "next.dj observability"},
+    "METADATA": {
+        "DEFAULTS": {
+            "viewport": "width=device-width, initial-scale=1",
+            "icons": {"icon": {"url": "/static/obs/icon.svg", "type": "image/svg+xml"}},
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "next.dj — Observability dashboard",
+            },
+        }
+    },
 }

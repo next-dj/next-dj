@@ -152,7 +152,8 @@ Custom verbs
 ~~~~~~~~~~~~
 
 ``register_patch_op`` registers a custom verb name on the server and earns the generic ``Patches.op`` channel.
-``manage.py check`` reads the registered names, reporting ``next.E066`` for a name that shadows a built-in verb and ``next.E090`` for a name that is not a valid verb token.
+``register_patch_op`` raises ``BuiltinPatchOpError`` for a built-in verb name, because the client applies the built-in verb and a custom handler under that name would never run.
+``manage.py check`` reads the registered names and reports ``next.E090`` for a name that is not a valid verb token.
 An unregistered name fails at runtime with ``UnknownPatchOpError``.
 The client supplies the handler through ``Next.partial.defineOp``.
 See :doc:`/content/topics/partial-rendering/extending` for the end-to-end recipe.
@@ -238,6 +239,7 @@ Exceptions
 ``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, and ``LayerHrefWithoutZoneError`` are curated ``next.partial`` exceptions.
 ``UnknownZoneError`` is raised when a partial request names a zone the template does not declare, surfacing as a 400 before any render.
 ``ForeignPageNotAuthorizedError`` is raised when a zone morph names a page that denies the request, whether the handler named that page itself or ``morph_zone`` took it from the posted origin, so a zone never travels in a response the page would have denied.
+``meta()`` raises it too when the fold runs an inherited metadata callable of an origin page that denies the request.
 ``LayerHrefWithoutZoneError`` is raised when a layer seeds an ``href`` but names no ``zone=`` to load it into, so the builder refuses the layer instead of opening an empty one on the client.
 
 The remaining nine are rarely caught and stay out of the curated surface.

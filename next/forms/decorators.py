@@ -36,6 +36,7 @@ class _HandlerSpec:
     scope: str | None = None
     form_class: "type[Form] | Callable[..., Any] | None" = None
     guard: ActionGuard | None = None
+    requires_runtime: bool = False
 
 
 def _register_handler(
@@ -55,6 +56,7 @@ def _register_handler(
             handler=func,
             form_class=spec.form_class,
             guard=spec.guard,
+            requires_runtime=spec.requires_runtime,
         )
     )
 
@@ -69,6 +71,7 @@ def action[C: Callable[..., Any]](
     scope: str | None = None,
     login_required: bool = False,
     permission_required: str | Iterable[str] | None = None,
+    requires_runtime: bool = False,
 ) -> Callable[[C], C]: ...
 def action(
     name: Callable[..., Any] | str | None = None,
@@ -77,6 +80,7 @@ def action(
     scope: str | None = None,
     login_required: bool = False,
     permission_required: str | Iterable[str] | None = None,
+    requires_runtime: bool = False,
 ) -> Callable[..., Any]:
     """Register a callable as a named form action.
 
@@ -114,6 +118,7 @@ def action(
                 scope=scope,
                 form_class=form_class,
                 guard=guard,
+                requires_runtime=requires_runtime,
             ),
         )
         return func

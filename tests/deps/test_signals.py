@@ -20,7 +20,7 @@ class TestProviderRegisteredSignal:
     def test_signal_fires_when_subclass_defined(
         self, capture_provider_registered: SignalRecorder
     ) -> None:
-        """provider_registered fires once when a new RegisteredParameterProvider subclass is defined."""
+        """provider_registered fires once per RegisteredParameterProvider subclass."""
 
         class _TestProvider(RegisteredParameterProvider):
             def can_handle(self, param: object, context: object) -> bool:

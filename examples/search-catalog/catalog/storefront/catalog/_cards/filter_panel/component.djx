@@ -10,7 +10,7 @@
              minlength="3"
              aria-describedby="filter-q-help"
              data-help-default="Type at least 3 characters."
-             data-help-tooshort="Need {min} more — at least 3 characters in total."/>
+             data-help-tooshort="Need {min} more, at least 3 characters in total."/>
       <p id="filter-q-help" data-filter-help
          class="mt-1 text-xs text-muted-foreground">
         Type at least 3 characters.

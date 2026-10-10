@@ -1,4 +1,4 @@
-"""Bootstrap registrations for the built-in `css`, `js`, and `module` asset kinds.
+"""Bootstrap registrations for the built-in slots and `css`, `js`, `module` kinds.
 
 The built-ins register through the same public API a project uses for `jsx` or `wasm`.
 """
@@ -9,12 +9,14 @@ from .assets import default_kinds
 from .collector import default_placeholders
 
 
+_HEAD_MARKER = "<!-- next:head -->"
 _STYLES_MARKER = "<!-- next:styles -->"
 _SCRIPTS_MARKER = "<!-- next:scripts -->"
 
 
 def register_defaults() -> None:
     """Register the built-in placeholder slots and asset kinds."""
+    default_placeholders.register("head", token=_HEAD_MARKER)
     default_placeholders.register("styles", token=_STYLES_MARKER)
     default_placeholders.register("scripts", token=_SCRIPTS_MARKER)
     default_kinds.register(

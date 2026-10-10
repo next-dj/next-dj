@@ -27,6 +27,15 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`components`
    Simple and composite components, props, slots, co-located assets.
 
+:doc:`seo/index`
+   Page metadata and its merge, the site scope, head tags, structured data, the sitemap and robots files, and the checks.
+
+:doc:`caching`
+   ``cache`` and ``headers`` in ``page.py``, what passes down the tree, and the rules that keep a shared page anonymous.
+
+:doc:`scripts/index`
+   Third-party scripts, consent, and page views.
+
 .. rubric:: Forms and static assets
 
 :doc:`forms/index`
@@ -70,6 +79,9 @@ Read the topic that matches the part you are touching, then jump to the referenc
    layouts
    context
    components
+   seo/index
+   caching
+   scripts/index
    forms/index
    static-assets/index
    partial-rendering/index

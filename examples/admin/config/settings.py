@@ -111,4 +111,21 @@ NEXT_FRAMEWORK = {
         }
     ],
     "STATIC_VERSION": "v1",
+    "SITE": {
+        "URL": "https://admin.example",
+        "NAME": "next.dj admin",
+        "INDEXABLE": False,
+    },
+    "METADATA": {
+        "DEFAULTS": {
+            "viewport": "width=device-width, initial-scale=1",
+            "icons": {
+                "icon": {
+                    "url": "/static/shadcn_admin/icon.svg",
+                    "type": "image/svg+xml",
+                }
+            },
+            "title": {"template": "{title} · {site_name}", "default": "next.dj admin"},
+        }
+    },
 }

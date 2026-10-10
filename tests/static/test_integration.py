@@ -83,7 +83,7 @@ class TestFullRenderPipeline:
 
 
 class TestUseStyleBlocksThroughPipeline:
-    """{% use_style %} registration order survives collector + inject."""
+    """`{% use_style %}` registration order is kept through the collector and inject."""
 
     def test_use_style_lands_in_final_html(
         self, wired_manager: StaticManager, collector: StaticCollector
@@ -146,7 +146,13 @@ class TestJsContextFlowsThroughInit:
         collector.add_js_context("score", 42)
 
         out = wired_manager.inject(f"<body>{SCRIPTS_PLACEHOLDER}</body>", collector)
-        assert 'Next._init({"user":"alice","score":42})' in out
+        assert (
+            'Next._init({"user":"alice","score":42,'
+            '"$chunks":{"scripts":"/static/next/next.scripts.min.js",'
+            '"sse":"/static/next/next.sse.min.js",'
+            '"csrf":"/static/next/next.csrf.min.js",'
+            '"poll":"/static/next/next.poll.min.js"}})'
+        ) in out
 
 
 class TestJsContextEscapedInInit:
@@ -182,7 +188,7 @@ class TestEmptyCollectorIntegration:
 
 
 class TestOneAssetSpelledTwoWays:
-    """Resolving before the collector sees a value is what lets dedup do its job."""
+    """A value is resolved before the collector records it, so dedup matches both."""
 
     def test_two_spellings_emit_exactly_one_link(
         self,

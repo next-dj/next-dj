@@ -676,10 +676,10 @@ class _CountingResolveBackend(RecordingStaticBackend):
 
 
 class _ManifestBackend(RecordingStaticBackend):
-    """Serves built URLs once a manifest lands, and the default URL until then.
+    """Serves built URLs once a manifest exists, and the default URL until then.
 
-    Models the manifest-driven backend the how-to guide walks through, whose
-    answer changes the moment an asset build finishes under a running process.
+    Models the manifest-driven backend of the how-to guide, whose URLs change as soon
+    as an asset build finishes under a running process.
     """
 
     def __init__(self, manifest: Path) -> None:
@@ -830,7 +830,7 @@ class TestAssetDiscoveryPagePlanWarmRender:
     def test_a_backend_answering_differently_is_seen_next_render(
         self, tmp_path: Path
     ) -> None:
-        """The manifest recipe from the docs, where a build lands mid-process."""
+        """The manifest recipe from the docs, with a build that finishes mid-process."""
         page_path = _tree_with_every_asset_shape(tmp_path)
         manifest = tmp_path / "manifest.json"
         backend = _ManifestBackend(manifest)
@@ -958,7 +958,7 @@ class TestAssetDiscoveryPlanFreshness:
     def test_importing_the_page_module_does_not_age_its_own_plan(
         self, tmp_path: Path, file_backend: StaticBackend
     ) -> None:
-        """The bytecode the import writes lands before the plan takes an mtime."""
+        """The import writes its bytecode before the plan reads an mtime."""
         page_dir = tmp_path / "section"
         page_dir.mkdir()
         (page_dir / "template.css").write_text("body{}")
@@ -1889,7 +1889,7 @@ class TestStaticDiscoveryCacheSwitch:
     def test_an_instance_built_before_the_override_keeps_its_answer(
         self, file_backend: StaticBackend
     ) -> None:
-        """A live discovery never rereads the key, so a render pays no lookup."""
+        """A live discovery never rereads the key, so a render does no lookup."""
         discovery = self._discovery(file_backend)
         with override_settings(NEXT_FRAMEWORK={"STATIC_DISCOVERY_CACHE": False}):
             assert discovery._cache_plans is True
@@ -2110,7 +2110,7 @@ class TestAssetDiscoveryCustomStems:
 
 
 class TestAssetDiscoveryModuleListNames:
-    """A name in a module list travels the road a co-located file travels."""
+    """A name in a module list is resolved the same way as a co-located file."""
 
     def test_a_bare_name_reaches_the_collector_as_a_public_url(
         self, tmp_path: Path

@@ -4,7 +4,6 @@ DI and untrusted input
 ======================
 
 The dependency resolver injects values from URL parameters, query strings, form bodies, and named providers.
-This page covers the safety rules that apply to each source and the patterns that prevent injection vulnerabilities.
 
 .. contents::
    :local:

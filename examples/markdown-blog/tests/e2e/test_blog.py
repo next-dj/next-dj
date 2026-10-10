@@ -1,23 +1,15 @@
-import pathlib
-
-import blog
 import pytest
-from blog.markdown_template import read_post_body, reading_minutes
+from blog.posts import load_post
 from e2e_support.browser import PageProbe, wait_for_runtime
 from playwright.sync_api import Page, expect
 
 
 pytestmark = pytest.mark.e2e
 
-POSTS_DIR = pathlib.Path(blog.__file__).parent / "screens" / "posts"
-
 SHARE = "[data-share]"
 META_BAR = "article header div"
-BODY = "article > div"
-
-
-def expected_minutes(slug: str) -> int:
-    return reading_minutes(read_post_body(POSTS_DIR / slug / "template.md"))
+BODY = "article > div.prose"
+TRAIL = "nav[aria-label='Breadcrumb']"
 
 
 def open_post(page: Page, base_url: str, slug: str) -> None:
@@ -50,12 +42,12 @@ def test_a_post_renders_its_markdown_body_and_reading_time(
     open_post(page, base_url, "hello-world")
 
     expect(page.locator("article header h1")).to_have_text("Hello, world")
-    expect(page.locator(f"{BODY} h1")).to_have_text("Hello, world")
+    expect(page.locator(f"{BODY} h1")).to_have_count(0)
     code = page.locator(f"{BODY} pre code")
     expect(code).to_have_count(1)
     expect(code).to_contain_text('print("hello, world")')
     expect(page.locator(META_BAR)).to_contain_text(
-        f"~ {expected_minutes('hello-world')} min read"
+        f"~ {load_post('hello-world').reading_minutes} min read"
     )
     expect(page.locator(META_BAR)).to_contain_text("/posts/hello-world/")
 
@@ -71,7 +63,7 @@ def test_the_share_button_copies_the_title_and_the_current_url(
 
     expect(button).to_have_text("✓ Copied")
     assert page.evaluate("() => navigator.clipboard.readText()") == (
-        f"Welcome to the blog — {base_url}/posts/welcome/"
+        f"Welcome to the blog - {base_url}/posts/welcome/"
     )
     assert page.evaluate("() => window.Next.context.post.title") == (
         "Welcome to the blog"
@@ -92,3 +84,16 @@ def test_the_index_lists_the_posts_without_a_share_button(
 
     expect(page).to_have_url(f"{base_url}/posts/welcome/")
     expect(page.locator(SHARE)).to_have_count(1)
+
+
+def test_the_breadcrumb_trail_leads_back_to_the_index(
+    page: Page, base_url: str
+) -> None:
+    open_post(page, base_url, "welcome")
+    trail = page.locator(TRAIL)
+    expect(trail.locator("[aria-current='page']")).to_have_text("Welcome to the blog")
+
+    trail.get_by_role("link", name="Home").click()
+
+    expect(page).to_have_url(f"{base_url}/")
+    expect(page.get_by_role("link", name="Hello, world")).to_be_visible()

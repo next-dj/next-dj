@@ -54,7 +54,7 @@ def _priced_provider() -> str:
 def _priced_page(directory: Path, *, scoped: bool) -> Iterator[Path]:
     """Build a ten-zone page whose providers are bound to a zone or not.
 
-    The registrations land in the module-level page singleton, so teardown undoes them.
+    The registrations go into the module-level page singleton, so teardown undoes them.
     """
     page_file = _write_zoned_page(directory, _PRICED_DJX)
     registry = page_singleton._context_manager

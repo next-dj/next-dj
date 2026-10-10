@@ -4,7 +4,6 @@ File upload security
 ====================
 
 An upload is the one request where a visitor writes bytes the server keeps and later hands to another visitor.
-This page covers the limits, the validation, and the serving rules an upload needs, and states what the framework does and does not do on its own.
 
 .. contents::
    :local:

@@ -98,7 +98,7 @@ class TestInstanceLookupFromSpec:
         assert _instance_lookup_from_spec("id", {"id": 0}) == {"id": 0}
 
     def test_dict_falsy_empty_string_value_is_kept(self) -> None:
-        """A present-but-falsy empty string is a valid lookup value, not treated as absent."""
+        """A present but empty string is a valid lookup value, not an absent one."""
         assert _instance_lookup_from_spec({"id": "pk"}, {"id": ""}) == {"pk": ""}
 
     def test_dict_single_pair_maps_to_db_field(self) -> None:
@@ -125,7 +125,7 @@ class TestInstanceLookupFromSpec:
 
 @pytest.mark.django_db()
 class TestGetInitial:
-    """BaseModelForm.get_initial loads instances from the URL per Meta.instance_from_url."""
+    """BaseModelForm.get_initial loads the instance Meta.instance_from_url names."""
 
     def test_loads_group_by_name(self) -> None:
         """A string spec loads the matching Group by name."""
@@ -145,7 +145,7 @@ class TestGetInitial:
         assert result.name == "staff"
 
     def test_multi_kwarg_dict_one_missing_returns_empty_dict(self) -> None:
-        """A dict spec with a missing url kwarg returns create-mode initial without querying."""
+        """A dict spec missing its url kwarg answers create mode, unqueried."""
 
         class GroupByIdAndSlugForm(ModelForm):
             class Meta:
@@ -336,7 +336,7 @@ class TestCallGetInitial:
         assert result == group
 
     def test_non_var_keyword_path_omits_url_kwargs(self, mock_http_request) -> None:
-        """A get_initial without **kwargs receives only its named params, never raw url_kwargs."""
+        """A get_initial without **kwargs gets its named params, never url_kwargs."""
         seen: dict[str, object] = {}
 
         class NamedOnlyForm(Form):
@@ -497,7 +497,7 @@ class TestGetRenderInstanceFromUrl:
         assert namespace.form.instance.pk is None
 
     def test_render_no_spec_is_unbound_create(self, mock_http_request) -> None:
-        """A peer form with no spec renders an unbound create form regardless of url kwargs."""
+        """A peer form with no spec renders unbound whatever the url kwargs."""
         Group.objects.create(name="reviewers")
         post = QueryDict(mutable=True)
         post["_next_form_origin"] = "/groups/reviewers/"

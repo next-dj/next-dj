@@ -5,7 +5,6 @@ Static assets overview
 
 The static pipeline finds CSS, JS, and module files that live next to pages and components.
 It deduplicates them across the request and injects link and script tags into placeholder slots inside the layout.
-This page covers the four moving pieces of the pipeline and traces a single asset from disk to the rendered HTML.
 
 .. contents::
    :local:

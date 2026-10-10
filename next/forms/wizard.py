@@ -18,13 +18,13 @@ from django.http import HttpRequest, HttpResponse
 from django.utils.encoding import escape_uri_path
 
 from next.backends import SingleBackendManager
-from next.conf.signals import settings_reloaded
 
 from .backends import ActionRegistration, scope_key_for
 from .base import (
     PermissionOutcome,
     _format_success_message,
     _meta_guard,
+    _meta_requires_runtime,
     _registration_gate,
     _stamp_hook_flag,
     _to_snake_case,
@@ -266,12 +266,9 @@ wizard_backend_manager = SingleBackendManager(
 )
 
 
-def _on_settings_reloaded(**kwargs) -> None:
+def forget_wizard_backend(**kwargs) -> None:
     """Drop the cached backend so a reloaded config takes effect."""
     wizard_backend_manager.reset()
-
-
-settings_reloaded.connect(_on_settings_reloaded)
 
 
 def _replace_step_segment(path: str, current: str, target: str) -> str:
@@ -311,6 +308,7 @@ def _auto_register_wizard_class(cls: "type[FormWizard]") -> None:
             scope=scope,
             wizard_class=cls,
             guard=_meta_guard(cls),
+            requires_runtime=_meta_requires_runtime(cls),
         )
     )
 

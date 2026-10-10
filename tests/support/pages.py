@@ -5,17 +5,22 @@ from typing import TYPE_CHECKING
 
 from django.http import HttpRequest
 
-from next.pages.loaders import _load_python_module_memo
+from next.pages.loaders import load_page_module
+from next.pages.manager.views import unified_view as build_unified_view
+from next.pages.metadata import resolve_metadata
+from next.pages.metadata.chain import MetadataThunk
+from next.seeding import METADATA_KEY
 from tests.support.partial_requests import partial_meta
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     import pytest
     from django.http.response import HttpResponseBase
 
     from next.pages import Page
+    from next.pages.metadata import ResolvedMetadata
 
 
 def build_page_request() -> HttpRequest:
@@ -25,6 +30,16 @@ def build_page_request() -> HttpRequest:
     request.META["SERVER_NAME"] = "testserver"
     request.META["SERVER_PORT"] = "80"
     return request
+
+
+def resolve_page_metadata(
+    page: Page, file_path: Path, request: HttpRequest | None = None, **kwargs: object
+) -> ResolvedMetadata:
+    """Resolve the metadata of `file_path` by building its whole render context."""
+    context_data = page.build_render_context(file_path, request, **kwargs)
+    thunk = context_data[METADATA_KEY]
+    assert isinstance(thunk, MetadataThunk)
+    return resolve_metadata(thunk.fold(context_data), request=request)
 
 
 def build_zone_request(zone: str) -> HttpRequest:
@@ -52,6 +67,39 @@ def build_nested_page(root: Path, *, body: str = "<h1>{{ title }}</h1>") -> Path
     return page_file
 
 
+def write_page(
+    root: Path,
+    trail: str = "",
+    source: str = 'template = "ok"\n',
+    *,
+    body: str | None = None,
+) -> Path:
+    """Write one ``page.py`` at ``trail`` under ``root`` and return it.
+
+    A ``body`` also writes the sibling ``template.djx`` the page renders.
+    """
+    directory = root / trail
+    directory.mkdir(parents=True, exist_ok=True)
+    page_file = directory / "page.py"
+    page_file.write_text(source)
+    if body is not None:
+        (directory / "template.djx").write_text(body)
+    return page_file
+
+
+def write_page_chain(root: Path, specs: Sequence[tuple[str, str]]) -> list[Path]:
+    """Write one nested ``page.py`` per spec under ``root``, returned root first."""
+    directory = root
+    pages: list[Path] = []
+    for name, source in specs:
+        directory = directory / name
+        directory.mkdir(exist_ok=True)
+        page_file = directory / "page.py"
+        page_file.write_text(source)
+        pages.append(page_file)
+    return pages
+
+
 def page_naming_one_style(root: Path, *, directory: str = "named") -> Path:
     """Write a page whose ``styles`` list names a staticfiles asset, not a URL.
 
@@ -67,7 +115,7 @@ def page_naming_one_style(root: Path, *, directory: str = "named") -> Path:
 
 def unified_view(page: Page, page_file: Path) -> Callable[..., HttpResponseBase]:
     """Return the view of `page_file` the way the URL builder creates it."""
-    return page._create_unified_view(page_file, _load_python_module_memo(page_file))
+    return build_unified_view(page, page_file, load_page_module(page_file)[0])
 
 
 def path_under(root: Path) -> Callable[[Path], bool]:

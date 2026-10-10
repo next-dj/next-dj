@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import sys
 from pathlib import Path
 from types import CodeType
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -71,6 +72,26 @@ def defining_file(obj: object) -> Path:
     raise TypeError(msg)
 
 
+def registering_file() -> Path:
+    """Return the file that called the decorator factory which calls this helper.
+
+    It is read before the decorator runs, so `@deco` and `@deco()` report one file.
+    """
+    return Path(sys._getframe(2).f_code.co_filename)
+
+
+def declared_file(
+    func: Callable[..., Any],
+    registered_from: Path,
+    note: Callable[[Path, Path, Callable[..., Any]], None],
+) -> Path:
+    """Return the file declaring `func`, noting a mismatch with `registered_from`."""
+    declared_in = defining_file(func)
+    if declared_in != registered_from:
+        note(registered_from, declared_in, func)
+    return declared_in
+
+
 def callable_name(obj: object) -> str:
     """Return the name a registration reports for ``obj`` in diagnostics.
 
@@ -94,7 +115,7 @@ class MisattributedContext(NamedTuple):
     """One registration whose callable was declared outside the file running it.
 
     Both files are kept because a diagnostic has to name the file that
-    expected the value and the one the registration landed on.
+    expected the value and the one the registration is bound to.
     """
 
     registered_from: Path
@@ -114,7 +135,7 @@ class MisattributionLog:
     def record(
         self, registered_from: Path, declared_in: Path, func: Callable[..., Any]
     ) -> None:
-        """Note that `func` bound to `declared_in` while `registered_from` ran."""
+        """Record that `func` was bound to `declared_in` while `registered_from` ran."""
         entry = MisattributedContext(
             registered_from=registered_from,
             declared_in=declared_in,
@@ -136,6 +157,8 @@ __all__ = [
     "MisattributionLog",
     "callable_name",
     "code_filename",
+    "declared_file",
     "defining_file",
     "describe_callable",
+    "registering_file",
 ]

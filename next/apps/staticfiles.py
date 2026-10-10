@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from django.conf import settings
-from django.core.signals import setting_changed
 
 from next.static.defaults import register_defaults
 
@@ -32,13 +31,10 @@ def install() -> None:
     register_defaults()
 
 
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
+def reinstall_finders(*, setting: str, **kwargs) -> None:
     """Re-add the finders when an override replaces the configured list."""
     if setting == "STATICFILES_FINDERS":
         install()
-
-
-setting_changed.connect(_on_setting_changed)
 
 
 __all__ = ["install"]

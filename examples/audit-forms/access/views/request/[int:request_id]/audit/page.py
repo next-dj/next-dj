@@ -1,7 +1,8 @@
 from access.models import AccessRequest, AuditEntry
 from django.http import Http404, HttpRequest
 
-from next import context
+from next import context, page
+from next.pages import MetadataDict
 
 
 @context("access_request")
@@ -11,6 +12,12 @@ def access_request(request_id: int) -> AccessRequest:
         return AccessRequest.objects.get(pk=request_id)
     except AccessRequest.DoesNotExist as exc:
         raise Http404 from exc
+
+
+@page.metadata
+def audit_meta(access_request: AccessRequest) -> MetadataDict:
+    """Title the trail after the request number, never after the requester."""
+    return {"title": f"Request #{access_request.pk}", "robots": {"index": False}}
 
 
 @context("entries")

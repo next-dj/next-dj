@@ -5,7 +5,6 @@ Custom stems
 
 A stem is the filename without the extension.
 The framework ships ``template``, ``layout``, and ``component`` as default stems.
-This page covers how to register new stems so discovery picks up additional filenames.
 
 .. contents::
    :local:

@@ -16,7 +16,6 @@ from django.utils.functional import SimpleLazyObject, empty
 
 from next.backends import resolve_setting_class
 from next.caches import LruCache
-from next.conf.signals import settings_reloaded
 from next.introspect import describe_callable
 
 from .cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache
@@ -153,7 +152,7 @@ class DependencyResolver:
         # Addresses a `remove_provider` dropped, so a later resync does not put
         # the instance the caller took out back on the list. Addressed the way
         # the registry addresses a class, so a reloader re-executing the module
-        # that declares it does not slip a fresh class past the removal.
+        # that declares it does not bypass the removal with a fresh class.
         self._suppressed: set[_Address] = set()
         self._syncing = False
         # Bumped on every `_providers` mutation, so a compiled plan carries the
@@ -186,7 +185,7 @@ class DependencyResolver:
     def _sync_providers(self) -> None:
         """Rebuild the auto-registered instances whenever the registry has moved.
 
-        Full resync, not a tail delta, since a replaced class or a race must land here.
+        A full resync rather than a tail delta, so a replaced class or a race is seen.
         """
         if self._registry_seen == provider_registry.version:
             return
@@ -213,7 +212,7 @@ class DependencyResolver:
                 self._syncing = False
             auto.sort(key=attrgetter("priority"))
             self._auto = auto
-            # The rebuild lands first, so a resolve on another thread never
+            # The rebuild runs first, so a resolve on another thread never
             # finds the registry caught up while the plans it stamped are
             # still reading fresh against the previous provider list.
             self._rebuild()
@@ -496,7 +495,7 @@ class DependencyResolver:
     ) -> dict[str, Any]:
         """Resolve `func` for component callables using template context.
 
-        The context travels unfiltered, since providers reading it by name already
+        The context is passed unfiltered, since providers reading it by name already
         refuse `RESERVED_KEYS` themselves, cheaper than a full copy.
         """
         cache = DependencyCache() if _cache is None else _as_cache(_cache)
@@ -558,9 +557,6 @@ def apply_resolver_setting() -> None:
     _holder._wrapped = cls()
 
 
-def _on_settings_reloaded(**kwargs) -> None:
+def reapply_resolver_setting(**kwargs) -> None:
     """Rebuild the resolver singleton when the framework settings change."""
     apply_resolver_setting()
-
-
-settings_reloaded.connect(_on_settings_reloaded)

@@ -1,7 +1,7 @@
 """Static assets implementation bound into the `next.ports` slot at app startup.
 
 Every method reads the manager when it is called, so binding the port at startup
-costs nothing until a render asks for an asset.
+does no work until a render requests an asset.
 """
 
 from __future__ import annotations

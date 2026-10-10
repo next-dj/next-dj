@@ -38,7 +38,7 @@ class TestFinderFollowsAnOverride:
 
     def test_another_setting_leaves_the_finders_alone(self) -> None:
         before = settings.STATICFILES_FINDERS
-        next_staticfiles._on_setting_changed(setting="INSTALLED_APPS")
+        next_staticfiles.reinstall_finders(setting="INSTALLED_APPS")
         assert settings.STATICFILES_FINDERS is before
 
 

@@ -12,7 +12,7 @@ from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, ClassVar
 from uuid import UUID
 
-from next.utils import normalise_route_name
+from next.utils import ROUTE_BRACKET_PATTERN, normalise_route_name
 
 from .errors import (
     DuplicateURLParameterError,
@@ -71,11 +71,7 @@ class URLPatternParser:
 
     parameter_error: ClassVar[type[URLParameterError]] = URLParameterError
 
-    # The wildcard alternative must come first so `[[x]]` never matches
-    # the single-bracket branch with a `[` inside the captured name.
-    _bracket_pattern: ClassVar[re.Pattern[str]] = re.compile(
-        r"\[\[(?P<wild>[^\[\]]+)\]\]|\[(?P<param>[^\[\]]+)\]"
-    )
+    _bracket_pattern: ClassVar[re.Pattern[str]] = ROUTE_BRACKET_PATTERN
 
     def parse_url_pattern(self, url_path: str) -> tuple[str, dict[str, str]]:
         """Return the Django path string and parameter names for `url_path`."""

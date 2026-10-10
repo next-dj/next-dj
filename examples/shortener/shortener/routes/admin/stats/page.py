@@ -4,6 +4,10 @@ from shortener.models import Link
 from shortener.receivers import action_counts
 
 from next import context
+from next.pages import MetadataDict
+
+
+metadata: MetadataDict = {"title": "Stats"}
 
 
 @context("totals")

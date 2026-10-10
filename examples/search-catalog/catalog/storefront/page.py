@@ -10,7 +10,7 @@ MAX_FEATURED = 12
 
 @context("featured")
 def featured(show: DQuery[int] = DEFAULT_FEATURED) -> list[Product]:
-    """Return featured products for the landing page.
+    """Return featured products for the home page.
 
     The optional `?show=N` query parameter lets visitors widen the
     featured grid up to `MAX_FEATURED`. The value is clamped on the

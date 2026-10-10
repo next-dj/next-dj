@@ -13,6 +13,7 @@ from flags.receivers import access_denied_count
 
 from next.testing import (
     assert_has_class,
+    assert_metadata,
     assert_missing_class,
     find_anchor,
     find_form,
@@ -333,3 +334,24 @@ class TestPostDeleteReceiver:
         flag.delete()
 
         assert cache.get(f"{FLAG_PREFIX}beta") is None
+
+
+class TestPageMetadata:
+    """Each panel names its tab, the admin subtree inherits `noindex` from its root."""
+
+    @pytest.mark.parametrize(
+        ("path", "title", "noindex"),
+        [
+            ("/", "next.dj — Feature flags admin", False),
+            ("/demo/", "Guard demo · next.dj flags", False),
+            ("/admin/", "Flag admin · next.dj flags", True),
+            ("/admin/metrics/", "Metrics · next.dj flags", True),
+        ],
+        ids=["home", "demo", "admin", "metrics"],
+    )
+    def test_each_panel_carries_its_title_and_robots(
+        self, next_client, path: str, title: str, *, noindex: bool
+    ) -> None:
+        assert_metadata(
+            next_client.get(path), title=title, robots="noindex" if noindex else None
+        )

@@ -94,4 +94,24 @@ NEXT_FRAMEWORK = {
         }
     ],
     "STATIC_VERSION": "v1",
+    "SITE": {
+        "URL": "https://short.example",
+        "NAME": "next.dj shortener",
+        "INDEXABLE": True,
+    },
+    "METADATA": {
+        "DEFAULTS": {
+            "viewport": "width=device-width, initial-scale=1",
+            "icons": {
+                "icon": {"url": "/static/shortener/icon.svg", "type": "image/svg+xml"}
+            },
+            "description": (
+                "Shorten a link, share it and count its clicks with next.dj."
+            ),
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "next.dj — URL shortener",
+            },
+        }
+    },
 }

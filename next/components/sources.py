@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from next.conf.signals import settings_reloaded
 from next.discovery import get_router_manager, iter_page_tree_component_folders
 
 from .context import component
@@ -64,9 +63,6 @@ def _register_page_tree_component_folders(manager: ComponentsManager) -> None:
 def reset_components_manager_cache(**kwargs) -> None:
     """Drop the cached `ComponentsManager` so the next read rebuilds it."""
     _components_manager_cache.held = None
-
-
-settings_reloaded.connect(reset_components_manager_cache)
 
 
 def iter_serialized_component_context_keys() -> Iterator[tuple[Path, str]]:

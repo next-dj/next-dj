@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any, ClassVar, override
 
 from django.conf import settings
-from django.core.signals import setting_changed
 
 from .defaults import DEFAULTS, USER_SETTING
 from .imports import clear_import_cache
@@ -97,10 +96,7 @@ def fail_loudly() -> bool:
     return bool(next_framework_settings.STRICT_LOADING or settings.DEBUG)
 
 
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
+def reload_on_setting_changed(*, setting: str, **kwargs) -> None:
     """Reload framework settings when Django reports a matching change."""
     if setting == USER_SETTING:
         next_framework_settings.reload()
-
-
-setting_changed.connect(_on_setting_changed)

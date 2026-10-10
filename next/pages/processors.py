@@ -1,20 +1,18 @@
 """Context-processor discovery and loading.
 
-Sourced from `PAGE_BACKENDS` and Django's `TEMPLATES`, Next-router entries winning ties.
+Processors come from `PAGE_BACKENDS` and Django's `TEMPLATES`, `PAGE_BACKENDS` first.
 """
 
 from __future__ import annotations
 
 import functools
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
-from django.core.signals import setting_changed
-from django.utils.module_loading import import_string
 
 from next.conf import next_framework_settings
-from next.conf.signals import settings_reloaded
+from next.conf.imports import import_callable
 
 
 if TYPE_CHECKING:
@@ -27,14 +25,11 @@ logger = logging.getLogger(__name__)
 def _import_context_processor(
     processor_path: str,
 ) -> Callable[[Any], dict[str, Any]] | None:
-    """Import a context processor callable or return None on failure."""
-    try:
-        processor = import_string(processor_path)
-        if callable(processor):
-            return processor  # type: ignore[no-any-return]
-    except (ImportError, AttributeError) as e:
-        logger.warning("Could not import context processor %s: %s", processor_path, e)
-    return None
+    """Import a context processor callable, warning and returning `None` on failure."""
+    processor = import_callable(processor_path)
+    if processor is None:
+        logger.warning("Could not import context processor %s", processor_path)
+    return cast("Callable[[Any], dict[str, Any]] | None", processor)
 
 
 @functools.cache
@@ -64,19 +59,15 @@ def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
     return [p for path in processor_paths if (p := _import_context_processor(path))]
 
 
-def _reset_context_processors_cache(**kwargs) -> None:
+def forget_context_processors(**kwargs) -> None:
     """Drop the memoised processors so the next render rebuilds the list."""
     _get_context_processors.cache_clear()
 
 
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
+def forget_template_processors(*, setting: str, **kwargs) -> None:
     """Drop the memo when Django reports a `TEMPLATES` change.
 
     `settings_reloaded` covers only the `NEXT_FRAMEWORK` half of the merge.
     """
     if setting == "TEMPLATES":
-        _reset_context_processors_cache()
-
-
-settings_reloaded.connect(_reset_context_processors_cache)
-setting_changed.connect(_on_setting_changed)
+        forget_context_processors()

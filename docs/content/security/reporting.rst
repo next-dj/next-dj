@@ -3,7 +3,6 @@
 Reporting a vulnerability
 =========================
 
-This page covers how to report a security vulnerability in next.dj.
 The disclosure process is private and the maintainers acknowledge every report.
 The canonical policy is :repo:`SECURITY.md <blob/main/SECURITY.md>` in the repository, and this page restates it for the manual.
 

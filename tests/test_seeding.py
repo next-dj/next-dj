@@ -154,7 +154,7 @@ class TestRenderFrame:
         with pytest.raises(FrozenInstanceError):
             frame.template_path = tmp_path / "other.djx"  # type: ignore[misc]
 
-    def test_the_action_anchor_of_the_enclosing_form_rides_along(
+    def test_the_action_anchor_of_the_enclosing_form_is_kept(
         self, tmp_path: Path
     ) -> None:
         context_data: dict[str, object] = {}

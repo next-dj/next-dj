@@ -1,7 +1,9 @@
+import os
 from pathlib import Path
 from unittest.mock import patch
 
 from next.urls.dispatcher import scan_pages_tree
+from tests.support import file_router
 
 
 class TestScanPagesDirectory:
@@ -93,3 +95,99 @@ class TestScanPagesDirectory:
                 )
             )
         assert calls == []
+
+
+class TestRouteOrder:
+    """The page tree yields the same patterns whatever order the directory read gives."""
+
+    @staticmethod
+    def _tree(root: Path) -> None:
+        for trail in (
+            "",
+            "blog",
+            "blog/about",
+            "blog/[slug]",
+            "blog/[int:id]",
+            "blog/[[rest]]",
+            "zeta",
+            "alpha",
+        ):
+            folder = root / trail
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "template.djx").write_text("<h1>Page</h1>")
+        (root / "docs" / "intro").mkdir(parents=True)
+        (root / "docs" / "intro" / "page.py").write_text("x = 1")
+
+    def test_static_then_parameter_then_catch_all(self, tmp_path) -> None:
+        self._tree(tmp_path)
+        trails = [trail for trail, _file in scan_pages_tree(tmp_path)]
+        assert trails == [
+            "",
+            "alpha",
+            "blog",
+            "blog/about",
+            "blog/[int:id]",
+            "blog/[slug]",
+            "blog/[[rest]]",
+            "docs/intro",
+            "zeta",
+        ]
+
+    def test_the_most_specific_sibling_comes_first(self, tmp_path) -> None:
+        # `post-[id]` would be shadowed by `[slug]` and `[uuid:key]` by
+        # `[str:key]`, since Django tries the patterns in order.
+        names = [
+            "[[rest]]",
+            "docs-[[rest]]",
+            "[str:key]",
+            "[slug]",
+            "[uuid:key]",
+            "post-[id]",
+            "[int:n]",
+        ]
+        for name in names:
+            (tmp_path / name).mkdir()
+            (tmp_path / name / "template.djx").write_text("<h1>Page</h1>")
+        trails = [trail for trail, _file in scan_pages_tree(tmp_path)]
+        assert trails == [
+            "post-[id]",
+            "[int:n]",
+            "[uuid:key]",
+            "[slug]",
+            "[str:key]",
+            "docs-[[rest]]",
+            "[[rest]]",
+        ]
+
+    def test_a_reversed_directory_read_yields_the_same_patterns(self, tmp_path) -> None:
+        self._tree(tmp_path)
+        listed = [str(p.pattern) for p in file_router(dirs=[tmp_path]).generate_urls()]
+        real_scandir = os.scandir
+
+        class _Reversed:
+            def __init__(self, path: object) -> None:
+                self._scan = real_scandir(path)
+
+            def __enter__(self) -> list[os.DirEntry[str]]:
+                return list(reversed(list(self._scan.__enter__())))
+
+            def __exit__(self, *exc: object) -> None:
+                self._scan.__exit__(*exc)
+
+        with patch("next.utils.os.scandir", _Reversed):
+            reversed_read = [
+                str(p.pattern) for p in file_router(dirs=[tmp_path]).generate_urls()
+            ]
+        assert reversed_read == listed
+        assert listed.index("blog/about/") < listed.index("blog/<str:slug>/")
+
+    def test_a_static_page_wins_over_a_parameter_sibling(self, tmp_path) -> None:
+        self._tree(tmp_path)
+        patterns = file_router(dirs=[tmp_path]).generate_urls()
+        match = next(
+            found
+            for pattern in patterns
+            if (found := pattern.resolve("blog/about/")) is not None
+        )
+        assert match.kwargs == {}
+        assert match.route == "blog/about/"

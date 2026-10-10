@@ -1,17 +1,19 @@
 """Shared helpers used by per-subpackage system-check modules.
 
-The discovery names travel on from `next.discovery`, so one import serves a check
-module, and the shared unknown-key probe here owns `next.E035`.
+It also re-exports the discovery helpers and the `next.conf` unknown-key check.
 """
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.core.checks import CheckMessage, Error
 
+from next.conf.checks import errors_for_unknown_keys
+from next.conf.defaults import USER_SETTING
 from next.conf.imports import import_class_cached
 from next.discovery import (
     PageRootsError,
@@ -29,8 +31,76 @@ from next.discovery import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
+
+
+WALK_HINT = (
+    "Every DIRS entry and every app pages folder must be a readable directory, "
+    "and a custom router's page_roots() must answer next.urls.PageRoot entries."
+)
+
+
+def raw_scope(name: str) -> Mapping[str, object] | None:
+    """Return the `NEXT_FRAMEWORK[name]` mapping as written, `None` when it is no dict.
+
+    A `NEXT_FRAMEWORK` or a scope that is no dict is reported once, by `next.E076`.
+    """
+    raw = getattr(settings, USER_SETTING, None)
+    if not isinstance(raw, dict):
+        return None
+    scope = raw.get(name)
+    return scope if isinstance(scope, dict) else None
+
+
+def takes_request(func: Callable[..., Any]) -> bool:
+    """Whether `func` can be called with the request as its one positional argument.
+
+    A callable whose signature cannot be inspected counts as taking the request.
+    """
+    try:
+        inspect.signature(func).bind(None)
+    except TypeError:
+        return False
+    except ValueError:
+        return True
+    return True
+
+
+class RunMemo[T]:
+    """Hold one value a check run builds once, kept while its key is the same object.
+
+    The memo keeps a reference to the key, so a new object cannot reuse its `id`.
+    """
+
+    __slots__ = ("_held",)
+
+    def __init__(self) -> None:
+        """Start empty and register with `forget_run_memos`."""
+        self._held: tuple[object, T] | None = None
+        _RUN_MEMOS.append(self)
+
+    def get(self, key: object, build: Callable[[], T]) -> T:
+        """Return the value held for `key`, building and keeping it on a miss."""
+        held = self._held
+        if held is not None and held[0] is key:
+            return held[1]
+        value = build()
+        self._held = (key, value)
+        return value
+
+    def forget(self) -> None:
+        """Drop the held value."""
+        self._held = None
+
+
+_RUN_MEMOS: list[RunMemo[Any]] = []
+
+
+def forget_run_memos() -> None:
+    """Drop the value of every run memo, so the next run rebuilds from disk."""
+    for memo in _RUN_MEMOS:
+        memo.forget()
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,10 +119,10 @@ def registration_file_errors(
     registrations: dict[Path, tuple[str, ...]],
     misattributed: Iterable[tuple[Path, Path, str]],
 ) -> list[CheckMessage]:
-    """Report registrations that no render of the intended file ever collects.
+    """Report registrations that no render of the intended file collects.
 
-    A registration keys on the file declaring the callable, so decorating an imported
-    helper binds it to a non-anchor file, or to another anchor with a different URL.
+    A registration is keyed on the file that declares the callable, so decorating an
+    imported helper binds it to the helper's file.
     """
     records = sorted(misattributed, key=_by_paths)
     errors = _cross_file_errors(subject, records)
@@ -63,8 +133,8 @@ def registration_file_errors(
 def import_backend_class(dotted_path: str) -> type[Any]:
     """Import a dotted backend path, folding any import-time failure into ImportError.
 
-    A backend module runs arbitrary code at import, and a check that lets it
-    raise takes the whole run down instead of reporting one error.
+    A backend module runs arbitrary code at import, and a check that lets it raise
+    aborts the whole run instead of reporting one error.
     """
     try:
         return import_class_cached(dotted_path)
@@ -74,7 +144,7 @@ def import_backend_class(dotted_path: str) -> type[Any]:
 
 
 def _names_by_file(records: list[tuple[Path, Path, str]]) -> dict[Path, set[str]]:
-    """Group the misattributed names by the file they landed on."""
+    """Group the misattributed names by the file they are bound to."""
     grouped: dict[Path, set[str]] = {}
     for _registered_from, declared_in, name in records:
         grouped.setdefault(declared_in, set()).add(name)
@@ -84,7 +154,7 @@ def _names_by_file(records: list[tuple[Path, Path, str]]) -> dict[Path, set[str]
 def _cross_file_errors(
     subject: RegistrationSubject, records: list[tuple[Path, Path, str]]
 ) -> list[CheckMessage]:
-    """Report each registration that landed on a file other than the one running it."""
+    """Report each registration bound to a file other than the one that runs it."""
     errors: list[CheckMessage] = []
     for registered_from, declared_in, name in records:
         errors.append(
@@ -105,9 +175,9 @@ def _dead_file_errors(
     registrations: dict[Path, tuple[str, ...]],
     already_reported: dict[Path, set[str]],
 ) -> list[CheckMessage]:
-    """Report registrations sitting on a file the renderer never looks at.
+    """Report registrations bound to a file the renderer never reads.
 
-    A name in `already_reported` is left out, because the cross-file report named it.
+    A name in `already_reported` is skipped, since the cross-file report names it.
     """
     errors: list[CheckMessage] = []
     for file_path in sorted(registrations, key=str):
@@ -138,30 +208,15 @@ def _by_paths(record: tuple[Path, Path, str]) -> tuple[str, str, str]:
     return (str(registered_from), str(declared_in), name)
 
 
-def errors_for_unknown_keys(
-    config: dict[str, Any], *, allowed: frozenset[str], prefix: str
-) -> list[CheckMessage]:
-    """Return an `Error` list when `config` contains keys outside `allowed`."""
-    unknown = sorted(k for k in config if k not in allowed)
-    if not unknown:
-        return []
-    unknown_fmt = ", ".join(repr(k) for k in unknown)
-    allowed_fmt = ", ".join(sorted(allowed))
-    return [
-        Error(
-            f"{prefix} has unknown keys {unknown_fmt}. Allowed keys are {allowed_fmt}.",
-            obj=settings,
-            id="next.E035",
-        )
-    ]
-
-
 __all__ = [
+    "WALK_HINT",
     "PageRootsError",
     "RegistrationSubject",
+    "RunMemo",
     "discover_page_registrations",
     "errors_for_unknown_keys",
     "first_visit",
+    "forget_run_memos",
     "get_page_roots",
     "get_pages_directories",
     "get_router_manager",
@@ -169,7 +224,9 @@ __all__ = [
     "iter_page_tree_component_folders",
     "iter_scanned_page_pairs",
     "page_tree_skip_names",
+    "raw_scope",
     "read_page_roots",
     "registration_file_errors",
     "reset_router_manager_cache",
+    "takes_request",
 ]

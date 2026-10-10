@@ -50,13 +50,13 @@ def _dedupe_watch_specs(specs: Iterable[tuple[Path, str]]) -> list[tuple[Path, s
 
 
 def _iter_default_autoreload_watch_specs() -> list[tuple[Path, str]]:
-    """Return the default watch specs for pages and filesystem components.
+    """Return the default watch specs for pages and components.
 
-    `.djx` is omitted because a template edit needs no process restart.
+    Templates and the sources at the top of a page tree, such as `scripts.py`, reload
+    in-process, so editing them needs no restart.
     """
-    specs: list[tuple[Path, str]] = [
-        (p, "**/page.py") for p in get_pages_directories_for_watch()
-    ]
+    page_roots = get_pages_directories_for_watch()
+    specs: list[tuple[Path, str]] = [(p, "**/page.py") for p in page_roots]
     specs.extend(
         (root, f"**/{comp_name}/**/component.py")
         for root, comp_name in iter_pages_roots_with_components_folder_names()

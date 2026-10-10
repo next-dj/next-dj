@@ -153,8 +153,8 @@ class FileComponentsBackend(ComponentsBackend):
     def import_component_modules(self) -> tuple[Path, ...]:
         """Import every discovered `component.py` and return their paths.
 
-        The import is unconditional, so a caller that walks decorator state pays under
-        `LAZY_COMPONENT_MODULES` the import the lazy mode otherwise avoids.
+        The import is unconditional, so under `LAZY_COMPONENT_MODULES` a caller that
+        walks decorator state triggers the import the lazy mode otherwise avoids.
         """
         self._ensure_loaded()
         self._import_registered_modules()

@@ -6,7 +6,7 @@
 import { defaultClock, defaultNavigate, defaultSession } from "./adapters";
 import { assetLoad, isAsset } from "./apply";
 import type { Asset, AssetLoad } from "./apply";
-import { sameOrigin } from "./protocol";
+import { sameOrigin, scriptNonce } from "./protocol";
 import type { PartialError } from "./protocol";
 import type { Clock, Navigate } from "./wire";
 
@@ -91,7 +91,7 @@ export function createAssets(deps: AssetsDeps): Assets {
   // Every URL inserted or scanned, normalised by urlKey, the dedup key.
   const loaded = new Set<string>();
   // Copied onto every dynamically inserted asset so CSP keeps allowing them.
-  const nonce = rememberNonce(doc);
+  const nonce = scriptNonce(doc);
   let knownVersion = "";
 
   // The dedup key of a URL asset, one form for both sides of the delta. The DOM
@@ -220,8 +220,8 @@ export function createAssets(deps: AssetsDeps): Assets {
     return el;
   }
 
-  // done rides inside the parse gate with the delta, so an envelope that lands
-  // mid-parse applies its ops once the document is whole.
+  // done runs inside the parse gate with the delta, so an envelope that arrives
+  // mid-parse applies its ops once the document is fully parsed.
   function loadCss(manifest: readonly Asset[], done: () => void): void {
     whenParsed(() => {
       catchUp();
@@ -371,14 +371,6 @@ function inlineKey(load: AssetLoad, body: string): string {
 
 function textOf(element: Element): string {
   return element.textContent;
-}
-
-// document.currentScript is null by the time a patch lands, so the bootstrap
-// nonce is captured at module evaluation and reused for every inserted asset.
-function rememberNonce(doc: Document): string | undefined {
-  const current = doc.currentScript;
-  const value = current instanceof HTMLElement ? current.nonce : "";
-  return value === "" ? undefined : value;
 }
 
 /** The default loader, inserting a <link> and racing its load against the timeout. */

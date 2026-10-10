@@ -3,7 +3,12 @@ import tseslint from "typescript-eslint";
 import vitest from "@vitest/eslint-plugin";
 import prettier from "eslint-config-prettier";
 
-const TS_SOURCES = ["next/client/*.ts", "vitest.config.ts", "eslint.config.mjs"];
+const TS_SOURCES = [
+  "next/client/*.ts",
+  "next/client/entries/*.ts",
+  "vitest.config.ts",
+  "eslint.config.mjs",
+];
 
 export default tseslint.config(
   {

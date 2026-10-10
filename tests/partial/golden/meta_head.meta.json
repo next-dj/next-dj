@@ -1,0 +1,13 @@
+{
+  "name": "meta_head",
+  "description": "A meta patch syncing the four head tags a navigation changes, every key present and the title carried as plain text.",
+  "content_type": "application/vnd.next.patches+json",
+  "status": 200,
+  "headers": {
+    "Content-Type": "application/vnd.next.patches+json",
+    "X-Next-Version": "9f3c2e1b",
+    "Cache-Control": "private, no-store",
+    "Vary": "X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version"
+  },
+  "envelope_file": "meta_head.envelope.json"
+}

@@ -1,8 +1,4 @@
-"""System check for every `NEXT_FRAMEWORK['TEMPLATE_LOADERS']` entry.
-
-The ids are `next.E042` for an entry that is no dotted path, `next.E043` for one that
-cannot be imported, and `next.E089` for a class that is no `TemplateLoader`.
-"""
+"""System check for every `NEXT_FRAMEWORK['TEMPLATE_LOADERS']` entry."""
 
 from __future__ import annotations
 

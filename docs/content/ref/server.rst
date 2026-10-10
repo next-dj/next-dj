@@ -31,6 +31,7 @@ Watcher
 ``register_autoreload_watch_spec(path, glob)`` registers one extra directory and glob pair with the watcher.
 Call it from your own ``AppConfig.ready`` to have additional trees watched without changing the ``next`` package.
 The built-in specs for pages and filesystem components are derived from ``NEXT_FRAMEWORK`` and need no registration.
+The ``sitemap.py``, ``robots.py``, ``robots.txt``, and ``scripts.py`` at the top of a page tree carry no spec, since under ``DEBUG`` the SEO and scripts managers read a source again in-process once its mtime moves, so an edit needs no restart.
 
 ``iter_all_autoreload_watch_specs`` returns the deduplicated list of built-in watch specs together with every pair registered through ``register_autoreload_watch_spec``.
 Each entry is a ``(path, glob)`` tuple consumed by ``StatReloader.watch_dir``.

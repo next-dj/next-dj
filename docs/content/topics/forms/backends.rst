@@ -5,7 +5,6 @@ Action backends
 
 A form action backend stores registered actions, generates their URL patterns, and dispatches submissions to handlers.
 The framework ships ``RegistryFormActionBackend`` and lets a project subclass it.
-This page covers the backend contract, the ``FORM_ACTION_BACKENDS`` setting, and the pattern for a custom backend.
 
 .. contents::
    :local:
@@ -94,6 +93,7 @@ A backend subclasses ``next.forms.FormActionBackend``, an abstract base class wi
 
 ``generate_urls()``.
    Returns the URLconf entries for every registered action.
+   It returns the same view objects on each call, because ``next.E149`` identifies the form action endpoint by its view.
    The bundled backend contributes a single catch-all route and returns an empty list while it holds no actions, so a project whose declaring modules never imported has no ``/_next/form/`` route at all and answers a submission with a bare 404 rather than ``FormActionNotFoundError``.
    The ``registry_empty`` hint on that exception, described in :doc:`/content/ref/forms`, names the same cause when the registry is reachable but empty.
 

@@ -1,15 +1,10 @@
-"""System checks for the form classes and `@action` handlers a project registers.
-
-The ids are `next.E041` and `next.E046` for colliding names, `next.W046` for a class
-outside `BASE_DIR`, `next.E047` and `next.E085` for a bad scope, `next.E053` for
-`@action` on a class, `next.E048` and `next.E049` for `Meta.instance_from_url`, and
-`next.W060` and `next.W061` for a missing `django.contrib` app.
-"""
+"""System checks for the form classes and `@action` handlers a project registers."""
 
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
 from next.checks import NEXT
+from next.utils import middleware_listed
 
 from .sources import diagnostics, iter_registered_actions
 
@@ -158,7 +153,7 @@ def _declares_success_message(target: object) -> bool:
 def check_success_message_framework(*args, **kwargs) -> list[CheckMessage]:
     """Warn when Meta.success_message is declared without the messages framework."""
     has_app = "django.contrib.messages" in settings.INSTALLED_APPS
-    has_middleware = _MESSAGE_MIDDLEWARE in tuple(settings.MIDDLEWARE or ())
+    has_middleware = middleware_listed(settings.MIDDLEWARE or (), _MESSAGE_MIDDLEWARE)
     if has_app and has_middleware:
         return []
     return [

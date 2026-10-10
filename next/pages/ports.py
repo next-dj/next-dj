@@ -1,7 +1,7 @@
 """Page-scan implementation bound into the `next.ports` slot at app startup.
 
-The scan reads the router manager from `next.discovery`, so discovery reaches it
-back through the port instead of through an import that would close the cycle.
+The scan reads the router manager from `next.discovery`, so discovery calls the scan
+through the port instead of through a circular import.
 """
 
 from typing import TYPE_CHECKING, override
@@ -24,7 +24,7 @@ class PageScanImpl(PageScan):
     def load_scanned_page_modules(
         self, router_manager: "RouterManager"
     ) -> "list[tuple[str, Path]]":
-        """Execute every routed `page.py`, answering the ones that loaded."""
+        """Execute every routed `page.py` and return the ones that loaded."""
         return load_scanned_page_modules(router_manager)
 
 

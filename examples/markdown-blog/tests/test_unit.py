@@ -1,15 +1,13 @@
+import datetime
 from pathlib import Path
 
 import pytest
 from blog import receivers
 from blog.loaders import MarkdownTemplateLoader
-from blog.markdown_template import (
-    post_metadata,
-    read_post_body,
-    reading_minutes,
-    render_markdown,
-)
+from blog.markdown_template import render_markdown
+from blog.posts import Post, all_posts, load_post, parse_post, reading_minutes
 from blog.receivers import _detect_source, loader_hits
+from django.http import Http404
 
 from next.pages import Page
 from next.pages.signals import template_loaded
@@ -34,28 +32,81 @@ class TestRenderMarkdown:
             assert needle in html
 
 
-class TestPostMetadata:
-    """`post_metadata` extracts title and URL name from a post folder."""
-
-    def test_extracts_title_and_url_name(self, tmp_path: Path) -> None:
-        post_dir = tmp_path / "my-post"
-        post_dir.mkdir()
-        post_md = post_dir / "post.md"
-        post_md.write_text("# Something\n\ntext")
-        assert post_metadata(post_md) == {
-            "slug": "my-post",
-            "url_name": "next:page_posts_my_post",
-            "title": "Something",
-        }
+FRONT = "---\ntitle: Something\nauthor: Ada\ndate: 2026-01-02\n---\n"
 
 
-class TestReadPostBody:
-    """`read_post_body` returns the raw Markdown text."""
+class TestParsePost:
+    """`parse_post` reads the front matter and keeps the body as Markdown."""
 
-    def test_returns_full_body(self, tmp_path: Path) -> None:
-        post_md = tmp_path / "post.md"
-        post_md.write_text("# Head\n\nbody")
-        assert read_post_body(post_md) == "# Head\n\nbody"
+    def test_reads_every_front_matter_field(self) -> None:
+        post = parse_post(
+            "my-post",
+            "---\ntitle: Something\nauthor: Ada\ndate: 2026-01-02\n"
+            "updated: 2026-02-03\ndescription: Said plainly.\n"
+            "keywords: one, two,, three\n---\n\nbody text\n",
+        )
+        assert post == Post(
+            slug="my-post",
+            title="Something",
+            author="Ada",
+            published=datetime.date(2026, 1, 2),
+            updated=datetime.date(2026, 2, 3),
+            description="Said plainly.",
+            keywords=("one", "two", "three"),
+            body="body text",
+        )
+        assert post.modified == datetime.date(2026, 2, 3)
+
+    def test_an_unedited_post_was_modified_when_published(self) -> None:
+        post = parse_post("p", FRONT + "text")
+        assert post.updated is None
+        assert post.modified == datetime.date(2026, 1, 2)
+        assert post.keywords == ()
+
+    @pytest.mark.parametrize(
+        ("body", "description"),
+        [
+            ("# Title\n\nBody text.", "Body text."),
+            ("# Title\n## Sub\nUnder a subheading.", "Under a subheading."),
+            ("\n\n# Title\n\n\nAfter blank lines.", "After blank lines."),
+            (
+                "# T\n\nfirst line\nsecond line\n\nnext paragraph",
+                "first line second line",
+            ),
+            ("# T\n\nSome **bold**, `code` and _em_.", "Some bold, code and em."),
+            ("# T\n\n" + " ".join(["word"] * 24), " ".join(["word"] * 24)),
+            ("# T\n\n" + " ".join(["word"] * 30), " ".join(["word"] * 24) + "…"),
+            ("# Only a heading", ""),
+        ],
+        ids=[
+            "skips-heading",
+            "skips-subheading",
+            "skips-leading-blanks",
+            "stops-at-paragraph-boundary",
+            "strips-inline-markup",
+            "keeps-exact-limit",
+            "truncates-past-limit",
+            "empty-without-paragraph",
+        ],
+    )
+    def test_without_a_description_the_first_paragraph_stands_in(
+        self, body: str, description: str
+    ) -> None:
+        assert parse_post("p", FRONT + body).description == description
+
+
+class TestLoadPost:
+    """`load_post` reads a file of `POSTS_DIR` and `all_posts` lists them."""
+
+    def test_an_unknown_slug_is_not_found(self) -> None:
+        with pytest.raises(Http404):
+            load_post("missing")
+
+    def test_every_post_is_listed_newest_first(self) -> None:
+        assert [post.slug for post in all_posts()] == ["hello-world", "welcome"]
+
+    def test_a_post_links_its_own_address(self) -> None:
+        assert load_post("welcome").path == "/posts/welcome/"
 
 
 class TestReadingMinutes:
@@ -81,10 +132,15 @@ class TestMarkdownTemplateLoader:
     def test_can_load_false_when_missing(self, tmp_path: Path) -> None:
         assert MarkdownTemplateLoader().can_load(tmp_path / "page.py") is False
 
-    def test_load_template_renders_markdown(self, tmp_path: Path) -> None:
+    def test_load_template_renders_markdown_as_a_prose_block(
+        self, tmp_path: Path
+    ) -> None:
         (tmp_path / "template.md").write_text("# hi\n\nbody")
         html = MarkdownTemplateLoader().load_template(tmp_path / "page.py")
-        assert "<h1>hi</h1>" in (html or "")
+        assert html == (
+            '<article class="prose prose-slate max-w-none text-foreground">'
+            "<h1>hi</h1>\n<p>body</p></article>"
+        )
 
     def test_load_template_returns_none_on_decode_error(self, tmp_path: Path) -> None:
         md_file = tmp_path / "template.md"

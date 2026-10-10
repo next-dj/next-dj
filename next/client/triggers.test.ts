@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { manualPollClock, manualVisibility } from "./test-doubles";
+import { createPoller } from "./poll";
+import type { PollFactory } from "./poll";
+import { CHUNK_TIMEOUT } from "./chunks";
+import {
+  chunkModules,
+  manualPollClock,
+  manualVisibility,
+  unloaded,
+} from "./test-doubles";
 import { createTriggers } from "./triggers";
+import { createDiagnostics } from "./diagnostics";
 import type { IntersectionAdapter, TriggerDeps, Triggers } from "./triggers";
 import type { Clock } from "./wire";
 
@@ -55,6 +64,7 @@ function makeTriggers(over: Partial<Parameters<typeof createTriggers>[0]> = {}):
     clock: manualClock(),
     observer: manualObserver(),
     confirm: () => true,
+    poll: chunkModules.poll,
     ...over,
   });
   return { triggers, requests, aborted };
@@ -308,6 +318,20 @@ describe("trigger delegation", () => {
     expect(requests[0]!.headers?.["X-Next-Origin"]).toBe("/requests/");
   });
 
+  it("names the page a submit was fired from as the owner of its answer", () => {
+    document.body.innerHTML =
+      '<div id="modal"><form action="/_next/form/u/" data-next-action="u"></form></div>';
+    const modal = document.querySelector("#modal")!;
+    const { triggers, requests } = makeTriggers({
+      pageUrl: (el) => (modal.contains(el) ? "/photos/1/" : "/feed/"),
+    });
+    detach = triggers.install(document);
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(requests[0]!.owner).toBe("/photos/1/");
+  });
+
   it("sends no origin header on a submit outside every layer", () => {
     document.body.innerHTML =
       '<form action="/_next/form/u/" data-next-action="u"></form>';
@@ -425,6 +449,26 @@ describe("trigger delegation", () => {
       .dispatchEvent(new Event("input", { bubbles: true }));
     expect(requests[0]!.url).toBe("/search/?q=x");
     expect(replaced).toEqual(["/search/?q=x"]);
+  });
+
+  it("leaves the bar still when the page a filter sits on is not the one it shows", () => {
+    document.body.innerHTML =
+      '<form action="/c/" data-next-target="r">' +
+      '<input name="q" value="x" data-next-trigger="input">' +
+      "</form>";
+    const replaced: string[] = [];
+    const rewritten: [Element, string][] = [];
+    const { triggers, requests } = makeTriggers({
+      history: { push: () => undefined, replace: (href) => replaced.push(href) },
+      rewrite: (el, href) => rewritten.push([el, href]) === 0,
+    });
+    detach = triggers.install(document);
+    document
+      .querySelector("input")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    expect(rewritten).toEqual([[document.querySelector("form"), "/c/?q=x"]]);
+    expect(replaced).toEqual([]);
+    expect(requests[0]!.url).toBe("/c/?q=x");
   });
 
   it("drops the query of an action when the filter form is empty", () => {
@@ -768,6 +812,59 @@ describe("zone polling", () => {
     expect(requests[0]!.headers).toBeUndefined();
     clock.tick();
     expect(requests).toHaveLength(2);
+  });
+
+  it("fetches the poll chunk only once a scan finds a poll zone, then arms it", () => {
+    const clock = manualPollClock();
+    const poll = unloaded<PollFactory>("poll");
+    document.head.innerHTML = "";
+    const { triggers, requests } = makeTriggers({ clock, poll });
+    detach = triggers.install(document);
+    document.body.innerHTML = '<div data-next-zone="t"></div>';
+    triggers.scan(document.body);
+    expect(poll.tags()).toBe(0);
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    triggers.scan(document.body);
+    expect(poll.tags()).toBe(1);
+    expect(clock.pending()).toBe(0);
+    poll.land(createPoller);
+    expect(clock.pending()).toBe(1);
+    clock.tick();
+    expect(requests.map((r) => r.zone)).toEqual(["t"]);
+  });
+
+  it("a poll chunk landing after its timeout still arms the zones", () => {
+    vi.useFakeTimers();
+    try {
+      const clock = manualPollClock();
+      const poll = unloaded<PollFactory>("poll");
+      document.head.innerHTML = "";
+      const { triggers, requests } = makeTriggers({ clock, poll });
+      detach = triggers.install(document);
+      document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+      triggers.scan(document.body);
+      vi.advanceTimersByTime(CHUNK_TIMEOUT);
+      expect(poll.tags()).toBe(0);
+      // The stalled file evaluates late, with no retry fetched in between.
+      poll.land(createPoller);
+      expect(clock.pending()).toBe(1);
+      clock.tick();
+      expect(requests.map((r) => r.zone)).toEqual(["t"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a poll chunk landing after a reset starts no poller for the dead instance", () => {
+    const clock = manualPollClock();
+    const poll = unloaded<PollFactory>("poll");
+    const { triggers } = makeTriggers({ clock, poll });
+    detach = triggers.install(document);
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    triggers.scan(document.body);
+    triggers._reset();
+    poll.land(createPoller);
+    expect(clock.pending()).toBe(0);
   });
 
   it("batches same-interval zones into one comma-joined GET per tick", () => {
@@ -1161,6 +1258,9 @@ describe("zone polling", () => {
   });
 });
 
+// The dev chunk's diagnostics, as the triggers read them once the chunk loads.
+const DEV = createDiagnostics();
+
 describe("dev attribute validation", () => {
   let detach: () => void;
 
@@ -1175,7 +1275,7 @@ describe("dev attribute validation", () => {
   it("warns on an out-of-set data-next-lazy value in dev", () => {
     document.body.innerHTML = '<div data-next-zone="z" data-next-lazy="loaded"></div>';
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { triggers } = makeTriggers({ dev: true });
+    const { triggers } = makeTriggers({ diagnostics: () => DEV });
     detach = triggers.install(document);
     triggers.scan(document.body);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -1188,7 +1288,7 @@ describe("dev attribute validation", () => {
     document.body.innerHTML =
       '<a href="/p2/" data-next-merge="add" data-next-target="list">more</a>';
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { triggers } = makeTriggers({ dev: true });
+    const { triggers } = makeTriggers({ diagnostics: () => DEV });
     detach = triggers.install(document);
     triggers.scan(document.body);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -1200,7 +1300,7 @@ describe("dev attribute validation", () => {
   it("warns on a malformed data-next-poll value in dev", () => {
     document.body.innerHTML = '<div data-next-zone="z" data-next-poll="5s"></div>';
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { triggers } = makeTriggers({ dev: true });
+    const { triggers } = makeTriggers({ diagnostics: () => DEV });
     detach = triggers.install(document);
     triggers.scan(document.body);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -1213,7 +1313,7 @@ describe("dev attribute validation", () => {
     document.body.innerHTML =
       '<div data-next-zone="z" data-next-poll="2147483648"></div>';
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { triggers } = makeTriggers({ dev: true });
+    const { triggers } = makeTriggers({ diagnostics: () => DEV });
     detach = triggers.install(document);
     triggers.scan(document.body);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -1225,7 +1325,7 @@ describe("dev attribute validation", () => {
   it("warns on a sub-second poll interval in dev, naming the floor", () => {
     document.body.innerHTML = '<div data-next-zone="z" data-next-poll="500"></div>';
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { triggers } = makeTriggers({ dev: true });
+    const { triggers } = makeTriggers({ diagnostics: () => DEV });
     detach = triggers.install(document);
     triggers.scan(document.body);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -1237,7 +1337,7 @@ describe("dev attribute validation", () => {
   it("warns on a valid poll interval whose element names no zone in dev", () => {
     document.body.innerHTML = '<div data-next-poll="5000"></div>';
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { triggers } = makeTriggers({ dev: true });
+    const { triggers } = makeTriggers({ diagnostics: () => DEV });
     detach = triggers.install(document);
     triggers.scan(document.body);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -1250,7 +1350,7 @@ describe("dev attribute validation", () => {
     document.body.innerHTML = '<div data-next-zone="z" data-next-lazy="loaded"></div>';
     const el = document.querySelector("div")!;
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { triggers } = makeTriggers({ dev: true });
+    const { triggers } = makeTriggers({ diagnostics: () => DEV });
     detach = triggers.install(document);
     // A replace patch scans the new wrapper element itself, not only descendants.
     triggers.scan(el);
@@ -1265,7 +1365,7 @@ describe("dev attribute validation", () => {
       '<a href="/p2/" data-next-merge="append" data-next-target="list">more</a>' +
       '<div data-next-zone="p" data-next-poll="5000"></div>';
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { triggers } = makeTriggers({ dev: true });
+    const { triggers } = makeTriggers({ diagnostics: () => DEV });
     detach = triggers.install(document);
     triggers.scan(document.body);
     expect(warn).not.toHaveBeenCalled();

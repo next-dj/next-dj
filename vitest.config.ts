@@ -10,7 +10,7 @@ export default defineConfig({
     restoreMocks: true,
     coverage: {
       provider: "v8",
-      include: ["next/client/*.ts"],
+      include: ["next/client/*.ts", "next/client/entries/*.ts"],
       exclude: [
         "next/client/*.test.ts",
         // What is left in adapters.ts is a thin hand-off to a browser global jsdom

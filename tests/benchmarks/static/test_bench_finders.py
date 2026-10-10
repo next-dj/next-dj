@@ -38,8 +38,7 @@ def _build_tree(root: Path) -> None:
 def pages_tree(tmp_path: Path) -> Iterator[Path]:
     """Build the tree and point the framework settings at it.
 
-    Runs under `DEBUG`, where the finder re-asks per asset instead of
-    trusting a cached answer.
+    Runs under `DEBUG`, where the finder re-asks per asset instead of trusting a cache.
     """
     root = tmp_path / "pages"
     root.mkdir()

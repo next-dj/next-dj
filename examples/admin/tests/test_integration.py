@@ -11,6 +11,7 @@ from library.models import Book, Chapter, Tag
 
 from next.testing import (
     NextClient,
+    assert_metadata,
     envelope_of,
     find_form,
     form_action,
@@ -1310,3 +1311,33 @@ class TestFlashMessages:
         )
         body = r.content.decode()
         assert "Welcome, admin." in body
+
+
+class TestPageMetadata:
+    """Every page is `noindex, nofollow`, model pages are titled after the model."""
+
+    def test_login_page_carries_the_site_default_and_noindex(self, next_client):
+        response = next_client.get("/admin/login/")
+        assert_metadata(response, title="next.dj admin", robots="noindex, nofollow")
+        assert response["X-Robots-Tag"] == "noindex, nofollow"
+
+    @pytest.mark.parametrize(
+        "suffix",
+        ["", "add/", "{pk}/change/", "{pk}/delete/", "{pk}/history/"],
+        ids=["changelist", "add", "change", "delete", "history"],
+    )
+    def test_model_pages_are_titled_after_the_model(self, admin_client, book, suffix):
+        path = "/admin/library/book/" + suffix.format(pk=book.pk)
+        assert_metadata(
+            admin_client.get(path),
+            title="Books · next.dj admin",
+            robots="noindex, nofollow",
+        )
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/robots.txt", "/sitemap.xml", "/admin/robots.txt", "/admin/sitemap.xml"],
+        ids=["root-robots", "root-sitemap", "admin-robots", "admin-sitemap"],
+    )
+    def test_no_seo_route_is_mounted(self, admin_client, path):
+        assert admin_client.get(path).status_code == 404

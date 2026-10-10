@@ -8,15 +8,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast, override
 
-from django.core.signals import setting_changed
-
 from next.backends import (
     BackendListManager,
     backend_entries,
     load_backends,
     resolve_setting_class,
 )
-from next.conf.signals import settings_reloaded
 
 from .backends import _DEFAULT_BACKEND_PATH, ComponentsBackend
 from .loading import ModuleLoader
@@ -189,12 +186,12 @@ def register_components_folder_from_router_walk(
     components_manager.register_router_walk_folder(folder, pages_root, scope_relative)
 
 
-def _on_settings_reloaded(**kwargs) -> None:
+def forget_component_backends(**kwargs) -> None:
     """Drop cached component backends when framework settings reload."""
     components_manager._invalidate()
 
 
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
+def forget_render_pipeline(*, setting: str, **kwargs) -> None:
     """Drop the render pipeline when Django reports a `TEMPLATES` change.
 
     A compiled template pins the engine that built it, and the `settings_reloaded`
@@ -202,10 +199,6 @@ def _on_setting_changed(*, setting: str, **kwargs) -> None:
     """
     if setting == "TEMPLATES":
         components_manager._reset_render_pipeline()
-
-
-settings_reloaded.connect(_on_settings_reloaded)
-setting_changed.connect(_on_setting_changed)
 
 
 __all__ = [

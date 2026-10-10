@@ -3,6 +3,10 @@ from django.http import HttpRequest, HttpResponseRedirect
 from wiki.models import RESERVED_SLUGS, Article
 
 from next.forms import ComponentWidget, Form
+from next.pages import MetadataDict
+
+
+metadata: MetadataDict = {"title": "Create an article", "robots": {"index": False}}
 
 
 class ArticleCreateForm(Form):

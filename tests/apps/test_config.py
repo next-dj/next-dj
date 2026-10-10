@@ -1,21 +1,27 @@
 from __future__ import annotations
 
+import ast
 from contextlib import ExitStack
-from typing import TYPE_CHECKING, ClassVar
+from pathlib import Path
+from typing import ClassVar
 from unittest.mock import Mock, patch
 
 import pytest
 from django.apps import apps
 from django.conf import settings
+from django.core.signals import setting_changed
 from django.test import override_settings
+from django.urls import Resolver404, resolve
 from django.utils import autoreload
 from django.utils.autoreload import (
     StatReloader as DjangoStatReloader,
     autoreload_started,
 )
 
+import next as next_package
 from next.apps import autoreload as next_autoreload, components as next_components
 from next.components import FileComponentsBackend, components_manager
+from next.conf.signals import settings_reloaded
 from next.deps import resolver
 from next.deps.introspect import _signature_cache
 from next.pages import loaders as pages_loaders
@@ -25,14 +31,20 @@ from next.partial.ports import PartialShaperImpl
 from next.ports import (
     PortSlot,
     page_scan_slot,
+    page_scripts_slot,
     partial_shaper_slot,
     router_access_slot,
+    seo_routes_slot,
     static_assets_slot,
 )
+from next.scripts.ports import PageScriptsImpl
+from next.seo.manager import seo_manager
+from next.seo.ports import SeoRoutesImpl
 from next.server import NextStatReloader
 from next.static import get_static_manager
 from next.static.ports import StaticAssetsImpl
 from next.urls import RouterFactory, router_manager
+from next.urls.manager import seo_routes_version
 from next.urls.ports import RouterAccessImpl
 from next.urls.signals import router_reloaded
 from tests.support import (
@@ -41,17 +53,17 @@ from tests.support import (
     MalformedRootsRouter,
     RaisingRootsRouter,
     importable_dir,
+    routed,
+    write_tree,
 )
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 _PROCESS_SLOTS = (
     page_scan_slot,
+    page_scripts_slot,
     partial_shaper_slot,
     router_access_slot,
+    seo_routes_slot,
     static_assets_slot,
 )
 
@@ -126,7 +138,7 @@ class TestNextFrameworkConfig:
     def test_autoreload_started_leaves_an_unrouted_app_tree_alone(
         self, mock_autoreload_sender, tmp_path, settings
     ) -> None:
-        """Without ``APP_DIRS`` the app tree routes nothing, so it never reaches watch_dir."""
+        """Without ``APP_DIRS`` the app tree routes nothing and reaches no watch_dir."""
         app_pages = tmp_path / "shop" / "pages"
         app_pages.mkdir(parents=True)
         (tmp_path / "shop" / "__init__.py").write_text("")
@@ -309,7 +321,7 @@ class TestStaticfilesInstall:
     """``next.apps.staticfiles.install`` wires the static files finder."""
 
     def test_next_static_files_finder_in_finders(self) -> None:
-        """``NextStaticFilesFinder`` is present in ``STATICFILES_FINDERS`` after ready()."""
+        """``NextStaticFilesFinder`` sits in ``STATICFILES_FINDERS`` after ready()."""
         finders = getattr(settings, "STATICFILES_FINDERS", [])
         assert "next.static.NextStaticFilesFinder" in finders
 
@@ -390,6 +402,9 @@ class TestDependencyResolverInstall:
         "page_scan_slot",
         "partial_shaper_slot",
         "router_access_slot",
+        "page_scripts_slot",
+        "seo_routes_slot",
+        "seo_routes_version",
         "static_assets_slot",
         "autoreload",
         "templates",
@@ -415,6 +430,9 @@ class TestDependencyResolverInstall:
             "page_scan_slot.set",
             "partial_shaper_slot.set",
             "router_access_slot.set",
+            "page_scripts_slot.set",
+            "seo_routes_slot.set",
+            "seo_routes_version.move",
             "static_assets_slot.set",
             "autoreload.install",
             "templates.install",
@@ -436,6 +454,10 @@ class TestDependencyResolverInstall:
                 RouterAccessImpl,
                 id="router",
             ),
+            pytest.param(
+                "page_scripts_slot", "page scripts port", PageScriptsImpl, id="scripts"
+            ),
+            pytest.param("seo_routes_slot", "seo routes port", SeoRoutesImpl, id="seo"),
             pytest.param(
                 "static_assets_slot",
                 "static assets port",
@@ -468,7 +490,65 @@ class TestDependencyResolverInstall:
         assert len(router_reloaded.receivers) == connected
         assert [type(slot.get()) for slot in _PROCESS_SLOTS] == [
             PageScanImpl,
+            PageScriptsImpl,
             PartialShaperImpl,
             RouterAccessImpl,
+            SeoRoutesImpl,
             StaticAssetsImpl,
         ]
+
+    def test_ready_bumps_the_seo_routes_version(self) -> None:
+        """URL patterns built before the SEO port was bound lack the SEO routes."""
+        before = seo_routes_version.value
+        apps.get_app_config("next").ready()
+        assert seo_routes_version.value not in {0, before}
+
+    def test_patterns_built_before_ready_gain_the_seo_routes(
+        self, tmp_path: Path
+    ) -> None:
+        """An app that resolves a URL in its own `ready()` cannot hide the sitemap."""
+        slot = PortSlot["SeoRoutesImpl"]("seo routes port")
+        with (
+            routed(write_tree(tmp_path / "pages", sitemap="")),
+            patch("next.apps.config.seo_routes_slot", slot),
+            patch("next.urls.manager.seo_routes_slot", slot),
+        ):
+            with pytest.raises(Resolver404):
+                resolve("/sitemap.xml")
+            apps.get_app_config("next").ready()
+            assert resolve("/sitemap.xml").route == "sitemap.xml"
+
+    def test_a_router_reload_resets_the_seo_manager(self) -> None:
+        """The SEO routes follow the routers, so a router reload drops their memo."""
+        apps.get_app_config("next").ready()
+        before = seo_manager.version
+
+        router_manager.reload()
+
+        assert seo_manager.version != before
+
+
+class TestReceiversConnectInReady:
+    """Every invalidation receiver is wired by `ready()`, once, never at import time."""
+
+    @pytest.mark.parametrize(
+        "signal", [setting_changed, settings_reloaded, router_reloaded]
+    )
+    def test_a_second_ready_adds_no_receiver(self, signal) -> None:
+        before = len(signal.receivers)
+        apps.get_app_config("next").ready()
+        assert len(signal.receivers) == before
+
+    def test_no_module_connects_a_receiver_at_import_time(self) -> None:
+        connected = [
+            path
+            for path in Path(next_package.__file__).parent.rglob("*.py")
+            if any(
+                isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Attribute)
+                and node.value.func.attr == "connect"
+                for node in ast.parse(path.read_text()).body
+            )
+        ]
+        assert connected == []

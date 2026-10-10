@@ -5,7 +5,6 @@ SSE under WSGI and ASGI
 
 Server-Sent Events carry patch envelopes to every open tab.
 The same envelope that answers an HTTP request rides the stream as an event.
-This page covers the stream helper, the refresh fan-out, the echo suppression, and the WSGI and ASGI contract that decides whether the stream can send a heartbeat.
 
 .. contents::
    :local:

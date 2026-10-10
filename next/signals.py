@@ -10,6 +10,7 @@ from next.components.signals import (
     components_registered,
 )
 from next.conf.signals import settings_reloaded
+from next.consent.signals import consent_backend_loaded
 from next.deps.signals import provider_registered
 from next.forms.signals import (
     action_dispatched,
@@ -21,7 +22,12 @@ from next.forms.signals import (
     wizard_completed,
     wizard_step_submitted,
 )
-from next.pages.signals import context_registered, page_rendered, template_loaded
+from next.pages.signals import (
+    context_registered,
+    metadata_registered,
+    page_rendered,
+    template_loaded,
+)
 from next.partial.signals import (
     field_validated,
     partial_backend_loaded,
@@ -31,6 +37,8 @@ from next.partial.signals import (
     zone_registered,
     zone_rendered,
 )
+from next.scripts.signals import scripts_registered
+from next.seo.signals import sitemap_backend_loaded
 from next.server.signals import watch_specs_ready
 from next.static.signals import (
     asset_registered,
@@ -50,12 +58,14 @@ __all__ = [
     "component_registered",
     "component_rendered",
     "components_registered",
+    "consent_backend_loaded",
     "context_registered",
     "field_validated",
     "form_access_denied",
     "form_backend_loaded",
     "form_validation_failed",
     "html_injected",
+    "metadata_registered",
     "page_rendered",
     "partial_backend_loaded",
     "patch_op_registered",
@@ -63,7 +73,9 @@ __all__ = [
     "route_registered",
     "router_backend_loaded",
     "router_reloaded",
+    "scripts_registered",
     "settings_reloaded",
+    "sitemap_backend_loaded",
     "sse_stream_closed",
     "sse_stream_opened",
     "static_backend_loaded",

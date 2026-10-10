@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 def route_watch_layer_patches(
     *, get_pages_directories_for_watch, scan_pages_tree
 ) -> Generator[None, None, None]:
-    """Apply the usual ``next.server`` patches around route discovery for ``tick()`` tests."""
+    """Patch ``next.server`` route discovery the usual way for ``tick()`` tests."""
     with (
         patch(
             "next.server.autoreload.get_pages_directories_for_watch",
@@ -29,7 +29,7 @@ def route_watch_layer_patches(
 
 @contextmanager
 def tick_scenario_route_set_grows(reloader: NextStatReloader):
-    """Watch dirs appear on the second call. Scan then returns a page when routes are ready."""
+    """Watch dirs appear on the second call, and the scan then returns a page."""
     fake_path = Path("/fake/pages/home/page.py")
     call_count = [0]
 

@@ -32,7 +32,7 @@ from next.components import (
 )
 from next.components.manager import (
     _configured_template_loader_class,
-    _on_settings_reloaded,
+    forget_component_backends,
 )
 from next.components.renderers import (
     TemplateSource,
@@ -374,7 +374,7 @@ class TestSettingsReloadedIsLazy:
         """The wired receiver drops the shared manager state without a rebuild."""
         components_manager._ensure_backends()
         with patch("next.components.manager.load_backends") as load_backends_mock:
-            _on_settings_reloaded()
+            forget_component_backends()
         load_backends_mock.assert_not_called()
         assert components_manager._loaded is False
 
@@ -510,7 +510,7 @@ class TestRegisterComponentsFolderFromRouterWalk:
     def test_lazy_component_modules_skips_eager_load(
         self, tmp_path: Path, min_component_config: dict
     ) -> None:
-        """With ``LAZY_COMPONENT_MODULES=True`` modules load on resolve, not at discovery."""
+        """With ``LAZY_COMPONENT_MODULES=True`` a module loads on resolve."""
         root = tmp_path / "_components"
         comp_dir = root / "lazy_c"
         comp_dir.mkdir(parents=True)

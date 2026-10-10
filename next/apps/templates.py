@@ -6,7 +6,6 @@ import re
 from typing import Any, cast
 
 from django.conf import settings
-from django.core.signals import setting_changed
 from django.template import base as template_base, engines
 from django.template.engine import Engine
 
@@ -17,6 +16,7 @@ _BUILTIN_MODULES = (
     "next.templatetags.next_static",
     "next.templatetags.pages",
     "next.templatetags.partial",
+    "next.templatetags.scripts",
 )
 
 _DJANGO_BACKEND = "django.template.backends.django.DjangoTemplates"
@@ -26,10 +26,15 @@ _BLOCK_TAG_BRANCH = "{%.*?%}"
 _NEXT_TAG_NAMES = (
     "action_url",
     "asset",
+    "breadcrumbs",
+    "collect_head",
     "collect_scripts",
     "collect_styles",
     "component",
+    "consented",
     "form",
+    "metadata",
+    "script",
     "set_slot",
     "slot",
     "template",
@@ -52,7 +57,7 @@ def _multiline_tag_pattern(pattern: str) -> str:
     """Return *pattern* with a line-spanning branch for next-dj's own block tags.
 
     Raises when Django's branch is not found, and every tag outside the next-dj
-    set keeps that branch, so a stray `{%` elsewhere swallows no extra text.
+    set keeps that branch, so a stray `{%` elsewhere consumes no extra text.
     """
     if _MULTILINE_BLOCK_TAG_BRANCH in pattern:
         return pattern
@@ -122,16 +127,13 @@ def install() -> None:
     _install_builtins()
 
 
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
+def reinstall_builtins(*, setting: str, **kwargs) -> None:
     """Reinstall the builtins when an override hands the engines a new `TEMPLATES`.
 
     Django rebuilds the engines from the new value, which carries no framework tags.
     """
     if setting == "TEMPLATES":
         install()
-
-
-setting_changed.connect(_on_setting_changed)
 
 
 __all__ = ["install"]

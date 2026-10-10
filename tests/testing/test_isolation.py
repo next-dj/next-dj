@@ -1,5 +1,7 @@
+import logging
 from pathlib import Path
 
+import pytest
 from django.http import HttpRequest, HttpResponse
 from django.template import Template
 
@@ -9,6 +11,7 @@ from next.components import (
     render_component,
 )
 from next.components.manager import components_manager
+from next.diagnostics import FailureLog
 from next.forms import ActionRegistration, RegistryFormActionBackend
 from next.forms.backends import FormActionBackend
 from next.forms.manager import form_action_manager
@@ -17,11 +20,14 @@ from next.pages.manager import page
 from next.testing import (
     reset_component_templates,
     reset_components,
+    reset_failure_logs,
     reset_form_actions,
     reset_form_registration_state,
     reset_page_cache,
     reset_registries,
+    reset_scripts,
 )
+from tests.scripts.trees import get, write_tree
 
 
 class TestResetFormActions:
@@ -177,6 +183,37 @@ class TestResetPageCache:
         assert fp not in page._templates.composed
         assert fp not in page._templates.compiled
         assert fp not in page._templates.composed_sources
+
+
+class TestResetScripts:
+    """reset_scripts reads a rewritten `scripts.py` on the next render."""
+
+    def test_a_rewritten_source_shows_after_the_reset(self, tmp_path: Path) -> None:
+        root = write_tree(tmp_path / "pages")
+        assert 'data-next-script="base"' in get(root).content.decode()
+        (root / "scripts.py").write_text(
+            "from next.scripts import Script\nscripts = (Script('new', init='1'),)\n"
+        )
+        reset_scripts()
+        html = get(root).content.decode()
+        assert 'data-next-script="new"' in html
+        assert 'data-next-script="base"' not in html
+
+
+class TestResetFailureLogs:
+    """reset_failure_logs makes a failure logged earlier in the process log again."""
+
+    def test_a_logged_key_logs_again_after_the_reset(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        failures = FailureLog(logging.getLogger("next.tests.isolation"))
+        with caplog.at_level(logging.WARNING, logger="next.tests.isolation"):
+            failures.warn("key", "missing x.js")
+            failures.warn("key", "missing x.js")
+            reset_failure_logs()
+            failures.warn("key", "missing x.js")
+
+        assert caplog.text.count("missing x.js") == 2
 
 
 class _StatelessBackend(FormActionBackend):

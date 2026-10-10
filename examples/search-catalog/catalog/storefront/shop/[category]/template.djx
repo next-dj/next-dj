@@ -1,0 +1,79 @@
+{% url 'next:page_catalog_category' category=category.slug as listing_url %}
+<div class="space-y-10" data-landing="{{ category.slug }}">
+  {% script "meta-pixel" %}
+
+  {% #component "card" %}
+    {% #slot "content" %}
+      <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{{ category.name }}</p>
+      <h1 class="mt-1 text-3xl font-bold tracking-tight text-foreground">{{ category.name }} at launch prices</h1>
+      {% if category.tagline %}
+        <p class="mt-2 text-muted-foreground">{{ category.tagline }}</p>
+      {% endif %}
+      <div class="mt-4">
+        {% component "button" href=listing_url text="Shop the range" variant="default" %}
+      </div>
+
+      <div class="mt-6 border-t border-border pt-4" data-launch-code>
+        <p class="text-sm font-medium text-foreground">Get 15 percent off your first order</p>
+        {% zone "lead-form" %}
+          {% if lead %}
+            <p data-lead-thanks class="mt-2 rounded-md bg-emerald-50 p-4 text-sm text-emerald-800">
+              Thanks, the code is on its way to {{ lead.email }}.
+            </p>
+          {% else %}
+            {% form "launch_code_form" %}
+              <div class="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div class="flex-1">
+                  {% #component "field" label="Email" for_id="id_email" error=form.email.errors|join:" " %}
+                    {% #slot "control" %}{{ form.email }}{% /slot %}
+                  {% /component %}
+                </div>
+                {% component "button" type="submit" text="Send me the code" variant="secondary" %}
+              </div>
+            {% endform %}
+            <noscript>
+              <p class="mt-2 text-xs text-muted-foreground">This sign-up needs JavaScript.</p>
+            </noscript>
+          {% endif %}
+        {% endzone %}
+      </div>
+    {% /slot %}
+  {% /component %}
+
+  <section class="space-y-3" aria-labelledby="landing-offers">
+    <h2 id="landing-offers" class="text-lg font-semibold">Launch prices</h2>
+    <ul class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      {% for product in offers %}
+        <li>{% component "product_card" %}</li>
+      {% endfor %}
+    </ul>
+    <a class="inline-block text-sm text-muted-foreground hover:text-foreground" href="{{ listing_url }}">
+      Browse every {{ category.name|lower }} product
+    </a>
+  </section>
+
+  <section class="space-y-3" aria-labelledby="landing-video">
+    <h2 id="landing-video" class="text-lg font-semibold">See the range</h2>
+    {% #consented "marketing" %}
+      <iframe data-landing-video class="aspect-video w-full rounded-md border border-border"
+              src="https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ"
+              title="The {{ category.name|lower }} range" loading="lazy" allowfullscreen></iframe>
+    {% else %}
+      <p data-landing-video-placeholder class="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground">
+        The video plays from YouTube, which sets marketing cookies. Accept marketing cookies to watch it here.
+      </p>
+    {% /consented %}
+  </section>
+
+  <section class="space-y-3" aria-labelledby="landing-faq">
+    <h2 id="landing-faq" class="text-lg font-semibold">Questions</h2>
+    <dl class="divide-y divide-border rounded-md border border-border bg-card">
+      {% for question, answer in faq %}
+        <div class="p-4">
+          <dt class="font-medium text-foreground">{{ question }}</dt>
+          <dd class="mt-1 text-sm text-muted-foreground">{{ answer }}</dd>
+        </div>
+      {% endfor %}
+    </dl>
+  </section>
+</div>

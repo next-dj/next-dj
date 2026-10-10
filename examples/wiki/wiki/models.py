@@ -5,10 +5,13 @@ from typing import ClassVar
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models
+from django.utils.text import Truncator
 
 
 SLUG_RE = r"^[a-z0-9][a-z0-9-]*$"
 RESERVED_SLUGS = frozenset({"docs", "articles", "search", "wiki"})
+SUMMARY_CHARS = 160
+INLINE_MARKUP = str.maketrans("", "", "*_`")
 
 
 class Article(models.Model):
@@ -36,6 +39,15 @@ class Article(models.Model):
         super().clean()
         if self.slug in RESERVED_SLUGS:
             raise ValidationError({"slug": "This slug is reserved by a file route."})
+
+    @property
+    def summary(self) -> str:
+        """Return the first paragraph of the body as plain text, cut to a snippet."""
+        for block in self.body_md.split("\n\n"):
+            text = " ".join(block.split()).translate(INLINE_MARKUP)
+            if text and not text.startswith("#"):
+                return Truncator(text).chars(SUMMARY_CHARS)
+        return ""
 
     @property
     def url(self) -> str:

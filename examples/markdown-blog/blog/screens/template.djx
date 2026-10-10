@@ -1,13 +1,16 @@
 <div class="space-y-6">
-  {% component "page_header" title="Latest posts" description="Markdown files under `screens/posts/`. One folder = one route." %}
+  {% component "page_header" title="Latest posts" description="Markdown files under `blog/posts/`, one dynamic route for all of them." %}
 
   <ul class="space-y-3">
     {% for post in posts %}
       <li class="rounded-md border border-border bg-card p-4 shadow-sm">
-        <a href="{% url post.url_name %}" class="text-lg font-semibold text-foreground hover:underline">
+        <a href="{% url 'next:page_posts_slug' slug=post.slug %}" class="text-lg font-semibold text-foreground hover:underline">
           {{ post.title }}
         </a>
-        <p class="mt-1 font-mono text-xs text-muted-foreground">/posts/{{ post.slug }}/</p>
+        <p class="mt-1 text-sm text-muted-foreground">{{ post.description }}</p>
+        <p class="mt-1 font-mono text-xs text-muted-foreground">
+          <time datetime="{{ post.published|date:'Y-m-d' }}">{{ post.published|date:"j M Y" }}</time>
+        </p>
       </li>
     {% endfor %}
   </ul>

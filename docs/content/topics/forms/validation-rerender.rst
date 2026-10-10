@@ -84,7 +84,7 @@ What survives re-render
 One thing carries over from the initial render.
 
 Dependency cache.
-   Read the per-request cache through ``next.deps.get_request_dep_cache(request)``.
+   Read the per-request cache through ``next.deps.render_dep_cache(request)``.
    The dispatcher stores it on the request under the attribute named by ``REQUEST_DEP_CACHE_ATTR`` so the helper can find it.
    The re-render reuses each cached value without rerunning the provider.
    A custom DI provider must therefore be idempotent across a render cycle.

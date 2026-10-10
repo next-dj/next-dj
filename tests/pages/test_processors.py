@@ -54,7 +54,7 @@ class TestContextProcessorsMemo:
     def test_a_series_of_calls_builds_the_list_once(self, router_settings) -> None:
         """The second call hands back the very list the first one built."""
         with patch(
-            "next.pages.processors.import_string", return_value=_processor
+            "next.pages.processors.import_callable", return_value=_processor
         ) as mock_import:
             first = _get_context_processors()
             second = _get_context_processors()
@@ -65,7 +65,7 @@ class TestContextProcessorsMemo:
     def test_settings_reloaded_drops_the_memo(self, router_settings) -> None:
         """A framework-settings reload makes the next call rebuild."""
         with patch(
-            "next.pages.processors.import_string", return_value=_processor
+            "next.pages.processors.import_callable", return_value=_processor
         ) as mock_import:
             _get_context_processors()
 
@@ -78,7 +78,7 @@ class TestContextProcessorsMemo:
         """The Django half of the merge moves without `settings_reloaded`."""
         with (
             override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": []}, TEMPLATES=[]),
-            patch("next.pages.processors.import_string", return_value=_processor),
+            patch("next.pages.processors.import_callable", return_value=_processor),
         ):
             assert _get_context_processors() == []
 
@@ -92,7 +92,7 @@ class TestContextProcessorsMemo:
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": _router_with("app.processors.one")},
                 TEMPLATES=_templates_with("app.processors.two"),
             ),
-            patch("next.pages.processors.import_string") as mock_import,
+            patch("next.pages.processors.import_callable") as mock_import,
         ):
             mock_import.side_effect = [_processor, _other_processor]
 
@@ -108,7 +108,7 @@ class TestContextProcessorsMemo:
                 TEMPLATES=_templates_with(shared),
             ),
             patch(
-                "next.pages.processors.import_string", return_value=_processor
+                "next.pages.processors.import_callable", return_value=_processor
             ) as mock_import,
         ):
             assert _get_context_processors() == [_processor]
@@ -122,7 +122,7 @@ class TestContextProcessorsMemo:
         page_file = tmp_path / "page.py"
         request = HttpRequest()
         with patch(
-            "next.pages.processors.import_string", return_value=_processor
+            "next.pages.processors.import_callable", return_value=_processor
         ) as mock_import:
             first = page_instance.build_render_context(page_file, request)
             second = page_instance.build_render_context(page_file, request)

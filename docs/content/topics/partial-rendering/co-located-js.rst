@@ -111,6 +111,7 @@ Scripts in patches never run
 
 A ``<script>`` inside patch HTML is never executed by any insertion path.
 The applier removes every script element from parsed patch HTML before it reaches the document.
+The sweep reaches into the content of every ``<template>`` in the patch as well, nested ones included, because a ``{% #consented %}`` block keeps its body in a template and revealing it would otherwise run a script the patch carried.
 Behaviour arrives through the co-located asset manifest and the ``event`` verb.
 The applier strips ``<script>`` elements from patch markup, it does not strip event-handler attributes, so an ``onclick`` the server renders into patch HTML still runs unless a Content Security Policy blocks it.
 This is structural, not a parser side effect, and it is why an inline widget initialiser has to move to one of the idioms above.

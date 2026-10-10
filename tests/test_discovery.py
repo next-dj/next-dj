@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
-from django.core.checks import Error
+from django.core.checks import Error, run_checks
 from django.test import override_settings
 
+from next import discovery
 from next.conf.signals import settings_reloaded
+from next.diagnostics import degraded
 from next.discovery import (
     PageRootsError,
     discover_page_registrations,
@@ -22,11 +24,18 @@ from next.discovery import (
     page_tree_skip_names,
     read_page_roots,
     reset_router_manager_cache,
+    routed_page_trees,
 )
 from next.pages import page
 from next.pages.ports import PageScanImpl
 from next.ports import PortSlot
-from next.urls import FileRouterBackend, PageRoot, RouterBackend, RouterFactory
+from next.urls import (
+    FileRouterBackend,
+    PageRoot,
+    RouterBackend,
+    RouterFactory,
+    RouterManager,
+)
 from next.urls.dispatcher import scan_pages_tree
 from next.urls.ports import RouterAccessImpl
 from next.utils import walk_page_tree
@@ -39,6 +48,7 @@ from tests.support import (
     SkippingRouter,
     file_router,
     file_router_config_entry,
+    write_page,
 )
 
 
@@ -48,14 +58,6 @@ if TYPE_CHECKING:
 
 def _labelled_root(index: int, tree: Path) -> PageRoot:
     return PageRoot(path=tree, label="Root" if index == 0 else f"Root ({tree})")
-
-
-def _write_page(tree: Path, route: str, source: str = 'template = "ok"\n') -> Path:
-    directory = tree / route
-    directory.mkdir(parents=True, exist_ok=True)
-    page_file = directory / "page.py"
-    page_file.write_text(source)
-    return page_file
 
 
 class _RootTreeRouter(RouterBackend):
@@ -186,7 +188,7 @@ class TestRouterManagerCache:
         self, tmp_path: Path
     ) -> None:
         """A check run reads its routes off this manager, so it carries the trees."""
-        _write_page(tmp_path, "blog")
+        write_page(tmp_path, "blog")
         entry = file_router_config_entry(pages_dir=tmp_path)
 
         with (
@@ -219,6 +221,15 @@ class TestRouterManagerCache:
         assert errors is second_errors
         assert errors[0].id == "next.E007"
         assert access.built == 1
+
+    def test_a_full_check_run_reports_one_failure_once(self) -> None:
+        # Every check that walks the routers skips on the same failure, so one
+        # broken router is one message however many checks would have read it.
+        reset_router_manager_cache()
+        with _counting_router_access(ImportError("boom")):
+            messages = run_checks(include_deployment_checks=True)
+
+        assert [m.id for m in messages].count("next.E007") == 1
 
 
 @contextmanager
@@ -256,7 +267,7 @@ class TestPageRegistrationDiscovery:
 
     def test_a_routed_page_module_is_executed(self, tmp_path: Path) -> None:
         """Execution is what puts the decorators of a page.py into the registry."""
-        page_file = _write_page(
+        page_file = write_page(
             tmp_path,
             "blog",
             "from next.pages import context\n\n\n"
@@ -271,17 +282,14 @@ class TestPageRegistrationDiscovery:
         assert [binding.key for binding in bindings] == ["greeting"]
 
     def test_a_page_that_cannot_be_imported_is_left_out(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog").write_text("raise RuntimeError('boom')\n")
+        write_page(tmp_path, "blog").write_text("raise RuntimeError('boom')\n")
         with _manager_over([_RootTreeRouter([tmp_path])]):
             loaded = discover_page_registrations()
         assert loaded == []
 
-    def test_a_second_call_runs_the_pass_again(self, tmp_path: Path) -> None:
-        """A repeat is what lets a check run see the tree as it stands.
-
-        Django orders its checks freely, so no memo may sit in front of the scan.
-        """
-        page_file = _write_page(tmp_path, "blog")
+    def test_a_second_call_reuses_the_pass(self, tmp_path: Path) -> None:
+        """Every check of a run that reads the registrations shares one import pass."""
+        page_file = write_page(tmp_path, "blog")
         with (
             _manager_over([_RootTreeRouter([tmp_path])]),
             _counting_page_scan() as scan,
@@ -290,17 +298,40 @@ class TestPageRegistrationDiscovery:
             second = discover_page_registrations()
 
         assert first == second == [("blog", page_file)]
+        assert len(scan.managers) == 1
+
+    def test_another_manager_runs_its_own_pass(self, tmp_path: Path) -> None:
+        write_page(tmp_path, "blog")
+        managers = [MagicMock(), MagicMock()]
+        for manager in managers:
+            manager.backends = (_RootTreeRouter([tmp_path]),)
+        with _counting_page_scan() as scan:
+            for manager in managers:
+                discover_page_registrations(manager)
+
+        assert scan.managers == managers
+
+    def test_a_reset_runs_the_pass_again(self, tmp_path: Path) -> None:
+        write_page(tmp_path, "blog")
+        with (
+            _manager_over([_RootTreeRouter([tmp_path])]),
+            _counting_page_scan() as scan,
+        ):
+            discover_page_registrations()
+            reset_router_manager_cache()
+            discover_page_registrations()
+
         assert len(scan.managers) == 2
 
     def test_a_tree_rescanned_after_a_reset_reports_the_new_page(
         self, tmp_path: Path
     ) -> None:
         """The per-run walk is what freezes the tree, and a reset is what thaws it."""
-        blog = _write_page(tmp_path, "blog")
+        blog = write_page(tmp_path, "blog")
         router = _RootTreeRouter([tmp_path])
         with _manager_over([router]):
             first = discover_page_registrations()
-            about = _write_page(tmp_path, "about")
+            about = write_page(tmp_path, "about")
             frozen = discover_page_registrations()
             reset_router_manager_cache()
             after = discover_page_registrations()
@@ -310,7 +341,7 @@ class TestPageRegistrationDiscovery:
 
     def test_a_given_manager_is_the_one_walked(self, tmp_path: Path) -> None:
         """A caller that resolved its own routers is not sent back to the slot."""
-        page_file = _write_page(tmp_path, "blog")
+        page_file = write_page(tmp_path, "blog")
         manager = MagicMock()
         manager.backends = (_RootTreeRouter([tmp_path]),)
         with (
@@ -339,7 +370,7 @@ class TestScannedPairsCache:
     """`iter_scanned_page_pairs` materialises one scan per router per run."""
 
     def test_two_consumptions_scan_once(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog")
+        write_page(tmp_path, "blog")
         router = _RootTreeRouter([tmp_path])
 
         with _walk_spy() as spy:
@@ -350,8 +381,8 @@ class TestScannedPairsCache:
         assert spy.call_count == 1
 
     def test_cached_pairs_match_direct_scan(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog")
-        _write_page(tmp_path, "docs/guide")
+        write_page(tmp_path, "blog")
+        write_page(tmp_path, "docs/guide")
         router = _RootTreeRouter([tmp_path])
 
         cached = list(iter_scanned_page_pairs(router))
@@ -362,8 +393,8 @@ class TestScannedPairsCache:
     def test_distinct_routers_cache_independently(self, tmp_path: Path) -> None:
         tree_a = tmp_path / "a"
         tree_b = tmp_path / "b"
-        _write_page(tree_a, "one")
-        _write_page(tree_b, "two")
+        write_page(tree_a, "one")
+        write_page(tree_b, "two")
         router_a = _RootTreeRouter([tree_a])
         router_b = _RootTreeRouter([tree_b])
 
@@ -377,7 +408,7 @@ class TestScannedPairsCache:
         assert pairs_a != pairs_b
 
     def test_explicit_reset_rescans(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog")
+        write_page(tmp_path, "blog")
         router = _RootTreeRouter([tmp_path])
 
         with _walk_spy() as spy:
@@ -388,7 +419,7 @@ class TestScannedPairsCache:
         assert spy.call_count == 2
 
     def test_settings_reloaded_signal_rescans(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog")
+        write_page(tmp_path, "blog")
         router = _RootTreeRouter([tmp_path])
 
         with _walk_spy() as spy:
@@ -399,11 +430,11 @@ class TestScannedPairsCache:
         assert spy.call_count == 2
 
     def test_new_pages_visible_only_after_reset(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog")
+        write_page(tmp_path, "blog")
         router = _RootTreeRouter([tmp_path])
 
         before = list(iter_scanned_page_pairs(router))
-        _write_page(tmp_path, "about")
+        write_page(tmp_path, "about")
         frozen = list(iter_scanned_page_pairs(router))
         reset_router_manager_cache()
         after = list(iter_scanned_page_pairs(router))
@@ -418,8 +449,8 @@ class TestEveryPagesRootIsScanned:
     def test_pairs_come_from_all_roots(self, tmp_path: Path) -> None:
         tree_a = tmp_path / "a"
         tree_b = tmp_path / "b"
-        page_a = _write_page(tree_a, "blog")
-        page_b = _write_page(tree_b, "docs")
+        page_a = write_page(tree_a, "blog")
+        page_b = write_page(tree_b, "docs")
         router = _RootTreeRouter([tree_a, tree_b])
 
         with _walk_spy() as spy:
@@ -433,15 +464,15 @@ class TestEveryPagesRootIsScanned:
         # and a walk that keeps duplicates both fail this.
         tree_a = tmp_path / "a"
         tree_b = tmp_path / "b"
-        _write_page(tree_a, "blog")
-        _write_page(tree_b, "docs")
+        write_page(tree_a, "blog")
+        write_page(tree_b, "docs")
         router = _RootTreeRouter([tree_a, tree_b, tree_a])
 
         assert get_pages_directories(router) == [tree_a, tree_b]
 
     def test_symlinked_spelling_of_one_tree_collapses(self, tmp_path: Path) -> None:
         real = tmp_path / "real"
-        _write_page(real, "blog")
+        write_page(real, "blog")
         linked = tmp_path / "linked"
         linked.symlink_to(real, target_is_directory=True)
         router = _RootTreeRouter([real, linked])
@@ -454,7 +485,7 @@ class TestEveryPagesRootIsScanned:
     def test_one_tree_under_two_labels_is_scanned_once(self, tmp_path: Path) -> None:
         # An app tree also listed in DIRS is routed twice for real, so the roots
         # keep both entries while the scan behind the page checks walks it once.
-        _write_page(tmp_path, "blog")
+        write_page(tmp_path, "blog")
         router = _TwoLabelRouter(tmp_path)
 
         assert [root.label for root in get_page_roots(router)] == ["App 'shop'", "Root"]
@@ -464,7 +495,7 @@ class TestEveryPagesRootIsScanned:
         # The page registries key on the path the module was loaded by, so the
         # router's own spelling has to come back out, not the resolved one.
         real = tmp_path / "real"
-        _write_page(real, "blog")
+        write_page(real, "blog")
         linked = tmp_path / "linked"
         linked.symlink_to(real, target_is_directory=True)
         router = _RootTreeRouter([linked, real])
@@ -479,7 +510,7 @@ class TestPageRootsAreTheRoutersOwn:
         self, tmp_path: Path, monkeypatch
     ) -> None:
         # A `pages` beside the process is no page root. `next.W002` names it.
-        _write_page(tmp_path / "pages", "hello")
+        write_page(tmp_path / "pages", "hello")
         monkeypatch.chdir(tmp_path)
 
         assert get_page_roots(_RootTreeRouter(root_trees=[])) == []
@@ -487,13 +518,78 @@ class TestPageRootsAreTheRoutersOwn:
     def test_the_reported_tree_is_the_only_tree(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        _write_page(tmp_path / "pages", "hello")
+        write_page(tmp_path / "pages", "hello")
         configured = tmp_path / "shell"
         configured.mkdir()
         monkeypatch.chdir(tmp_path)
         router = _RootTreeRouter([configured])
 
         assert get_page_roots(router) == [PageRoot(path=configured, label="Root")]
+
+
+class TestRoutedPageTrees:
+    """Every routed tree is listed once, in router order, with the names it skips."""
+
+    def test_a_tree_two_routers_share_is_listed_once(self, tmp_path: Path) -> None:
+        tree = tmp_path / "shell"
+        tree.mkdir()
+        manager = MagicMock(spec=RouterManager)
+        manager.backends = (_RootTreeRouter([tree]), _RootTreeRouter([tree, tmp_path]))
+        found = routed_page_trees(manager)
+        assert [root.path for root, _skip in found] == [tree, tmp_path]
+        assert all(isinstance(skip, frozenset) for _root, skip in found)
+
+    def test_a_failing_router_costs_its_trees_and_is_logged(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, settings
+    ) -> None:
+        """A request reads the trees, so the failure degrades the render it ran in."""
+        settings.DEBUG = False
+        manager = MagicMock(spec=RouterManager)
+        manager.backends = (RaisingRootsRouter(), _RootTreeRouter([tmp_path]))
+        with caplog.at_level("ERROR", logger="next.discovery"):
+            found = routed_page_trees(manager)
+
+        assert [root.path for root, _skip in found] == [tmp_path]
+        assert "RaisingRootsRouter failed to list its page trees" in caplog.text
+        assert "database is down" in caplog.text
+        assert degraded() is True
+
+    def test_a_failing_router_raises_under_debug(self, settings) -> None:
+        settings.DEBUG = True
+        manager = MagicMock(spec=RouterManager)
+        manager.backends = (RaisingRootsRouter(),)
+        with pytest.raises(PageRootsError) as caught:
+            routed_page_trees(manager)
+
+        assert "Make page_roots() return" in caught.value.__notes__[0]
+
+    def test_the_contract_is_read_once_per_router_version(self, tmp_path: Path) -> None:
+        manager = MagicMock(spec=RouterManager)
+        manager.version = 1
+        manager.backends = (SkippingRouter([tmp_path], frozenset({"api"})),)
+        with patch.object(
+            SkippingRouter, "skip_dir_names", return_value=frozenset({"api"})
+        ) as asked:
+            first = routed_page_trees(manager)
+            routed_page_trees(manager)
+            manager.version = 2
+            manager.backends = (SkippingRouter([tmp_path], frozenset({"api"})),)
+            routed_page_trees(manager)
+
+        assert first[0][1] == frozenset({"api"})
+        assert asked.call_count == 2
+
+    def test_a_reload_pins_no_router_for_the_rest_of_the_process(
+        self, tmp_path: Path
+    ) -> None:
+        """Each reload builds new routers, and none of them stays in a check cache."""
+        manager = MagicMock(spec=RouterManager)
+        for version in range(3):
+            manager.version = version
+            manager.backends = (_RootTreeRouter([tmp_path]),)
+            routed_page_trees(manager)
+
+        assert discovery._CACHED_ROUTERS == []
 
 
 class TestPageTreeSkipNames:
@@ -521,7 +617,7 @@ class TestPageTreeSkipNames:
         # A `blog` that one entry refuses is a route of the next entry's tree,
         # so the skip set of a router may never gather what another declared.
         tree = tmp_path / "site"
-        _write_page(tree, "blog")
+        write_page(tree, "blog")
         entries = [
             file_router_config_entry(dirs=["blog"]),
             file_router_config_entry(pages_dir=tree),
@@ -554,7 +650,7 @@ class TestPageTreeSkipNames:
             assert page_tree_skip_names(router) == frozenset({"api"})
 
     def test_a_raising_skip_set_refuses_no_directory(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog")
+        write_page(tmp_path, "blog")
         router = RaisingSkipNamesRouter([tmp_path])
 
         assert page_tree_skip_names(router) == frozenset()
@@ -602,7 +698,7 @@ class TestPageTreeComponentFolders:
         self, tmp_path: Path
     ) -> None:
         tree = tmp_path / "shell"
-        _write_page(tree, "blog")
+        write_page(tree, "blog")
         top = self._write_component(tree / "_components")
         nested = self._write_component(tree / "blog" / "_components")
         router = file_router(app_dirs=False, dirs=[tree])
@@ -616,7 +712,7 @@ class TestPageTreeComponentFolders:
     ) -> None:
         # The router never registers what `_drafts` holds, so neither may the check.
         tree = tmp_path / "shell"
-        _write_page(tree, "blog")
+        write_page(tree, "blog")
         self._write_component(tree / "_drafts" / "_components")
         entry = file_router_config_entry(pages_dir=tree, dirs=["_drafts"])
 
@@ -628,7 +724,7 @@ class TestPageTreeComponentFolders:
         self, tmp_path: Path
     ) -> None:
         tree = tmp_path / "shell"
-        _write_page(tree, "blog")
+        write_page(tree, "blog")
         self._write_component(tree / "_components")
 
         assert list(iter_page_tree_component_folders(_RootTreeRouter([tree]))) == []
@@ -637,7 +733,7 @@ class TestPageTreeComponentFolders:
         self, tmp_path: Path
     ) -> None:
         tree = tmp_path / "shell"
-        _write_page(tree, "blog")
+        write_page(tree, "blog")
         widgets = self._write_component(tree / "widgets")
         router = _WidgetsFolderRouter(file_router_config_entry(pages_dir=tree))
 
@@ -654,7 +750,7 @@ class TestPageTreeComponentFolders:
 
     def test_pages_and_folders_come_from_one_walk(self, tmp_path: Path) -> None:
         tree = tmp_path / "shell"
-        _write_page(tree, "blog")
+        write_page(tree, "blog")
         self._write_component(tree / "_components")
         router = file_router(app_dirs=False, dirs=[tree])
 
@@ -670,7 +766,7 @@ class TestPageTreeComponentFolders:
         self, tmp_path: Path
     ) -> None:
         tree = tmp_path / "shell"
-        _write_page(tree, "blog")
+        write_page(tree, "blog")
         self._write_component(tree / "_components")
 
         assert (
@@ -683,11 +779,11 @@ class TestFileRouterWalkParity:
     """The check walk finds exactly the pages the file router's own walk finds."""
 
     def _build_tree(self, root: Path) -> None:
-        _write_page(root, "blog")
-        _write_page(root, "blog/[slug]")
-        _write_page(root, "_components/card")
-        _write_page(root, "_drafts/wip")
-        _write_page(root, "deep/nested/leaf")
+        write_page(root, "blog")
+        write_page(root, "blog/[slug]")
+        write_page(root, "_components/card")
+        write_page(root, "_drafts/wip")
+        write_page(root, "deep/nested/leaf")
         (root / "virtual").mkdir(parents=True, exist_ok=True)
         (root / "virtual" / "template.djx").write_text("<p>ok</p>\n")
 
@@ -769,7 +865,7 @@ class TestPerRouterCachesKeyOnIdentity:
 
     def test_a_config_equal_subclass_keeps_its_own_scan(self, tmp_path: Path) -> None:
         tree = tmp_path / "shell"
-        _write_page(tree, "blog")
+        write_page(tree, "blog")
         (tree / "_widgets").mkdir()
         (tree / "_widgets" / "card").mkdir()
         (tree / "_widgets" / "card" / "page.py").write_text('template = "x"\n')
@@ -789,7 +885,7 @@ class TestPerRouterCachesKeyOnIdentity:
     ) -> None:
         # A dataclass router carries `__hash__ = None`, which no cache lookup
         # may turn into a traceback out of a check run.
-        _write_page(tmp_path, "blog")
+        write_page(tmp_path, "blog")
         router = _UnhashableRouter(tree=tmp_path)
 
         assert page_tree_skip_names(router) == frozenset()
@@ -836,7 +932,7 @@ class TestFailingPageRootsRead:
         assert str(caught.value.__cause__) == "database is down"
 
     def test_a_healthy_router_raises_nothing(self, tmp_path: Path) -> None:
-        _write_page(tmp_path, "blog")
+        write_page(tmp_path, "blog")
 
         roots = read_page_roots(_RootTreeRouter([tmp_path]))
 

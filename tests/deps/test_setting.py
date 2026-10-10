@@ -49,7 +49,7 @@ class BuiltResolver(DependencyResolver):
     """Resolver subclass that sets up a field of its own while it is built."""
 
     def __init__(self, *providers) -> None:
-        """Note that the constructor ran, on top of the base initialisation."""
+        """Record that the constructor ran, after the base initialisation."""
         super().__init__(*providers)
         self.badge = "built"
 
@@ -181,7 +181,7 @@ class TestApplyResolverSetting:
         assert not resolver._plan_cache
 
     def test_a_subclass_with_slots_is_built_like_any_other(self) -> None:
-        """Slots of its own are no obstacle once the object is built rather than retyped."""
+        """Own slots are no obstacle once the object is built rather than retyped."""
         apply_with(SLOTTED_PATH)
         assert type(current_resolver()) is SlottedResolver
 

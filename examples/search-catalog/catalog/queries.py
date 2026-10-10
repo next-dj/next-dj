@@ -6,19 +6,27 @@ from typing import TYPE_CHECKING, Any
 
 from django.core.cache import cache
 from django.core.paginator import Paginator
+from django.http import Http404
 
-from .models import Product
+from .models import Category, Product
 
 
 if TYPE_CHECKING:
     from django.db.models import QuerySet
 
-    from .models import Category
     from .providers import Filters
 
 
 CACHE_KEY_PREFIX = "catalog.search."
 CACHE_TTL = 60
+
+
+def route_category(slug: str) -> Category:
+    """Return the category the slug of a route names, a 404 for an unknown one."""
+    try:
+        return Category.objects.get(slug=slug)
+    except Category.DoesNotExist as exc:
+        raise Http404 from exc
 
 
 def _cache_key(

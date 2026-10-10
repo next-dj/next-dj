@@ -28,8 +28,8 @@ export interface MorphOptions {
   afterNode?: (oldNode: Node, newNode: Node) => void;
   // An unmatched old node is about to be discarded. false keeps it.
   onDiscard?: (node: Node) => boolean | void;
-  // Emit markup diagnostics to the console. Default false.
-  dev?: boolean;
+  // Reports a node carrying both data-next-key and id, the dev channel's warning.
+  keyed?: ((el: Element) => void) | undefined;
 }
 
 interface Ctx {
@@ -42,14 +42,14 @@ interface Ctx {
   onDiscard: (node: Node) => boolean | void;
 }
 
-// Read the id through getAttribute: the `id` property is subject to DOM
-// clobbering, an `<input name="id">` shadows form.id.
-function readId(el: Element, dev: boolean): string | null {
+type Keyed = MorphOptions["keyed"];
+
+// Read the id through getAttribute, since the `id` property is subject to DOM
+// clobbering, where an `<input name="id">` shadows form.id.
+function readId(el: Element, keyed: Keyed): string | null {
   const key = el.getAttribute(ATTR_KEY);
   if (key !== null) {
-    if (dev && el.getAttribute("id") !== null) {
-      console.warn(`[next.morph] ${ATTR_KEY} and id on one node`, el);
-    }
+    if (keyed !== undefined && el.getAttribute("id") !== null) keyed(el);
     return key;
   }
   return el.getAttribute("id");
@@ -57,17 +57,17 @@ function readId(el: Element, dev: boolean): string | null {
 
 // Build id-sets for one tree in a single pass. Each element's id bubbles into
 // every ancestor's set, so a wrapper without an id still votes through its
-// descendants. Collected ids also land in the universe for the intersection.
+// descendants. Collected ids are also added to the universe for the intersection.
 function collectIds(
   root: Element,
   into: Map<Element, Set<string>>,
   universe: Set<string>,
-  dev: boolean,
+  keyed: Keyed,
 ): void {
-  consume(root, root, into, universe, dev);
+  consume(root, root, into, universe, keyed);
   const tagged = root.querySelectorAll(`[id],[${ATTR_KEY}]`);
   for (const el of Array.from(tagged)) {
-    consume(el, root, into, universe, dev);
+    consume(el, root, into, universe, keyed);
   }
 }
 
@@ -76,9 +76,9 @@ function consume(
   root: Element,
   into: Map<Element, Set<string>>,
   universe: Set<string>,
-  dev: boolean,
+  keyed: Keyed,
 ): void {
-  const id = readId(el, dev);
+  const id = readId(el, keyed);
   if (id === null) return;
   universe.add(id);
   let node: Element | null = el;
@@ -171,8 +171,8 @@ function findMatch(
   return pointer;
 }
 
-// A hyphenated tag or a shadow root is atomic: on a tag match only attributes
-// sync, children are never morphed, the engine never enters the shadow root.
+// A hyphenated tag or a shadow root is atomic. On a tag match only attributes
+// sync, and the engine never morphs its children or enters the shadow root.
 function isAtomic(el: Element): boolean {
   return el.tagName.includes("-") || el.shadowRoot != null;
 }
@@ -276,8 +276,8 @@ function syncAttributes(ctx: Ctx, oldEl: Element, newEl: Element): void {
       }
     }
   }
-  // Snapshot the old names: removeAttribute mutates the live NamedNodeMap, so a
-  // fixed list keeps the pass stable while it removes.
+  // Snapshot the old names, since removeAttribute mutates the live NamedNodeMap and
+  // a fixed list keeps the pass stable while it removes.
   const oldNames = Array.from(oldEl.attributes, (attr) => attr.name);
   for (const name of oldNames) {
     if (newEl.hasAttribute(name) || skipAttribute(ctx, oldEl, name)) continue;
@@ -349,8 +349,8 @@ function morphChildren(
 }
 
 // A match always shares its new pair's tag, so an atomic element with a changed
-// tag never matches: it is inserted fresh and the old one discarded, the honest
-// connected/disconnected lifecycle for a custom element.
+// tag never matches. It is inserted new and the old one discarded, which gives a
+// custom element the correct connected and disconnected callbacks.
 function applyMatch(
   ctx: Ctx,
   match: Node,
@@ -441,7 +441,7 @@ export function morph(
 ): Element {
   const content = parseContent(target, html);
   const mode = options.mode ?? "node";
-  const dev = options.dev ?? false;
+  const keyed = options.keyed;
   const doc = target.ownerDocument;
 
   const newRoot =
@@ -456,12 +456,12 @@ export function morph(
   const ids = new Map<Element, Set<string>>();
   const oldUniverse = new Set<string>();
   const newUniverse = new Set<string>();
-  collectIds(target, ids, oldUniverse, dev);
+  collectIds(target, ids, oldUniverse, keyed);
   if (newRoot instanceof Element) {
-    collectIds(newRoot, ids, newUniverse, dev);
+    collectIds(newRoot, ids, newUniverse, keyed);
   } else {
     for (const child of Array.from(newRoot.childNodes)) {
-      if (isElement(child)) collectIds(child, ids, newUniverse, dev);
+      if (isElement(child)) collectIds(child, ids, newUniverse, keyed);
     }
   }
   const persistent = new Set<string>();

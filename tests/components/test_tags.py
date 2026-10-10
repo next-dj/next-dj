@@ -54,7 +54,7 @@ class TestComponentTag:
         assert result == ""
 
     def test_component_tag_renders_empty_when_path_not_str_or_path(self) -> None:
-        """When current_template_path is not str/Path (e.g. int), component renders empty."""
+        """A current_template_path of another type renders the component empty."""
         t = Template('{% load components %}{% component "card" %}')
         result = t.render(Context({"current_template_path": 42}))
         assert result == ""
@@ -1333,7 +1333,7 @@ class TestComponentNodePathCache:
     def test_the_tag_keeps_its_memo_keyed_by_the_raw_string(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The node carries a string, so building a path per read is what the memo saves."""
+        """The node carries a string, so the memo saves building a path per read."""
         node = self._node()
         raw, expected = self._noncanonical(tmp_path, "shared")
         ctx = Context({"current_template_path": raw})

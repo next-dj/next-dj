@@ -10,7 +10,7 @@ from django.template.base import Template
 from django.test import RequestFactory
 
 from next.pages import Page
-from next.pages.loaders import _load_python_module_memo
+from next.pages.loaders import load_python_module_memo
 from next.partial import zone_requested
 from next.partial.registry import zones_of
 from next.partial.registry.zones import _zone_cache
@@ -183,7 +183,7 @@ class TestRegistryIsolatedFromGetPath:
         page_file = _write_zone_page(
             tmp_path, 'a {% zone "z" %}<p>{{ t }}</p>{% endzone %} b'
         )
-        module = _load_python_module_memo(page_file)
+        module = load_python_module_memo(page_file)
         view = page_instance._create_unified_view(page_file, module)
         response = view(_make_request())
         assert b'<div data-next-zone="z">' in response.content
@@ -195,7 +195,7 @@ class TestRegistryIsolatedFromGetPath:
         page_file = _write_zone_page(
             tmp_path, '{% zone "z" %}<p>{{ t }}</p>{% endzone %}'
         )
-        module = _load_python_module_memo(page_file)
+        module = load_python_module_memo(page_file)
         view = page_instance._create_unified_view(page_file, module)
         view(_make_request())
         assert len(_zone_cache) == 0

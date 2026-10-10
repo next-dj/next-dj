@@ -29,6 +29,11 @@ dependencies = [
     "django>=5.2,<6.2",
 ]
 
+[project.optional-dependencies]
+testing = [
+    "defusedxml>=0.7",
+]
+
 [project.urls]
 Homepage = "https://github.com/next-dj/next-dj"
 Documentation = "https://next-dj.readthedocs.io/"
@@ -53,6 +58,8 @@ dev = [
     "markdown>=3.7",
     "time-machine>=2.16",
     "pytest-randomly==5.0.0",
+    "defusedxml==0.7.1",
+    "types-defusedxml==0.7.0.20260504",
 ]
 compat = [
     "django-crispy-forms>=2.3",
@@ -66,6 +73,7 @@ e2e = [
     "playwright==1.63.0",
 ]
 docs = [
+    "defusedxml==0.7.1",
     "doc8==2.0.0",
     "sphinx==9.1.0",
     "shibuya==2026.7.12",
@@ -90,7 +98,14 @@ path = "build_hooks.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["next"]
-artifacts = ["next/static/next/next.min.js"]
+artifacts = [
+    "next/static/next/next.min.js",
+    "next/static/next/next.scripts.min.js",
+    "next/static/next/next.sse.min.js",
+    "next/static/next/next.csrf.min.js",
+    "next/static/next/next.poll.min.js",
+    "next/static/next/next.dev.min.js",
+]
 exclude = [
     "next/client/",
     "next/static/next/next.meta.json",
@@ -107,7 +122,14 @@ include = [
     "package.json",
     "package-lock.json",
 ]
-artifacts = ["next/static/next/next.min.js"]
+artifacts = [
+    "next/static/next/next.min.js",
+    "next/static/next/next.scripts.min.js",
+    "next/static/next/next.sse.min.js",
+    "next/static/next/next.csrf.min.js",
+    "next/static/next/next.poll.min.js",
+    "next/static/next/next.dev.min.js",
+]
 exclude = [
     "next/client/*.test.ts",
     "next/static/next/next.meta.json",
@@ -159,6 +181,10 @@ omit = [
     "*/next/forms/checks/*",
     "*/next/partial/checks/*",
     "*/next/apps/checks.py",
+    "*/next/seo/checks/*",
+    "*/next/site/checks.py",
+    "*/next/consent/checks.py",
+    "*/next/scripts/checks.py",
 ]
 
 # Collapse source-tree and site-packages paths so coverage reports, omits, and

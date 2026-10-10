@@ -8,7 +8,7 @@ from django.test import RequestFactory, override_settings
 from next.static.assets import StaticAsset
 from next.static.collector import StaticCollector, default_placeholders
 from next.static.manager import StaticManager
-from next.static.scripts import NextScriptBuilder
+from next.static.runtime import NextScriptBuilder
 
 
 if TYPE_CHECKING:

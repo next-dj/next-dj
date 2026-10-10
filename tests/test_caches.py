@@ -3,7 +3,13 @@ from typing import override
 
 import pytest
 
-from next.caches import DEFAULT_CACHE_SIZE, BoundedCache, LruCache
+from next.caches import (
+    DEFAULT_CACHE_SIZE,
+    PAGE_HEADROOM,
+    BoundedCache,
+    LruCache,
+    PageCache,
+)
 
 
 class _EmptiedEntries(OrderedDict[str, int]):
@@ -71,7 +77,7 @@ class TestBoundedCache:
         assert list(cache) == ["first", "second"]
 
     def test_a_miss_answers_the_default(self) -> None:
-        """A key no entry is held under answers what the caller asked for."""
+        """A missing key returns the default the caller passed."""
         cache: BoundedCache[str, int] = BoundedCache()
         assert cache.get("absent") is None
         assert cache.get("absent", 7) == 7
@@ -84,7 +90,7 @@ class TestBoundedCache:
         assert cache["only"] == 1
 
     def test_membership_and_length_report_what_is_held(self) -> None:
-        """The dunders answer for the entries, not for the mapping behind them."""
+        """The dunder methods report the entries, not the mapping behind them."""
         cache: BoundedCache[str, int] = BoundedCache()
         cache["only"] = 1
         assert "only" in cache
@@ -100,7 +106,7 @@ class TestBoundedCache:
         assert not cache
 
     def test_clearing_drops_every_entry(self) -> None:
-        """A cleared cache answers as an empty one."""
+        """A cleared cache behaves as an empty one."""
         cache: BoundedCache[str, int] = BoundedCache()
         cache["only"] = 1
         cache.clear()
@@ -112,8 +118,66 @@ class TestBoundedCache:
         assert cache._maxsize == DEFAULT_CACHE_SIZE
 
 
+@pytest.fixture()
+def restored_page_bound():
+    """Put the shared page bound back on the class and on every live cache."""
+    bound = PageCache._bound
+    yield
+    PageCache._bound = bound
+    for cache in list(PageCache._instances):
+        cache._maxsize = bound
+
+
+def _fill(cache: PageCache[int, int], count: int) -> None:
+    for key in range(count):
+        cache[key] = key
+
+
+@pytest.mark.usefixtures("restored_page_bound")
+class TestPageCache:
+    """The bound of a page-keyed cache follows the routed page count."""
+
+    def test_fit_raises_the_bound_of_every_cache_held(self) -> None:
+        cache: PageCache[int, int] = PageCache()
+        pages = PageCache._bound
+        PageCache.fit(pages)
+        _fill(cache, pages * PAGE_HEADROOM + 1)
+        assert len(cache) == pages * PAGE_HEADROOM
+        assert 0 not in cache
+        assert 1 in cache
+
+    def test_a_cache_built_after_fit_starts_at_the_raised_bound(self) -> None:
+        pages = PageCache._bound
+        PageCache.fit(pages)
+        cache: PageCache[int, int] = PageCache()
+        _fill(cache, pages * PAGE_HEADROOM)
+        assert len(cache) == pages * PAGE_HEADROOM
+
+    def test_fit_lowers_the_bound_and_drops_the_oldest_entries(self) -> None:
+        cache: PageCache[int, int] = PageCache()
+        PageCache.fit(DEFAULT_CACHE_SIZE)
+        _fill(cache, DEFAULT_CACHE_SIZE * PAGE_HEADROOM)
+        PageCache.fit(1)
+        assert cache._maxsize == PageCache._bound == DEFAULT_CACHE_SIZE
+        assert len(cache) == DEFAULT_CACHE_SIZE
+        assert 0 not in cache
+        assert DEFAULT_CACHE_SIZE * PAGE_HEADROOM - 1 in cache
+
+    def test_the_bound_never_falls_below_the_default(self) -> None:
+        PageCache.fit(DEFAULT_CACHE_SIZE)
+        PageCache.fit(0)
+        assert PageCache._bound == DEFAULT_CACHE_SIZE
+
+    def test_a_trim_stops_once_another_thread_emptied_the_cache(self) -> None:
+        cache: PageCache[str, int] = PageCache()
+        cache._entries = _EmptiedEntries(first=1, second=2)
+        cache._maxsize = 1
+        cache._trim()
+        assert len(cache) == 2
+
+
 class TestLruCache:
-    """The cache where a read makes its entry the freshest one."""
+    """The cache where a read makes its entry the most recent one."""
 
     def test_a_rewrite_keeps_the_key_and_makes_it_the_freshest(self) -> None:
         """A key already held stays readable while it moves to the end."""
@@ -140,7 +204,7 @@ class TestLruCache:
         assert list(cache) == ["second", "first"]
 
     def test_a_miss_answers_the_default(self) -> None:
-        """A key no entry is held under answers what the caller asked for."""
+        """A missing key returns the default the caller passed."""
         cache: LruCache[str, int] = LruCache()
         assert cache.get("absent") is None
         assert cache.get("absent", 7) == 7
@@ -172,7 +236,7 @@ class TestLruCache:
         assert cache.get("only") is None
 
     def test_a_key_no_mapping_can_hold_raises_rather_than_missing(self) -> None:
-        """The TypeError is what tells a caller to inspect its callable afresh."""
+        """The TypeError tells a caller to bypass the cache for its callable."""
         cache: LruCache[object, int] = LruCache()
         unhashable: dict[str, str] = {}
         with pytest.raises(TypeError):

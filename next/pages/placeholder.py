@@ -35,8 +35,8 @@ def _block_tags(content: str) -> Iterator[tuple[str, int, int]]:
         if token.token_type is not TokenType.BLOCK:
             continue
         head = token.contents.split(maxsplit=1)
-        # The debug lexer records the bounds of every token, which is what the
-        # plain one leaves unset and the stubs therefore call optional.
+        # The debug lexer records the bounds of every token, which the plain lexer
+        # leaves unset, so the stubs type them as optional.
         start, end = cast("tuple[int, int]", token.position)
         yield (head[0] if head else ""), start, end
 
@@ -44,7 +44,7 @@ def _block_tags(content: str) -> Iterator[tuple[str, int, int]]:
 def placeholder_spans(content: str) -> list[tuple[int, int]]:
     """Return the bounds of every placeholder a parse of `content` would reach.
 
-    Django's own lexer settles what counts as a tag, so a placeholder written under
+    Django's own lexer decides what counts as a tag, so a placeholder written under
     `{% verbatim %}` or `{% comment %}` is text that composition must not fill.
     """
     spans: list[tuple[int, int]] = []

@@ -3,8 +3,7 @@
 Project layout
 ==============
 
-This page covers the directory layout that next.dj expects for a single Django project.
-It assumes one Django application that ships pages, components, and form actions.
+A single next.dj project keeps its pages, components, and form actions in one Django application, laid out as below.
 For projects with several applications or a shared UI kit, read :doc:`multi-project`.
 
 .. contents::
@@ -57,18 +56,21 @@ The Notes project from the tutorial demonstrates the full layout.
                page.py
                template.djx
      static/
-       favicon.ico
+       site/
+         icon.svg
+         logo.svg
      tests/
        __init__.py
        test_integration.py
 
-Three things are special about this tree.
+Four things are special about this tree.
 
 - ``pages/`` is the page root.
   Every directory below it becomes a URL.
 - ``_components/`` lives inside the page root.
   Every directory below it becomes a reusable component.
 - ``static/`` keeps project-wide assets that are not co-located with a page or a component.
+- ``static/site/icon.svg`` is the favicon every page names through the ``icons`` metadata key, see :doc:`/content/topics/seo/icons-and-images`.
 
 The file router registers each ``_components/`` folder it meets while walking the page tree, and it skips that folder as a route.
 A ``_components/`` folder placed beside ``pages/`` rather than inside it is never walked, so the ``{% component %}`` tag finds nothing there.

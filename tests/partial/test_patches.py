@@ -1,11 +1,26 @@
+from collections.abc import Callable
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
+from django.http import Http404
+from django.test import override_settings
+from django.utils.functional import Promise, lazy
 
 import next.pages
 import next.partial
 import next.partial.errors
 import next.partial.patches
+from next.diagnostics import degraded, watch_degraded
+from next.pages import ld
+from next.pages.errors import PageMetadataShapeError
+from next.pages.metadata import resolve_metadata
 from next.partial import Asset, FormMeta, Patches, PatchResponse
-from next.partial.errors import ReservedPatchKeyError
+from next.partial.errors import (
+    BuiltinPatchOpError,
+    ForeignPageNotAuthorizedError,
+    ReservedPatchKeyError,
+)
 from next.partial.headers import CONTENT_TYPE
 from next.partial.render import ZoneRenderResult
 from next.static import KindRegistry, StaticAsset
@@ -15,8 +30,91 @@ from tests.support import (
     BUILD_MANIFEST,
     MANIFEST_BACKENDS,
     BuildManifestBackend,
+    file_router_config_entry,
     partial_request,
+    write_page_chain,
 )
+
+
+INHERITING_ROOT = """
+from next.pages import page
+
+
+@page.context("board", inherit_context=True)
+def board():
+    return "Kanban"
+
+
+@page.metadata(inherit=True)
+def root_meta(board):
+    return {"title": {"template": "{title} | " + board}}
+"""
+DENYING_LEAF = """
+from django.http import HttpResponseForbidden
+
+metadata = {"title": "Leaf"}
+
+
+def render():
+    return HttpResponseForbidden()
+"""
+RAISING_ROOT = """
+from next.pages import page
+
+
+@page.metadata(inherit=True)
+def root_meta():
+    raise LookupError("board")
+"""
+GONE_ROOT = """
+from django.http import Http404
+
+from next.pages import page
+
+
+@page.metadata(inherit=True)
+def root_meta():
+    raise Http404
+"""
+VISIT_ROOT = """
+from django.http import HttpRequest
+
+from next.pages import page
+
+
+@page.metadata(inherit=True)
+def root_meta(request: HttpRequest):
+    tab = request.GET.get("tab", "-")
+    return {"title": {"template": f"{{title}} | {request.method} {request.path} {tab}"}}
+"""
+LEAF_TITLE = 'template = "<p>Leaf</p>"\nmetadata = {"title": "Leaf"}\n'
+STATIC_ROOT = 'metadata = {"title": {"template": "{title} | Static"}}\n'
+ZONED_LEAF = """
+from next.pages import page
+
+
+@page.context("user")
+def user():
+    return "Ann"
+
+
+@page.metadata
+def leaf_meta(user):
+    return {"title": user}
+"""
+
+
+def _routed(root: Path) -> override_settings:
+    """Route the page tree under `root` as the only page backend."""
+    entry = file_router_config_entry(pages_dir=root)
+    return override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]})
+
+
+def _builder_for(root: Path, page_path: Path) -> Patches:
+    """Return a builder whose posted origin is the URL routing `page_path`."""
+    return Patches(
+        partial_request(f"/{page_path.parent.relative_to(root).as_posix()}/")
+    )
 
 
 class TestAddAssetResolvesLoad:
@@ -314,6 +412,306 @@ class TestPatchesBuilder:
         assert Patches(None, version="9f3c").envelope().version == "9f3c"
 
 
+def _meta(title: str | None, **rest: str | None) -> dict[str, object]:
+    return {
+        "title": title,
+        "description": rest.get("description"),
+        "canonical": rest.get("canonical"),
+        "robots": rest.get("robots"),
+    }
+
+
+class TestMeta:
+    """`meta` sends the four head tags the origin page would render, each or null."""
+
+    def test_the_ancestor_template_wraps_the_title_of_the_verb(self) -> None:
+        envelope = Patches(partial_request("/titled/leaf/")).meta("Wallets").envelope()
+        assert envelope.ops[0].as_dict() == {"op": "meta", **_meta("Wallets · Site")}
+
+    def test_the_verb_stands_in_the_place_of_the_own_title(self) -> None:
+        envelope = Patches(partial_request("/titled/")).meta("Wallets").envelope()
+        assert envelope.ops[0].extras == _meta("Wallets")
+
+    def test_an_absolute_title_bypasses_the_template(self) -> None:
+        envelope = (
+            Patches(partial_request("/titled/leaf/"))
+            .meta({"title": {"absolute": "Wallets"}})
+            .envelope()
+        )
+        assert envelope.ops[0].extras == _meta("Wallets")
+
+    def test_a_mapping_syncs_description_canonical_and_robots(self) -> None:
+        with override_next_settings(SITE={"URL": "https://acme.example"}):
+            envelope = (
+                Patches(partial_request("/titled/leaf/"))
+                .meta(
+                    {
+                        "title": "Wallets",
+                        "description": "All of them",
+                        "canonical": True,
+                        "robots": {"index": False},
+                    }
+                )
+                .envelope()
+            )
+        assert envelope.ops[0].extras == _meta(
+            "Wallets · Site",
+            description="All of them",
+            canonical="https://acme.example/titled/leaf/",
+            robots="noindex",
+        )
+
+    def test_the_title_travels_as_plain_text(self) -> None:
+        envelope = (
+            Patches(partial_request("/titled/leaf/")).meta("Tom & Jerry").envelope()
+        )
+        assert envelope.ops[0].extras["title"] == "Tom & Jerry · Site"
+
+    def test_braces_in_the_title_stay_literal_under_the_template(self) -> None:
+        builder = Patches(partial_request("/titled/leaf/"))
+        envelope = builder.meta("Set {title} {0} {{x}}").envelope()
+        assert envelope.ops[0].extras["title"] == "Set {title} {0} {{x}} · Site"
+
+    def test_a_closed_site_ships_its_robots(self) -> None:
+        with override_next_settings(SITE={"INDEXABLE": False}):
+            envelope = Patches(partial_request("/titled/leaf/")).meta("W").envelope()
+        assert envelope.ops[0].extras["robots"] == "noindex, nofollow"
+
+    @pytest.mark.parametrize(
+        "builder",
+        [
+            lambda: Patches.versioned("v1"),
+            lambda: Patches(partial_request(origin=None)),
+            lambda: Patches(partial_request("/_next/form/x/")),
+        ],
+        ids=["no_request", "no_origin", "foreign_origin"],
+    )
+    def test_a_builder_without_an_origin_page_folds_the_defaults_alone(
+        self, builder: Callable[[], Patches]
+    ) -> None:
+        defaults = {"title": {"template": "{title} | Acme", "default": "Acme"}}
+        with override_next_settings(METADATA={"DEFAULTS": defaults}):
+            envelope = builder().meta("Wallets").envelope()
+        assert envelope.ops[0].as_dict() == {"op": "meta", "title": "Wallets | Acme"}
+
+    @pytest.mark.parametrize(
+        "builder",
+        [
+            lambda: Patches.versioned("v1"),
+            lambda: Patches(partial_request(origin=None)),
+            lambda: Patches(partial_request("/_next/form/x/")),
+        ],
+        ids=["no_request", "no_origin", "foreign_origin"],
+    )
+    def test_a_builder_without_an_origin_page_leaves_a_self_canonical_alone(
+        self, builder: Callable[[], Patches]
+    ) -> None:
+        defaults = {
+            "canonical": True,
+            "alternates": {"languages": True},
+            "og": {"images": [{"url": "/og.png"}]},
+            "twitter": {"images": ["/tw.png"]},
+            "icons": {"icon": "/icon.svg"},
+            "manifest": "/app.webmanifest",
+            "links": [{"rel": "preload", "href": "/f.woff2", "as": "font"}],
+            "jsonld": [ld.Node(id="#org", type="Organization", extra={"url": "/"})],
+        }
+        with override_next_settings(METADATA={"DEFAULTS": defaults}):
+            extras = builder().meta("Wallets").envelope().ops[0].extras
+        assert extras == {"title": "Wallets"}
+
+    @pytest.mark.parametrize(
+        "builder",
+        [
+            lambda: Patches.versioned("v1"),
+            lambda: Patches(partial_request(origin=None)),
+        ],
+        ids=["no_request", "no_origin"],
+    )
+    def test_a_builder_without_an_origin_page_omits_the_unset_tags(
+        self, builder: Callable[[], Patches]
+    ) -> None:
+        # A null would remove the tag, and the server does not know the origin's tags.
+        extras = builder().meta({"description": "All"}).envelope().ops[0].extras
+        assert extras == {"description": "All"}
+
+    def test_a_builder_without_an_origin_page_degrades_under_refused_defaults(
+        self,
+    ) -> None:
+        defaults = {"canonical": "javascript:x"}
+        with override_next_settings(METADATA={"DEFAULTS": defaults}):
+            watch_degraded()
+            extras = Patches.versioned("v1").meta("Wallets").envelope().ops[0].extras
+            assert degraded() is True
+        assert extras == {"title": "Wallets", "robots": "noindex"}
+
+    def test_a_builder_without_an_origin_page_sends_a_set_robots(self) -> None:
+        with override_next_settings(SITE={"INDEXABLE": False}):
+            extras = Patches.versioned("v1").meta("W").envelope().ops[0].extras
+        assert extras == {"title": "W", "robots": "noindex, nofollow"}
+
+    def test_the_blocks_the_op_omits_are_never_resolved(self) -> None:
+        defaults = {
+            "alternates": {"languages": True},
+            "og": {"images": [{"url": "/og.png"}]},
+            "jsonld": [ld.Node(id="#org", type="Organization", extra={"url": "/"})],
+        }
+        with (
+            override_next_settings(METADATA={"DEFAULTS": defaults}),
+            patch(
+                "next.partial.patches.resolve_metadata", wraps=resolve_metadata
+            ) as resolve,
+        ):
+            Patches(partial_request("/titled/leaf/")).meta("Wallets")
+        folded = resolve.call_args.args[0]
+        assert (folded.alternates, folded.og, folded.jsonld) == (None, None, ())
+
+    def test_a_builder_without_a_request_ships_a_declared_canonical(self) -> None:
+        with override_next_settings(
+            SITE={"URL": "https://acme.example"},
+            METADATA={"DEFAULTS": {"canonical": "/home/"}},
+        ):
+            extras = Patches.versioned("v1").meta("Wallets").envelope().ops[0].extras
+        assert extras["canonical"] == "https://acme.example/home/"
+
+    def test_a_lazy_title_is_evaluated_when_the_op_is_recorded(self) -> None:
+        language = ["en"]
+        title = lazy(lambda: f"Wallets ({language[0]})", str)()
+        builder = Patches(partial_request("/titled/leaf/")).meta(title)
+        language[0] = "de"
+        payload = builder.envelope().ops[0].as_dict()
+        assert payload == {"op": "meta", **_meta("Wallets (en) · Site")}
+        assert isinstance(payload["title"], str)
+        assert not isinstance(payload["title"], Promise)
+
+    def test_a_refused_mapping_names_the_verb(self) -> None:
+        with pytest.raises(PageMetadataShapeError) as caught:
+            Patches.versioned("v1").meta({"canonical": "javascript:x"})
+        assert caught.value.source == "Patches.meta"
+
+    def test_op_refuses_the_builtin_verb(self) -> None:
+        with pytest.raises(BuiltinPatchOpError):
+            Patches.versioned("v1").op("meta", title="Wallets")
+
+    def test_an_inherited_callable_template_wraps_the_title(
+        self, tmp_path: Path
+    ) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", INHERITING_ROOT), ("leaf", LEAF_TITLE)]
+        )
+        with _routed(tmp_path):
+            envelope = _builder_for(tmp_path, leaf).meta("Post").envelope()
+        assert envelope.ops[0].extras == _meta("Post | Kanban")
+
+    def test_an_inherited_callable_reads_a_get_visit_of_the_origin(
+        self, tmp_path: Path
+    ) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", VISIT_ROOT), ("leaf", LEAF_TITLE)]
+        )
+        with _routed(tmp_path):
+            envelope = _builder_for(tmp_path, leaf).meta("Post").envelope()
+        assert envelope.ops[0].extras["title"] == "Post | GET /root/leaf/ -"
+
+    def test_an_inherited_callable_reads_the_queued_url(self, tmp_path: Path) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", VISIT_ROOT), ("leaf", LEAF_TITLE)]
+        )
+        with _routed(tmp_path):
+            builder = _builder_for(tmp_path, leaf).replace_url("/root/leaf/?tab=2")
+            envelope = builder.meta("Post").envelope()
+        assert envelope.ops[1].extras["title"] == "Post | GET /root/leaf/ 2"
+
+    def test_an_inherited_callable_runs_behind_the_origin_guard(
+        self, tmp_path: Path
+    ) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", INHERITING_ROOT), ("leaf", DENYING_LEAF)]
+        )
+        with _routed(tmp_path), pytest.raises(ForeignPageNotAuthorizedError):
+            _builder_for(tmp_path, leaf).meta("Post")
+
+    def test_a_raising_inherited_callable_skips_only_the_meta_op(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        next.partial.patches._failures.clear()
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", RAISING_ROOT), ("leaf", LEAF_TITLE)]
+        )
+        with _routed(tmp_path), caplog.at_level("ERROR", logger="next.partial.patches"):
+            first = _builder_for(tmp_path, leaf).meta("Post").event("saved")
+            second = _builder_for(tmp_path, leaf).meta("Post")
+        assert [op.op for op in first.envelope().ops] == ["event"]
+        assert second.envelope().ops == ()
+        assert len(caplog.records) == 1
+        assert "raised LookupError" in caplog.text
+
+    def test_a_raising_inherited_callable_is_loud_under_debug(
+        self, tmp_path: Path
+    ) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", RAISING_ROOT), ("leaf", LEAF_TITLE)]
+        )
+        with (
+            _routed(tmp_path),
+            override_settings(DEBUG=True),
+            pytest.raises(LookupError) as caught,
+        ):
+            _builder_for(tmp_path, leaf).meta("Post")
+        assert "Patches.meta()" in caught.value.__notes__[0]
+
+    def test_an_intended_404_of_an_inherited_callable_propagates(
+        self, tmp_path: Path
+    ) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", GONE_ROOT), ("leaf", LEAF_TITLE)]
+        )
+        with _routed(tmp_path), pytest.raises(Http404):
+            _builder_for(tmp_path, leaf).meta("Post")
+
+    def test_a_static_chain_runs_no_guard(self, tmp_path: Path) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", STATIC_ROOT), ("leaf", DENYING_LEAF)]
+        )
+        with _routed(tmp_path):
+            envelope = _builder_for(tmp_path, leaf).meta("Post").envelope()
+        assert envelope.ops[0].extras == _meta("Post | Static")
+
+    @pytest.mark.parametrize(
+        ("push", "canonical"),
+        [
+            ("/titled/leaf/?sort=x&page=2", "/titled/leaf/?page=2"),
+            ("?page=4", "/titled/leaf/?page=4"),
+            ("/titled/leaf/", "/titled/leaf/"),
+        ],
+        ids=["path", "relative_query", "no_query"],
+    )
+    def test_a_queued_url_names_the_address_of_the_canonical(
+        self, push: str, canonical: str
+    ) -> None:
+        with override_next_settings(
+            SITE={"URL": "https://acme.example"},
+            METADATA={"DEFAULTS": {"canonical": True}, "CANONICAL_QUERY": ["page"]},
+        ):
+            envelope = (
+                Patches(partial_request("/titled/leaf/?page=3"))
+                .push_url(push)
+                .toast("Saved")
+                .meta("W")
+                .envelope()
+            )
+        assert envelope.ops[2].extras["canonical"] == f"https://acme.example{canonical}"
+
+    def test_meta_chains_in_order(self) -> None:
+        envelope = (
+            Patches(partial_request("/titled/leaf/"))
+            .push_url("/titled/leaf/")
+            .meta("Wallets")
+            .envelope()
+        )
+        assert [op.op for op in envelope.ops] == ["url", "meta"]
+
+
 class TestPatchResponse:
     """`PatchResponse` is an HttpResponse carrying serialized bytes."""
 
@@ -333,6 +731,9 @@ class TestPatchResponse:
     def test_custom_status(self) -> None:
         response = PatchResponse(b"{}", status=409)
         assert response.status_code == 409
+
+    def test_no_cache_ever_keeps_it(self) -> None:
+        assert PatchResponse(b"{}")["Cache-Control"] == "private, no-store"
 
 
 class TestBuilderExceptionSurface:
@@ -428,6 +829,22 @@ class TestBuilderZoneManifest:
         )
         assert [op.op for op in envelope.ops] == ["morph", "context"]
         assert envelope.ops[1].as_dict() == {"op": "context", "data": {"seen": 7}}
+
+
+class TestZoneOverridesReachTheMetadataTag:
+    """A `{% metadata %}` in a zone body reads the overrides of the morph."""
+
+    def test_the_override_replaces_the_context_value(self, tmp_path: Path) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", ZONED_LEAF)])
+        (leaf.parent / "template.djx").write_text(
+            '{% zone "head" %}{% metadata %}{% endzone %}'
+        )
+        with _routed(tmp_path):
+            builder = _builder_for(tmp_path, leaf)
+            bob = builder.morph(zone="head", overrides={"user": "Bob"}).envelope()
+            assert "<title>Bob</title>" in bob.ops[0].html
+            ann = builder.morph(zone="head").envelope()
+        assert "<title>Ann</title>" in ann.ops[1].html
 
 
 class TestZoneDeltaReservedKeys:

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSse } from "./sse";
 import type { EventSourceAdapter, SourceControl, VisibilityAdapter } from "./sse";
-import { manualVisibility } from "./test-doubles";
+import { manualVisibility, chunkModules } from "./test-doubles";
 import { Wire } from "./wire";
+import { createCsrf } from "./csrf";
 import { CONTENT_TYPE, HEADER_REQUEST_ID } from "./protocol";
 
 interface MockSource {
@@ -45,6 +46,18 @@ function envelope(ops: unknown[], requestId?: string): string {
   return JSON.stringify(body);
 }
 
+it("falls back to the platform seams and resets twice harmlessly", () => {
+  const sse = createSse({
+    apply: () => undefined,
+    fetch: () => undefined,
+    dispatch: () => undefined,
+  });
+  expect(sse.size()).toBe(0);
+  sse._reset();
+  sse._reset();
+  expect(sse.size()).toBe(0);
+});
+
 describe("createSse", () => {
   let applied: unknown[];
   let fetched: { url: string; zone: string }[];
@@ -83,6 +96,33 @@ describe("createSse", () => {
     expect(opened[0]!.url).toBe("/stream/");
     opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }]));
     expect(applied).toHaveLength(1);
+  });
+
+  it("opens no stream for a container removed before its scan ran", () => {
+    const root = document.createElement("div");
+    root.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    makeSse(adapter, manualVisibility()).scan(root);
+    expect(opened).toEqual([]);
+  });
+
+  it("applies each event on behalf of the page the stream subscribed from", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const pages: string[] = [];
+    const sse = createSse({
+      apply: (_raw, page) => pages.push(page),
+      fetch: () => undefined,
+      dispatch: () => undefined,
+      document,
+      source: adapter,
+      visibility: manualVisibility(),
+      pageUrl: () => "/inbox/",
+    });
+    sse.scan(document);
+    opened[0]!.message(envelope([{ op: "meta", title: "Inbox (3)" }]));
+    expect(pages).toEqual(["/inbox/"]);
+    sse._reset();
   });
 
   it("scan opens a stream only once per url", () => {
@@ -175,6 +215,7 @@ describe("createSse", () => {
       navigate: () => undefined,
       dispatch: () => undefined,
       onEnvelope: () => undefined,
+      csrf: createCsrf({ mint: chunkModules.csrf }),
       rememberRequestId: (id) => sse.remember(id),
     });
     await wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });

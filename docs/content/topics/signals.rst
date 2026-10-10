@@ -50,6 +50,9 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``context_registered``
      - Pages
      - After a context function is attached to a page module.
+   * - ``metadata_registered``
+     - Pages
+     - After a ``@page.metadata`` callable is attached to a page module.
    * - ``page_rendered``
      - Pages
      - After the page renders to HTML and the static assets are injected.
@@ -134,6 +137,15 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``partial_backend_loaded``
      - Partial
      - After the partial protocol backend is created from its configuration entry.
+   * - ``sitemap_backend_loaded``
+     - SEO
+     - After a sitemap backend is created from its configuration entry.
+   * - ``scripts_registered``
+     - Scripts
+     - When the ``scripts.py`` of a page tree is registered, a tree without one sending nothing.
+   * - ``consent_backend_loaded``
+     - Consent
+     - After the consent backend is created from its configuration entry.
    * - ``watch_specs_ready``
      - Server
      - After the reloader resolves the full list of watch specs.

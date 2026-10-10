@@ -5,7 +5,6 @@ Deduplication
 
 The pipeline emits each asset once per request even when several components reference the same file.
 The collector's dedup strategy decides which registrations survive to injection.
-This page covers the bundled dedup strategies, how the collector applies them, and how to plug a custom strategy.
 
 .. contents::
    :local:

@@ -7,10 +7,13 @@ tests that verify registry behaviour or reload backends after swapping settings.
 from __future__ import annotations
 
 from next.components.manager import components_manager
+from next.diagnostics import reset_failure_logs
 from next.forms.manager import form_action_manager
 from next.forms.registration import registration_diagnostics
 from next.forms.wizard import wizard_backend_manager
 from next.pages.manager import page
+from next.scripts.manager import forget_scripts
+from next.seo.manager import reset_seo_sources
 
 
 def reset_form_actions() -> None:
@@ -61,11 +64,30 @@ def reset_page_cache() -> None:
     page.clear_template_caches()
 
 
+def reset_scripts() -> None:
+    """Drop every discovered `scripts.py`, so the next render reads them again.
+
+    Outside `DEBUG` a source is read once, so a test that rewrites one needs this.
+    """
+    forget_scripts()
+
+
+def reset_seo() -> None:
+    """Drop the SEO sources, backends and `@sitemap.items` registrations.
+
+    The next request discovers them again, so a test that rewrites a source needs this.
+    """
+    reset_seo_sources()
+
+
 __all__ = [
     "reset_component_templates",
     "reset_components",
+    "reset_failure_logs",
     "reset_form_actions",
     "reset_form_registration_state",
     "reset_page_cache",
     "reset_registries",
+    "reset_scripts",
+    "reset_seo",
 ]

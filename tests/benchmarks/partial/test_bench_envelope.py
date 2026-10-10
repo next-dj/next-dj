@@ -12,6 +12,7 @@ from next.forms.dispatch.responses import ActionOutcome, ActionOutcomeKind
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.partial import JsonPartialProtocolBackend, Patches, shape_partial
 from next.partial.headers import REQUEST_FLAG
+from tests.support import partial_request
 
 
 if TYPE_CHECKING:
@@ -46,6 +47,31 @@ class TestBenchEnvelopeBuild:
             return protocol.serialize_envelope(envelope)
 
         benchmark(run)
+
+    @pytest.mark.benchmark(group="partial.envelope")
+    def test_meta_over_the_site_defaults(self, benchmark) -> None:
+        """A head update with no origin page, folded over the site defaults."""
+        metadata = {"title": "Saved", "description": "The draft is saved."}
+        benchmark(lambda: Patches.versioned("9f3c2e1b").meta(metadata).envelope())
+
+    @pytest.mark.benchmark(group="partial.envelope")
+    def test_meta_over_an_origin_page(self, benchmark) -> None:
+        """A head update folded over the chain of the page the action was posted from.
+
+        Each round takes a fresh request, so the origin resolves as it does per action.
+        """
+        metadata = {"title": "Saved", "description": "The draft is saved."}
+        Patches(partial_request("/titled/leaf/")).meta(metadata).envelope()
+
+        def setup() -> tuple[tuple[Patches], dict[str, object]]:
+            return (Patches(partial_request("/titled/leaf/")),), {}
+
+        benchmark.pedantic(
+            lambda builder: builder.meta(metadata).envelope(),
+            setup=setup,
+            rounds=200,
+            warmup_rounds=5,
+        )
 
 
 class TestBenchShapeInvalid:

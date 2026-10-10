@@ -15,6 +15,7 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    "django.contrib.sitemaps",
     "django.contrib.staticfiles",
     "next",
     "catalog",
@@ -73,6 +74,9 @@ STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+GA_MEASUREMENT_ID = "G-DEMO0000"
+META_PIXEL_ID = "100000000000000"
+
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
@@ -89,9 +93,32 @@ NEXT_FRAMEWORK = {
     "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
-            "DIRS": [str(SHARED_DIR / "_components")],
+            "DIRS": [
+                str(SHARED_DIR / "_components"),
+                str(BASE_DIR / "marketplace" / "_cards"),
+            ],
             "COMPONENTS_DIR": "_cards",
         }
     ],
     "STATIC_VERSION": "v1",
+    "SITE": {
+        "URL": "https://catalog.example",
+        "NAME": "next.dj catalog",
+        "INDEXABLE": True,
+    },
+    "CONSENT": {"CATEGORIES": ["necessary", "analytics", "marketing"]},
+    "METADATA": {
+        "DEFAULTS": {
+            "viewport": "width=device-width, initial-scale=1",
+            "icons": {
+                "icon": {"url": "/static/catalog/icon.svg", "type": "image/svg+xml"}
+            },
+            "description": "Faceted search over a demo storefront, built on next.dj.",
+            "title": {
+                "template": "{title} · {site_name}",
+                "default": "next.dj — Search catalog",
+            },
+        },
+        "CANONICAL_QUERY": ("page",),
+    },
 }

@@ -4,7 +4,10 @@ from django.urls import reverse
 from wiki.models import Article
 
 from next import context
+from next.pages import MetadataDict
 
+
+metadata: MetadataDict = {"title": "Search"}
 
 FILE_DOC_CATALOGUE = (
     {

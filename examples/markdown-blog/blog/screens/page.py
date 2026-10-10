@@ -1,16 +1,32 @@
-from pathlib import Path
-
-from blog.markdown_template import post_metadata
+from blog.posts import SOCIAL_IMAGE, Post, all_posts
+from django.urls import reverse_lazy
 
 from next import context
+from next.pages import MetadataDict
 
 
-POSTS_DIR = Path(__file__).parent / "posts"
+metadata: MetadataDict = {
+    "title": "Latest posts",
+    "breadcrumb": "Home",
+    "canonical": True,
+    "og": {
+        "images": [
+            {
+                "url": SOCIAL_IMAGE,
+                "type": "image/png",
+                "width": 1200,
+                "height": 630,
+                "alt": "A white band with an indigo mark on a slate background",
+            }
+        ]
+    },
+    "alternates": {
+        "feeds": [{"url": reverse_lazy("feed"), "type": "rss", "title": "next.dj blog"}]
+    },
+}
 
 
 @context("posts")
-def posts() -> list[dict[str, str]]:
-    return sorted(
-        (post_metadata(p) for p in POSTS_DIR.glob("*/template.md")),
-        key=lambda m: m["slug"],
-    )
+def posts() -> list[Post]:
+    """Return every post for the index, the newest first."""
+    return all_posts()

@@ -20,7 +20,7 @@ Run ``uv run python manage.py check`` after an upgrade, because the framework re
 What that classifier does not describe is how the code is held, which is the part a reader evaluating the project can verify.
 Every merge carries 100 percent line and branch coverage over ``next/``, the same threshold on every project under ``examples/``, and the same on the TypeScript client runtime.
 Mypy runs strict over the whole package, Ruff runs with every rule selected, and a benchmark job fails a pull request whose median regresses past the gate it sets.
-The client bundle has a hard budget of 14 KB gzipped, checked on every run, because it ships on every page.
+The client runtime has a hard gzip budget of 14 KB, checked on every run because it ships on every page, and each lazy chunk carries a budget of its own.
 :doc:`/content/contributing/quality-gates` states what each gate measures and which command reproduces it.
 
 Road to 1.0

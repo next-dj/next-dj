@@ -310,6 +310,30 @@ def _context_merge() -> GoldenCase:
     )
 
 
+def _meta_head() -> GoldenCase:
+    envelope = (
+        Patches.versioned("9f3c2e1b")
+        .meta(
+            {
+                "title": "Wallets & Cards",
+                "description": "Every wallet in one place.",
+                "canonical": "https://acme.example/wallets/",
+                "robots": "noindex, follow",
+            }
+        )
+        .envelope()
+    )
+    return GoldenCase(
+        name="meta_head",
+        envelope=envelope,
+        description=(
+            "A meta patch syncing the four head tags a navigation changes, every "
+            "key present and the title carried as plain text."
+        ),
+        version="9f3c2e1b",
+    )
+
+
 GOLDEN_CASES = [
     _replace_zone(),
     _inner_zone(),
@@ -326,6 +350,7 @@ GOLDEN_CASES = [
     _sse_refresh(),
     _result_form_visit(),
     _context_merge(),
+    _meta_head(),
 ]
 
 

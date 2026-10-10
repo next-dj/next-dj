@@ -1,9 +1,4 @@
-"""System checks for the shape of a routed pages tree on disk.
-
-The ids are `next.E008`, `next.E009` and `next.E087` for bracket syntax, `next.E010`
-for a parameter directory with no page, `next.E030` and `next.E088` for a router that
-cannot report or walk its trees, and `next.W002` for a tree nobody routes.
-"""
+"""System checks for the shape of a routed pages tree on disk."""
 
 from __future__ import annotations
 
@@ -17,6 +12,7 @@ from django.urls.converters import get_converters
 
 from next.checks import NEXT
 from next.checks.common import (
+    WALK_HINT,
     PageRootsError,
     first_visit,
     get_page_roots,
@@ -43,9 +39,9 @@ def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
     """Check each router's pages tree for layouts, naming, and structure."""
     errors: list[CheckMessage] = []
 
-    router_manager, init_errors = get_router_manager()
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors
+        return []
 
     # Nested and doubly-mounted roots reach one directory through several trees.
     seen: set[Path] = set()
@@ -77,7 +73,13 @@ def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
                 )
         except (AttributeError, OSError) as e:
             errors.append(
-                Error(f"Error checking router pages: {e}", obj=settings, id="next.E088")
+                Error(
+                    f"{type(router).__name__} page trees could not be walked to "
+                    f"check their structure: {e}",
+                    hint=WALK_HINT,
+                    obj=settings,
+                    id="next.E088",
+                )
             )
 
     return errors

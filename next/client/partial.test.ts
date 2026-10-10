@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPartial } from "./partial";
+import { createDiagnostics } from "./diagnostics";
 import type { PartialAdapters, PartialSurface } from "./partial";
 import type { DialogAdapter } from "./layers";
-import type { EventSourceAdapter, SourceControl } from "./sse";
-import { manualPollClock, manualVisibility } from "./test-doubles";
+import { createSse } from "./sse";
+import type { EventSourceAdapter, SourceControl, SseFactory } from "./sse";
+import {
+  manualPollClock,
+  manualVisibility,
+  chunkModules,
+  unloaded,
+} from "./test-doubles";
 
 // A patches response the fetch returns so the wire resolves without a server.
 function patchesResponse(body = '{"version":"v1","ops":[],"assets":[],"form":null}') {
@@ -37,6 +44,7 @@ function makeSurface() {
   const dispatched: { event: string; detail: Record<string, unknown> }[] = [];
   const merged: Record<string, unknown>[] = [];
   const partial = createPartial({
+    ...chunkModules,
     dispatch: (event, detail) => dispatched.push({ event, detail }),
     mergeContext: (data) => merged.push(data),
   });
@@ -126,6 +134,16 @@ describe("createPartial surface", () => {
     expect(seen).toEqual(["btn"]);
   });
 
+  it("fires a wire error on the document as well as the bus", async () => {
+    const onDocument = vi.fn();
+    document.addEventListener("partial:error", onDocument);
+    await partial.fetch({ url: "https://attacker.example/x/" });
+    document.removeEventListener("partial:error", onDocument);
+    expect((onDocument.mock.calls[0]![0] as CustomEvent).detail).toMatchObject({
+      kind: "network",
+    });
+  });
+
   it("fetch sends the CSRF token set through setCsrf on unsafe methods", async () => {
     const calls: RequestInit[] = [];
     partial._configure({
@@ -188,6 +206,20 @@ describe("createPartial surface", () => {
     await partial.fetch({ url: "/list/", zone: "z" });
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("hooked");
   });
+
+  it.each(["{}", "[]", '"text"'])(
+    "reports a well-typed response whose JSON %s is no envelope as a parse error",
+    async (body) => {
+      partial._configure({ document, fetch: async () => patchesResponse(body) });
+      await expect(
+        partial.fetch({ url: "/list/", zone: "z" }),
+      ).resolves.toBeUndefined();
+      const errors = dispatched.filter((d) => d.event === "partial:error");
+      expect(errors.map((d) => d.detail)).toEqual([
+        { kind: "parse", body, error: expect.any(TypeError) },
+      ]);
+    },
+  );
 
   it("_reset clears custom ops, csrf, and configured adapters", async () => {
     partial.defineOp("confetti", () => undefined);
@@ -544,6 +576,134 @@ describe("createPartial surface", () => {
     expect(calls.length).toBeGreaterThan(0);
   });
 
+  it("fetches the sse chunk only once a scan finds a stream, then opens it", () => {
+    const sse = unloaded<SseFactory>("sse");
+    const lazy = createPartial({
+      ...chunkModules,
+      sse,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    const source = mockSource();
+    lazy._configure({
+      document,
+      source: source.adapter,
+      visibility: manualVisibility(),
+    });
+    document.head.innerHTML = "";
+    document.body.innerHTML = '<div data-next-zone="z"></div>';
+    lazy.sse.scan(document);
+    expect(sse.tags()).toBe(0);
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    lazy.sse.scan(document);
+    expect(lazy.sse.size()).toBe(0);
+    expect(sse.tags()).toBe(1);
+    sse.land(createSse);
+    expect(source.opened).toHaveLength(1);
+    expect(lazy.sse.size()).toBe(1);
+    lazy._reset();
+  });
+
+  it("hands the request ids sent before the bridge to it, so their echoes drop", () => {
+    const sse = unloaded<SseFactory>("sse");
+    const applied: Record<string, unknown>[] = [];
+    const lazy = createPartial({
+      ...chunkModules,
+      sse,
+      dispatch: (event, detail) => {
+        if (event === "partial:applied") applied.push(detail);
+      },
+      mergeContext: () => undefined,
+    });
+    const source = mockSource();
+    lazy._configure({
+      document,
+      source: source.adapter,
+      visibility: manualVisibility(),
+    });
+    document.body.innerHTML =
+      '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
+    lazy.sse.scan(document);
+    // Only the last ECHO_LIMIT ids are kept, as the bridge's own ring keeps them.
+    for (let i = 0; i < 26; i += 1) lazy.sse.remember(`r${i}`);
+    sse.land(createSse);
+    const event = (id: string): string =>
+      JSON.stringify({
+        version: "v1",
+        request_id: id,
+        ops: [{ op: "inner", target: { zone: "z" }, html: id }],
+      });
+    source.opened[0]!.message(event("r25"));
+    expect(applied).toEqual([]);
+    source.opened[0]!.message(event("r0"));
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("r0");
+    lazy._reset();
+  });
+
+  it("keeps one bridge across scans and feeds it later ids directly", () => {
+    const lazy = createPartial({
+      ...chunkModules,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    const source = mockSource();
+    lazy._configure({
+      document,
+      source: source.adapter,
+      visibility: manualVisibility(),
+    });
+    document.body.innerHTML =
+      '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
+    lazy.sse.scan(document);
+    lazy.sse.scan(document);
+    expect(source.opened).toHaveLength(1);
+    lazy.sse.remember("own");
+    source.opened[0]!.message(
+      JSON.stringify({
+        version: "v1",
+        request_id: "own",
+        ops: [{ op: "inner", target: { zone: "z" }, html: "echo" }],
+      }),
+    );
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("old");
+    lazy._reset();
+  });
+
+  it("a stream chunk landing after a reset scans nothing for the dead pass", () => {
+    const sse = unloaded<SseFactory>("sse");
+    const lazy = createPartial({
+      ...chunkModules,
+      sse,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    const source = mockSource();
+    lazy._configure({
+      document,
+      source: source.adapter,
+      visibility: manualVisibility(),
+    });
+    document.body.innerHTML =
+      '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
+    lazy.sse.scan(document);
+    lazy.sse.remember("stale");
+    lazy._reset();
+    sse.land(createSse);
+    expect(source.opened).toEqual([]);
+    lazy.sse.scan(document);
+    expect(source.opened).toHaveLength(1);
+    // The reset dropped the buffered id with the rest of the bridge state.
+    source.opened[0]!.message(
+      JSON.stringify({
+        version: "v1",
+        request_id: "stale",
+        ops: [{ op: "inner", target: { zone: "z" }, html: "fresh" }],
+      }),
+    );
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("fresh");
+    lazy._reset();
+  });
+
   it("an SSE event applies through the same pipeline as a response", () => {
     document.body.innerHTML =
       '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
@@ -564,6 +724,40 @@ describe("createPartial surface", () => {
       }),
     );
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("live");
+  });
+
+  it("a host meta from a stream or a zone GET under a layer survives its close", async () => {
+    window.history.replaceState(null, "", "/inbox/");
+    document.title = "Inbox (0)";
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const source = mockSource();
+    const meta = (title: string) =>
+      JSON.stringify({
+        version: "v1",
+        ops: [{ op: "meta", title }],
+        assets: [],
+        form: null,
+      });
+    partial._configure({
+      document,
+      dialog: mockDialog(),
+      source: source.adapter,
+      visibility: manualVisibility(),
+      fetch: async (url) =>
+        patchesResponse(meta(url.endsWith("/inbox/7/") ? "Mail 7" : "Inbox (4)")),
+    });
+    partial.sse.scan(document);
+    await partial.layers.open(null, "/inbox/7/", "mail");
+    expect(document.title).toBe("Mail 7");
+    source.opened[0]!.message(meta("Inbox (3)"));
+    expect(document.title).toBe("Mail 7");
+    partial.layers.close({ result: 1 });
+    expect(document.title).toBe("Inbox (3)");
+    await partial.layers.open(null, "/inbox/7/", "mail");
+    await partial.fetch({ url: "/inbox/", zone: "list" });
+    expect(document.title).toBe("Mail 7");
+    partial.layers.close({ result: 1 });
+    expect(document.title).toBe("Inbox (4)");
   });
 
   it("an SSE resume re-GETs the bound zones through the wire", async () => {
@@ -605,7 +799,7 @@ describe("createPartial surface", () => {
     ).toBe(true);
   });
 
-  it("the dev flag reaches the applier's boundary diagnostics", () => {
+  it("the dev channel reaches the applier's boundary diagnostics", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "debug").mockImplementation(() => {});
     document.body.innerHTML = '<div data-next-zone="z">old</div>';
@@ -615,7 +809,7 @@ describe("createPartial surface", () => {
       assets: [],
       form: null,
     };
-    partial._configure({ document, dev: true });
+    partial._configure({ document, dev: true, diagnostics: createDiagnostics() });
     partial.apply(wire);
     expect(warn).toHaveBeenCalledWith("[next] dropped malformed ops: 1");
     warn.mockClear();
@@ -630,7 +824,7 @@ describe("createPartial surface", () => {
     const seen: unknown[] = [];
     // A verb registered before the dev channel opens must survive it.
     partial.defineOp("confetti", (patch) => seen.push(patch.origin));
-    partial._configure({ dev: true });
+    partial._configure({ dev: true, diagnostics: createDiagnostics() });
     partial.apply({
       version: "v1",
       ops: [null, { op: "confetti", origin: "btn" }],
@@ -693,10 +887,10 @@ describe("createPartial surface", () => {
     made.partial._reset();
   });
 
-  it("the dev flag reaches the trigger attribute diagnostics", () => {
+  it("the dev channel reaches the trigger attribute diagnostics", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     document.body.innerHTML = '<div data-next-zone="t" data-next-poll="soon"></div>';
-    partial._configure({ document, dev: true });
+    partial._configure({ document, dev: true, diagnostics: createDiagnostics() });
     partial.ready();
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('data-next-poll="soon" is not a whole number'),
@@ -705,6 +899,19 @@ describe("createPartial surface", () => {
     partial._configure({ document });
     partial.ready();
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("a dev chunk landing after ready validates the mounted page once", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    document.body.innerHTML = '<div data-next-zone="t" data-next-lazy="soon"></div>';
+    partial._configure({ document, dev: true });
+    partial.ready();
+    expect(warn).not.toHaveBeenCalled();
+    const diagnostics = createDiagnostics();
+    partial._configure({ dev: true, diagnostics });
+    partial._configure({ dev: true });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]![0]).toContain('data-next-lazy="soon"');
   });
 
   it("onMount returns a teardown that unregisters the callback", () => {

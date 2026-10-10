@@ -43,9 +43,10 @@ Both come from the backend under check rather than from the settings, so one ent
 An override that reaches a database or a network is therefore called where an outage must not stop the process.
 The framework guards every such read, and it guards the value as well as the call.
 A backend that raises, or that answers something other than ``PageRoot`` entries, contributes no tree for that call instead of reaching a caller that dereferences it, and one that names its components folder as anything but a string contributes no component glob.
+The ``scripts.py`` and SEO source discovery a request runs reads ``page_roots`` inside ``FailureLog.guard`` instead, so a failure there costs that backend its trees under :ref:`topics-failure-containment`.
 
 ``skip_dir_names`` is guarded the same way, and a backend that raises there or answers anything but a collection of names refuses no directory to the check walk.
-The first such failure is logged once and the repeats stay quiet, because these paths run per reloader tick and per static lookup, and a backend that raised is logged with its traceback while one that answered the wrong type is named by that type.
+These paths run per reloader tick and per static lookup, so the failure is logged at the FailureLog rate, a backend that raised with its traceback and one that answered the wrong type by that type, see :ref:`topics-failure-containment`.
 ``manage.py check`` reports the same failure once as ``next.E030``, with the traceback, which is where a human is reading output on purpose.
 ``next.E030`` covers the report itself, a ``page_roots`` that raises or answers something other than ``PageRoot`` entries.
 A tree the backend reports successfully but the check walk then cannot read, an unreadable directory among them, is a separate report, ``next.E088``.

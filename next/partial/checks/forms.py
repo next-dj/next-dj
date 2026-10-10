@@ -1,20 +1,16 @@
-"""System checks where a form action meets partial rendering.
-
-The ids are `next.W070` for a looped `{% form %}` with no identity and `next.W068` for
-a form action backend that shapes its own response without the partial branch.
-"""
+"""System checks where a form action meets partial rendering."""
 
 from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning, register
 
 from next.checks import NEXT
 from next.forms.backends import FormActionBackend
 from next.forms.manager import form_action_manager
+from next.pages.checks.composed import iter_composed_pages
 from next.partial.keys import FORM_KEY_ATTR, FORM_ZONE_ATTR
 
 from .backends import partial_backends_active
 from .codes import W_FORM_BACKEND_NOT_AWARE, W_FORM_IN_FOR_NO_KEY
 from .nodes import forms_in_loop
-from .pages import iter_composed_pages
 
 
 @register(Tags.templates, NEXT)

@@ -1,9 +1,4 @@
-"""System checks for what a routed `page.py` module declares.
-
-The ids are `next.E011` for a walk that fails, `next.E012` and `next.E013` for a
-missing or uncallable body source, `next.W043` for several body sources, and
-`next.E017` for a module that raises while importing.
-"""
+"""System checks for what a routed `page.py` module declares."""
 
 from __future__ import annotations
 
@@ -20,15 +15,16 @@ from django.core.checks import (
 
 from next.checks import NEXT
 from next.checks.common import (
+    WALK_HINT,
     first_visit,
     get_page_roots,
     get_router_manager,
     page_tree_skip_names,
 )
 from next.pages.loaders import (
-    _load_python_module_memo,
     build_registered_loaders,
     last_load_error,
+    load_python_module_memo,
 )
 from next.pages.scan import iter_existing_scanned_pages
 from next.utils import walk_page_tree
@@ -48,9 +44,9 @@ def check_page_functions(*args, **kwargs) -> list[CheckMessage]:
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
-    router_manager, init_errors = get_router_manager()
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors
+        return []
 
     # One `page.py` reached through several page trees is one page.
     seen: set[Path] = set()
@@ -66,7 +62,11 @@ def check_page_functions(*args, **kwargs) -> list[CheckMessage]:
         except (AttributeError, OSError) as e:
             errors.append(
                 Error(
-                    f"Error checking page functions: {e}", obj=settings, id="next.E011"
+                    f"{type(router).__name__} page trees could not be walked to "
+                    f"check page.py functions: {e}",
+                    hint=WALK_HINT,
+                    obj=settings,
+                    id="next.E011",
                 )
             )
 
@@ -78,8 +78,8 @@ def _check_page_functions_in_directory(
 ) -> tuple[list[CheckMessage], list[CheckMessage]]:
     """Check `page.py` files for render/template rules, skipping files in `seen`.
 
-    The walk refuses what the router refuses, so a `page.py` under a skipped
-    directory answers no URL and is held to no body-source rule.
+    The walk skips what the router skips, so a `page.py` under a skipped directory
+    serves no URL and is exempt from the body-source rules.
     """
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
@@ -136,7 +136,7 @@ def _active_body_sources(page_file: Path) -> list[str]:
     Priority: `render()`, the `template` attribute, then
     `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]` entries.
     """
-    module = _load_python_module_memo(page_file)
+    module = load_python_module_memo(page_file)
     sources: list[str] = []
     if module is not None:
         if callable(getattr(module, "render", None)):
@@ -174,7 +174,7 @@ def _load_render_function(file_path: Path) -> object:
     A broken `page.py` loads as `None` and yields `None` here. The caller
     reads `last_load_error` and leaves the failure to `next.E017`.
     """
-    module = _load_python_module_memo(file_path)
+    module = load_python_module_memo(file_path)
     if module is None:
         return None
     return getattr(module, "render", None)
@@ -185,7 +185,7 @@ def _has_template_or_djx(file_path: Path) -> bool:
     if (file_path.parent / "layout.djx").exists():
         return True
 
-    module = _load_python_module_memo(file_path)
+    module = load_python_module_memo(file_path)
     if module is not None and hasattr(module, "template"):
         return True
 
@@ -216,13 +216,13 @@ def check_page_module_imports(*args, **kwargs) -> list[CheckMessage]:
     Importing every user module costs a full tree walk, so the check is a deployment
     one and runs under `manage.py check --deploy` instead of on every command.
     """
-    router_manager, init_errors = get_router_manager()
+    router_manager, _init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors
+        return []
     return [
         Error(_page_import_error_message(page_path), obj=str(page_path), id="next.E017")
         for page_path in iter_existing_scanned_pages(router_manager, set())
-        if _load_python_module_memo(page_path) is None
+        if load_python_module_memo(page_path) is None
     ]
 
 

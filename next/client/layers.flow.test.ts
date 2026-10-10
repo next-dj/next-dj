@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
 import type { DialogAdapter } from "./layers";
+import { chunkModules } from "./test-doubles";
 
 interface Dispatched {
   event: string;
@@ -71,6 +72,7 @@ describe("layer flow through the partial surface", () => {
     dismissers = made.dismissers;
     respond = () => envelopeResponse(zoneMorphBody("none", "<div></div>"));
     partial = createPartial({
+      ...chunkModules,
       dispatch: (event, detail) => dispatched.push({ event, detail }),
       mergeContext: () => undefined,
     });
@@ -196,6 +198,53 @@ describe("layer flow through the partial surface", () => {
     ).toBe("fresh");
   });
 
+  it("a meta op after layer.close in one envelope keeps its title", async () => {
+    document.title = "Feed";
+    respond = () =>
+      envelopeResponse(zoneMorphBody("z", '<div data-next-zone="z">step</div>'));
+    await partial.layers.open(null, "/w/", "z");
+    partial.apply(envelope([{ op: "meta", title: "Wizard" }]));
+    expect(document.title).toBe("Wizard");
+    partial.apply(
+      envelope([
+        { op: "layer.close", result: 1 },
+        { op: "meta", title: "Saved" },
+      ]),
+    );
+    expect(partial.layers.size()).toBe(0);
+    expect(document.title).toBe("Saved");
+  });
+
+  it("the title a base-page mutation answers waits under a layer opened meanwhile", async () => {
+    window.history.replaceState(null, "", "/feed/");
+    document.title = "Feed";
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-action="u"></form>';
+    let release!: (r: Response) => void;
+    respond = () => new Promise<Response>((r) => (release = r));
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    const saved = release;
+    respond = () =>
+      envelopeResponse(
+        JSON.stringify(
+          envelope([
+            { op: "morph", target: { zone: "photo" }, html: "<div>p</div>" },
+            { op: "meta", title: "Photo" },
+          ]),
+        ),
+      );
+    await partial.layers.open(null, "/photos/1/", "photo");
+    expect(document.title).toBe("Photo");
+    saved(envelopeResponse(JSON.stringify(envelope([{ op: "meta", title: "Saved" }]))));
+    await flush();
+    expect(document.title).toBe("Photo");
+    partial.layers.close({ result: undefined });
+    expect(document.title).toBe("Saved");
+    window.history.replaceState(null, "", "/");
+  });
+
   it("a validation-error envelope morphs the master zone and leaves the layer open", async () => {
     respond = () =>
       envelopeResponse(
@@ -300,5 +349,32 @@ describe("layer flow through the partial surface", () => {
     opener.dispatchEvent(layerEvent);
     expect(layerEvent.defaultPrevented).toBe(true);
     expect(partial.layers.size()).toBe(1);
+  });
+
+  it("a filter inside a layer moves the layer's URL and a close restores the host", async () => {
+    window.history.replaceState(null, "", "/feed/?page=2");
+    respond = () =>
+      envelopeResponse(
+        zoneMorphBody(
+          "photo",
+          '<div data-next-zone="photo"><form action="/photos/" data-next-target="grid">' +
+            '<input name="q" value="cat" data-next-trigger="input"></form>' +
+            '<div data-next-zone="grid">all</div></div>',
+        ),
+      );
+    await partial.layers.open(null, "/photos/", "photo");
+    respond = () =>
+      envelopeResponse(zoneMorphBody("grid", '<div data-next-zone="grid">cats</div>'));
+    document
+      .querySelector("dialog input")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    await flush();
+    expect(location.pathname + location.search).toBe("/photos/?q=cat");
+    expect(document.querySelector('dialog [data-next-zone="grid"]')!.textContent).toBe(
+      "cats",
+    );
+    partial.layers.close({ result: undefined });
+    expect(location.pathname + location.search).toBe("/feed/?page=2");
+    window.history.replaceState(null, "", "/");
   });
 });

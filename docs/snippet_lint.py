@@ -28,7 +28,15 @@ BODY_INDENTS = frozenset({3, 4})
 
 # next.dj block tags close with a slash, Django's own with an end- prefix.
 SLASH_TAGS = frozenset(
-    {"#component", "#slot", "#set_slot", "#use_style", "#use_script", "#template"}
+    {
+        "#component",
+        "#consented",
+        "#slot",
+        "#set_slot",
+        "#use_style",
+        "#use_script",
+        "#template",
+    }
 )
 END_TAGS = frozenset(
     {

@@ -108,7 +108,7 @@ class TestRegisterDependency:
         assert provider.resolve(param, ctx) is None
 
     def test_registered_dependency_not_used_if_url_kwargs_same_name(self) -> None:
-        """URL kwargs take precedence so param 'obj_id' gets the url value, not a dependency."""
+        """A URL kwarg wins, so 'obj_id' gets the URL value, not the dependency."""
         r = _minimal_resolver()
 
         @r.dependency("obj_id")
