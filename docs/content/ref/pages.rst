@@ -163,7 +163,7 @@ A shared ``cache`` applies to a ``GET`` or a ``HEAD`` alone and is sent with ``p
 ``headers`` may not name a caching header, ``Cache-Control``, ``CDN-Cache-Control``, ``Surrogate-Control``, ``Cloudflare-CDN-Cache-Control``, ``Expires``, ``Age``, or ``Vary``, which ``cache`` owns.
 ``SharedCookies`` is the cookie jar a shared response carries in place of Django's, so a cookie a middleware sets after the view, the session and CSRF cookies among them, still makes the response private, and a post-render callback settles a lazily rendered response the same way.
 A zone response carries the ``headers`` of its page and ``private, no-store``.
-A callable ``cache`` that raises or answers a wrong shape sends the page with ``private, no-store`` and logs at most once every ten minutes, raising under ``DEBUG`` or ``STRICT_LOADING``.
+A callable ``cache`` runs once ``render()`` has resolved the body, skipped when the response ``render()`` returns is no success or names its own ``Cache-Control``, and one that raises or answers a wrong shape sends the page with ``private, no-store``.
 See :doc:`/content/topics/caching` for the rules.
 
 .. autoclass:: next.pages.CacheDict

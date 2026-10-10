@@ -3,8 +3,7 @@
 Project layout
 ==============
 
-This page covers the directory layout that next.dj expects for a single Django project.
-It assumes one Django application that ships pages, components, and form actions.
+A single next.dj project keeps its pages, components, and form actions in one Django application, laid out as below.
 For projects with several applications or a shared UI kit, read :doc:`multi-project`.
 
 .. contents::

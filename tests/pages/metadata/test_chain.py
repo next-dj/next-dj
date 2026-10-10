@@ -29,6 +29,7 @@ from next.pages.metadata.chain import (
     MetadataOrigin,
     MetadataThunk,
     _failures,
+    _fresh,
     chain_entry,
     contained_chain,
     declared_metadata,
@@ -620,14 +621,28 @@ class TestContainedFailures:
         self, registry: PageMetadataRegistry, tmp_path: Path
     ) -> None:
         (leaf,) = write_page_chain(tmp_path, [("leaf", REFUSED)])
-        with patch.object(_failures, "contain") as contain:
+        with patch.object(_failures, "_log") as log:
             entry = contained_chain(registry, leaf)
             contained_chain(registry, leaf)
-        first, second = (call.args[0] for call in contain.call_args_list)
+        first, second = (call.args[4] for call in log.call_args_list)
         assert first is not second
         assert entry.refusal not in (first, second)
         assert str(first) == str(second) == str(entry.refusal)
         assert first.source == entry.refusal.source
+
+    def test_a_raised_copy_never_grows_the_memoised_notes(self, tmp_path: Path) -> None:
+        refusal = PageMetadataConflictError(tmp_path / "page.py")
+        refusal.add_note("memoised")
+        fresh = _fresh(refusal)
+        fresh.add_note("raised")
+        assert refusal.__notes__ == ["memoised"]
+        assert fresh.__notes__ == ["memoised", "raised"]
+
+    def test_a_copy_of_a_refusal_without_notes_carries_none(
+        self, tmp_path: Path
+    ) -> None:
+        fresh = _fresh(PageMetadataConflictError(tmp_path / "page.py"))
+        assert not hasattr(fresh, "__notes__")
 
     @override_settings(DEBUG=True)
     def test_a_refused_chain_fails_loudly_under_debug(

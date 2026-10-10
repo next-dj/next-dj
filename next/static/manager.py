@@ -10,13 +10,11 @@ import logging
 from typing import TYPE_CHECKING, Final, cast, override
 
 from django.contrib.staticfiles.storage import staticfiles_storage
-from django.core.signals import setting_changed
 from django.utils.functional import LazyObject, empty
 
 from next.backends import BackendListManager, backend_entries, load_backends
 from next.conf import import_class_cached, next_framework_settings
-from next.conf.signals import settings_reloaded
-from next.diagnostics import FailureLog, isolated_build, mark_degraded
+from next.diagnostics import Capture, FailureLog, isolated_build, mark_degraded
 from next.pages.watch import get_pages_directories_for_watch
 
 from .assets import with_version
@@ -83,17 +81,23 @@ def _bundle_url(path: str) -> str | None:
     A hashing storage raises for a file `collectstatic` did not copy. The page then
     renders without the bundle, and the error is raised under `DEBUG`.
     """
-    try:
+    with _failures.guard(
+        path,
+        "The static files storage has no %s, so pages render without it. Build the "
+        "client runtime and run collectstatic.",
+        path,
+        catch=(ValueError,),
+    ):
         return str(staticfiles_storage.url(path))
-    except ValueError as exc:
-        _failures.contain(
-            exc,
-            path,
-            "The static files storage has no %s, so pages render without it. Build "
-            "the client runtime and run collectstatic.",
-            path,
-        )
-        return None
+    return None
+
+
+def _chunk_url(path: str) -> str | None:
+    """Return the storage URL of a lazy chunk, `None` when the storage lacks it."""
+    capture = Capture((ValueError,))
+    with capture:
+        return str(staticfiles_storage.url(path))
+    return None
 
 
 def _script_builder(url: str | None, options: dict[str, object]) -> NextScriptBuilder:
@@ -103,18 +107,16 @@ def _script_builder(url: str | None, options: dict[str, object]) -> NextScriptBu
     """
     if url is None:
         options = {**options, "policy": ScriptInjectionPolicy.DISABLED}
-    try:
+    with _failures.guard(
+        "policy",
+        "NEXT_JS_OPTIONS['policy'] names no injection policy, so 'auto' applies. "
+        "Write 'auto', 'manual' or 'disabled'.",
+        catch=(ValueError,),
+    ):
         return NextScriptBuilder.from_options(url or "", options)
-    except ValueError as exc:
-        _failures.contain(
-            exc,
-            "policy",
-            "NEXT_JS_OPTIONS['policy'] names no injection policy, so 'auto' applies. "
-            "Write 'auto', 'manual' or 'disabled'.",
-        )
-        return NextScriptBuilder.from_options(
-            url or "", {**options, "policy": ScriptInjectionPolicy.AUTO}
-        )
+    return NextScriptBuilder.from_options(
+        url or "", {**options, "policy": ScriptInjectionPolicy.AUTO}
+    )
 
 
 def _rewrites_asset_urls(backend: StaticBackend) -> bool:
@@ -285,19 +287,18 @@ class StaticManager(BackendListManager[StaticBackend]):
     def chunk_url(self, name: str) -> str | None:
         """Return the URL of the lazy chunk `$chunks` names `name`, once per storage.
 
-        `None` means the storage lacks the chunk, and the page then cannot load it.
-        Every render that meets a missing chunk is marked degraded.
+        A missing chunk is a deploy error `next.W090` reports, never a degraded render.
         """
         path = CHUNK_STATIC_PATHS[name]
         if name not in self._chunk_urls:
-            self._chunk_urls[name] = _bundle_url(path)
+            self._chunk_urls[name] = _chunk_url(path)
         url = self._chunk_urls[name]
         if url is None:
-            # `_bundle_url` logged under this key, which starts its quiet period.
-            _reused(
+            _failures.warn(
                 path,
-                "The static files storage still has no %s, so pages render without "
-                "it. Build the client runtime and run collectstatic.",
+                "The static files storage has no %s, so pages leave it out of $chunks "
+                "and the runtime cannot load it. Build the client runtime and run "
+                "collectstatic.",
                 path,
             )
         return url
@@ -432,8 +433,7 @@ def reset_default_manager() -> None:
 def forget_manager_page_roots(**kwargs) -> None:
     """Tell the default manager that a router reload changed the page roots.
 
-    A manager that is not built yet reads them on first use, so the lazy handle is
-    not built only to be invalidated.
+    A manager not built yet reads them on first use, so nothing is built to invalidate.
     """
     if default_manager._wrapped is not empty:
         default_manager.forget_page_roots()
@@ -442,19 +442,18 @@ def forget_manager_page_roots(**kwargs) -> None:
 def forget_manager_backend_urls(**kwargs) -> None:
     """Tell the default manager that the staticfiles storage was rebuilt.
 
-    A manager that is not built yet holds no backend and no memo, so the lazy handle
-    is not built only to be invalidated.
+    A manager not built yet holds no backend or memo, so nothing is built to invalidate.
     """
     if default_manager._wrapped is not empty:
         default_manager.forget_backend_urls()
 
 
-def _on_settings_reloaded(**kwargs) -> None:
+def forget_static_manager(**kwargs) -> None:
     """Reset the default static manager when framework settings reload."""
     reset_default_manager()
 
 
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
+def forget_storage_state(*, setting: str, **kwargs) -> None:
     """Drop the derived state that a changed Django setting invalidates.
 
     `settings_reloaded` covers only `NEXT_FRAMEWORK`. `APP_DIRS` trees change with
@@ -464,7 +463,3 @@ def _on_setting_changed(*, setting: str, **kwargs) -> None:
         forget_manager_page_roots()
     elif setting in MANIFEST_SETTINGS:
         forget_manager_backend_urls()
-
-
-settings_reloaded.connect(_on_settings_reloaded)
-setting_changed.connect(_on_setting_changed)

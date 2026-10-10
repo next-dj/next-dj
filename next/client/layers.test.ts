@@ -995,6 +995,13 @@ describe("layer intercepting URL lifecycle", () => {
     expect(window.location.pathname).toBe("/feed/");
   });
 
+  it("a close restores the fragment the host page stood on", async () => {
+    window.history.replaceState(null, "", "/feed/#post-3");
+    await layers.open(null, "/photos/1/", "photo");
+    layers.close({ dismiss: true, reason: "escape" });
+    expect(window.location.pathname + window.location.hash).toBe("/feed/#post-3");
+  });
+
   it("a filter inside a layer moves its URL, so a close still replaces to the host", async () => {
     await layers.open(null, "/photos/1/", "photo");
     const form = document.createElement("form");

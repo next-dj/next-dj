@@ -4,7 +4,6 @@ Social and canonical tags
 =========================
 
 The canonical link, the robots directives, the hreflang alternates, and the social blocks describe a page to crawlers and to the cards a link unfurls into.
-This page covers how every URL becomes absolute, then each of these keys and the tags it emits.
 :doc:`metadata` covers where the keys are declared, and :doc:`head-tags` the remaining keys.
 
 .. contents::

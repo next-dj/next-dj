@@ -5,7 +5,6 @@ Action backends
 
 A form action backend stores registered actions, generates their URL patterns, and dispatches submissions to handlers.
 The framework ships ``RegistryFormActionBackend`` and lets a project subclass it.
-This page covers the backend contract, the ``FORM_ACTION_BACKENDS`` setting, and the pattern for a custom backend.
 
 .. contents::
    :local:

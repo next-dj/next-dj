@@ -8,6 +8,7 @@ Module summary
 
 ``next.testing`` exposes a test client, partial envelope decoding, signal recorder, registry isolation, action helpers, HTML utilities, rendering helpers, loaders, patching helpers, and dependency context builders.
 ``next.testing.plugin`` sits apart from that surface as an opt-in pytest plugin and is the only module in the package that imports pytest.
+The package imports ``defusedxml`` for ``parse_sitemap``, so it needs the ``testing`` extra, ``next.dj[testing]``.
 
 Public API
 ----------

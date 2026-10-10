@@ -17,6 +17,7 @@ from django.template import TemplateDoesNotExist
 from django.template.loader import get_template
 
 from next.checks import NEXT, SEO
+from next.diagnostics import Capture
 from next.seo.backends import PageTreeSitemapBackend, backend_path
 from next.seo.manager import seo_manager
 from next.seo.sitemaps import (
@@ -318,9 +319,11 @@ def _backend_sections() -> tuple[list[tuple[str, str]], list[CheckMessage]]:
         if isinstance(backend, PageTreeSitemapBackend):
             continue
         name = backend_path(backend)
-        try:
+        capture = Capture()
+        with capture:
             sections = list(backend.sections(None))
-        except Exception as exc:  # noqa: BLE001 - a backend is project code
+        exc = capture.error
+        if exc is not None:
             warnings.append(
                 DjangoWarning(
                     f"{name}.sections(None) raised {type(exc).__name__}: {exc}, so "

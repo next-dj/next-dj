@@ -10,8 +10,7 @@ from .headers import stamp_site_robots
 class RobotsHeaderMiddleware(MiddlewareMixin):
     """Stamp `X-Robots-Tag: noindex, nofollow` on every response of a closed site.
 
-    Pages and framework routes set it already. The middleware covers admin, API and
-    media responses.
+    Pages and framework routes set it already, so this covers admin, API and media.
     """
 
     def process_response(

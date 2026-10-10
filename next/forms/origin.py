@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING, cast
 
 from django.urls import Resolver404, get_script_prefix, resolve
 
+from next.conf.sentinels import UNSET
 from next.deps import RESERVED_KEYS
-from next.utils import UNSET, decode_url_path
+from next.utils import decode_url_path
 
 from .uid import URL_NAME_FORM_ACTION, is_path_only, posted_origin_path
 

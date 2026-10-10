@@ -3,7 +3,7 @@
 Component pipeline
 ==================
 
-This page covers how the components backend discovers component folders, loads their Python modules, resolves their context, and renders the final HTML fragment.
+The components backend discovers component folders, loads their Python modules, resolves their context, and renders the final HTML fragment.
 
 .. contents::
    :local:

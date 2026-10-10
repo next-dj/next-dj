@@ -3,15 +3,19 @@
 // own request ids drops their echoes, and a background tab pauses the streams.
 
 import { defaultEventSource, defaultVisibility } from "./adapters";
-import { ATTR_SSE, asString, currentUrl, isRecord, matching } from "./protocol";
+import {
+  ATTR_SSE,
+  ECHO_LIMIT,
+  asString,
+  currentUrl,
+  isRecord,
+  matching,
+} from "./protocol";
 import type { PartialError } from "./protocol";
 
 // A visibility flip shorter than this reconnects the stream but skips the zone
 // re-GETs, so flicking between tabs does not storm the server.
 const RESUME_REVALIDATE_MS = 3000;
-// The last 25 own request ids, matching the server-side echo window. Overflow is
-// safe, since a dropped id only causes an extra refresh.
-const ECHO_LIMIT = 25;
 // The cap on zones a connection tracks, so a long background sleep does not make
 // resume re-GET an unbounded backlog at once. A plain cap, not an LRU.
 const MAX_BOUND = 64;

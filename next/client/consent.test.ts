@@ -427,4 +427,25 @@ describe("consented markup", () => {
       '<p>before</p><iframe src="https://video.example/x"></iframe><p>after</p>',
     );
   });
+
+  it("never reveals a block whose category is blank, not even after accepting all", () => {
+    document.body.innerHTML = BLOCK.replace('"marketing"', '" "');
+    const { consent } = makeConsent();
+    consent.acceptAll();
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(consent._allows("")).toBe(false);
+    expect(consent._allows(" \t")).toBe(false);
+  });
+
+  it("reveals a joint block only once each of its categories is granted", () => {
+    document.body.innerHTML = BLOCK.replace('"marketing"', '"analytics marketing"');
+    const { consent } = makeConsent();
+    consent.update({ marketing: true });
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(consent._allows("analytics marketing")).toBe(false);
+    consent.update({ analytics: true });
+    expect(document.querySelector("iframe")).not.toBeNull();
+    expect(consent._allows("analytics  marketing")).toBe(true);
+    expect(consent._allows("necessary")).toBe(true);
+  });
 });

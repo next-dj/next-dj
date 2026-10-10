@@ -5,7 +5,6 @@ Robots
 
 ``/robots.txt`` has two sources, a ``robots.py`` that declares its groups in Python and a static ``robots.txt`` served as written.
 Both sit at the top of a page root, beside the ``sitemap.py`` of :doc:`sitemaps`, and a site has one source.
-This page covers the declared and the static forms, blocking AI crawlers, and why a ``noindex`` page never becomes a ``Disallow``.
 
 .. contents::
    :local:
@@ -70,7 +69,7 @@ Rules per request
        return groups
 
 ``robots.py`` is read by the dependency resolver, so it keeps ``from __future__ import annotations`` out.
-A ``rules`` callable that raises answers 503 with ``Retry-After`` and logs the failure once, and under ``DEBUG`` or ``STRICT_LOADING`` the exception reaches the technical page with a note naming the callable.
+A ``rules`` callable that raises answers 503 with ``Retry-After``, see :ref:`topics-failure-containment`.
 The checks read a static ``rules`` list alone, so a callable's groups are never compared against the sitemap.
 
 The Sitemap lines
@@ -120,13 +119,6 @@ A ``robots.py`` that fails to import keeps the route and answers 503 with ``Retr
 A 404 would be wrong here, since RFC 9309 reads a 4xx on ``/robots.txt`` as no restriction at all, which would open a staging host to every crawler.
 RFC 9309 reads a 5xx as an unreachable file, which a crawler answers by crawling nothing or by keeping the rules it cached before.
 
-A closed site
--------------
-
-On a site closed to search, ``/robots.txt`` answers ``User-agent: *`` with an empty ``Disallow:`` and no ``Sitemap:`` line, whatever the sources declare, see :doc:`site`.
-The crawler may then fetch every page and read its ``noindex``.
-A site only ``DEBUG`` closes serves its own robots under ``X-Robots-Tag: noindex, nofollow`` instead, so the file can be read during development.
-
 No Disallow from noindex
 ------------------------
 
@@ -135,6 +127,7 @@ A page that declares ``"robots": {"index": False}`` is not added to ``Disallow``
 A private area therefore keeps its ``noindex`` and stays crawlable, and ``manage.py check`` reports a ``Disallow`` that covers a ``noindex`` page.
 It also reports the opposite mistake, a ``Disallow`` covering a URL the sitemap lists or the sitemap address itself.
 Both checks read only the groups that name ``*``, since a crawler named in a group of its own follows that group alone, so a group that keeps AI crawlers out of the whole site warns about nothing.
+A site closed to search follows the same rule, and its ``/robots.txt`` disallows nothing whatever the sources declare, see :doc:`site`.
 
 See also
 --------

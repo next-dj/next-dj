@@ -318,6 +318,15 @@ describe("the commit phase", () => {
     expect(navigated()).toEqual([]);
   });
 
+  it("a drop rolls back to the fragment the page stood on", () => {
+    window.history.replaceState(null, "", "/feed/?page=2#row-7");
+    const drop = navigation.hold("/photos/2/", "/photos/2/", () => undefined);
+    drop!();
+    expect(location.pathname + location.search + location.hash).toBe(
+      "/feed/?page=2#row-7",
+    );
+  });
+
   it("a drop after the bar moved on leaves it where it is", () => {
     const drop = navigation.hold("/photos/2/", "/photos/2/", () => undefined);
     window.history.replaceState(null, "", "/elsewhere/");

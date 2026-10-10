@@ -26,6 +26,12 @@ class TestConsent:
             frozenset({NECESSARY, "analytics", "marketing"}), decided=True
         ).allows("analytics marketing")
 
+    @pytest.mark.parametrize("category", ["", " ", "\t"])
+    def test_a_blank_category_is_never_allowed(self, category: str) -> None:
+        consent = Consent(frozenset({NECESSARY, "analytics"}), decided=True)
+        assert not consent.allows(category)
+        assert consent[category] is False
+
     def test_an_item_lookup_answers_like_allows(self) -> None:
         consent = Consent(frozenset({"analytics"}), decided=True)
         assert consent["analytics"] is True
@@ -56,6 +62,7 @@ class TestJointCategory:
             (("marketing", NECESSARY), "marketing"),
             ((NECESSARY, NECESSARY), NECESSARY),
             (("analytics marketing", "marketing"), "analytics marketing"),
+            (("", " "), NECESSARY),
         ],
     )
     def test_the_names_join_once_and_sorted(

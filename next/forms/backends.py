@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, TypedDict, override
 from weakref import WeakSet
 
 from django.core.exceptions import ImproperlyConfigured
-from django.core.signals import setting_changed
 from django.http import Http404
 from django.urls import get_script_prefix, path
 from django.views.decorators.http import require_http_methods
@@ -307,14 +306,11 @@ def _action_meta(registration: ActionRegistration, uid: str) -> ActionMeta:
     return meta
 
 
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
+def forget_action_urls(*, setting: str, **kwargs) -> None:
     """Drop cached action URLs when the URLconf is swapped under override_settings."""
     if setting == "ROOT_URLCONF":
         for backend in _url_caching_backends:
             backend._url_cache.clear()
-
-
-setting_changed.connect(_on_setting_changed)
 
 
 class RegistryFormActionBackend(FormActionBackend):

@@ -13,7 +13,7 @@ from django.utils.functional import Promise
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.safestring import SafeData
 
-from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog
+from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog, type_name
 from next.forms.origin import resolve_origin, resolve_url_to_page
 from next.forms.uid import redirect_or_fallback, validated_origin_path
 from next.pages import page as page_manager
@@ -427,8 +427,7 @@ class Patches:
     ) -> "Patches":
         """Open a server-initiated layer, optionally seeding a zone or href.
 
-        An href without a zone raises `LayerHrefWithoutZoneError`, and a cross-site
-        href raises `CrossSiteHrefError`.
+        An href needs a zone and must stay on the site, or the call raises.
         """
         if href is not None and zone is None:
             raise LayerHrefWithoutZoneError(href)
@@ -552,7 +551,15 @@ class Patches:
         The inherited callables read `visit`, the request the origin view would see.
         The failure is logged per page and exception type at the `FailureLog` rate.
         """
-        try:
+        with _failures.guard(
+            page_path,
+            "The metadata that %s inherits raised %s in Patches.meta(). The head is "
+            "left unchanged and the rest of the patch applies. Fix the @page.metadata "
+            "callable or the metadata it returns.",
+            page_path,
+            pass_through=_META_PASSES,
+            detail=type_name,
+        ):
             return page_manager.fold_metadata(
                 page_path,
                 overlay=segment,
@@ -560,19 +567,7 @@ class Patches:
                 url_kwargs=dict(match.url_kwargs),
                 context_data=self._metadata_context,
             )
-        except _META_PASSES:
-            raise
-        except Exception as exc:  # noqa: BLE001 - an inherited callable may raise anything
-            _failures.contain(
-                exc,
-                (page_path, type(exc)),
-                "The metadata that %s inherits raised %s in Patches.meta(). The head "
-                "is left unchanged and the rest of the patch applies. Fix the "
-                "@page.metadata callable or the metadata it returns.",
-                page_path,
-                type(exc).__name__,
-            )
-            return None
+        return None
 
     def _head_address(self, match: "OriginMatch") -> str:
         """Return the address the head describes, the last queued URL if any."""

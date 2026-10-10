@@ -15,8 +15,7 @@ from django.conf import settings
 from django.core.checks import CheckMessage, Error
 from django.core.exceptions import ImproperlyConfigured
 
-from next.conf.signals import settings_reloaded
-from next.diagnostics import FailureLog
+from next.diagnostics import FailureLog, exception_text
 from next.ports import page_scan_slot, router_access_slot
 from next.utils import page_roots_shape_error, walk_page_tree
 
@@ -74,8 +73,7 @@ _ROUTER_CONTRACT_CACHE: dict[int, _RouterContract] = {}
 class _RoutedSkipNames:
     """The skip names of the routers of one manager version, read once per version.
 
-    The manager pins its backends until its version moves, so no `id` is reused while
-    the memo holds it.
+    Backends stay pinned per manager version, so no `id` is reused while memoised.
     """
 
     __slots__ = ("held",)
@@ -160,9 +158,6 @@ def reset_router_manager_cache(**kwargs) -> None:
     _ROUTER_CONTRACT_CACHE.clear()
     _CACHED_ROUTERS.clear()
     _routed_skip_names.held = None
-
-
-settings_reloaded.connect(reset_router_manager_cache)
 
 
 def first_visit(path: Path, seen: set[Path]) -> bool:
@@ -322,19 +317,17 @@ def _skip_names_by_router(
 def _routed_roots(router: RouterBackend) -> list[PageRoot]:
     """Return the page trees `router` reports, none when it fails to report them.
 
-    A request reads the trees, so the failure goes through `FailureLog.contain`.
+    A request reads the trees, so the failure goes through a `FailureLog` guard.
     """
-    try:
+    with _failures.guard(
+        ("page_roots", type(router)),
+        "%s, so the scripts.py and SEO sources of its page trees are not loaded. Make "
+        "page_roots() return a list of next.urls.PageRoot.",
+        catch=(PageRootsError,),
+        detail=exception_text,
+    ):
         return read_page_roots(router)
-    except PageRootsError as exc:
-        _failures.contain(
-            exc,
-            ("page_roots", type(router)),
-            "%s, so the scripts.py and SEO sources of its page trees are not "
-            "loaded. Make page_roots() return a list of next.urls.PageRoot.",
-            exc,
-        )
-        return []
+    return []
 
 
 def routed_page_trees(manager: RouterManager) -> list[tuple[PageRoot, frozenset[str]]]:

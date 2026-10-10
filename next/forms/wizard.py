@@ -18,7 +18,6 @@ from django.http import HttpRequest, HttpResponse
 from django.utils.encoding import escape_uri_path
 
 from next.backends import SingleBackendManager
-from next.conf.signals import settings_reloaded
 
 from .backends import ActionRegistration, scope_key_for
 from .base import (
@@ -267,12 +266,9 @@ wizard_backend_manager = SingleBackendManager(
 )
 
 
-def _on_settings_reloaded(**kwargs) -> None:
+def forget_wizard_backend(**kwargs) -> None:
     """Drop the cached backend so a reloaded config takes effect."""
     wizard_backend_manager.reset()
-
-
-settings_reloaded.connect(_on_settings_reloaded)
 
 
 def _replace_step_segment(path: str, current: str, target: str) -> str:

@@ -10,7 +10,6 @@ from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy
 from pytest_lazy_fixtures import lf
 
-from next import utils
 from next.conf import next_framework_settings
 from next.conf.frozen import FrozenDict, FrozenList
 from next.conf.merge import (
@@ -23,7 +22,6 @@ from next.conf.merge import (
     accepted_value,
     merge_user_settings,
 )
-from next.conf.sentinels import Unset
 from next.conf.settings import NextFrameworkSettings
 from tests.django_setup import PROJECT_ROOT
 
@@ -176,10 +174,6 @@ class TestReplacementIsWhole:
 
 class TestSentinelHome:
     """The configuration layer defines the sentinel and imports no area helper."""
-
-    def test_the_utils_sentinel_is_the_configuration_one(self) -> None:
-        assert utils.UNSET is UNSET
-        assert utils.Unset is Unset
 
     def test_the_merge_imports_no_framework_helper(self) -> None:
         completed = subprocess.run(

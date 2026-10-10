@@ -84,8 +84,7 @@ def _annotation_is_dict_like(annotation: object) -> bool:
 def _return_annotation(func: Callable[..., Any]) -> object:
     """Return the resolved return annotation, read the way the DI resolver reads it.
 
-    A hint the resolver itself cannot evaluate does not block a page, so an unreadable
-    annotation counts as an absent one.
+    An unreadable hint counts as absent, since the resolver does not block a page on it.
     """
     try:
         return cached_type_hints(func).get("return", inspect.Signature.empty)

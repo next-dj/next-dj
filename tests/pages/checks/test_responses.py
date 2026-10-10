@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from django.middleware.http import ConditionalGetMiddleware
@@ -13,6 +14,7 @@ from next.pages.checks import (
     check_csrf_in_session,
     check_page_response_declarations,
     check_shared_page_responses,
+    responses,
 )
 from tests.support import (
     FEED_URLCONF,
@@ -302,3 +304,20 @@ class TestCsrfEndpoint:
     def test_a_routed_endpoint_is_silent(self, tmp_path) -> None:
         with routed(_pages(tmp_path, "cache = 60\n"), CSRF_DELIVERY="lazy"):
             assert check_csrf_endpoint_reversible() == []
+
+
+class TestSharedPagePaths:
+    """The shared pages are read once per check run."""
+
+    def test_a_run_reads_the_page_modules_once(self, tmp_path) -> None:
+        with (
+            routed(_pages(tmp_path, "cache = 60\n")),
+            patch.object(
+                responses, "_page_modules", wraps=responses._page_modules
+            ) as read,
+        ):
+            first = responses.shared_page_paths()
+            assert responses.shared_page_paths() is first
+            reset_check_caches()
+            assert responses.shared_page_paths() == first
+        assert read.call_count == 2

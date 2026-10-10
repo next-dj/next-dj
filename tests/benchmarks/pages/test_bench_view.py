@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import pytest
 from django.test import override_settings
 
-from next.pages.loaders import _load_python_module_memo
+from next.pages.loaders import load_python_module_memo
 from next.pages.manager import page as page_singleton
 from tests.benchmarks.factories import build_layout_page
 from tests.support import partial_meta, plain_get
@@ -54,7 +54,7 @@ def _view_for(page_file: Path) -> Iterator[Callable[..., HttpResponseBase]]:
     Created the way the URL builder creates it, so the benchmark times the
     per-request path and none of the build-time work.
     """
-    module = _load_python_module_memo(page_file)
+    module = load_python_module_memo(page_file)
     view = page_singleton._create_unified_view(page_file, module)
     try:
         yield view

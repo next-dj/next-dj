@@ -5,7 +5,6 @@ Sitemaps
 
 A ``sitemap.py`` at the top of a page root switches ``/sitemap.xml`` on for that tree.
 Every static route is listed on its own, a dynamic route lists the rows an ``@sitemap.items`` callable answers, and the XML comes from the templates of :doc:`django:ref/contrib/sitemaps`.
-This page covers the file, the two kinds of routes, lazy items, the module attributes, and languages, and :doc:`sitemap-sections` covers sections, backends, the origin, and caching.
 
 .. contents::
    :local:
@@ -26,13 +25,13 @@ Without one no sitemap route exists, so a ``path("sitemap.xml", ...)`` placed af
 
 The file is executed once when the framework discovers the tree and kept until the SEO routes reset on a router or settings reload.
 While ``DEBUG`` is on an edit shows on the next request without a restart, since every SEO route first checks the files at the top of each page root.
-A file that fails to import is logged once, keeps its route, and answers 404, so no partial sitemap is served, and ``manage.py check`` reports the cause.
+A file that fails to import is logged, keeps its route, and answers 404, so no partial sitemap is served, and ``manage.py check`` reports the cause.
 A 404 is safe here, since a crawler reads a missing sitemap as nothing listed and keeps the URLs it already knows.
 ``sitemap.py`` is read by the dependency resolver like a ``page.py``, so it keeps ``from __future__ import annotations`` out.
 A ``sitemap.py`` below the top of the tree is never read, and the checks say so.
 
 ``django.contrib.sitemaps`` sits in ``INSTALLED_APPS`` with ``APP_DIRS`` on the Django template backend, because the XML is rendered from the ``sitemap.xml`` and ``sitemap_index.xml`` templates it ships.
-A site closed to search answers 404 for every sitemap address, and a site only ``DEBUG`` closes serves them under ``noindex``, see :doc:`site`.
+A site closed to search answers 404 for every sitemap address, see :doc:`site`.
 
 Static routes
 -------------
@@ -43,8 +42,7 @@ A route matching a glob in ``exclude`` is left out as well, and a glob matches t
 Only ``*`` and ``?`` are wildcards, and brackets are literal because routes spell parameters with them, so ``posts/[slug]`` names that one dynamic route.
 
 Only the static metadata is read, ``DEFAULTS`` plus every ``metadata`` dict from the page root down.
-Metadata the schema refuses does not break the document, the route is left out because its page renders under ``noindex``, the refusal is logged at most once every ten minutes, and the metadata checks report the fault.
-Under ``DEBUG`` or ``STRICT_LOADING`` the sitemap raises instead.
+Metadata the schema refuses does not break the document, the route is left out because its page renders under ``noindex``, and the metadata checks report the fault.
 The list is memoised until a ``page.py`` of the tree loads again.
 
 Dynamic routes and lazy items
@@ -88,8 +86,7 @@ A row that none of these reverses is a ``TypeError`` naming the callable.
        return [SitemapEntry(kwargs={"slug": slug}, changefreq="daily") for slug in ("python", "django")]
 
 The first argument is the route as the directory names spell it, and the same tree has to serve it, otherwise the build raises ``SitemapTrailError`` and ``manage.py check`` reports it ahead of time.
-An items callable, its ``kwargs=`` callable, a row of the wrong shape, or a row that does not reverse makes the sitemap answer 503 with ``Retry-After`` and logs the failure once, so a crawler comes back later rather than reading a 500.
-Under ``DEBUG`` or ``STRICT_LOADING`` the exception reaches the technical page with a note naming the callable and the trail.
+An items callable, its ``kwargs=`` callable, a row of the wrong shape, a row that does not reverse, or a sitemap template that fails to render makes the sitemap answer 503 with ``Retry-After``, so a crawler comes back later rather than reading a 500, see :ref:`topics-failure-containment`.
 The callable is resolved through dependency injection like a ``@context`` callable, so ``Depends`` and a parameter annotated :class:`~django.http.HttpRequest` are available to it.
 A registration binds to the ``sitemap.py`` that runs the decorator, so the callable may live in a helper module and be registered as ``sitemap.items("notes/[int:note_id]")(notes)`` after its import.
 The decorator run anywhere else registers nothing, and two callables on one route keep only the later one, and the checks report both.

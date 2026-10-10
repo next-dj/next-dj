@@ -8,7 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterator, Mapping
     from pathlib import Path
 
     from django.forms import BaseForm, BaseFormSet
@@ -188,6 +188,17 @@ class SeoRoutes(Protocol):
         ...
 
 
+class FormRoutes(Protocol):
+    """The URL patterns the form backends serve.
+
+    The forms area imports the pages package, which loads the URL checks that read this.
+    """
+
+    def __iter__(self) -> Iterator[URLPattern]:
+        """Yield the URL patterns of every form backend."""
+        ...
+
+
 class PageScripts(Protocol):
     """The third-party scripts one page render adds to its head and init payload.
 
@@ -209,6 +220,7 @@ class PageScripts(Protocol):
         ...
 
 
+form_routes_slot = PortSlot["FormRoutes"]("form routes port")
 page_scan_slot = PortSlot["PageScan"]("page scan port")
 partial_shaper_slot = PortSlot["PartialShaper"]("partial shaper")
 router_access_slot = PortSlot["RouterAccess"]("router access port")
@@ -218,6 +230,7 @@ static_assets_slot = PortSlot["StaticAssets"]("static assets port")
 
 
 __all__ = [
+    "FormRoutes",
     "PageScan",
     "PageScripts",
     "PartialShaper",
@@ -225,6 +238,7 @@ __all__ = [
     "RouterAccess",
     "SeoRoutes",
     "StaticAssets",
+    "form_routes_slot",
     "page_scan_slot",
     "page_scripts_slot",
     "partial_shaper_slot",

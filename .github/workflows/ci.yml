@@ -25,7 +25,7 @@ jobs:
         cache: 'npm'
     - name: Install Node dependencies
       run: npm ci
-    - name: Build next.min.js
+    - name: Build the runtime and its lazy chunks
       run: npm run build:next
     - uses: ./.github/actions/setup-python-uv
     - name: Build wheel and sdist
@@ -129,19 +129,22 @@ jobs:
       run: npm run format:check
     - name: Lint TypeScript (ESLint)
       run: npm run lint:js
-    - name: Build next.min.js
+    - name: Build the runtime and its lazy chunks
       run: npm run build:next
-    - name: Check bundle size budget
+    - name: Check the gzip budget of the runtime and each lazy chunk
       run: |
-        # The runtime ships gzipped on every page, so its gzip size is the hard budget enforced here in CI.
-        # Minification is exhausted at this size, so further growth needs a lazy-loaded chunk, not a bump.
-        bytes=$(gzip -nc next/static/next/next.min.js | wc -c)
-        budget=$((14 * 1024))
-        echo "next.min.js: ${bytes} bytes gzip (budget ${budget} bytes)"
-        if [ "$bytes" -gt "$budget" ]; then
-          echo "::error::next.min.js (${bytes} bytes gzip) exceeds the 14 KB gzip budget (${budget} bytes)"
-          exit 1
-        fi
+        status=0
+        for entry in next:14336 next.scripts:3584 next.sse:1536 next.csrf:768 next.poll:1024 next.dev:2048; do
+          name="${entry%%:*}.min.js"
+          budget="${entry##*:}"
+          bytes=$(gzip -nc "next/static/next/${name}" | wc -c)
+          echo "${name}: ${bytes} bytes gzip (budget ${budget} bytes)"
+          if [ "$bytes" -gt "$budget" ]; then
+            echo "::error::${name} (${bytes} bytes gzip) exceeds its gzip budget (${budget} bytes)"
+            status=1
+          fi
+        done
+        exit "$status"
     - name: Run JavaScript unit tests with coverage
       run: npm run test:js:coverage
 

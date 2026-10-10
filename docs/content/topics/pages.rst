@@ -4,7 +4,6 @@ Pages
 =====
 
 A page is a directory under a configured page root that produces a body when its URL is requested.
-This page covers the three ways a page produces that body, the priority rules between them, the ``render`` function contract, and how custom template loaders extend discovery beyond ``template.djx``.
 
 .. contents::
    :local:

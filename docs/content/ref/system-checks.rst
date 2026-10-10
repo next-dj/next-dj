@@ -575,8 +575,7 @@ Errors
    * - ``next.E104``
      - A ``metadata`` dict names a key or a value the schema refuses, at any depth, the key path named in the message.
        This covers a URL with a scheme outside http and https, ``x-default`` given both in ``languages`` and as ``x_default``, a NaN or a non-string key in raw JSON-LD, ``canonical: False``, an ``og.determiner``, ``viewport_fit``, ``interactive_widget``, or ``color_scheme`` outside its values, a ``twitter.card`` outside ``summary``, ``summary_large_image``, ``app``, and ``player``, and a ``player`` card without ``twitter.player``.
-       A lazy URL passes unforced, and a render that forces it to such a scheme leaves the tag out and logs the ``PageMetadataShapeError`` at most once every ten minutes.
-       Under ``DEBUG`` or ``STRICT_LOADING`` the render raises it instead.
+       A lazy URL passes unforced, and a render that forces it to such a scheme leaves the tag out.
      - ``next.pages.checks.metadata.shape``
    * - ``next.E105``
      - A title, a title default, or an absolute title is the empty string, which renders an empty ``<title>``.
@@ -587,7 +586,7 @@ Errors
    * - ``next.E107``
      - ``NEXT_FRAMEWORK["METADATA"]["RENDERER"]`` does not import or names no concrete ``MetadataRenderer`` subclass.
        The check imports the dotted path and never builds the class.
-       A render with such a value falls back to ``HtmlMetadataRenderer`` and logs it at most once every ten minutes, and raises under ``DEBUG`` or ``STRICT_LOADING``.
+       A render with such a value falls back to ``HtmlMetadataRenderer``.
      - ``next.pages.checks.metadata.scope``
    * - ``next.E108``
      - A ``@page.metadata`` callable is not annotated as returning a mapping.
@@ -668,7 +667,7 @@ Errors
      - ``next.site.checks``
    * - ``next.E130``
      - ``NEXT_JS_OPTIONS["policy"]`` names no ``ScriptInjectionPolicy``, read through ``NextScriptBuilder.from_options`` as a render reads it.
-       Pages inject the runtime as under ``"auto"``, and log the fallback at most once every ten minutes.
+       Pages inject the runtime as under ``"auto"``.
      - ``next.static.checks``
    * - ``next.E131``
      - A ``page.py`` declares a ``cache`` or ``headers`` the response cannot carry as written, an unknown key, a negative age, a flag that is no bool, ``public`` with ``no_store``, a forbidden or invalid header name, or a value with a control character or a character outside ASCII.
@@ -692,7 +691,7 @@ Errors
      - ``next.scripts.checks``
    * - ``next.E137``
      - ``CONSENT["BACKEND"]`` does not import or is no ``ConsentBackend`` subclass.
-       Pages still render, every visitor reading as undecided with every category but ``necessary`` denied, and the failure is logged at most once every ten minutes, or raised under ``DEBUG`` or ``STRICT_LOADING``.
+       Pages still render, every visitor reading as undecided with every category but ``necessary`` denied.
        Name a subclass by its dotted path, or remove ``BACKEND`` to read the cookie the runtime writes.
      - ``next.consent.checks``
    * - ``next.E138``
@@ -700,7 +699,7 @@ Errors
      - ``next.scripts.checks``
    * - ``next.E139``
      - A custom ``preload_template``, ``script_tag_template``, or ``init_template`` in ``NEXT_JS_OPTIONS``, or a ``css_tag``, ``js_tag``, or ``module_tag`` in a ``STATIC_BACKENDS`` entry, does not format with its fields, ``{url}`` or ``{payload}`` and ``{nonce_attr}``, through a stray brace or another field.
-       The check formats each with blank values, and a render uses the default tag in its place and logs it at most once every ten minutes.
+       The check formats each with blank values, and a render uses the default tag in its place.
      - ``next.static.checks``
    * - ``next.E140``
      - A script names a category ``CONSENT["CATEGORIES"]`` does not list, so no visitor can grant it.
@@ -729,7 +728,7 @@ Errors
      - ``next.static.checks``
    * - ``next.E148``
      - ``CSRF_DELIVERY`` is ``"lazy"``, or ``"auto"`` with a page whose ``cache`` a CDN may hold, while ``ROOT_URLCONF`` does not route the ``_next/csrf/`` endpoint, so ``csrf_url()`` does not reverse.
-       Pages embed the token instead and log it at most once every ten minutes, and the hint asks for ``include("next.urls")``.
+       Pages embed the token instead, and the hint asks for ``include("next.urls")``.
      - ``next.pages.checks.responses``
    * - ``next.E149``
      - The CSRF token endpoint or the form action endpoint reverses, but ``resolve()`` of its address returns a view other than the framework view, such as a project pattern listed above ``include("next.urls")``, a project view that reuses the URL name ``csrf`` or ``form_action``, or a page, which the message names by its file.
@@ -900,7 +899,7 @@ Warnings
      - ``next.seo.checks.sitemaps``
    * - ``next.W090``
      - The client runtime ``next/next.min.js`` or a lazy chunk other than the dev one is unbuilt, so no static files finder answers it, or the static files storage, a hashing one such as ``ManifestStaticFilesStorage``, holds no entry for it.
-       A page renders without the runtime, or without the chunk, and logs it at most once every ten minutes.
+       A page renders without the runtime, or leaves the chunk out of ``$chunks`` and logs a warning while its render stays shareable.
        The check carries ``deploy=True``.
      - ``next.static.checks``
    * - ``next.W091``

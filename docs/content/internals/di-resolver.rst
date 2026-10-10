@@ -3,7 +3,7 @@
 Dependency resolver
 ===================
 
-This page covers how the dependency resolver inspects a callable, picks providers, fills parameters, and caches results across a request.
+The dependency resolver inspects a callable, picks providers, fills parameters, and caches results across a request.
 
 .. contents::
    :local:

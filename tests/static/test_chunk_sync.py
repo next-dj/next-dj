@@ -72,6 +72,13 @@ class TestChunkLists:
             source = (ROOT / entry).read_text(encoding="utf-8")
             assert f'Next._land("{key}"' in source, entry
 
+    def test_each_chunk_entry_is_named_by_its_key(self) -> None:
+        entries = _build_entries()
+        for key, path in CHUNK_STATIC_PATHS.items():
+            assert path == f"next/next.{key}.min.js"
+            entry = entries[f"next.{key}.min"]
+            assert entry == f"next/client/entries/{key}.ts"
+
     def test_build_hook_checks_every_static_bundle(self) -> None:
         tree = ast.parse((ROOT / "build_hooks.py").read_text(encoding="utf-8"))
         bundles = next(

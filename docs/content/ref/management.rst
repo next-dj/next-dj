@@ -17,12 +17,14 @@ Each ``@page.metadata`` callable of the page follows under ``*``, since a callab
 .. code-block:: text
    :caption: manage.py showmetadata /posts/launch-day/
 
-   blog/pages/posts/[slug]/page.py
+   /srv/site/blog/pages/posts/[slug]/page.py
      description: NEXT_FRAMEWORK['METADATA']['DEFAULTS']
      jsonld: NEXT_FRAMEWORK['METADATA']['DEFAULTS']
-     title: blog/pages/page.py
-     *: post_metadata in blog/pages/posts/[slug]/page.py
+     title: /srv/site/blog/pages/page.py
+     *: post_metadata in /srv/site/blog/pages/posts/[slug]/page.py
 
+Every file is named by its absolute path.
+The path resolves under the language its prefix names, ``LANGUAGE_CODE`` without one, so a translated path under :func:`~django.conf.urls.i18n.i18n_patterns` reaches its page.
 A path that resolves to no URL, or to a view that is no page, is a ``CommandError``.
 
 See also

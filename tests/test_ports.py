@@ -6,10 +6,12 @@ from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpResponse
 from django.urls import path
 
+from next.forms.manager import FormActionManager
 from next.pages.ports import PageScanImpl
 from next.partial.ports import PartialShaperImpl
 from next.ports import (
     PortSlot,
+    form_routes_slot,
     page_scan_slot,
     page_scripts_slot,
     partial_shaper_slot,
@@ -26,6 +28,7 @@ from tests.support import IntentOnlyShaper
 
 
 PROCESS_SLOTS = [
+    pytest.param(form_routes_slot, FormActionManager, id="form_routes"),
     pytest.param(page_scan_slot, PageScanImpl, id="page_scan"),
     pytest.param(page_scripts_slot, PageScriptsImpl, id="page_scripts"),
     pytest.param(partial_shaper_slot, PartialShaperImpl, id="partial_shaper"),
@@ -35,6 +38,7 @@ PROCESS_SLOTS = [
 ]
 
 SLOT_SUBJECTS = [
+    "form routes port",
     "page scan port",
     "page scripts port",
     "partial shaper",

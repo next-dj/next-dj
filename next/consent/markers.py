@@ -13,9 +13,7 @@ _FIELDS: Final = frozenset({"allows", "decided", "granted"})
 def joint_category(*categories: str) -> str:
     """Return the category a script waits for when every one of `categories` must hold.
 
-    A script declared `marketing` inside a `{% #consented "analytics" %}` block, or a
-    block inside another, waits for both. The names are joined with a space, which
-    no category name contains, and `Consent.allows` and the runtime require each one.
+    The names are joined with a space, which `Consent.allows` and the runtime split on.
     """
     names = sorted(
         {name for category in categories for name in category.split()} - {NECESSARY}
@@ -34,19 +32,19 @@ class Consent:
     decided: bool = False
 
     def allows(self, category: str) -> bool:
-        """Whether scripts of `category` may run for this visitor.
+        """Whether scripts of `category` may run for this visitor, never a blank one.
 
         A joint category from `joint_category` is allowed only when each name is.
         """
-        return all(
-            name == NECESSARY or name in self.granted for name in category.split()
+        names = category.split()
+        return bool(names) and all(
+            name == NECESSARY or name in self.granted for name in names
         )
 
     def __getitem__(self, category: str) -> bool:
         """Answer `{% if consent.marketing %}` like `allows`.
 
-        A template tries a key lookup first, so a field name raises `KeyError` and the
-        lookup falls through to the attribute.
+        A field name raises `KeyError`, so a template falls through to the attribute.
         """
         if category in _FIELDS:
             raise KeyError(category)

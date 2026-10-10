@@ -308,3 +308,84 @@ describe("the scripts defaults", () => {
     expect(scripts.status("early")).toBe("loaded");
   });
 });
+
+describe("loading a script the server rendered", () => {
+  const settled = new Map<Element, boolean>();
+
+  function rendered(): { scripts: Scripts; tag: HTMLScriptElement } {
+    document.head.innerHTML = '<script data-next-script="gtm" src="/gtm.js"></script>';
+    const scripts = createScripts({
+      dispatch: () => undefined,
+      allows: () => true,
+      settled: (el) => settled.get(el),
+    });
+    scripts._configure([{ name: "gtm", src: "/gtm.js" }]);
+    return { scripts, tag: document.head.querySelector("script")! };
+  }
+
+  beforeEach(() => {
+    settled.clear();
+    vi.spyOn(document, "readyState", "get").mockReturnValue("interactive");
+  });
+
+  it("resolves once the tag loads, not before", async () => {
+    const { scripts, tag } = rendered();
+    let done = false;
+    const load = scripts.load("gtm").then(() => (done = true));
+    await Promise.resolve();
+    expect(done).toBe(false);
+    tag.dispatchEvent(new Event("load"));
+    await load;
+    expect(scripts.status("gtm")).toBe("rendered");
+  });
+
+  it("rejects when the tag fails", async () => {
+    const { scripts, tag } = rendered();
+    const load = scripts.load("gtm");
+    tag.dispatchEvent(new Event("error"));
+    await expect(load).rejects.toThrow("gtm failed to load");
+  });
+
+  it("answers at once for a tag the runtime saw settle", async () => {
+    const { scripts, tag } = rendered();
+    settled.set(tag, true);
+    await expect(scripts.load("gtm")).resolves.toBeUndefined();
+    settled.set(tag, false);
+    await expect(scripts.load("gtm")).rejects.toThrow("gtm failed to load");
+  });
+
+  it("resolves by the window load for a tag that settled before anyone listened", async () => {
+    const { scripts } = rendered();
+    const load = scripts.load("gtm");
+    window.dispatchEvent(new Event("load"));
+    await expect(load).resolves.toBeUndefined();
+  });
+
+  it("resolves at once on a page that finished loading", async () => {
+    const { scripts } = rendered();
+    vi.spyOn(document, "readyState", "get").mockReturnValue("complete");
+    await expect(scripts.load("gtm")).resolves.toBeUndefined();
+  });
+});
+
+describe("the idle default", () => {
+  it("waits on the window and document it was given", () => {
+    const doc = document.implementation.createHTMLDocument("");
+    vi.spyOn(doc, "readyState", "get").mockReturnValue("loading");
+    const win = new EventTarget() as EventTarget & { setTimeout: typeof setTimeout };
+    const timers: (() => void)[] = [];
+    win.setTimeout = ((run: () => void) => timers.push(run)) as typeof setTimeout;
+    const scripts = createScripts({
+      dispatch: () => undefined,
+      allows: () => true,
+      document: doc,
+      window: win as unknown as Window,
+    });
+    scripts._configure([{ name: "late", init: "/* late */", strategy: "idle" }]);
+    window.dispatchEvent(new Event("load"));
+    expect(timers).toEqual([]);
+    win.dispatchEvent(new Event("load"));
+    timers[0]!();
+    expect(scripts.status("late")).toBe("loaded");
+  });
+});

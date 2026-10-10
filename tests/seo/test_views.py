@@ -2,11 +2,13 @@ import errno
 import logging
 from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 import pytest
 from django.conf import settings
 from django.core.cache import cache
+from django.template import TemplateSyntaxError
+from django.template.response import SimpleTemplateResponse
 from django.test import Client, RequestFactory, override_settings
 from django.urls import NoReverseMatch, reverse
 
@@ -415,6 +417,20 @@ class TestDeclaredItems:
         assert first.content == b""
         [record] = [r for r in caplog.records if r.name == "next.seo.views"]
         assert "/sitemap.xml raised SitemapTrailError" in record.getMessage()
+
+    def test_a_failing_template_answers_503(self, tmp_path, caplog) -> None:
+        root = write_tree(tmp_path / "pages", pages=("posts/[slug]",), sitemap=DATED)
+        broken = PropertyMock(side_effect=TemplateSyntaxError("bad tag"))
+        with (
+            routed(root, **WITH_BASE),
+            patch.object(SimpleTemplateResponse, "rendered_content", broken),
+            caplog.at_level(logging.ERROR, logger="next.seo"),
+        ):
+            response = Client().get("/sitemap.xml")
+        assert response.status_code == 503
+        assert response["Retry-After"] == "300"
+        [record] = [r for r in caplog.records if r.name == "next.seo.views"]
+        assert "/sitemap.xml raised TemplateSyntaxError" in record.getMessage()
 
     @override_settings(DEBUG=True)
     def test_debug_raises_an_unknown_trail(self, tmp_path) -> None:

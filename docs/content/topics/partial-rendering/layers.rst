@@ -5,7 +5,6 @@ Layers and modals
 
 A layer is a modal the runtime opens over the current view and fills with a zone of a page.
 A ``data-next-layer`` link opens one from the markup, ``Patches.layer_open`` opens one from a handler, and both load the same thing, a named zone of a page that also renders on its own.
-This page covers the click-side interception, the title a layer restores, the server builder, the authorization step a foreign page's zone passes through, and the CSS hooks the runtime leaves behind.
 
 .. contents::
    :local:

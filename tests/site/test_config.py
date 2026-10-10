@@ -342,20 +342,20 @@ class TestFailingSiteUrl:
         with site_settings(URL=tenant_url):
             assert site_url_failed(None) is False
 
-    @pytest.mark.parametrize(
-        ("rule", "named"),
-        [
-            (raising_rule, "raised RuntimeError"),
-            (path_url, "'https://tenant.example/app'"),
-        ],
-        ids=["raising", "path"],
-    )
     @override_settings(DEBUG=True)
-    def test_debug_raises_naming_the_setting(self, rule, named) -> None:
-        with site_settings(URL=rule), pytest.raises(ImproperlyConfigured) as caught:
+    def test_debug_raises_naming_the_setting(self) -> None:
+        with site_settings(URL=path_url), pytest.raises(ImproperlyConfigured) as caught:
             site_url(_get("testserver"))
         assert "NEXT_FRAMEWORK['SITE']['URL']" in str(caught.value)
-        assert named in str(caught.value)
+        assert "'https://tenant.example/app'" in str(caught.value)
+
+    @override_settings(DEBUG=True)
+    def test_debug_reraises_a_raising_rule_with_the_setting_noted(self) -> None:
+        with site_settings(URL=raising_rule), pytest.raises(RuntimeError) as caught:
+            site_url(_get("testserver"))
+        [note] = caught.value.__notes__
+        assert "NEXT_FRAMEWORK['SITE']['URL']" in note
+        assert "raised RuntimeError" in note
 
 
 class TestFailingIndexable:

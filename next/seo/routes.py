@@ -47,18 +47,15 @@ def _served(route: str, probe: Callable[[], bool]) -> bool:
     or `STRICT_LOADING`, and otherwise keeps the route, whose view answers 503 for the
     same failure while the other routes still resolve.
     """
-    try:
+    with _failures.guard(
+        route,
+        "Deciding whether to mount /%s raised, so the route stays mounted and answers "
+        "503 until its source loads.",
+        route,
+        pass_through=(),
+    ):
         return probe()
-    except Exception as exc:  # noqa: BLE001 - contained, the probe runs project code
-        _failures.contain(
-            exc,
-            route,
-            "Deciding whether to mount /%s raised, so the route stays mounted "
-            "and answers 503 until its source loads.",
-            route,
-            pass_through=(),
-        )
-        return True
+    return True
 
 
 def served_names() -> frozenset[str]:

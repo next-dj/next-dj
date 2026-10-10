@@ -20,8 +20,8 @@ from next.pages.loaders import (
     PageModuleImportError,
     TemplateLoader,
     _load_python_module,
-    _load_python_module_memo,
     build_registered_loaders,
+    load_python_module_memo,
 )
 from next.pages.manager.views import fit_page_caches
 from next.pages.registry import PageContextRegistry
@@ -988,7 +988,7 @@ class TestBrokenPageImportView:
         os.utime(page_file, (stamp, stamp))
         # Another subsystem's reload records the failure, as static
         # discovery or a checks pass would on a real deployment.
-        assert _load_python_module_memo(page_file) is None
+        assert load_python_module_memo(page_file) is None
 
         with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):
             pattern.callback(build_page_request())
@@ -1007,7 +1007,7 @@ class TestBrokenPageImportView:
         stamp = page_file.stat().st_mtime + 10
         page_file.write_text(_BROKEN_SYNTAX)
         os.utime(page_file, (stamp, stamp))
-        assert _load_python_module_memo(page_file) is None
+        assert load_python_module_memo(page_file) is None
 
         with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):
             pattern.callback(build_page_request())
@@ -1133,7 +1133,7 @@ class TestResolvePageBodyWithoutRender:
         page_file = tmp_path / "page.py"
         page_file.write_text('template = "<p>static</p>"')
 
-        module = _load_python_module_memo(page_file)
+        module = load_python_module_memo(page_file)
         resolution = page_instance._resolve_page_body(page_file, module, _dep_cache={})
 
         assert resolution.body == "<p>static</p>"
@@ -1262,7 +1262,7 @@ class TestCustomTemplateLoaderIntegration:
         page_file = tmp_path / "page.py"
         page_file.write_text('template = "from-attr"')
 
-        module = _load_python_module_memo(page_file)
+        module = load_python_module_memo(page_file)
         body = page_instance._load_static_body(page_file, module)
         assert body == "from-attr"
 

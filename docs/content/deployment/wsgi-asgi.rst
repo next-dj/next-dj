@@ -3,7 +3,7 @@
 WSGI and ASGI
 =============
 
-This page covers the choice between WSGI and ASGI, the configuration each requires, and the recommended hosts for each option.
+A next.dj project runs under WSGI or ASGI, and the choice decides the configuration and the hosts that suit it.
 
 .. contents::
    :local:

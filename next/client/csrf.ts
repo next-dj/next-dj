@@ -67,27 +67,27 @@ export function createCsrf(deps: CsrfDeps): Csrf {
   const fetch = deps.fetch ?? defaultFetch();
   const doc = deps.document ?? document;
   let payload: CsrfPayload | undefined;
-  let pending: Promise<CsrfPayload | undefined> | undefined;
+  let pending: Promise<CsrfPayload | undefined | null> | undefined;
   // Incremented by set and _reset, so a fetch started earlier cannot overwrite them.
   let epoch = 0;
 
-  async function mint(url: string): Promise<CsrfPayload | undefined> {
+  async function mint(url: string): Promise<CsrfPayload | undefined | null> {
     const started = epoch;
-    // A chunk that cannot load counts as a failure, already reported as an asset error.
     const mintWith = deps.mint.get() ?? (await deps.mint.load());
-    const minted = await mintWith?.(url, fetch, doc);
+    // A chunk that cannot load answers null, since its loader reported it as an asset.
+    const minted = mintWith === undefined ? null : await mintWith(url, fetch, doc);
     // A token an envelope set while this fetch was in flight is newer and is kept.
     if (started !== epoch) return payload;
     if (minted?.token === undefined) {
       // Cleared, so the next mutation fetches again instead of failing permanently.
       pending = undefined;
-      return undefined;
+      return minted === null ? null : undefined;
     }
     payload = minted;
     return minted;
   }
 
-  function ensure(): Promise<CsrfPayload | undefined> {
+  function ensure(): Promise<CsrfPayload | undefined | null> {
     const url = payload?.url;
     if (payload?.token !== undefined || url === undefined)
       return Promise.resolve(payload);

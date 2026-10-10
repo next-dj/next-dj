@@ -5,7 +5,6 @@ Layouts
 
 A layout is a ``layout.djx`` file in any directory under a page root.
 The framework wraps every page below it through string substitution into a ``{% template %}`` placeholder.
-This page covers how layouts are discovered, how the layout chain composes, how to publish layout-level context, and how multiple page backends produce independent layout trees.
 
 .. contents::
    :local:

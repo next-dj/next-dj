@@ -9,7 +9,6 @@ import logging
 from typing import TYPE_CHECKING, NamedTuple
 
 from next.backends import backend_entries
-from next.conf.signals import settings_reloaded
 from next.diagnostics import QUIET_PERIOD, BackendReadLog
 from next.ports import router_access_slot
 from next.utils import (
@@ -75,9 +74,6 @@ def forget_watch_state(**kwargs) -> None:
     """Drop everything the watch layer holds, so a reconfiguration is read again."""
     _forget_backends()
     forget_resolved_trees()
-
-
-settings_reloaded.connect(forget_watch_state)
 
 
 def _build_page_backends_for_watch() -> tuple[list[RouterBackend], bool]:

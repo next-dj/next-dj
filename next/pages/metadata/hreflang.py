@@ -6,7 +6,6 @@ from urllib.parse import SplitResult, unquote, urlsplit, urlunsplit
 
 from django.conf import settings
 from django.conf.urls.i18n import is_language_prefix_patterns_used
-from django.core.signals import setting_changed
 from django.urls import (
     NoReverseMatch,
     Resolver404,
@@ -19,7 +18,6 @@ from django.urls import (
 from django.utils import translation
 
 from next.caches import LruCache
-from next.conf.signals import settings_reloaded
 
 
 _URLCONF_SETTINGS: Final = frozenset({"ROOT_URLCONF", "LANGUAGES", "LANGUAGE_CODE"})
@@ -69,8 +67,7 @@ def _route_paths(
 ) -> _Paths:
     """Return every `LANGUAGES` code with the path of the route of `match`, memoised.
 
-    The URL arguments keep the order of the route pattern, so one route always builds
-    the same key.
+    URL arguments keep the route pattern order, so one route always builds the same key.
     """
     key: _RouteKey | _PathKey = (
         urlconf,
@@ -107,10 +104,8 @@ def _translations(
 ) -> tuple[tuple[str, str], ...]:
     """Return `path` under every `LANGUAGES` code its route reverses under, in order.
 
-    A `match` the request already resolved for `path` saves the resolve. A code whose
-    path equals the one of the own language has no route of its own and is left out.
-    A path that no named route resolves keeps the own language alone, so it has no
-    alternates.
+    A `match` resolved for `path` saves the resolve. A code repeating the own path is
+    left out, and a path no named route resolves has no alternates.
     """
     parts = urlsplit(path)
     if not parts.path.startswith(prefix):
@@ -175,13 +170,9 @@ def forget_translated_urls(**kwargs) -> None:
     _translated.clear()
 
 
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
+def forget_urlconf_translations(*, setting: str, **kwargs) -> None:
     if setting in _URLCONF_SETTINGS:
         _translated.clear()
-
-
-settings_reloaded.connect(forget_translated_urls)
-setting_changed.connect(_on_setting_changed)
 
 
 __all__ = ["forget_translated_urls", "hreflang_urls", "translated_url", "x_default_url"]

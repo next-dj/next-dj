@@ -23,6 +23,7 @@ _failures = FailureLog(logger)
 _SHARED_DIRECTIVES: Final = frozenset({"public", "s-maxage"})
 _PRIVATE_DIRECTIVES: Final = frozenset({"private", "no-store"})
 _DROPPED_DIRECTIVES: Final = _SHARED_DIRECTIVES | {"private"}
+_UNRESOLVED: Final = "unresolved"
 
 
 def _directive_name(directive: str) -> str:
@@ -33,9 +34,8 @@ def _directive_name(directive: str) -> str:
 def _shared(response: HttpResponseBase, names: set[str]) -> bool:
     """Whether a shared cache may store `response` under its current headers.
 
-    `public`, `s-maxage` and a CDN header permit it explicitly. Without `private` or
-    `no-store`, a freshness lifetime from `max-age` or `Expires` permits it too, which
-    is the form `cache_page` emits.
+    `public`, `s-maxage` or a CDN header permit it, and so does a `max-age` or `Expires`
+    lifetime without `private` or `no-store`, the form `cache_page` emits.
     """
     if not _SHARED_DIRECTIVES.isdisjoint(names):
         return True
@@ -47,12 +47,12 @@ def _shared(response: HttpResponseBase, names: set[str]) -> bool:
 
 
 def _route(request: HttpRequest) -> str:
-    """Return the URL pattern `request` resolved to, or its path when it resolved none.
+    """Return the name of the route `request` resolved to, a constant when none.
 
-    A dynamic route serves many paths for one cause, so the warning is keyed by route.
+    A key never holds request data, and every request to a route has the same cause.
     """
     match = getattr(request, "resolver_match", None)
-    return request.path if match is None else match.route
+    return _UNRESOLVED if match is None else match.view_name
 
 
 def guard_shared_cache(
@@ -60,10 +60,8 @@ def guard_shared_cache(
 ) -> HttpResponseBase:
     """Make `response` private when it sets a cookie that a shared cache would store.
 
-    `public` and `s-maxage` are removed from `Cache-Control` and `private` is put first,
-    the CDN headers are removed, and `Vary` gains `Cookie`. The warning is keyed by
-    route and logged at the `FailureLog` rate, since every request to a route has the
-    same cause.
+    `private` replaces `public` and `s-maxage`, the CDN headers go, and `Vary` gains
+    `Cookie`. The warning is logged per route name at the `FailureLog` rate.
     """
     if not response.cookies:
         return response

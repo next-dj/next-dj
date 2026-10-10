@@ -1,7 +1,6 @@
 """The consent a visitor gives per category, read on the server and sent to the runtime.
 
-The framework provides the mechanism, not compliance, and denies every category but
-necessary by default.
+It provides the mechanism, not compliance, and denies all but `necessary` by default.
 """
 
 from . import checks, providers, signals

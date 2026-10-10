@@ -53,6 +53,8 @@ interface Layer {
   // The opening page URL, captured at open time. Sent as X-Next-Origin so the
   // server resolves the host for an out-of-band render of its zones.
   host: string;
+  // The host with its fragment, the address a close restores.
+  back: string;
   // The head restored on close, kept current by a meta op of a page under the layer.
   head: Head;
   // Set once a meta op arrived for this layer's own page, so a meta op of a page
@@ -245,6 +247,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     // The opening page, captured before the request so a later navigation cannot
     // move it. The query is kept, so a filtered host comes back with its filters.
     const host = currentUrl();
+    const back = host + doc.location.hash;
     // A browser dismiss gesture (Esc, backdrop, dialog form) reaches the same
     // close path as a server dismiss, so the reason flows through one channel.
     const close = dialogAdapter.open(dialog, (reason) => dismissFrom(dialog, reason));
@@ -256,6 +259,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
       close,
       returnFocus,
       host,
+      back,
       head: readHead(doc),
       titled: false,
       committed: false,
@@ -343,7 +347,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
       // After a programmatic close the URL is still the pushed one, so it is replaced
       // with the host. After Back the browser has already changed it.
       if (layer.committed && currentUrl() === layer.pushedUrl) {
-        commit.write({ href: layer.host, action: "replace" });
+        commit.write({ href: layer.back, action: "replace" });
       }
       // The saved head passes to the layer above, or is written when none is above.
       const above = stack[index];

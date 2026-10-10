@@ -196,6 +196,28 @@ class TestHeldBody:
         assert out.startswith('<template data-next-consented="marketing"><video>')
 
 
+class TestBlankCategory:
+    """A category that resolves blank renders the else branch and is logged."""
+
+    @pytest.mark.parametrize("category", ["", "  "])
+    @pytest.mark.parametrize("shared", [False, True], ids=["server", "client"])
+    def test_the_else_branch_renders(
+        self, caplog: pytest.LogCaptureFixture, category: str, *, shared: bool
+    ) -> None:
+        source = "{% #consented category %}<video>{% else %}<p>ask</p>{% /consented %}"
+        request = RequestFactory().get("/")
+        request.COOKIES["next_consent"] = "1:marketing:1"
+        if shared:
+            mark_shared_render(request)
+        collector = StaticCollector()
+        context = {"category": category, REQUEST_KEY: request, COLLECTOR_KEY: collector}
+        with caplog.at_level(logging.WARNING, "next.scripts"):
+            outs = [Template(source).render(Context(context)) for _ in range(2)]
+        assert outs == ["<p>ask</p>", "<p>ask</p>"]
+        assert list(collector.notes(CONSENT_NOTE)) == []
+        assert caplog.text.count("resolves its category to the blank") == 1
+
+
 class TestUnknownCategory:
     """A category the list leaves out is logged once under `DEBUG`."""
 

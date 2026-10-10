@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from next.discovery import first_visit, get_router_manager, iter_scanned_page_pairs
 
-from .loaders import _load_python_module_memo
+from .loaders import load_python_module_memo
 from .manager import page
 
 
@@ -53,7 +53,7 @@ def load_scanned_page_modules(router_manager: RouterManager) -> list[tuple[str, 
         for url_path, page_path in iter_existing_scanned_page_pairs(
             router_manager, set()
         )
-        if _load_python_module_memo(page_path) is not None
+        if load_python_module_memo(page_path) is not None
     ]
 
 

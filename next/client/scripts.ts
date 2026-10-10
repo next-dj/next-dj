@@ -29,9 +29,13 @@ export interface ScriptsDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   allows: (category: string) => boolean;
   document?: Document;
+  window?: Window;
   idle?: IdleAdapter;
   // Where the first interaction is listened for. Absent, the window.
   events?: EventTarget;
+  // Whether a server-rendered tag has loaded, true or false once it settled. The
+  // runtime records it from the start, since a tag can settle before this chunk runs.
+  settled?: (el: Element) => boolean | undefined;
   // The CSP nonce of the runtime script, set on every inserted script.
   nonce?: string | undefined;
 }
@@ -90,29 +94,46 @@ function readEntry(value: unknown): Entry | undefined {
 }
 
 // Run after the load event once the main thread idles, bounded by IDLE_TIMEOUT_MS.
-function defaultIdle(): IdleAdapter {
+function defaultIdle(doc: Document, win: Window): IdleAdapter {
   return (run) => {
+    // Safari has no requestIdleCallback, so a timeout replaces it.
+    const request = (win as Partial<Window>).requestIdleCallback;
     const schedule = (): void => {
-      // Safari has no requestIdleCallback, so a timeout replaces it.
-      if ("requestIdleCallback" in globalThis)
-        requestIdleCallback(run, { timeout: IDLE_TIMEOUT_MS });
-      else globalThis.setTimeout(run, 1);
+      if (request === undefined) win.setTimeout(run, 1);
+      else request.call(win, run, { timeout: IDLE_TIMEOUT_MS });
     };
-    if (document.readyState === "complete") schedule();
-    else window.addEventListener("load", schedule, { once: true });
+    if (doc.readyState === "complete") schedule();
+    else win.addEventListener("load", schedule, { once: true });
   };
 }
 
 export function createScripts(deps: ScriptsDeps): Scripts {
   const doc = deps.document ?? document;
-  const idle = deps.idle ?? defaultIdle();
+  const win = deps.window ?? window;
+  const idle = deps.idle ?? defaultIdle(doc, win);
   const entrants = new Map<string, Entrant>();
-  const events = deps.events ?? window;
+  const events = deps.events ?? win;
   const waiting: Entrant[] = [];
   let armed = false;
 
   function rendered(name: string): boolean {
     return doc.querySelector(`script[${ATTR_SCRIPT}="${cssEscape(name)}"]`) !== null;
+  }
+
+  // A rendered tag without src ran inline. One that settled before anyone listened
+  // has settled by the window load, so that event answers for it.
+  function renderedLoad(name: string): Promise<void> {
+    const el = doc.querySelector(`script[${ATTR_SCRIPT}="${cssEscape(name)}"][src]`);
+    if (el === null) return Promise.resolve();
+    const known = deps.settled?.(el);
+    const failed = new Error(`script ${name} failed to load`);
+    if (known === false) return Promise.reject(failed);
+    if (known === true || doc.readyState === "complete") return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      el.addEventListener("load", () => resolve(), { once: true });
+      el.addEventListener("error", () => reject(failed), { once: true });
+      win.addEventListener("load", () => resolve(), { once: true });
+    });
   }
 
   // failed names the URL that did not load, absent on success.
@@ -210,7 +231,8 @@ export function createScripts(deps: ScriptsDeps): Scripts {
   function load(name: string): Promise<void> {
     const entrant = entrants.get(name);
     const status = entrant?.status ?? (rendered(name) ? "rendered" : undefined);
-    if (status === "rendered" || status === "loaded") return Promise.resolve();
+    if (status === "rendered") return renderedLoad(name);
+    if (status === "loaded") return Promise.resolve();
     if (entrant === undefined || status === "error" || status === "blocked") {
       return Promise.reject(new Error(`script ${name} is ${status ?? "unknown"}`));
     }

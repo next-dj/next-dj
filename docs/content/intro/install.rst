@@ -64,6 +64,13 @@ Install the project package from PyPI.
 Some installers normalise dots to hyphens in wheel and cache paths.
 The import path is always ``next``.
 
+The test helpers of ``next.testing`` need the ``testing`` extra, which a project adds to its development dependencies.
+
+.. code-block:: bash
+   :caption: shell
+
+   uv add --dev "next.dj[testing]"
+
 Create a Django project
 -----------------------
 

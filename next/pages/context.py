@@ -1,7 +1,6 @@
 """The `Context` parameter marker and the providers that inject `context_data` values.
 
-A value is injected through an explicit `Context` default, or by a parameter name that
-matches an existing key.
+A value is injected by an explicit `Context` default or by a name matching a key.
 """
 
 from __future__ import annotations

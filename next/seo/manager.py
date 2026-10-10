@@ -15,11 +15,11 @@ from django.utils.functional import Promise
 from next.backends import BackendListManager, load_backends
 from next.conf.defaults import DEFAULTS
 from next.conf.scopes import scope_value
-from next.conf.signals import settings_reloaded
+from next.conf.sentinels import UNSET, Unset
 from next.diagnostics import FailureLog
 from next.site.config import site_closed_to_crawlers, site_config
 from next.urls.manager import seo_routes_version
-from next.utils import UNSET, Unset, template_edits_watched
+from next.utils import template_edits_watched
 
 from .backends import SitemapBackend, backend_path, shortest_cache
 from .discovery import (
@@ -137,19 +137,16 @@ def _serves(backend: SitemapBackend) -> bool:
     It runs during URL resolution, outside any view, so an intended exception such as
     `Http404` is contained too and never fails the resolution of every other URL.
     """
-    try:
+    path = backend_path(backend)
+    with _failures.guard(
+        (path, "serves"),
+        "%s.serves() raised, so /sitemap.xml stays mounted and answers 503 while its "
+        "sections fail too. Make serves() return without raising.",
+        path,
+        pass_through=(),
+    ):
         return bool(backend.serves())
-    except Exception as exc:  # noqa: BLE001 - contained, the probe runs project code
-        path = backend_path(backend)
-        _failures.contain(
-            exc,
-            (path, "serves"),
-            "%s.serves() raised, so /sitemap.xml stays mounted and answers 503 "
-            "while its sections fail too. Make serves() return without raising.",
-            path,
-            pass_through=(),
-        )
-        return True
+    return True
 
 
 class SeoManager(BackendListManager[SitemapBackend]):
@@ -298,9 +295,6 @@ seo_manager = SeoManager()
 def forget_seo_sources(**kwargs) -> None:
     """Reset the SEO manager, as the receiver of the settings and router reloads."""
     seo_manager.reset()
-
-
-settings_reloaded.connect(forget_seo_sources)
 
 
 def reset_seo_sources() -> None:

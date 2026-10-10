@@ -97,8 +97,7 @@ class PageTreeSitemapBackend(SitemapBackend):
     def sections(self, request: HttpRequest | None) -> dict[str, Sitemap[Any]]:
         """Return one section per tree plus one per `section=` its items name.
 
-        Items on a trail `exclude` matches are dropped, and so is a static route that
-        an items callable claims.
+        Excluded trails are dropped, and so is a static route an items callable claims.
         """
         sections: dict[str, Sitemap[Any]] = {}
         for root in self.roots():
@@ -125,8 +124,7 @@ class PageTreeSitemapBackend(SitemapBackend):
     def static_trails(self, root: SeoRoot, options: SitemapOptions) -> tuple[str, ...]:
         """Return the static trails of `root` that no items callable claims.
 
-        The noindex test resolves the metadata of every page, so the result is
-        memoised per module version.
+        Memoised per module version, as the noindex test resolves all page metadata.
         """
         version = module_version()
         held = self._static.get(root.path)

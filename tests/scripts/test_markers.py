@@ -36,6 +36,11 @@ class TestScript:
     def test_a_category_to_grant_gates_it(self) -> None:
         assert Script("pixel", init="x", category="marketing").gated
 
+    @pytest.mark.parametrize("category", ["", "  "])
+    def test_a_blank_category_is_refused(self, category: str) -> None:
+        with pytest.raises(ValueError, match="'pixel' declares a blank category"):
+            Script("pixel", init="x", category=category)
+
     def test_only_the_allowed_attributes_are_kept(self) -> None:
         script = Script(
             "x",

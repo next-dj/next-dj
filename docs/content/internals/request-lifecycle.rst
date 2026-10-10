@@ -67,12 +67,13 @@ A match on ``/_next/form/<str:uid>/`` dispatches to the form dispatcher instead.
 Page view
 ~~~~~~~~~
 
-The page view first reads the response policy of the page, the ``cache`` of its ``page.py`` and the ``headers`` of every ``page.py`` along its chain, memoised per module reload, with a callable ``cache`` resolved through the render's dependency cache.
-A policy that lets a shared cache keep the response defers the CSRF token under ``CSRF_DELIVERY="auto"`` and marks the render shared, so the forms carry no token and a ``Consent`` parameter reads an undecided visitor.
-The view then loads the page module and resolves the body source.
+The page view first loads the page module and resolves the body source.
 When the module exposes a ``render`` function the view calls it before context runs, resolving its arguments through the dependency resolver.
 ``render`` may return a string body or an ``HttpResponseBase`` that short-circuits the layout and static pipelines.
 When the body comes from the ``template`` attribute or a ``template.djx`` file the view reads that source as a plain string.
+The view then reads the response policy of the page, the ``cache`` of its ``page.py`` and the ``headers`` of every ``page.py`` along its chain, memoised per module reload.
+A callable ``cache`` runs through the render's dependency cache, and is skipped when the response ``render()`` returned is no success or names its own ``Cache-Control``.
+A policy that lets a shared cache keep the response defers the CSRF token under ``CSRF_DELIVERY="auto"`` and marks the render shared, so the forms carry no token and a ``Consent`` parameter reads an undecided visitor.
 After the body is in hand the view builds the render context and runs every ``@context`` function in order.
 Captured URL kwargs from the matched route are seeded into the context dict before any ``@context`` function runs.
 The render context also carries a deferred fold of the page metadata, which ``{% metadata %}`` in the root layout resolves as the composed template renders, so a ``@page.metadata`` callable runs after every ``@context`` function and reads the same dependency cache.
@@ -117,7 +118,7 @@ A shared cache swaps the response's cookie jar for ``SharedCookies``, which make
 On a site closed to search the header is ``noindex, nofollow``, and otherwise it repeats the robots directives the ``{% metadata %}`` resolve published on the request when they block, or those of the static fold when no head rendered.
 ``Vary: Cookie`` joins when the HTML followed the consent cookie.
 A ``render()`` that returns its own response passes the same stamping, its own headers winning.
-A zone response goes through ``finish_zone_response``, which stamps the page ``headers``, ``private, no-store`` where the response names no ``Cache-Control`` of its own, and the site-level robots header, so a CDN that ignores ``Vary`` never keeps it.
+A zone response goes through ``finish_zone_response``, which stamps the page ``headers``, ``private, no-store`` where the response names no ``Cache-Control`` of its own, and the robots header of a site closed to search, never the page's own robots, so a CDN that ignores ``Vary`` never keeps it.
 A zone request reads the page ``headers`` alone, so a callable ``cache`` is never called for it.
 
 Both routed views then stamp the partial ``Vary`` set on the finished response, whether or not the project declares a single zone.

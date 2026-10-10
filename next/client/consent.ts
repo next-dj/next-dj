@@ -36,6 +36,8 @@ export interface Consent {
   _announce(): void;
   /** Reveal the consented markup in roots the granted categories allow. */
   _reveal(roots: readonly ParentNode[]): void;
+  /** Whether category is granted, as the server's Consent.allows answers it. */
+  _allows(category: string): boolean;
 }
 
 export interface ConsentDeps {
@@ -115,6 +117,13 @@ export function createConsent(deps: ConsentDeps): Consent {
     doc.cookie = parts.join("; ");
   }
 
+  // A joint category joins names with spaces and needs each one. A blank one names
+  // nothing, so it is refused rather than read as granted.
+  function allows(category: string): boolean {
+    const names = category.split(/\s+/).filter((name) => name !== "");
+    return names.length > 0 && names.every((name) => granted.has(name));
+  }
+
   // The next:consent detail for the current state.
   function state(changed: string[], initial: boolean): ConsentChange {
     return {
@@ -138,10 +147,7 @@ export function createConsent(deps: ConsentDeps): Consent {
       })),
     );
     for (const { template, nested } of work) {
-      if (
-        !template.isConnected ||
-        !granted.has(String(template.getAttribute(CONSENTED)))
-      )
+      if (!template.isConnected || !allows(String(template.getAttribute(CONSENTED))))
         continue;
       for (const node of deniedBranch(template)) node.remove();
       const body = doc.importNode((template as HTMLTemplateElement).content, true);
@@ -217,5 +223,6 @@ export function createConsent(deps: ConsentDeps): Consent {
       fire(doc, deps.dispatch, "next:consent", { ...state([], true) });
     },
     _reveal: reveal,
+    _allows: allows,
   };
 }

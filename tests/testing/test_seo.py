@@ -1,12 +1,13 @@
 import xml.etree.ElementTree as ET
 
 import pytest
+from defusedxml import EntitiesForbidden
 from django.http import HttpResponse, StreamingHttpResponse
 from django.test import Client
 
 from next.seo.manager import seo_manager
 from next.seo.registry import sitemap_items_registry
-from next.testing import SitemapUrl, parse_sitemap, reset_seo
+from next.testing import SitemapUrl, assert_metadata, parse_sitemap, reset_seo
 from tests.support import BASE, POSTS_ITEMS, WITH_BASE, routed, write_tree
 
 
@@ -68,6 +69,20 @@ class TestParseSitemap:
             iter([b"<urlset><url><loc>https://a.example/</loc>", b"</url></urlset>"])
         )
         assert parse_sitemap(response) == [SitemapUrl("https://a.example/")]
+
+    def test_a_streamed_body_reads_again(self) -> None:
+        response = StreamingHttpResponse(
+            iter([b"<urlset><url><loc>https://a.example/</loc>", b"</url></urlset>"])
+        )
+        assert parse_sitemap(response) == parse_sitemap(response)
+        assert_metadata(response, title=None)
+
+    def test_an_entity_expansion_is_refused(self) -> None:
+        response = HttpResponse(
+            '<!DOCTYPE u [<!ENTITY e "x">]><urlset><url><loc>&e;</loc></url></urlset>'
+        )
+        with pytest.raises(EntitiesForbidden):
+            parse_sitemap(response)
 
 
 class TestResetSeo:

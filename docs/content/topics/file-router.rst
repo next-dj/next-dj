@@ -4,7 +4,6 @@ File router
 ===========
 
 The file router scans your project for ``page.py`` and ``template.djx`` files and generates Django URL patterns from the directory tree.
-This page covers every route shape the router accepts, how URL parameters are captured and typed, how URL names are computed, and how to mount several routers side by side.
 
 .. contents::
    :local:

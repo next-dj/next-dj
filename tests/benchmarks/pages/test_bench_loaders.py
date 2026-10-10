@@ -8,8 +8,8 @@ from next.pages.loaders import (
     DjxTemplateLoader,
     LayoutTemplateLoader,
     PythonTemplateLoader,
-    _load_python_module_memo,
     build_registered_loaders,
+    load_python_module_memo,
 )
 
 
@@ -31,14 +31,14 @@ class TestBenchPythonModuleLoader:
             counter[0] += 1
             return (path,), {}
 
-        benchmark.pedantic(_load_python_module_memo, setup=setup, rounds=20)
+        benchmark.pedantic(load_python_module_memo, setup=setup, rounds=20)
 
     @pytest.mark.benchmark(group="pages.loaders")
     def test_python_load_warm_mtime_hit(self, tmp_path: Path, benchmark) -> None:
         page_path = tmp_path / "page.py"
         page_path.write_text(_PY_SRC)
-        _load_python_module_memo(page_path)
-        benchmark(_load_python_module_memo, page_path)
+        load_python_module_memo(page_path)
+        benchmark(load_python_module_memo, page_path)
 
     @pytest.mark.benchmark(group="pages.loaders")
     def test_python_template_loader_can_load(

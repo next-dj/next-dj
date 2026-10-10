@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPoller } from "./poll";
 import type { PollFactory } from "./poll";
-import { chunkModules, manualPollClock, manualVisibility } from "./test-doubles";
+import { CHUNK_TIMEOUT } from "./chunks";
+import {
+  chunkModules,
+  manualPollClock,
+  manualVisibility,
+  unloaded,
+} from "./test-doubles";
 import { createTriggers } from "./triggers";
 import { createDiagnostics } from "./diagnostics";
 import type { IntersectionAdapter, TriggerDeps, Triggers } from "./triggers";
@@ -808,34 +814,57 @@ describe("zone polling", () => {
     expect(requests).toHaveLength(2);
   });
 
-  it("fetches the poll chunk only once a scan finds a poll zone, then arms it", async () => {
+  it("fetches the poll chunk only once a scan finds a poll zone, then arms it", () => {
     const clock = manualPollClock();
-    let factory: PollFactory | undefined;
-    let loads = 0;
-    const { triggers, requests } = makeTriggers({
-      clock,
-      poll: {
-        get: () => factory,
-        load: async () => {
-          loads += 1;
-          factory = createPoller;
-          return factory;
-        },
-      },
-    });
+    const poll = unloaded<PollFactory>("poll");
+    document.head.innerHTML = "";
+    const { triggers, requests } = makeTriggers({ clock, poll });
     detach = triggers.install(document);
     document.body.innerHTML = '<div data-next-zone="t"></div>';
     triggers.scan(document.body);
-    expect(loads).toBe(0);
+    expect(poll.tags()).toBe(0);
     document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
     triggers.scan(document.body);
-    expect(loads).toBe(1);
+    expect(poll.tags()).toBe(1);
     expect(clock.pending()).toBe(0);
-    await Promise.resolve();
-    await Promise.resolve();
+    poll.land(createPoller);
     expect(clock.pending()).toBe(1);
     clock.tick();
     expect(requests.map((r) => r.zone)).toEqual(["t"]);
+  });
+
+  it("a poll chunk landing after its timeout still arms the zones", () => {
+    vi.useFakeTimers();
+    try {
+      const clock = manualPollClock();
+      const poll = unloaded<PollFactory>("poll");
+      document.head.innerHTML = "";
+      const { triggers, requests } = makeTriggers({ clock, poll });
+      detach = triggers.install(document);
+      document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+      triggers.scan(document.body);
+      vi.advanceTimersByTime(CHUNK_TIMEOUT);
+      expect(poll.tags()).toBe(0);
+      // The stalled file evaluates late, with no retry fetched in between.
+      poll.land(createPoller);
+      expect(clock.pending()).toBe(1);
+      clock.tick();
+      expect(requests.map((r) => r.zone)).toEqual(["t"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a poll chunk landing after a reset starts no poller for the dead instance", () => {
+    const clock = manualPollClock();
+    const poll = unloaded<PollFactory>("poll");
+    const { triggers } = makeTriggers({ clock, poll });
+    detach = triggers.install(document);
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    triggers.scan(document.body);
+    triggers._reset();
+    poll.land(createPoller);
+    expect(clock.pending()).toBe(0);
   });
 
   it("batches same-interval zones into one comma-joined GET per tick", () => {

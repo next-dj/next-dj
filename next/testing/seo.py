@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
+
+from defusedxml.ElementTree import fromstring
 
 from .responses import response_text
 
 
 if TYPE_CHECKING:
+    from xml.etree.ElementTree import Element
+
     from django.http.response import HttpResponseBase
 
 
@@ -31,12 +34,12 @@ def _local(tag: str) -> str:
     return tag.rpartition("}")[2]
 
 
-def _text(entry: ET.Element, name: str) -> str | None:
+def _text(entry: Element, name: str) -> str | None:
     found = next((child for child in entry if _local(child.tag) == name), None)
     return None if found is None else (found.text or "").strip()
 
 
-def _entry(entry: ET.Element) -> SitemapUrl:
+def _entry(entry: Element) -> SitemapUrl:
     alternates = tuple(
         (code, href)
         for link in entry.iter(_XHTML_LINK)
@@ -54,10 +57,9 @@ def _entry(entry: ET.Element) -> SitemapUrl:
 def parse_sitemap(response: HttpResponseBase) -> list[SitemapUrl]:
     """Return the URLs a sitemap or a sitemap index response lists, in order.
 
-    A body that is no well-formed XML raises `ET.ParseError`, failing the test.
+    A body that is no well-formed XML raises `ParseError`, failing the test.
     """
-    # The body comes from the project under test, so the stdlib parser is safe.
-    root = ET.fromstring(response_text(response))  # noqa: S314
+    root = fromstring(response_text(response))
     return [_entry(entry) for entry in root if _local(entry.tag) in _ENTRIES]
 
 

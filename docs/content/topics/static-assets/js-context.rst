@@ -4,7 +4,6 @@ JavaScript context
 ==================
 
 next.dj ships a ``Next`` object to the browser that holds context values marked for serialisation.
-This page covers how to opt a context value in, how to choose a serializer, and how the conflict policy resolves duplicate keys.
 
 .. contents::
    :local:
@@ -65,8 +64,7 @@ Set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` to the dotted path of a serializ
 
 ``resolve_serializer`` reads the setting on every call and builds one instance per dotted path, which every render shares until the settings reload.
 When the key is absent or set to an empty string the framework uses ``JsonJsContextSerializer``.
-A path that does not import, a class whose constructor raises, or an instance without ``dumps`` gives way to ``JsonJsContextSerializer`` too, so no page fails over it.
-The failure is logged at most once every ten minutes, and under ``DEBUG`` or ``STRICT_LOADING`` it raises instead, naming the setting.
+A path that does not import, a class whose constructor raises, or an instance without ``dumps`` gives way to ``JsonJsContextSerializer`` too, so no page fails over it, see :ref:`topics-failure-containment`.
 
 System checks
 ~~~~~~~~~~~~~
@@ -197,6 +195,7 @@ The framework then writes its own value where it has one, ``$csrf`` on a payload
 The runtime reads ``$csrf`` at bootstrap and seeds the header it stamps on every unsafe request, so a programmatic ``Next.partial.fetch`` carries a token without a form field.
 On a page whose CSRF token is deferred, ``$csrf`` names the token endpoint instead of a token, see :doc:`/content/security/csrf-and-forms`.
 ``$chunks`` is part of every payload and names the scripts chunk ``next.scripts.min.js`` under ``scripts``, the stream bridge ``next.sse.min.js`` under ``sse``, the CSRF mint ``next.csrf.min.js`` under ``csrf``, the zone poller ``next.poll.min.js`` under ``poll``, and, while ``DEBUG`` is on, the diagnostics chunk ``next.dev.min.js`` under ``dev``, which the runtime fetches only when ``$dev`` is true, and ``$scripts`` and ``$consent`` carry the script manifest and the consent state, see :doc:`/content/ref/client-extras`.
+A chunk the static files storage cannot serve is left out of ``$chunks`` with a warning, and the render stays shareable since its HTML is complete, while ``next.W090`` reports the chunk at deploy.
 A render with no value to write leaves the key out of the payload altogether, so a production page carries no ``$dev`` key at all and an automatically injected payload carries the registered value in no environment.
 A payload the project assembles itself under the ``MANUAL`` policy answers for its own filtering, see `Manual injection`_.
 

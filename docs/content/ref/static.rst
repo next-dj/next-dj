@@ -9,7 +9,6 @@ Module summary
 ``next.static`` exposes the asset discovery, the request-scoped collector, and the configured static backends.
 It also exposes the kind and placeholder registries, the ``next.min.js`` script builder, the two staticfiles finders, and the JS context serializer.
 ``next.static.runtime`` holds the script builder and the init payload keys, and ``next.static.nonce`` the CSP nonce every tag carries.
-``next.static.scripts`` is a deprecated alias that resolves every name from ``next.static.runtime``, ``csrf_header_name`` from ``next.csrf``, and ``csrf_payload`` as ``next.csrf.csrf_token_payload``, with a ``DeprecationWarning`` that names the current import.
 ``static_name`` covers the reference shape rule, and ``StaticAssetNotFoundError`` and ``StaticAssetTraversalError`` name the two references the pipeline refuses, see :doc:`/content/topics/static-assets/name-resolution`.
 
 Public API
@@ -104,6 +103,7 @@ Nonce
 
 ``resolve_nonce(request)`` answers the nonce of one render, read once per request while ``CSP_NONCE`` is ``True``.
 ``nonce_minted(request)`` answers whether a nonce was minted for the request, by a framework tag or by a template reading it, and the page response is made private once it is, so no shared cache keeps it.
+``nonce_minted``, ``NONCE_ATTR``, and ``CSP_NONCE_ATTR`` live in ``next.csrf`` beside the other request-scoped render flags, and ``next.static.nonce`` re-exports them, see :doc:`csrf`.
 ``request_nonce`` reads django-csp's ``request.csp_nonce`` or Django's own ``get_nonce``, and ``nonce_active()`` answers whether ``CSP_NONCE`` is on and one of the two middlewares, or a subclass of one, is installed.
 The injector hands the nonce to the script builder and to every backend renderer as the ``nonce`` keyword, see :doc:`/content/security/csp-and-nonce`.
 

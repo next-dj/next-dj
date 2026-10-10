@@ -17,9 +17,9 @@ from next.checks.common import (
     page_tree_skip_names,
 )
 from next.conf import import_class_cached, next_framework_settings
-from next.conf.signals import settings_reloaded
 from next.csrf import csrf_url, csrf_view
 from next.forms.uid import URL_NAME_FORM_ACTION, reverse_form_action
+from next.ports import form_routes_slot
 
 from .backends import FILE_ROUTER_CONFIG_KEYS, FileRouterBackend, RouterBackend
 from .dispatcher import scan_pages_tree
@@ -385,12 +385,9 @@ _PROBE_UID = "probe"
 
 def _framework_routes() -> tuple[tuple[str, Callable[[], str], frozenset[Any]], ...]:
     """Return the label, reverse call and serving views of each framework endpoint."""
-    # Deferred, because the form manager imports the pages package, which imports this.
-    from next.forms.manager import form_action_manager  # noqa: PLC0415
-
     action_views = frozenset(
         pattern.callback
-        for pattern in form_action_manager
+        for pattern in form_routes_slot.get()
         if pattern.name == URL_NAME_FORM_ACTION
     )
     return (
@@ -419,9 +416,7 @@ def _answered_by(match: ResolverMatch) -> str:
 def check_framework_routes_reachable(*args, **kwargs) -> list[CheckMessage]:
     """Report a framework endpoint that a view other than its own answers (`next.E149`).
 
-    The resolved view is compared, not the URL name, so a project view that reuses
-    the name does not pass. An endpoint that does not reverse is left to the checks
-    of its own setting.
+    It compares views, not URL names, so a project view reusing the name fails.
     """
     errors: list[CheckMessage] = []
     for label, address, views in _framework_routes():
@@ -456,9 +451,6 @@ def reset_collected_patterns_cache(**kwargs) -> None:
     _collected_patterns.router_manager = None
     _collected_patterns.patterns = []
     _collected_patterns.errors = []
-
-
-settings_reloaded.connect(reset_collected_patterns_cache)
 
 
 def _collect_all_patterns(

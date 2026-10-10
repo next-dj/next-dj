@@ -35,6 +35,7 @@ from next.pages.responses import (
     response_policy,
     robots_tag,
     vary_on_cookie,
+    zone_policy,
 )
 from next.partial.headers import VARY_HEADERS
 from next.testing import NextClient
@@ -456,6 +457,58 @@ class TestPageCache:
         assert _get(root).status_code == 404
 
 
+RAISING_CACHE = "\ndef cache():\n    raise RuntimeError('cache ran')\n"
+
+
+class TestCallableCacheAfterTheBody:
+    """A callable `cache` runs after `render()`, only for a response that carries it."""
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            "HttpResponseRedirect('/elsewhere/')",
+            "HttpResponse('x', headers={'Cache-Control': 'no-cache'})",
+        ],
+        ids=["redirect", "own_cache_control"],
+    )
+    def test_a_response_without_the_cache_never_runs_it(
+        self, tmp_path, caplog, answer
+    ) -> None:
+        source = (
+            "from django.http import HttpResponse, HttpResponseRedirect\n\n"
+            f"def render():\n    return {answer}\n" + RAISING_CACHE
+        )
+        with caplog.at_level(logging.ERROR, logger="next.pages.responses"):
+            response = _get(_tree(tmp_path, ("", source)))
+        assert response.status_code in {200, 302}
+        assert "callable cache" not in caplog.text
+
+    def test_the_page_guard_wins_over_a_404_from_the_cache(self, tmp_path) -> None:
+        source = (
+            "from django.core.exceptions import PermissionDenied\n"
+            "from django.http import Http404\n\n"
+            "def render():\n    raise PermissionDenied\n\n"
+            "def cache():\n    raise Http404\n"
+        )
+        assert _get(_tree(tmp_path, ("", source))).status_code == 403
+
+    def test_a_successful_render_response_carries_it(self, tmp_path) -> None:
+        source = (
+            "from django.http import HttpResponse\n\n"
+            "def render():\n    return HttpResponse('x')\n\n"
+            "def cache():\n    return 60\n"
+        )
+        assert (
+            _get(_tree(tmp_path, ("", source)))["Cache-Control"] == "public, max-age=60"
+        )
+
+    def test_a_zone_policy_carries_no_robots(self, tmp_path) -> None:
+        file_path = write_page(
+            tmp_path, "", "template = 'x'\nmetadata = {'robots': 'noindex'}\n"
+        )
+        assert zone_policy(page, file_path).robots is None
+
+
 class TestPageHeaders:
     """`headers` flow down the tree by name, the nearest page winning."""
 
@@ -708,9 +761,8 @@ class TestLateCookies:
     ) -> None:
         # Contained after the cache is set, so the post-render hook replaces the cache.
         before = (
-            "import logging, next.diagnostics as d; "
-            "request.boom = type('B', (), {'__str__': lambda s: d.FailureLog("
-            "logging.getLogger('t')).contain(RuntimeError('x'), 'k', 'm') or ''})()"
+            "import next.diagnostics as d; "
+            "request.boom = type('B', (), {'__str__': lambda s: d.mark_degraded() or ''})()"
         )
         response = _get(self._root(tmp_path, "{{ request.boom }}", before=before))
         assert response["Cache-Control"] == "private, no-store"
@@ -1359,11 +1411,10 @@ class TestZoneSkipsTheCallableCache:
 
 
 DEGRADED_ZONE_RESPONSE = (
-    "import logging\n"
     "from django.http import HttpResponse\n"
-    "from next.diagnostics import FailureLog\n\n"
+    "from next.diagnostics import mark_degraded\n\n"
     "def render():\n"
-    "    FailureLog(logging.getLogger('t')).contain(RuntimeError('x'), 'k', 'm')\n"
+    "    mark_degraded()\n"
     "    response = HttpResponse('x')\n"
     "    response['Cache-Control'] = 'public, max-age=60'\n"
     "    return response\n"

@@ -152,22 +152,22 @@ The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, ch
      - ``next/client/next.ts``
      - On every page, the core runtime behind ``window.Next``.
    * - ``next.scripts.min.js``
-     - ``next/client/extras.ts``
+     - ``next/client/entries/scripts.ts``
      - Only when the init payload carries ``$scripts`` or ``$consent``, or page code calls ``Next.ready("scripts")``, for consent and third-party scripts.
    * - ``next.sse.min.js``
-     - ``next/client/sse-chunk.ts``
+     - ``next/client/entries/sse.ts``
      - Only once a scan finds a ``data-next-sse`` container, for the stream bridge.
    * - ``next.csrf.min.js``
-     - ``next/client/csrf-chunk.ts``
+     - ``next/client/entries/csrf.ts``
      - Only when a mutation or the first focus in an action form needs a deferred CSRF token, for the fetch that mints it.
    * - ``next.poll.min.js``
-     - ``next/client/poll-chunk.ts``
+     - ``next/client/entries/poll.ts``
      - Only once a scan finds a ``data-next-poll`` zone, for the zone poller.
    * - ``next.dev.min.js``
-     - ``next/client/dev.ts``
+     - ``next/client/entries/dev.ts``
      - Only under ``DEBUG``, when the payload carries ``$dev``, for the development diagnostics.
 
-The job then enforces a hard budget of 14 KB gzipped on ``next/static/next/next.min.js`` alone, because the core runtime ships on every page, and that budget check runs in continuous integration only.
+The job then enforces a gzip budget on every bundle, 14336 bytes for ``next.min.js``, which ships on every page, and 3584, 1536, 768, 1024, and 2048 bytes for the scripts, sse, csrf, poll, and dev chunks, and that budget check runs in continuous integration only.
 The five chunks carry no budget of their own, since a page that never asks for them never downloads them.
 Growth past the budget calls for a lazily loaded chunk rather than a larger single file.
 The job finishes with the vitest run and its coverage thresholds.

@@ -315,7 +315,7 @@ NEXT_JS_OPTIONS
 Dict passed to ``NextScriptBuilder.from_options`` for the bundled ``next.min.js`` runtime.
 Keys are the injection ``policy`` (``auto``, ``disabled``, or ``manual``) and the optional string templates ``preload_template``, ``script_tag_template``, and ``init_template``.
 A ``policy`` no member names reads as ``auto``, and a template ``.format`` cannot fill is replaced by the default one.
-Each case is logged at most once every ten minutes, or raised under ``DEBUG`` or ``STRICT_LOADING``, and ``next.E130`` and ``next.E139`` report them at ``manage.py check``.
+``manage.py check`` reports both, and a render meets them under :ref:`topics-failure-containment`.
 
 Default value ``{}`` (automatic injection with default templates).
 
@@ -365,6 +365,7 @@ A broken ``page.py`` answers 404 while ``logger.exception`` records the full tra
 In every mode the failure is scoped to the broken page, sibling pages keep serving.
 
 Every fail-loud path reads the flag through the ``next.conf.fail_loudly`` predicate, which combines it with ``settings.DEBUG`` so the page loader and the component tag cannot drift apart.
+The same predicate lets a failure of any other user callable propagate, see :ref:`topics-failure-containment`.
 
 Default value ``False``.
 See :doc:`pages` for the page-load contract, :doc:`template-tags` for the component-miss outcomes, :doc:`conf` for ``fail_loudly``, and :doc:`/content/deployment/settings` for the production recommendation.
@@ -495,13 +496,11 @@ Default value ``{"URL": None, "NAME": None, "INDEXABLE": "auto"}``.
 
 ``URL`` is an ``http`` or ``https`` origin with no path, a callable taking the request, or the dotted path of one, and every absolute URL of the head, the sitemap, and the robots file is built on it, the ``Site`` row of ``django.contrib.sites`` and then the request host standing in without it.
 A callable answering ``None`` falls through to the same fallbacks.
-A callable that raises or answers no origin raises ``ImproperlyConfigured`` under ``DEBUG`` or ``STRICT_LOADING``, and otherwise is logged at most once every ten minutes while the SEO routes answer 503.
+A callable that raises or answers no origin makes the SEO routes answer 503.
 ``NAME`` seeds the ``site_name`` metadata key when ``DEFAULTS`` sets none.
 ``INDEXABLE`` is ``"auto"``, which follows ``not DEBUG``, a bool, or a callable taking the request or ``None``, and every robots meta, ``X-Robots-Tag``, sitemap, and robots file follows its answer.
-A callable that raises reads as not indexable and is logged at most once every ten minutes, and under ``DEBUG`` or ``STRICT_LOADING`` the exception propagates.
-Under ``"auto"`` with ``DEBUG`` on, the sitemap and the robots file are still served under ``X-Robots-Tag: noindex, nofollow``.
-A value the scope cannot use is ``next.E129``, and ``manage.py check --deploy`` warns with ``next.W110`` about a missing ``URL`` unless ``SITE_ID`` pins a row, with ``next.W122`` when ``ALLOWED_HOSTS`` also holds ``"*"``, and with ``next.W111`` about ``INDEXABLE`` set to ``False`` on a site that still publishes a sitemap or a robots source.
-See :doc:`/content/topics/seo/site`.
+A callable that raises reads as not indexable.
+See :doc:`/content/topics/seo/site` for what a closed site serves and the checks that read the scope.
 
 METADATA
 ~~~~~~~~
@@ -544,10 +543,8 @@ The scope takes three upper-case options, and any other key is reported as ``nex
 ``DEFAULTS`` is the outermost segment of every page's metadata chain and takes the lower-case keys a ``metadata`` dict in a ``page.py`` takes, less ``breadcrumb``.
 Its ``title`` is the ``{"template": ..., "default": ...}`` form alone, because the settings tier has no page of its own to title, and its template therefore applies to every page, the root included.
 The value is normalised once per settings reload.
-A key or a value the schema refuses is reported as ``next.E098``.
-At runtime it raises under ``DEBUG`` or ``STRICT_LOADING``.
-Otherwise every page renders under ``noindex`` with the site name alone and is sent with ``private, no-store``, and the refusal is logged at most once every ten minutes.
-A template without a default and an empty title are reported as ``next.E100`` and ``next.E105``, as they are on a page, and a ``Replace`` or ``RESET`` there has no effect and is reported as ``next.W104``.
+A key or a value the schema refuses renders every page under ``noindex`` with the site name alone, and ``manage.py check`` reports it.
+A ``Replace`` or ``RESET`` there has no effect.
 See :doc:`/content/topics/seo/metadata` for the declaration forms and :doc:`/content/topics/seo/merge` for the merge.
 
 ``CANONICAL_QUERY`` is the list or tuple of query parameter names a self canonical keeps, in the order it lists them.
@@ -569,8 +566,7 @@ Dict holding the sitemap backends.
 Default value ``{"SITEMAP_BACKENDS": [{"BACKEND": "next.seo.PageTreeSitemapBackend", "OPTIONS": {}}]}``.
 
 ``SITEMAP_BACKENDS`` lists the sources of sitemap sections in merge order, each an entry of ``BACKEND`` naming a ``next.seo.SitemapBackend`` subclass and ``OPTIONS``.
-A backend that does not import, an entry that is no mapping, and a value that is no list are reported as ``next.E120``, and an unknown key of the scope as ``next.E035``.
-A backend whose ``sections(None)`` raises in ``manage.py check`` is ``next.W089``, and one that raises while serving answers 503 with ``Retry-After``.
+A backend that raises while serving makes the sitemap answer 503.
 See :doc:`/content/topics/seo/sitemap-sections`.
 
 CSRF_DELIVERY
@@ -623,10 +619,11 @@ Default value.
    }
 
 The presence of the key switches consent on.
-A project that sets ``CONSENT``, even to an empty dict, gives every page its consent state, so the banner works on pages without a gated script, and a project that leaves it out has no consent at all.
+A project that sets ``CONSENT``, even to an empty dict, gives every page its consent state, so the banner works on pages without a gated script.
+Without it, only a page whose tree declares scripts or whose render meets a ``{% #consented %}`` block carries the state.
 ``BACKEND`` names a ``next.consent.ConsentBackend`` subclass, ``CATEGORIES`` the categories the project declares with ``necessary`` always among them, and ``SERVER_RENDER`` is ``"auto"``, ``True``, or ``False``.
 ``OPTIONS`` belongs to the backend, and the cookie backend reads the cookie name, lifetime, ``SameSite``, domain, path, and ``secure`` flag from it.
-``next.E135`` reports a category list without ``necessary``, ``next.E146`` a category name the cookie cannot carry, ``next.E137`` an unusable backend, ``next.E145`` an unknown render mode, ``next.E150`` an unknown ``samesite``, ``next.W125`` a ``samesite`` of ``"None"`` without ``secure``, ``next.E151`` a ``max_age`` that is not a positive int, ``next.W119`` an insecure consent cookie beside a secure session cookie, ``next.W123`` a ``{% #consented %}`` block on a project without ``CONSENT``, and ``next.W091`` one naming a category the list lacks.
+``manage.py check`` reports a value the scope cannot use, see :ref:`ref-system-checks`.
 See :doc:`/content/topics/scripts/consent`.
 
 Patching defaults

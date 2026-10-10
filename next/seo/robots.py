@@ -172,8 +172,7 @@ def robots_candidates(
 ) -> tuple[tuple[Path, RobotsSource], ...]:
     """Return every `/robots.txt` source with what it serves, in order of precedence.
 
-    A `robots.py` precedes the `robots.txt` beside it and keeps the route even when
-    its import failed.
+    A `robots.py` beats its sibling `robots.txt` and keeps the route on a failed import.
     """
     candidates: list[tuple[Path, RobotsSource]] = []
     for root in roots:

@@ -11,7 +11,6 @@ from django.http import HttpRequest
 from next.conf.defaults import DEFAULTS
 from next.conf.scopes import scope_value
 from next.conf.settings import fail_loudly
-from next.conf.signals import settings_reloaded
 from next.diagnostics import FailureLog, mark_degraded
 from next.pages.errors import PageMetadataShapeError
 from next.site import site_indexable
@@ -126,9 +125,6 @@ def forget_metadata_scope(**kwargs) -> None:
     """Drop the memoised settings tier and options, so a reload takes effect."""
     site_tier.cache_clear()
     metadata_options.cache_clear()
-
-
-settings_reloaded.connect(forget_metadata_scope)
 
 
 __all__ = [

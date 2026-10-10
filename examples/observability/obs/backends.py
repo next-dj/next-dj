@@ -50,8 +50,7 @@ class BabelJsxBackend(StaticFilesBackend):
     ) -> str:
         """Return a `<script type="text/babel">` tag pointing at `url`.
 
-        Babel-standalone copies the nonce onto the script it injects, so the compiled
-        JSX runs under a nonce CSP.
+        Babel-standalone copies the nonce onto the compiled script it injects.
         """
         del request
         nonce_attr = format_html(' nonce="{}"', nonce) if nonce else ""

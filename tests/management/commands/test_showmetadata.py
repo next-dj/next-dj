@@ -2,8 +2,16 @@ from io import StringIO
 
 import pytest
 from django.core.management import CommandError, call_command
+from django.test import override_settings
 
-from tests.support import USER_URLCONF, routed, write_page, write_tree
+from tests.support import (
+    I18N,
+    I18N_PREFIXED_URLCONF,
+    USER_URLCONF,
+    routed,
+    write_page,
+    write_tree,
+)
 
 
 def _show(path: str) -> str:
@@ -60,6 +68,16 @@ class TestShowMetadata:
         with routed(root, SITE={"NAME": "Acme"}, METADATA=metadata):
             printed = _show("/")
         assert f"  site_name: {source}\n" in printed
+
+    @pytest.mark.parametrize("prefix", ["en", "de"])
+    def test_a_language_prefix_resolves_under_its_language(
+        self, tmp_path, prefix
+    ) -> None:
+        root = write_tree(tmp_path / "pages", pages=())
+        home = write_page(root, "", "metadata = {'title': 'Home'}\n", body="<p>x</p>")
+        with routed(root, urlconf=I18N_PREFIXED_URLCONF), override_settings(**I18N):
+            printed = _show(f"/{prefix}/")
+        assert printed.startswith(f"{home}\n")
 
     def test_an_unrouted_path_is_an_error(self, tmp_path) -> None:
         with (

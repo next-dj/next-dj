@@ -5,7 +5,6 @@ CSP and nonce
 
 A Content Security Policy restricts which scripts a page may run.
 The framework writes the request's nonce onto every tag it renders, the client runtime carries the nonce onto every element it inserts, and a patch never runs an inline script, so a nonce-based policy covers the whole page.
-This page covers where the nonce comes from, what carries it, why scripts in patches never run, and the interplay with a cached page.
 
 .. contents::
    :local:

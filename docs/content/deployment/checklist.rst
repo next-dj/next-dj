@@ -64,6 +64,7 @@ Review these when a page root carries a ``sitemap.py``, a ``robots.py``, or a ``
 - Fetch ``/sitemap.xml`` and ``/robots.txt`` on the deployed host and read the first ``<loc>`` and the ``Sitemap:`` line for the public origin.
 - A sitemap over a large table answers a ``QuerySet`` from its items callable, declares ``cache``, and the default cache is shared across every worker.
 - A page a CDN caches declares ``cache`` with ``public`` or ``s_maxage``, and the CDN bypasses requests that carry ``X-Next-Request``, see :doc:`/content/howto/cache-pages-on-a-cdn`.
+- ``next.middleware.SharedCacheGuardMiddleware`` sits first in ``MIDDLEWARE``, or directly below ``UpdateCacheMiddleware``, or else ``ConditionalGetMiddleware`` sits above every middleware that sets a cookie, which ``next.W124`` reports, see :doc:`/content/topics/caching`.
 - ``CSRF_USE_SESSIONS`` stays off and no CSP nonce is active beside shared pages, since either makes every one of them private, which ``next.W121`` and ``next.W120`` report.
 
 See :doc:`/content/topics/seo/sitemaps` and :doc:`/content/topics/seo/robots` for the two files.
@@ -146,10 +147,10 @@ Run the framework system checks as part of CI and as part of the deployment scri
 
 A clean exit is required for the deployment to proceed.
 
-The ``--deploy`` flag is what matters here, because eight framework checks are registered as deployment checks and a plain ``check`` never runs them.
+The ``--deploy`` flag is what matters here, because nine framework checks are registered as deployment checks and a plain ``check`` never runs them.
 Three report ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
 Each one costs a full walk of the page tree, which is why it is paid once per deploy rather than on every management command, and each one names a failure a visitor would otherwise meet as a 404, a silently stripped body, or a 500.
-``next.W083`` reports an asset version that never moves, ``next.W110`` and ``next.W122`` a missing ``SITE["URL"]``, ``next.W111`` a closed site that still publishes crawler documents, ``next.W118`` a script over plain HTTP, and ``next.W119`` an insecure consent cookie.
+``next.W083`` reports an asset version that never moves, ``next.W090`` a client runtime bundle or lazy chunk the static files storage cannot serve, ``next.W110`` and ``next.W122`` a missing ``SITE["URL"]``, ``next.W111`` a closed site that still publishes crawler documents, ``next.W118`` a script over plain HTTP, and ``next.W119`` an insecure consent cookie.
 
 See :ref:`ref-system-checks` for the full catalog.
 

@@ -5,8 +5,6 @@ Page metadata
 
 Page metadata is the title, the description, and the rest of the ``<head>`` a page carries.
 A ``page.py`` declares it as a module dict or as a dependency-injected callable, every ancestor ``page.py`` and the settings contribute their own layer, and ``{% metadata %}`` in the root layout renders the result.
-This page covers the two declaration forms, the title template, the tag, and the ``meta`` patch verb, and :doc:`merge` covers how the layers combine.
-Metadata belongs to the pages the file router serves, and a plain Django view renders none, see :doc:`quickstart` for the whole setup.
 
 .. contents::
    :local:
@@ -15,9 +13,6 @@ Metadata belongs to the pages the file router serves, and a plain Django view re
 Overview
 --------
 
-The head of a page is the one region a page fills through data rather than markup.
-A layout offers a single ``{% template %}`` placeholder for the body, so a per-page ``<title>`` cannot come from a block override, and a ``@context`` value for it would still leave the description, the canonical link, and the social tags to hand-written template code.
-Metadata is that data.
 Each ``page.py`` on the path from the page root to the requested page contributes one layer, ``NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`` contributes the outermost one, and the framework merges them into one immutable ``Metadata`` value the tag renders.
 
 The keys of a layer are ``title``, ``description``, ``site_name``, ``canonical``, ``alternates``, ``robots``, ``og``, ``twitter``, ``verification``, ``keywords``, ``icons``, ``manifest``, ``links``, ``viewport``, ``theme_color``, ``color_scheme``, ``other``, ``properties``, ``jsonld``, and, on a page alone, ``breadcrumb``.
@@ -57,27 +52,21 @@ Dynamic metadata
 
 ``@page.metadata`` registers a callable that builds the metadata per request.
 The callable takes dependency-injected parameters exactly like a ``@context`` callable, so a context value the page already published, a captured URL segment, ``Depends``, and ``DQuery`` are all available to it.
-Reading the context value by its parameter name is the idiom, because the row a ``@context`` callable fetched for the body is the row the head describes, and it is fetched once.
+Reading the context value by its parameter name is the idiom, because the row a ``@context`` callable fetched for the body is the row the head describes, and it is fetched once, as the note page of :doc:`quickstart` shows.
+A page with no row titles itself from the request instead, here a search page that stays out of the index.
 
 .. code-block:: python
-   :caption: notes/pages/notes/[int:note_id]/page.py
+   :caption: notes/pages/search/page.py
 
-   from django.shortcuts import get_object_or_404
-   from notes.models import Note
-
-   from next import context, page
+   from next import page
    from next.pages import MetadataDict
-   from next.urls import DUrl
-
-   @context("note")
-   def note(note_id: DUrl[int]) -> Note:
-       return get_object_or_404(Note, pk=note_id)
+   from next.urls import DQuery
 
    @page.metadata
-   def note_metadata(note: Note) -> MetadataDict:
-       return {"title": note.title, "description": note.summary}
+   def search_metadata(q: DQuery[str] = "") -> MetadataDict:
+       return {"title": f"Search: {q}" if q else "Search", "robots": {"index": False}}
 
-A value of ``None`` means unset, so ``"description": note.summary`` with a summary of ``None`` keeps the description an ancestor declared rather than erasing it.
+A value of ``None`` means unset, so a description read off a field that holds ``None`` keeps the description an ancestor declared rather than erasing it.
 An empty string is a value and renders an empty description.
 :doc:`merge` covers how the returned dict merges over the ancestors, and ``RESET`` for the case where an inherited value must go.
 
@@ -87,13 +76,9 @@ The callable returns a mapping and never receives the ancestors' metadata as a p
 
 The callable runs once per template render, on the first ``{% metadata %}`` read, against the context the tag renders in, so a value a ``{% with %}`` block or a zone override puts in scope reaches it.
 It shares the dependency cache of the render with ``render()`` and the ``@context`` callables, so a ``Depends`` value resolved by one of them is reused.
-A callable that raises :exc:`~django.http.Http404` turns the whole page into a 404, which is what a metadata lookup that finds no row should answer.
-:exc:`~django.core.exceptions.PermissionDenied` passes through the same way.
-Any other exception, or a returned value the schema refuses, leaves that callable out of the merge, and the page renders what the rest of the chain declares.
-The failure is logged at most once every ten minutes per file and exception type, and under ``DEBUG`` or ``STRICT_LOADING`` it raises with a note naming the callable and its file.
-A chain the schema refuses as a whole, such as a misspelt key in a ``metadata`` dict or a file declaring both forms, renders the ``DEFAULTS`` under ``noindex``, logged the same way, and ``manage.py check`` names the cause.
-The ``X-Robots-Tag`` and the sitemap read the same ``noindex``, so a page whose own declaration fails is not indexed by accident.
-A JSON-LD node a callable builds with a value JSON cannot hold, such as ``nan`` or a set, is left out of the graph the same way.
+A callable that raises :exc:`~django.http.Http404` or :exc:`~django.core.exceptions.PermissionDenied` answers 404 or 403 for the whole page, which is what a metadata lookup that finds no row should answer.
+Any other exception, or a returned value the schema refuses, leaves that callable out of the merge, and the page renders what the rest of the chain declares, see :ref:`topics-failure-containment`.
+A chain the schema refuses as a whole, such as a misspelt key in a ``metadata`` dict or a file declaring both forms, renders the ``DEFAULTS`` under ``noindex``, and the ``X-Robots-Tag`` and the sitemap read the same ``noindex``.
 A zone GET renders no head, and a ``render()`` returning an :class:`~django.http.HttpResponse` short-circuits the layout, so neither path runs the callable.
 
 Title template
@@ -177,13 +162,12 @@ Open Graph, Twitter, and JSON-LD stay as first rendered, because the crawlers th
            return Patches(request).morph_zone("note").meta(note.title).response()
 
 An inherited ancestor callable runs as the render would, against a GET visit of the origin URL or of the URL a queued ``push_url()`` or ``replace_url()`` names, so ``meta()`` first runs the ``render()`` guard of the origin page, raising ``ForeignPageNotAuthorizedError`` on a denial.
-An inherited callable that raises anything else drops the ``meta`` operation alone, logged at most once every ten minutes, so the rest of the patch still applies, and under ``DEBUG`` or ``STRICT_LOADING`` it raises.
+An inherited callable that fails otherwise drops the ``meta`` operation alone, so the rest of the patch still applies.
 A value the action passes to ``meta()`` that the schema refuses raises ``PageMetadataShapeError`` every time, since it is a bug in the action itself.
-Custom tags a ``MetadataRenderer`` adds are not synced, only the four tags above travel in the envelope.
 A builder without an origin page merges the value over ``DEFAULTS`` alone and leaves out every tag that stays unset, so the client keeps the tag it has.
 A canonical that names the page itself is left out too, rather than pointing at the action endpoint.
 A ``push_url()`` or ``replace_url()`` queued before ``meta()`` names the address the canonical is built from, so the tag follows the URL the same envelope moves the browser to.
-The tags belong to the page whose envelope carried them, so a ``meta`` for a URL that is neither the page nor an open layer is dropped, see :doc:`/content/topics/partial-rendering/layers`.
+A ``meta`` for a URL that is neither the page nor an open layer is dropped, see :doc:`/content/topics/partial-rendering/layers`.
 The verb sits beside ``push_url()`` in the verbs table of :doc:`/content/topics/partial-rendering/reference`.
 
 See also

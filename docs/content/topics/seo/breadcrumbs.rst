@@ -5,7 +5,6 @@ Breadcrumbs
 
 A page tree already is a hierarchy, so the breadcrumbs of a page are its ancestor pages with a label each.
 The ``breadcrumb`` metadata key names the label, ``{% breadcrumbs %}`` renders the crumbs, and the JSON-LD graph gains a ``BreadcrumbList`` without any markup of its own.
-This page covers the labels, the URLs, the tag, and the graph node.
 
 .. contents::
    :local:

@@ -49,7 +49,8 @@ export interface CsrfPayload {
 /** The token a mutation stamps, ensure fetching a deferred one on first need. */
 export interface CsrfSource {
   current(): CsrfPayload | undefined;
-  ensure(): Promise<CsrfPayload | undefined>;
+  // null when the csrf chunk failed to load, a failure its loader already reported.
+  ensure(): Promise<CsrfPayload | undefined | null>;
 }
 
 /** A single wire request with its queueing and locking intent. */
@@ -203,7 +204,9 @@ export class Wire {
       let csrf = this.#csrf.current();
       // A deferred token is fetched inside the lock, so a double submit fetches once.
       if (!safe && csrf?.token === undefined && csrf?.url !== undefined) {
-        csrf = await this.#csrf.ensure();
+        const ensured = await this.#csrf.ensure();
+        if (ensured === null) return;
+        csrf = ensured;
         if (csrf?.token === undefined) {
           this.#dispatch("partial:error", {
             kind: "csrf",

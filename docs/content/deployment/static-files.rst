@@ -3,8 +3,7 @@
 Static files in production
 ==========================
 
-This page covers how to serve next.dj static assets in production.
-It covers the build step, the staticfiles finder integration, content hashing, asset versioning, and the CDN host.
+Serving next.dj static assets in production involves a build step, the staticfiles finder integration, content hashing, asset versioning, and a CDN host.
 
 .. contents::
    :local:
@@ -71,8 +70,8 @@ Manifest storage
 
 For projects that use Django ``ManifestStaticFilesStorage`` the framework cooperates without extra configuration.
 ``collectstatic`` writes the manifest, the framework reads it at runtime, and the rendered HTML uses the manifested filenames.
-When the manifest lacks a runtime bundle, the page still renders, without the runtime or without that chunk.
-The missing file is logged at most once every ten minutes, and ``manage.py check --deploy`` reports it as ``next.W090``.
+When the manifest lacks a runtime bundle, the page still renders, without the runtime or without that chunk, and ``manage.py check --deploy`` reports it as ``next.W090``.
+A missing chunk leaves the page HTML complete, so the render stays shareable.
 
 The shipped ``next.min.js`` carries no ``sourceMappingURL`` comment, so manifest post-processing finds no reference to rewrite and no map a wheel install leaves out.
 ``collectstatic`` under manifest storage therefore completes on a wheel install with no ignore pattern and no post-processing exclusion.

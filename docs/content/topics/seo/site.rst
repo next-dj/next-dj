@@ -5,7 +5,6 @@ Site identity and indexability
 
 ``NEXT_FRAMEWORK["SITE"]`` says where the site lives, what it is called, and whether search engines may index it.
 Every absolute URL of the head, the sitemap, and the robots file is built on its origin, and every robots meta, ``X-Robots-Tag`` header, sitemap, and robots file follows its one indexability answer.
-This page covers the three keys, the forms each takes, and what a site closed to search serves.
 
 .. contents::
    :local:
@@ -51,9 +50,8 @@ It receives ``None`` where no request exists, in a sitemap build or a management
 An answer of ``None`` falls through to the ``Site`` row and the request host.
 Any other answer goes through the same validation as a literal, and a callable takes the request as its one positional argument, which ``manage.py check`` reads off its signature without calling it.
 
-A callable that raises or answers a value that is no origin is a configuration error.
-Under ``DEBUG`` or ``STRICT_LOADING`` it raises ``ImproperlyConfigured`` naming the setting and the value.
-In production it is logged at most once every ten minutes, a page falls back to the request host, and ``/sitemap.xml`` and a ``robots.py`` answer 503 with ``Retry-After``, so no crawler document is built on a host a ``Host`` header chose.
+A callable that raises fails with its own exception, and one that answers a value that is no origin with ``ImproperlyConfigured``.
+A contained one leaves a page on the request host, and ``/sitemap.xml`` and a ``robots.py`` answer 503 with ``Retry-After``, so no crawler document is built on a host a ``Host`` header chose, see :ref:`topics-failure-containment`.
 
 .. code-block:: python
    :caption: tenants/site.py
@@ -82,8 +80,7 @@ Indexability
    * - Value
      - Indexable when
    * - ``"auto"``
-     - ``DEBUG`` is off.
-       The host is not compared, because a proxy that rewrites the host would then close a production site without notice, which does more harm than an indexed staging host.
+     - ``DEBUG`` is off, whatever the host.
    * - ``True`` or ``False``
      - Always, or never.
        ``manage.py check --deploy`` warns about ``False`` while the site still publishes a sitemap or a robots source.
@@ -112,8 +109,7 @@ A callable is the recipe for preview deployments that share the production setti
 
 A request for ``https://pr-42.preview.notes.example/`` renders ``noindex, nofollow`` on every page, while the production host renders the robots directives the pages declare.
 
-A callable that raises fails closed, so a broken rule never opens a preview host to search.
-The request reads as not indexable and the failure is logged at most once every ten minutes, and under ``DEBUG`` or ``STRICT_LOADING`` the exception reaches the technical page with a note naming the setting.
+A callable that raises fails closed, so a broken rule never opens a preview host to search, and the request reads as not indexable.
 The answer is cached with the SEO responses per indexability, so a closed host never reads the copy an open one stored.
 
 A site closed to search

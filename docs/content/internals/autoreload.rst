@@ -3,7 +3,7 @@
 Autoreload
 ==========
 
-This page covers how the development server watches the filesystem and rebuilds the route set without a restart.
+The development server watches the filesystem and rebuilds the route set without a restart.
 
 .. contents::
    :local:
@@ -90,7 +90,7 @@ A ``pages`` directory beside the working directory that no router routes is neit
 Every read of a router here is guarded, and the guard drops a value of the wrong type instead of passing it on.
 ``runserver`` boots, ``collectstatic`` runs, and the staticfiles finder answers even when a backend raises from ``page_roots`` or ``components_folder_name``, and equally when it answers the wrong shape.
 The failure costs that backend its trees and nothing else.
-It is logged once per backend and subject rather than per tick, again after a quiet period of ten minutes with the number of suppressed occurrences, and again once the framework is reconfigured.
+It is logged per backend and subject at the FailureLog rate rather than per tick, see :ref:`topics-failure-containment`.
 
 - Each page root contributes a ``**/page.py`` spec.
 - Each page root paired with the name its router returns from ``components_folder_name`` contributes a ``**/<components-folder>/**/component.py`` spec, ``_components`` by default.

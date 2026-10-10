@@ -3,7 +3,7 @@
 CSRF and forms
 ==============
 
-This page covers how CSRF protection works through the next.dj dispatch path and what to do for forms that bypass the standard ``{% form %}`` tag.
+CSRF protection runs through the next.dj dispatch path, and a form that bypasses the standard ``{% form %}`` tag takes the token on its own.
 
 .. contents::
    :local:
@@ -177,7 +177,7 @@ Use these cookie flags in production.
 An eager page renders the token into every ``{% form %}`` and its inline ``Next._init`` payload, and a deferred page lets any same-origin script fetch it from ``/_next/csrf/``, so a script running on the page reaches it whatever the flag says.
 The value of the flag is that an attacker who can read cookies through another channel still does not get this one.
 
-The bundled runtime takes its token from the ``$csrf`` payload or the endpoint rather than from the cookie, so a project that leaves unsafe requests to the runtime keeps the flag on with nothing to change.
+A project that leaves unsafe requests to the bundled runtime keeps the flag on with nothing to change, since the runtime never reads the cookie.
 The endpoint reads the token through Django, so ``CSRF_USE_SESSIONS`` works as well.
 It reads the session on every request, though, which makes every page a CDN may hold private, and ``manage.py check`` warns about it while such pages exist.
 

@@ -6,7 +6,6 @@ import re
 from typing import Any, cast
 
 from django.conf import settings
-from django.core.signals import setting_changed
 from django.template import base as template_base, engines
 from django.template.engine import Engine
 
@@ -128,16 +127,13 @@ def install() -> None:
     _install_builtins()
 
 
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
+def reinstall_builtins(*, setting: str, **kwargs) -> None:
     """Reinstall the builtins when an override hands the engines a new `TEMPLATES`.
 
     Django rebuilds the engines from the new value, which carries no framework tags.
     """
     if setting == "TEMPLATES":
         install()
-
-
-setting_changed.connect(_on_setting_changed)
 
 
 __all__ = ["install"]

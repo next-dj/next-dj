@@ -70,8 +70,7 @@ def _in_merge_order(entries: dict[str | None, PageContextEntry]) -> _OrderedEntr
 class _PageOrder(NamedTuple):
     """The callables of the page itself in run order, with the keys the merge keeps.
 
-    `shielded` names the keyed values set before the keyless callable runs, which its
-    dict merge does not overwrite.
+    `shielded` names the keyed values the keyless callable's merge must not overwrite.
     """
 
     entries: _OrderedEntries
@@ -81,8 +80,7 @@ class _PageOrder(NamedTuple):
 def _page_order(entries: dict[str | None, PageContextEntry]) -> _PageOrder:
     """Order the page callables, the inheritable ones first in declaration order.
 
-    Descendants run the inheritable ones in the same order, so they see the same values
-    as the page.
+    Descendants run the inheritable ones in this order, so they see the page's values.
     """
     inherited = tuple(item for item in entries.items() if item[1].inherit_context)
     if not inherited:

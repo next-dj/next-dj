@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Protocol, override, runtime_checkable
 from django.core.serializers.json import DjangoJSONEncoder
 
 from next.conf import import_class_cached, next_framework_settings
-from next.conf.signals import settings_reloaded
 from next.diagnostics import FailureLog, isolated_build, mark_degraded
 
 
@@ -120,7 +119,11 @@ class _Configured:
 
 
 _configured = _Configured()
-settings_reloaded.connect(_configured.forget)
+
+
+def forget_serializer(**kwargs: object) -> None:
+    """Drop the held serializer, so a settings reload builds the new one."""
+    _configured.forget()
 
 
 def _instantiate(path: str) -> JsContextSerializer:
@@ -139,28 +142,22 @@ def _build_serializer(path: str) -> JsContextSerializer:
     error is raised under `DEBUG` and otherwise logged at the `FailureLog` rate, and
     `next.W079` to `next.W082` report the cause.
     """
-    try:
-        instance = _instantiate(path)
-    except Exception as exc:  # noqa: BLE001 - a project serializer may raise anything
-        _failures.contain(
-            exc,
-            path,
-            "JS_CONTEXT_SERIALIZER %r cannot serialize, so the JSON serializer "
-            "is used instead. Point it at a class whose instances have a "
-            "dumps(value) -> str method.",
-            path,
-        )
-        return _default_serializer
-    return instance
+    with _failures.guard(
+        path,
+        "JS_CONTEXT_SERIALIZER %r cannot serialize, so the JSON serializer is used "
+        "instead. Point it at a class whose instances have a dumps(value) -> str "
+        "method.",
+        path,
+    ):
+        return _instantiate(path)
+    return _default_serializer
 
 
 def resolve_serializer() -> JsContextSerializer:
     """Return the configured serializer or the process-wide default.
 
-    The dotted path is read on every call, so a settings override takes effect from
-    the call that follows it, while the instance is built once per path. Every render
-    that uses the default in place of a broken serializer is marked degraded and logs
-    the failure at the `FailureLog` rate.
+    The path is read per call, the instance built once per path. A render falling back
+    from a broken one is degraded and logged at the `FailureLog` rate.
     """
     path = getattr(next_framework_settings, "JS_CONTEXT_SERIALIZER", None)
     if not path:

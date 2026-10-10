@@ -9,7 +9,7 @@ from django.template.base import Node
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString
 
-from next.diagnostics import FailureLog
+from next.diagnostics import FailureLog, type_name
 from next.seeding import METADATA_KEY
 
 from .backends import metadata_renderer
@@ -75,18 +75,16 @@ class MetadataNode(Node):
         if resolved is None:
             return ""
         renderer = metadata_renderer()
-        try:
+        kind = type(renderer)
+        with _failures.guard(
+            kind,
+            "%s raised %s while it rendered the head of a page, so the head renders "
+            "empty. Fix the renderer or the metadata value it reads.",
+            kind.__name__,
+            detail=type_name,
+        ):
             return renderer.render(resolved)
-        except Exception as exc:  # noqa: BLE001 - a renderer and lazy text run user code
-            _failures.contain(
-                exc,
-                (type(renderer), type(exc)),
-                "%s raised %s while it rendered the head of a page, so the head "
-                "renders empty. Fix the renderer or the metadata value it reads.",
-                type(renderer).__name__,
-                type(exc).__name__,
-            )
-            return ""
+        return ""
 
 
 def _crumb(crumb: Breadcrumb) -> SafeString:

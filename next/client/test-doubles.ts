@@ -3,7 +3,8 @@
 
 import { vi } from "vitest";
 import type { LayerBridge } from "./apply";
-import type { LazyModule } from "./chunks";
+import { lazyChunk } from "./chunks";
+import type { Lazy, LazyModule } from "./chunks";
 import { mintCsrf } from "./csrf";
 import { createPoller } from "./poll";
 import { createSse } from "./sse";
@@ -87,7 +88,26 @@ export function stubBridge(overrides: Partial<LayerBridge> = {}): LayerBridge {
 
 // A chunk module that has already loaded, so a suite runs the runtime synchronously.
 export function landed<T>(value: T): LazyModule<T> {
-  return { get: () => value, load: () => Promise.resolve(value) };
+  return {
+    get: () => value,
+    load: () => Promise.resolve(value),
+    whenLoaded: (fn) => fn(value),
+  };
+}
+
+// A chunk not fetched yet, whose tag lands in the head. The test lands its module.
+export function unloaded<T>(key: string): Lazy<T> & { tags(): number } {
+  const chunk = lazyChunk<T>(
+    {
+      dispatch: () => undefined,
+      nonce: undefined,
+      context: () => ({ $chunks: { [key]: `/static/next/next.${key}.min.js` } }),
+    },
+    key,
+  );
+  const tags = (): number =>
+    document.head.querySelectorAll(`script[src$="next.${key}.min.js"]`).length;
+  return { ...chunk, tags };
 }
 
 // The modules of the sse, csrf, and poll chunks, as createPartial takes them.

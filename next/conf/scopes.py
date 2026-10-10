@@ -1,7 +1,6 @@
 """Reads of the nested `NEXT_FRAMEWORK` scopes, with missing keys taken from `DEFAULTS`.
 
-The merge replaces a default scope with the user mapping whole, so a key the user
-leaves out is read from `DEFAULTS` here.
+The merge replaces a default scope whole, so a key the user leaves out is read here.
 """
 
 from __future__ import annotations

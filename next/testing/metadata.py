@@ -217,7 +217,11 @@ def _actual(tags: HeadTags, key: str, expected: object) -> object:
 def _wanted(key: str, expected: object) -> object:
     if isinstance(expected, Mapping):
         return dict(expected)
-    if key == "jsonld" and isinstance(expected, Sequence):
+    if (
+        key == "jsonld"
+        and isinstance(expected, Sequence)
+        and not isinstance(expected, str)
+    ):
         return list(expected)
     return expected
 

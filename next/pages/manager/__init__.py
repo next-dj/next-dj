@@ -19,9 +19,9 @@ from next.deps.resolver import current_resolver
 from next.introspect import declared_file, registering_file
 from next.pages.loaders import (
     LayoutTemplateLoader,
-    _load_python_module_memo,
     build_registered_loaders,
     load_page_module,
+    load_python_module_memo,
     reset_module_memo,
 )
 from next.pages.metadata.chain import (
@@ -457,7 +457,7 @@ class Page:
         composed = templates.composed.get(file_path)
         if composed is None or templates.composed_is_stale(file_path):
             templates.forget_composed(file_path)
-            module = _load_python_module_memo(file_path)
+            module = load_python_module_memo(file_path)
             body = self._load_static_body(file_path, module)
             composed = self._layout_loader.compose_body(body, file_path)
             self.register_template(file_path, composed)

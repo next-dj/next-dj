@@ -3,7 +3,7 @@
 Static asset security
 =====================
 
-This page covers the security properties of the static pipeline including origin control, content hashing, integrity attributes, and CSP nonces.
+The static pipeline carries four security properties, origin control, content hashing, integrity attributes, and CSP nonces.
 
 .. contents::
    :local:

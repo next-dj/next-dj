@@ -78,8 +78,7 @@ def _foreign_zone_reads(
 def _zone_request_context(url_path: str) -> ResolutionContext:
     """Build the resolution context of a zone request that carries no context data.
 
-    The `context_data` is empty, so a parameter that another provider fills does not
-    depend on the zone-bound `@context`.
+    With empty `context_data`, a parameter another provider fills is not zone-bound.
     """
     return ResolutionContext(
         request=HttpRequest(),
@@ -125,8 +124,7 @@ def _context_parameters(func: Callable[..., Any]) -> list[inspect.Parameter]:
 def _url_parameter_names(url_path: str) -> list[str]:
     """Return the URL kwarg names the route captures, as the router parses them.
 
-    A route the parser refuses captures nothing, since `next.E008` or `next.E009`
-    reports it.
+    A refused route captures nothing, since `next.E008` or `next.E009` reports it.
     """
     parser = _url_parser()
     try:

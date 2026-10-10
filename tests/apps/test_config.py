@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import ast
 from contextlib import ExitStack
-from typing import TYPE_CHECKING, ClassVar
+from pathlib import Path
+from typing import ClassVar
 from unittest.mock import Mock, patch
 
 import pytest
 from django.apps import apps
 from django.conf import settings
+from django.core.signals import setting_changed
 from django.test import override_settings
 from django.urls import Resolver404, resolve
 from django.utils import autoreload
@@ -15,8 +18,10 @@ from django.utils.autoreload import (
     autoreload_started,
 )
 
+import next as next_package
 from next.apps import autoreload as next_autoreload, components as next_components
 from next.components import FileComponentsBackend, components_manager
+from next.conf.signals import settings_reloaded
 from next.deps import resolver
 from next.deps.introspect import _signature_cache
 from next.pages import loaders as pages_loaders
@@ -51,10 +56,6 @@ from tests.support import (
     routed,
     write_tree,
 )
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 _PROCESS_SLOTS = (
@@ -525,3 +526,29 @@ class TestDependencyResolverInstall:
         router_manager.reload()
 
         assert seo_manager.version != before
+
+
+class TestReceiversConnectInReady:
+    """Every invalidation receiver is wired by `ready()`, once, never at import time."""
+
+    @pytest.mark.parametrize(
+        "signal", [setting_changed, settings_reloaded, router_reloaded]
+    )
+    def test_a_second_ready_adds_no_receiver(self, signal) -> None:
+        before = len(signal.receivers)
+        apps.get_app_config("next").ready()
+        assert len(signal.receivers) == before
+
+    def test_no_module_connects_a_receiver_at_import_time(self) -> None:
+        connected = [
+            path
+            for path in Path(next_package.__file__).parent.rglob("*.py")
+            if any(
+                isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Attribute)
+                and node.value.func.attr == "connect"
+                for node in ast.parse(path.read_text()).body
+            )
+        ]
+        assert connected == []

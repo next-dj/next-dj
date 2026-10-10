@@ -22,8 +22,7 @@ from django.utils.timezone import get_current_timezone, is_naive, make_aware
 from django.utils.translation import get_language, to_locale
 
 from next.conf import next_framework_settings
-from next.conf.signals import settings_reloaded
-from next.diagnostics import FailureLog
+from next.diagnostics import FailureLog, exception_text
 from next.pages.errors import PageMetadataRequestError, PageMetadataShapeError
 from next.ports import router_access_slot
 from next.site import SiteOriginError, site_indexable, site_origin
@@ -142,7 +141,7 @@ def _origin(request: HttpRequest | None, url: str) -> tuple[str, str]:
         raise SiteOriginError(url) from exc
 
 
-class _DroppedUrl(Exception):  # noqa: N818 - a control-flow signal, not an error
+class DroppedUrlError(Exception):
     """A lazy URL failed its check once forced, so the tag carrying it is left out."""
 
 
@@ -153,17 +152,15 @@ def _plain_url(url: Url) -> str:
     """
     if not isinstance(url, Promise):
         return url
-    try:
+    guard = _failures.guard(
+        "lazy-url",
+        "%s, so its tag is left out. Give the lazy URL an http or https URL or a path.",
+        catch=(PageMetadataShapeError,),
+        detail=exception_text,
+    )
+    with guard:
         return str(url)
-    except PageMetadataShapeError as exc:
-        _failures.contain(
-            exc,
-            ("lazy-url", str(exc)),
-            "%s, so its tag is left out. Give the lazy URL an http or https URL or "
-            "a path.",
-            exc,
-        )
-        raise _DroppedUrl from exc
+    raise DroppedUrlError from guard.error
 
 
 def _kept[T](items: Iterable[T], convert: Callable[[T], T]) -> tuple[T, ...]:
@@ -172,7 +169,7 @@ def _kept[T](items: Iterable[T], convert: Callable[[T], T]) -> tuple[T, ...]:
     for item in items:
         try:
             kept.append(convert(item))
-        except _DroppedUrl:
+        except DroppedUrlError:
             continue
     return tuple(kept)
 
@@ -181,15 +178,14 @@ def _or_none[T](convert: Callable[[], T]) -> T | None:
     """Return what `convert` builds, `None` when a lazy URL it forces failed."""
     try:
         return convert()
-    except _DroppedUrl:
+    except DroppedUrlError:
         return None
 
 
 def absolute_url(url: str, *, request: HttpRequest | None = None) -> str:
     """Return `url` made absolute on the site origin, the one the sitemap uses.
 
-    A URL with a scheme keeps its origin, and a protocol-relative one takes a scheme,
-    each encoded the way a relative one is.
+    A URL with a scheme keeps its origin, a `//` one takes a scheme, both encoded alike.
     """
     parts = urlsplit(url)
     if parts.scheme:
@@ -517,12 +513,9 @@ def _crumb_route(trail: str, template: str) -> tuple[str, tuple[str, ...]]:
     return template.format(name=parser.prepare_url_name(trail)), tuple(parameters)
 
 
-def _forget_crumb_routes(**kwargs: object) -> None:
+def forget_crumb_routes(**kwargs: object) -> None:
     """Drop the memoised crumb routes, so a reconfigured URL parser takes effect."""
     _crumb_route.cache_clear()
-
-
-settings_reloaded.connect(_forget_crumb_routes)
 
 
 def _crumb_url(
@@ -595,24 +588,22 @@ def _graph_node(item: object, url: IdMap) -> Mapping[str, object] | None:
 
     A callable builds its nodes per request, so a bad value surfaces only here.
     """
-    try:
+    kind = node_type(item) or type(item).__name__
+    with _failures.guard(
+        ("jsonld", kind),
+        "The JSON-LD %s node holds a value JSON cannot write (%s), so the node is left "
+        "out of the graph. Give it finite numbers and JSON values.",
+        kind,
+        catch=(ValueError,),
+        detail=exception_text,
+    ):
         node = (
             item.as_jsonld(url)
             if isinstance(item, Node)
             else _raw_node(cast("Mapping[str, object]", item), url)
         )
-    except ValueError as exc:
-        kind = node_type(item) or type(item).__name__
-        _failures.contain(
-            exc,
-            ("jsonld", kind),
-            "The JSON-LD %s node holds a value JSON cannot write (%s), so the node "
-            "is left out of the graph. Give it finite numbers and JSON values.",
-            kind,
-            exc,
-        )
-        return None
-    return cast("Mapping[str, object]", node)
+        return cast("Mapping[str, object]", node)
+    return None
 
 
 def _crumb_list(

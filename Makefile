@@ -41,7 +41,7 @@ help: # show this help message
 	@echo "  docs-serve      - build and serve documentation"
 	@echo "  docs-clean      - clean documentation build"
 	@echo "  install-js      - install JS toolchain via npm ci"
-	@echo "  build-js        - compile next.ts to next.min.js via esbuild"
+	@echo "  build-js        - compile the runtime and its lazy chunks to next*.min.js via esbuild"
 	@echo "  test-js         - run JavaScript unit tests with vitest"
 	@echo "  test-js-coverage - run JavaScript unit tests with the v8 coverage gate"
 	@echo "  lint-js         - lint TypeScript files with ESLint"
@@ -52,7 +52,7 @@ help: # show this help message
 install-js: # install JS toolchain via npm ci
 	npm ci
 
-build-js: install-js # compile next/client/next.ts to next.min.js via esbuild
+build-js: install-js # compile next/client/next.ts and the next/client/entries chunks via esbuild
 	npm run build:next
 
 test-js: # run JavaScript unit tests with vitest

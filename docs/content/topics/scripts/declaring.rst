@@ -5,7 +5,6 @@ Declaring scripts
 
 A ``scripts.py`` at the top of a page tree declares every third-party script the tree runs, each a ``Script`` value with a name, a source, a loading strategy, and a consent category.
 The server writes the scripts a page may run at once into its head, and the runtime loads the rest later, on idle, on the first interaction, on demand, or once the visitor grants their category.
-This page covers the declaration, the strategies, the head slot, per-page scripts, and the nonce.
 
 .. contents::
    :local:
@@ -61,6 +60,7 @@ A ``Script`` takes these fields.
      - When the script loads, ``Strategy.ASYNC`` by default.
    * - ``category``
      - The consent category, ``necessary`` by default, one of ``CONSENT["CATEGORIES"]``.
+       A blank category is refused when the ``Script`` is built.
    * - ``auto``
      - ``True`` to run on every page of the tree, ``False`` to run only where ``{% script %}`` names it.
    * - ``attrs``

@@ -4,8 +4,8 @@
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
 import type { Envelope } from "./apply";
-import { createExtras, lazyChunk } from "./chunks";
-import type { ChunkDeps, ExtrasFactory, Lazy, ScriptsChunk } from "./chunks";
+import { createScriptsLoader, lazyChunk } from "./chunks";
+import type { ChunkDeps, Lazy, ScriptsChunk, ScriptsFactory } from "./chunks";
 import type { ConsentChange } from "./consent";
 import { readCsrf } from "./csrf";
 import type { CsrfMint } from "./csrf";
@@ -28,7 +28,7 @@ export type { ScriptStatus } from "./scripts";
 
 /** The module each single-module chunk registers through Next._land, by chunk name. */
 interface NextModules {
-  scripts: ExtrasFactory;
+  scripts: ScriptsFactory;
   sse: SseFactory;
   csrf: CsrfMint;
   poll: PollFactory;
@@ -102,6 +102,15 @@ class NextBus extends EventTarget {
 // Read during module evaluation, the only time document.currentScript is set.
 const NONCE = scriptNonce(document);
 
+// The outcome of each script tag that settles from here on, so Next.scripts.load of a
+// server-rendered tag that loaded before the scripts chunk arrived resolves at once.
+const SETTLED = new WeakMap<EventTarget, boolean>();
+const record = ({ target, type }: Event): void => {
+  if (target instanceof HTMLScriptElement) SETTLED.set(target, type === "load");
+};
+document.addEventListener("load", record, true);
+document.addEventListener("error", record, true);
+
 /** The window-exposed runtime facade, a static class since there is one per page. */
 class Next {
   static #context: Record<string, unknown> = {};
@@ -137,10 +146,15 @@ class Next {
   /** Third-party scripts, set once the scripts chunk has loaded. */
   static scripts: ScriptsChunk["scripts"] | undefined;
 
-  static #extras = createExtras(
+  static #scripts = createScriptsLoader(
     {
       ...Next.#chunk,
-      mount: (nodes) => Next.partial.mount(nodes),
+      host: {
+        dispatch: Next.#chunk.dispatch,
+        nonce: NONCE,
+        mount: (nodes) => Next.partial.mount(nodes),
+        settled: (el) => SETTLED.get(el),
+      },
       install: (chunk) => {
         Next.consent = chunk.consent;
         Next.scripts = chunk.scripts;
@@ -150,7 +164,7 @@ class Next {
   );
 
   static #chunks: { [K in keyof NextChunks]: () => Promise<NextChunks[K]> } = {
-    scripts: () => Next.#extras.ready(),
+    scripts: () => Next.#scripts.ready(),
   };
 
   static navigation = {
@@ -167,11 +181,11 @@ class Next {
     Next.#context = context;
     // Only the boolean true enables the dev channel, a "true" string does not. It is
     // enabled before the initial trigger scan, and the diagnostics are attached once
-    // the dev chunk has loaded.
+    // the dev chunk has loaded, unless a later payload turned the channel off.
     if (context.$dev === true) {
       Next.partial._configure({ dev: true });
-      void Next.#modules.dev.load().then((diagnostics) => {
-        if (diagnostics !== undefined)
+      Next.#modules.dev.whenLoaded((diagnostics) => {
+        if (Next.#context.$dev === true)
           Next.partial._configure({ dev: true, diagnostics });
       });
     }
@@ -186,13 +200,13 @@ class Next {
     Next.partial.ready();
     Next.#bus.emit("ready", context);
     // Last, so a next:consent listener bound in a ready handler gets the first event.
-    Next.#extras.init(context);
+    Next.#scripts.init(context);
   }
 
   /**
    * Resolve with the surfaces of a lazy chunk once it has loaded and been configured.
    *
-   * Fetches the chunk when the page has not, and rejects when it cannot be loaded.
+   * Fetches the chunk if needed. Rejects when it cannot load or the page had no init.
    */
   static ready<K extends keyof NextChunks>(chunk: K): Promise<NextChunks[K]> {
     return Next.#chunks[chunk]();

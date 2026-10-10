@@ -232,5 +232,5 @@ class TestBuiltinsFollowAnOverride:
 
     def test_another_setting_leaves_templates_alone(self) -> None:
         before = settings.TEMPLATES
-        next_templates._on_setting_changed(setting="INSTALLED_APPS")
+        next_templates.reinstall_builtins(setting="INSTALLED_APPS")
         assert settings.TEMPLATES is before

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Wire } from "./wire";
 import { createCsrf } from "./csrf";
+import type { CsrfMint } from "./csrf";
+import { lazyChunk } from "./chunks";
 import type { CsrfPayload, CsrfSource } from "./wire";
 import type { SessionStore } from "./assets";
 import {
@@ -633,6 +635,34 @@ describe("Wire abortable validation", () => {
       event: "partial:error",
       detail: { kind: "csrf", url: "/f/" },
     });
+  });
+
+  it("a csrf chunk that failed to load is reported once, as the asset", async () => {
+    document.head.innerHTML = "";
+    const reported: Record<string, unknown>[] = [];
+    const mint = lazyChunk<CsrfMint>(
+      {
+        dispatch: (_event, detail) => reported.push(detail),
+        nonce: undefined,
+        context: () => ({ $chunks: { csrf: "/static/next/next.csrf.min.js" } }),
+      },
+      "csrf",
+    );
+    const csrf = createCsrf({ mint });
+    csrf.set({ header: "X-CSRFToken", url: "/_next/csrf/" });
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), {
+      csrf: { header: "X-CSRFToken", url: "/_next/csrf/" },
+      ensure: () => csrf.ensure(),
+    });
+    const sent = h.wire.fetch({ url: "/f/", method: "POST", uid: "u" });
+    document.head.querySelector("script")!.dispatchEvent(new Event("error"));
+    await sent;
+    expect(h.calls).toEqual([]);
+    expect(h.dispatched).toEqual([]);
+    expect(reported).toEqual([expect.objectContaining({ kind: "asset" })]);
+    // The lock is released, so the next submit tries again.
+    void h.wire.fetch({ url: "/f/", method: "POST", uid: "u" });
+    expect(document.head.querySelectorAll("script")).toHaveLength(1);
   });
 
   it("stamps the declared zone, not the queue key, on an abortable POST", async () => {

@@ -3,9 +3,7 @@
 Checking and testing SEO
 ========================
 
-Three tools tell what a project hands search engines before a crawler does.
-The system checks read the declarations without a request, ``manage.py showmetadata`` prints where each key of a page comes from, and ``next.testing`` asserts the head and the sitemap inside a test.
-This page covers each of them.
+Three tools tell what a project hands search engines before a crawler does, the system checks, ``manage.py showmetadata``, and the test helpers of ``next.testing``.
 
 .. contents::
    :local:
@@ -70,7 +68,7 @@ A test is the place for everything a callable decides per row, the title of a no
        urls = parse_sitemap(NextClient().get("/sitemap.xml"))
        assert f"https://notes.example/notes/{note.pk}/" in {url.loc for url in urls}
 
-``parse_sitemap`` answers the ``SitemapUrl`` values of a document, each with ``loc``, ``lastmod``, and ``alternates``.
+``parse_sitemap`` answers the ``SitemapUrl`` values of a document, each with ``loc``, ``lastmod``, and ``alternates``, and parses it through ``defusedxml``, which the ``next.dj[testing]`` extra installs.
 A robots file is plain text, so a test asserts on ``response.content`` directly.
 ``reset_seo`` drops the discovered sources and the ``@sitemap.items`` registrations, for a test that writes a ``sitemap.py`` of its own.
 

@@ -136,6 +136,10 @@ class TestAssertMetadata:
         with pytest.raises(AssertionError, match=r"twitter: expected 'x', got \{"):
             assert_metadata(HEAD, twitter="x")
 
+    def test_a_jsonld_string_compares_as_one_value(self) -> None:
+        with pytest.raises(AssertionError, match=r"jsonld: expected 'x', got \["):
+            assert_metadata(HEAD, jsonld="x")
+
     def test_an_unknown_key_is_refused(self) -> None:
         with pytest.raises(TypeError, match=r"unknown keys \['icons'\]"):
             assert_metadata(HEAD, icons="a")
@@ -154,4 +158,9 @@ class TestAssertMetadata:
 
     def test_a_streamed_response_is_read_to_its_end(self) -> None:
         response = StreamingHttpResponse(iter([b"<head><title>", b"T</title>"]))
+        assert_metadata(response, title="T")
+
+    def test_a_streamed_response_reads_again(self) -> None:
+        response = StreamingHttpResponse(iter([b"<head><title>", b"T</title>"]))
+        assert_metadata(response, title="T")
         assert_metadata(response, title="T")

@@ -100,21 +100,20 @@ class TestGuardSharedCache:
         assert ("CDN-Cache-Control" in response) is cdn
         assert "Vary" not in response
 
-    def test_each_path_is_reported_once(self, caplog) -> None:
-        for path in ("/a/", "/a/", "/b/"):
+    def test_unresolved_requests_share_one_key(self, caplog) -> None:
+        """A path is request data, so it never becomes a key of its own."""
+        for path in ("/a/", "/b/"):
             guard_shared_cache(RequestFactory().get(path), _response("public"))
         records = _guarded_records(caplog)
-        assert [record.args for record in records] == [("/a/",), ("/b/",)]
+        assert [record.args for record in records] == [("/a/",)]
 
-    def test_each_route_is_reported_once_whatever_its_path(self, caplog) -> None:
-        for path in ("/posts/1/", "/posts/2/"):
+    def test_each_route_name_is_reported_once_whatever_its_path(self, caplog) -> None:
+        for path, name in (("/posts/1/", "post"), ("/posts/2/", "post"), ("/", "home")):
             request = RequestFactory().get(path)
-            request.resolver_match = ResolverMatch(
-                _response, (), {}, route="posts/<int:pk>/"
-            )
+            request.resolver_match = ResolverMatch(_response, (), {}, url_name=name)
             guard_shared_cache(request, _response("public"))
         records = _guarded_records(caplog)
-        assert [record.args for record in records] == [("/posts/1/",)]
+        assert [record.args for record in records] == [("/posts/1/",), ("/",)]
 
     def test_a_reconfigure_reports_a_path_again(self, caplog) -> None:
         guard_shared_cache(RequestFactory().get("/a/"), _response("public"))

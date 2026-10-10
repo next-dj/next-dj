@@ -32,7 +32,7 @@ import type { PollFactory } from "./poll";
 import { createNavigation } from "./navigation";
 import type { NavigationState } from "./navigation";
 import { defaultHistory, defaultNavigate } from "./adapters";
-import { ATTR_SSE, currentUrl, fire, matching } from "./protocol";
+import { ATTR_SSE, ECHO_LIMIT, currentUrl, fire, matching } from "./protocol";
 import type { Diagnostics } from "./protocol";
 
 /** The core seams the applier and the fetch layer read from. */
@@ -130,25 +130,38 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   // The SSE bridge once its chunk has loaded, built with the adapters configured last.
   let bridge: Sse | undefined;
   let sseAdapters: PartialAdapters | undefined;
-  const live = (): Sse | undefined => {
-    const factory = deps.sse.get();
-    if (bridge === undefined && factory !== undefined) {
+  // The request ids sent before the bridge is built. A stream that opens once its
+  // chunk lands can still carry their echoes, so the bridge takes them over.
+  let unbridged: string[] = [];
+  // Bumped on every reset of the bridge, so a chunk landing late scans no stale root.
+  let epoch = 0;
+  const live = (factory: SseFactory): Sse => {
+    if (bridge === undefined) {
       bridge = factory(sseDeps(sseAdapters));
+      for (const id of unbridged) bridge.remember(id);
+      unbridged = [];
     }
     return bridge;
   };
-  // A page with no stream never fetches the bridge. A request id from before it loads
-  // belongs to a mutation no later stream is subscribed for, so it is not kept.
+  // A page with no stream never fetches the bridge.
   const sse: Sse = {
     scan(root) {
       if (matching(root, `[${ATTR_SSE}]`).length === 0) return;
-      const landed = live();
-      if (landed !== undefined) landed.scan(root);
-      else void deps.sse.load().then(() => live()?.scan(root));
+      const started = epoch;
+      deps.sse.whenLoaded((factory) => {
+        if (started === epoch) live(factory).scan(root);
+      });
     },
-    remember: (id) => bridge?.remember(id),
+    remember(id) {
+      if (bridge !== undefined) bridge.remember(id);
+      else unbridged = [...unbridged, id].slice(-ECHO_LIMIT);
+    },
     size: () => bridge?.size() ?? 0,
-    _reset: () => bridge?._reset(),
+    _reset() {
+      bridge?._reset();
+      unbridged = [];
+      epoch += 1;
+    },
   };
   let applier = new Applier(applyDeps());
   let wire = new Wire(wireDeps());

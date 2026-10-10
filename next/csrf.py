@@ -1,4 +1,4 @@
-"""Where a page puts the CSRF token for its runtime and forms, and the token endpoint.
+"""Where a page puts its CSRF token, the token endpoint, and the request render flags.
 
 A token in the HTML sets the CSRF cookie, so a page a shared cache may store defers it.
 """
@@ -31,7 +31,6 @@ from django.utils.cache import add_never_cache_headers, patch_vary_headers
 
 from next.caches import BoundedCache
 from next.conf import next_framework_settings
-from next.conf.signals import settings_reloaded
 from next.diagnostics import FailureLog
 from next.site.headers import ROBOTS_HEADER
 
@@ -78,9 +77,6 @@ def forget_csrf_delivery(**kwargs) -> None:
     _urls.clear()
 
 
-settings_reloaded.connect(forget_csrf_delivery)
-
-
 def defer_token(request: HttpRequest) -> None:
     """Keep the token out of the HTML of this render. The runtime fetches it instead."""
     setattr(request, CSRF_DEFERRED_ATTR, True)
@@ -89,6 +85,23 @@ def defer_token(request: HttpRequest) -> None:
 def token_deferred(request: HttpRequest) -> bool:
     """Whether this render keeps the CSRF token out of its HTML."""
     return getattr(request, CSRF_DEFERRED_ATTR, False) is True
+
+
+NONCE_ATTR: Final = "_next_csp_nonce"
+"""The request attribute that holds the nonce resolved for the request."""
+
+CSP_NONCE_ATTR: Final = "_csp_nonce"
+"""The request attribute where Django's CSP middleware and django-csp keep the nonce."""
+
+
+def nonce_minted(request: HttpRequest) -> bool:
+    """Return whether a nonce was generated for `request`, by a framework tag or not.
+
+    Django's `LazyNonce` is truthy once evaluated, and django-csp stores the string.
+    """
+    return isinstance(getattr(request, NONCE_ATTR, None), str) or bool(
+        getattr(request, CSP_NONCE_ATTR, None)
+    )
 
 
 def csrf_header_name() -> str:
@@ -146,16 +159,14 @@ def csrf_payload(request: HttpRequest) -> dict[str, str]:
     When the endpoint is not routed the token is embedded instead, so forms still post.
     """
     if token_deferred(request):
-        try:
+        with _failures.guard(
+            CSRF_URL_NAME,
+            "The CSRF token endpoint does not reverse, so this page embeds its token "
+            "instead of deferring it. Add path('', include('next.urls')) to "
+            "ROOT_URLCONF.",
+            catch=(NoReverseMatch,),
+        ):
             return {"header": csrf_header_name(), "url": csrf_url()}
-        except NoReverseMatch as exc:
-            _failures.contain(
-                exc,
-                CSRF_URL_NAME,
-                "The CSRF token endpoint does not reverse, so this page embeds its "
-                "token instead of deferring it. Add path('', include('next.urls')) "
-                "to ROOT_URLCONF.",
-            )
     return csrf_token_payload(request)
 
 
@@ -187,8 +198,10 @@ def csrf_view(request: HttpRequest) -> HttpResponse:
 
 
 __all__ = [
+    "CSP_NONCE_ATTR",
     "CSRF_DEFERRED_ATTR",
     "CSRF_URL_NAME",
+    "NONCE_ATTR",
     "CsrfDelivery",
     "csrf_delivery",
     "csrf_header_name",
@@ -198,5 +211,6 @@ __all__ = [
     "csrf_view",
     "defer_token",
     "forget_csrf_delivery",
+    "nonce_minted",
     "token_deferred",
 ]

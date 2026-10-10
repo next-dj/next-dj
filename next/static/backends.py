@@ -89,9 +89,7 @@ class StaticBackend(ABC):
 class StaticFilesBackend(StaticBackend):
     """Resolve co-located asset URLs through Django staticfiles.
 
-    `css_tag`, `js_tag`, and `module_tag` hold format strings taking `{url}` and
-    `{nonce_attr}`. Both are HTML-escaped, since the tag is inserted after the template
-    engine has rendered.
+    `*_tag` formats take `{url}` and `{nonce_attr}`, escaped as they skip the engine.
     """
 
     _DEFAULT_CSS_TAG: ClassVar[str] = '<link rel="stylesheet" href="{url}"{nonce_attr}>'

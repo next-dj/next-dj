@@ -11,12 +11,10 @@ import threading
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, overload, override
 
-from django.core.signals import setting_changed
 from django.urls import URLPattern, URLResolver, clear_url_caches, path
 from django.urls.resolvers import RoutePattern
 
 from next.backends import backend_entries, load_backends, resolve_setting_class
-from next.conf.signals import settings_reloaded
 from next.csrf import CSRF_URL_NAME, csrf_view
 from next.forms.manager import form_action_manager
 from next.pages.manager.views import fit_page_caches
@@ -166,7 +164,7 @@ class RouterManager:
 router_manager = RouterManager()
 
 
-def _on_settings_reloaded(**kwargs) -> None:
+def reload_router_settings(**kwargs) -> None:
     """Rebuild router backends and drop the built URL resolver on settings reload.
 
     The slot keeps its identity so the outer include resolver, which iterates it on
@@ -176,7 +174,7 @@ def _on_settings_reloaded(**kwargs) -> None:
     urlpatterns.reset()
 
 
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
+def reload_app_routers(*, setting: str, **kwargs) -> None:
     """Rebuild the routers when the app list behind their page trees moves.
 
     The rebuild bumps the version behind the lazy patterns, clears Django's URL caches,
@@ -184,10 +182,6 @@ def _on_setting_changed(*, setting: str, **kwargs) -> None:
     """
     if setting == "INSTALLED_APPS":
         router_manager.reload()
-
-
-settings_reloaded.connect(_on_settings_reloaded)
-setting_changed.connect(_on_setting_changed)
 
 
 _CSRF_PATTERN = path("_next/csrf/", csrf_view, name=CSRF_URL_NAME)
@@ -326,8 +320,6 @@ urlpatterns = _LazyResolverSlot()
 
 __all__ = [
     "RouterManager",
-    "SeoRoutesVersion",
-    "VersionToken",
     "app_name",
     "router_manager",
     "seo_routes_version",

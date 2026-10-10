@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import threading
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, ClassVar, Final, override
+from typing import TYPE_CHECKING, Any, ClassVar, Final, overload, override
 from weakref import WeakSet
 
 
@@ -63,7 +63,13 @@ class BoundedCache[K, V]:
         """Return how many entries are held."""
         return len(self._entries)
 
-    def get(self, key: K, default: V | None = None) -> V | None:
+    @overload
+    def get(self, key: K) -> V | None: ...
+
+    @overload
+    def get[D](self, key: K, default: D) -> V | D: ...
+
+    def get(self, key: K, default: object = None) -> object:
         """Return the entry under `key`, or `default` when there is none."""
         return self._entries.get(key, default)
 
@@ -148,8 +154,14 @@ class LruCache[K, V](BoundedCache[K, V]):
             # concurrent eviction that removed this key has already restored the bound.
             return
 
+    @overload
+    def get(self, key: K) -> V | None: ...
+
+    @overload
+    def get[D](self, key: K, default: D) -> V | D: ...
+
     @override
-    def get(self, key: K, default: V | None = None) -> V | None:
+    def get(self, key: K, default: object = None) -> object:
         """Return the entry under `key` and refresh it, or `default` for a miss.
 
         A concurrent eviction between the lookup and the refresh counts as a miss.

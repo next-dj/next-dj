@@ -12,13 +12,14 @@ The runtime applies the patch envelopes the server authors, drives the ``data-ne
 It never invents a target or a swap strategy, so this page records what the runtime accepts rather than what it decides.
 
 The TypeScript sources live in ``next/client/`` and are not part of the installed package.
-``make build-js`` bundles, in one esbuild call, ``next/client/next.ts`` into ``next/static/next/next.min.js``, ``next/client/extras.ts`` into ``next/static/next/next.scripts.min.js``, ``next/client/sse-chunk.ts`` into ``next/static/next/next.sse.min.js``, ``next/client/csrf-chunk.ts`` into ``next/static/next/next.csrf.min.js``, ``next/client/poll-chunk.ts`` into ``next/static/next/next.poll.min.js``, and ``next/client/dev.ts`` into ``next/static/next/next.dev.min.js``, the six minified artefacts the wheel ships.
+``make build-js`` bundles, in one esbuild call, ``next/client/next.ts`` into ``next/static/next/next.min.js``, and each entry of ``next/client/entries/``, ``scripts.ts``, ``sse.ts``, ``csrf.ts``, ``poll.ts``, and ``dev.ts``, into ``next/static/next/next.<name>.min.js``, the six minified artefacts the wheel ships.
 The scripts chunk carries consent and third-party scripts, and the runtime fetches it only for a page that needs it, see :doc:`client-extras`.
 The sse chunk carries the stream bridge, fetched once a scan finds a ``data-next-sse`` container.
 The csrf chunk carries the fetch of a deferred CSRF token, fetched on the first need of a page that shipped only the endpoint.
 The poll chunk carries the zone poller, fetched once a scan finds a ``data-next-poll`` zone.
 The dev chunk carries the diagnostics of a ``DEBUG`` render, and a production page never fetches it.
-A chunk that fails to load, or has not loaded within 15 seconds, fires ``partial:error`` of kind ``asset`` and is fetched again on its next need, so a stalled request holds no ``Next.ready``, form submit, or stream for good.
+A chunk that fails to load, or has not loaded within 15 seconds, fires ``partial:error`` of kind ``asset`` once and is fetched again on its next need, so a stalled request holds no ``Next.ready``, form submit, or stream for good.
+A chunk that lands after its timeout is still delivered to every subscriber that waited for it.
 ``tests/static/test_chunk_sync.py`` holds the chunk lists of ``next.ts``, ``chunks.ts``, ``next/static/runtime.py``, ``package.json``, ``build_hooks.py``, and ``pyproject.toml`` to one another.
 The wheel excludes ``next/client/`` outright, so a project never imports the TypeScript and installs no Node toolchain to serve the runtime.
 The script builder publishes the bundle under the static path ``next/next.min.js``, which the active staticfiles storage fingerprints like any other asset.
@@ -493,12 +494,12 @@ None of these modules is reachable from application code, so the names serve rea
        The fetch itself ships in the csrf chunk.
    * - ``chunks.ts``
      - The core side of the lazy chunks, which fetches each on demand, and of the scripts chunk, which answers ``Next.ready("scripts")`` once it loads.
-   * - ``extras.ts``, ``consent.ts``, ``scripts.ts``
-     - The scripts chunk itself, consent and the script manifest loader.
+   * - ``consent.ts``, ``scripts.ts``
+     - Consent and the script manifest loader, shipped in the scripts chunk.
    * - ``poll.ts``
      - The zone poller, its interval groups, and the pause and resume on tab visibility, shipped in the poll chunk.
-   * - ``sse-chunk.ts``, ``csrf-chunk.ts``, ``poll-chunk.ts``, ``dev.ts``
-     - The entries of the sse, csrf, poll, and dev chunks.
+   * - ``entries/scripts.ts``, ``entries/sse.ts``, ``entries/csrf.ts``, ``entries/poll.ts``, ``entries/dev.ts``
+     - The entry of each lazy chunk, one module per chunk named after it.
 
 Configuration
 -------------

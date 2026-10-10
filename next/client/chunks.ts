@@ -15,12 +15,16 @@ const CHUNK_KEYS = ["$scripts", "$consent"];
 // cannot block Next.ready, a deferred CSRF token or a stream indefinitely.
 export const CHUNK_TIMEOUT = 15e3;
 
-/** The runtime functions exposed to the scripts chunk. */
-export interface ExtrasHost {
+const NO_PAYLOAD = "[next] the page has no init payload";
+
+/** The runtime functions the scripts chunk factory receives, and nothing more. */
+export interface ScriptsHost {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   nonce: string | undefined;
   // The post-morph mount pass, run over revealed consent markup like inserted markup.
   mount: (nodes: readonly Element[]) => void;
+  // Whether a server-rendered script tag has loaded, undefined while it has not settled.
+  settled: (el: Element) => boolean | undefined;
 }
 
 /** The public surfaces of the scripts chunk, resolved by Next.ready("scripts"). */
@@ -30,17 +34,17 @@ export interface ScriptsChunk {
 }
 
 /** The surfaces the scripts chunk factory returns. */
-export interface Extras extends ScriptsChunk {
+export interface ScriptsModule extends ScriptsChunk {
   consent: Consent;
   scripts: Scripts;
   /** Configure from an init payload and announce the initial consent state. */
   configure(context: Record<string, unknown>): void;
 }
 
-export type ExtrasFactory = (host: ExtrasHost) => Extras;
+export type ScriptsFactory = (host: ScriptsHost) => ScriptsModule;
 
 /** The runtime's loader of the scripts chunk. */
-export interface ExtrasLoader {
+export interface ScriptsLoader {
   /** Resolve once the chunk has loaded and been configured, fetching it if needed. */
   ready(): Promise<ScriptsChunk>;
   /** Store an init payload, fetching the chunk when the payload requires it. */
@@ -56,8 +60,9 @@ export interface ChunkDeps {
   context: () => Record<string, unknown>;
 }
 
-export interface ExtrasDeps extends ChunkDeps {
-  mount: (nodes: readonly Element[]) => void;
+export interface ScriptsLoaderDeps extends ChunkDeps {
+  // What the chunk factory receives, kept apart from the loader's own seams.
+  host: ScriptsHost;
   // Publishes the chunk surfaces before they are configured, so a listener of the
   // initial next:consent can already call them.
   install: (chunk: ScriptsChunk) => void;
@@ -69,6 +74,8 @@ export interface LazyModule<T> {
   get(): T | undefined;
   /** Resolve with the module, fetching its chunk if needed, or undefined on failure. */
   load(): Promise<T | undefined>;
+  /** Run fn with the module on its first landing, even one after a failed attempt. */
+  whenLoaded(fn: (value: T) => void): void;
 }
 
 /** A lazy module plus the registration call its chunk makes. */
@@ -91,85 +98,116 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
   let value: T | undefined;
   let pending: Promise<T | undefined> | undefined;
   let settle: ((value: T | undefined) => void) | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // A timed-out tag may still evaluate, so its subscribers outlive the attempt.
+  const waiting: ((value: T) => void)[] = [];
+
+  function load(): Promise<T | undefined> {
+    if (value !== undefined) return Promise.resolve(value);
+    if (pending !== undefined) return pending;
+    const chunks = deps.context().$chunks;
+    const url = isRecord(chunks) ? asString(chunks[key]) : undefined;
+    if (url === undefined) return Promise.resolve(undefined);
+    const el = doc.createElement("script");
+    if (deps.nonce !== undefined) el.nonce = deps.nonce;
+    // Per attempt, since another script may remove the tag before it reports.
+    let failed = false;
+    const fail = (): void => {
+      // Nothing to do once the module is registered or this attempt has failed.
+      if (failed || value !== undefined) return;
+      failed = true;
+      clearTimeout(timer);
+      // A retry appends a new tag, so the failed one is removed.
+      el.remove();
+      pending = undefined;
+      settle?.(undefined);
+      fire(doc, deps.dispatch, "partial:error", {
+        kind: "asset",
+        url,
+        error: new Error(`${key} chunk failed`),
+      } satisfies PartialError);
+    };
+    el.onerror = fail;
+    // A file that ran without registering its module fails too, so no caller hangs.
+    el.onload = fail;
+    el.src = url;
+    doc.head.append(el);
+    timer = setTimeout(fail, CHUNK_TIMEOUT);
+    pending = new Promise((resolve) => (settle = resolve));
+    return pending;
+  }
+
   return {
     get: () => value,
-    load() {
-      if (value !== undefined) return Promise.resolve(value);
-      if (pending !== undefined) return pending;
-      const chunks = deps.context().$chunks;
-      const url = isRecord(chunks) ? asString(chunks[key]) : undefined;
-      if (url === undefined) return Promise.resolve(undefined);
-      const el = doc.createElement("script");
-      if (deps.nonce !== undefined) el.nonce = deps.nonce;
-      // Per attempt, since another script may remove the tag before it reports.
-      let failed = false;
-      const fail = (): void => {
-        // Nothing to do once the module is registered or this attempt has failed.
-        if (failed || value !== undefined) return;
-        failed = true;
-        // A retry appends a new tag, so the failed one is removed.
-        el.remove();
-        pending = undefined;
-        settle?.(undefined);
-        fire(doc, deps.dispatch, "partial:error", {
-          kind: "asset",
-          url,
-          error: new Error(`${key} chunk failed`),
-        } satisfies PartialError);
-      };
-      el.onerror = fail;
-      // A file that ran without registering its module fails too, so no caller hangs.
-      el.onload = fail;
-      el.src = url;
-      doc.head.append(el);
-      setTimeout(fail, CHUNK_TIMEOUT);
-      pending = new Promise((resolve) => (settle = resolve));
-      return pending;
+    load,
+    whenLoaded(fn) {
+      if (value !== undefined) fn(value);
+      else {
+        waiting.push(fn);
+        void load();
+      }
     },
     land(landed) {
       if (value !== undefined) return;
       value = landed;
+      clearTimeout(timer);
       settle?.(landed);
+      for (const fn of waiting.splice(0)) fn(landed);
     },
   };
 }
 
 /** Build the scripts chunk loader, which configures the chunk with each payload. */
-export function createExtras(
-  deps: ExtrasDeps,
-  chunk: LazyModule<ExtrasFactory>,
-): ExtrasLoader {
-  let extras: Extras | undefined;
+export function createScriptsLoader(
+  deps: ScriptsLoaderDeps,
+  chunk: LazyModule<ScriptsFactory>,
+): ScriptsLoader {
+  const doc = deps.document ?? document;
+  let built: ScriptsModule | undefined;
   // Set by the first init. From then on deps.context returns the latest payload.
   let seeded = false;
   // The ready calls made before init, resolved by init once the payload is known.
   const early: ((landing: Promise<ScriptsChunk>) => void)[] = [];
 
-  // Called only after init stored a payload. The chunk is configured with the latest.
+  // Later calls reuse the surfaces built the first time.
+  function build(factory: ScriptsFactory): ScriptsModule {
+    if (built === undefined) {
+      built = factory(deps.host);
+      deps.install(built);
+      // Read at build time, since init may have stored a newer payload meanwhile.
+      built.configure(deps.context());
+    }
+    return built;
+  }
+
+  // Called only after init stored a payload.
   async function land(): Promise<ScriptsChunk> {
     // A chunk that has already loaded is built synchronously, without an await.
     const factory = chunk.get() ?? (await chunk.load());
     if (factory === undefined)
       throw new Error("[next] the scripts chunk is unavailable");
-    // Later calls reuse the surfaces built the first time.
-    if (extras === undefined) {
-      extras = factory(deps);
-      deps.install(extras);
-      // Read after the await, since init may have stored a newer payload meanwhile.
-      extras.configure(deps.context());
-    }
-    return extras;
+    return build(factory);
   }
 
   return {
     ready() {
       if (seeded) return land();
-      return new Promise((resolve) => early.push(resolve));
+      return new Promise((resolve, reject) => {
+        // The inline init runs while the document parses, so none by its end means none.
+        const abandon = (): void => {
+          if (!seeded) reject(new Error(NO_PAYLOAD));
+        };
+        if (doc.readyState !== "loading") return abandon();
+        early.push(resolve);
+        doc.addEventListener("DOMContentLoaded", abandon, { once: true });
+      });
     },
     init(next) {
       seeded = true;
-      if (extras !== undefined) extras.configure(next);
+      if (built !== undefined) built.configure(next);
       else if (early.length > 0 || CHUNK_KEYS.some((key) => next[key] !== undefined)) {
+        // A chunk landing after its timeout is still built and configured.
+        chunk.whenLoaded(build);
         const landing = land();
         // The loader already reported the failure as a partial:error.
         landing.catch(() => undefined);

@@ -45,8 +45,7 @@ class Origin:
 def request_origin(request: HttpRequest | None) -> Origin:
     """Return the origin of the site URL, else of the current site of `request`.
 
-    Without a request only the site URL applies, and `SiteOriginError` is raised
-    when it is not set.
+    Without a request only the site URL applies, raising `SiteOriginError` when unset.
     """
     return Origin(*site_origin(request))
 

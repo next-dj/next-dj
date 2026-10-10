@@ -12,13 +12,13 @@ from django.conf import settings
 from django.contrib.sitemaps.views import SitemapIndexItem, x_robots_tag
 from django.core.paginator import EmptyPage, PageNotAnInteger
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseNotFound
-from django.template.response import TemplateResponse
+from django.template.response import SimpleTemplateResponse, TemplateResponse
 from django.urls import NoReverseMatch, reverse
 from django.utils.http import http_date
 from django.views.decorators.cache import cache_page
 from django.views.decorators.http import require_safe
 
-from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog
+from next.diagnostics import FailureLog
 from next.site import site_indexable
 from next.site.config import site_closed_to_crawlers, site_url_failed
 from next.site.headers import site_robots
@@ -104,8 +104,7 @@ def _not_found(reason: str) -> HttpResponse:
 def _unavailable() -> HttpResponse:
     """Return a 503 with `Retry-After`, which asks crawlers to retry later.
 
-    Under RFC 9309 a crawler keeps its last copy on a 5xx, while it reads a 4xx on
-    `/robots.txt` as no restriction.
+    Per RFC 9309 a 5xx keeps the last copy, while a 4xx reads as no restriction.
     """
     response = HttpResponse(status=503, content_type=TEXT_CONTENT_TYPE)
     response.headers["Retry-After"] = str(RETRY_AFTER_SECONDS)
@@ -343,10 +342,11 @@ _cached_sitemap = _CachedView(_sitemap, seo_manager.cache_control)
 _cached_robots = _CachedView(_robots, _robots_cache)
 
 
-def _culprit(exc: BaseException) -> str:
-    """Return the notes of `exc`, or its type name when it has none."""
+def _described(exc: Exception) -> tuple[str, str]:
+    """Return the type name of `exc` and its notes, the type name when it has none."""
+    kind = type(exc).__name__
     notes = getattr(exc, "__notes__", None)
-    return " ".join(notes) if notes else type(exc).__name__
+    return kind, " ".join(notes) if notes else kind
 
 
 type _Route[**P] = Callable[Concatenate[HttpRequest, P], HttpResponse]
@@ -355,9 +355,8 @@ type _Route[**P] = Callable[Concatenate[HttpRequest, P], HttpResponse]
 def _seo_view[**P](route: str) -> Callable[[_Route[P]], _Route[P]]:
     """Restrict an SEO view to `GET` and `HEAD`, with a plain 404 and a 503 on failure.
 
-    The view runs project code, such as a backend, an items callable or a `rules`
-    callable. A 503 asks crawlers to retry, while a 500 reads as a failing site.
-    Under `DEBUG` the exception propagates with a note naming its source.
+    The view and its template run project code, so the response is rendered inside the
+    guard. A 503 asks crawlers to retry, while a 500 reads as a failing site.
     """
 
     def decorate(view: _Route[P]) -> _Route[P]:
@@ -365,25 +364,23 @@ def _seo_view[**P](route: str) -> Callable[[_Route[P]], _Route[P]]:
         def answer(
             request: HttpRequest, /, *args: P.args, **kwargs: P.kwargs
         ) -> HttpResponse:
+            guard = _failures.guard(
+                route,
+                "/%s raised %s while it was built, so it answers 503 with Retry-After "
+                "until the cause is fixed. %s",
+                route,
+                detail=_described,
+            )
             try:
-                seo_manager.refresh()
-                return view(request, *args, **kwargs)
-            except INTENDED_EXCEPTIONS as exc:
-                if isinstance(exc, Http404):
-                    return _not_found(_NOT_FOUND)
-                raise
-            except Exception as exc:  # noqa: BLE001 - the route runs project code
-                culprit = _culprit(exc)
-                _failures.contain(
-                    exc,
-                    (route, type(exc), culprit),
-                    "/%s raised %s while it was built, so it answers 503 with "
-                    "Retry-After until the cause is fixed. %s",
-                    route,
-                    type(exc).__name__,
-                    culprit,
-                )
-                return _unavailable()
+                with guard:
+                    seo_manager.refresh()
+                    response = view(request, *args, **kwargs)
+                    if isinstance(response, SimpleTemplateResponse):
+                        response.render()
+                    return response
+            except Http404:
+                return _not_found(_NOT_FOUND)
+            return _unavailable()
 
         return site_robots(require_safe(answer))
 

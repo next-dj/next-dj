@@ -5,7 +5,6 @@ Icons and social images
 
 The favicon, the touch icon, and the card image a shared link unfurls into are metadata keys like any other.
 ``icons`` declares the icon links, and ``og.images`` and ``twitter.images`` the card images, so they merge along the tree and a section overrides them by naming them again.
-This page covers both keys and a card drawn per page.
 
 .. contents::
    :local:

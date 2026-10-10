@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 from next.conf.settings import fail_loudly
 from next.deps.resolver import current_resolver
-from next.diagnostics import FailureLog
+from next.diagnostics import FailureLog, exception_text, type_name
 from next.introspect import callable_name
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.loaders import AncestorStamps, load_page_module
@@ -47,6 +47,7 @@ _failures: Final = FailureLog(logging.getLogger(__name__))
 
 type ChainRefusal = PageMetadataShapeError | PageMetadataConflictError
 _REFUSALS: Final = (PageMetadataShapeError, PageMetadataConflictError)
+_EVERY: Final = (Exception,)
 
 
 class MetadataDeclaration(NamedTuple):
@@ -163,8 +164,7 @@ def _build_chain(
 ) -> ChainEntry:
     """Fold what each ancestor of `walk` declares, root first, over the `site` segment.
 
-    The entry records the stamps of the module loads it folded. A refused declaration
-    raises.
+    The entry records the stamps of the folded loads. A refused declaration raises.
     """
     paths = walk.ancestors.paths
     root = paths[0].parent
@@ -284,20 +284,18 @@ def contained_chain(registry: PageMetadataRegistry, file_path: Path) -> ChainEnt
 def _contain_refusal(
     registry: PageMetadataRegistry, file_path: Path, refusal: ChainRefusal
 ) -> None:
-    """Report the memoised `refusal` of the chain of `file_path` through `contain`."""
-    try:
+    """Report the memoised `refusal` of the chain of `file_path` through a guard."""
+    with _failures.guard(
+        file_path,
+        "The metadata chain of %s is refused (%s), so the page renders the site "
+        "defaults under noindex. Run manage.py check to see what to fix.",
+        file_path,
+        catch=_REFUSALS,
+        detail=exception_text,
+    ):
         if fail_loudly():
             chain_entry(registry, file_path)
         raise _fresh(refusal)
-    except _REFUSALS as exc:
-        _failures.contain(
-            exc,
-            (file_path, type(exc)),
-            "The metadata chain of %s is refused (%s), so the page renders the "
-            "site defaults under noindex. Run manage.py check to see what to fix.",
-            file_path,
-            exc,
-        )
 
 
 def _fresh(refusal: ChainRefusal) -> ChainRefusal:
@@ -308,6 +306,9 @@ def _fresh(refusal: ChainRefusal) -> ChainRefusal:
     """
     fresh = type(refusal).__new__(type(refusal), *refusal.args)
     vars(fresh).update(vars(refusal))
+    notes = vars(refusal).get("__notes__")
+    if notes is not None:
+        fresh.__notes__ = list(notes)
     fresh.__cause__ = refusal.__cause__
     return fresh
 
@@ -344,7 +345,15 @@ def _fold_tail(
             state = fold_segment(state, source.segment)
             continue
         source_name = f"{callable_name(func)} in {source.file_path}"
-        try:
+        guard = _failures.guard(
+            source.file_path,
+            "The @page.metadata callable %s raised %s, so the page renders without "
+            "what it returns. Fix the callable, or raise Http404 for a missing object.",
+            source_name,
+            catch=_EVERY if contain else (),
+            detail=type_name,
+        )
+        with guard:
             resolved = active.resolve_dependencies(
                 func,
                 request=request,
@@ -354,18 +363,7 @@ def _fold_tail(
                 **url_kwargs,
             )
             segment = normalize_metadata(func(**resolved), source=source_name)
-        except Exception as exc:
-            if not contain:
-                raise
-            _failures.contain(
-                exc,
-                (source.file_path, type(exc)),
-                "The @page.metadata callable %s raised %s, so the page renders "
-                "without what it returns. Fix the callable, or raise Http404 for a "
-                "missing object.",
-                source_name,
-                type(exc).__name__,
-            )
+        if guard.failed:
             continue
         state = fold_segment(state, replace(segment, trail=source.segment.trail))
     return state

@@ -300,7 +300,7 @@ The loader decides where a component body comes from and how long a compiled tem
 ``METADATA["RENDERER"]`` names a ``next.pages.MetadataRenderer`` subclass, whose ``render(resolved)`` turns the ``ResolvedMetadata`` of one response into the markup ``{% metadata %}`` writes into the head.
 The resolve has already read the request and the settings, so the renderer sees neither and cannot lose a policy.
 Subclass ``HtmlMetadataRenderer`` and extend its ``sections`` or override a ``render_<name>`` hook to add a tag while keeping every stock one, see :doc:`/content/ref/metadata` for the contract.
-A path that does not import or names no concrete subclass is ``next.E107``, a render with it falls back to ``HtmlMetadataRenderer``, every such page is sent with ``private, no-store``, and the failure is logged at most once every ten minutes.
+A path that does not import or names no concrete subclass is ``next.E107``, and a render with it falls back to ``HtmlMetadataRenderer``.
 
 Signals
 -------
@@ -324,6 +324,9 @@ A port is the narrow surface one subsystem calls another through.
    * - Slot
      - Shipped implementation
      - What it answers
+   * - ``form_routes_slot``
+     - ``next.forms.manager.form_action_manager``
+     - Answers the URL patterns of every form backend.
    * - ``page_scan_slot``
      - ``next.pages.ports.PageScanImpl``
      - Executes every routed ``page.py`` and answers the ones that loaded.
@@ -343,7 +346,7 @@ A port is the narrow surface one subsystem calls another through.
      - ``next.static.ports.StaticAssetsImpl``
      - Creates a collector, discovers page and component assets, and injects the placeholder tags.
 
-``NextFrameworkConfig.ready()`` binds all six, ahead of every step that imports user code.
+``NextFrameworkConfig.ready()`` binds all seven, ahead of every step that imports user code.
 Replace one by subclassing the shipped implementation and calling ``set`` on its slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since a slot holds one implementation and the last binding wins.
 
 .. code-block:: python
@@ -375,6 +378,32 @@ A port differs from a backend in who reads it.
 A backend family is configured in ``NEXT_FRAMEWORK`` and reloads itself when the settings change, while a slot is bound once at startup and nothing rebinds it, which is why replacing one is a startup decision rather than a configuration key.
 Reach for a port only when no backend, strategy, or protocol covers the seam, because the protocols are narrower than the subsystems behind them and a replacement takes on whatever the shipped implementation was doing for every caller.
 See :doc:`/content/ref/ports` for the method contract of each.
+
+.. _topics-failure-containment:
+
+Failure containment
+-------------------
+
+Project and third-party code runs inside the framework on every request, a ``@page.metadata`` callable, a callable ``cache``, a sitemap items callable, a ``rules`` callable, a backend, a serializer, or a settings callable.
+Every area applies one policy when such code raises, and the pages that document each callable state only what its failure answers, a 404, a 503, a ``noindex``, or a fallback value.
+
+- ``Http404``, ``PermissionDenied``, ``SuspiciousOperation``, and ``BadRequest`` raised inside a view pass through in every mode, so Django answers 404, 403, or 400 as from any view.
+  Code that runs outside any view, such as URL resolution or a middleware, contains them like any other failure.
+- Under ``DEBUG`` or ``NEXT_FRAMEWORK["STRICT_LOADING"]``, which ``next.conf.fail_loudly`` reads together, any other exception propagates with a note naming the source and the fix, so the technical error page points at the failing line.
+- Otherwise the failure is contained.
+  The caller answers its documented fallback, the render is marked degraded, and the failure is logged with its traceback.
+
+A degraded render is sent with ``Cache-Control: private, no-store``, whatever its ``cache`` declares, because the page lacks what the failing source would have added, perhaps a ``noindex``.
+A fallback the framework keeps in place of a broken serializer, tag template, or consent backend lasts until the configuration changes, and every render that uses it is degraded, not only the first.
+A contained failure does not mark the page ``noindex`` in turn, since a callable that fails on every page would otherwise drop the whole site from search for as long as it fails.
+
+A failure is logged on its first occurrence and then at most once every ten minutes while it keeps recurring, which the other pages call the FailureLog rate.
+The record that ends a quiet period carries the number of occurrences left out in its message and in its ``suppressed`` attribute.
+A log key names a source such as a file, a route, or a setting, never request data, and the keys a log holds are bounded.
+A reload of the framework settings, or ``next.testing.reset_failure_logs()``, makes every failure log again.
+
+A backend answer read on every reloader tick or static lookup goes through ``BackendReadLog`` instead, which drops an answer that raises or has the wrong type and never re-raises, under ``DEBUG`` included.
+:doc:`/content/ref/utils` documents ``FailureLog`` and its ``guard`` boundary.
 
 Choosing between mechanisms
 ---------------------------
@@ -431,7 +460,7 @@ Position the app relative to ``next`` in ``INSTALLED_APPS`` by what it registers
    ]
 
 For every registry on this page the position does not change the outcome, as *App order in* ``INSTALLED_APPS`` above explains.
-A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all eight slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
+A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all seven slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
 A package that reuses an existing kind or placeholder name with different parameters fails at startup either way, and its position only decides which ``ready`` call raises.
 
 Declare the dependency on next.dj under its distribution name, and constrain it from below only.

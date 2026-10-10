@@ -23,8 +23,7 @@ if TYPE_CHECKING:
 class MetadataPage(NamedTuple):
     """A routed `page.py` with its raw metadata, its own segment and its static fold.
 
-    `raw` is `None` for the callable form. `segment` and `static` are `None` when the
-    schema refuses the page or its chain.
+    `raw` is `None` for the callable form, `segment` and `static` for a refused chain.
     """
 
     url_path: str

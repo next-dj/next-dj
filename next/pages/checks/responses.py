@@ -15,14 +15,19 @@ from django.core.checks import (
 )
 from django.template.defaulttags import CsrfTokenNode
 from django.template.library import SimpleNode
-from django.urls import NoReverseMatch, reverse
+from django.urls import NoReverseMatch
 from django.utils import translation
 
 from next.checks import NEXT
-from next.checks.common import first_visit, get_router_manager, iter_scanned_page_pairs
+from next.checks.common import (
+    RunMemo,
+    first_visit,
+    get_router_manager,
+    iter_scanned_page_pairs,
+)
 from next.conf.defaults import USER_SETTING
-from next.csrf import CSRF_URL_NAME, CsrfDelivery, csrf_delivery, csrf_url
-from next.pages.loaders import _load_python_module_memo
+from next.csrf import CsrfDelivery, csrf_delivery, csrf_url
+from next.pages.loaders import load_python_module_memo
 from next.pages.responses import cache_control, cache_problems, headers_problems
 from next.utils import is_middleware, middleware_listed
 
@@ -77,7 +82,7 @@ def _page_modules() -> Iterator[tuple[Path, object, object]]:
         for _url_path, page_path in iter_scanned_page_pairs(router):
             if not first_visit(page_path, seen):
                 continue
-            module = _load_python_module_memo(page_path)
+            module = load_python_module_memo(page_path)
             if module is not None:
                 yield (
                     page_path,
@@ -166,24 +171,33 @@ def _declared_shared(cache: object) -> bool:
 
 def _named(page_path: Path) -> str:
     """Return the name of a page, marked when its `cache` is a callable."""
-    module = _load_python_module_memo(page_path)
+    module = load_python_module_memo(page_path)
     if callable(getattr(module, "cache", None)):
         return f"{page_path} (callable cache)"
     return str(page_path)
 
 
-def _listed(pages: list[Path]) -> str:
+def _listed(pages: tuple[Path, ...]) -> str:
     """Return the names of the first few pages and the count of the rest."""
     named = ", ".join(_named(path) for path in pages[:_NAMED_PAGES])
     rest = len(pages) - _NAMED_PAGES
     return f"{named} and {rest} more" if rest > 0 else named
 
 
-def shared_page_paths() -> list[Path]:
-    """Return each routed page whose `cache` may let a shared cache store it."""
-    return [
-        path for path, cache, _headers in _page_modules() if _declared_shared(cache)
-    ]
+_shared_paths: RunMemo[tuple[Path, ...]] = RunMemo()
+
+
+def shared_page_paths() -> tuple[Path, ...]:
+    """Return each routed page a shared cache may store, built once per check run."""
+    router_manager, _errors = get_router_manager()
+    if router_manager is None:
+        return ()
+    return _shared_paths.get(
+        router_manager,
+        lambda: tuple(
+            path for path, cache, _headers in _page_modules() if _declared_shared(cache)
+        ),
+    )
 
 
 def private_pages_warning(cause: str, check_id: str) -> list[CheckMessage]:
@@ -245,7 +259,7 @@ def check_conditional_get_order(*args, **kwargs) -> list[CheckMessage]:
         for name in middleware[:position]
         if not any(is_middleware(name, quiet) for quiet in _COOKIELESS_MIDDLEWARE)
     ]
-    pages = shared_page_paths() if outer else []
+    pages = shared_page_paths() if outer else ()
     if not pages:
         return []
     return [
@@ -268,7 +282,7 @@ def check_conditional_get_order(*args, **kwargs) -> list[CheckMessage]:
 def shared_pages() -> Iterator[tuple[Path, Template]]:
     """Yield each page whose `cache` may let a shared cache store it."""
     for page_path, template in iter_composed_pages():
-        module = _load_python_module_memo(page_path)
+        module = load_python_module_memo(page_path)
         if _declared_shared(getattr(module, "cache", None)):
             yield page_path, template
 
@@ -311,7 +325,7 @@ def _pages_language_prefixed() -> bool | None:
     for code in codes:
         with translation.override(code):
             try:
-                addresses.add(reverse(f"next:{CSRF_URL_NAME}"))
+                addresses.add(csrf_url())
             except NoReverseMatch:
                 return None
     return len(addresses) > 1

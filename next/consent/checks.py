@@ -42,8 +42,7 @@ def _raw_categories() -> object:
 def category_list_problem() -> str | None:
     """Return what makes `CONSENT['CATEGORIES']` unusable, `None` when nothing does.
 
-    The scripts checks call it too, so a list `next.E135` reports raises no `next.E140`
-    for each script as well.
+    Scripts checks reuse it, so a list under `next.E135` adds no `next.E140` per script.
     """
     listed = _raw_categories()
     if listed is None:

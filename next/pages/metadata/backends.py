@@ -16,7 +16,6 @@ from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString
 
 from next.backends import resolve_setting_class
-from next.conf.signals import settings_reloaded
 from next.diagnostics import FailureLog, isolated_build, mark_degraded
 
 from .markers import (
@@ -416,26 +415,19 @@ def _built_renderer() -> tuple[MetadataRenderer, bool]:
 
 def _build_renderer() -> MetadataRenderer:
     """Build the configured renderer, `HtmlMetadataRenderer` when it fails."""
-    try:
+    with _failures.guard(
+        _RENDERER_KEY,
+        "NEXT_FRAMEWORK['METADATA']['RENDERER'] could not be built, so the head "
+        "renders through HtmlMetadataRenderer. Name a concrete "
+        "next.pages.MetadataRenderer subclass.",
+    ):
         return configured_renderer_class()()
-    except Exception as exc:  # noqa: BLE001 - the renderer's __init__ is user code
-        _failures.contain(
-            exc,
-            _RENDERER_KEY,
-            "NEXT_FRAMEWORK['METADATA']['RENDERER'] could not be built (%s), so the "
-            "head renders through HtmlMetadataRenderer. Name a concrete "
-            "next.pages.MetadataRenderer subclass.",
-            exc,
-        )
-        return HtmlMetadataRenderer()
+    return HtmlMetadataRenderer()
 
 
 def forget_metadata_renderer(**kwargs) -> None:
     """Drop the memoised renderer, so a settings reload takes effect."""
     _built_renderer.cache_clear()
-
-
-settings_reloaded.connect(forget_metadata_renderer)
 
 
 __all__ = [

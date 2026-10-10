@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CHUNK_TIMEOUT, createExtras, lazyChunk } from "./chunks";
-import type { Extras, ExtrasFactory, ExtrasHost, ScriptsChunk } from "./chunks";
+import { CHUNK_TIMEOUT, createScriptsLoader, lazyChunk } from "./chunks";
+import type {
+  ScriptsModule,
+  ScriptsFactory,
+  ScriptsHost,
+  ScriptsChunk,
+} from "./chunks";
 
 interface Dispatched {
   event: string;
@@ -13,6 +18,11 @@ const CHUNKS = {
   dev: "/static/next/next.dev.min.js",
 };
 
+// The inline init runs while the document parses, the only time a ready can precede it.
+function parsing(): void {
+  vi.spyOn(document, "readyState", "get").mockReturnValue("loading");
+}
+
 function chunkTags(): HTMLScriptElement[] {
   return Array.from(document.head.querySelectorAll("script"));
 }
@@ -20,8 +30,8 @@ function chunkTags(): HTMLScriptElement[] {
 // A chunk double that logs every configure it receives, in order.
 function fakeChunk() {
   const calls: unknown[][] = [];
-  const hosts: ExtrasHost[] = [];
-  const factory = (host: ExtrasHost): Extras => {
+  const hosts: ScriptsHost[] = [];
+  const factory = (host: ScriptsHost): ScriptsModule => {
     hosts.push(host);
     return {
       consent: {
@@ -33,6 +43,7 @@ function fakeChunk() {
         _configure: () => undefined,
         _announce: () => undefined,
         _reveal: () => undefined,
+        _allows: () => true,
       },
       scripts: {
         load: async () => undefined,
@@ -57,9 +68,18 @@ function makeLoader(withNonce = true) {
     nonce: withNonce ? "boot" : undefined,
     context: () => seeded,
   };
-  const chunk = lazyChunk<ExtrasFactory>(deps, "scripts");
-  const extras = createExtras(
-    { ...deps, mount, install: (landed) => installed.push(landed) },
+  const chunk = lazyChunk<ScriptsFactory>(deps, "scripts");
+  const extras = createScriptsLoader(
+    {
+      ...deps,
+      host: {
+        dispatch: deps.dispatch,
+        nonce: deps.nonce,
+        mount,
+        settled: () => undefined,
+      },
+      install: (landed) => installed.push(landed),
+    },
     chunk,
   );
   // The runtime seeds its context before init, and the chunk registers through _land.
@@ -69,7 +89,7 @@ function makeLoader(withNonce = true) {
       seeded = next;
       extras.init(next);
     },
-    register: (factory: ExtrasFactory) => chunk.land(factory),
+    register: (factory: ScriptsFactory) => chunk.land(factory),
   };
   return { loader, dispatched, installed, mount };
 }
@@ -119,6 +139,7 @@ describe("fetching the scripts chunk", () => {
     "a payload whose $chunks is %j has nowhere to fetch from",
     async ($chunks) => {
       const { loader } = makeLoader();
+      parsing();
       const ready = loader.ready();
       loader.init({ $scripts: [], $chunks });
       await expect(ready).rejects.toThrow("unavailable");
@@ -156,6 +177,7 @@ describe("waiting for the scripts chunk", () => {
 
   it("a ready before init waits for the payload to fetch it, then resolves", async () => {
     const { loader, installed, dispatched } = makeLoader();
+    parsing();
     const ready = loader.ready();
     expect(chunkTags()).toEqual([]);
     loader.init({ $chunks: { scripts: "/static/next/next.scripts.abc.js" } });
@@ -188,6 +210,7 @@ describe("waiting for the scripts chunk", () => {
 
   it("a chunk landing before the payload waits for init to build and configure it", async () => {
     const { loader, installed, mount } = makeLoader();
+    parsing();
     const { factory, calls, hosts } = fakeChunk();
     loader.register(factory);
     let settled = false;
@@ -260,6 +283,73 @@ describe("waiting for the scripts chunk", () => {
     expect(chunkTags()[0]).not.toBe(failed);
     loader.register(fakeChunk().factory);
     await expect(retry).resolves.toHaveProperty("scripts");
+  });
+});
+
+describe("a scripts chunk past its moment", () => {
+  beforeEach(() => {
+    document.head.innerHTML = "";
+  });
+
+  it("a ready before init rejects once the document parsed without one", async () => {
+    const { loader } = makeLoader();
+    parsing();
+    const first = loader.ready();
+    const second = loader.ready();
+    document.dispatchEvent(new Event("DOMContentLoaded"));
+    await expect(first).rejects.toThrow("no init payload");
+    await expect(second).rejects.toThrow("no init payload");
+    expect(chunkTags()).toEqual([]);
+  });
+
+  it("a ready after the parse with no init rejects at once", async () => {
+    const { loader } = makeLoader();
+    await expect(loader.ready()).rejects.toThrow("no init payload");
+  });
+
+  it("an init during the parse leaves the end of the parse nothing to reject", async () => {
+    const { loader } = makeLoader();
+    parsing();
+    const ready = loader.ready();
+    loader.init({ $chunks: CHUNKS });
+    document.dispatchEvent(new Event("DOMContentLoaded"));
+    loader.register(fakeChunk().factory);
+    await expect(ready).resolves.toHaveProperty("consent");
+  });
+
+  it("builds and configures a chunk that lands after its timeout, with no retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const { loader, installed, dispatched } = makeLoader();
+      loader.init({ $consent: {}, $chunks: CHUNKS });
+      const ready = loader.ready();
+      vi.advanceTimersByTime(CHUNK_TIMEOUT);
+      await expect(ready).rejects.toThrow("unavailable");
+      expect(dispatched.map((d) => d.detail.kind)).toEqual(["asset"]);
+      const { factory, calls } = fakeChunk();
+      loader.register(factory);
+      expect(installed).toHaveLength(1);
+      expect(calls).toEqual([["configure", { $consent: {}, $chunks: CHUNKS }]]);
+      expect(chunkTags()).toEqual([]);
+      await expect(loader.ready()).resolves.toBe(installed[0]);
+      expect(dispatched).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("hands the chunk only the host functions it declares", async () => {
+    const { loader } = makeLoader();
+    const { factory, hosts } = fakeChunk();
+    loader.register(factory);
+    loader.init({ $scripts: [] });
+    await loader.ready();
+    expect(Object.keys(hosts[0]!).sort()).toEqual([
+      "dispatch",
+      "mount",
+      "nonce",
+      "settled",
+    ]);
   });
 });
 
@@ -393,5 +483,39 @@ describe("a single-module chunk", () => {
     seed({ $dev: true, $chunks: { scripts: CHUNKS.scripts } });
     expect(await chunk.load()).toBeUndefined();
     expect(tags()).toEqual([]);
+  });
+
+  it("clears its timeout once the module lands", () => {
+    vi.useFakeTimers();
+    try {
+      const { chunk } = makeDev();
+      void chunk.load();
+      expect(vi.getTimerCount()).toBe(1);
+      chunk.land("diagnostics");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("runs a subscriber on a landing after the timeout, and at once once landed", () => {
+    vi.useFakeTimers();
+    try {
+      const { chunk, errors, tags } = makeDev();
+      const seen: string[] = [];
+      chunk.whenLoaded((value) => seen.push(`early ${value}`));
+      expect(tags()).toHaveLength(1);
+      vi.advanceTimersByTime(CHUNK_TIMEOUT);
+      expect(errors).toHaveLength(1);
+      chunk.land("diagnostics");
+      expect(seen).toEqual(["early diagnostics"]);
+      chunk.whenLoaded((value) => seen.push(`late ${value}`));
+      expect(seen).toEqual(["early diagnostics", "late diagnostics"]);
+      chunk.land("second");
+      expect(seen).toHaveLength(2);
+      expect(errors).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

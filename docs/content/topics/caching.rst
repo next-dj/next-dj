@@ -5,7 +5,6 @@ Caching and response headers
 
 A page response carries headers beside its body, the ``Cache-Control`` a CDN obeys and whatever security header one section of the site needs.
 ``page.py`` declares the first through ``cache`` and the second through ``headers``, and the framework keeps a response that shows one visitor out of every shared cache.
-This page covers the two declarations, what each ``page.py`` name passes down the tree, and the rules that make a shared page private.
 
 .. contents::
    :local:
@@ -44,17 +43,11 @@ cache
    }
 
 The page answers ``Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600``.
-The directives are applied through :func:`~django.utils.cache.patch_cache_control` and :func:`~django.utils.cache.patch_vary_headers`, and only on a successful response to a ``GET`` or a ``HEAD``, so a ``POST`` the page answers itself never carries the page's cache, and a callable ``cache`` is not even resolved for it or for a zone request.
+The directives are applied through :func:`~django.utils.cache.patch_cache_control` and :func:`~django.utils.cache.patch_vary_headers`, and only on a successful response to a ``GET`` or a ``HEAD``, so a ``POST`` the page answers itself never carries the page's cache.
+A callable ``cache`` runs once ``render()`` has resolved the body, and is skipped for a zone request and for a response ``render()`` returns that is no success or names its own ``Cache-Control``, so a redirect or a 403 from ``render()`` never runs it and the page's own guards answer before an ``Http404`` the callable raises.
 ``manage.py check`` reports an unknown key, a negative age, a flag that is no bool, and ``public`` together with ``no_store``.
 A callable ``cache`` that raises, or returns anything but the forms above, sends the page with ``private, no-store``, since no cache may keep a response whose policy is unknown.
-A page whose render contained a failure is sent with ``private, no-store`` too, whatever its ``cache`` declares.
-A callable ``SITE["INDEXABLE"]`` that fails while the response headers are set counts as such a failure.
-A serializer, a runtime bundle, a chunk, a tag template or a consent backend that the framework replaced with a fallback keeps that fallback until the configuration changes, and every render that uses it is sent with ``private, no-store``, not only the first.
-A ``@page.metadata`` callable that raises, a renderer, a serializer or a runtime bundle that fails, each leaves the page without what it would have added, perhaps a ``noindex``, so no cache keeps the page past the failure.
-The page is not marked ``noindex`` in turn, since a callable that fails on every page would otherwise drop the whole site from search for as long as it fails.
-A page whose own ``metadata`` dict the schema refuses is the exception, and it renders under ``noindex`` until the declaration is fixed.
-The failure is logged at most once every ten minutes per page, and under ``DEBUG`` or ``STRICT_LOADING`` it raises instead, naming the ``page.py`` and the shapes it may return.
-``Http404`` and ``PermissionDenied`` raised from it answer 404 and 403 as from any view.
+A render that contained a failure anywhere is sent with ``private, no-store`` as well, whatever its ``cache`` declares, see :ref:`topics-failure-containment`.
 
 A page is shared when its cache lets a CDN keep a copy, through ``public`` or ``s_maxage``.
 The checks cannot call a callable ``cache``, so they count its page as one that may be shared and mark it ``(callable cache)`` in the messages.
@@ -144,7 +137,7 @@ The shared cache guard
 ``SharedCacheGuardMiddleware`` is opt-in and checks the finished response rather than the page.
 A response that sets a cookie while a shared cache may keep it loses ``public`` and ``s-maxage`` and gains ``private``, its ``CDN-Cache-Control``, ``Cloudflare-CDN-Cache-Control``, and ``Surrogate-Control`` headers are removed, and ``Vary`` gains ``Cookie``.
 A shared cache may keep a response whose ``Cache-Control`` carries ``public`` or ``s-maxage``, one with a CDN header, and one with a ``max-age`` or an ``Expires`` but neither ``private`` nor ``no-store``.
-Every other directive stays, and each URL route is logged at most once every ten minutes, the path standing in where no route resolved.
+Every other directive stays, and the rewrite is logged at the FailureLog rate per URL route name.
 List it first in ``MIDDLEWARE``, so it sees every cookie the stack sets.
 A project that uses ``UpdateCacheMiddleware`` lists the guard directly below it, never above it, so the copy Django's cache stores is the private one.
 In either position ``next.W124`` stays silent.

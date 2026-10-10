@@ -242,8 +242,7 @@ def _listed_paths(roots: tuple[SeoRoot, ...]) -> set[str]:
 def check_robots_disallow(*args, **kwargs) -> list[CheckMessage]:
     """Compare the `Disallow` rules of static `*` groups with the listed URLs.
 
-    `next.W095` flags a URL the sitemap lists, and `next.W096` a noindex page whose
-    tag crawlers cannot read.
+    `next.W095` flags a blocked listed URL, `next.W096` a blocked noindex page.
     """
     roots = loaded_seo_roots()
     warnings: list[CheckMessage] = []

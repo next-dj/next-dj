@@ -13,12 +13,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, ClassVar, override
 
-from django.core.signals import setting_changed
-
 from next.caches import PageCache
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
-from next.conf.signals import settings_reloaded
 from next.pages.errors import PageModuleImportError
 from next.utils import (
     MAX_ANCESTOR_WALK_DEPTH,
@@ -112,8 +109,7 @@ def _load_stamps(loads: Iterable[_PageLoad | None]) -> tuple[int | None, ...]:
 class AncestorStamps:
     """The `page.py` files above one page, root first, and the load stamps a memo read.
 
-    A memo over them rebuilds once one of them reloads, and a load of another file
-    leaves it valid.
+    A memo over them rebuilds when one of them reloads, not on a load of another file.
     """
 
     paths: tuple[Path, ...]
@@ -148,8 +144,7 @@ class AncestorStamps:
     def revalidated(self) -> AncestorStamps | None:
         """Return the stamps while no ancestor has reloaded, otherwise `None`.
 
-        While template edits are watched each ancestor loads again, so an edit on disk
-        takes effect at once.
+        Watched template edits reload each ancestor, so an edit takes effect at once.
         """
         watched = template_edits_watched()
         if self.version != _version.value or self.watched is not watched:
@@ -266,7 +261,7 @@ def _page_load(file_path: Path) -> _PageLoad | None:
     return load
 
 
-def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
+def load_python_module_memo(file_path: Path) -> types.ModuleType | None:
     """Return the module now at `file_path`, or `None` when it is absent or broken."""
     load = _page_load(file_path)
     return None if load is None else load.module
@@ -310,12 +305,9 @@ def _additional_layout_files() -> tuple[Path, ...]:
     return tuple(dict.fromkeys(candidates))
 
 
-def _reset_additional_layouts_cache(**kwargs) -> None:
+def forget_additional_layouts(**kwargs) -> None:
     """Drop cached root-level `layout.djx` paths on settings reload."""
     _additional_layout_files.cache_clear()
-
-
-settings_reloaded.connect(_reset_additional_layouts_cache)
 
 
 @functools.cache
@@ -334,7 +326,7 @@ def forget_page_roots(**kwargs) -> None:
         _version.value += 1
 
 
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
+def forget_app_page_roots(*, setting: str, **kwargs) -> None:
     """Drop the memoised page trees when the app list behind them moves.
 
     `settings_reloaded` covers only the `NEXT_FRAMEWORK` half, and the trees
@@ -344,18 +336,13 @@ def _on_setting_changed(*, setting: str, **kwargs) -> None:
         forget_page_roots()
 
 
-settings_reloaded.connect(forget_page_roots)
-setting_changed.connect(_on_setting_changed)
-
-
 _TREE_DEPTHS: PageCache[Path, tuple[tuple[Path, ...], int]] = PageCache()
 
 
 def page_tree_depth(start_dir: Path) -> int:
     """Return the number of directories from `start_dir` up to its page tree root.
 
-    A directory outside every tree returns the walk cap. The result is memoised per set
-    of trees.
+    A directory outside every tree returns the walk cap, memoised per set of trees.
     """
     roots = _page_roots()
     held = _TREE_DEPTHS.get(start_dir)
@@ -389,7 +376,7 @@ def read_module_string_lists(
     `None` tells an absent or broken module apart from one that declares none of the
     names, and anything but a list of non-empty strings reads as empty.
     """
-    module = _load_python_module_memo(file_path)
+    module = load_python_module_memo(file_path)
     if module is None:
         return None
     return {attr: _read_string_list(module, attr) for attr in attrs}
@@ -428,13 +415,13 @@ class PythonTemplateLoader(TemplateLoader):
     @override
     def can_load(self, file_path: Path) -> bool:
         """Return whether the module loads and defines `template`."""
-        module = _load_python_module_memo(file_path)
+        module = load_python_module_memo(file_path)
         return module is not None and hasattr(module, "template")
 
     @override
     def load_template(self, file_path: Path) -> str | None:
         """Return `module.template` if the module exposes it."""
-        module = _load_python_module_memo(file_path)
+        module = load_python_module_memo(file_path)
         return getattr(module, "template", None) if module else None
 
 
@@ -475,8 +462,7 @@ def _as_placeholder_fallback(body: str) -> str:
 class LayoutTemplateLoader:
     """Compose nested `layout.djx` wrappers around the page template.
 
-    It is not a `TemplateLoader`, because the loader chain supplies a body and this
-    class wraps it.
+    It is not a `TemplateLoader`, since the loader chain supplies the body it wraps.
     """
 
     def can_load(self, file_path: Path) -> bool:
@@ -612,9 +598,6 @@ def build_registered_loaders() -> Sequence[TemplateLoader]:
     return tuple(instances)
 
 
-def _reset_registered_loaders_cache(**kwargs) -> None:
+def forget_registered_loaders(**kwargs) -> None:
     """Drop cached loader instances on settings reload."""
     build_registered_loaders.cache_clear()
-
-
-settings_reloaded.connect(_reset_registered_loaders_cache)

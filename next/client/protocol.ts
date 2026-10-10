@@ -13,6 +13,9 @@ export const HEADER_MERGE = "X-Next-Merge";
 export const HEADER_VERSION = "X-Next-Version";
 export const HEADER_REQUEST_ID = "X-Next-Request-Id";
 export const HEADER_ORIGIN = "X-Next-Origin";
+// The last 25 own request ids, matching the server-side echo window. Overflow is
+// safe, since a dropped id only causes an extra refresh.
+export const ECHO_LIMIT = 25;
 
 /** The data-next-poll bounds, matching _MIN_POLL_MS and _MAX_POLL_MS in
  * next/partial/zone.py. The signed-32-bit ceiling, above it a timer fires at once. */

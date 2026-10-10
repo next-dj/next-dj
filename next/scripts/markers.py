@@ -58,6 +58,15 @@ class Script:
     auto: bool = True
     attrs: Mapping[str, str] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        """Refuse a blank category, which no visitor could ever grant."""
+        if not self.category.strip():
+            msg = (
+                f"The script {self.name!r} declares a blank category. Name one, or "
+                f"leave it out for {NECESSARY!r}."
+            )
+            raise ValueError(msg)
+
     @property
     def gated(self) -> bool:
         """Whether the script waits for a category the visitor has to grant."""

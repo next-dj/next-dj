@@ -10,11 +10,9 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
-from django.core.signals import setting_changed
 
 from next.conf import next_framework_settings
 from next.conf.imports import import_callable
-from next.conf.signals import settings_reloaded
 
 
 if TYPE_CHECKING:
@@ -61,19 +59,15 @@ def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
     return [p for path in processor_paths if (p := _import_context_processor(path))]
 
 
-def _reset_context_processors_cache(**kwargs) -> None:
+def forget_context_processors(**kwargs) -> None:
     """Drop the memoised processors so the next render rebuilds the list."""
     _get_context_processors.cache_clear()
 
 
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
+def forget_template_processors(*, setting: str, **kwargs) -> None:
     """Drop the memo when Django reports a `TEMPLATES` change.
 
     `settings_reloaded` covers only the `NEXT_FRAMEWORK` half of the merge.
     """
     if setting == "TEMPLATES":
-        _reset_context_processors_cache()
-
-
-settings_reloaded.connect(_reset_context_processors_cache)
-setting_changed.connect(_on_setting_changed)
+        forget_context_processors()

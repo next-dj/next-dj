@@ -9,7 +9,7 @@ from django.test import override_settings
 
 from next.caches import BoundedCache
 from next.pages import Page
-from next.pages.loaders import _load_python_module_memo
+from next.pages.loaders import load_python_module_memo
 from next.partial.headers import VARY_HEADERS
 from next.testing import envelope_of
 from next.utils import stat_mtime_ns
@@ -225,7 +225,7 @@ class TestStaticFastPathView:
     ) -> None:
         """The fast path composes the same HTML the per-request path composes."""
         page_file = build_nested_page(tmp_path)
-        module = _load_python_module_memo(page_file)
+        module = load_python_module_memo(page_file)
         view = unified_view(page_instance, page_file)
         request = build_page_request()
 
@@ -523,7 +523,7 @@ class TestZoneTickOnTheResolvingBranch:
             "    calls += 1\n"
             "    return '<p>dynamic</p>'\n"
         )
-        module = _load_python_module_memo(page_file)
+        module = load_python_module_memo(page_file)
 
         response = unified_view(page_instance, page_file)(build_zone_request("z"))
 

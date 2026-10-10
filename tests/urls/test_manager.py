@@ -30,7 +30,7 @@ from next.urls.manager import (
     _build_url_resolver,
     _LazyResolverSlot,
     _LazyUrlPatterns,
-    _on_settings_reloaded,
+    reload_router_settings,
     seo_routes_version,
 )
 from next.urls.signals import router_reloaded
@@ -1050,6 +1050,6 @@ class TestLazyResolverSlot:
             patch.object(router_manager, "reload") as mock_reload,
             patch.object(_LazyResolverSlot, "reset") as mock_reset,
         ):
-            _on_settings_reloaded()
+            reload_router_settings()
         assert mock_reload.call_count == 1
         assert mock_reset.call_count == 1

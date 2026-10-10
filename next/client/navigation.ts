@@ -68,7 +68,10 @@ interface Move {
 export function createNavigation(deps: NavigationDeps): Navigation {
   const doc = deps.document ?? document;
   const history = deps.history ?? defaultHistory();
-  const held = new Map<string, { from: NavigationState; onCommit: () => void }>();
+  const held = new Map<
+    string,
+    { from: NavigationState; back: string; onCommit: () => void }
+  >();
   // The path last announced. A popstate is measured from it, since the browser has
   // already changed the location.
   let known = currentUrl(doc);
@@ -145,14 +148,19 @@ export function createNavigation(deps: NavigationDeps): Navigation {
   return {
     current,
     hold(owner, href, onCommit) {
-      const entry = { from: current(), onCommit };
+      // The fragment too, so a revert lands on the anchor the page was scrolled to.
+      const entry = {
+        from: current(),
+        back: currentUrl(doc) + doc.location.hash,
+        onCommit,
+      };
       if (!record({ href, action: "push" })) return;
       held.set(owner, entry);
       return () => {
         if (held.get(owner) !== entry) return;
         held.delete(owner);
         if (currentUrl(doc) !== owner) return;
-        record({ href: entry.from.path, action: "replace" });
+        record({ href: entry.back, action: "replace" });
         // The push and its revert are both unannounced, so an open commit starts here.
         if (open !== undefined) open.from = current();
       };

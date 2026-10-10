@@ -4,8 +4,10 @@ from argparse import ArgumentParser
 from pathlib import Path
 from typing import Any, override
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.urls import Resolver404, resolve
+from django.utils import translation
 
 from next.pages import page
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
@@ -19,11 +21,18 @@ class Command(BaseCommand):
 
     @override
     def add_arguments(self, parser: ArgumentParser) -> None:
+        """Take the URL path of the page to show."""
         parser.add_argument("path", help="The URL path of the page, like /blog/x/.")
 
     @override
     def handle(self, *args: Any, **options: Any) -> None:
+        """Print the page file and the source of each key, under the path language."""
         path = options["path"]
+        language = translation.get_language_from_path(path) or settings.LANGUAGE_CODE
+        with translation.override(language):
+            self._show(path)
+
+    def _show(self, path: str) -> None:
         try:
             match = resolve(path)
         except Resolver404 as exc:

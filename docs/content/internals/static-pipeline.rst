@@ -3,7 +3,7 @@
 Static pipeline
 ===============
 
-This page covers how the static subsystem discovers assets, collects them per request, deduplicates them, and emits the final HTML through the configured backend.
+The static subsystem discovers assets, collects them per request, deduplicates them, and emits the final HTML through the configured backend.
 
 .. contents::
    :local:

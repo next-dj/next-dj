@@ -71,8 +71,7 @@ def resolve_setting_class[T](
 ) -> type[T]:
     """Return the class named by one dotted-path setting, checked against `base`.
 
-    The shipped default is returned without an import, since its package may still be
-    importing when the setting is read.
+    The shipped default skips the import, since its package may still be importing.
     """
     root = _root_class(base)
     dotted, default = _setting_value(setting, scope)

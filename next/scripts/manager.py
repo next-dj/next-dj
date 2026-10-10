@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import urlsplit
 
-from django.core.signals import setting_changed
 from django.http import HttpRequest
 
 from next.caches import BoundedCache
+from next.conf.sentinels import UNSET
 from next.consent import NECESSARY, UNDECIDED, Consent, get_consent
 from next.consent.manager import consent_configured, consent_payload, server_mode
 from next.consent.markers import joint_category
@@ -55,9 +55,6 @@ _NOTHING: Final[tuple[str, Mapping[str, object]]] = ("", {})
 
 _NO_SCRIPTS: Final[tuple[Script, ...]] = ()
 
-_MISSING: Final = object()
-"""Marks a lookup that found nothing, apart from a held `None`."""
-
 _ASSET_ERRORS: Final = (StaticAssetNotFoundError, StaticAssetTraversalError)
 
 
@@ -85,7 +82,7 @@ class ScriptsManager:
         self._loaded = False
         self._lock = threading.RLock()
         self._trees: dict[Path, tuple[Script, ...]] = {}
-        self._roots_of: BoundedCache[Path, object] = BoundedCache()
+        self._roots_of: BoundedCache[Path, Path | None] = BoundedCache()
         self._kept: dict[Path, ScriptsSource | None] = {}
         self._srcs: BoundedCache[str, tuple[str | None, bool]] = BoundedCache()
         self._srcs_storage: object = None
@@ -133,9 +130,9 @@ class ScriptsManager:
         A miss is filled under the lock from a loaded registry, so a concurrent reset
         cannot leave a `None` root behind for a page that has one.
         """
-        held = self._roots_of.get(page_path, _MISSING)
-        if held is not _MISSING:
-            return held  # type: ignore[return-value]
+        held = self._roots_of.get(page_path, UNSET)
+        if held is not UNSET:
+            return held
         resolved = page_path.resolve()
         with self._lock:
             if not self._loaded:
@@ -199,10 +196,7 @@ class ScriptsManager:
     ) -> list[Script]:
         """Return the scripts this render runs, a held-back one waiting for its blocks.
 
-        A script that is `auto`, or that the page names outside a gated block, is not
-        held back. A held-back script waits for its own category and the category of
-        every block that names it, so a `marketing` script named in an `analytics`
-        block needs both.
+        A held-back script also waits for the category of every block that names it.
         """
         names = {name for name in collector.notes(SCRIPT_NOTE) if isinstance(name, str)}
         held: dict[str, str] = {}
@@ -372,13 +366,10 @@ def forget_scripts(**kwargs) -> None:
     scripts_manager.reset()
 
 
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
+def forget_script_srcs(*, setting: str, **kwargs) -> None:
     """Drop the memoised `src` URLs once the staticfiles storage is rebuilt."""
     if setting in MANIFEST_SETTINGS:
         scripts_manager.forget_srcs()
-
-
-setting_changed.connect(_on_setting_changed)
 
 
 __all__ = [

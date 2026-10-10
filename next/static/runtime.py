@@ -147,20 +147,18 @@ def usable_template(
     """
     if template == default:
         return default
-    try:
+    guard = _failures.guard(
+        where,
+        "%s %r does not format with the fields %s, so the default tag renders instead. "
+        "Double every literal brace as {{ or }} and name no other field.",
+        where,
+        template,
+        ", ".join(f"{{{name}}}" for name in fields),
+        catch=TEMPLATE_ERRORS,
+    )
+    with guard:
         dry_run_template(template, fields)
-    except TEMPLATE_ERRORS as exc:
-        _failures.contain(
-            exc,
-            where,
-            "%s %r does not format with the fields %s, so the default tag renders "
-            "instead. Double every literal brace as {{ or }} and name no other field.",
-            where,
-            template,
-            ", ".join(f"{{{name}}}" for name in fields),
-        )
-        return default
-    return template
+    return default if guard.failed else template
 
 
 class ScriptInjectionPolicy(enum.Enum):
@@ -178,9 +176,7 @@ class ScriptInjectionPolicy(enum.Enum):
 class NextScriptBuilder:
     """Builds the preload hint, script tag, and init script for `window.Next`.
 
-    `preload_template`, `script_tag_template` and `init_template` override the
-    defaults. The first two take `{url}`, the last takes `{payload}`, and all three
-    take `{nonce_attr}`.
+    Preload and script tag templates take `{url}`, init `{payload}`, all `{nonce_attr}`.
     """
 
     DEFAULT_PRELOAD: ClassVar[str] = (

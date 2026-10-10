@@ -258,10 +258,7 @@ def pytest_runtest_call(item: pytest.Item) -> Generator[None, object, object]:
 def _settle(page: Page) -> None:
     """Let the requests the page still has in flight finish before the test ends.
 
-    Django closes its database connections in `request_finished`, after the browser
-    already holds the response, so a flush in teardown would race that close on the
-    live server thread. A page holding an event stream never goes idle, and the wait
-    gives up after a short while instead.
+    A teardown flush would race Django closing connections in `request_finished`.
     """
     with suppress(PlaywrightTimeoutError):
         page.wait_for_load_state("networkidle", timeout=SETTLE_TIMEOUT_MS)

@@ -22,7 +22,7 @@ from django.utils.encoding import repercent_broken_unicode
 from django.utils.module_loading import import_string
 
 from next.caches import DEFAULT_CACHE_SIZE
-from next.conf.sentinels import UNSET, Unset  # noqa: F401 - the areas import it here
+from next.diagnostics import Capture
 from next.errors import InvalidDirsError
 
 
@@ -115,8 +115,7 @@ def stat_mtime_ns(path: Path) -> int | None:
 class _SourceLoader(importlib.machinery.SourceFileLoader):
     """Validate the cached bytecode of a source on its nanosecond mtime.
 
-    A `.pyc` validated on whole seconds serves stale code after a same-size rewrite
-    within the same second.
+    Whole-second checks serve a stale `.pyc` after a same-size rewrite in one second.
     """
 
     @override
@@ -145,8 +144,7 @@ def exec_module_file(path: Path, name: str) -> types.ModuleType | None:
 class TreeSource[E: Exception]:
     """One Python file at the top of a page tree, with its executed module or failure.
 
-    `stamp` is the mtime at execution, so a watched process runs the file again after
-    an edit.
+    `stamp` is the mtime at execution, so a watched process reruns the file on an edit.
     """
 
     path: Path
@@ -164,8 +162,7 @@ def load_tree_source[E: Exception](
 ) -> TreeSource[E] | None:
     """Execute the file at `path` as `module_name`, `None` when there is no file.
 
-    An exception the file raises is logged and kept on the source as the `__cause__` of
-    `error(path)`, for its caller to report.
+    An exception it raises is logged and kept as the `__cause__` of `error(path)`.
     """
     if not path.is_file():
         return None
@@ -387,10 +384,14 @@ def _visit_page_dir(
 
 @functools.cache
 def _middleware_class(path: str) -> type | None:
-    """Import a `MIDDLEWARE` entry, `None` when it does not import as a class."""
-    try:
+    """Import a `MIDDLEWARE` entry, `None` when it does not import as a class.
+
+    A broken entry is Django's to report at startup, so it is not logged here.
+    """
+    capture = Capture()
+    with capture:
         found = import_string(path)
-    except Exception:  # noqa: BLE001 - a broken entry is Django's to report at startup
+    if capture.failed:
         return None
     return found if isinstance(found, type) else None
 

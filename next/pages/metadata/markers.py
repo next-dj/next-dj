@@ -92,8 +92,7 @@ def robots_noindex(robots: Robots | str | None) -> bool:
 def refused_robots(robots: Robots | str | None) -> Robots | str:
     """Return `robots` under `REFUSED_ROBOTS`, every other declared directive kept.
 
-    A refused source must not make a page indexable, but a `nofollow` the site
-    declared still applies.
+    A refused source cannot make a page indexable, but a declared `nofollow` stays.
     """
     if robots is None:
         return REFUSED_ROBOTS

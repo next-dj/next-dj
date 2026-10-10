@@ -480,7 +480,6 @@ Every stage of that POST, from ``get_initial`` through the validation-failure re
 Each component instance of the re-rendered page reads a copy of it, so a value resolved earlier in the dispatch is reused while a value one instance resolves from its own props stays with that instance.
 ``FormActionDispatch`` attaches its dependency cache to the request, and ``render_dep_cache`` reads it back.
 Outside a form dispatch the function answers a fresh empty dict the request never carries, so a caller never handles a missing cache.
-``get_request_dep_cache`` is deprecated, answers ``None`` outside a dispatch, and raises a ``DeprecationWarning`` on every call.
 
 .. code-block:: python
    :caption: reading the cache

@@ -12,7 +12,7 @@ from next.backends import SingleBackendManager
 from next.conf.defaults import DEFAULTS, USER_SETTING
 from next.conf.scopes import scope_value
 from next.conf.settings import fail_loudly
-from next.diagnostics import FailureLog, isolated_build, mark_degraded
+from next.diagnostics import FailureLog, mark_degraded
 from next.pages.responses import shared_render
 
 from .backends import ConsentBackend
@@ -106,10 +106,8 @@ def get_consent(request: HttpRequest | None) -> Consent:
 def _backend() -> ConsentBackend | None:
     """Return the configured backend, `None` where it cannot be built.
 
-    A failure is memoised as well, so a broken entry is not imported again on every
-    render. Every render that reads the memoised failure is degraded and counts as a
-    recurrence, logged at the `FailureLog` rate. `forget_consent_settings` drops the
-    answer on a settings reload.
+    A failure is memoised too, so a broken entry is not imported on every render. Each
+    render reading it is degraded and logged at the `FailureLog` rate.
     """
     backend, failed = _built_backend()
     if failed:
@@ -120,40 +118,28 @@ def _backend() -> ConsentBackend | None:
 
 @functools.cache
 def _built_backend() -> tuple[ConsentBackend | None, bool]:
-    """Build the configured backend once, with whether the build contained a failure."""
-    return isolated_build(_build_backend)
-
-
-def _build_backend() -> ConsentBackend | None:
-    """Return the configured backend, `None` when it cannot be built."""
-    try:
-        return consent_backend_manager.get()
-    except Exception as exc:  # noqa: BLE001 - a backend may raise anything it likes
-        _failures.contain(
-            exc,
-            _LOAD_KEY,
-            "%s failed to load, so %s. Name a next.consent.ConsentBackend subclass "
-            "that imports and builds from its CONSENT entry.",
-            _BACKEND,
-            _FALLBACK,
-        )
-        return None
+    """Build the configured backend once, with whether the build failed."""
+    guard = _failures.guard(
+        _LOAD_KEY,
+        "%s failed to load, so %s. Name a next.consent.ConsentBackend subclass that "
+        "imports and builds from its CONSENT entry.",
+        _BACKEND,
+        _FALLBACK,
+    )
+    with guard:
+        return consent_backend_manager.get(), False
+    return None, guard.error is not None
 
 
 def _read(backend: ConsentBackend, request: HttpRequest) -> Consent:
     """Return what `backend` reads from `request`, undecided when the read fails."""
     source = type(backend).__qualname__
-    try:
+    guard = _failures.guard(
+        ("read", source), "%s.read() of %s raised, so %s.", source, _BACKEND, _FALLBACK
+    )
+    with guard:
         read: object = backend.read(request)
-    except Exception as exc:  # noqa: BLE001 - a backend may raise anything it likes
-        _failures.contain(
-            exc,
-            ("read", source),
-            "%s.read() of %s raised, so %s.",
-            source,
-            _BACKEND,
-            _FALLBACK,
-        )
+    if guard.failed:
         return UNDECIDED
     if isinstance(read, Consent):
         return read
@@ -171,8 +157,7 @@ def _read(backend: ConsentBackend, request: HttpRequest) -> Consent:
 def _backend_config() -> Mapping[str, object]:
     """Return what the configured backend adds to `$consent`, read once per backend.
 
-    Every render that reads a memoised failure is degraded and counts as a recurrence,
-    logged at the `FailureLog` rate.
+    A render reading a memoised failure is degraded and logged at the `FailureLog` rate.
     """
     backend = _backend()
     if backend is None:
@@ -193,25 +178,24 @@ def _backend_config() -> Mapping[str, object]:
 
 @functools.cache
 def _built_config(backend: ConsentBackend) -> tuple[Mapping[str, object], bool]:
-    """Read `backend.client_config()` once, with whether a failure was contained."""
-    return isolated_build(functools.partial(_client_config, backend))
-
-
-def _client_config(backend: ConsentBackend) -> Mapping[str, object]:
-    """Return what `backend` adds to `$consent`, nothing when the call fails."""
+    """Read what `backend` adds to `$consent` once, with whether the call raised."""
     source = type(backend).__qualname__
-    try:
+    guard = _failures.guard(
+        ("client_config", source),
+        "%s.client_config() of %s raised, so the runtime writes its consent cookie "
+        "under the default name and age.",
+        source,
+        _BACKEND,
+    )
+    with guard:
         config: object = backend.client_config()
-    except Exception as exc:  # noqa: BLE001 - a backend may raise anything it likes
-        _failures.contain(
-            exc,
-            ("client_config", source),
-            "%s.client_config() of %s raised, so the runtime writes its consent "
-            "cookie under the default name and age.",
-            source,
-            _BACKEND,
-        )
-        return {}
+    if guard.error is not None:
+        return {}, True
+    return _client_config(source, config), False
+
+
+def _client_config(source: str, config: object) -> Mapping[str, object]:
+    """Return `config` when it is a mapping, nothing otherwise."""
     if isinstance(config, Mapping):
         return config
     _failures.warn(

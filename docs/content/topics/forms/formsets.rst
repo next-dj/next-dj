@@ -6,7 +6,6 @@ Formsets
 A formset bundles several forms that submit together as a unit.
 Django provides ``formset_factory`` and ``modelformset_factory`` to construct them.
 next.dj dispatches formset submissions through the same action pipeline that handles single forms.
-This page covers the patterns for registering a formset action, rendering rows in templates, and using the ``cleanup_extra_initial`` helper.
 
 .. contents::
    :local:

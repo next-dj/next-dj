@@ -3,9 +3,7 @@
 SEO pipeline
 ============
 
-This page covers the two halves of the seo machinery.
-The first is the metadata of one page, from the ``page.py`` declarations to the head markup, the chain, fold, resolve, and render stages and the memos behind them.
-The second is the crawler documents, how the seo area finds the sources at the top of every page root, how the sitemap backends turn them into sections, how a section stays lazy over a large table, how the routes join the lazy urlpatterns without a circular import, and what resets the memos.
+The seo machinery has two halves, the metadata of one page from the ``page.py`` declarations to the head markup, and the crawler documents served from the sources at the top of every page root.
 
 .. contents::
    :local:
@@ -86,8 +84,7 @@ Failures
 ~~~~~~~~
 
 A ``@page.metadata`` callable is user code that runs on every request, so the render contains what it raises through the ``FailureLog`` of ``next.diagnostics``.
-``MetadataThunk.fold`` leaves a callable that raises, or returns a shape the schema refuses, out of the fold and logs it at most once every ten minutes per file and exception type.
-:exc:`~django.http.Http404` and :exc:`~django.core.exceptions.PermissionDenied` pass through, and under ``DEBUG`` or ``STRICT_LOADING`` every failure raises with a note naming the callable and its file.
+``MetadataThunk.fold`` leaves a callable that raises, or returns a shape the schema refuses, out of the fold, its log key the file and the exception type, see :ref:`topics-failure-containment`.
 A chain the schema refuses as a whole, a shape error in a ``page.py`` dict or a file declaring both forms, folds to the settings tier under ``noindex``.
 The refusal is memoised in the ``ChainEntry``, so ``contained_chain``, which the thunk, the response policy, and the sitemap read, reports it on every read without walking the ancestors again.
 ``chain_entry`` walks again and raises a new exception for the checks, ``showmetadata``, and ``Patches.meta``.
@@ -158,7 +155,7 @@ Each root becomes a ``SeoRoot`` carrying the page root, its label and section, i
 
 ``load_source`` executes a Python source through ``load_tree_source`` of ``next.utils``, the loader ``scripts.py`` goes through as well, outside the page module memo, after forgetting what the file registered before, so a re-executed ``sitemap.py`` registers its callables afresh.
 The answer is a ``TreeSource`` carrying the module or the failure and the modification time the file ran at.
-A source that raises is logged once and keeps a ``SeoSourceImportError`` on its ``SeoSource`` for the checks, and its route keeps a ``BrokenSource`` rather than falling back to another source, a sitemap answering 404 and a robots file 503.
+A source that raises is logged on each execution and keeps a ``SeoSourceImportError`` on its ``SeoSource`` for the checks, and its route keeps a ``BrokenSource`` rather than falling back to another source, a sitemap answering 404 and a robots file 503.
 The page module memo and its failure record never see an SEO source, so a broken ``robots.py`` leaves ``has_load_errors`` of the pages untouched.
 
 The section of a root is the ``section`` its ``sitemap.py`` declares, else the label of the innermost installed application holding the root, else the slugified directory, and ``unique_labels`` of ``next.seo.discovery`` hands out the lowest free ``-N`` suffix to a repeat.
@@ -206,16 +203,16 @@ The URL slot
 ``next.seo`` imports ``next.urls`` for the router manager and the reverse helper, so ``next.urls.manager`` cannot import the routes back.
 ``SeoRoutes`` in ``next.ports`` declares ``patterns``, ``SeoRoutesImpl`` in ``next.seo.ports`` implements it over the manager, and ``NextFrameworkConfig.ready()`` binds the implementation into ``seo_routes_slot``.
 ``_LazyUrlPatterns`` concatenates the router patterns, the form-action patterns, the ``/_next/csrf/`` route, and the slot's patterns, and its ``version_token`` is the triple of the router version, the form-action version, and ``seo_routes_version``.
-``seo_routes_version`` is a ``SeoRoutesVersion`` in ``next.urls.manager``, moved by ``NextFrameworkConfig.ready()`` right after it binds the slot and by the seo manager on every reset, so a resolve reads the token as a plain attribute and the port carries no version.
+``seo_routes_version`` of ``next.urls.manager`` is moved by ``NextFrameworkConfig.ready()`` right after it binds the slot and by the seo manager on every reset, so a resolve reads the token as a plain attribute and the port carries no version.
 ``patterns`` answers only the routes whose source exists, so an empty answer leaves a project's own pattern below ``include("next.urls")`` in charge of that address.
-A source lookup that raises while the routes are filtered, ``Http404`` included, goes through ``FailureLog.contain`` with ``pass_through=()``, keeping the route mounted to answer 503, or raising with a note under ``DEBUG`` or ``STRICT_LOADING``.
+A source lookup that raises while the routes are filtered, ``Http404`` included, runs inside ``FailureLog.guard`` with ``pass_through=()``, which keeps the route mounted to answer 503.
 ``next.seo.urls`` serves the same routes through ``SeoPatterns``, a lazy sequence refiltered whenever the manager version moves.
 
 Views
 ~~~~~
 
 Every view answers ``GET`` and ``HEAD`` alone, answers a miss through ``_not_found`` with a constant reason, a plain-text 404 that skips the project's 404 handler, and stamps ``X-Robots-Tag: noindex, nofollow`` on a site closed to search.
-Any other exception, from an items callable, a backend, a ``rules`` callable, or a reverse, goes through ``FailureLog.contain`` of ``next.diagnostics``, answering 503 with ``Retry-After`` and logging at most once every ten minutes, or raising with a note under ``DEBUG`` or ``STRICT_LOADING``.
+Every view builds and renders its response inside ``FailureLog.guard`` of ``next.diagnostics``, so any other exception, from an items callable, a backend, a ``rules`` callable, a reverse, or a sitemap template, answers 503 with ``Retry-After``, see :ref:`topics-failure-containment`.
 A view reached through a mount other than ``next_seo`` while ``next.seo.urls`` serves that route at another address answers 404, so each document has one address.
 The sitemap and robots views sit behind a wrapper that applies the declared ``Cache-Control`` to a 200 and, for a storable cache with an age, :func:`~django.views.decorators.cache.cache_page` keyed on the fingerprint and the indexability of the request, one wrap per indexability, rebuilt when the manager version moves.
 The cache control is read once per manager version, and the indexability of the request is read only when a copy is stored.

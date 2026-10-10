@@ -3,7 +3,7 @@
 Page discovery
 ==============
 
-This page covers how the framework discovers pages from the filesystem, registers them, evaluates context, and composes the final body with the ancestor layout chain.
+The framework discovers pages from the filesystem, registers them, evaluates context, and composes the final body with the ancestor layout chain.
 
 .. contents::
    :local:

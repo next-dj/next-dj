@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "./next";
 // The scripts chunk registers on evaluation, as it does once the runtime fetches it.
-import "./extras";
+import "./entries/scripts";
 // The single-module chunks register the same way.
-import "./sse-chunk";
-import "./csrf-chunk";
-import "./poll-chunk";
+import "./entries/sse";
+import "./entries/csrf";
+import "./entries/poll";
 
 interface Consent {
   get(): Readonly<Record<string, boolean>>;
@@ -41,6 +41,7 @@ interface NextStatic {
   ready(chunk: "scripts"): Promise<{ consent: Consent; scripts: unknown }>;
   navigation: { current(): { url: string; path: string; title: string } };
   _init(context: Record<string, unknown>): void;
+  _land(key: string, value: unknown): void;
   on(event: string, listener: (payload: Record<string, unknown>) => void): () => void;
   use<T>(plugin: (next: NextStatic) => T): T;
 }
@@ -754,6 +755,27 @@ describe("Next.consent and Next.scripts", () => {
     win.Next.partial._reset();
   });
 
+  it("settles a load of a rendered tag by what the tag did before the chunk ran", async () => {
+    vi.spyOn(document, "readyState", "get").mockReturnValue("interactive");
+    document.head.innerHTML =
+      '<script data-next-script="early" src="/early.js"></script>' +
+      '<script data-next-script="broken" src="/broken.js"></script>';
+    const [early, broken] = Array.from(document.head.querySelectorAll("script"));
+    early!.dispatchEvent(new Event("load"));
+    broken!.dispatchEvent(new Event("error"));
+    // Any other element's load passes the recorder by.
+    document.head.append(document.createElement("link"));
+    document.head.querySelector("link")!.dispatchEvent(new Event("load"));
+    win.Next._init({
+      $scripts: [
+        { name: "early", src: "/early.js" },
+        { name: "broken", src: "/broken.js" },
+      ],
+    });
+    await expect(win.Next.scripts.load("early")).resolves.toBeUndefined();
+    await expect(win.Next.scripts.load("broken")).rejects.toThrow("failed to load");
+  });
+
   it("carries the bootstrap nonce onto an inserted script", () => {
     win.Next._init({ $scripts: [{ name: "plain", init: "window.nextPlain = 1" }] });
     const el = document.head.querySelector('script[data-next-script="plain"]')!;
@@ -822,5 +844,14 @@ describe("the dev chunk", () => {
     win.Next._init({ $chunks: { dev: "/static/next/next.dev.min.js" } });
     win.Next._init({ $dev: "true", $chunks: { dev: "/static/next/next.dev.min.js" } });
     expect(devTags()).toEqual([]);
+  });
+
+  // Last, since the dev module stays landed for the rest of the file.
+  it("a dev chunk landing after a payload turned dev off attaches nothing", () => {
+    const diagnostics = { attrs: vi.fn() };
+    win.Next._init({ $dev: true, $chunks: { dev: "/static/next/next.dev.min.js" } });
+    win.Next._init({});
+    win.Next._land("dev", diagnostics);
+    expect(diagnostics.attrs).not.toHaveBeenCalled();
   });
 });

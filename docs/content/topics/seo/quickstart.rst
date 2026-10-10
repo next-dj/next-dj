@@ -3,8 +3,6 @@
 SEO quickstart
 ==============
 
-Page metadata works on the pages the file router serves, a directory with a ``page.py`` or a template.
-A plain Django view renders none of it, and ``{% metadata %}`` in its template renders the empty string.
 This page wires a site up from scratch, the settings, the head tag, a title per page, a sitemap, and a robots file, and every step links the topic that covers it in depth.
 
 .. contents::
@@ -174,9 +172,7 @@ Check the result
    uv run python manage.py showmetadata /notes/42/
    uv run python manage.py check
 
-While ``DEBUG`` is on the site is closed to search.
-Every page renders ``noindex, nofollow``, and ``/sitemap.xml`` and ``/robots.txt`` still answer with ``X-Robots-Tag: noindex, nofollow`` for a preview.
-With ``DEBUG`` off the pages render the robots directives they declare, see :doc:`site`.
+While ``DEBUG`` is on the site is closed to search and every page renders ``noindex, nofollow``, see :doc:`site`.
 ``showmetadata`` prints which layer sets each key of a page, and :doc:`auditing` covers the checks and the test helpers.
 
 See also

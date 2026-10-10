@@ -10,8 +10,10 @@ from next.diagnostics import (
     INTENDED_EXCEPTIONS,
     QUIET_PERIOD,
     BackendReadLog,
+    Capture,
     FailureLog,
     degraded,
+    exception_text,
     reset_failure_logs,
     watch_degraded,
 )
@@ -166,11 +168,9 @@ def failures() -> FailureLog:
 
 
 def _contained(failures: FailureLog, key: object, error: Exception = _BOOM) -> str:
-    """Run a call raising `error` through `contain`, answering the caller's fallback."""
-    try:
+    """Run a call raising `error` through a guard, answering the caller's fallback."""
+    with failures.guard(key, "items() in %s raised", "sitemap.py"):
         _raise(error)
-    except Exception as exc:  # noqa: BLE001 - every failure goes to `contain`
-        failures.contain(exc, key, "items() in %s raised", "sitemap.py")
     return "fallback"
 
 
@@ -255,11 +255,11 @@ class TestFailureLog:
         """A call site outside any view contains a 404 like any other failure."""
         settings.DEBUG = False
         watch_degraded()
-        with caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"):
-            try:
-                _raise(Http404())
-            except Http404 as exc:
-                failures.contain(exc, "items", "items() raised", pass_through=())
+        with (
+            caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"),
+            failures.guard("items", "items() raised", pass_through=()),
+        ):
+            _raise(Http404())
 
         assert [record.getMessage() for record in caplog.records] == ["items() raised"]
         assert degraded() is True
@@ -270,6 +270,65 @@ class TestFailureLog:
         failures.warn("a", "missing %s", "x.js")
         assert degraded() is False
 
+    def test_the_guard_holds_what_it_contained(
+        self, failures: FailureLog, settings
+    ) -> None:
+        settings.DEBUG = False
+        guard = failures.guard("items", "items() raised")
+        with guard:
+            _raise()
+        assert guard.failed
+        assert guard.error is _BOOM
+        watch_degraded()
+
+    def test_a_clean_block_leaves_the_guard_unfailed(
+        self, failures: FailureLog
+    ) -> None:
+        guard = failures.guard("items", "items() raised")
+        with guard:
+            pass
+        assert not guard.failed
+        assert guard.error is None
+
+    def test_an_exception_outside_catch_propagates(
+        self, failures: FailureLog, caplog: pytest.LogCaptureFixture, settings
+    ) -> None:
+        settings.DEBUG = False
+        with (
+            caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"),
+            pytest.raises(RuntimeError),
+            failures.guard("items", "items() raised", catch=(ValueError,)),
+        ):
+            _raise()
+
+        assert caplog.records == []
+
+    def test_a_base_exception_always_propagates(
+        self, failures: FailureLog, settings
+    ) -> None:
+        settings.DEBUG = False
+        with (
+            pytest.raises(KeyboardInterrupt),
+            failures.guard("items", "items() raised", pass_through=()),
+        ):
+            raise KeyboardInterrupt
+
+    def test_detail_extends_the_message_but_never_the_key(
+        self, failures: FailureLog, caplog: pytest.LogCaptureFixture, settings
+    ) -> None:
+        settings.DEBUG = False
+        with caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"):
+            for error in (_BOOM, ValueError("/secret/1"), ValueError("/secret/2")):
+                with failures.guard(
+                    "items", "items() raised %s", detail=exception_text
+                ):
+                    _raise(error)
+        watch_degraded()
+
+        assert [record.getMessage() for record in caplog.records] == [
+            "items() raised boom"
+        ]
+
     def test_intended_exceptions_name_the_http_answers(self) -> None:
         assert set(INTENDED_EXCEPTIONS) == {
             Http404,
@@ -277,6 +336,23 @@ class TestFailureLog:
             SuspiciousOperation,
             BadRequest,
         }
+
+
+class TestCapture:
+    """A capture holds the exception it catches and never logs or re-raises it."""
+
+    def test_a_caught_exception_is_held(self, settings) -> None:
+        settings.DEBUG = True
+        capture = Capture()
+        with capture:
+            _raise()
+        assert capture.error is _BOOM
+
+    def test_an_uncaught_exception_propagates(self) -> None:
+        capture = Capture((ValueError,))
+        with pytest.raises(RuntimeError), capture:
+            _raise()
+        assert not capture.failed
 
 
 class TestQuietPeriod:

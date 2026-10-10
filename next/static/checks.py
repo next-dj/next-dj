@@ -195,8 +195,7 @@ def _rendering_backend() -> tuple[str, type[StaticBackend]]:
 def _missing_render_keywords(method: Callable[..., object]) -> frozenset[str]:
     """Return the render keywords a renderer cannot accept, empty when it takes both.
 
-    Every render passes `request`, and a render whose request carries a nonce passes
-    `nonce` too.
+    Every render passes `request`, and one whose request carries a nonce passes `nonce`.
     """
     try:
         parameters = inspect.signature(method).parameters.values()

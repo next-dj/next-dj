@@ -55,7 +55,7 @@ The checks read the static metadata alone, so what a ``@page.metadata`` callable
    @override_settings(DEBUG=False)
    def test_draft_stays_out(draft):
        response = NextClient().get(f"/notes/{draft.pk}/")
-       assert_metadata(response, robots="noindex, follow")
+       assert_metadata(response, robots="noindex")
        urls = parse_sitemap(NextClient().get("/sitemap.xml"))
        assert f"https://notes.example/notes/{draft.pk}/" not in {url.loc for url in urls}
 

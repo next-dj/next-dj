@@ -20,7 +20,6 @@ from django.core.files import File
 from django.core.files.storage import Storage
 
 from next.components import component_watch_roots, get_component_paths_for_watch
-from next.conf.signals import settings_reloaded
 from next.pages.watch import (
     get_layout_djx_paths_for_watch,
     get_pages_directories_for_watch,
@@ -197,8 +196,7 @@ class _MappedSourceStorage(Storage):
 class _ScanRoots(NamedTuple):
     """The trees one scan reads, page trees first and component trees after.
 
-    A reconfigured tree changes no mtime the snapshot records, so the roots are stored
-    with the scan and always compared.
+    A reconfigured tree changes no recorded mtime, so the roots are stored and compared.
     """
 
     pages: tuple[Path, ...]
@@ -235,12 +233,9 @@ class _SettingsGeneration:
 _settings_generation = _SettingsGeneration()
 
 
-def _forget_scans(**kwargs) -> None:
+def forget_scans(**kwargs) -> None:
     """Mark every held scan stale, so a reconfigure is walked again."""
     _settings_generation.bump()
-
-
-settings_reloaded.connect(_forget_scans)
 
 
 def _registry_generation() -> tuple[int, int, int]:

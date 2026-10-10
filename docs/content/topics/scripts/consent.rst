@@ -5,7 +5,6 @@ Consent
 
 A script, a block of markup, or a server-side decision can wait for the visitor's consent to a category.
 The categories live in ``NEXT_FRAMEWORK["CONSENT"]``, a consent backend reads the visitor's choice on the server, and ``Next.consent`` records it in the browser.
-This page covers turning consent on, the categories, the cookie, where gated scripts render, the ``Consent`` parameter, ``{% #consented %}``, and the banner's side in JavaScript.
 
 .. contents::
    :local:
@@ -41,7 +40,8 @@ The framework knows one category, ``necessary``, which is always granted, since 
 Every other category is the project's own, and it declares the ones its scripts use in ``CATEGORIES``, ``necessary`` among them.
 Every category but ``necessary`` stays denied until the visitor chooses.
 A category name is a cookie-safe token of letters, digits, ``_``, ``-``, and ``.``, since the cookie writes the granted names between colons, separated by ``|``.
-The other values shown are the defaults, and the ``CONSENT`` entry of :doc:`/content/ref/settings` lists the checks that validate the scope.
+A blank category, an empty or whitespace-only name, is never granted.
+The other values shown are the defaults, and :ref:`ref-system-checks` lists the checks that validate the scope.
 
 The cookie
 ----------
@@ -56,8 +56,7 @@ The runtime keeps the choice in this cookie alone, whatever the backend.
 A backend tells it the cookie through ``client_config()``, the entries it adds to ``$consent``, and one that adds none leaves the runtime writing ``next_consent`` with the default age.
 
 A backend that fails to import, to build, or to read, or that answers anything but a ``Consent``, never fails the page.
-Under ``DEBUG`` or ``STRICT_LOADING`` the error is raised with a note naming ``NEXT_FRAMEWORK['CONSENT']['BACKEND']``.
-Otherwise every visitor reads as undecided, every category but ``necessary`` stays denied, and the failure is logged at most once every ten minutes.
+Every visitor then reads as undecided and every category but ``necessary`` stays denied, see :ref:`topics-failure-containment`.
 A backend that fails to import or to build is not tried again until the framework settings reload.
 
 Where gated scripts render
@@ -102,6 +101,7 @@ Gating markup
 -------------
 
 ``{% #consented "<category>" %}`` renders its body for a visitor who granted the category, and the optional ``{% else %}`` branch for everyone else.
+A category that resolves blank renders the ``else`` branch and logs a warning at the FailureLog rate.
 
 .. code-block:: jinja
    :caption: shop/pages/lp/[campaign]/template.djx
@@ -127,7 +127,7 @@ A gate only tightens.
 A declared script keeps its own category and waits for the block's as well, so a ``marketing`` script named inside a ``{% #consented "analytics" %}`` block needs both, and a block nested in another needs the outer category too.
 A script that several client-rendered blocks name waits for the category of each of them.
 The entry names every category it waits for, separated by a space, and both ``Consent.allows`` and the runtime read such a name as all of them.
-Any other asset kind the body registers is dropped and logged at most once every ten minutes, since only a script can wait for the category.
+Any other asset kind the body registers is dropped and logged at the FailureLog rate, since only a script can wait for the category.
 When the server decides, the body renders in place for a visitor who granted the category, its scripts with it.
 
 The banner

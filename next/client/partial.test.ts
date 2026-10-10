@@ -5,7 +5,12 @@ import type { PartialAdapters, PartialSurface } from "./partial";
 import type { DialogAdapter } from "./layers";
 import { createSse } from "./sse";
 import type { EventSourceAdapter, SourceControl, SseFactory } from "./sse";
-import { manualPollClock, manualVisibility, chunkModules } from "./test-doubles";
+import {
+  manualPollClock,
+  manualVisibility,
+  chunkModules,
+  unloaded,
+} from "./test-doubles";
 
 // A patches response the fetch returns so the wire resolves without a server.
 function patchesResponse(body = '{"version":"v1","ops":[],"assets":[],"form":null}') {
@@ -571,19 +576,11 @@ describe("createPartial surface", () => {
     expect(calls.length).toBeGreaterThan(0);
   });
 
-  it("fetches the sse chunk only once a scan finds a stream, then opens it", async () => {
-    let factory: SseFactory | undefined;
-    const loads: number[] = [];
+  it("fetches the sse chunk only once a scan finds a stream, then opens it", () => {
+    const sse = unloaded<SseFactory>("sse");
     const lazy = createPartial({
       ...chunkModules,
-      sse: {
-        get: () => factory,
-        load: async () => {
-          loads.push(1);
-          factory = createSse;
-          return factory;
-        },
-      },
+      sse,
       dispatch: () => undefined,
       mergeContext: () => undefined,
     });
@@ -593,18 +590,117 @@ describe("createPartial surface", () => {
       source: source.adapter,
       visibility: manualVisibility(),
     });
+    document.head.innerHTML = "";
     document.body.innerHTML = '<div data-next-zone="z"></div>';
     lazy.sse.scan(document);
-    expect(loads).toEqual([]);
+    expect(sse.tags()).toBe(0);
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     lazy.sse.scan(document);
-    lazy.sse.remember("early");
     expect(lazy.sse.size()).toBe(0);
-    expect(loads).toEqual([1]);
-    await Promise.resolve();
-    await Promise.resolve();
+    expect(sse.tags()).toBe(1);
+    sse.land(createSse);
     expect(source.opened).toHaveLength(1);
     expect(lazy.sse.size()).toBe(1);
+    lazy._reset();
+  });
+
+  it("hands the request ids sent before the bridge to it, so their echoes drop", () => {
+    const sse = unloaded<SseFactory>("sse");
+    const applied: Record<string, unknown>[] = [];
+    const lazy = createPartial({
+      ...chunkModules,
+      sse,
+      dispatch: (event, detail) => {
+        if (event === "partial:applied") applied.push(detail);
+      },
+      mergeContext: () => undefined,
+    });
+    const source = mockSource();
+    lazy._configure({
+      document,
+      source: source.adapter,
+      visibility: manualVisibility(),
+    });
+    document.body.innerHTML =
+      '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
+    lazy.sse.scan(document);
+    // Only the last ECHO_LIMIT ids are kept, as the bridge's own ring keeps them.
+    for (let i = 0; i < 26; i += 1) lazy.sse.remember(`r${i}`);
+    sse.land(createSse);
+    const event = (id: string): string =>
+      JSON.stringify({
+        version: "v1",
+        request_id: id,
+        ops: [{ op: "inner", target: { zone: "z" }, html: id }],
+      });
+    source.opened[0]!.message(event("r25"));
+    expect(applied).toEqual([]);
+    source.opened[0]!.message(event("r0"));
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("r0");
+    lazy._reset();
+  });
+
+  it("keeps one bridge across scans and feeds it later ids directly", () => {
+    const lazy = createPartial({
+      ...chunkModules,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    const source = mockSource();
+    lazy._configure({
+      document,
+      source: source.adapter,
+      visibility: manualVisibility(),
+    });
+    document.body.innerHTML =
+      '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
+    lazy.sse.scan(document);
+    lazy.sse.scan(document);
+    expect(source.opened).toHaveLength(1);
+    lazy.sse.remember("own");
+    source.opened[0]!.message(
+      JSON.stringify({
+        version: "v1",
+        request_id: "own",
+        ops: [{ op: "inner", target: { zone: "z" }, html: "echo" }],
+      }),
+    );
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("old");
+    lazy._reset();
+  });
+
+  it("a stream chunk landing after a reset scans nothing for the dead pass", () => {
+    const sse = unloaded<SseFactory>("sse");
+    const lazy = createPartial({
+      ...chunkModules,
+      sse,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    const source = mockSource();
+    lazy._configure({
+      document,
+      source: source.adapter,
+      visibility: manualVisibility(),
+    });
+    document.body.innerHTML =
+      '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
+    lazy.sse.scan(document);
+    lazy.sse.remember("stale");
+    lazy._reset();
+    sse.land(createSse);
+    expect(source.opened).toEqual([]);
+    lazy.sse.scan(document);
+    expect(source.opened).toHaveLength(1);
+    // The reset dropped the buffered id with the rest of the bridge state.
+    source.opened[0]!.message(
+      JSON.stringify({
+        version: "v1",
+        request_id: "stale",
+        ops: [{ op: "inner", target: { zone: "z" }, html: "fresh" }],
+      }),
+    );
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("fresh");
     lazy._reset();
   });
 

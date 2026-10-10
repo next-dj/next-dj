@@ -96,8 +96,7 @@ class _Render:
     def nonce(self) -> str | None:
         """Return the request nonce, resolved by the first tag that carries it.
 
-        A minted nonce makes the response private, so a render that writes no tag
-        leaves the page shareable.
+        A minted nonce makes the response private, so a tagless render stays shareable.
         """
         return resolve_nonce(self.request)
 

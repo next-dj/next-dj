@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from django.utils.cache import patch_vary_headers
 
-from next.utils import UNSET
+from next.conf.sentinels import UNSET
 
 
 if TYPE_CHECKING:

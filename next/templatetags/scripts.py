@@ -130,6 +130,14 @@ class ConsentedNode(ConsentedTagNode):
     def render(self, context: template.Context) -> str:
         """Render the branch the consent of the visitor selects."""
         category = str(self.category.resolve(context))
+        if not category.strip():
+            _failures.warn(
+                ("blank", category),
+                "{%% #consented %%} resolves its category to the blank %r, so the "
+                "block renders its else branch. Pass the name of a category.",
+                category,
+            )
+            return self.denied.render(context)
         _warn_unknown(category)
         request = _request(context)
         collector = _collector(context)

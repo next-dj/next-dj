@@ -16,7 +16,6 @@ from django.utils.functional import SimpleLazyObject, empty
 
 from next.backends import resolve_setting_class
 from next.caches import LruCache
-from next.conf.signals import settings_reloaded
 from next.introspect import describe_callable
 
 from .cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache
@@ -558,9 +557,6 @@ def apply_resolver_setting() -> None:
     _holder._wrapped = cls()
 
 
-def _on_settings_reloaded(**kwargs) -> None:
+def reapply_resolver_setting(**kwargs) -> None:
     """Rebuild the resolver singleton when the framework settings change."""
     apply_resolver_setting()
-
-
-settings_reloaded.connect(_on_settings_reloaded)

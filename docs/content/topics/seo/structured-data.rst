@@ -5,7 +5,6 @@ Structured data
 
 ``jsonld`` carries the schema.org description of a page, as plain mappings or as nodes of ``next.pages.ld``.
 Every node the page and its ancestors declare renders into one JSON-LD ``@graph``, so the Organization of ``DEFAULTS`` and the Product of a landing page describe one site together.
-This page covers plain mappings, the ``ld`` nodes, the ``@id`` rules, and the graph.
 
 .. contents::
    :local:
@@ -118,7 +117,7 @@ The graph
 
 Every node renders into a single ``<script type="application/ld+json">`` carrying ``{"@context": "https://schema.org", "@graph": [...]}``.
 The JSON is written by :class:`~django.core.serializers.json.DjangoJSONEncoder` with ``allow_nan=False``, and ``<``, ``>``, and ``&`` are escaped so a value can never close the script.
-A node a ``@page.metadata`` callable builds with a value JSON cannot hold is left out of the graph and logged at most once every ten minutes, and under ``DEBUG`` or ``STRICT_LOADING`` the render raises.
+A node a ``@page.metadata`` callable builds with a value JSON cannot hold is left out of the graph, see :ref:`topics-failure-containment`.
 
 ``jsonld`` merges by ``@id`` along the tree.
 A node whose raw ``@id`` an ancestor declared replaces that node in place, and a node without an ``@id`` appends.

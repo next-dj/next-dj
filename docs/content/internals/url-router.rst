@@ -3,7 +3,7 @@
 URL router
 ==========
 
-This page covers how the file router scans the filesystem, builds URL patterns, and reloads at runtime.
+The file router scans the filesystem, builds URL patterns, and reloads at runtime.
 
 .. contents::
    :local:

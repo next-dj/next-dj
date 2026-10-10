@@ -144,7 +144,11 @@ describe("the deferred token", () => {
   it("fetches the csrf chunk first when it has not landed yet", async () => {
     const { fetch, calls, release } = minting();
     const csrf = createCsrf({
-      mint: { get: () => undefined, load: () => landed(mintCsrf).load() },
+      mint: {
+        get: () => undefined,
+        load: () => landed(mintCsrf).load(),
+        whenLoaded: () => undefined,
+      },
       fetch,
     });
     csrf.set({ header: "X-CSRFToken", url: CSRF_URL });
@@ -158,11 +162,16 @@ describe("the deferred token", () => {
   it("a csrf chunk that cannot load is a refusal the next need retries", async () => {
     const { fetch, calls } = minting();
     const csrf = createCsrf({
-      mint: { get: () => undefined, load: () => Promise.resolve(undefined) },
+      mint: {
+        get: () => undefined,
+        load: () => Promise.resolve(undefined),
+        whenLoaded: () => undefined,
+      },
       fetch,
     });
     csrf.set({ header: "X-CSRFToken", url: CSRF_URL });
-    expect(await csrf.ensure()).toBeUndefined();
+    // null tells the wire the loader already reported the chunk failure.
+    expect(await csrf.ensure()).toBeNull();
     expect(calls).toEqual([]);
     expect(csrf.current()).toEqual({ header: "X-CSRFToken", url: CSRF_URL });
   });

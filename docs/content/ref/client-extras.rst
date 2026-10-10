@@ -6,7 +6,7 @@ Client consent, scripts, and navigation reference
 Module summary
 --------------
 
-This page records the parts of ``window.Next`` that serve third-party scripts, consent, and navigation, next to :doc:`client`, which records the partial surface and the attribute contract.
+Three members of ``window.Next`` serve third-party scripts, consent, and navigation, beside the partial surface :doc:`client` records.
 ``Next.navigation`` lives in the core bundle, ``next.min.js``.
 ``Next.consent`` and ``Next.scripts`` live in the scripts chunk, ``next.scripts.min.js``, which the runtime fetches only when the init payload carries ``$scripts`` or ``$consent``, or when page code calls ``Next.ready("scripts")``.
 Both stay ``undefined`` until the chunk loads, and nothing answers for them before it does.
@@ -18,7 +18,7 @@ Next.ready("scripts")
 ~~~~~~~~~~~~~~~~~~~~~
 
 ``Next.ready("scripts")`` returns a ``Promise<ScriptsChunk>`` that resolves with ``{consent, scripts}`` once the chunk has loaded and taken the page's init payload.
-It fetches the chunk on a page that did not, and a call made before the init payload arrives waits for it.
+It fetches the chunk on a page that did not, and a call made before the init payload arrives waits for it, rejecting when the document finishes parsing with no init payload at all.
 It rejects when the chunk cannot load or has not loaded within 15 seconds, and a failed fetch also fires ``partial:error`` of kind ``asset``, so a banner never records a choice nothing keeps.
 A later call after a failure fetches the chunk again.
 The chunk takes the latest payload ``Next._init`` received, even one that arrived while it was still loading.
@@ -75,6 +75,7 @@ Next.scripts
    * - ``load(name)``
      - ``Promise<void>``
      - Load a script of the page's manifest now, whatever its strategy, resolving once it loaded and rejecting on an error or a denied category.
+       For a tag the server rendered it waits for that tag's ``load`` and rejects on its ``error``, resolving at once when the tag already loaded.
    * - ``status(name)``
      - ``ScriptStatus | undefined``
      - ``rendered`` for a tag the server wrote, then ``pending``, ``loading``, ``loaded``, ``error``, or ``blocked`` for a manifest entry, and ``undefined`` for an unknown name.

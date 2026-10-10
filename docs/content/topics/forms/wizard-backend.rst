@@ -6,7 +6,6 @@ Wizard backend
 A wizard backend persists per-step draft data between requests.
 Every wizard in a project shares one backend, chosen once through ``NEXT_FRAMEWORK["FORM_WIZARD_BACKEND"]``.
 The default backend stores drafts in the Django session.
-This page covers the ``FormWizardBackend`` contract, the bundled ``SessionFormWizardBackend`` and its value codec, the cache-backed alternative, the configuration, and a custom-backend recipe.
 
 .. contents::
    :local:

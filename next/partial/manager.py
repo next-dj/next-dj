@@ -7,11 +7,9 @@ from typing import TYPE_CHECKING
 
 from django.contrib.staticfiles.storage import ManifestFilesMixin, staticfiles_storage
 from django.core.exceptions import ImproperlyConfigured
-from django.core.signals import setting_changed
 
 from next.backends import SingleBackendManager
 from next.conf import next_framework_settings
-from next.conf.signals import settings_reloaded
 
 from .backends import PartialProtocolBackend
 from .signals import partial_backend_loaded
@@ -110,13 +108,13 @@ def _hash_mapping(hashed_files: "Mapping[str, str]") -> str:
     return digest[:_HASH_WIDTH]
 
 
-def _on_settings_reloaded(**kwargs) -> None:
+def forget_partial_backend(**kwargs) -> None:
     """Drop the cached backend and version so a reloaded config takes effect."""
     partial_backend_manager.reset()
     asset_version.cache_clear()
 
 
-def _on_setting_changed(*, setting: str, **kwargs) -> None:
+def forget_asset_version(*, setting: str, **kwargs) -> None:
     """Drop the memoised version when the staticfiles configuration moves.
 
     `settings_reloaded` covers only the `NEXT_FRAMEWORK` half, and the
@@ -124,10 +122,6 @@ def _on_setting_changed(*, setting: str, **kwargs) -> None:
     """
     if setting in _STORAGE_SETTINGS:
         asset_version.cache_clear()
-
-
-settings_reloaded.connect(_on_settings_reloaded)
-setting_changed.connect(_on_setting_changed)
 
 
 __all__ = ["asset_version", "partial_backend_manager", "pinned_version"]

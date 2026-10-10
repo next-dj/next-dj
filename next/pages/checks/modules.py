@@ -22,9 +22,9 @@ from next.checks.common import (
     page_tree_skip_names,
 )
 from next.pages.loaders import (
-    _load_python_module_memo,
     build_registered_loaders,
     last_load_error,
+    load_python_module_memo,
 )
 from next.pages.scan import iter_existing_scanned_pages
 from next.utils import walk_page_tree
@@ -136,7 +136,7 @@ def _active_body_sources(page_file: Path) -> list[str]:
     Priority: `render()`, the `template` attribute, then
     `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]` entries.
     """
-    module = _load_python_module_memo(page_file)
+    module = load_python_module_memo(page_file)
     sources: list[str] = []
     if module is not None:
         if callable(getattr(module, "render", None)):
@@ -174,7 +174,7 @@ def _load_render_function(file_path: Path) -> object:
     A broken `page.py` loads as `None` and yields `None` here. The caller
     reads `last_load_error` and leaves the failure to `next.E017`.
     """
-    module = _load_python_module_memo(file_path)
+    module = load_python_module_memo(file_path)
     if module is None:
         return None
     return getattr(module, "render", None)
@@ -185,7 +185,7 @@ def _has_template_or_djx(file_path: Path) -> bool:
     if (file_path.parent / "layout.djx").exists():
         return True
 
-    module = _load_python_module_memo(file_path)
+    module = load_python_module_memo(file_path)
     if module is not None and hasattr(module, "template"):
         return True
 
@@ -222,7 +222,7 @@ def check_page_module_imports(*args, **kwargs) -> list[CheckMessage]:
     return [
         Error(_page_import_error_message(page_path), obj=str(page_path), id="next.E017")
         for page_path in iter_existing_scanned_pages(router_manager, set())
-        if _load_python_module_memo(page_path) is None
+        if load_python_module_memo(page_path) is None
     ]
 
 

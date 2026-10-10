@@ -4,7 +4,6 @@ URL reversing
 =============
 
 next.dj generates a URL name for every file-routed page.
-This page covers ``page_reverse``, its lazy variant ``page_reverse_lazy``, and ``with_query``, the three reverse helpers exported from ``next.urls``.
 
 .. contents::
    :local:

@@ -4,9 +4,9 @@ Testing
 =======
 
 next.dj ships ``next.testing`` with a test client, registry isolation, signal capture, action helpers, and HTML utilities.
-This page covers the public surface of the module and the patterns for testing pages, components, forms, and signals end to end.
 Nothing re-exported from ``next.testing`` imports pytest, so every helper works under Django's ``TestCase``, stdlib ``unittest``, and pytest alike.
 Pytest lives alone in the opt-in ``next.testing.plugin`` module, which a project loads from its ini file when it wants the fixtures described below.
+``next.testing`` parses a sitemap through ``defusedxml``, which the ``testing`` extra installs, so a test environment adds ``next.dj[testing]`` rather than ``next.dj``.
 
 .. contents::
    :local:

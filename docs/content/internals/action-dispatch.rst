@@ -3,8 +3,7 @@
 Action dispatch
 ===============
 
-This page covers the form dispatch pipeline.
-It traces a submission from the template ``{% form %}`` tag through the validation chain to the handler and the re-render path.
+A form submission travels from the template ``{% form %}`` tag through the validation chain to the handler and the re-render path.
 
 .. contents::
    :local:

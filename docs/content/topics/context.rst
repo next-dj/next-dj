@@ -4,13 +4,7 @@ Context
 =======
 
 Context is the data that pages and components publish into their template scope.
-This page covers the two shapes of the ``@context`` decorator and the ways to vary them.
-It also walks inheritance down the route tree, how component context differs from page context, and how to expose values to the JavaScript bundle.
-A final section covers how to swap out the serializer that ships values to the browser.
-
-This page is the concept reference for context.
-Once you understand the decorator and the ``serialize`` flag here, :doc:`/content/topics/static-assets/js-context` covers the full ``window.Next.context`` mechanics.
-The :doc:`/content/howto/override-the-js-context-serializer` how-to walks through replacing the serializer.
+:doc:`/content/topics/static-assets/js-context` covers the full ``window.Next.context`` mechanics behind the ``serialize`` flag, and :doc:`/content/howto/override-the-js-context-serializer` walks through replacing the serializer.
 
 .. contents::
    :local:

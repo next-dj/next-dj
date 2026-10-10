@@ -14,8 +14,7 @@ from .markers import UNDECIDED, Consent
 class ConsentProvider(RegisteredParameterProvider):
     """Supply the `Consent` of the request to a parameter annotated with it.
 
-    A render that does not read the cookie sees an undecided visitor. Any other render
-    varies on `Cookie`.
+    A render that reads no cookie sees an undecided visitor, the rest vary on `Cookie`.
     """
 
     priority = 50

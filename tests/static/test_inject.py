@@ -953,13 +953,17 @@ class TestMemoisedFallbacksDegradeEveryRender:
             assert self._degraded_renders() == [True, True, True]
         self._assert_logged_again(caplog, "missing next/next.min.js")
 
-    def test_an_uncollected_chunk(self, caplog) -> None:
+    def test_an_uncollected_chunk_warns_without_degrading(self, caplog) -> None:
+        """The HTML is complete without a lazy chunk, so the render stays shareable."""
         with mock.patch(
             "next.static.manager.staticfiles_storage.url",
             side_effect=_hashed_without("next/next.sse.min.js"),
         ):
-            assert self._degraded_renders() == [True, True, True]
-        self._assert_logged_again(caplog, "still has no next/next.sse.min.js")
+            assert self._degraded_renders() == [False, False, False]
+        records = [r for r in caplog.records if r.name.startswith("next.static")]
+        assert [r.levelname for r in records] == ["WARNING", "WARNING"]
+        assert "has no next/next.sse.min.js" in records[0].getMessage()
+        assert records[1].suppressed > 0
 
     def test_a_broken_serializer(self, caplog) -> None:
         path = f"{__name__}._NotASerializer"

@@ -42,6 +42,9 @@ The concat's cache token reads ``seo_routes_version`` in ``next.urls.manager``, 
 ``PageScripts`` answers the head tags and the reserved payload entries, ``$scripts`` and ``$consent``, the third-party scripts add to one render.
 ``next.scripts`` reads the static manager to resolve a script's ``src``, so the injector of ``next.static`` reads ``page_scripts_slot`` through ``peek`` rather than importing it back.
 
+``FormRoutes`` answers the URL patterns of every form backend.
+The forms area imports ``next.pages``, which loads the URL checks, so those checks read ``form_routes_slot`` rather than importing ``next.forms.manager`` back.
+
 ``PortSlot.peek`` answers the bound implementation, or ``None`` before the app is ready.
 The lazy urlpatterns read the seo slot through it, so a concat built before ``NextFrameworkConfig.ready()`` leaves the seo routes out and caches nothing, and a URL resolved or reversed from an earlier ``ready()`` still works.
 
@@ -49,7 +52,7 @@ Implementations
 ---------------
 
 Each area binds its own implementation, one class per port, holding nothing but the delegation to the area's real entry points.
-Every implementation lives in the ``ports`` module of its area.
+Every implementation lives in the ``ports`` module of its area, save ``FormRoutes``, which the form action manager answers itself.
 
 .. list-table::
    :header-rows: 1
@@ -58,6 +61,9 @@ Every implementation lives in the ``ports`` module of its area.
    * - Port
      - Implementation
      - Slot
+   * - ``FormRoutes``
+     - ``next.forms.manager.form_action_manager``
+     - ``form_routes_slot``
    * - ``PageScan``
      - ``next.pages.ports.PageScanImpl``
      - ``page_scan_slot``
@@ -77,7 +83,7 @@ Every implementation lives in the ``ports`` module of its area.
      - ``next.scripts.ports.PageScriptsImpl``
      - ``page_scripts_slot``
 
-``next.apps`` binds all six in ``NextFrameworkConfig.ready()``, ahead of every step that imports user code.
+``next.apps`` binds all seven in ``NextFrameworkConfig.ready()``, ahead of every step that imports user code.
 A project that replaces one subclasses the shipped implementation and calls ``set`` on the slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since the slot holds one implementation and the last binding wins.
 
 Public API

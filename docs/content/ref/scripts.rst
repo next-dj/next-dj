@@ -41,7 +41,7 @@ Consent
 -------
 
 ``Consent`` is the frozen value a visitor's choice reads as, ``granted`` holding ``necessary`` always and ``decided`` staying false until the visitor chooses.
-``allows(category)`` answers one category, and a template reads ``consent.marketing`` through ``__getitem__``.
+``allows(category)`` answers one category, false for a blank one, and reads a name of several space-separated categories as all of them, and a template reads ``consent.marketing`` through ``__getitem__``.
 ``get_consent(request)`` answers the consent of a request, read once and kept to the configured categories, and ``consent_categories()`` the configured list with ``necessary`` first.
 
 .. automodule:: next.consent.markers
@@ -61,7 +61,7 @@ The runtime keeps the choice only in its consent cookie, so a backend that reads
 ``CookieConsentBackend`` reads the ``2:<a>|<b>:<seconds>`` cookie the runtime writes and also accepts the ``1:<a>,<b>:<seconds>`` form, whose categories are separated by commas.
 Its ``cookie()`` answers the name, age, and flags the runtime writes the cookie with, which is the ``cookie`` entry its ``client_config()`` adds.
 Under a backend that adds no ``cookie`` entry, the runtime keeps its cookie of the choice under the default name and age.
-A backend that raises or answers anything but a ``Consent`` reads as ``UNDECIDED`` and is logged at most once every ten minutes, and under ``DEBUG`` or ``STRICT_LOADING`` the exception propagates.
+A backend that raises or answers anything but a ``Consent`` reads as ``UNDECIDED``, see :ref:`topics-failure-containment`.
 
 .. automodule:: next.consent.backends
    :members:

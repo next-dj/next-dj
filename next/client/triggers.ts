@@ -365,14 +365,12 @@ export function createTriggers(deps: TriggerDeps): Triggers {
 
   // The poller, built on first use once its chunk has loaded.
   let poller: Poller | undefined;
+  // Bumped by _reset, so a chunk landing late starts no poller for a dead instance.
+  let epoch = 0;
 
-  // Start polling the elements, false while the poll chunk has not loaded.
-  function startPolls(els: Element[]): boolean {
-    const factory = deps.poll.get();
-    if (factory === undefined) return false;
+  function startPolls(factory: PollFactory, els: Element[]): void {
     poller ??= factory({ clock, visibility, pageUrl, fetch: zoneGet });
     for (const el of els) poller.start(el);
-    return true;
   }
 
   // Batch the load zones into one comma-joined GET per owning page. Grouping by
@@ -401,9 +399,11 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     }
     // A page with no poll zone never fetches the poller.
     const polled = matching(root, `[${POLL_ATTR}]`);
-    if (polled.length > 0 && !startPolls(polled)) {
-      void deps.poll.load().then(() => startPolls(polled));
-    }
+    if (polled.length === 0) return;
+    const started = epoch;
+    deps.poll.whenLoaded((factory) => {
+      if (started === epoch) startPolls(factory, polled);
+    });
   }
 
   function install(target: Document): () => void {
@@ -439,6 +439,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       for (const stop of observed.values()) stop();
       observed.clear();
       poller?._reset();
+      epoch += 1;
       // Also remove the listeners install added, so a reset instance handles no event.
       detach?.();
       detach = null;

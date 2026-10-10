@@ -3,7 +3,7 @@
 Partial pipeline
 ================
 
-This page covers how a zone is compiled out of a page template, how a partial request reaches one, how an action outcome becomes a patch envelope, and what the subsystem keeps between requests.
+The partial pipeline compiles a zone out of a page template, routes a partial request to it, and turns an action outcome into a patch envelope, keeping a few memos between requests.
 
 .. contents::
    :local:

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable, Hashable
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
 from time import monotonic
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Self, override
 from weakref import WeakSet
 
 from django.core.exceptions import BadRequest, PermissionDenied, SuspiciousOperation
@@ -15,11 +16,10 @@ from django.http import Http404
 
 from next.caches import BoundedCache
 from next.conf.settings import fail_loudly
-from next.conf.signals import settings_reloaded
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Hashable
+    from types import TracebackType
 
 
 # A view raises these to answer 400, 403 or 404, and Django converts each into its own
@@ -48,8 +48,7 @@ def watch_degraded() -> None:
 def degraded() -> bool:
     """Return whether a failure was contained since the last `watch_degraded` call.
 
-    A degraded page lacks the output of its failing source, so its response must not
-    be stored in a shared cache.
+    A degraded page lacks its failing source's output, so no shared cache stores it.
     """
     return _DEGRADED.get()
 
@@ -62,9 +61,7 @@ def mark_degraded() -> None:
 def isolated_build[T](build: Callable[[], T]) -> tuple[T, bool]:
     """Return what `build` returns and whether it contained a failure.
 
-    The build runs in a copy of the context, so the current render is not marked by
-    it. A memo stores the flag and calls `mark_degraded` on every render that reads
-    the value, so each of those renders is treated as the first one was.
+    It runs in a copied context, and a memo replays the flag through `mark_degraded`.
     """
     context = copy_context()
     context.run(watch_degraded)
@@ -95,18 +92,105 @@ class _Report:
     suppressed: int = 0
 
 
+type Detail = Callable[[Exception], tuple[object, ...]]
+"""Message args a guard draws from the exception, never its key, which stays bounded."""
+
+
+def type_name(exc: Exception) -> tuple[str]:
+    """Return the type name of `exc`, the detail of a guard whose message names it."""
+    return (type(exc).__name__,)
+
+
+def exception_text(exc: Exception) -> tuple[str]:
+    """Return the text of `exc`, the detail of a guard whose message names it."""
+    return (str(exc),)
+
+
+class Capture:
+    """Hold an exception of `catch` the block raises in `error`, and suppress it."""
+
+    __slots__ = ("_catch", "error")
+
+    def __init__(self, catch: tuple[type[Exception], ...] = (Exception,)) -> None:
+        """Catch the exceptions of `catch`, every other one propagating."""
+        self._catch = catch
+        self.error: Exception | None = None
+
+    @property
+    def failed(self) -> bool:
+        """Whether the block raised an exception the boundary caught."""
+        return self.error is not None
+
+    def __enter__(self) -> Self:
+        """Enter the block."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        """Answer whether the exception of the block is suppressed."""
+        if exc is None or not isinstance(exc, self._catch):
+            return False
+        return self._held(exc)
+
+    def _held(self, exc: Exception) -> bool:
+        """Hold `exc` and suppress it."""
+        self.error = exc
+        return True
+
+
+class Guard(Capture):
+    """Contain a failure of the block, the one boundary of the failure policy.
+
+    It re-raises with a note under `DEBUG` or `STRICT_LOADING`, else degrades a render.
+    """
+
+    __slots__ = ("_args", "_detail", "_key", "_log", "_message", "_pass_through")
+
+    def __init__(
+        self,
+        log: FailureLog,
+        key: tuple[Hashable, ...],
+        message: str,
+        args: tuple[object, ...],
+        catch: tuple[type[Exception], ...],
+        pass_through: tuple[type[BaseException], ...],
+        detail: Detail | None,
+    ) -> None:
+        """Contain `catch` but not `pass_through`, logging under `key` through `log`."""
+        self._catch = catch
+        self.error = None
+        self._log = log
+        self._key = key
+        self._message = message
+        self._args = args
+        self._pass_through = pass_through
+        self._detail = detail
+
+    @override
+    def _held(self, exc: Exception) -> bool:
+        """Apply the failure policy to `exc`, answering whether it is suppressed."""
+        if isinstance(exc, self._pass_through):
+            return False
+        args = self._args if self._detail is None else (*self._args, *self._detail(exc))
+        if fail_loudly():
+            exc.add_note(self._message % args if args else self._message)
+            return False
+        _DEGRADED.set(True)
+        self._log._log(logging.ERROR, self._key, self._message, args, exc)
+        return super()._held(exc)
+
+
 _LOGS: WeakSet[FailureLog] = WeakSet()
 
 
 class FailureLog:
     """Log a failure key once, then again after each quiet period it keeps failing in.
 
-    A failing user callable runs on every request, so logging every occurrence would
-    repeat one traceback per request, while logging it only once would hide a failure
-    that recurs for the life of the process. The record that ends a quiet period
-    carries the number of occurrences left out in its `suppressed` attribute and in
-    its message. Keys are held in a bounded cache, and a key is still drawn from a
-    finite set such as a source path or a setting name, never from request data.
+    A failing callable runs per request, so one key is logged at a bounded rate.
     """
 
     def __init__(self, logger: logging.Logger) -> None:
@@ -115,7 +199,6 @@ class FailureLog:
         self._reports: BoundedCache[Hashable, _Report] = BoundedCache()
         self._lock = threading.Lock()
         _LOGS.add(self)
-        settings_reloaded.connect(self.clear)
 
     def clear(self, **kwargs: object) -> None:
         """Forget every reported key, so each failure is logged again."""
@@ -168,45 +251,31 @@ class FailureLog:
             level, message, *args, exc_info=exc_info, extra={"suppressed": suppressed}
         )
 
-    def contain(
+    def guard(
         self,
-        exc: BaseException,
         key: Hashable,
         message: str,
         *args: object,
+        catch: tuple[type[Exception], ...] = (Exception,),
         pass_through: tuple[type[BaseException], ...] = INTENDED_EXCEPTIONS,
-    ) -> None:
-        """Re-raise `exc` under `DEBUG` or `STRICT_LOADING`, else log it and degrade.
+        detail: Detail | None = None,
+    ) -> Guard:
+        """Return the boundary that contains a failure of its block under `key`.
 
-        Call it from the `except` block that caught `exc`, then return the caller's
-        fallback. An exception in `pass_through` is re-raised in every mode. The
-        default, `INTENDED_EXCEPTIONS`, lets Django answer with its own 400, 403 or
-        404. Django converts those exceptions only when a view raises them, so a call
-        site outside any view, such as URL resolution or a middleware, passes
-        `pass_through=()` and contains them like any other failure. A re-raised
-        failure carries `message` as a note, so the technical error page names the
-        source and the fix. Otherwise the render is marked degraded, and `message` is
-        logged with the traceback on the first failure of `key` and after each quiet
-        period.
+        Django answers an intended exception only when a view raises it, so a call site
+        outside any view passes `pass_through=()`.
         """
-        if isinstance(exc, pass_through):
-            raise  # noqa: PLE0704 - re-raises the exception the caller is handling
-        if fail_loudly():
-            exc.add_note(message % args if args else message)
-            raise  # noqa: PLE0704 - re-raises the exception the caller is handling
-        _DEGRADED.set(True)
-        self._log(logging.ERROR, (key,), message, args, exc)
+        return Guard(self, (key,), message, args, catch, pass_through, detail)
 
     def warn(self, key: Hashable, message: str, *args: object) -> None:
         """Log `message` for `key` at a bound rate, for a failure with no traceback."""
         self._log(logging.WARNING, (key,), message, args)
 
 
-def reset_failure_logs() -> None:
+def reset_failure_logs(**kwargs: object) -> None:
     """Forget the reported keys of every failure log, so each failure is logged again.
 
-    A test that asserts on a log record calls it, so the outcome does not depend on
-    whether an earlier test in the same process logged the same key.
+    A settings reload calls it, and so does a test that asserts on a log record.
     """
     for log in list(_LOGS):
         log.clear()
@@ -215,9 +284,7 @@ def reset_failure_logs() -> None:
 class BackendReadLog(FailureLog):
     """Read a value from a backend, returning a default when the read fails.
 
-    A backend is read on every reloader tick and static lookup, so a failing read is
-    logged per backend class and subject at the rate of `FailureLog`. Unlike
-    `contain`, a failing read is never re-raised, under `DEBUG` included.
+    It never re-raises, under `DEBUG` included, and never degrades the render.
     """
 
     def read[T](
@@ -231,18 +298,16 @@ class BackendReadLog(FailureLog):
     ) -> T:
         """Return what `read` returns, `default` when it raises or `valid` refuses it.
 
-        `valid` runs inside the same guard, since inspecting the result can run backend
-        code that raises.
+        `valid` runs inside the guard, since inspecting the result can run backend code.
         """
-        source = type(backend).__name__
-        try:
+        capture = Capture()
+        with capture:
             answer = read()
             sound = valid(answer)
-        except Exception as exc:  # noqa: BLE001 - logged, a backend may raise anything
-            self._log(logging.ERROR, (source, subject), _FAILED, (source, subject), exc)
-            return default
-        if not sound:
-            self._log(logging.ERROR, (source, subject), _MALFORMED, (source, subject))
+        if capture.error is not None or not sound:
+            key = (type(backend).__name__, subject)
+            message = _MALFORMED if capture.error is None else _FAILED
+            self._log(logging.ERROR, key, message, key, capture.error)
             return default
         return answer
 
@@ -251,10 +316,15 @@ __all__ = [
     "INTENDED_EXCEPTIONS",
     "QUIET_PERIOD",
     "BackendReadLog",
+    "Capture",
+    "Detail",
     "FailureLog",
+    "Guard",
     "degraded",
+    "exception_text",
     "isolated_build",
     "mark_degraded",
     "reset_failure_logs",
+    "type_name",
     "watch_degraded",
 ]

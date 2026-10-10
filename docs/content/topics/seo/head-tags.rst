@@ -5,7 +5,6 @@ Head tags
 
 Beyond the title and the social blocks, the head carries the viewport, the browser colors, keywords, ownership tokens, feeds, resource hints, and the odd vendor meta.
 Each has a key of its own, so it merges along the tree and is checked on its own, and two escape hatches, ``other`` and ``properties``, cover the names the schema does not know.
-This page covers each key and the tag it emits.
 
 .. contents::
    :local:

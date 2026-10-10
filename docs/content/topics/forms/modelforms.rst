@@ -9,7 +9,6 @@ A :doc:`ModelForm <django:topics/forms/modelforms>` adapts a Django model to a f
 The `Before and after`_ section below shows the delta against the hand-written lookup.
 
 next.dj supports ModelForms anywhere a plain ``Form`` works.
-This page covers the ``next.forms.ModelForm`` base class, the declarative ``Meta.instance_from_url`` key that loads an instance for edit pages, and the create-and-edit-with-one-class pattern that follows from it.
 
 .. contents::
    :local:

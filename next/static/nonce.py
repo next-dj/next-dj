@@ -8,15 +8,10 @@ from django.conf import settings
 from django.http import HttpRequest
 
 from next.conf import next_framework_settings
-from next.conf.signals import settings_reloaded
-from next.utils import UNSET, middleware_listed
+from next.conf.sentinels import UNSET
+from next.csrf import CSP_NONCE_ATTR, NONCE_ATTR, nonce_minted
+from next.utils import middleware_listed
 
-
-NONCE_ATTR: Final = "_next_csp_nonce"
-"""The request attribute that holds the nonce resolved for the request."""
-
-CSP_NONCE_ATTR: Final = "_csp_nonce"
-"""The request attribute where Django's CSP middleware and django-csp keep the nonce."""
 
 CSP_MIDDLEWARE: Final = (
     "django.middleware.csp.ContentSecurityPolicyMiddleware",
@@ -36,8 +31,7 @@ except ImportError:  # pragma: no cover - Django before 6.0 mints no nonce itsel
 def request_nonce(request: HttpRequest) -> str | None:
     """Return the nonce django-csp or Django's CSP middleware minted for `request`.
 
-    Reading the lazy nonce generates it, so the middleware then writes it into the
-    `Content-Security-Policy` header.
+    Reading the lazy nonce mints it, so the middleware writes it into the CSP header.
     """
     value = getattr(request, "csp_nonce", None)
     if value is None and django_get_nonce is not None:
@@ -64,9 +58,6 @@ def forget_nonce_setting(**kwargs) -> None:
     nonce_enabled.cache_clear()
 
 
-settings_reloaded.connect(forget_nonce_setting)
-
-
 def resolve_nonce(request: HttpRequest | None) -> str | None:
     """Return the nonce of `request`, resolved once and memoised on the request.
 
@@ -80,16 +71,6 @@ def resolve_nonce(request: HttpRequest | None) -> str | None:
     nonce = request_nonce(request) if nonce_enabled() else None
     setattr(request, NONCE_ATTR, nonce)
     return nonce
-
-
-def nonce_minted(request: HttpRequest) -> bool:
-    """Return whether a nonce was generated for `request`, by a framework tag or not.
-
-    Django's `LazyNonce` is truthy once evaluated, and django-csp stores the string.
-    """
-    return isinstance(getattr(request, NONCE_ATTR, None), str) or bool(
-        getattr(request, CSP_NONCE_ATTR, None)
-    )
 
 
 __all__ = [

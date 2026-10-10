@@ -5,7 +5,6 @@ Merging along the tree
 
 Every page merges ``DEFAULTS`` and each ancestor ``page.py`` into one ``Metadata`` value.
 The merge is deep, so a page names only the keys it changes and keeps every nested value an ancestor set.
-This page covers the merge rule of every key and the way to take an inherited value back.
 
 .. contents::
    :local:

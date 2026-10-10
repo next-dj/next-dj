@@ -1,7 +1,6 @@
 """The shape validators the metadata normaliser compiles the input dicts into.
 
-Each shape checks one value, builds what the fold reads, and names the key path of a
-value it refuses.
+Each shape checks one value, builds what the fold reads, and names a refused key path.
 """
 
 from collections.abc import Callable, Mapping, Sequence

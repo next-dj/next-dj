@@ -19,11 +19,11 @@ from django.utils.functional import Promise
 from next.conf.defaults import DEFAULTS
 from next.conf.imports import import_callable
 from next.conf.scopes import scope_value
+from next.conf.sentinels import UNSET, Unset
 from next.conf.settings import fail_loudly
-from next.conf.signals import settings_reloaded
-from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog
+from next.diagnostics import FailureLog, type_name
 from next.introspect import describe_callable
-from next.utils import UNSET, WEB_SCHEMES, Unset
+from next.utils import WEB_SCHEMES
 
 from .errors import SiteOriginError
 
@@ -133,47 +133,35 @@ def forget_site_config(**kwargs) -> None:
     site_config.cache_clear()
 
 
-settings_reloaded.connect(forget_site_config)
-
-
-def _url_failed(key: str, message: str, exc: Exception | None = None) -> _Failed:
-    """Report a failed callable `URL`, raising when loading is strict, else logging."""
-    if fail_loudly():
-        raise ImproperlyConfigured(message) from exc
-    if exc is None:
-        _failures.warn(("URL", key), message)
-    else:
-        _failures.contain(exc, ("URL", key), message)
-    return _Failed.FAILED
-
-
 def _answered_origin(rule: SiteUrlRule, request: HttpRequest | None) -> _Declared:
     """Return the origin a callable `URL` answers, `None` when it answers `None`."""
-    try:
+    guard = _failures.guard(
+        ("URL", "raised"),
+        "%s %s raised %s, so the request has no declared origin and the SEO routes "
+        "answer 503. Make it answer an http or https origin, or None to fall back to "
+        "the request host.",
+        _URL_SETTING,
+        describe_callable(rule),
+        detail=type_name,
+    )
+    with guard:
         value = rule(request)
-    except INTENDED_EXCEPTIONS:
-        raise
-    except Exception as exc:  # noqa: BLE001 - the callable is project code
-        return _url_failed(
-            "raised",
-            f"{_URL_SETTING} {describe_callable(rule)} raised "
-            f"{type(exc).__name__}, so the request has no declared origin and the "
-            "SEO routes answer 503. Make it answer an http or https origin, or "
-            "None to fall back to the request host.",
-            exc,
-        )
+    if guard.failed:
+        return _Failed.FAILED
     if value is None:
         return None
     origin = url_origin(value) if isinstance(value, str) else None
-    if origin is None:
-        return _url_failed(
-            "answer",
-            f"{_URL_SETTING} {describe_callable(rule)} answered {value!r}, which is "
-            "not an http or https origin, so the SEO routes answer 503. Answer an "
-            "origin with no path like 'https://acme.example', or None to fall back "
-            "to the request host.",
-        )
-    return origin
+    if origin is not None:
+        return origin
+    message = (
+        f"{_URL_SETTING} {describe_callable(rule)} answered {value!r}, which is not an "
+        "http or https origin, so the SEO routes answer 503. Answer an origin with no "
+        "path like 'https://acme.example', or None to fall back to the request host."
+    )
+    if fail_loudly():
+        raise ImproperlyConfigured(message)
+    _failures.warn(("URL", "answer"), message)
+    return _Failed.FAILED
 
 
 def _declared_origin(request: HttpRequest | None) -> _Declared:
@@ -274,19 +262,16 @@ def _answered_indexable(
     It also runs in `RobotsHeaderMiddleware`, outside any view, so an intended
     exception such as `Http404` is contained like any other.
     """
-    try:
+    with _failures.guard(
+        "INDEXABLE",
+        "%s %s raised, so the site reads as closed to search and every response "
+        "carries noindex. Make it answer a bool for a request and for None.",
+        _INDEXABLE_SETTING,
+        describe_callable(rule),
+        pass_through=(),
+    ):
         return bool(rule(request))
-    except Exception as exc:  # noqa: BLE001 - the callable is project code
-        _failures.contain(
-            exc,
-            "INDEXABLE",
-            "%s %s raised, so the site reads as closed to search and every response "
-            "carries noindex. Make it answer a bool for a request and for None.",
-            _INDEXABLE_SETTING,
-            describe_callable(rule),
-            pass_through=(),
-        )
-        return False
+    return False
 
 
 def debug_closed() -> bool:

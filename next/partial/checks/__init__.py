@@ -3,10 +3,6 @@
 Importing the package registers every check.
 """
 
-import warnings
-
-from next.checks.common import forget_run_memos
-
 from .backends import (
     check_asset_version_moves_between_deploys,
     check_manifest_version_has_manifest_storage,
@@ -48,19 +44,6 @@ from .zones import (
 )
 
 
-def reset_composed_pages_memo(**kwargs) -> None:
-    """Drop the run memos of the checks, the composed pages among them.
-
-    Deprecated. Call `next.checks.reset_check_caches`, which also drops these memos.
-    """
-    warnings.warn(
-        "reset_composed_pages_memo is deprecated, call next.checks.reset_check_caches",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    forget_run_memos()
-
-
 __all__ = [
     "E_BACKENDS_NOT_A_LIST",
     "E_BACKEND_WITHOUT_PATH",
@@ -96,5 +79,4 @@ __all__ = [
     "check_zone_name_is_slug",
     "check_zone_not_in_if",
     "check_zone_not_in_loop",
-    "reset_composed_pages_memo",
 ]

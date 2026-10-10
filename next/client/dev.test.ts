@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
 import "./next";
 // Evaluates the dev chunk's entry, as the runtime does once it fetched it.
-import "./dev";
+import "./entries/dev";
 import { createDiagnostics } from "./diagnostics";
 
 const win = globalThis as unknown as {
@@ -53,9 +53,9 @@ it("warns once when a stalled copy of the chunk evaluates after its retry", asyn
     $csrf: { header: "X-CSRFToken" },
     $chunks: { dev: "/static/next/next.dev.min.js" },
   });
-  await import("./dev");
+  await import("./entries/dev");
   vi.resetModules();
-  await import("./dev");
+  await import("./entries/dev");
   await Promise.resolve();
   const csrf = warn.mock.calls.filter(([text]) => String(text).includes("$csrf"));
   expect(csrf).toHaveLength(1);

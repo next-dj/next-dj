@@ -182,8 +182,7 @@ def listed_trails(
 ) -> list[str]:
     """Return the static trails a sitemap lists, without excluded and noindex pages.
 
-    `noindex` reads whether a page sets noindex. A system check passes a read that
-    does not raise for a refused chain.
+    `noindex` reads a page's noindex, and a system check passes one that never raises.
     """
     return [
         trail
@@ -197,8 +196,7 @@ def listed_trails(
 def _rows(value: object, func: Callable[..., Any]) -> Rows:
     """Return the value an items callable returned as sliceable rows.
 
-    An unordered `QuerySet` stays lazy and is ordered by primary key, and an
-    iterator is read into a list.
+    An unordered `QuerySet` stays lazy, ordered by pk, and an iterator becomes a list.
     """
     if isinstance(value, QuerySet):
         if value.ordered:

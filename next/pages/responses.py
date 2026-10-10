@@ -1,7 +1,6 @@
 """The `Cache-Control`, custom headers and `X-Robots-Tag` of a page response.
 
-`cache` applies to the page that declares it, while `headers` apply to every page
-below the `page.py` that declares them.
+`cache` applies to its own page, `headers` to every page below the declaring `page.py`.
 """
 
 from __future__ import annotations
@@ -21,8 +20,7 @@ from django.utils.cache import patch_cache_control, patch_vary_headers
 
 from next.caches import PageCache
 from next.conf.settings import fail_loudly
-from next.conf.signals import settings_reloaded
-from next.csrf import CsrfDelivery, csrf_delivery, defer_token
+from next.csrf import CsrfDelivery, csrf_delivery, defer_token, nonce_minted
 from next.deps.cache import render_dep_cache
 from next.deps.resolver import current_resolver
 from next.diagnostics import FailureLog, degraded
@@ -293,8 +291,7 @@ def headers_problems(value: object) -> list[str]:
 class ResponsePolicy:
     """The cache, headers and robots header of one page response, set before render.
 
-    `robots` is the `X-Robots-Tag` the static metadata requires, used when no head was
-    rendered.
+    `robots` is the static `X-Robots-Tag`, used when no head was rendered.
     """
 
     cache: CacheControl | None = None
@@ -312,13 +309,14 @@ class _Declared:
     """The declarations of the `page.py` files above one page, with their load stamps.
 
     `dynamic` holds a callable `cache`, which needs a request, and `policy` the rest.
-    `uncached` is `policy` without its cache, for a zone or a non-cacheable method.
-    `refused` marks a metadata chain the schema refused, reported again per response.
+    `uncached` is `policy` without its cache, for a non-cacheable method, and `zone`
+    holds only the headers. `refused` marks a chain the schema refused.
     """
 
     ancestors: AncestorStamps
     policy: ResponsePolicy
     uncached: ResponsePolicy
+    zone: ResponsePolicy
     dynamic: Callable[..., object] | None
     refused: bool = False
 
@@ -355,6 +353,7 @@ def _read_declared(page: Page, file_path: Path) -> _Declared:
         ancestors=ancestors,
         policy=replace(uncached, cache=cache_control(own)),
         uncached=uncached,
+        zone=ResponsePolicy(headers=headers),
         dynamic=own if callable(own) else None,
         refused=static.refused,
     )
@@ -383,11 +382,11 @@ def _declared(page: Page, file_path: Path) -> _Declared:
 
 
 def zone_policy(page: Page, file_path: Path) -> ResponsePolicy:
-    """Return the policy of a zone response, the page headers and no cache.
+    """Return the policy of a zone response, the page headers alone.
 
-    A zone response is never stored, so a callable `cache` is not called for it.
+    A zone response is never stored and carries no head, so it needs no cache or robots.
     """
-    return _declared(page, file_path).uncached
+    return _declared(page, file_path).zone
 
 
 def response_policy(
@@ -397,11 +396,12 @@ def response_policy(
     *,
     url_kwargs: Mapping[str, object],
     dep_cache: dict[str, object] | None = None,
+    response: HttpResponseBase | None = None,
 ) -> ResponsePolicy:
     """Return the policy of a full page, reading the static part once per reload.
 
-    Only a `GET` or a `HEAD` receives a cache, and a callable `cache` is resolved
-    through dependency injection.
+    Only a `GET` or a `HEAD` receives a cache, and a callable `cache` runs only when the
+    `response` that `render()` built, if any, would carry it.
     """
     held = _declared(page, file_path)
     if request.method not in _CACHEABLE:
@@ -409,6 +409,8 @@ def response_policy(
     func = held.dynamic
     if func is None:
         return held.policy
+    if response is not None and not _carries_cache(response):
+        return held.uncached
     cache = render_dep_cache(request) if dep_cache is None else dep_cache
     return replace(
         held.policy, cache=_dynamic_cache(func, file_path, request, cache, url_kwargs)
@@ -424,23 +426,21 @@ def _dynamic_cache(
 ) -> CacheControl | None:
     """Evaluate a callable `cache`, falling back to `NO_STORE` when it fails.
 
-    A response whose policy is unknown must not be stored, so a failure only disables
-    caching.
+    A response with an unknown policy must not be stored, so a failure disables caching.
     """
-    try:
+    guard = _failures.guard(
+        ("cache", file_path),
+        "The callable cache in %s raised, so the page is sent with Cache-Control: "
+        "private, no-store. Make it return %s.",
+        file_path,
+        _ANSWER_SHAPE,
+    )
+    with guard:
         resolved = current_resolver().resolve_dependencies(
             func, request=request, _cache=dep_cache, _stack=[], **url_kwargs
         )
         value = func(**resolved)
-    except Exception as exc:  # noqa: BLE001 - a page's own code may raise anything
-        _failures.contain(
-            exc,
-            ("cache", file_path),
-            "The callable cache in %s raised, so the page is sent with "
-            "Cache-Control: private, no-store. Make it return %s.",
-            file_path,
-            _ANSWER_SHAPE,
-        )
+    if guard.failed:
         return NO_STORE
     problems = cache_problems(value, callable_allowed=False)
     if not problems:
@@ -465,7 +465,7 @@ def prepare_page_render(policy: ResponsePolicy, request: HttpRequest) -> None:
     """Prepare the render of a full page according to its policy.
 
     The CSRF token is deferred where `CSRF_DELIVERY` requires it, and a page a shared
-    cache may store is marked as a shared render. A zone response skips both steps.
+    cache may store is marked as a shared render.
     """
     mode = csrf_delivery()
     if mode is CsrfDelivery.LAZY or (mode is CsrfDelivery.AUTO and policy.shared):
@@ -511,9 +511,6 @@ def forget_response_policies(**kwargs) -> None:
     _DECLARED.clear()
 
 
-settings_reloaded.connect(forget_response_policies)
-
-
 def _warn_private(file_path: Path) -> None:
     """Log per page, at the `FailureLog` rate, that its shared cache is made private."""
     _failures.warn(
@@ -549,8 +546,7 @@ def _drop_cache_headers(response: HttpResponseBase) -> None:
 class SharedCookies(SimpleCookie):
     """The cookie jar of a shared response, which makes it private on the first cookie.
 
-    Middleware sets the CSRF and session cookies after the view returns, so the jar
-    itself runs the check.
+    Middleware sets CSRF and session cookies after the view, so the jar runs the check.
     """
 
     def __init__(
@@ -606,10 +602,6 @@ def _personal(request: HttpRequest, response: HttpResponseBase) -> bool:
     A request with an `Authorization` header is personal too, since a shared copy would
     reach every visitor, and so is a render that read the CSP nonce in any template.
     """
-    # Imported here, because the import of `next.static` reaches this module through
-    # its checks, which load the page manager.
-    from next.static.nonce import nonce_minted  # noqa: PLC0415
-
     if (
         response.cookies
         or request.META.get("CSRF_COOKIE_NEEDS_UPDATE")
@@ -636,6 +628,11 @@ def _after_render(
         cookies.take_private()
 
 
+def _carries_cache(response: HttpResponseBase) -> bool:
+    """Whether a page cache applies to `response`, a success with no `Cache-Control`."""
+    return response.status_code in _SUCCESS and not response.has_header("Cache-Control")
+
+
 def _apply_cache(
     response: HttpResponseBase,
     control: CacheControl,
@@ -643,7 +640,7 @@ def _apply_cache(
     file_path: Path,
 ) -> None:
     """Set the cache on a successful response that carries no `Cache-Control`."""
-    if response.has_header("Cache-Control") or response.status_code not in _SUCCESS:
+    if not _carries_cache(response):
         return
     if not control.shared:
         control.apply(response)
@@ -675,8 +672,7 @@ def _blocks(content: str | None) -> bool:
 def robots_tag(robots: str | None, googlebot: str | None) -> str | None:
     """Return the `X-Robots-Tag` value of a page, `None` unless a directive blocks.
 
-    The header names one agent, so the directives for every agent take precedence over
-    the googlebot ones.
+    It names one agent, so the directives for every agent beat the googlebot ones.
     """
     if _blocks(robots):
         return robots

@@ -149,31 +149,32 @@ def _resolving_view(
         dep_cache = render_dep_cache(request)
         shaper = partial_shaper_slot.get()
         intent = shaper.intent(request)
-        if intent.zones:
-            policy = zone_policy(page, file_path)
-        else:
-            policy = response_policy(
-                page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
-            )
-            prepare_page_render(policy, request)
         resolution = page._resolve_page_body(
             file_path, active_module, request, _dep_cache=dep_cache, **kwargs
         )
-        if resolution.http_response is not None:
-            if intent.zones:
-                return finish_zone_response(resolution.http_response, policy, request)
-            return _finish_render_response(
-                resolution.http_response, policy, request, file_path, shaper
-            )
+        built = resolution.http_response
         if intent.zones:
-            zone = shaper.zone_response(
-                file_path,
-                request,
-                intent,
-                dynamic_body=resolution.dynamic,
-                url_kwargs=dict(kwargs),
-            )
-            return finish_zone_response(zone, policy, request)
+            zone = built
+            if zone is None:
+                zone = shaper.zone_response(
+                    file_path,
+                    request,
+                    intent,
+                    dynamic_body=resolution.dynamic,
+                    url_kwargs=dict(kwargs),
+                )
+            return finish_zone_response(zone, zone_policy(page, file_path), request)
+        policy = response_policy(
+            page,
+            file_path,
+            request,
+            url_kwargs=kwargs,
+            dep_cache=dep_cache,
+            response=built,
+        )
+        prepare_page_render(policy, request)
+        if built is not None:
+            return _finish_render_response(built, policy, request, file_path, shaper)
         body = resolution.body if resolution.body is not None else ""
         response = HttpResponse(
             page._render_composed(

@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 from django.contrib.sitemaps import Sitemap
-from django.core.exceptions import ImproperlyConfigured, PermissionDenied
+from django.core.exceptions import PermissionDenied
 from django.http import Http404
 from django.test import Client, override_settings
 from django.urls import NoReverseMatch
@@ -325,9 +325,10 @@ class TestSiteUrl:
         root = write_tree(tmp_path / "pages", sitemap="")
         with (
             routed(root, SITE={"URL": _raising_url}),
-            pytest.raises(ImproperlyConfigured, match=r"\['URL'\] .*_raising_url"),
+            pytest.raises(RuntimeError) as caught,
         ):
             Client().get("/sitemap.xml")
+        assert "['URL'] \"_raising_url\"" in caught.value.__notes__[0]
 
 
 class TestIndexableCache:
