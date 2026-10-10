@@ -106,6 +106,7 @@ intersphinx_mapping = {
 linkcheck_ignore = [
     r"https://docs\.djangoproject\.com/.*",
     r"https://docs\.python\.org/.*",
+    r"https://github\.com/next-dj/next-dj(?:/.*)?$",
 ]
 
 # templates path

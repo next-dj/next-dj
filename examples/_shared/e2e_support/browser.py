@@ -278,8 +278,11 @@ def next_probe(request: pytest.FixtureRequest) -> Iterator[PageProbe]:
     yield collected
     collected.detach(page)
 
-    if not _test_failed(request):
+    failed = _test_failed(request)
+    if not failed:
         _settle(page)
+    page.context.unroute_all(behavior="ignoreErrors")
+    if not failed:
         # Closing here releases any SSE stream still parked in a server thread. A
         # failed test keeps its page open instead, because pytest-playwright shoots
         # the failure screenshot off `context.pages` when the context tears down.
