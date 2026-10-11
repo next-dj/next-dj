@@ -26,7 +26,7 @@ See *Resolution performance* in :doc:`/content/topics/file-router` for the algor
 Which Django and Python versions are supported
 ----------------------------------------------
 
-Python 3.12, 3.13, and 3.14, with Django 5.2, 6.0, and 6.1.
+Python 3.12, 3.13, 3.14, and 3.15, with Django 5.2, 6.0, and 6.1.
 Python 3.14 needs Django 6.0 or newer, because Django 5.2 supports 3.12 and 3.13 only.
 See the *Requirements* list in :doc:`/content/intro/install` for the combinations continuous integration tests.
 
