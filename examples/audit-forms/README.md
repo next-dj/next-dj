@@ -43,7 +43,7 @@ Tailwind loads via the Play CDN in [`portal/layout.djx`](portal/layout.djx). No 
 `AuditEntry.source` distinguishes them.
 
 - `source="backend"`: written by `AuditedFormActionBackend.dispatch` in [`access/backends.py`](access/backends.py). It runs synchronously inside the dispatch path so it has direct access to `request.POST` and the resolved `HttpResponse`. It writes two rows per dispatch: `request_started` (with the captured POST payload) and `dispatched` (with `response_status` and the redirect target).
-- `source="signal"`: written by the receivers in [`access/receivers.py`](access/receivers.py). They subscribe to `next.forms.signals.action_dispatched`, `form_validation_failed`, and `form_access_denied`, using only the kwargs the framework ships in those signals. They never see the raw request, which is the whole point: the signal channel is decoupled from the backend class.
+- `source="signal"`: written by the receivers in [`access/signals.py`](access/signals.py). They subscribe to `next.forms.signals.action_dispatched`, `form_validation_failed`, and `form_access_denied`, using only the kwargs the framework ships in those signals. They never see the raw request, which is the whole point: the signal channel is decoupled from the backend class.
 
 The two channels intentionally overlap on `kind="dispatched"` so the admin page can show them side by side. Pick whichever fits your project, or run both, like this example does.
 
@@ -78,7 +78,7 @@ If the dotted path fails to import, the `next.E068` system check fires at `manag
 ### 3. One declarative `FormWizard` for three steps
 
 ```python
-# access/views/request/[step]/page.py
+# access/pages/request/[step]/page.py
 class AccessRequestWizard(next.forms.FormWizard):
     class Meta:
         steps = [
@@ -94,7 +94,7 @@ The class declares itself as one action through `__init_subclass__`, so the auto
 ### 3a. A dynamic permission gate on the wizard
 
 ```python
-# access/views/request/[step]/page.py
+# access/pages/request/[step]/page.py
 class AccessRequestWizard(next.forms.FormWizard):
     @classmethod
     def check_permissions(cls, request):
@@ -109,10 +109,10 @@ The gate is the retention-policy acknowledgement. Every step form inherits it fr
 
 One kind of POST passes ahead of the gate. A blur-validation probe (`validate="blur"` on the `{% form %}` tag, section 10) asks only whether one named field is well formed and saves no step data, so the hook returns early when `partial_intent(request).validate_fields` is set. Denying it would break inline validation on the very first field, long before the user has scrolled to the acknowledgement.
 
-The framework fires `next.forms.signals.form_access_denied` **only** on a dynamic-hook denial, never on the static `ActionGuard` fast-path. The sender is `FormActionDispatch` and the kwargs are `action_name`, `uid`, `request`, `layer` (`"view"` for `check_permissions`, `"object"` for `has_object_permission`), and `reason` (`"denied"` when the hook returned `False`, `"raised"` on `PermissionDenied`, `"response"` on an `HttpResponse` short-circuit). The receiver in [`access/receivers.py`](access/receivers.py) records one signal-sourced `AuditEntry` per denial with `kind="access_denied"`, storing `layer` and `reason` in the dedicated `access_layer` / `access_reason` columns:
+The framework fires `next.forms.signals.form_access_denied` **only** on a dynamic-hook denial, never on the static `ActionGuard` fast-path. The sender is `FormActionDispatch` and the kwargs are `action_name`, `uid`, `request`, `layer` (`"view"` for `check_permissions`, `"object"` for `has_object_permission`), and `reason` (`"denied"` when the hook returned `False`, `"raised"` on `PermissionDenied`, `"response"` on an `HttpResponse` short-circuit). The receiver in [`access/signals.py`](access/signals.py) records one signal-sourced `AuditEntry` per denial with `kind="access_denied"`, storing `layer` and `reason` in the dedicated `access_layer` / `access_reason` columns:
 
 ```python
-# access/receivers.py
+# access/signals.py
 @receiver(form_access_denied)
 def _on_form_access_denied(action_name, layer, reason, **kwargs):
     AuditEntry.objects.create(
@@ -155,15 +155,15 @@ The wizard binds the current step's form to the POST, validates only that step's
 
 The example ships three composite components, each pairing one `.djx` with a `component.py` that contributes only context:
 
-- **`progress_bar/`: synthesised state from wizard truth.** Lives at `views/request/[step]/_blocks/progress_bar/`. Its `@component.context` functions take the `wizard` instance (pushed into the template context by the `{% form %}` tag) and read `current_step()`, `step_names()`, and `completed_steps()`. A step is `current` when it is the active step, `saved` when it has stored data, otherwise `pending`. No page-level step context is needed, because all step knowledge lives in the wizard.
+- **`progress_bar/`: synthesised state from wizard truth.** Lives at `pages/request/[step]/_components/progress_bar/`. Its `@component.context` functions take the `wizard` instance (pushed into the template context by the `{% form %}` tag) and read `current_step()`, `step_names()`, and `completed_steps()`. A step is `current` when it is the active step, `saved` when it has stored data, otherwise `pending`. No page-level step context is needed, because all step knowledge lives in the wizard.
 
 - **`step_section/`: one context callable driving a loop in the template.** Lives next to `progress_bar`. Its `sections` context takes `form` and `wizard` via DI and returns one dict per step: the state (`active`, `errors`, `saved`, `pending`), the border classes, the badge props, the bound fields to render, and the stored values to list. The `.djx` walks that list and owns every tag, so the shared `badge` component draws the pill and `|truncatechars` shortens a long saved value. Field labels are read off the step form classes rather than restated, and the page template calls `{% component "step_section" %}` once for all three steps.
 
-- **`audit_row/`: `@component.context` deriving display data.** Lives at `views/_blocks/audit_row/` (one scope above the admin and per-request pages so both can use it). Takes an `AuditEntry` from the parent loop and exposes `kind_class`, `source_class`, `summary`, `payload_keys`, `request_link`, and `data_attrs`. The template stays markup-only.
+- **`audit_row/`: `@component.context` deriving display data.** Lives at `pages/_components/audit_row/` (one scope above the admin and per-request pages so both can use it). Takes an `AuditEntry` from the parent loop and exposes `kind_class`, `source_class`, `summary`, `payload_keys`, `request_link`, and `data_attrs`. The template stays markup-only.
 
 ### 6. Per-request audit trail (`AuditEntry.request` FK)
 
-The audit log can be read globally at `/admin/audit/` or per-request at `/request/<request_id>/audit/`. The router walks the file tree and emits both patterns from one app. `views/request/[step]/page.py` becomes `request/<str:step>/`, and `views/request/[int:request_id]/audit/page.py` becomes `request/<int:request_id>/audit/`. Django's URL resolver picks the int variant first, so `/request/5/audit/` reaches the per-request page even though `5` would also be a valid `<str:step>`.
+The audit log can be read globally at `/admin/audit/` or per-request at `/request/<request_id>/audit/`. The router walks the file tree and emits both patterns from one app. `pages/request/[step]/page.py` becomes `request/<str:step>/`, and `pages/request/[int:request_id]/audit/page.py` becomes `request/<int:request_id>/audit/`. Django's URL resolver picks the int variant first, so `/request/5/audit/` reaches the per-request page even though `5` would also be a valid `<str:step>`.
 
 The correlation column on `AuditEntry.request` is **only** populated by the backend channel, on the **dispatched** row of the final step. The wizard's `done` stores `request.session["access_request_just_created"]` right after `AccessRequest.objects.create(...)`, and `AuditedFormActionBackend.dispatch` pops that key after `super()` returns. Signal-channel rows stay unlinked by design, because the signal channel sees only the kwargs the signal ships, and `AccessRequest.id` is not among them.
 
@@ -187,7 +187,7 @@ The effect on the page is the same either way: on `GET` of step 2 the team summa
 
 `/admin/audit/?kind=validation_failed` narrows the table to one kind through a plain GET form. The `@context("active_kind")` function reads `request.GET` and the template uses it to mark the matching `<option>` as `selected`.
 
-The heavy table is a lazy zone. `views/admin/audit/template.djx` wraps it in `{% zone "audit-table" lazy="revealed" %}` with a `{% placeholder %}` branch of `skeleton` bars. On the full page render only the placeholder renders, and the body, the `<table>` with up to a hundred rows, is skipped. The body arrives as a morph patch when the zone scrolls into view, so the table is fetched on demand rather than on first paint.
+The heavy table is a lazy zone. `pages/admin/audit/template.djx` wraps it in `{% zone "audit-table" lazy="revealed" %}` with a `{% placeholder %}` branch of `skeleton` bars. On the full page render only the placeholder renders, and the body, the `<table>` with up to a hundred rows, is skipped. The body arrives as a morph patch when the zone scrolls into view, so the table is fetched on demand rather than on first paint.
 
 The expensive query is guarded by `zone_requested`, the idiom that makes the laziness honest rather than cosmetic:
 
@@ -228,7 +228,7 @@ The example runs both because it is a _demonstration_. In production, pick the c
 
 The landing page and the wizard wire together into one interaction that needs no project JavaScript: click "Start a new request", fill the wizard inside a modal, and watch the recent-requests list refresh under the modal as it closes. The whole thing is three template attributes, two zones, and one builder call.
 
-**The opening link and the list zone.** The landing page ([`access/views/template.djx`](access/views/template.djx)) carries one plain link with two attributes and wraps the list in a named zone:
+**The opening link and the list zone.** The landing page ([`access/pages/template.djx`](access/pages/template.djx)) carries one plain link with two attributes and wraps the list in a named zone:
 
 ```django
 <a href="{% url 'next:page_request_step' step='identity' %}"
@@ -247,7 +247,7 @@ The landing page and the wizard wire together into one interaction that needs no
 
 `data-next-layer` names the zone the modal hosts, `data-next-accepted` names the page zone to re-fetch once the modal closes with an accept result, and `data-next-key` lets the list morph identify rows by primary key. No selector and no swap mode appear in the markup. The server authors every operation, and the client only names intent.
 
-**The wizard inside a zone.** The step template ([`access/views/request/[step]/template.djx`](access/views/request/%5Bstep%5D/template.djx)) wraps the existing form in the `access-wizard` zone and turns on blur validation:
+**The wizard inside a zone.** The step template ([`access/pages/request/[step]/template.djx`](access/pages/request/%5Bstep%5D/template.djx)) wraps the existing form in the `access-wizard` zone and turns on blur validation:
 
 ```django
 {% zone "access-wizard" %}
@@ -260,7 +260,7 @@ The landing page and the wizard wire together into one interaction that needs no
 The page module did not change for routing or steps. The only Python edit is the wizard's `done`, which now closes the layer and toasts instead of returning a bare redirect:
 
 ```python
-# access/views/request/[step]/page.py
+# access/pages/request/[step]/page.py
 def done(self, request, cleaned_data):
     fields = {k: v for k, v in cleaned_data.items() if k != POLICY_FIELD}
     access_request = AccessRequest.objects.create(**fields)
@@ -280,7 +280,7 @@ Both entry points into the wizard carry the same opener attributes: the landing 
 
 **With the runtime.** The link opens a native `<dialog>` and creates an empty `access-wizard` container before the request, then GETs the step page for that zone alone. Each step submits inside the modal: an invalid step morphs only the `access-wizard` zone and the modal stays open, a valid non-final step morphs the zone to the next step with no redirect, and the final step's `done` returns `layer.close` plus a toast. The runtime closes the modal and, because the opening link named `data-next-accepted`, re-GETs the `request-list` zone of the landing page with its own cookies, so the list authorizes and renders in its own view before morphing under the now-closed modal.
 
-**Without the runtime.** Every attribute degrades to a plain link or form. The link navigates to the full `/request/identity/` page, each step posts and `302`-redirects to the next step's page, and the final step's `done` falls back to a `303` redirect to `/request/<id>/audit/?just=1`, the same result page the workflow always ends on. The `data-next-*` attributes are inert without a runtime, so the no-JS path is byte-for-byte the original flow with one status code changed from `302` to `303`. The `tests/test_integration.py` suite asserts both paths: `TestModalWizardFlagship` walks the partial envelopes, the no-runtime regression lives in `TestSuccessRedirect`.
+**Without the runtime.** Every attribute degrades to a plain link or form. The link navigates to the full `/request/identity/` page, each step posts and `302`-redirects to the next step's page, and the final step's `done` falls back to a `303` redirect to `/request/<id>/audit/?just=1`, the same result page the workflow always ends on. The `data-next-*` attributes are inert without a runtime, so the no-JS path is byte-for-byte the original flow with one status code changed from `302` to `303`. The `tests/test_integration.py` suite asserts both paths: `TestModalWizardFlagship` walks the partial envelopes, `TestSuccessRedirect` pins the no-runtime path.
 
 The shared `dialog` component ([`examples/_shared/_components/dialog/`](../_shared/_components/dialog/)) is a styled wrapper around `<dialog>`. The framework's layer runtime owns opening a dialog from a `data-next-layer` link and closing it on accept or dismiss, so the component ships no open trigger of its own. Its `component.mjs` keeps only the document-delegation idiom, a single document listener that survives a morph replacing the dialog markup, for the cases that mount a styled `<dialog>` directly without a layer.
 
@@ -300,11 +300,11 @@ The test suite asserts the server contract (the envelopes, the zone targets, the
 [`portal/layout.djx`](portal/layout.djx) calls the shared `page_head` component without a title, and the builtin `{% metadata %}` tag inside it folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with what the page tree declares. The landing declares nothing and renders the settings `default`. The wizard and the global log declare a one-line dict each:
 
 ```python
-# access/views/request/[step]/page.py
+# access/pages/request/[step]/page.py
 metadata: MetadataDict = {"title": "Request access", "robots": {"index": False}}
 ```
 
-`/admin/audit/` has the same shape titled `Audit log`, and one title covers all three wizard steps. The per-request trail is dynamic, so [`request/[int:request_id]/audit/page.py`](access/views/request/%5Bint%3Arequest_id%5D/audit/page.py) registers a callable that names the `access_request` context as its parameter and gets the row that context already fetched:
+`/admin/audit/` has the same shape titled `Audit log`, and one title covers all three wizard steps. The per-request trail is dynamic, so [`request/[int:request_id]/audit/page.py`](access/pages/request/%5Bint%3Arequest_id%5D/audit/page.py) registers a callable that names the `access_request` context as its parameter and gets the row that context already fetched:
 
 ```python
 @page.metadata

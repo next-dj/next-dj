@@ -74,7 +74,7 @@ There is no model to save, so the page owns every write.
 The bulk form below declares ``enabled_names`` with an empty choice list, so a ``MultipleChoiceField`` rejects every submitted value until `Dynamic choices`_ fills the list in ``__init__``.
 
 .. code-block:: python
-   :caption: flags/panels/admin/page.py — bulk update across many rows
+   :caption: flags/pages/admin/page.py — bulk update across many rows
 
    from django.http import HttpRequest, HttpResponseRedirect
 
@@ -139,7 +139,7 @@ Populate choices in ``__init__`` when they depend on the database or the request
 Call ``super().__init__`` first, then rewrite the field's ``choices`` or ``queryset``.
 
 .. code-block:: python
-   :caption: flags/panels/admin/page.py — choices from current flag names
+   :caption: flags/pages/admin/page.py — choices from current flag names
 
    import next.forms
 

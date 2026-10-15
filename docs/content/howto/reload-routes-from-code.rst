@@ -21,7 +21,7 @@ Wire the receivers.
 Each receiver is decorated with ``@receiver`` at module top level, and ``AppConfig.ready`` imports the module so the decorators run once on startup.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    from django.db.models.signals import post_delete, post_save
    from django.dispatch import receiver
@@ -37,7 +37,7 @@ Each receiver is decorated with ``@receiver`` at module top level, and ``AppConf
    def reload_router_on_delete(**kwargs) -> None:
        router_manager.reload()
 
-Import the receivers module from ``AppConfig.ready`` so the decorators run at startup.
+Import ``notes.signals`` from ``AppConfig.ready`` so the decorators run at startup.
 
 .. code-block:: python
    :caption: notes/apps.py
@@ -48,7 +48,7 @@ Import the receivers module from ``AppConfig.ready`` so the decorators run at st
        name = "notes"
 
        def ready(self) -> None:
-           from notes import receivers  # imported for its receiver registrations
+           from notes import signals  # imported for its receiver registrations
 
 Each call rebuilds the backend list from the current ``NEXT_FRAMEWORK`` configuration, clears Django's URL caches, and emits ``router_reloaded``.
 The framework listens to that signal itself, so the routers the development watcher and the staticfiles finder read are rebuilt with the ones the URL resolver serves.

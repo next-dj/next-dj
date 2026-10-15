@@ -33,16 +33,16 @@ The keyword argument that carries the captured value is named after the paramete
 
    from next.urls import page_reverse
 
-   # routes/page.py
+   # pages/page.py
    page_reverse()                              # "/"
 
-   # routes/blog/page.py
+   # pages/blog/page.py
    page_reverse("blog")                        # "/blog/"
 
-   # routes/posts/[slug]/page.py
+   # pages/posts/[slug]/page.py
    page_reverse("posts/[slug]", slug="hello")  # "/posts/hello/"
 
-   # routes/posts/[int:post_id]/page.py
+   # pages/posts/[int:post_id]/page.py
    page_reverse("posts/[int:post_id]", post_id=7)  # "/posts/7/"
 
 The template is normalised through the same parser the router uses for URL name generation, which collapses the slashes, brackets, colons, and hyphens into underscores and leaves everything between them alone.

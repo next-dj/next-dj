@@ -10,4 +10,4 @@ Short one. Just enough to prove the render pipeline works.
 print("hello, world")
 ```
 
-The nested post layout is shared across every article under `screens/posts/`.
+The nested post layout is shared across every article under `pages/posts/`.

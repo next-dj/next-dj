@@ -78,7 +78,7 @@ def test_the_lazy_zone_swaps_its_placeholder_for_the_busiest_pages(
     busiest = zone(page, BUSIEST_ZONE)
     expect(busiest.locator("li")).not_to_have_count(0)
     expect(busiest.get_by_text("Loading the busiest pages")).to_have_count(0)
-    expect(busiest).to_contain_text("dashboards/page.py")
+    expect(busiest).to_contain_text("obs/pages/page.py")
     lazy = next_probe.partial_requests(zone=BUSIEST_ZONE)
     assert [response.request.method for response in lazy] == ["GET"]
 

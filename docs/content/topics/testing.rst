@@ -116,7 +116,7 @@ The plugin is named explicitly rather than shipped as a ``pytest11`` entry point
    DJANGO_SETTINGS_MODULE = config.settings
    pythonpath = .
    addopts = -p next.testing.plugin
-   next_pages = myapp/routes
+   next_pages = myapp/pages
    next_clear_cache = true
 
 That file is the recommended starting point for a new suite, and the options it sets are described below.
@@ -155,7 +155,7 @@ Each one is inert by default, so a suite that loads the plugin and sets none of 
    addopts = -p next.testing.plugin
    next_pages =
        root_pages
-       notes/workspaces
+       notes/pages
    next_components = true
    next_clear_cache = true
 

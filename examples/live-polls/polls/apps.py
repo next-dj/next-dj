@@ -7,6 +7,7 @@ from next.static.discovery import default_stems
 class PollsConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "polls"
+    label = "polls"
 
     def ready(self) -> None:
         """Register the Vue asset kind, the page stem, and signal wiring."""
@@ -15,4 +16,4 @@ class PollsConfig(AppConfig):
         )
         default_stems.register("template", "page")
 
-        from polls import providers, signals
+        from polls import deps, signals

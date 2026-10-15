@@ -54,7 +54,7 @@ Declare the ordered steps under ``Meta.steps`` as a list of ``(name, FormClass)`
 Each form class is a plain ``django.forms.Form`` or ``django.forms.ModelForm``.
 
 .. code-block:: python
-   :caption: access/views/request/[step]/page.py — auto-registered as ``access_request_wizard``
+   :caption: access/pages/request/[step]/page.py — auto-registered as ``access_request_wizard``
 
    from access.models import AccessRequest
    from django import forms
@@ -89,8 +89,7 @@ Each form class is a plain ``django.forms.Form`` or ``django.forms.ModelForm``.
            AccessRequest.objects.create(**cleaned_data)
            return redirect_to_origin(request)
 
-The captions on this page mirror the repository's ``audit-forms`` example, which configures ``PAGES_DIR`` as ``views`` and ``COMPONENTS_DIR`` as ``_blocks``.
-Under the default settings the same files live in ``access/pages/request/[step]/`` and a ``_components/`` folder, see :doc:`/content/ref/settings`.
+The captions on this page mirror the ``access`` application of the repository's ``audit-forms`` example.
 
 Every step form subclasses ``django.forms`` directly.
 A step is not a standalone action, so a plain Django form has nothing to register and nothing to suppress.
@@ -219,7 +218,7 @@ Rendering
 Render the wizard with the same ``{% form %}`` block tag a plain form uses.
 
 .. code-block:: jinja
-   :caption: access/views/request/[step]/template.djx
+   :caption: access/pages/request/[step]/template.djx
 
    {% form "access_request_wizard" %}
      {{ form.as_p }}
@@ -283,7 +282,7 @@ The ``{% component %}`` call must sit inside the ``{% form %}`` block, because t
 Called from outside the block, the ``wizard`` parameter of ``@component.context`` resolves to ``None`` and every wizard read raises ``AttributeError``.
 
 .. code-block:: python
-   :caption: access/views/request/[step]/_blocks/progress_bar/component.py
+   :caption: access/pages/request/[step]/_components/progress_bar/component.py
 
    from typing import Any
 
@@ -311,7 +310,7 @@ Called from outside the block, the ``wizard`` parameter of ``@component.context`
        return "pending"
 
 .. code-block:: jinja
-   :caption: access/views/request/[step]/_blocks/progress_bar/component.djx
+   :caption: access/pages/request/[step]/_components/progress_bar/component.djx
 
    <nav>
      {% for step in steps %}
@@ -324,7 +323,7 @@ Called from outside the block, the ``wizard`` parameter of ``@component.context`
 The page template calls the component from inside the block, beside the step form shown earlier.
 
 .. code-block:: jinja
-   :caption: access/views/request/[step]/template.djx
+   :caption: access/pages/request/[step]/template.djx
 
    {% form "access_request_wizard" %}
      {% component "progress_bar" %}

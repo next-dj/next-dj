@@ -85,7 +85,7 @@ NEXT_FRAMEWORK = {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
             "DIRS": [BASE_DIR / "root_pages"],
-            "PAGES_DIR": "workspaces",
+            "PAGES_DIR": "pages",
             "OPTIONS": {
                 "context_processors": [
                     "django.template.context_processors.request",
@@ -98,7 +98,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(BASE_DIR / "root_blocks"), str(SHARED_DIR / "_components")],
-            "COMPONENTS_DIR": "_blocks",
+            "COMPONENTS_DIR": "_components",
         }
     ],
     "STATIC_BACKENDS": [{"BACKEND": "notes.backends.TenantPrefixStaticBackend"}],

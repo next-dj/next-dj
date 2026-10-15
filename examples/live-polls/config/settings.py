@@ -97,7 +97,7 @@ NEXT_FRAMEWORK = {
             # broadcast. It supplies the shared HTML envelope wrapped
             # around every poll list, detail, and stream surface.
             "DIRS": [str(BASE_DIR / "studio")],
-            "PAGES_DIR": "screens",
+            "PAGES_DIR": "pages",
             "OPTIONS": {"context_processors": []},
         }
     ],
@@ -105,7 +105,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
-            "COMPONENTS_DIR": "_widgets",
+            "COMPONENTS_DIR": "_components",
         }
     ],
     "STATIC_BACKENDS": [

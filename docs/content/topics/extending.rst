@@ -443,7 +443,7 @@ A reusable extension ships as an ordinary Django application, and its ``AppConfi
        name = "next_audit"
 
        def ready(self) -> None:
-           from next_audit import providers, receivers  # noqa: F401
+           from next_audit import deps, signals  # noqa: F401
 
 Register through ``ready`` rather than at module import, because the app registry is not populated when the module body runs.
 Everything a package registers imperatively goes there, the provider and named-dependency registrations, the asset kinds and stems, the patch verbs, the autoreload watch specs, the signal receivers, and a port replacement.

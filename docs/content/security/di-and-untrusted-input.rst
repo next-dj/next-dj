@@ -135,7 +135,7 @@ A custom provider that reads from external state (database, cache, HTTP) must va
 The ``url_kwargs`` dict and ``request.GET`` are both untrusted.
 
 .. code-block:: python
-   :caption: notes/providers.py
+   :caption: notes/deps.py
 
    import inspect
    import re

@@ -6,10 +6,10 @@ import re
 import pytest
 from django.core.cache import cache
 from flags.cache import FLAG_PREFIX, get_cached_flag
+from flags.deps import WRITE_GATE_FLAG
 from flags.metrics import render_counts
 from flags.models import Flag
-from flags.providers import WRITE_GATE_FLAG
-from flags.receivers import access_denied_count
+from flags.signals import access_denied_count
 
 from next.testing import (
     assert_has_class,
@@ -81,7 +81,7 @@ class TestHome:
         assert "Nothing disabled" in body
 
 
-ADMIN_PANEL = pathlib.Path("flags/panels/admin/page.py")
+ADMIN_PAGE = pathlib.Path("flags/pages/admin/page.py")
 
 BADGE_RE = re.compile(
     r'<span class="inline-flex items-center rounded-full[^"]*">\s*(\w+)\s*</span>'
@@ -114,12 +114,12 @@ class TestAdminBulkToggle:
     def test_toggle_preview_reads_the_flag_state(self, make_flag) -> None:
         on_badge = render_component_by_name(
             "toggle_preview",
-            at=ADMIN_PANEL,
+            at=ADMIN_PAGE,
             props={"flag": make_flag("on_flag", label="On", enabled=True)},
         )
         off_badge = render_component_by_name(
             "toggle_preview",
-            at=ADMIN_PANEL,
+            at=ADMIN_PAGE,
             props={"flag": make_flag("off_flag", label="Off")},
         )
         assert _badge_text(on_badge) == "on"

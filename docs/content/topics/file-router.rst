@@ -23,7 +23,7 @@ Renaming a directory renames the URL and its computed URL name.
 Removing a directory removes the URL.
 
 The name of the page root itself is the ``PAGES_DIR`` value of the backend entry, so it is whatever a project sets it to.
-The examples on this page use ``routes`` while the tutorial and the shipped default use ``pages``, and nothing below depends on which name a project picks.
+The examples on this page use ``pages``, the shipped default, and nothing below depends on which name a project picks.
 
 When to use the file router
 ---------------------------
@@ -42,28 +42,28 @@ The router recognises four directory shapes.
 
 Plain segment.
    A directory name without brackets becomes a static URL segment.
-   ``routes/blog/page.py`` answers ``/blog/``.
+   ``pages/blog/page.py`` answers ``/blog/``.
 
 Captured segment.
    A directory wrapped in single brackets becomes a captured URL parameter.
-   ``routes/posts/[slug]/page.py`` answers ``/posts/<str:slug>/``.
+   ``pages/posts/[slug]/page.py`` answers ``/posts/<str:slug>/``.
 
 Typed captured segment.
    A captured directory with a converter prefix sets the Django path converter.
-   ``routes/posts/[int:post_id]/page.py`` answers ``/posts/<int:post_id>/``.
+   ``pages/posts/[int:post_id]/page.py`` answers ``/posts/<int:post_id>/``.
 
 Wildcard segment.
    A directory wrapped in double brackets becomes a ``path`` converter that swallows multiple URL segments.
-   ``routes/api/[[suffix]]/page.py`` answers ``/api/<path:suffix>/``.
+   ``pages/api/[[suffix]]/page.py`` answers ``/api/<path:suffix>/``.
    A route holds at most one wildcard segment.
    A second ``[[name]]`` anywhere in the same trail raises ``DuplicateURLParameterError`` at router build and reports :ref:`next.E028 <ref-system-checks>` at check time, whatever the two names are.
 
 The following layout shows the four shapes together.
 
 .. code-block:: text
-   :caption: routes tree
+   :caption: pages tree
 
-   routes/
+   pages/
      page.py                       /
      blog/
        page.py                     /blog/
@@ -114,14 +114,14 @@ Captured values reach Python through markers.
 ``DUrl[T]`` parses the captured value into the requested type and provides it to context functions and action handlers.
 
 Hyphens in directory names are normalised to underscores in the generated URL parameter and URL name.
-A ``routes/[my-id]/page.py`` route becomes the Django parameter ``<str:my_id>``, the resolver provides it as ``my_id``, and the URL name registers as ``next:page_my_id``.
+A ``pages/[my-id]/page.py`` route becomes the Django parameter ``<str:my_id>``, the resolver provides it as ``my_id``, and the URL name registers as ``next:page_my_id``.
 Name your directories without hyphens when you want the parameter name and the directory name to match exactly.
 A directory name that is no Python identifier after that normalisation, such as ``[2fa]`` or ``[user.id]``, raises ``InvalidURLParameterError`` at router build.
 ``manage.py check`` reports it twice, as :ref:`next.E008 <ref-system-checks>` from the structural walk that reads the directory name and as :ref:`next.E082 <ref-system-checks>` from the pattern walk that tries to turn the route into a Django path.
 Both that refusal and ``DuplicateURLParameterError`` name the offending ``page.py`` alongside the route.
 
 .. code-block:: python
-   :caption: routes/posts/[int:post_id]/page.py
+   :caption: pages/posts/[int:post_id]/page.py
 
    from notes.models import Note
 
@@ -143,9 +143,9 @@ A directory that contains a ``template.djx`` without a ``page.py`` still becomes
 The router renders the template directly without invoking a Python page module.
 
 .. code-block:: text
-   :caption: routes tree
+   :caption: pages tree
 
-   routes/
+   pages/
      about/
        template.djx                /about/
      legal/
@@ -171,15 +171,15 @@ Captured segments contribute their parameter name without the brackets.
 
    * - File
      - URL name
-   * - ``routes/page.py``
+   * - ``pages/page.py``
      - ``next:page_``
-   * - ``routes/blog/page.py``
+   * - ``pages/blog/page.py``
      - ``next:page_blog``
-   * - ``routes/posts/[slug]/page.py``
+   * - ``pages/posts/[slug]/page.py``
      - ``next:page_posts_slug``
-   * - ``routes/posts/[int:post_id]/page.py``
+   * - ``pages/posts/[int:post_id]/page.py``
      - ``next:page_posts_int_post_id``
-   * - ``routes/api/[[suffix]]/page.py``
+   * - ``pages/api/[[suffix]]/page.py``
      - ``next:page_api_suffix``
 
 The trailing underscore on the root page name is intentional.
@@ -199,7 +199,7 @@ Set it to change the prefix for every file-routed page at once.
        "URL_NAME_TEMPLATE": "route_{name}",
    }
 
-With this value ``routes/blog/page.py`` registers as ``next:route_blog``.
+With this value ``pages/blog/page.py`` registers as ``next:route_blog``.
 The placeholder ``{name}`` must appear in the template so each page still gets a distinct name.
 
 Reverse them through the standard ``{% url %}`` tag or with ``page_reverse``.
@@ -266,7 +266,7 @@ The comparison is string equality after bracket conversion, so semantic overlap 
                "BACKEND": "next.urls.FileRouterBackend",
                "APP_DIRS": True,
                "DIRS": [str(BASE_DIR / "chrome")],
-               "PAGES_DIR": "routes",
+               "PAGES_DIR": "pages",
                "OPTIONS": {
                    "context_processors": [
                        "myapp.context_processors.global_context",
@@ -303,7 +303,7 @@ Segment entry.
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": ["_drafts"],
                "APP_DIRS": True,
-               "PAGES_DIR": "routes",
+               "PAGES_DIR": "pages",
                "OPTIONS": {"context_processors": []},
            }
        ]
@@ -338,14 +338,14 @@ Each backend can read from a different directory, register a different ``PAGES_D
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],
                "APP_DIRS": True,
-               "PAGES_DIR": "routes",
+               "PAGES_DIR": "pages",
                "OPTIONS": {"context_processors": []},
            },
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],
                "APP_DIRS": True,
-               "PAGES_DIR": "admin_routes",
+               "PAGES_DIR": "admin_pages",
                "OPTIONS": {"context_processors": []},
            }
        ]
@@ -380,7 +380,7 @@ Common patterns
 Single page application root
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A single ``routes/page.py`` registers the empty path ``/``.
+A single ``pages/page.py`` registers the empty path ``/``.
 The router treats it as the default URL for the project.
 
 Static content section

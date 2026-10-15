@@ -12,9 +12,9 @@ from polls import broker as broker_module
 from polls.backends import ViteManifestBackend
 from polls.broker import SNAPSHOT_KEY, PollBroker, build_snapshot, store_snapshot
 from polls.demo import DEMO_POLLS, seed_demo
+from polls.deps import DPoll, PollProvider
 from polls.forms import VoteForm
 from polls.models import Choice, Poll
-from polls.providers import DPoll, PollProvider
 from polls.signals import VOTE_ACTION_NAME, broadcast_vote
 
 from next.static import default_kinds
@@ -36,10 +36,10 @@ def asset_path(vite_root: Path) -> Path:
     asset = (
         vite_root
         / "polls"
-        / "screens"
+        / "pages"
         / "polls"
         / "[int:id]"
-        / "_widgets"
+        / "_components"
         / "poll_chart"
     )
     asset.mkdir(parents=True, exist_ok=True)
@@ -55,7 +55,7 @@ def _backend(options: dict[str, str]) -> ViteManifestBackend:
     )
 
 
-ASSET_RELATIVE_PATH = "polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue"
+ASSET_RELATIVE_PATH = "polls/pages/polls/[int:id]/_components/poll_chart/component.vue"
 
 
 def _root_holding_the_asset(vite_root: Path, _tmp_path: Path) -> Path:

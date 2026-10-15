@@ -3,7 +3,7 @@ import re
 from decimal import Decimal
 
 import pytest
-from catalog import queries as catalog_queries
+from catalog import services as catalog_services
 from catalog.demo import CATEGORIES
 from catalog.landing import FAQ, LEAD_ZONE
 from catalog.models import Category, Lead, Product
@@ -59,7 +59,7 @@ def _more_zone(body: str) -> str:
 
 def _cache_keys() -> list[str]:
     """Return every cache key currently stored under the search prefix."""
-    return [k for k in cache._cache if catalog_queries.CACHE_KEY_PREFIX in k]
+    return [k for k in cache._cache if catalog_services.CACHE_KEY_PREFIX in k]
 
 
 class TestRouting:

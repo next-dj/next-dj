@@ -64,7 +64,7 @@ The React side has its own suite. `npm test` runs Vitest over the three co-locat
 Every route and component owns its asset files in the same directory:
 
 ```
-boards/board/[int:id]/
+pages/board/[int:id]/
 ├── page.py           <- @context callables building the board payload
 ├── page.jsx          <- named export Board plus the React island mount/unmount pair
 ├── page.test.jsx     <- Vitest + RTL tests for Board
@@ -72,7 +72,7 @@ boards/board/[int:id]/
 ├── layout.djx        <- board header + Board/Settings nav
 ├── settings/
 │   └── template.djx  <- rename, add-column, and archive forms, a virtual route with no page.py
-└── _pieces/
+└── _components/
     ├── card/
     │   ├── component.py
     │   ├── component.djx
@@ -88,7 +88,7 @@ boards/board/[int:id]/
         └── component.djx       <- "Move complete" SSR fallback
 ```
 
-The outer HTML envelope is not in this tree. It lives in [`cockpit/layout.djx`](cockpit/layout.djx), the project-level page root listed in `PAGE_BACKENDS["DIRS"]`, while the routable pages come from the app through `APP_DIRS = True` and `PAGES_DIR = "boards"`.
+The outer HTML envelope is not in this tree. It lives in [`cockpit/layout.djx`](cockpit/layout.djx), the project-level page root listed in `PAGE_BACKENDS["DIRS"]`, while the routable pages come from the app through `APP_DIRS = True` and `PAGES_DIR = "pages"`.
 
 `layout.djx` renders the Board and Settings tabs with the shared `nav_link` component and feeds it `url_kwargs=board_url_kwargs`, an inherited `@context` that returns `{"id": board.pk}`. The tabs therefore reverse `next:page_board_int_id` and `next:page_board_int_id_settings` by name, and the call site never spells out the `[int:id]` converter or a literal `/board/<id>/` path.
 
@@ -102,10 +102,10 @@ class KanbanConfig(AppConfig):
         )
         default_stems.register("template", "page")
 
-        from kanban import providers, signals  # noqa: F401, PLC0415
+        from kanban import deps, signals
 ```
 
-`render_module_tag` is the framework's built-in renderer for ES module assets, so jsx files reuse it without a custom renderer. The `signals` import wires the dev-mode `collector_finalized` receiver. No other integration point in the framework is touched.
+`render_module_tag` is the framework's built-in renderer for ES module assets, so jsx files reuse it without a custom renderer. The `deps` import registers the `DBoard` and `DCard` providers, and the `signals` import wires the dev-mode `collector_finalized` receiver. No other integration point in the framework is touched.
 
 ### 3. `ViteManifestBackend`
 
@@ -174,7 +174,7 @@ def board_payload(active_board: DBoard[Board], request: HttpRequest) -> dict:
 
 The React root follows the framework-island contract. `Next.partial.onMount("#kanban-board", ...)` mounts the board when the element appears, a `WeakMap` guard keeps repeated `onMount` passes from creating a second root on a live element, and a delegated `next:removed` listener unmounts the root when the mount point detaches, whether the event fires on the element itself or on an ancestor whose subtree contains it.
 
-`DeepMergePolicy` is configured as the JS-context policy in [`config/settings.py`](config/settings.py), so the layout-level `active_boards_count` from `boards/page.py` and the page-level `board` payload merge into one `window.Next.context` object instead of the later writer replacing the earlier one. The same backend runs `HashContentDedup`, which keys assets by the sha256 of their content, so two hashed bundle filenames holding identical bytes collapse to one tag after a build.
+`DeepMergePolicy` is configured as the JS-context policy in [`config/settings.py`](config/settings.py), so the layout-level `active_boards_count` from `pages/page.py` and the page-level `board` payload merge into one `window.Next.context` object instead of the later writer replacing the earlier one. The same backend runs `HashContentDedup`, which keys assets by the sha256 of their content, so two hashed bundle filenames holding identical bytes collapse to one tag after a build.
 
 ### 6. The same board with and without JavaScript
 
@@ -202,7 +202,7 @@ Modules that use these markers never start with `from __future__ import annotati
 
 ### 10. One title for the board and its settings page
 
-No template spells the `<title>`. [`cockpit/layout.djx`](cockpit/layout.djx) calls the shared `page_head` component, which renders the builtin `{% metadata %}` tag, and the tag folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with whatever the page tree declares. The settings tier holds the template `{title} · {site_name}` and a `default`, `NEXT_FRAMEWORK["SITE"]["NAME"]` fills `{site_name}`, and the index renders that default because it names no title of its own. [`board/[int:id]/page.py`](kanban/boards/board/%5Bint%3Aid%5D/page.py) adds the one dynamic tier:
+No template spells the `<title>`. [`cockpit/layout.djx`](cockpit/layout.djx) calls the shared `page_head` component, which renders the builtin `{% metadata %}` tag, and the tag folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with whatever the page tree declares. The settings tier holds the template `{title} · {site_name}` and a `default`, `NEXT_FRAMEWORK["SITE"]["NAME"]` fills `{site_name}`, and the index renders that default because it names no title of its own. [`board/[int:id]/page.py`](kanban/pages/board/%5Bint%3Aid%5D/page.py) adds the one dynamic tier:
 
 ```python
 @page.metadata(inherit=True)
@@ -227,6 +227,7 @@ The settings page hosts three independent `<form>` blocks. Each one posts to its
 - [`kanban/apps.py`](kanban/apps.py): `KanbanConfig.ready()` with the two registry calls.
 - [`kanban/signals.py`](kanban/signals.py): `inject_vite_dev_assets` receiver wired in `DEBUG` mode.
 - [`kanban/backends.py`](kanban/backends.py): `ViteManifestBackend` dev/prod URL routing.
+- [`kanban/deps.py`](kanban/deps.py): `DBoard` and `DCard` markers with `BoardProvider` and `CardProvider`.
 - [`vite.config.ts`](vite.config.ts): glob multi-entry build that discovers all co-located `.jsx` files.
 - [`vitest.config.ts`](vitest.config.ts): Vitest setup targeting `kanban/**/*.test.{jsx,tsx}`.
 - [`next/static/assets.py`](../../next/static/assets.py): the public `KindRegistry` API used by `apps.py`.

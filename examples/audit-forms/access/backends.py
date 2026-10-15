@@ -51,7 +51,7 @@ class AuditedFormActionBackend(RegistryFormActionBackend):
     """Registry backend that writes a backend-sourced `AuditEntry` per dispatch.
 
     Writes `request_started` and `dispatched` rows alongside the signal-sourced ones
-    `access.receivers` writes, so the admin page shows both channels side by side.
+    `access.signals` writes, so the admin page shows both channels side by side.
     """
 
     def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:

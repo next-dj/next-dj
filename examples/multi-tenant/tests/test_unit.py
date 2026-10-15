@@ -13,10 +13,10 @@ from markup import render_markdown
 from notes.backends import TenantPrefixStaticBackend
 from notes.context_processors import tenant_theme
 from notes.demo import DEMO_TENANTS, seed_demo
+from notes.deps import DTenant, TenantProvider
 from notes.middleware import TenantMiddleware
 from notes.models import Note, Tenant
-from notes.providers import DTenant, TenantProvider
-from notes.receivers import _on_form_access_denied
+from notes.signals import _on_form_access_denied
 from notes.themes import (
     DEFAULT_ACCENT,
     THEME_STYLESHEETS,
@@ -30,7 +30,7 @@ pytestmark = pytest.mark.django_db
 
 
 EXAMPLE_ROOT = Path(__file__).resolve().parent.parent
-PAGES_ROOT = EXAMPLE_ROOT / "notes" / "workspaces"
+PAGES_ROOT = EXAMPLE_ROOT / "notes" / "pages"
 
 
 def _load(path: Path, name: str) -> ModuleType:
@@ -43,7 +43,7 @@ def _load(path: Path, name: str) -> ModuleType:
 
 
 _note_card = _load(
-    PAGES_ROOT / "notes" / "_blocks" / "note_card" / "component.py", "mt_note_card"
+    PAGES_ROOT / "notes" / "_components" / "note_card" / "component.py", "mt_note_card"
 )
 
 

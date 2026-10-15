@@ -94,18 +94,18 @@ Place a page module at the ``stream/`` route and return a ``PatchEventStream`` f
 The framework escape hatch returns any :class:`~django.http.HttpResponseBase` subclass verbatim, so no ``layout.djx`` wraps the response and the static collector does not run.
 Each ``Patches`` the source yields becomes one event, and ``echo_of`` carries the originating request id so the voter's own tab drops its echo.
 
-``DPoll`` is a project-defined DI marker the example declares in ``polls/providers.py``.
+``DPoll`` is a project-defined DI marker the example declares in ``polls/deps.py``.
 See :doc:`/content/topics/dependency-injection` for how to define custom markers.
 
 .. code-block:: python
-   :caption: polls/screens/polls/[int:id]/stream/page.py
+   :caption: polls/pages/polls/[int:id]/stream/page.py
 
    from collections.abc import Iterator
 
    from django.http import HttpRequest
    from polls.broker import broker
+   from polls.deps import DPoll
    from polls.models import Poll
-   from polls.providers import DPoll
 
    from next.partial import Patches, PatchEventStream
 
@@ -168,7 +168,7 @@ The vote page wraps its results in a zone and connects the stream with a ``data-
 The runtime opens one ``EventSource`` and routes each ``next-patches`` event into the same apply pipeline an HTTP response uses, so no hand-written ``EventSource`` code is needed.
 
 .. code-block:: jinja
-   :caption: polls/screens/polls/[int:id]/template.djx
+   :caption: polls/pages/polls/[int:id]/template.djx
 
    {% zone "poll-results" %}
      {% component "poll_chart" %}

@@ -8,14 +8,14 @@ from django.db import IntegrityError
 from django.http import Http404
 from shortener import cache as cache_module
 from shortener.cache import flush_clicks, increment_clicks
+from shortener.deps import DLink, LinkProvider
 from shortener.models import Link
-from shortener.providers import DLink, LinkProvider
-from shortener.receivers import action_counts
-from shortener.routes.page import (
+from shortener.pages.page import (
     SLUG_ATTEMPTS_PER_LENGTH,
     SLUG_MAX_LENGTH,
     _create_link_with_unique_slug,
 )
+from shortener.signals import action_counts
 
 from next.forms.dispatch import FormActionDispatch
 from next.forms.signals import action_dispatched
@@ -64,7 +64,7 @@ class TestGenerateSlugIntegrityRetry:
         # retry uses the next random slug from `secrets.choice`.
         candidates = iter(["abcdef", "xyz123"])
         with mock.patch(
-            "shortener.routes.page._random_slug",
+            "shortener.pages.page._random_slug",
             side_effect=lambda _length: next(candidates),
         ):
             link = _create_link_with_unique_slug("https://example.com/second")
@@ -74,7 +74,7 @@ class TestGenerateSlugIntegrityRetry:
         make_link("fixed")
         total = SLUG_ATTEMPTS_PER_LENGTH * (SLUG_MAX_LENGTH - 6 + 1)
         with (
-            mock.patch("shortener.routes.page._random_slug", return_value="fixed"),
+            mock.patch("shortener.pages.page._random_slug", return_value="fixed"),
             mock.patch.object(
                 Link.objects, "create", side_effect=IntegrityError("dup")
             ),
@@ -85,7 +85,7 @@ class TestGenerateSlugIntegrityRetry:
 
 
 class TestReceivers:
-    """`shortener.receivers` observes `action_dispatched` and exposes counts."""
+    """`shortener.signals` observes `action_dispatched` and exposes counts."""
 
     def test_action_counts_empty_when_nothing_dispatched(self) -> None:
         assert action_counts() == {}

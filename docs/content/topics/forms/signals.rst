@@ -19,7 +19,7 @@ Read what you need from it inside the receiver and do not retain the object past
 Connecting receivers
 --------------------
 
-Receivers live in a module that Django does not import on its own.
+Receivers live in ``signals.py``, a module that neither Django nor next.dj imports on its own.
 Import that module from ``AppConfig.ready`` so every receiver is connected before the first request.
 
 .. code-block:: python
@@ -31,7 +31,7 @@ Import that module from ``AppConfig.ready`` so every receiver is connected befor
        name = "notes"
 
        def ready(self) -> None:
-           from notes import receivers  # noqa: F401, PLC0415
+           from notes import signals  # noqa: F401, PLC0415
 
 .. _topics-forms-signals-action-registered:
 
@@ -50,7 +50,7 @@ Exactly one of ``handler``, ``form_class``, or ``wizard_class`` identifies the r
 ``scope`` is ``"page"`` for anchor-file declarations (``page.py``, ``component.py``) and ``"shared"`` for all other files.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    import logging
 
@@ -108,7 +108,7 @@ The payload carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwarg
 A receiver that needs request data reads it from ``request`` directly or from ``dep_cache``, without keeping a reference after it returns.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    from django.dispatch import receiver
 
@@ -153,7 +153,7 @@ The payload carries ``action_name``, ``uid``, ``request``, ``error_count``, and 
 The dispatcher only builds the payload and sends the signal when at least one receiver is connected, so an unused signal costs nothing.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    from django.dispatch import receiver
 
@@ -186,7 +186,7 @@ The payload carries ``step``, ``cleaned_data``, ``uid``, and ``request``.
 ``cleaned_data`` is a copy of the validated cleaned data for that step.
 
 .. code-block:: python
-   :caption: access/receivers.py
+   :caption: access/signals.py
 
    import logging
 
@@ -216,7 +216,7 @@ The payload carries ``cleaned_data``, ``uid``, and ``request``.
 ``cleaned_data`` is the merged mapping passed to ``done``, flattening the keys of every step form.
 
 .. code-block:: python
-   :caption: access/receivers.py
+   :caption: access/signals.py
 
    from django.dispatch import receiver
 
@@ -246,7 +246,7 @@ A ``"page"`` denial is always ``"response"``, because a page refuses by returnin
 The dispatcher builds the payload and sends the signal only when at least one receiver is connected, so an audit receiver adds no cost to an allowed request.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    import logging
 
@@ -284,7 +284,7 @@ The payload carries ``config`` and ``instance``.
 The signal fires at load time, outside any request, so it carries neither ``uid`` nor ``request``.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    import logging
 
@@ -314,7 +314,7 @@ It fires on first use and again after a settings reload drops the cached instanc
 The signal fires at load time, outside any request, so it carries neither ``uid`` nor ``request``.
 
 .. code-block:: python
-   :caption: access/receivers.py
+   :caption: access/signals.py
 
    from django.dispatch import receiver
 

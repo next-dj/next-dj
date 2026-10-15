@@ -92,7 +92,7 @@ NEXT_FRAMEWORK = {
             # The project-level page root `chrome/` holds only the outer `layout.djx`.
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "chrome")],
-            "PAGES_DIR": "surfaces",
+            "PAGES_DIR": "pages",
             "OPTIONS": {
                 # The hand-crafted logout form in `layout.djx` writes a bare
                 # `{% csrf_token %}`, which reads the token this processor seeds.
@@ -104,10 +104,10 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [
-                str(BASE_DIR / "shadcn_admin" / "_panels"),
+                str(BASE_DIR / "shadcn_admin" / "_components"),
                 str(SHARED_DIR / "_components"),
             ],
-            "COMPONENTS_DIR": "_panels",
+            "COMPONENTS_DIR": "_components",
         }
     ],
     "STATIC_VERSION": "v1",

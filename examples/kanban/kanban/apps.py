@@ -7,6 +7,7 @@ from next.static.discovery import default_stems
 class KanbanConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "kanban"
+    label = "kanban"
 
     def ready(self) -> None:
         """Register JSX kind, page stem, and connect signal handlers."""
@@ -15,4 +16,4 @@ class KanbanConfig(AppConfig):
         )
         default_stems.register("template", "page")
 
-        from kanban import providers, signals
+        from kanban import deps, signals

@@ -84,7 +84,7 @@ NEXT_FRAMEWORK = {
             "APP_DIRS": True,
             # Project-level page root carrying the shared HTML envelope.
             "DIRS": [str(BASE_DIR / "marketplace")],
-            "PAGES_DIR": "storefront",
+            "PAGES_DIR": "pages",
             "OPTIONS": {
                 "context_processors": ["catalog.context_processors.active_filters"]
             },
@@ -95,9 +95,9 @@ NEXT_FRAMEWORK = {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [
                 str(SHARED_DIR / "_components"),
-                str(BASE_DIR / "marketplace" / "_cards"),
+                str(BASE_DIR / "marketplace" / "_components"),
             ],
-            "COMPONENTS_DIR": "_cards",
+            "COMPONENTS_DIR": "_components",
         }
     ],
     "STATIC_VERSION": "v1",

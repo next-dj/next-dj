@@ -60,7 +60,7 @@ Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_componen
 The chain has three links:
 
 1. [`notes/middleware.py`](notes/middleware.py) parses `X-Tenant` and looks up the matching `Tenant` row. Missing slug → `400`. Unknown slug → `404`. Match → `request.tenant = tenant`. Both refusals answer with a fixed body built from a module constant, never from the submitted slug, and the middleware docstring carries the proxy obligations the header shape rests on. Paths under `/_t/` return early without resolving anything, because the per-tenant asset URLs of section 2 already carry the slug in the path and a browser never puts the header on an asset request. That early return is safe only because nothing tenant-owned lives under the prefix: [`config/urls.py`](config/urls.py) discards the slug and serves the same shared file whichever tenant a URL names, so the prefix is a cache key rather than an isolation boundary, and no page route can be reached through it.
-2. [`notes/providers.py`](notes/providers.py) defines `DTenant` (a `DDependencyBase` marker) and `TenantProvider`, a `RegisteredParameterProvider`. The provider matches when `param.annotation is DTenant` and `request.tenant` is set. `static_can_handle` answers `False` for any other annotation, so the plan compiler keeps the provider out of unrelated parameters, and `None` for `DTenant`, whose tenant check stays in `can_handle`. `apps.py` imports the module on startup so the auto-registry picks it up.
+2. [`notes/deps.py`](notes/deps.py) defines `DTenant` (a `DDependencyBase` marker) and `TenantProvider`, a `RegisteredParameterProvider`. The provider matches when `param.annotation is DTenant` and `request.tenant` is set. `static_can_handle` answers `False` for any other annotation, so the plan compiler keeps the provider out of unrelated parameters, and `None` for `DTenant`, whose tenant check stays in `can_handle`. `apps.py` imports the module on startup so the auto-registry picks it up.
 3. Pages and form actions request the tenant by name and type:
 
    ```python
@@ -129,7 +129,7 @@ The `notes` Django app does not own its HTML shell. The root template lives unde
         "BACKEND": "next.urls.FileRouterBackend",
         "APP_DIRS": True,
         "DIRS": [BASE_DIR / "root_pages"],
-        "PAGES_DIR": "workspaces",
+        "PAGES_DIR": "pages",
         ...
     },
 ],
@@ -137,7 +137,7 @@ The `notes` Django app does not own its HTML shell. The root template lives unde
     {
         "BACKEND": "next.components.FileComponentsBackend",
         "DIRS": [BASE_DIR / "root_blocks", SHARED_DIR / "_components"],
-        "COMPONENTS_DIR": "_blocks",
+        "COMPONENTS_DIR": "_components",
     },
 ],
 ```
@@ -148,7 +148,7 @@ The `<main>` element in that layout delegates its width to the shared [`containe
 
 ### 5. Inherit context for the active tenant
 
-[`notes/workspaces/page.py`](notes/workspaces/page.py) registers two `@context` callables, and only the first one is inherited:
+[`notes/pages/page.py`](notes/pages/page.py) registers two `@context` callables, and only the first one is inherited:
 
 ```python
 @context("tenant", inherit_context=True)
@@ -161,15 +161,15 @@ def recent_notes(active_tenant: DTenant) -> list[Note]:
     return list(Note.objects.filter(tenant=active_tenant)[:5])
 ```
 
-`inherit_context=True` lifts `tenant` to every descendant page, so [`notes/layout.djx`](notes/workspaces/notes/layout.djx) and both form templates print `tenant.slug` without re-resolving anything. `recent_notes` carries no flag, so it stays on the landing page that renders it and the `/notes/` list does not pay for a query it never shows.
+`inherit_context=True` lifts `tenant` to every descendant page, so [`notes/layout.djx`](notes/pages/notes/layout.djx) and both form templates print `tenant.slug` without re-resolving anything. `recent_notes` carries no flag, so it stays on the landing page that renders it and the `/notes/` list does not pay for a query it never shows.
 
 ### 6. The two note forms and the shared preview
 
-[`notes/workspaces/notes/new/page.py`](notes/workspaces/notes/new/page.py) defines `NoteCreateForm`, a plain `next.forms.Form` with no model behind it. The template reaches it as `{% form "note_create_form" %}`, the snake_case name the framework derives from the class. Its `on_valid` takes `active_tenant: DTenant` and passes it straight to `Note.objects.create`, so the tenant is stamped on the row by the same provider the pages use and the browser never sees a tenant field it could tamper with. The redirect goes to the new note's editor, not back to the list, so the author keeps typing where they left off.
+[`notes/pages/notes/new/page.py`](notes/pages/notes/new/page.py) defines `NoteCreateForm`, a plain `next.forms.Form` with no model behind it. The template reaches it as `{% form "note_create_form" %}`, the snake_case name the framework derives from the class. Its `on_valid` takes `active_tenant: DTenant` and passes it straight to `Note.objects.create`, so the tenant is stamped on the row by the same provider the pages use and the browser never sees a tenant field it could tamper with. The redirect goes to the new note's editor, not back to the list, so the author keeps typing where they left off.
 
 Both forms declare their widgets with `next.forms.ComponentWidget`, naming the shared kit's `input` component and its `markdown_textarea` composite and passing `rows` and `placeholder` through as component props, so `{{ form.title }}` renders through the shared kit's `input` and `textarea` components instead of Django's default HTML. A `ComponentWidget` naming a component that does not resolve is reported as `next.W054` at `manage.py check` time.
 
-[`notes/workspaces/notes/[int:note_id]/edit/page.py`](notes/workspaces/notes/[int:note_id]/edit/page.py) defines `NoteEditForm`, a `ModelForm` whose `Meta.fields` lists only `title` and `body`. There is no extra id field. The form binds to an instance through `get_initial`, which reads the URL kwarg `note_id`, derives the tenant from the request via `get_active_tenant(request)`, and routes the lookup through `get_object_or_404(Note, pk=note_id, tenant=tenant)`, so a tenant requesting another tenant's note id receives a `404`. On a valid submission `on_valid` calls `self.save()` and redirects back to the editor.
+[`notes/pages/notes/[int:note_id]/edit/page.py`](notes/pages/notes/[int:note_id]/edit/page.py) defines `NoteEditForm`, a `ModelForm` whose `Meta.fields` lists only `title` and `body`. There is no extra id field. The form binds to an instance through `get_initial`, which reads the URL kwarg `note_id`, derives the tenant from the request via `get_active_tenant(request)`, and routes the lookup through `get_object_or_404(Note, pk=note_id, tenant=tenant)`, so a tenant requesting another tenant's note id receives a `404`. On a valid submission `on_valid` calls `self.save()` and redirects back to the editor.
 
 The body field names the shared `markdown_textarea` composite, which renders the plain `textarea` control and nests the `markdown_preview` pane ([`examples/_shared/_components/markdown_preview/`](../_shared/_components/markdown_preview/)) right under it. No page template names the pane and no page context prepares its HTML. The pane renders its `source` prop through `render_markdown` from the shared [`examples/_shared/markup.py`](../_shared/markup.py), which escapes the raw body before the `markdown` package sees it, strips unsafe link URLs, and wraps the result in `SafeString`. The create page has no body yet and renders the empty string, which `render_markdown` answers with its placeholder paragraph, so the pane is never a blank box on first paint. A `ComponentWidget` render carries the full render frame, so the nested call resolves and the shell's co-located `component.mjs` is auto-discovered and served as a module script. `TenantPrefixStaticBackend` rewrites its `/static/next/components/markdown_preview.mjs` URL to `/_t/<slug>/static/...` so the script rides the same per-tenant prefix as the co-located CSS. The shell, the client behaviour, and the server-side render are all shared with the wiki form.
 
@@ -195,7 +195,7 @@ A bare `403` carries no body to re-render, so the editor says up front what the 
 
 Both hooks emit `next.signals.form_access_denied` on a denial, carrying the `action_name`, `uid`, `request`, the `layer` (`"view"` or `"object"`), and the `reason` (`"raised"`, `"denied"`, or `"response"`). The signal stays silent when both hooks allow the request.
 
-The `notes` app consumes that signal. [`notes/receivers.py`](notes/receivers.py) connects a receiver that logs each denial under the `notes.access` logger, reading the active tenant through `get_active_tenant` so the line names the tenant whose edit was refused. `NotesConfig.ready` imports the module so the connection is live at startup.
+The `notes` app consumes that signal. [`notes/signals.py`](notes/signals.py) connects a receiver that logs each denial under the `notes.access` logger, reading the active tenant through `get_active_tenant` so the line names the tenant whose edit was refused. `NotesConfig.ready` imports the module so the connection is live at startup.
 
 ```python
 from .access import get_active_tenant
@@ -216,7 +216,7 @@ def _on_form_access_denied(action_name, layer, reason, request, **kwargs):
 
 ### 8. Every tab names its workspace
 
-[`root_pages/layout.djx`](root_pages/layout.djx) calls the shared `page_head` component without a title, and the builtin `{% metadata %}` tag inside it folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with what the page tree declares. The settings tier cannot know the tenant, so the workspace root overrides part of it per request in [`notes/workspaces/page.py`](notes/workspaces/page.py):
+[`root_pages/layout.djx`](root_pages/layout.djx) calls the shared `page_head` component without a title, and the builtin `{% metadata %}` tag inside it folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with what the page tree declares. The settings tier cannot know the tenant, so the workspace root overrides part of it per request in [`notes/pages/page.py`](notes/pages/page.py):
 
 ```python
 @page.metadata(inherit=True)

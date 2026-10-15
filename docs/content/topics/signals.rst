@@ -163,7 +163,7 @@ Receiver patterns
 
 Connect once at startup.
 
-Django's app registry is not fully initialised at module import time, so the receiver import lives inside ``ready`` rather than at module level.
+Django's app registry is not fully initialised at module import time, so the import of ``signals.py``, the module that holds the receivers, lives inside ``ready`` rather than at module level.
 
 .. code-block:: python
    :caption: notes/apps.py
@@ -174,12 +174,15 @@ Django's app registry is not fully initialised at module import time, so the rec
        name = "notes"
 
        def ready(self) -> None:
-           from notes import receivers  # noqa: F401
+           from notes import signals  # noqa: F401
+
+Neither Django nor next.dj discovers ``signals.py``, so this import is what connects the receivers.
+:doc:`application-layout` covers when an application declares a signal of its own and how a receiver defers its writes.
 
 Use ``django.dispatch.receiver`` to connect a callable to a signal.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    import logging
 
@@ -207,7 +210,7 @@ Guard the receiver body against this.
 A receiver is an observation point, and its failure should cost an observation rather than a response, so wrap the work in ``try`` and log what it raised instead of letting it out.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    import logging
 
@@ -236,7 +239,7 @@ Call ``signal.disconnect(receiver)`` when a receiver should stop firing.
 The same ``dispatch_uid`` passed to ``connect`` can be supplied to ``disconnect`` so a receiver wired by string identifier can also be removed by that identifier.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    import logging
 

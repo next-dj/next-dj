@@ -403,7 +403,7 @@ The context manager prepends the provider to the resolver list on entry and remo
 .. code-block:: python
 
    from django.test import TestCase
-   from myapp.providers import TenantProvider
+   from myapp.deps import TenantProvider
 
    from next.testing.patching import override_provider
 

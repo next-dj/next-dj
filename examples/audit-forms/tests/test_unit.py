@@ -7,7 +7,7 @@ import pytest
 from access.backends import _safe_form_payload, _step_from_origin
 from access.models import AccessRequest, AuditEntry
 from access.policy import POLICY_FIELD, AcknowledgedStep
-from access.receivers import _on_form_access_denied
+from access.signals import _on_form_access_denied
 from django.contrib.sessions.backends.db import SessionStore
 from django.http import HttpRequest, QueryDict
 
@@ -16,7 +16,7 @@ pytestmark = pytest.mark.django_db
 
 
 EXAMPLE_ROOT = Path(__file__).resolve().parent.parent
-VIEWS_ROOT = EXAMPLE_ROOT / "access" / "views"
+PAGES_ROOT = EXAMPLE_ROOT / "access" / "pages"
 
 
 def _load(path: Path, name: str) -> ModuleType:
@@ -28,19 +28,19 @@ def _load(path: Path, name: str) -> ModuleType:
     return module
 
 
-_step_page = _load(VIEWS_ROOT / "request" / "[step]" / "page.py", "audit_step_page")
+_step_page = _load(PAGES_ROOT / "request" / "[step]" / "page.py", "audit_step_page")
 _progress = _load(
-    VIEWS_ROOT / "request" / "[step]" / "_blocks" / "progress_bar" / "component.py",
+    PAGES_ROOT / "request" / "[step]" / "_components" / "progress_bar" / "component.py",
     "audit_progress_bar",
 )
 _audit_row = _load(
-    VIEWS_ROOT / "_blocks" / "audit_row" / "component.py", "audit_audit_row"
+    PAGES_ROOT / "_components" / "audit_row" / "component.py", "audit_audit_row"
 )
 _step_section = _load(
-    VIEWS_ROOT / "request" / "[step]" / "_blocks" / "step_section" / "component.py",
+    PAGES_ROOT / "request" / "[step]" / "_components" / "step_section" / "component.py",
     "audit_step_section",
 )
-_admin_audit = _load(VIEWS_ROOT / "admin" / "audit" / "page.py", "audit_admin_audit")
+_admin_audit = _load(PAGES_ROOT / "admin" / "audit" / "page.py", "audit_admin_audit")
 
 
 def _audit_request(*, zone: str | None, kind: str = "") -> HttpRequest:

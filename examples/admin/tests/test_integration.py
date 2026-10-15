@@ -54,7 +54,7 @@ class TestDashboard:
             assert label in body
 
     def test_two_layout_roots_produce_one_document(self, admin_client):
-        """`chrome/layout.djx` wraps `surfaces/layout.djx`, neither repeats."""
+        """`chrome/layout.djx` wraps `pages/layout.djx`, neither repeats."""
         body = admin_client.get("/admin/").content.decode()
         assert body.count("<!DOCTYPE html>") == 1
         assert body.count("<body") == 1

@@ -4,7 +4,24 @@ The skeleton copied for every new example in this repository. It runs and its te
 
 ## Layout
 
-Two page roots feed one file router. `chrome/` is the project-level root listed in `PAGE_BACKENDS["DIRS"]`, and its `layout.djx` is the outermost HTML envelope wrapped around every page. `myapp/routes/` is the per-app root the router finds through `APP_DIRS=True`, and it holds the pages themselves. Components resolve the same way, from the app's `_widgets/` and from the shared kit in [`../_shared/_components/`](../_shared/_components/) listed in `COMPONENT_BACKENDS["DIRS"]`. `STATICFILES_DIRS` picks up `../_shared/static` alongside the example's own `static/`, which is how the shadcn palette and its tokens arrive. The tab icon is the app static file `myapp/static/myapp/icon.svg`, declared under `icons` in `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`, and the head renders it as `<link rel="icon">`.
+Two page roots feed one file router. `chrome/` is the project-level root listed in `PAGE_BACKENDS["DIRS"]`, and its `layout.djx` is the outermost HTML envelope wrapped around every page. `myapp/pages/` is the per-app root the router finds through `APP_DIRS=True`, and it holds the pages themselves. Components resolve the same way, from the app's `pages/_components/` and from the shared kit in [`../_shared/_components/`](../_shared/_components/) listed in `COMPONENT_BACKENDS["DIRS"]`. `STATICFILES_DIRS` picks up `../_shared/static` alongside the example's own `static/`, which is how the shadcn palette and its tokens arrive. The tab icon is the app static file `myapp/static/myapp/icon.svg`, declared under `icons` in `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`, and the head renders it as `<link rel="icon">`.
+
+The app follows the canonical next.dj layout, the one every example in this repository shares:
+
+```
+myapp/
+├── apps.py          # ready() imports deps and signals
+├── models.py
+├── deps.py          # DI providers, markers, @resolver.dependency
+├── signals.py       # signal declarations and their receivers
+├── pages/           # PAGES_DIR, the page tree
+│   ├── _components/ # COMPONENTS_DIR, components scoped to the tree
+│   ├── page.py
+│   └── template.djx
+└── static/myapp/
+```
+
+The scaffold ships no `deps.py` and no `signals.py`, since it has nothing to inject and nothing to observe. Add them under those names when the example needs them and import both from `MyappConfig.ready()`. `config/settings.py` spells out `PAGES_DIR = "pages"` and `COMPONENTS_DIR = "_components"`, because a backend entry that lists its own `DIRS` has to name both, and the values are the framework defaults. Both stay settings so an existing project can keep the directory names it already has.
 
 ## Rename checklist
 
@@ -13,13 +30,9 @@ The scaffold ships deliberately generic names. Each rename touches more than one
 | Rename | Also update |
 | --- | --- |
 | `myapp/` | `INSTALLED_APPS` in [`config/settings.py`](config/settings.py), and `next_pages` in [`pytest.ini`](pytest.ini) |
-| `myapp/routes/` | `PAGES_DIR` in `PAGE_BACKENDS`, and `next_pages` in `pytest.ini` |
-| `myapp/routes/_widgets/` | `COMPONENTS_DIR` in `COMPONENT_BACKENDS` |
 | `chrome/` | `PAGE_BACKENDS["DIRS"]` |
 | `next.dj template`, `https://template.example` and `Next.dj example template` | `NAME` and `URL` under `NEXT_FRAMEWORK["SITE"]`, and the `title` default under `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in `config/settings.py`, the tab title of every page that declares none |
 | The site `description` | `description` under `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`, the search snippet of every page that declares none |
-
-Pick names that fit the domain rather than reusing `routes` and `_widgets`. Every example renames both, which is what shows the naming is yours and not the framework's.
 
 ## Conventions
 

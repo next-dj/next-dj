@@ -204,7 +204,7 @@ Drop a ``component.jsx`` file next to the ``component.py`` it belongs to.
 Discovery finds it because ``component`` is a registered stem and ``.jsx`` is now a registered extension.
 
 .. code-block:: jsx
-   :caption: kanban/boards/board/[int:id]/_pieces/card/component.jsx
+   :caption: kanban/pages/board/[int:id]/_components/card/component.jsx
 
    import { useState } from "react";
 
@@ -212,8 +212,6 @@ Discovery finds it because ``component`` is a registered stem and ``.jsx`` is no
      const [dragging, setDragging] = useState(false);
      return <div data-kanban-card={id}>{title}</div>;
    }
-
-The ``_pieces`` directory name comes from the kanban example's ``COMPONENTS_DIR`` override, and the framework default is ``_components``.
 
 Verification
 ------------

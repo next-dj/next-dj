@@ -53,7 +53,7 @@ When the URL itself must change per request, subclass ``StaticFilesBackend`` and
 .. code-block:: python
    :caption: notes/backends.py
 
-   from notes.access import active_shard
+   from notes.middleware import active_shard
 
    from next.static import StaticFilesBackend
 
@@ -86,12 +86,12 @@ Tenant URL prefix
 The static manager passes the current request to ``asset_url`` and to every renderer call, so a backend can vary its output per visitor.
 A common multi-tenant pattern is to prefix every asset URL with a tenant slug so static files are scoped per tenant.
 Override ``asset_url`` and leave absolute URLs untouched.
-The shipped multi-tenant example implements this pattern, and the snippet below mirrors its backend.
+The shipped multi-tenant example implements this pattern.
 
 .. code-block:: python
    :caption: notes/backends.py
 
-   from notes.access import get_active_tenant
+   from notes.middleware import get_active_tenant
 
    from next.static import StaticFilesBackend
 

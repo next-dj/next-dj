@@ -191,21 +191,21 @@ The separation comes from the directories, not from the backends, because layout
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],
                "APP_DIRS": True,
-               "PAGES_DIR": "routes",
+               "PAGES_DIR": "pages",
                "OPTIONS": {"context_processors": []},
            },
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],
                "APP_DIRS": True,
-               "PAGES_DIR": "admin_routes",
+               "PAGES_DIR": "admin_pages",
                "OPTIONS": {"context_processors": []},
            }
        ]
    }
 
-The first backend reads ``notes/routes/`` and uses ``notes/routes/layout.djx`` as its root.
-The second backend reads ``notes/admin_routes/`` and uses ``notes/admin_routes/layout.djx`` as its root.
+The first backend reads ``notes/pages/`` and uses ``notes/pages/layout.djx`` as its root.
+The second backend reads ``notes/admin_pages/`` and uses ``notes/admin_pages/layout.djx`` as its root.
 The two chains stay separate only because the two directories share no ancestor that carries a ``layout.djx``.
 A layout in a shared ancestor directory, such as the ``notes`` package directory itself, wraps pages from both backends.
 Root layouts collected from ``DIRS`` are also global.

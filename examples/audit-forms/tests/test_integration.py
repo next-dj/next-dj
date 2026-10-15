@@ -30,7 +30,7 @@ WIZARD_ACTION = "access_request_wizard"
 _STEP_PAGE_PATH = (
     Path(__file__).resolve().parent.parent
     / "access"
-    / "views"
+    / "pages"
     / "request"
     / "[step]"
     / "page.py"

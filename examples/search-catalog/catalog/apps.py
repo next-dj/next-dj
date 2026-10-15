@@ -4,7 +4,8 @@ from django.apps import AppConfig
 class CatalogConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "catalog"
+    label = "catalog"
 
     def ready(self) -> None:
-        """Import providers so they auto-register on startup."""
-        from catalog import providers
+        """Import the DI module so its providers auto-register on startup."""
+        from catalog import deps

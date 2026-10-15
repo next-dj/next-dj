@@ -1,6 +1,6 @@
 # Markdown blog
 
-A blog whose articles are plain Markdown files on disk, each opened by a few lines of front matter. One dynamic route at `screens/posts/[slug]/` serves every post, and the front matter feeds the page head: the description, the keywords, the Open Graph article block and the `BlogPosting` structured data. A custom `MarkdownTemplateLoader` registered under `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]` shows the other road for a static page, a sibling `template.md` read as the page body.
+A blog whose articles are plain Markdown files on disk, each opened by a few lines of front matter. One dynamic route at `pages/posts/[slug]/` serves every post, and the front matter feeds the page head: the description, the keywords, the Open Graph article block and the `BlogPosting` structured data. A custom `MarkdownTemplateLoader` registered under `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]` shows the other road for a static page, a sibling `template.md` read as the page body.
 
 The example covers the reading side of the framework: a custom `TemplateLoader` plug-in, the `template_loaded` signal, a two-root page layout, `@context(serialize=True)` feeding `window.Next.context` for a share button, a co-located `component.js`, a Django context processor wired through the router, page metadata with JSON-LD, breadcrumbs, an RSS feed, a social image, a sitemap and a `robots.py`.
 
@@ -31,7 +31,7 @@ Nothing is stored in the database, so `migrate` only builds Django's own tables.
 
 ### 1. Two page roots and two component roots
 
-[`config/settings.py`](config/settings.py) renames the conventional folders, adds a project-level root beside the app tree, wires a per-router context processor, and registers the custom Markdown loader alongside the built-in djx loader:
+[`config/settings.py`](config/settings.py) keeps the canonical `pages/` and `_components/` folders, adds a project-level root beside the app tree, wires a per-router context processor, and registers the custom Markdown loader alongside the built-in djx loader:
 
 ```python
 NEXT_FRAMEWORK = {
@@ -40,7 +40,7 @@ NEXT_FRAMEWORK = {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "site")],
-            "PAGES_DIR": "screens",
+            "PAGES_DIR": "pages",
             "OPTIONS": {
                 "context_processors": [
                     "django.template.context_processors.request",
@@ -54,9 +54,9 @@ NEXT_FRAMEWORK = {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [
                 str(SHARED_DIR / "_components"),
-                str(BASE_DIR / "site" / "_parts"),
+                str(BASE_DIR / "site" / "_components"),
             ],
-            "COMPONENTS_DIR": "_parts",
+            "COMPONENTS_DIR": "_components",
         }
     ],
     "TEMPLATE_LOADERS": [
@@ -66,9 +66,9 @@ NEXT_FRAMEWORK = {
 }
 ```
 
-`DIRS` names the project-level page root [`site/`](site/), which holds the single outer [`layout.djx`](site/layout.djx) with `<!DOCTYPE html>`, the `page_head` call, and `{% collect_scripts %}`. `APP_DIRS = True` plus `PAGES_DIR = "screens"` picks up the routable pages from [`blog/screens/`](blog/screens/). Neither root knows about the other, and every page in the app is wrapped by the project envelope first.
+`DIRS` names the project-level page root [`site/`](site/), which holds the single outer [`layout.djx`](site/layout.djx) with `<!DOCTYPE html>`, the `page_head` call, and `{% collect_scripts %}`. `APP_DIRS = True` plus `PAGES_DIR = "pages"` picks up the routable pages from [`blog/pages/`](blog/pages/). Neither root knows about the other, and every page in the app is wrapped by the project envelope first.
 
-The component backend gets `site/_parts` as a second `DIRS` entry. A component root listed in `DIRS` resolves at the empty route scope, so [`site_footer`](site/_parts/site_footer/component.djx) is visible from every template in the project without living next to any page. The shared shadcn kit in [`../_shared/_components/`](../_shared/_components/) is the first entry and supplies `page_head`, `app_shell`, `nav_link`, and `page_header`.
+The component backend gets `site/_components` as a second `DIRS` entry. A component root listed in `DIRS` resolves at the empty route scope, so [`site_footer`](site/_components/site_footer/component.djx) is visible from every template in the project without living next to any page. The shared shadcn kit in [`../_shared/_components/`](../_shared/_components/) is the first entry and supplies `page_head`, `app_shell`, `nav_link`, and `page_header`.
 
 `OPTIONS.context_processors` is the router's own extension point for per-page context processors. It merges with Django's `TEMPLATES[0].OPTIONS.context_processors`, entries from the router take priority, and duplicates are dropped.
 
@@ -92,7 +92,7 @@ This is a demo blog built on **next-dj**. ...
 
 [`blog/posts.py`](blog/posts.py) reads it into a frozen `Post`. `parse_post` splits the block off the top, reads `key: value` lines, and keeps the rest as Markdown source. `description` is optional, [`hello-world.md`](blog/posts/hello-world.md) leaves it out and `excerpt` stands in, the first paragraph that is not a heading with inline markup stripped and cut to 24 words. `updated` is optional too, and `Post.modified` answers the publication day for a post never edited. `load_post(slug)` raises `Http404` for a slug without a file, `all_posts()` lists every file the newest first, and `Post.html` renders the body through [`blog/markdown_template.py`](blog/markdown_template.py), whose `fenced_code` extension turns the code block in `hello-world` into `<pre><code class="language-python">`.
 
-[`screens/posts/[slug]/page.py`](blog/screens/posts/%5Bslug%5D/page.py) is the only post page there is:
+[`pages/posts/[slug]/page.py`](blog/pages/posts/%5Bslug%5D/page.py) is the only post page there is:
 
 ```python
 @context("article")
@@ -105,11 +105,11 @@ def post(article: Post) -> dict[str, str]:
     return {"slug": article.slug, "title": article.title}
 ```
 
-`article` reads the file the URL names once per request. `post` names the `article` key as its parameter and receives the value the first callable produced, the way section 8 does for the head, and hands the share button the two fields it reads through `window.Next.context.post`. Everything else stays on the server. [`template.djx`](blog/screens/posts/%5Bslug%5D/template.djx) beside it is one line, `{{ article.html }}`. Adding a post means adding one `.md` file, the route, the index, the feed and the sitemap pick it up.
+`article` reads the file the URL names once per request. `post` names the `article` key as its parameter and receives the value the first callable produced, the way section 8 does for the head, and hands the share button the two fields it reads through `window.Next.context.post`. Everything else stays on the server. [`template.djx`](blog/pages/posts/%5Bslug%5D/template.djx) beside it is one line, `{{ article.html }}`. Adding a post means adding one `.md` file, the route, the index, the feed and the sitemap pick it up.
 
 ### 3. Custom `MarkdownTemplateLoader` for a static page
 
-[`blog/loaders.py`](blog/loaders.py) subclasses `TemplateLoader` and treats a sibling `template.md` as the page body. [`screens/about/`](blog/screens/about/) holds a `page.py` that only declares metadata and a `template.md` the loader reads:
+[`blog/loaders.py`](blog/loaders.py) subclasses `TemplateLoader` and treats a sibling `template.md` as the page body. [`pages/about/`](blog/pages/about/) holds a `page.py` that only declares metadata and a `template.md` the loader reads:
 
 ```python
 class MarkdownTemplateLoader(TemplateLoader):
@@ -141,7 +141,7 @@ Three methods, three responsibilities:
 
 ### 4. Nested layout, breadcrumbs and the meta bar
 
-[`screens/posts/layout.djx`](blog/screens/posts/layout.djx) wraps every post. It renders the breadcrumb trail, the title, the publication date, the reading time and the share button, and a `prose` container that receives the article HTML through `{% template %}`. The outer [`site/layout.djx`](site/layout.djx) wraps that article in turn, which makes the post pages a two-level layout composition across two page roots.
+[`pages/posts/layout.djx`](blog/pages/posts/layout.djx) wraps every post. It renders the breadcrumb trail, the title, the publication date, the reading time and the share button, and a `prose` container that receives the article HTML through `{% template %}`. The outer [`site/layout.djx`](site/layout.djx) wraps that article in turn, which makes the post pages a two-level layout composition across two page roots.
 
 The trail is not spelled by hand:
 
@@ -157,7 +157,7 @@ The trail is not spelled by hand:
 </nav>
 ```
 
-Each `page.py` from the root down adds one crumb, labelled by its `breadcrumb` key or by its own title. The root [`screens/page.py`](blog/screens/page.py) declares `"breadcrumb": "Home"`, a key that is never inherited, `screens/posts/` holds no `page.py` and adds nothing, and the post adds its title. The bare `{% breadcrumbs %}` renders the same trail as a plain `<nav>`, the `as` form hands the crumbs to a template that styles them. The head gets the trail as well: a `BreadcrumbList` joins the JSON-LD graph of every page two crumbs deep, the one section 8 shows beside the `BlogPosting`.
+Each `page.py` from the root down adds one crumb, labelled by its `breadcrumb` key or by its own title. The root [`pages/page.py`](blog/pages/page.py) declares `"breadcrumb": "Home"`, a key that is never inherited, `pages/posts/` holds no `page.py` and adds nothing, and the post adds its title. The bare `{% breadcrumbs %}` renders the same trail as a plain `<nav>`, the `as` form hands the crumbs to a template that styles them. The head gets the trail as well: a `BreadcrumbList` joins the JSON-LD graph of every page two crumbs deep, the one section 8 shows beside the `BlogPosting`.
 
 ### 5. Page body priority
 
@@ -167,11 +167,11 @@ next.dj resolves the page body in this order:
 2. A `template = "..."` module attribute on the page.
 3. The first registered `TemplateLoader` whose `can_load(page)` returns `True`.
 
-Only step 3 is used here, and both loaders take part. `MarkdownTemplateLoader` backs `/about/`, `DjxTemplateLoader` backs the index (`screens/page.py` beside `screens/template.djx`) and the post route. The highest-priority present source wins, and a page declaring more than one gets [`next.W043`](../../docs/content/ref/system-checks.rst) at `manage.py check` time naming the winner. A `TEMPLATE_LOADERS` entry that is not a string surfaces as `next.E042`, one that cannot be imported as `next.E043`, and one that resolves to a class that is no `TemplateLoader` as `next.E089`.
+Only step 3 is used here, and both loaders take part. `MarkdownTemplateLoader` backs `/about/`, `DjxTemplateLoader` backs the index (`pages/page.py` beside `pages/template.djx`) and the post route. The highest-priority present source wins, and a page declaring more than one gets [`next.W043`](../../docs/content/ref/system-checks.rst) at `manage.py check` time naming the winner. A `TEMPLATE_LOADERS` entry that is not a string surfaces as `next.E042`, one that cannot be imported as `next.E043`, and one that resolves to a class that is no `TemplateLoader` as `next.E089`.
 
 ### 6. Tracing which loader won through `template_loaded`
 
-The framework sends `next.pages.signals.template_loaded` after a page registers its template source, with the page `file_path` as the only payload. [`blog/receivers.py`](blog/receivers.py) uses it to record which source backed each page, the question the priority list above raises in practice:
+The framework sends `next.pages.signals.template_loaded` after a page registers its template source, with the page `file_path` as the only payload. [`blog/signals.py`](blog/signals.py) uses it to record which source backed each page, the question the priority list above raises in practice:
 
 ```python
 @receiver(template_loaded)
@@ -184,7 +184,7 @@ def _on_template_loaded(file_path: Path, **kwargs) -> None:
 
 ### 7. Share button, a component with no Python side
 
-[`_parts/share_button/`](blog/screens/_parts/share_button/) is a directory with `component.djx` and `component.js` and no `component.py`. A directory holding a `component.djx` is already a component, so nothing has to be added to make the framework find it.
+[`_components/share_button/`](blog/pages/_components/share_button/) is a directory with `component.djx` and `component.js` and no `component.py`. A directory holding a `component.djx` is already a component, so nothing has to be added to make the framework find it.
 
 The click handler reads the serialized post the page put on the window:
 
@@ -201,7 +201,7 @@ The `<title>` is not in any template. [`site/layout.djx`](site/layout.djx) calls
 
 The settings tier is `NEXT_FRAMEWORK["SITE"]` beside `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in [`config/settings.py`](config/settings.py). `SITE["URL"]` is the published origin, `https://blog.example` here, and every relative URL the tag emits is made absolute against it, so the canonical, the feed and the social image point at the published domain rather than at whatever host served the request. `SITE["NAME"]` fills `{site_name}` and `og:site_name`. `SITE["INDEXABLE"]` is pinned to `True`, the default `"auto"` follows `DEBUG` and would put `noindex` on every page of the dev server. The defaults hold the viewport, the tab icon, a site-wide `description`, `og: {"type": "website"}` and the `title` template `{title} · {site_name}` with its `default`.
 
-The root [`screens/page.py`](blog/screens/page.py) declares the tier every page shares, a module dict every descendant inherits ahead of its own metadata:
+The root [`pages/page.py`](blog/pages/page.py) declares the tier every page shares, a module dict every descendant inherits ahead of its own metadata:
 
 ```python
 metadata: MetadataDict = {
@@ -225,9 +225,9 @@ metadata: MetadataDict = {
 }
 ```
 
-The dict folds once, not per request, and the feed address comes from its URL name rather than being spelled twice, since `reverse_lazy("feed")` waits for the URLconf and reverses when a page renders. `canonical: True` means the page's own path, so `/posts/welcome/` emits `https://blog.example/posts/welcome/` without anyone spelling it. `alternates.feeds` adds `<link rel="alternate" type="application/rss+xml">`, so a feed reader pointed at any page finds section 9. `og.images` is the social card of section 10. [`screens/about/page.py`](blog/screens/about/page.py) is the smallest possible `page.py`, a dict with a title and a description.
+The dict folds once, not per request, and the feed address comes from its URL name rather than being spelled twice, since `reverse_lazy("feed")` waits for the URLconf and reverses when a page renders. `canonical: True` means the page's own path, so `/posts/welcome/` emits `https://blog.example/posts/welcome/` without anyone spelling it. `alternates.feeds` adds `<link rel="alternate" type="application/rss+xml">`, so a feed reader pointed at any page finds section 9. `og.images` is the social card of section 10. [`pages/about/page.py`](blog/pages/about/page.py) is the smallest possible `page.py`, a dict with a title and a description.
 
-A post cannot be a dict, its head lives in its front matter. `post_meta` in [`[slug]/page.py`](blog/screens/posts/%5Bslug%5D/page.py) is the dynamic tier:
+A post cannot be a dict, its head lives in its front matter. `post_meta` in [`[slug]/page.py`](blog/pages/posts/%5Bslug%5D/page.py) is the dynamic tier:
 
 ```python
 @page.metadata
@@ -278,15 +278,15 @@ The integration tests read the head back through `next.testing.assert_metadata`,
 
 | File | URL | Name |
 | --- | --- | --- |
-| `screens/page.py` + `screens/template.djx` | `/` | `next:page_` |
-| `screens/about/page.py` + `screens/about/template.md` | `/about/` | `next:page_about` |
-| `screens/posts/[slug]/page.py` + `template.djx` | `/posts/<slug>/` | `next:page_posts_slug` |
+| `pages/page.py` + `pages/template.djx` | `/` | `next:page_` |
+| `pages/about/page.py` + `pages/about/template.md` | `/about/` | `next:page_about` |
+| `pages/posts/[slug]/page.py` + `template.djx` | `/posts/<slug>/` | `next:page_posts_slug` |
 
-The index links each post with `{% url 'next:page_posts_slug' slug=post.slug %}`. `screens/posts/` itself holds only `layout.djx`, so it contributes chrome without becoming a route.
+The index links each post with `{% url 'next:page_posts_slug' slug=post.slug %}`. `pages/posts/` itself holds only `layout.djx`, so it contributes chrome without becoming a route.
 
 ### 13. Sitemap and robots from the page root
 
-A `sitemap.py` at the top of a page root switches `/sitemap.xml` on for that tree. The blog's is [`blog/screens/sitemap.py`](blog/screens/sitemap.py):
+A `sitemap.py` at the top of a page root switches `/sitemap.xml` on for that tree. The blog's is [`blog/pages/sitemap.py`](blog/pages/sitemap.py):
 
 ```python
 changefreq = "weekly"
@@ -302,7 +302,7 @@ Every route without a `[param]` segment is listed on its own, so `/` and `/about
 
 `include("next.urls")` sits at the root of [`config/urls.py`](config/urls.py), so it mounts `/sitemap.xml`, `/sitemap-<section>.xml` and `/robots.txt` at the host root with no URL of their own. `/sitemap-blog.xml` is the section of this one root, labelled after the app, and with a single root `/sitemap.xml` is the same document. An index takes its place on its own once a second root declares a `sitemap.py` or a section grows past `limit`.
 
-Robots comes from [`blog/screens/robots.py`](blog/screens/robots.py), one `RobotsRule` that allows everything:
+Robots comes from [`blog/pages/robots.py`](blog/pages/robots.py), one `RobotsRule` that allows everything:
 
 ```python
 rules = [RobotsRule(allow="/")]

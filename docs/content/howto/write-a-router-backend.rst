@@ -86,7 +86,7 @@ Reuse the file route view
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The database URLs do not need their own view.
-A file route at ``wiki/routes/wiki/[slug]/page.py`` already renders an article from a captured ``slug``.
+A file route at ``wiki/pages/wiki/[slug]/page.py`` already renders an article from a captured ``slug``.
 Locate that catchall :doc:`URLPattern <django:ref/urls>` by its reverse name and reuse its callback.
 
 .. code-block:: python
@@ -154,7 +154,7 @@ The framework imports the class and hands the whole entry to its constructor, so
                "BACKEND": "wiki.backends.HybridRouterBackend",
                "APP_DIRS": True,
                "DIRS": [str(BASE_DIR / "shell")],
-               "PAGES_DIR": "routes",
+               "PAGES_DIR": "pages",
                "OPTIONS": {
                    "context_processors": [
                        "django.template.context_processors.request",
@@ -189,7 +189,7 @@ Reload when the table changes
 Connect a receiver to ``post_save`` and ``post_delete`` and call ``router_manager.reload()``.
 
 .. code-block:: python
-   :caption: wiki/receivers.py
+   :caption: wiki/signals.py
 
    from django.db.models.signals import post_delete, post_save
    from django.dispatch import receiver

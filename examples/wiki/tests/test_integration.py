@@ -14,8 +14,8 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import path, reverse
 from django.utils.text import Truncator
 from wiki.backends import HybridRouterBackend
+from wiki.deps import ArticleProvider, DArticle
 from wiki.models import Article
-from wiki.providers import ArticleProvider, DArticle
 
 from next.testing import (
     NextClient,
@@ -160,7 +160,7 @@ class TestDocFigureChildren:
     def test_routing_page_reuses_the_figure(self, next_client: NextClient) -> None:
         body = next_client.get(reverse("next:page_docs_routing")).content.decode()
         assert "<figure" in body
-        assert "<li><code>routes/page.py</code> → <code>/</code></li>" in body
+        assert "<li><code>pages/page.py</code> → <code>/</code></li>" in body
 
 
 class TestArticleCreation:
@@ -433,7 +433,7 @@ class TestRouterReloadSignal:
 
 
 class TestUnits:
-    """Unit tests covering defensive branches in models, providers, and backends."""
+    """Unit tests covering defensive branches in models, deps, and backends."""
 
     def test_article_str_returns_title(self, routing_doc: Article) -> None:
         assert str(routing_doc) == routing_doc.title

@@ -74,7 +74,7 @@ NEXT_FRAMEWORK = {
             "APP_DIRS": True,
             # The project-level page root `site/` holds the envelope and `site_footer`.
             "DIRS": [str(BASE_DIR / "site")],
-            "PAGES_DIR": "screens",
+            "PAGES_DIR": "pages",
             "OPTIONS": {
                 "context_processors": [
                     "django.template.context_processors.request",
@@ -89,9 +89,9 @@ NEXT_FRAMEWORK = {
             # The second root makes `site_footer` resolve at the empty route scope.
             "DIRS": [
                 str(SHARED_DIR / "_components"),
-                str(BASE_DIR / "site" / "_parts"),
+                str(BASE_DIR / "site" / "_components"),
             ],
-            "COMPONENTS_DIR": "_parts",
+            "COMPONENTS_DIR": "_components",
         }
     ],
     "TEMPLATE_LOADERS": [

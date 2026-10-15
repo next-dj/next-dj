@@ -20,7 +20,6 @@ from django.http import (
 from fragments import render_fragment
 
 from next import Depends, action
-from next.deps import resolver
 from next.forms import BaseModelForm, cleanup_extra_initial, form_spec
 from next.partial import Patches, is_partial_request
 from shadcn_admin import utils
@@ -30,7 +29,7 @@ _LOG_CHANGE_MESSAGE = "Changed via shadcn-admin form"
 
 _CHANGE_TEMPLATE_PATH = (
     Path(__file__).resolve().parent
-    / "surfaces"
+    / "pages"
     / "[str:app_label]"
     / "[str:model_name]"
     / "[int:pk]"
@@ -350,18 +349,6 @@ def _build_form_class(spec: AdminFormSpec) -> type[django_forms.Form]:
 
     AdminForm.__name__ = f"Admin{base.__name__}"
     return AdminForm
-
-
-@resolver.dependency("admin_spec")
-def admin_spec(
-    request: HttpRequest, app_label: str, model_name: str, pk: int | None = None
-) -> AdminFormSpec:
-    """Resolve `(model, ModelAdmin, instance)` once per dispatch.
-
-    Named so `Depends("admin_spec")` shares one resolution across the factory,
-    `get_initial`, the action handler, and any re-render context in the same POST.
-    """
-    return AdminFormSpec.resolve(request, app_label, model_name, pk=pk)
 
 
 def admin_add_form_factory(

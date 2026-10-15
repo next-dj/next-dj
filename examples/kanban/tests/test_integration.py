@@ -409,7 +409,7 @@ class TestJsContext:
 
 
 class TestInheritedHeaderCount:
-    """`active_boards_count` flows from `boards/page.py` into board detail."""
+    """`active_boards_count` flows from `pages/page.py` into board detail."""
 
     def test_index_shows_count(self, next_client: NextClient, board: Board) -> None:
         response = next_client.get("/")

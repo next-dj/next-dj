@@ -1,26 +1,40 @@
 from decimal import Decimal
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from catalog.demo import seed_demo
-from catalog.forms import PRESETS, PresetFilterForm
-from catalog.models import Category, Lead, Product
-from catalog.providers import (
+from catalog.deps import (
     DFilters,
     DPage,
-    Filters,
     FiltersProvider,
     PageProvider,
     PageRequest,
     _decimal_or_none,
     parse_filters,
 )
+from catalog.forms import PRESETS, PresetFilterForm
+from catalog.models import Category, Filters, Lead, Product
+from catalog.services import cached_search
 from catalog.templatetags.catalog_qs import querystring
 from catalog.zones import CATEGORY_ZONES, LISTING_ZONES, zone_target
+from django.core.cache import cache
 from django.core.management import call_command
 
 
 pytestmark = pytest.mark.django_db
+
+_KEY_CHANGES = {
+    "q": "iPhone",
+    "brands": ("Globex",),
+    "price_min": Decimal(100),
+    "price_max": Decimal(50),
+    "in_stock": True,
+    "sort": "price_desc",
+    "page": 2,
+    "per_page": 10,
+    "category": "electronics",
+}
 
 
 def _param(annotation: object) -> SimpleNamespace:
@@ -32,6 +46,18 @@ def _resolve_page(rf, query: str) -> PageRequest:
     """Run `PageProvider` against a request carrying `query`."""
     request = rf.get("/" + (f"?{query}" if query else ""))
     return PageProvider().resolve(_param(None), SimpleNamespace(request=request))
+
+
+def _search(
+    *,
+    page: int = 1,
+    per_page: int = 100,
+    category: str | None = None,
+    **filters: object,
+) -> dict[str, Any]:
+    """Run `cached_search` with the given `Filters` fields, paging and category slug."""
+    scope = Category.objects.get(slug=category) if category else None
+    return cached_search(Filters(**filters), page, per_page, category=scope)
 
 
 class TestDemoData:
@@ -76,6 +102,72 @@ class TestModelStr:
         cat = Category.objects.create(slug="x", name="Things")
         lead = Lead.objects.create(category=cat, email="ada@example.com")
         assert str(lead) == "ada@example.com (Things)"
+
+
+class TestProductQuerySet:
+    """Cover the reads `Product.objects` exposes to the listing pages."""
+
+    def test_matching_keeps_the_price_range(self, demo_data) -> None:
+        """Return only products priced inside the requested bounds."""
+        filters = Filters(price_min=Decimal(100), price_max=Decimal(300))
+        prices = [p.price for p in Product.objects.matching(filters)]
+        assert prices
+        assert all(Decimal(100) <= price <= Decimal(300) for price in prices)
+
+    def test_matching_orders_by_the_requested_sort(self, demo_data) -> None:
+        """Order cheapest first when the filter set asks for `price_asc`."""
+        prices = [p.price for p in Product.objects.matching(Filters(sort="price_asc"))]
+        assert prices == sorted(prices)
+
+    def test_matching_falls_back_to_newest_on_an_unknown_sort(self, demo_data) -> None:
+        """Treat an unrecognised sort key as the default newest-first ordering."""
+        unknown = list(Product.objects.matching(Filters(sort="bogus")))
+        assert unknown == list(Product.objects.matching(Filters()))
+
+    def test_matching_in_stock_drops_sold_out_products(self, demo_data) -> None:
+        """Keep only the products in stock when the filter set asks for them."""
+        in_stock = set(Product.objects.filter(in_stock=True))
+        assert Product.objects.filter(in_stock=False).exists()
+        assert set(Product.objects.matching(Filters(in_stock=True))) == in_stock
+
+    def test_brand_list_is_sorted_and_distinct(self, demo_data) -> None:
+        """Return each brand once, alphabetically."""
+        assert Product.objects.brand_list() == ["Acme", "Globex", "Hooli", "Initech"]
+
+
+class TestCachedSearch:
+    """Cover the cached, paginated search behind both listing pages."""
+
+    def test_category_scopes_the_results(self, demo_data) -> None:
+        """Return only the products of the category passed in."""
+        payload = _search(sort="price_asc", category="books")
+        books = set(Product.objects.filter(category__slug="books"))
+        assert books != set(Product.objects.all())
+        assert set(payload["products"]) == books
+        assert payload["total"] == len(books)
+
+    def test_repeat_search_reads_from_the_cache(
+        self, demo_data, django_assert_num_queries
+    ) -> None:
+        """Answer an identical search from the cache without touching the database."""
+        first = _search(sort="price_asc", per_page=5)
+        with django_assert_num_queries(0):
+            second = _search(sort="price_asc", per_page=5)
+        assert second == first
+
+    @pytest.mark.parametrize(
+        ("field", "value"), _KEY_CHANGES.items(), ids=list(_KEY_CHANGES)
+    )
+    def test_cache_key_tells_each_field_apart(self, demo_data, field, value) -> None:
+        """Serve a fresh search, not the cached one, when a single field changes."""
+        base = {"sort": "price_asc", "per_page": 5}
+        changed = {**base, field: value}
+        first = _search(**base)
+        second = _search(**changed)
+        cache.clear()
+        fresh = _search(**changed)
+        assert fresh != first
+        assert second == fresh
 
 
 class TestFiltersDataclass:

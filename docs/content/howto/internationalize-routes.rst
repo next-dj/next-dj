@@ -83,7 +83,7 @@ Load the ``i18n`` tag library at the top of the template.
 The examples below use a separate ``shop`` project rather than the Notes project shown elsewhere in the documentation.
 
 .. code-block:: jinja
-   :caption: shop/routes/template.djx
+   :caption: shop/pages/template.djx
 
    {% load i18n %}
 
@@ -94,7 +94,7 @@ Translate text built in Python with :func:`~django.utils.translation.gettext`.
 A ``@context`` callable returns the already-translated string.
 
 .. code-block:: python
-   :caption: shop/routes/page.py
+   :caption: shop/pages/page.py
 
    from django.utils.translation import gettext as _
 
@@ -112,7 +112,7 @@ Page titles and descriptions live in the ``metadata`` dict of a ``page.py``, and
 Wrap the texts in :func:`~django.utils.translation.gettext_lazy`, the settings tier included, and add ``alternates`` so every variant of a page links to the others.
 
 .. code-block:: python
-   :caption: shop/routes/page.py
+   :caption: shop/pages/page.py
 
    from django.utils.translation import gettext_lazy as _
 

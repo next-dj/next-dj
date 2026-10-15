@@ -1,0 +1,14 @@
+from notes.deps import DTenant
+from notes.models import Note
+
+from next import context
+from next.pages import MetadataDict
+
+
+metadata: MetadataDict = {"title": "Notes"}
+
+
+@context("notes")
+def notes(active_tenant: DTenant) -> list[Note]:
+    """Return every note that belongs to the active tenant."""
+    return list(Note.objects.filter(tenant=active_tenant))

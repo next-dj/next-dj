@@ -9,8 +9,8 @@ from django.http import (
     HttpResponseRedirect,
 )
 
+from kanban.deps import CARD_PARAM, DBoard, DCard
 from kanban.models import Board, Card, Column
-from kanban.providers import CARD_PARAM, DBoard, DCard
 from next.forms import ComponentWidget, Form, ModelForm
 from next.urls import page_reverse, with_query
 

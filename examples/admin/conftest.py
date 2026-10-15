@@ -6,7 +6,7 @@ from next.testing import NextClient
 
 
 # At import rather than in a fixture, because conftest import precedes the
-# plugin's session-scoped page load and the surfaces read the admin registry.
+# plugin's session-scoped page load and the pages read the admin registry.
 django_admin.autodiscover()
 
 

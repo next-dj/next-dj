@@ -1,13 +1,62 @@
-from typing import ClassVar
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import ClassVar, Self
 
 from django.db import models
 from django.urls import reverse
+
+
+_SORT_ORDERINGS = {
+    "price_asc": ("price",),
+    "price_desc": ("-price",),
+    "name": ("name",),
+    "newest": ("-created_at",),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class Filters:
+    """Search criteria that narrow and order a catalog listing."""
+
+    q: str = ""
+    brands: tuple[str, ...] = ()
+    price_min: Decimal | None = None
+    price_max: Decimal | None = None
+    in_stock: bool = False
+    sort: str = "newest"
+
+    def is_active(self) -> bool:
+        """Return True when at least one filter is non-default."""
+        return bool(
+            self.q
+            or self.brands
+            or self.price_min is not None
+            or self.price_max is not None
+            or self.in_stock
+            or self.sort != "newest"
+        )
 
 
 class ProductQuerySet(models.QuerySet):
     def brand_list(self) -> list[str]:
         """Return a sorted, distinct list of brand names in this queryset."""
         return list(self.order_by("brand").values_list("brand", flat=True).distinct())
+
+    def matching(self, filters: Filters) -> Self:
+        """Narrow to the products a filter set selects, in the order it asks for."""
+        qs = self.select_related("category")
+        if filters.q:
+            qs = qs.filter(name__icontains=filters.q)
+        if filters.brands:
+            qs = qs.filter(brand__in=filters.brands)
+        if filters.price_min is not None:
+            qs = qs.filter(price__gte=filters.price_min)
+        if filters.price_max is not None:
+            qs = qs.filter(price__lte=filters.price_max)
+        if filters.in_stock:
+            qs = qs.filter(in_stock=True)
+        ordering = _SORT_ORDERINGS.get(filters.sort, _SORT_ORDERINGS["newest"])
+        return qs.order_by(*ordering)
 
 
 class Category(models.Model):

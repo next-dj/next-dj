@@ -4,7 +4,8 @@ from django.apps import AppConfig
 class FlagsConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "flags"
+    label = "flags"
 
     def ready(self) -> None:
-        """Import provider and receiver modules so DI and signals wire up."""
-        from flags import providers, receivers
+        """Import the `deps` and `signals` modules so DI and receivers wire up."""
+        from flags import deps, signals

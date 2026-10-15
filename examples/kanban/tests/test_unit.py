@@ -13,9 +13,9 @@ from django.http import Http404, HttpRequest
 from django.test import override_settings
 from kanban.backends import ViteManifestBackend
 from kanban.demo import seed_demo
+from kanban.deps import BoardProvider, CardProvider, DBoard, DCard
 from kanban.forms import CreateCardForm, MoveCardForm
 from kanban.models import Board, Card, Column
-from kanban.providers import BoardProvider, CardProvider, DBoard, DCard
 from kanban.signals import inject_vite_dev_assets
 
 from next.deps import ResolutionContext
@@ -25,19 +25,19 @@ from next.static import StaticAsset, StaticCollector
 
 pytestmark = pytest.mark.django_db
 
-_PIECES = (
+_COMPONENTS = (
     Path(__file__).parent.parent
     / "kanban"
-    / "boards"
+    / "pages"
     / "board"
     / "[int:id]"
-    / "_pieces"
+    / "_components"
 )
 
 
 def _load(relative: str):
     spec = importlib.util.spec_from_file_location(
-        f"_test_{relative.replace('/', '_').replace('.py', '')}", _PIECES / relative
+        f"_test_{relative.replace('/', '_').replace('.py', '')}", _COMPONENTS / relative
     )
     mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
     spec.loader.exec_module(mod)  # type: ignore[union-attr]

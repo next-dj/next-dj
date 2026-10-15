@@ -64,7 +64,10 @@ Read the topic that matches the part you are touching, then jump to the referenc
 .. rubric:: Project layout
 
 :doc:`project-layout`
-   Recommended single project tree and settings.
+   Application composition, the page tree as delivery, project sizes, and settings.
+
+:doc:`application-layout`
+   Where models, querysets, services, and signals hold the logic of an application.
 
 :doc:`multi-project`
    Shared UI kit and per project page DIRS.
@@ -90,6 +93,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
    testing
    extending
    project-layout
+   application-layout
    multi-project
 
 .. seealso::

@@ -205,10 +205,11 @@ Read the tenant through one helper
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Every consumer reads the tenant through a single accessor instead of touching ``request.tenant`` directly.
+The accessor sits in ``notes/middleware.py`` beside the middleware that sets the attribute.
 On error pages where the middleware short-circuited, the attribute is absent and the helper returns ``None``.
 
 .. code-block:: python
-   :caption: notes/access.py
+   :caption: notes/middleware.py, the accessor
 
    def get_active_tenant(request):
        """Return the tenant attached to `request` by `TenantMiddleware`."""
@@ -221,9 +222,9 @@ A ``DDependencyBase`` marker plus a ``RegisteredParameterProvider`` lets page an
 The provider matches the bare ``DTenant`` annotation when a request carries a tenant.
 
 .. code-block:: python
-   :caption: notes/providers.py
+   :caption: notes/deps.py, the marker
 
-   from notes.access import get_active_tenant
+   from notes.middleware import get_active_tenant
 
    from next.deps import DDependencyBase, RegisteredParameterProvider
 
@@ -264,20 +265,20 @@ A top-level import in ``apps.py`` also registers the provider, but only when the
        name = "notes"
 
        def ready(self) -> None:
-           from notes import providers  # imported for its registration side effect
+           from notes import deps  # imported for its registration side effect
 
-           _ = providers
+           _ = deps
 
-The ``_ = providers`` line documents the intentional side-effect import so a linter does not flag it as unused.
+The ``_ = deps`` line documents the intentional side-effect import so a linter does not flag it as unused.
 
 A page context function now requests the tenant by name and type, and the resolver hands back the model instance.
 Keep real annotations in these modules, because the resolver compares parameter annotations by identity.
 
 .. code-block:: python
-   :caption: notes/workspaces/notes/page.py
+   :caption: notes/pages/notes/page.py
 
+   from notes.deps import DTenant
    from notes.models import Note
-   from notes.providers import DTenant
 
    from next import context
 
@@ -295,10 +296,10 @@ Share the tenant through a named dependency
 When several callables in one render need the tenant, register the accessor as a named dependency instead.
 
 .. code-block:: python
-   :caption: notes/deps.py
+   :caption: notes/deps.py, the named dependency
 
    from django.http import HttpRequest
-   from notes.access import get_active_tenant
+   from notes.middleware import get_active_tenant
    from notes.models import Tenant
 
    from next.deps import resolver
@@ -310,7 +311,7 @@ When several callables in one render need the tenant, register the accessor as a
 Any callable then asks for the value by name.
 
 .. code-block:: python
-   :caption: notes/workspaces/notes/page.py
+   :caption: notes/pages/notes/page.py
 
    from notes.models import Note, Tenant
 
@@ -322,7 +323,7 @@ Any callable then asks for the value by name.
            return 0
        return Note.objects.filter(tenant=tenant).count()
 
-Import ``notes.deps`` from ``AppConfig.ready`` alongside the provider module so the decorator runs before the first request.
+The same ``notes.deps`` import in ``AppConfig.ready`` that registers the provider runs this decorator before the first request.
 The marker route re-resolves for every parameter that carries ``DTenant``, while the named dependency is resolved once and memoised for the rest of the pass.
 Keep the marker for callables that prefer to ask by type.
 
@@ -332,10 +333,10 @@ Lift the tenant to every descendant page
 A ``@context(..., inherit_context=True)`` callable on the workspace root publishes the tenant once, and every nested page reads it without re-resolving.
 
 .. code-block:: python
-   :caption: notes/workspaces/page.py
+   :caption: notes/pages/page.py
 
+   from notes.deps import DTenant
    from notes.models import Tenant
-   from notes.providers import DTenant
 
    from next import context
 
@@ -353,7 +354,7 @@ List it in the page backend ``OPTIONS`` so the file router runs it.
 .. code-block:: python
    :caption: notes/context_processors.py
 
-   from notes.access import get_active_tenant
+   from notes.middleware import get_active_tenant
 
    def tenant_theme(request):
        """Surface per-tenant CSS variables to every page template."""
@@ -373,7 +374,7 @@ List it in the page backend ``OPTIONS`` so the file router runs it.
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],
                "APP_DIRS": True,
-               "PAGES_DIR": "workspaces",
+               "PAGES_DIR": "pages",
                "OPTIONS": {
                    "context_processors": [
                        "django.template.context_processors.request",

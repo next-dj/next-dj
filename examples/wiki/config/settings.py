@@ -83,7 +83,7 @@ NEXT_FRAMEWORK = {
             "APP_DIRS": True,
             # The shared HTML envelope, walked next to the per-app trees.
             "DIRS": [str(BASE_DIR / "shell")],
-            "PAGES_DIR": "routes",
+            "PAGES_DIR": "pages",
             "OPTIONS": {
                 "context_processors": ["django.template.context_processors.request"]
             },
@@ -93,7 +93,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
-            "COMPONENTS_DIR": "_blocks",
+            "COMPONENTS_DIR": "_components",
         }
     ],
     "STATIC_VERSION": "v1",

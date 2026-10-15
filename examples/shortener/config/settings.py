@@ -82,7 +82,7 @@ NEXT_FRAMEWORK = {
             "APP_DIRS": True,
             # The project-level page root `host/` owns the shared `layout.djx` envelope.
             "DIRS": [str(BASE_DIR / "host")],
-            "PAGES_DIR": "routes",
+            "PAGES_DIR": "pages",
             "OPTIONS": {"context_processors": []},
         }
     ],
@@ -90,7 +90,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
-            "COMPONENTS_DIR": "_widgets",
+            "COMPONENTS_DIR": "_components",
         }
     ],
     "STATIC_VERSION": "v1",

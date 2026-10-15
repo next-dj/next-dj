@@ -249,7 +249,7 @@ Define ``get_initial`` only when the lookup the page needs cannot be expressed b
 
    from django.http import HttpRequest
    from django.shortcuts import get_object_or_404
-   from notes.access import get_active_tenant
+   from notes.middleware import get_active_tenant
 
    from next.urls import DUrl
 

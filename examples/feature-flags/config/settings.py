@@ -80,7 +80,7 @@ NEXT_FRAMEWORK = {
             "APP_DIRS": True,
             # Project-level page root carrying the shared HTML envelope.
             "DIRS": [str(BASE_DIR / "frame")],
-            "PAGES_DIR": "panels",
+            "PAGES_DIR": "pages",
             "OPTIONS": {"context_processors": []},
         }
     ],
@@ -88,7 +88,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
-            "COMPONENTS_DIR": "_chunks",
+            "COMPONENTS_DIR": "_components",
         }
     ],
     "STATIC_VERSION": "v1",

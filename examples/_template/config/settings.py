@@ -76,7 +76,6 @@ STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# PAGES_DIR and COMPONENTS_DIR are yours to name, every example renames them.
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
@@ -84,7 +83,7 @@ NEXT_FRAMEWORK = {
             "APP_DIRS": True,
             # Project-level page root with the HTML envelope, next to `APP_DIRS`.
             "DIRS": [str(BASE_DIR / "chrome")],
-            "PAGES_DIR": "routes",
+            "PAGES_DIR": "pages",
             "OPTIONS": {"context_processors": []},
         }
     ],
@@ -92,7 +91,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
-            "COMPONENTS_DIR": "_widgets",
+            "COMPONENTS_DIR": "_components",
         }
     ],
     "STATIC_VERSION": "v1",

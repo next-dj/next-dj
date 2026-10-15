@@ -107,12 +107,12 @@ It runs before the ``DQuery`` provider, so a ``DQuery`` parameter that shares a 
    .. code-block:: python
       :caption: shadowing a same-named URL kwarg
 
-      # routes/shop/[category]/page.py
+      # pages/shop/[category]/page.py
       @context("category", inherit_context=True)
       def category() -> str:
           return "books"
 
-      # routes/shop/[category]/products/page.py
+      # pages/shop/[category]/products/page.py
       @context("listing")
       def products(category: str) -> str:
           return f"Listing for {category}."
@@ -315,7 +315,8 @@ Use ``resolver.dependency`` to register a callable that any handler can ask for 
    def layout_theme() -> dict:
        return {"name": "Notes", "version": "1.0"}
 
-Import the module that defines the dependency from ``AppConfig.ready`` so the decorator runs before the first request.
+Named dependencies and custom providers live in the ``deps.py`` of the application, see :doc:`project-layout`.
+next.dj does not discover that module, so ``AppConfig.ready`` imports it and the decorator runs before the first request.
 The registered callable can take any provider-resolved parameters because it is itself dispatched through the resolver.
 
 Diagnosing a dependency cycle
@@ -377,7 +378,7 @@ For data sources the built-in providers do not cover, register a parameter provi
 The base classes are ``RegisteredParameterProvider`` and ``DDependencyBase``.
 
 .. code-block:: python
-   :caption: notes/providers.py
+   :caption: notes/deps.py, the note marker
 
    from typing import get_args, get_origin
 
@@ -416,8 +417,8 @@ Use the new marker.
 .. code-block:: python
    :caption: notes/pages/notes/[id]/page.py
 
+   from notes.deps import DNote
    from notes.models import Note
-   from notes.providers import DNote
 
    from next import context
 
@@ -523,7 +524,7 @@ Two rules.
 Do not use future annotations in modules with DI parameters.
    ``page.py``, ``component.py``, action handlers, and any ``get_initial`` need real annotations.
    Plain Python files that only import the framework can use future annotations freely.
-   A custom provider module such as ``notes/providers.py`` is never introspected by :func:`typing.get_type_hints`, so it can use future annotations freely too.
+   A provider class is never introspected by :func:`typing.get_type_hints`, but a callable registered through ``resolver.dependency`` is, so a ``deps.py`` that holds named dependencies keeps real annotations as well.
 
 Keep DI types runtime importable.
    A hint the resolver cannot evaluate never becomes the type a provider matches on.

@@ -1,0 +1,42 @@
+from catalog.deps import DFilters, DPage
+from catalog.models import Category, Product
+from catalog.services import cached_search
+from catalog.zones import CATEGORY_ZONES, zone_target
+from django.shortcuts import get_object_or_404
+
+from next import context, page
+from next.pages import MetadataDict
+
+
+@context("filter_zones")
+def filter_zones() -> str:
+    """Name every zone the live filter re-renders on a category listing.
+
+    The category listing paginates instead of growing on scroll, so the set drops
+    `catalog-more` and keeps the pager beside the results.
+    """
+    return zone_target(CATEGORY_ZONES)
+
+
+@context("category", inherit_context=True)
+def category(category: str) -> Category:
+    """Resolve the category slug from the URL, handed to the product page below too."""
+    return get_object_or_404(Category, slug=category)
+
+
+@page.metadata
+def category_meta(category: Category) -> MetadataDict:
+    """Title the listing after the category the inherited context resolved."""
+    return {"title": category.name}
+
+
+@context("page_obj")
+def page_obj(category: Category, filters: DFilters, page: DPage) -> dict:
+    """Return the cached search payload scoped to the current category."""
+    return cached_search(filters, page.number, page.per_page, category=category)
+
+
+@context("all_brands")
+def all_brands(category: Category) -> list[str]:
+    """Return every brand that has products inside the current category."""
+    return Product.objects.filter(category=category).brand_list()

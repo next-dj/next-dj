@@ -9,7 +9,8 @@ Tailwind loads from the Play CDN through a shared ``page_head`` component every 
 That component renders the head through ``{% metadata %}``, and every example names itself in ``SITE["NAME"]``, declares its viewport and title template in ``METADATA["DEFAULTS"]``, and names its tab icon, a static ``icon.svg``, in the ``icons`` metadata key.
 ``manage.py check --deploy --tag seo`` passes clean in every example.
 The ``kanban`` and ``live-polls`` folders add a Vite toolchain on top of that and need Node installed.
-Every example renames ``PAGES_DIR`` and ``COMPONENTS_DIR`` on purpose and registers a project-level ``DIRS`` root in ``PAGE_BACKENDS``, so the settings show that neither directory name is fixed.
+Every application keeps its pages in ``pages/`` and its page-tree components in ``pages/_components/``, and every example registers a project-level ``DIRS`` root in ``PAGE_BACKENDS``.
+The ``admin`` example also serves the components at the root of its ``shadcn_admin`` application through ``COMPONENT_BACKENDS`` ``DIRS``.
 The :repo:`examples README <blob/main/examples/README.md>` carries the run commands and the conventions every folder follows.
 
 Catalog

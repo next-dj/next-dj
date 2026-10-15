@@ -27,7 +27,7 @@ The marker is a Python 3.12 generic that subclasses ``DDependencyBase``.
 The provider claims any parameter whose annotation origin is ``DFlag`` and reads the flag name from the URL kwargs or the template context.
 
 .. code-block:: python
-   :caption: flags/providers.py
+   :caption: flags/deps.py
 
    import inspect
    from typing import get_args, get_origin
@@ -113,7 +113,7 @@ A :doc:`Django signal receiver <django:topics/signals>` drops the cached entry w
 The next ``get_cached_flag`` call refetches from the database.
 
 .. code-block:: python
-   :caption: flags/receivers.py
+   :caption: flags/signals.py
 
    from django.db.models.signals import post_delete, post_save
 
@@ -133,10 +133,11 @@ The next ``get_cached_flag`` call refetches from the database.
        post_delete.connect(_invalidate_on_delete, sender=Flag)
 
 Wire the provider and receivers at app ready
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``flags.providers`` registers ``FlagProvider`` with the resolver as a side effect of import.
-Both ``flags.providers`` and ``flags.receivers`` reach ``flags.models`` through their import chains, so ``AppConfig.ready`` defers the imports until the app registry is populated.
+``flags.deps`` registers ``FlagProvider`` with the resolver as a side effect of import.
+Neither Django nor next.dj discovers ``deps.py`` or ``signals.py``, so ``AppConfig.ready`` imports both explicitly.
+Both ``flags.deps`` and ``flags.signals`` reach ``flags.models`` through their import chains, so ``AppConfig.ready`` defers the imports until the app registry is populated.
 A top-level import in ``apps.py`` would run while Django is still loading app configs, and defining the ``Flag`` model at that point raises :exc:`~django.core.exceptions.AppRegistryNotReady`.
 
 .. code-block:: python
@@ -150,16 +151,13 @@ A top-level import in ``apps.py`` would run while Django is still loading app co
 
        def ready(self) -> None:
            """Import providers and connect receivers once the app registry is populated."""
-           from flags import (  # imported for its registration side effect
-               providers,
-               receivers,
-           )
+           from flags import deps, signals  # imported for their registration side effect
 
-           _ = providers
-           receivers.connect()
+           _ = deps
+           signals.connect()
 
-The ``_ = providers`` line documents the intentional side-effect import.
-``receivers.connect`` runs at ready time, so the signal connections happen after the app registry knows ``Flag``.
+The ``_ = deps`` line documents the intentional side-effect import.
+``signals.connect`` runs at ready time, so the signal connections happen after the app registry knows ``Flag``.
 
 Consume the marker in a component
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -168,11 +166,11 @@ A composite component with a ``render`` function asks for ``flag: DFlag[Flag]``.
 When the flag is off ``render`` returns an empty string, so the gated block collapses with no wrapper markup.
 
 .. code-block:: python
-   :caption: flags/panels/_chunks/feature_guard/component.py
+   :caption: flags/pages/_components/feature_guard/component.py
 
    from django.template import Context, Template
+   from flags.deps import DFlag
    from flags.models import Flag
-   from flags.providers import DFlag
 
    _BANNER = Template(
        '<article data-feature-guard="{{ flag.name }}"'
@@ -207,7 +205,7 @@ Each ``{% component %}`` tag carries a literal ``flag_name``.
 The string flows into the component context and the provider reads it from ``context.context_data``.
 
 .. code-block:: jinja
-   :caption: flags/panels/demo/template.djx
+   :caption: flags/pages/demo/template.djx
 
    {% component "feature_guard" flag_name="beta_checkout" %}
    {% component "feature_guard" flag_name="dark_sidebar" %}

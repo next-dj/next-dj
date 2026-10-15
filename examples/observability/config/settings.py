@@ -93,7 +93,7 @@ NEXT_FRAMEWORK = {
             "APP_DIRS": True,
             # `instrument/` owns the shared HTML envelope every dashboard renders into.
             "DIRS": [str(BASE_DIR / "instrument")],
-            "PAGES_DIR": "dashboards",
+            "PAGES_DIR": "pages",
             "OPTIONS": {"context_processors": []},
         }
     ],
@@ -101,7 +101,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "obs.backends.CountingComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
-            "COMPONENTS_DIR": "_widgets",
+            "COMPONENTS_DIR": "_components",
         }
     ],
     "STATIC_BACKENDS": [
