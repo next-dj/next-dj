@@ -1,0 +1,145 @@
+from pathlib import Path
+from unittest.mock import patch
+
+from next.urls import router_manager
+from next.urls.routes import Route, collect_routes
+from tests.support import installed_apps, write_app, write_page, write_urlconf
+
+
+def _rows(root: Path) -> list[tuple[str, str, str, str, str]]:
+    return [
+        (
+            route.url,
+            route.name,
+            route.app,
+            str(route.file.relative_to(root)),
+            route.source,
+        )
+        for route in collect_routes()
+    ]
+
+
+def _project(root: Path, *entries: str) -> str:
+    write_app(root, "wallets", {"pages": ("ops/[int:pk]",)}, mount="w/<int:wallet>/")
+    write_app(root, "blog", {"pages": ("", "about")})
+    write_app(root, "audit", {"pages": ("log",)})
+    return write_urlconf(root, "rows_urls", *entries)
+
+
+class TestCollectRoutes:
+    """One row per page in resolution order, from the URLconf root."""
+
+    def test_every_source_around_the_framework_include(self, tmp_path) -> None:
+        urlconf = _project(
+            tmp_path,
+            'path("org/<int:org>/audit/", pages("audit"))',
+            'path("app/", include("next.urls"))',
+            'path("crew/", pages("blog", namespace="crew"))',
+        )
+
+        with installed_apps(tmp_path, "wallets", "blog", "audit", urlconf=urlconf):
+            rows = _rows(tmp_path)
+
+        assert rows == [
+            (
+                "/org/<int:org>/audit/log/",
+                "audit:page_log",
+                "audit",
+                "audit/pages/log/page.py",
+                "urls",
+            ),
+            (
+                "/app/w/<int:wallet>/ops/<int:pk>/",
+                "next:page_w_int_wallet_ops_int_pk",
+                "wallets",
+                "wallets/pages/ops/[int:pk]/page.py",
+                "mounts",
+            ),
+            ("/crew/", "crew:page_", "blog", "blog/pages/page.py", "urls"),
+            (
+                "/crew/about/",
+                "crew:page_about",
+                "blog",
+                "blog/pages/about/page.py",
+                "urls",
+            ),
+        ]
+
+    def test_auto_trees_are_listed_only_where_the_framework_is_included(
+        self, tmp_path
+    ) -> None:
+        urlconf = _project(tmp_path, 'path("audit/", pages("audit"))')
+
+        with installed_apps(tmp_path, "wallets", "blog", "audit", urlconf=urlconf):
+            rows = _rows(tmp_path)
+
+        assert [(url, source) for url, _name, _app, _file, source in rows] == [
+            ("/audit/log/", "urls")
+        ]
+
+    def test_a_project_root_tree_and_a_virtual_page(self, tmp_path) -> None:
+        site = tmp_path / "site"
+        write_page(site, "contact")
+        (site / "about").mkdir()
+        (site / "about" / "template.djx").write_text("<p>about</p>\n")
+
+        with installed_apps(tmp_path, dirs=[site]):
+            routes = collect_routes()
+
+        assert routes == [
+            Route(
+                url="/contact/",
+                name="next:page_contact",
+                app="",
+                file=site.resolve() / "contact" / "page.py",
+                source="root",
+            ),
+            Route(
+                url="/about/",
+                name="next:page_about",
+                app="",
+                file=site.resolve() / "about" / "template.djx",
+                source="root",
+            ),
+        ]
+
+    def test_a_page_whose_trail_does_not_parse_is_left_out(self, tmp_path) -> None:
+        write_app(tmp_path, "shop", {"pages": ("cart", "item/[id]/[id]")})
+
+        with installed_apps(tmp_path, "shop"):
+            rows = _rows(tmp_path)
+
+        assert [url for url, *_rest in rows] == ["/cart/"]
+
+    def test_without_a_file_router_there_are_no_routes(self) -> None:
+        entry = {"BACKEND": "tests.support.routers.EntryRouter"}
+
+        with patch.object(
+            router_manager, "_get_next_pages_config", return_value=[entry]
+        ):
+            router_manager.reload()
+            routes = collect_routes()
+        router_manager.reload()
+
+        assert routes == []
+
+
+class TestOnlyRoutedPages:
+    """The table lists the pages the router routes and nothing else on disk."""
+
+    def test_a_page_without_a_body_source_is_left_out(self, tmp_path) -> None:
+        write_app(tmp_path, "blog", {"pages": ("", "about")})
+        write_page(tmp_path / "blog" / "pages", "draft", "title = 'no body'\n")
+
+        with installed_apps(tmp_path, "blog"):
+            rows = [route.url for route in collect_routes()]
+
+        assert rows == ["/", "/about/"]
+
+    def test_a_page_the_parser_refuses_is_left_out(self, tmp_path) -> None:
+        write_app(tmp_path, "blog", {"pages": ("", "twice/[x]/[x]")})
+
+        with installed_apps(tmp_path, "blog"):
+            rows = [route.url for route in collect_routes()]
+
+        assert rows == ["/"]

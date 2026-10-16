@@ -16,6 +16,7 @@ from next.testing import override_next_settings
 from next.urls import PageRoot, RouterBackend
 from next.urls.checks import (
     _collect_url_patterns,
+    check_app_mounts,
     check_framework_routes_reachable,
     check_next_pages_configuration,
     check_reverse_name_collisions,
@@ -23,11 +24,16 @@ from next.urls.checks import (
     check_url_patterns,
 )
 from tests.support import (
+    check_ids,
     file_router,
+    file_router_config_entry,
     importable_dir,
+    installed_apps,
     patch_checks_router_manager_with_routers,
     routed,
+    write_app,
     write_page,
+    write_urlconf,
 )
 
 
@@ -245,17 +251,15 @@ class TestCheckUrlPatterns:
         """The folder a backend names through the contract leaves the collection."""
         tree_a = tmp_path / "tree_a"
         tree_b = tmp_path / "tree_b"
-        write_page(tree_a, "_components/widget")
-        write_page(tree_b, "_components/widget")
+        write_page(tree_a, "widgets/card")
+        write_page(tree_b, "widgets/card")
 
         unskipped = _TreeRouter(root_trees=[tree_a, tree_b])
         with patch_checks_router_manager_with_routers(routers=[unskipped]):
             assert any(m.id == "next.E015" for m in check_url_patterns(None))
 
         reset_check_caches()
-        skipped = _TreeRouter(
-            root_trees=[tree_a, tree_b], components_folder="_components"
-        )
+        skipped = _TreeRouter(root_trees=[tree_a, tree_b], components_folder="widgets")
         with patch_checks_router_manager_with_routers(routers=[skipped]):
             assert check_url_patterns(None) == []
 
@@ -265,8 +269,8 @@ class TestCheckUrlPatterns:
         """A directory the router itself refuses keeps its pages out of the routes."""
         tree_a = tmp_path / "tree_a"
         tree_b = tmp_path / "tree_b"
-        write_page(tree_a, "_drafts/wip")
-        write_page(tree_b, "_drafts/wip")
+        write_page(tree_a, "drafts/wip")
+        write_page(tree_b, "drafts/wip")
         router = _TreeRouter(root_trees=[tree_a, tree_b])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -274,7 +278,7 @@ class TestCheckUrlPatterns:
 
         reset_check_caches()
         skipping = _TreeRouter(
-            root_trees=[tree_a, tree_b], skip_names=frozenset({"_drafts"})
+            root_trees=[tree_a, tree_b], skip_names=frozenset({"drafts"})
         )
         with patch_checks_router_manager_with_routers(routers=[skipping]):
             assert check_url_patterns(None) == []
@@ -564,3 +568,213 @@ class TestFrameworkRoutesReachable:
     def test_an_unrouted_endpoint_is_left_to_its_own_check(self) -> None:
         with override_settings(ROOT_URLCONF=_urlconf("none", path("", _mine))):
             assert check_framework_routes_reachable() == []
+
+
+def _mount_messages(root: Path, *names: str, urlconf: str | None = None) -> list:
+    with installed_apps(root, *names, urlconf=urlconf):
+        reset_check_caches()
+        return [
+            *check_app_mounts(None),
+            *check_url_patterns(None),
+            *check_reverse_name_collisions(None),
+        ]
+
+
+class TestAppMountChecks:
+    """`check_app_mounts` names every declaration the router refuses or ignores."""
+
+    @pytest.mark.parametrize(
+        ("declared", "fragment"),
+        [
+            ({"mount": 3}, "declares mount as int instead of a str"),
+            ({"mounts": "shop/"}, "declares mounts as something other than a dict"),
+            ({"mounts": {"pages": None}}, "something other than a dict of str to str"),
+            ({"mount": "a/", "mounts": {"pages": "b/"}}, "declares both mount and"),
+            ({"mounts": {"pages/log": "b/"}}, "which are no plain directory names"),
+        ],
+        ids=["mount_type", "mounts_type", "mounts_value_type", "both", "unplain_key"],
+    )
+    def test_e152_for_a_refused_declaration(self, tmp_path, declared, fragment):
+        write_app(tmp_path, "shop", **declared)
+
+        messages = _mount_messages(tmp_path, "shop")
+
+        assert check_ids(messages) == ["next.E152"]
+        assert fragment in messages[0].msg
+        assert "'shop'" in messages[0].msg
+
+    @pytest.mark.parametrize(
+        "declared",
+        [
+            {"mount": "[slug]/"},
+            {"mounts": {"pages": "w/[int:wallet]/", "staff_pages": "staff/"}},
+        ],
+        ids=["mount", "mounts"],
+    )
+    def test_e153_for_a_bracketed_prefix(self, tmp_path, declared) -> None:
+        write_app(tmp_path, "shop", {"pages": ("",), "staff_pages": ("",)}, **declared)
+
+        messages = _mount_messages(tmp_path, "shop")
+
+        assert check_ids(messages) == ["next.E153"]
+        assert "[" in messages[0].msg
+
+    def test_w126_for_a_key_naming_no_directory(self, tmp_path) -> None:
+        write_app(tmp_path, "shop", mounts={"pages": "", "gone": "x/"})
+
+        messages = _mount_messages(tmp_path, "shop")
+
+        assert check_ids(messages) == ["next.W126"]
+        assert "'gone'" in messages[0].msg
+
+    @pytest.mark.parametrize(
+        ("trees", "expected"),
+        [({"routes": ("",)}, []), ({"pages": ("",)}, ["next.W126"])],
+        ids=["routes_tree", "pages_tree_only"],
+    )
+    def test_mount_is_read_against_the_pages_dir(
+        self, tmp_path, trees, expected
+    ) -> None:
+        write_app(tmp_path, "shop", trees, mount="shop/")
+        entry = file_router_config_entry(app_dirs=True, pages_dir_name="routes")
+
+        with installed_apps(tmp_path, "shop", framework={"PAGE_BACKENDS": [entry]}):
+            reset_check_caches()
+            messages = check_app_mounts(None)
+
+        assert check_ids(messages) == expected
+        assert all("'routes'" in message.msg for message in messages)
+
+    def test_w127_for_a_declaration_a_pages_include_overrides(self, tmp_path) -> None:
+        write_app(
+            tmp_path,
+            "wallets",
+            {"pages": ("ops",), "staff_pages": ("team",)},
+            mounts={"pages": "w/", "staff_pages": "staff/"},
+        )
+        urlconf = write_urlconf(
+            tmp_path,
+            "w127_urls",
+            'path("", include("next.urls"))',
+            'path("crew/", pages("wallets", "staff_pages"))',
+        )
+
+        messages = _mount_messages(tmp_path, "wallets", urlconf=urlconf)
+
+        assert check_ids(messages) == ["next.W127"]
+        assert "'staff_pages'" in messages[0].msg
+
+    @pytest.mark.parametrize(
+        "declared",
+        [{}, {"mount": "shop/"}, {"mounts": {"pages": "w/<int:wallet>/"}}],
+        ids=["undeclared", "mount", "mounts"],
+    )
+    def test_a_sound_declaration_draws_nothing(self, tmp_path, declared) -> None:
+        write_app(tmp_path, "shop", {"pages": ("", "cart")}, **declared)
+
+        assert _mount_messages(tmp_path, "shop") == []
+
+    def test_an_undeclared_tree_a_pages_include_mounts_draws_nothing(
+        self, tmp_path
+    ) -> None:
+        write_app(tmp_path, "audit", {"pages": ("log",)})
+        urlconf = write_urlconf(tmp_path, "quiet_urls", 'path("a/", pages("audit"))')
+
+        assert _mount_messages(tmp_path, "audit", urlconf=urlconf) == []
+
+
+class TestMountedTreeUrlChecks:
+    """The URL checks key each route from the URLconf root, prefix and all."""
+
+    @pytest.mark.parametrize(
+        ("declared", "trail", "fragment"),
+        [
+            ({"mount": "w/<int:wallet>/"}, "ops/[int:wallet]", "'w/<int:wallet>/'"),
+            ({"mounts": {"pages": "<slug:org>/"}}, "[org]", "'<slug:org>/'"),
+        ],
+        ids=["mount", "mounts"],
+    )
+    def test_e154_for_a_segment_repeating_a_prefix_kwarg(
+        self, tmp_path, declared, trail, fragment
+    ) -> None:
+        write_app(tmp_path, "wallets", {"pages": ("", trail)}, **declared)
+
+        messages = _mount_messages(tmp_path, "wallets")
+
+        assert check_ids(messages) == ["next.E154"]
+        assert fragment in messages[0].msg
+        assert "'wallets'" in messages[0].msg
+
+    def test_e154_for_a_pages_include_prefix(self, tmp_path) -> None:
+        write_app(tmp_path, "audit", {"pages": ("log/[int:org]",)})
+        urlconf = write_urlconf(
+            tmp_path, "e154_urls", 'path("o/<int:org>/", pages("audit"))'
+        )
+
+        messages = _mount_messages(tmp_path, "audit", urlconf=urlconf)
+
+        assert check_ids(messages) == ["next.E154"]
+        assert "'o/<int:org>/'" in messages[0].msg
+
+    def test_e028_inside_a_prefixed_tree(self, tmp_path) -> None:
+        write_app(tmp_path, "shop", {"pages": ("", "item/[id]/[id]")}, mount="s/")
+
+        assert check_ids(_mount_messages(tmp_path, "shop")) == ["next.E028"]
+
+    def test_e015_for_two_apps_mounted_onto_one_url(self, tmp_path) -> None:
+        write_app(tmp_path, "shop", {"pages": ("cart",)}, mount="store/")
+        write_app(tmp_path, "store", {"pages": ("store/cart",)})
+
+        messages = _mount_messages(tmp_path, "shop", "store")
+
+        assert check_ids(messages) == ["next.E015"]
+        assert '"store/cart/"' in messages[0].msg
+
+    def test_e015_for_a_pages_include_onto_a_routed_url(self, tmp_path) -> None:
+        write_app(tmp_path, "audit", {"pages": ("log",)})
+        write_app(tmp_path, "blog", {"pages": ("audit/log",)})
+        urlconf = write_urlconf(
+            tmp_path,
+            "e015_urls",
+            'path("audit/", pages("audit"))',
+            'path("", include("next.urls"))',
+        )
+
+        messages = _mount_messages(tmp_path, "audit", "blog", urlconf=urlconf)
+
+        assert check_ids(messages) == ["next.E015"]
+
+    def test_one_page_under_two_prefixes_is_no_conflict(self, tmp_path) -> None:
+        write_app(tmp_path, "shop", {"pages": ("cart",)}, mount="a/")
+        write_app(tmp_path, "store", {"pages": ("cart",)}, mount="b/")
+
+        assert _mount_messages(tmp_path, "shop", "store") == []
+
+    def test_e039_compares_names_within_one_namespace(self, tmp_path) -> None:
+        write_app(tmp_path, "audit", {"pages": ("foo-bar",)})
+        write_app(tmp_path, "blog", {"pages": ("foo_bar", "foo-bar")})
+        urlconf = write_urlconf(
+            tmp_path,
+            "e039_urls",
+            'path("audit/", pages("audit"))',
+            'path("", include("next.urls"))',
+        )
+
+        messages = _mount_messages(tmp_path, "audit", "blog", urlconf=urlconf)
+
+        assert check_ids(messages) == ["next.E039"]
+        assert "blog" in messages[0].msg
+        assert "audit" not in messages[0].msg
+
+    def test_a_pages_tree_two_routers_report_is_collected_once(self, tmp_path):
+        write_app(tmp_path, "audit", {"pages": ("log",)})
+        urlconf = write_urlconf(tmp_path, "twice_urls", 'path("a/", pages("audit"))')
+        routers = [file_router(app_dirs=True), file_router(app_dirs=False)]
+
+        with installed_apps(tmp_path, "audit", urlconf=urlconf):
+            with patch_checks_router_manager_with_routers(routers=routers):
+                messages = check_url_patterns(None)
+            roots = [root.source for router in routers for root in router.page_roots()]
+
+        assert roots == ["urls", "urls"]
+        assert messages == []

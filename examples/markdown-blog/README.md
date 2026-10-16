@@ -180,7 +180,7 @@ def _on_template_loaded(file_path: Path, **kwargs) -> None:
         _loader_hits[str(file_path)] = _detect_source(file_path)
 ```
 
-`_detect_source` looks for a sibling `template.md`, then a sibling `template.djx`, and reports `page.py` when neither is present. The map is guarded by a `threading.Lock` because pages load lazily on first request and the dev server serves those requests on several threads. `loader_hits()` returns a copy, so a caller never iterates the live dictionary while another thread writes to it. [`BlogConfig.ready`](blog/apps.py) imports the module so the connection exists before the first page loads.
+`_detect_source` looks for a sibling `template.md`, then a sibling `template.djx`, and reports `page.py` when neither is present. The map is guarded by a `threading.Lock` because pages load lazily on first request and the dev server serves those requests on several threads. `loader_hits()` returns a copy, so a caller never iterates the live dictionary while another thread writes to it. The framework imports `blog/signals.py` at startup, so the connection exists before the first page loads and `BlogConfig` needs no `ready()`.
 
 ### 7. Share button, a component with no Python side
 

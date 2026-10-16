@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from django.apps import apps
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, Tags, register
+from django.core.checks import (
+    CheckMessage,
+    Error,
+    Tags,
+    Warning as DjangoWarning,
+    register,
+)
 from django.urls import NoReverseMatch, Resolver404, resolve
 
 from next.checks import NEXT, SEO
@@ -20,19 +28,28 @@ from next.conf import import_class_cached, next_framework_settings
 from next.csrf import csrf_url, csrf_view
 from next.forms.uid import URL_NAME_FORM_ACTION, reverse_form_action
 from next.ports import form_routes_slot
+from next.utils import PageRoot, prefix_trail
 
-from .backends import FILE_ROUTER_CONFIG_KEYS, FileRouterBackend, RouterBackend
+from .backends import (
+    FILE_ROUTER_CONFIG_KEYS,
+    FileRouterBackend,
+    RouterBackend,
+    is_framework_app,
+    read_mount_declaration,
+)
 from .dispatcher import scan_pages_tree
 from .errors import DuplicateURLParameterError, URLParameterError
 from .parser import default_url_parser
+from .urlconf import tree_route, urlconf_mounts
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
-    from pathlib import Path
 
+    from django.apps import AppConfig
     from django.urls import ResolverMatch
 
+    from .backends import MountDeclaration
     from .manager import RouterManager
 
 
@@ -42,8 +59,11 @@ _FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset({"BACKEND", *FILE_ROUTER_CONFIG_KEYS})
 
 _NON_FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset({"BACKEND"})
 
-_CollectedPattern = tuple[str, str, str, frozenset[str]]
-"""`(django_pattern, url_path, source, parameter_names)` for one route."""
+_CollectedPattern = tuple[str, str, str, frozenset[str], str]
+"""`(django_pattern, name_trail, source, parameter_names, namespace)` for one route."""
+
+_UNMOUNTED = PageRoot(path=Path(), label="")
+"""The placement of a tree at the root of `next.urls`, without a prefix."""
 
 
 def _router_class(backend_path: str) -> type[RouterBackend] | None:
@@ -334,16 +354,16 @@ def check_reverse_name_collisions(*args, **kwargs) -> list[CheckMessage]:
     all_patterns, _ = _collect_all_patterns(router_manager)
 
     # reverse() picks by arguments, so a collision needs name and parameters both.
-    grouped: dict[tuple[str, frozenset[str]], dict[str, list[str]]] = {}
-    for _pattern, url_path, source, parameters in all_patterns:
+    grouped: dict[tuple[str, str, frozenset[str]], dict[str, list[str]]] = {}
+    for _pattern, url_path, source, parameters, namespace in all_patterns:
         full_name = next_framework_settings.URL_NAME_TEMPLATE.format(
             name=default_url_parser.prepare_url_name(url_path)
         )
-        grouped.setdefault((full_name, parameters), {}).setdefault(url_path, []).append(
-            source
-        )
+        grouped.setdefault((namespace, full_name, parameters), {}).setdefault(
+            url_path, []
+        ).append(source)
 
-    for (full_name, _signature), routes in grouped.items():
+    for (_namespace, full_name, _signature), routes in grouped.items():
         # One trail from several trees is an E015 path conflict, not this.
         if len(routes) == 1:
             continue
@@ -446,6 +466,114 @@ def check_framework_routes_reachable(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
+def _declaration_errors(
+    config: AppConfig, declaration: MountDeclaration
+) -> list[CheckMessage]:
+    """Report a `mount` or `mounts` declaration the router refuses."""
+    if declaration.refusal is not None:
+        return [
+            Error(
+                f"App {config.name!r} {declaration.refusal}, so the router ignores the "
+                "declaration and routes its pages tree at the root.",
+                hint=(
+                    "Declare mount as a str, or mounts as a dict of app subdirectory "
+                    "to path() prefix, and never both."
+                ),
+                obj=config,
+                id="next.E152",
+            )
+        ]
+    return [
+        Error(
+            f"App {config.name!r} mounts a tree under {prefix!r}, whose brackets "
+            "are page directory syntax, so the router ignores the declaration.",
+            hint="Write the prefix in Django path() syntax, like 'w/<int:wallet>/'.",
+            obj=config,
+            id="next.E153",
+        )
+        for prefix in declaration.bracketed
+    ]
+
+
+def _declared_trees(
+    declaration: MountDeclaration, pages_dirs: tuple[str, ...]
+) -> list[tuple[str, str]]:
+    """Return the declared trees, `mount` read once per `PAGES_DIR` of an app router."""
+    return [
+        (subdir, prefix)
+        for key, prefix in declaration.trees or ()
+        for subdir in (pages_dirs if key is None else (key,))
+    ]
+
+
+def _app_pages_dirs() -> tuple[str, ...]:
+    """Return the `PAGES_DIR` of every file router that routes app trees."""
+    router_manager, _errors = get_router_manager()
+    if router_manager is None:
+        return ()
+    return tuple(
+        dict.fromkeys(
+            router.pages_dir
+            for router in router_manager.backends
+            if isinstance(router, FileRouterBackend) and router.app_dirs
+        )
+    )
+
+
+def _declared_tree_warnings(
+    config: AppConfig,
+    declaration: MountDeclaration,
+    claimed: frozenset[tuple[str, str]],
+    pages_dirs: tuple[str, ...],
+) -> list[CheckMessage]:
+    """Warn about a declared tree that is missing or that `pages()` mounts instead."""
+    warnings: list[CheckMessage] = []
+    for subdir, prefix in _declared_trees(declaration, pages_dirs):
+        tree = Path(config.path) / subdir
+        if not tree.is_dir():
+            warnings.append(
+                DjangoWarning(
+                    f"App {config.name!r} mounts {subdir!r} under {prefix!r}, but "
+                    f"{tree} is no directory, so nothing is routed from it.",
+                    hint="Create the directory or drop the declaration of the tree.",
+                    obj=config,
+                    id="next.W126",
+                )
+            )
+        if (config.name, subdir) in claimed:
+            warnings.append(
+                DjangoWarning(
+                    f"App {config.name!r} declares {subdir!r} in mount or mounts, "
+                    "while ROOT_URLCONF mounts that tree through pages(), which wins, "
+                    "so the declaration has no effect.",
+                    hint="Drop the declaration or the pages() include.",
+                    obj=config,
+                    id="next.W127",
+                )
+            )
+    return warnings
+
+
+@register(Tags.urls, NEXT)
+def check_app_mounts(*args, **kwargs) -> list[CheckMessage]:
+    """Validate the `mount` and `mounts` declarations of every installed app.
+
+    The router ignores a declaration it refuses, so only these messages name it.
+    """
+    claimed = urlconf_mounts().claimed
+    pages_dirs = _app_pages_dirs()
+    messages: list[CheckMessage] = []
+    for config in apps.get_app_configs():
+        if is_framework_app(config.name):
+            continue
+        declaration = read_mount_declaration(config)
+        messages.extend(_declaration_errors(config, declaration))
+        messages.extend(
+            _declared_tree_warnings(config, declaration, claimed, pages_dirs)
+        )
+    return messages
+
+
 def reset_collected_patterns_cache(**kwargs) -> None:
     """Drop memoised collected patterns so the next check run recollects."""
     _collected_patterns.router_manager = None
@@ -471,10 +599,11 @@ def _collect_all_patterns_uncached(
     """Collect one `_CollectedPattern` per route from every router backend."""
     all_patterns: list[_CollectedPattern] = []
     errors: list[CheckMessage] = []
+    seen: set[PageRoot] = set()
 
     for router in router_manager.backends:
         try:
-            _collect_router_patterns(router, all_patterns, errors)
+            _collect_router_patterns(router, all_patterns, errors, seen)
         except (AttributeError, OSError) as e:
             errors.append(
                 Error(
@@ -492,13 +621,27 @@ def _collect_router_patterns(
     router: RouterBackend,
     all_patterns: list[_CollectedPattern],
     errors: list[CheckMessage],
+    seen: set[PageRoot],
 ) -> None:
-    """Append patterns from every page tree `router` reports."""
+    """Append patterns from every page tree `router` reports.
+
+    A tree a URLconf mounts is reported by every file router, so it is collected once.
+    """
     skip_dir_names = page_tree_skip_names(router)
+    include_point = urlconf_mounts().include_point or ""
     for root in get_page_roots(router):
+        if root.source == "urls":
+            if root in seen:
+                continue
+            seen.add(root)
         all_patterns.extend(
             _collect_url_patterns(
-                root.path, root.label, errors, skip_dir_names=skip_dir_names
+                root.path,
+                root.label,
+                errors,
+                skip_dir_names=skip_dir_names,
+                root=root,
+                include_point=include_point,
             )
         )
 
@@ -508,7 +651,7 @@ def _check_url_conflicts(
 ) -> None:
     """Report an error when the same Django path string comes from multiple sources."""
     pattern_dict: dict[str, list[str]] = {}
-    for pattern, _url_path, source, _parameters in all_patterns:
+    for pattern, _url_path, source, _parameters, _namespace in all_patterns:
         if pattern in pattern_dict:
             pattern_dict[pattern].append(source)
         else:
@@ -531,26 +674,71 @@ def _collect_url_patterns(
     context: str,
     errors: list[CheckMessage],
     skip_dir_names: Iterable[str] = (),
+    *,
+    root: PageRoot = _UNMOUNTED,
+    include_point: str = "",
 ) -> list[_CollectedPattern]:
     """Collect one `_CollectedPattern` per route from one pages root.
 
-    Conversion and skip set match the router, so the check sees its exact routes.
+    It matches the router walk and keys each route from the URLconf root.
     """
     patterns: list[_CollectedPattern] = []
 
     if not pages_path.exists():
         return patterns
 
+    head = tree_route(root, include_point)
+    prefix_names = _prefix_parameters(root)
     for url_path, page_file in scan_pages_tree(pages_path, skip_dir_names):
         try:
-            django_pattern, parameters = default_url_parser.parse_url_pattern(url_path)
+            _route, own = default_url_parser.parse_url_pattern(url_path)
+            clash = sorted(prefix_names.intersection(own))
+            django_pattern, parameters = default_url_parser.parse_url_pattern(
+                url_path if clash else root.name_trail(url_path)
+            )
         except URLParameterError as exc:
             errors.append(_parameter_refusal_error(exc, url_path, page_file))
-        else:
-            source = f"{context}: {page_file.relative_to(pages_path)}"
-            patterns.append((django_pattern, url_path, source, frozenset(parameters)))
+            continue
+        if clash:
+            errors.append(_prefix_clash_error(root, clash, page_file))
+            continue
+        source = f"{context}: {page_file.relative_to(pages_path)}"
+        patterns.append(
+            (
+                f"{head}{django_pattern}",
+                root.name_trail(url_path),
+                source,
+                frozenset(parameters),
+                root.namespace,
+            )
+        )
 
     return patterns
+
+
+def _prefix_parameters(root: PageRoot) -> frozenset[str]:
+    """Return the URL parameter names the mount prefix of `root` captures."""
+    if not root.prefix:
+        return frozenset()
+    try:
+        _route, parameters = default_url_parser.parse_url_pattern(
+            prefix_trail(root.prefix)
+        )
+    except URLParameterError:
+        return frozenset()
+    return frozenset(parameters)
+
+
+def _prefix_clash_error(root: PageRoot, names: list[str], page_file: Path) -> Error:
+    """Report a page parameter that the mount prefix of its tree already captures."""
+    return Error(
+        f"The page {page_file} captures {names}, which the prefix {root.prefix!r} "
+        f"that mounts the tree of app {root.app!r} captures already, so one value "
+        "would overwrite the other.",
+        hint="Rename the bracket directory or the parameter in the prefix.",
+        obj=str(page_file),
+        id="next.E154",
+    )
 
 
 def _parameter_refusal_error(
@@ -573,6 +761,7 @@ def _parameter_refusal_error(
 
 
 __all__ = [
+    "check_app_mounts",
     "check_next_pages_configuration",
     "check_reverse_name_collisions",
     "check_url_patterns",

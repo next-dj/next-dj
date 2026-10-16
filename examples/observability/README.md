@@ -1,6 +1,6 @@
 # Observability dashboard
 
-A self-hosted dashboard that watches the framework from the inside. Signals from eight framework subsystems land in nineteen receivers, accumulate in an in-process counter store, and surface in a table, a Chart.js bar chart, or a React sparkline. Nothing here monkey-patches the framework, every hook is a documented extension point.
+A self-hosted dashboard that watches the framework from the inside. Signals from nine framework subsystems land in eighteen receivers, accumulate in an in-process counter store, and surface in a table, a Chart.js bar chart, or a React sparkline. Nothing here monkey-patches the framework, every hook is a documented extension point.
 
 The page tree is `obs/pages/`. The components live next to the pages that use them. The `JS_CONTEXT_SERIALIZER` setting points at a custom class. Two pages declare their CDN dependencies through page-level `scripts = [...]` lists so the framework collects them, dedupes them, and emits them through `{% collect_scripts %}` ahead of every widget's co-located file. One of those lists also holds a staticfiles name beside a vendor URL, and an opt-in profile runs the project on `ManifestStaticFilesStorage` so the name picks up a content hash the hardcoded path never would. Two co-located widgets read `window.Next.context.<key>`, the sparkline through a per-decorator serializer override that wraps the payload in a versioned envelope, the bar chart flat through the global default. The entire frontend arrives from CDNs, so the dashboard runs without `npm`. The static collector picks up `.css`, `.js`, and `.jsx` files, the last through a custom `BabelJsxBackend` that emits `<script type="text/babel">` tags.
 
@@ -60,14 +60,14 @@ instrument/
 static/
 └── dashboards/js/chart_theme.js   <- project asset named by stats/page.py, hashed under the manifest profile
 obs/
-├── apps.py                   <- imports signals, registers the jsx kind and the metric-pulse verb
+├── apps.py                   <- registers the jsx kind and the metric-pulse verb
 ├── models.py                 <- MetricSnapshot persisted by flush_metrics
 ├── forms.py                  <- WindowFilterForm, partial apply emits metric-pulse
 ├── metrics.py                <- LocMemCache counter API, bucketed and cumulative
 ├── backends.py               <- CountingComponentsBackend, BabelJsxBackend
 ├── static_policies.py        <- InstrumentedDedup
 ├── serializers.py            <- PydanticJsContextSerializer + WrappedJsContextSerializer
-├── signals.py                <- one receiver per signal group, eight blocks
+├── signals.py                <- eighteen receivers across nine signal groups
 ├── management/commands/flush_metrics.py
 └── pages/
     ├── page.py               <- @context totals
@@ -224,7 +224,7 @@ A counter is addressed by a `kind` and a `key`. When the interesting part of an 
 
 The page signals carry an absolute path, so `page_key` in [obs/signals.py](obs/signals.py) rewrites it relative to `BASE_DIR` before it becomes a counter key. Without that step `/stats/pages/` would publish the machine's home directory in every row.
 
-`components_registered` is the bulk twin of `component_registered`, so its receiver loops over the payload and reuses the same kind. `page_rendered` feeds two counters: one render count and one accumulated `duration_ms_total`, floored to at least 1 so a sub-millisecond render still moves the total.
+`components_registered` is the bulk twin of `component_registered`, so its receiver loops over the payload and reuses the same kind. The framework imports `obs/signals.py` before it discovers components, so `components.registered` already counts every shared kit component when the process starts. `/stats/components/` reads `components.rendered` instead, so a fresh process shows its empty message there until a page renders. `page_rendered` feeds two counters: one render count and one accumulated `duration_ms_total`, floored to at least 1 so a sub-millisecond render still moves the total.
 
 The `backends` group is one receiver for six signals. Every settings-driven backend family (components, form actions, the form wizard, the file router, static assets, and partial rendering) announces a built backend through the same `config` and `instance` payload, so `on_backend_loaded` takes the tuple of all six and keys the counter by `type(instance).__name__`. Nothing in the handler knows which family sent it, which is the point: a new backend family joins the dashboard by being added to `BACKEND_LOADED_SIGNALS`.
 

@@ -3,9 +3,11 @@ from typing import Any
 from django.contrib.admin.models import LogEntry
 from django.contrib.contenttypes.models import ContentType
 from django.http import HttpRequest
+from django.utils.text import capfirst
 from shadcn_admin import utils
 
-from next import context
+from next import context, page
+from next.pages import MetadataDict
 
 
 _ACTION_LABELS = {1: "Added", 2: "Changed", 3: "Deleted"}
@@ -43,4 +45,14 @@ def history_state(
         "rows": rows,
         "changelist_url": utils.changelist_url(app_label, model_name),
         "change_url": utils.change_url(app_label, model_name, pk),
+    }
+
+
+@page.metadata
+def history_meta(app_label: str, model_name: str) -> MetadataDict:
+    """Title the page after the model its prefix names, as the changelist tabs read."""
+    model, _ = utils.resolve_model_admin(app_label, model_name)
+    return {
+        "title": capfirst(str(model._meta.verbose_name_plural)),
+        "breadcrumb": "History",
     }

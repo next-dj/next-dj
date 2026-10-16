@@ -8,8 +8,11 @@ from tests.support import (
     SHADOWED_URLCONF,
     USER_URLCONF,
     check_ids,
+    installed_apps,
     routed,
+    write_app,
     write_tree,
+    write_urlconf,
 )
 
 
@@ -89,3 +92,29 @@ class TestRoutesAtHostRoot:
         root = write_tree(tmp_path / "pages", sitemap="", robots="")
         with routed(root, **({} if urlconf is None else {"urlconf": urlconf})):
             assert check_seo_routes_at_host_root() == []
+
+
+class TestMountedTreeRouteCollisions:
+    """A page collides with a served address only where its prefix routes it."""
+
+    @pytest.mark.parametrize(
+        ("declared", "entry", "collides"),
+        [
+            ({}, 'path("", include("next.urls"))', True),
+            ({"mount": "shop/"}, 'path("", include("next.urls"))', False),
+            ({}, 'path("", pages("shop"))', True),
+            ({}, 'path("shop/", pages("shop"))', False),
+        ],
+        ids=["unprefixed", "mounts", "pages_at_root", "pages_under_prefix"],
+    )
+    def test_a_sitemap_named_page(self, tmp_path, declared, entry, collides) -> None:
+        write_app(tmp_path, "shop", {"pages": ("", "sitemap.xml")}, **declared)
+        (tmp_path / "shop" / "pages" / "sitemap.py").write_text("")
+        urlconf = write_urlconf(
+            tmp_path, "collide_urls", entry, 'path("", include("next.seo.urls"))'
+        )
+
+        with installed_apps(tmp_path, "shop", urlconf=urlconf):
+            messages = check_seo_route_collisions()
+
+        assert check_ids(messages) == (["next.E115"] if collides else [])

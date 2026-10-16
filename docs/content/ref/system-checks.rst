@@ -742,24 +742,37 @@ Errors
      - The consent cookie's ``max_age`` option is not a positive int.
        A value that is not an int is replaced by the default age, and zero or less makes the browser drop the cookie at once, so the choice is not kept.
      - ``next.consent.checks``
-   * - ``next.E170``
+   * - ``next.E152``
+     - An installed app declares ``mount`` as something other than a str, ``mounts`` as something other than a dict of str to str, a ``mounts`` key that is no plain directory name, such as a path with a separator, ``""``, ``"."``, or ``".."``, or both of them.
+       The router ignores the declaration and routes the app's ``PAGES_DIR`` tree at the root, as if the app declared nothing.
+     - ``next.urls.checks``
+   * - ``next.E153``
+     - A ``mount`` or ``mounts`` prefix of an installed app holds ``[`` or ``]``, the bracket syntax of page directories, where a prefix takes Django ``path()`` syntax.
+       The router ignores the declaration as it does for ``next.E152``.
+     - ``next.urls.checks``
+   * - ``next.E154``
+     - A page captures a URL parameter that the mount prefix of its tree captures already, so one value would overwrite the other.
+       The message names the prefix and the app, for a ``mounts`` prefix and for the route a URLconf includes ``pages()`` under alike.
+     - ``next.urls.checks``
+   * - ``next.E155``
      - A model under ``DObject`` has a default manager that defines no callable ``visible_to``, so every lookup of that model fails.
      - ``next.deps.checks``
-   * - ``next.E171``
+   * - ``next.E156``
      - A ``DObject`` with a parent sits on a page context callable that runs before any context callable provides a value under the parent name, such as ``@context("post", inherit_context=True)`` in an ancestor ``page.py``.
        A parent read after a keyless callable is not judged, since its keys are known only at render time.
+       The message quotes the full route of the page, every prefix included, as ``next.W128`` does.
      - ``next.deps.checks``
-   * - ``next.E172``
+   * - ``next.E157``
      - A ``DObject`` with a parent sits on a form handler, a form factory, or one of the form hooks ``get_initial``, ``get_form_kwargs``, ``check_permissions``, ``has_object_permission``, and ``on_valid``, which resolve with no page context, so the parent is never there.
      - ``next.deps.checks``
-   * - ``next.E173``
+   * - ``next.E158``
      - A ``DObject`` parameter sits on a ``@component.context`` callable, which resolves with no URL kwargs, so the lookup never finds its pk.
      - ``next.deps.checks``
-   * - ``next.E174``
+   * - ``next.E159``
      - The project declares a ``DObject`` parameter and no ``scope`` dependency is registered, so no lookup can call ``visible_to``.
        Register it with ``@resolver.dependency("scope")`` in the ``deps.py`` of an app.
      - ``next.deps.checks``
-   * - ``next.E175``
+   * - ``next.E160``
      - A ``DObject`` parameter sits on a callable whose type hints do not resolve, such as a module under ``from __future__ import annotations`` that imports a name of the signature under ``TYPE_CHECKING``, so the annotation stays a string and every resolve raises ``TypeError``.
      - ``next.deps.checks``
 
@@ -1051,9 +1064,19 @@ Warnings
    * - ``next.W125``
      - The consent cookie's ``samesite`` option is ``"None"`` while ``secure`` is not ``True``, so a browser rejects the cookie on a page that is not served over https.
      - ``next.consent.checks``
-   * - ``next.W135``
-     - A ``DObject`` parameter on a context callable that a routed ``page.py`` runs, an inherited one included, is named after no kwarg the route of that page captures, so the lookup finds no URL kwarg.
-       A warning rather than an error, because a kwarg an outer ``include()`` captures reaches the page at runtime and the route of the page tree never shows it, while a kwarg missing at runtime raises ``UnboundObjectError``.
+   * - ``next.W126``
+     - A ``mounts`` key of an installed app, or the ``PAGES_DIR`` tree its ``mount`` moves, names no directory under the app, so nothing is routed from it.
+     - ``next.urls.checks``
+   * - ``next.W127``
+     - A tree an installed app declares in ``mount`` or ``mounts`` is also mounted through ``pages()`` in ``ROOT_URLCONF``.
+       The URLconf wins, so the declaration has no effect.
+     - ``next.urls.checks``
+   * - ``next.W128``
+     - A ``DObject`` parameter on a context callable that a routed ``page.py`` runs, an inherited one included, is named after no kwarg the full route of that page hands it, so the lookup finds no URL kwarg.
+       The full route counts the bracket segments of the page, a ``mount`` or ``mounts`` prefix, and every kwarg the includes around the tree capture or pass as extra kwargs, the ``path()`` that includes a ``pages()`` tree and the one that includes ``next.urls`` alike.
+       A ``DObject`` named ``wallet`` under ``mounts = {"pages": "wallets/<int:wallet>/"}`` or ``path("w/<int:wallet>/", pages("wallets"))`` therefore draws no warning, and the message quotes the full route, such as ``/wallets/<int:wallet>/ops/``.
+       A tree that ``pages()`` mounts twice is judged by the include the URLconf lists first.
+       A warning rather than an error, because the walk cannot read an include hidden behind a lazy pattern sequence, while a kwarg missing at runtime raises ``UnboundObjectError``.
      - ``next.deps.checks``
 
 Codes are assigned per check and are not contiguous.

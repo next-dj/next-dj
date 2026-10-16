@@ -59,7 +59,8 @@ Namespace override
 The default namespace is ``next``, the ``app_name`` that ``next.urls`` declares for Django's namespacing.
 It is a fixed constant rather than a setting, so a call that targets another namespace passes the ``namespace`` keyword.
 ``page_reverse`` joins ``namespace`` to the computed URL name with a colon and hands the single view name to ``django.urls.reverse``, so the value must name a Django URL namespace that already exists.
-The ``next`` namespace exists because ``next.urls`` sets ``app_name = "next"``, and a second namespace exists only when ``next.urls`` is mounted again under an explicit ``namespace`` argument.
+The ``next`` namespace exists because ``next.urls`` sets ``app_name = "next"``.
+A second namespace exists when a ``pages()`` include mounts one application tree, as *Names of mounted trees* below describes, or when ``next.urls`` is mounted again under an explicit ``namespace`` argument.
 
 .. code-block:: python
    :caption: config/urls.py
@@ -92,6 +93,29 @@ The ``namespace`` argument selects which copy of the tree ``reverse`` resolves a
 It does not narrow the set of routes a mount publishes, because both mounts publish the same set.
 
 Passing a ``namespace`` that no Django mount registers raises ``NoReverseMatch``.
+
+Names of mounted trees
+~~~~~~~~~~~~~~~~~~~~~~
+
+A tree an ``AppConfig`` mounts under a prefix through ``mount`` or ``mounts`` stays in the ``next`` namespace, and its names include the prefix.
+The template spells each converter of the prefix in bracket syntax, so ``<int:wallet>`` becomes ``[int:wallet]`` and its value travels as a keyword argument like any captured segment.
+
+A tree a URLconf mounts through ``pages()`` registers in a namespace named after the application label, or the ``namespace`` the call passes, and its names leave the prefix out.
+A converter in the route above the include is a keyword argument all the same.
+
+.. code-block:: python
+   :caption: mounted trees
+
+   from next.urls import page_reverse
+
+   # mounts = {"operations": "wallets/<int:wallet>/operations/"} on WalletsConfig
+   page_reverse("wallets/[int:wallet]/operations", wallet=1)  # "/wallets/1/operations/"
+
+   # path("staff/", pages("audit")) in config/urls.py
+   page_reverse("", namespace="audit")     # "/staff/"
+   page_reverse("log", namespace="audit")  # "/staff/log/"
+
+See :ref:`topics-file-router-mounting` for the three levels a tree mounts at.
 
 When to use page_reverse instead of reverse
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

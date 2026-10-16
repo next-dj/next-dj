@@ -14,7 +14,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, TypeGuard, override
+from typing import TYPE_CHECKING, Any, Final, Literal, TypeGuard, override
 from urllib.parse import unquote_to_bytes
 
 from django.conf import settings
@@ -50,6 +50,22 @@ ROUTE_BRACKET_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"\[\[(?P<wild>[^\[\]]+)\]\]|\[(?P<param>[^\[\]]+)\]"
 )
 """The bracket segments of a trail, a double-bracket wildcard or a typed parameter."""
+
+
+_DJANGO_PARAMETER: Final[re.Pattern[str]] = re.compile(r"<([^<>]+)>")
+
+
+@functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
+def prefix_trail(prefix: str) -> str:
+    """Return a Django `path()` prefix as a trail, `<int:pk>` read as `[int:pk]`."""
+    return _DJANGO_PARAMETER.sub(r"[\1]", prefix.strip("/"))
+
+
+def join_trail(head: str, tail: str) -> str:
+    """Join two trails with one slash, either of them possibly empty."""
+    if not head:
+        return tail
+    return f"{head}/{tail}" if tail else head
 
 
 def is_dynamic_trail(url_path: str) -> bool:
@@ -177,12 +193,35 @@ def load_tree_source[E: Exception](
     return TreeSource(path, module, stamp=stamp)
 
 
+type PageSource = Literal["root", "mounts", "urls"]
+"""How a tree reaches the URLconf, by default, through `mounts` or through `pages()`."""
+
+
 @dataclass(frozen=True, slots=True)
 class PageRoot:
-    """A page tree a router routes, with the label a report names it by."""
+    """A page tree a router routes, with the label a report names it by.
+
+    `prefix` is its mount route in `path()` syntax, absolute only for a `pages()` tree.
+    """
 
     path: Path
     label: str
+    prefix: str = ""
+    subdir: str = ""
+    app: str = ""
+    source: PageSource = "root"
+    namespace: str = "next"
+
+    def route_trail(self, trail: str = "") -> str:
+        """Return the trail of the route a page at the tree-relative `trail` answers."""
+        return join_trail(prefix_trail(self.prefix), trail)
+
+    def name_trail(self, trail: str = "") -> str:
+        """Return the trail a page at the tree-relative `trail` is routed and named by.
+
+        A `pages()` tree names its pages in a namespace of its own, without the prefix.
+        """
+        return trail if self.source == "urls" else self.route_trail(trail)
 
 
 def page_roots_shape_error(source: str, roots: list[Any]) -> str | None:
@@ -304,8 +343,7 @@ def walk_page_tree(
 ) -> Generator[tuple[str, Path], None, None]:
     """Yield `(url_path, page_file)` for every page under `tree_root`.
 
-    A directory holding a `template.djx` and no `page.py` yields the page file it would
-    have, as a virtual page, and `on_skipped_dir` reports every directory refused entry.
+    A lone `template.djx` is a virtual page, and a `_name` folder is a skipped one.
     """
     yield from _visit_page_dir(
         tree_root, tree_root, "", frozenset(skip_dir_names), on_skipped_dir
@@ -372,7 +410,7 @@ def _visit_page_dir(
         yield url_path, current_path / "page.py"
     children.sort(key=lambda entry: _route_rank(entry.name))
     for entry in children:
-        if entry.name in skip_dir_names:
+        if entry.name.startswith("_") or entry.name in skip_dir_names:
             if on_skipped_dir is not None:
                 on_skipped_dir(Path(entry.path), tree_root, url_path)
             continue

@@ -65,6 +65,15 @@ Modules
 ``next.urls.reverse``.
    ``page_reverse``, ``page_reverse_lazy``, and ``with_query`` helpers.
 
+``next.urls.urlconf``.
+   Walks the root URLconf for the route ``next.urls`` is included under and for every ``pages()`` include, as *Mounted trees* below describes.
+
+``next.urls.mount``.
+   ``pages()`` and ``MountedTree``, the lazy include target that holds one application tree.
+
+``next.urls.routes``.
+   ``collect_routes`` and ``Route``, the route table that ``manage.py next routes`` prints.
+
 URL name computation
 --------------------
 
@@ -78,7 +87,9 @@ The template ``URL_NAME_TEMPLATE`` controls the format.
 The default ``page_{name}`` produces the names listed in :doc:`/content/topics/file-router`.
 
 The name computation collapses ``/``, brackets, ``:``, ``-``, and ``_`` into a single underscore, so distinct routes such as ``foo-bar`` and ``foo_bar`` can produce the same name.
-The ``check_reverse_name_collisions`` system check walks every page tree of every router, computes the reverse name of each route through the same parser, and fails with ``next.E039`` when two distinct routes collapse to one name, listing the conflicting paths.
+The ``check_reverse_name_collisions`` system check walks every page tree of every router, computes the reverse name of each route through the same parser, and fails with ``next.E039`` when two distinct routes collapse to one name within one namespace, listing the conflicting paths.
+
+A tree mounted through ``mount`` or ``mounts`` is named from its full trail, the prefix read through ``prefix_trail`` so ``<int:wallet>`` counts as ``[int:wallet]``, and a ``pages()`` tree is named from its tree-relative trail in a namespace of its own.
 
 Resolution algorithm
 --------------------
@@ -123,6 +134,27 @@ Within a kind, a name with more literal text comes first, so ``post-[id]`` prece
 The rank reads a name through ``ROUTE_BRACKET_PATTERN``, the expression the URL parser converts, so ``blog/about`` always precedes ``blog/[slug]``.
 The pattern list is therefore the same on every file system, whatever order ``os.scandir`` returns the entries in.
 
+Across trees the page routes list the application trees with a prefix first, then the application trees at the include point, then the ``DIRS`` roots, each group in ``INSTALLED_APPS`` order.
+A project that mounts nothing keeps the order of application trees followed by ``DIRS`` roots.
+A ``pages()`` tree sits outside this list, where its URLconf includes it.
+
+A trail the parser refuses, such as a repeated parameter name or a segment that repeats a name the prefix captures, does not abort the build.
+``FileRouterBackend`` logs a warning naming the ``page.py``, leaves that page unrouted, and routes the rest, so ``manage.py check`` runs and reports it.
+
+Mounted trees
+-------------
+
+``urlconf_mounts()`` walks the include tree of ``ROOT_URLCONF`` once per root resolver, so :func:`~django.urls.clear_url_caches` or a swapped URLconf walks it again.
+It records the route ``next.urls`` is included under and every ``pages()`` include with its route joined through the enclosing includes.
+Both include targets are ``MountedPatterns`` sequences, and the walk notes them without iterating, because iterating one builds page routes and the build itself reads the walk.
+
+An application tree is keyed by its application and subdirectory.
+The trees the walk finds through ``pages()`` drop out of the auto-assembly of ``next.urls``, and ``page_roots`` reports them beside the auto-assembled ones with ``source="urls"``, so component registration, static discovery, and the checks see every tree the router serves.
+
+A tree mounted through ``mount`` or ``mounts`` carries its prefix in each pattern string, so the trie indexes the full path.
+A ``pages()`` tree builds tree-relative patterns through the first ``FileRouterBackend``, wraps them in the ``URL_RESOLVER`` class, and rebuilds them when the router version moves, while Django joins in the outer route.
+A view of a prefixed tree or of a ``pages()`` tree carries ``next_route_prefix`` and ``next_route_trail``, which the breadcrumb resolution reads to reverse the crumbs of its ancestors.
+
 Reload mechanics
 ----------------
 
@@ -141,8 +173,8 @@ Long lived processes such as websocket subscribers listen for the signal to refr
 
 The manager also reloads on two signals of its own accord.
 A ``settings_reloaded`` receiver rebuilds the routers and drops the built URL resolver, so a new ``URL_RESOLVER`` or a new ``PAGE_BACKENDS`` list takes effect without a restart.
-A :data:`~django.test.signals.setting_changed` receiver rebuilds them whenever ``INSTALLED_APPS`` moves, because a file router memoises its per-application pattern lists under the application name alone and would otherwise serve the routes of the previous list.
-That second receiver is what makes :func:`~django.test.override_settings` over ``INSTALLED_APPS`` produce the routes of the swapped list.
+A :data:`~django.test.signals.setting_changed` receiver rebuilds them whenever ``INSTALLED_APPS`` or ``ROOT_URLCONF`` moves, because a file router memoises the pattern list of each application tree and reads its ``pages()`` mounts from the root URLconf, so it would otherwise serve the routes of the previous value.
+That second receiver is what makes :func:`~django.test.override_settings` over ``INSTALLED_APPS`` or ``ROOT_URLCONF`` produce the routes of the swapped value.
 Both receivers call the notifying form, so each of them fires ``router_backend_loaded`` and ``router_reloaded`` as an explicit ``reload()`` does.
 
 Multiple backends
@@ -154,7 +186,8 @@ Resolution preserves the concatenated list order, so the first match wins.
 
 If two routes convert to exactly the same Django path string the ``check_url_patterns`` system check reports the conflict at startup as ``next.E015``, whether they come from one tree or several.
 The comparison is string equality after bracket conversion, so semantic overlap between typed converters, such as ``posts/[int:id]`` next to ``posts/[id]``, is not reported.
-The same collection pass owns the duplicate parameter report, failing with ``next.E028`` and listing every conflicting name in one message, and reports a router whose collection raises as ``next.E016``.
+The comparison keys each route from the URLconf root, mount prefixes included, so two applications mounted onto one URL conflict as well.
+The same collection pass owns the duplicate parameter report, failing with ``next.E028`` and listing every conflicting name in one message, or with ``next.E154`` when the repeated name comes from the mount prefix, and reports a router whose collection raises as ``next.E016``.
 ``check_reverse_name_collisions`` reuses the collection but drops its errors, so ``next.E016`` and ``next.E028`` never appear twice.
 
 Route introspection
@@ -163,7 +196,7 @@ Route introspection
 Beside the abstract ``generate_urls``, ``RouterBackend`` carries three concrete introspection methods, ``page_roots``, ``components_folder_name``, and ``skip_dir_names``.
 They are a public contract, the only thing the system checks and the development watcher read from a backend, and :doc:`/content/howto/write-a-router-backend` is the canonical description of each method and of the safe defaults that make overriding them the opt-in.
 
-The checks walk the reported trees themselves, refusing the names ``skip_dir_names`` returns plus the folder ``components_folder_name`` names, while the watcher derives its watch specs from ``page_roots`` and ``components_folder_name`` alone, as :doc:`autoreload` describes.
+The checks walk the reported trees themselves, refusing every directory whose name starts with an underscore, the names ``skip_dir_names`` returns, and the folder ``components_folder_name`` names, while the watcher derives its watch specs from ``page_roots`` and ``components_folder_name`` alone, as :doc:`autoreload` describes.
 
 ``RouterManager.backends`` is the public read of the loaded backend list, a tuple in routing order.
 The first read loads the backends from ``PAGE_BACKENDS``, the same build the first iteration of the manager runs, so a caller that asks before the first resolve reads the configured set rather than an empty tuple.
@@ -179,7 +212,7 @@ Extension points
   The value is a dotted path to a Django ``URLResolver`` subclass, which the manager instantiates with an empty route pattern and the lazy pattern sequence.
   ``"django.urls.resolvers.URLResolver"`` restores the plain linear scan, and a subclass of ``TrieURLResolver`` keeps the index while changing the candidate order.
 - Subscribe to ``route_registered`` to observe each new pattern.
-  It fires once per discovered pattern with ``sender=FileRouterBackend`` and the ``url_path`` and ``file_path`` keyword arguments.
+  It fires once per discovered pattern with ``sender=FileRouterBackend`` and the ``url_path`` and ``file_path`` keyword arguments, where ``url_path`` holds the mount prefix of a ``mount`` or ``mounts`` tree.
 - Subscribe to ``router_backend_loaded`` to observe each backend the manager builds.
   It fires once per instantiated ``PAGE_BACKENDS`` entry with the resolved router class as sender and the ``config`` copy and the built ``instance`` as keyword arguments, so a receiver connected with ``sender=`` hears one backend family alone.
   ``reload(notify=False)`` builds the backends without sending it.

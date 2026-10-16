@@ -26,7 +26,7 @@ from next.pages import page
 from next.pages.metadata.hreflang import x_default_url
 from next.pages.metadata.normalize import X_DEFAULT
 from next.urls.reverse import page_reverse
-from next.utils import is_dynamic_trail, is_int
+from next.utils import is_dynamic_trail, is_int, join_trail
 
 from .discovery import declared_cache
 from .errors import SitemapTrailError
@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
     from next.pages.responses import CacheControl
+    from next.utils import PageRoot
 
     from .discovery import SeoRoot
     from .pagination import Rows
@@ -193,6 +194,14 @@ def listed_trails(
     ]
 
 
+def static_trails(root: PageRoot, trails: Iterable[str]) -> tuple[str, ...]:
+    """Return the static trails of a tree, none under a prefix that takes a parameter.
+
+    Such a prefix needs kwargs that only an items callable can give.
+    """
+    return () if is_dynamic_trail(root.route_trail()) else tuple(trails)
+
+
 def _rows(value: object, func: Callable[..., Any]) -> Rows:
     """Return the value an items callable returned as sliceable rows.
 
@@ -280,8 +289,13 @@ class PageTreeSitemap(_SitemapBase):
         items: Sequence[SitemapItemsEntry] = (),
         request: HttpRequest | None = None,
     ) -> None:
-        """Store the routes and the declarations without calling an items callable."""
+        """Store the routes and the declarations without calling an items callable.
+
+        The mount of the tree is read once here, as every item reverses under it.
+        """
         self.seo_root = seo_root
+        self._name_head = seo_root.root.name_trail()
+        self._namespace = seo_root.root.namespace
         self.options = options
         self.request = request
         self.protocol = options.protocol
@@ -292,7 +306,7 @@ class PageTreeSitemap(_SitemapBase):
         # Django strips the language prefix from its x-default URL, while the page
         # head names the URL of the default language, so `get_urls` adds that one.
         self.x_default = False
-        self._static = tuple(static)
+        self._static = static_trails(seo_root.root, static)
         self._declared = tuple(items)
         self._entries: ChainedEntries[SitemapItem] | None = None
 
@@ -344,7 +358,11 @@ class PageTreeSitemap(_SitemapBase):
         """Reverse the item under the active language, so its prefix is in the path."""
         kwargs: dict[str, Any] = dict(item.entry.kwargs)
         try:
-            return page_reverse(item.trail, **kwargs)
+            return page_reverse(
+                join_trail(self._name_head, item.trail),
+                namespace=self._namespace,
+                **kwargs,
+            )
         except NoReverseMatch as exc:
             exc.add_note(
                 f"Raised reversing the trail {item.trail!r} with the kwargs "
@@ -451,4 +469,5 @@ __all__ = [
     "listed_trails",
     "sitemap_languages",
     "static_noindex",
+    "static_trails",
 ]

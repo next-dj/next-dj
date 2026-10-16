@@ -117,6 +117,40 @@ def test_signing_out_clears_the_session_and_relocks_the_dashboard(
     expect(page.locator("#id_password")).to_be_visible()
 
 
+def test_the_activity_feed_of_another_app_opens_inside_the_admin_shell(
+    page: Page, base_url: str, signed_in: None
+) -> None:
+    page.goto(f"{base_url}/admin/")
+    wait_for_runtime(page)
+
+    page.get_by_role("link", name="Activity feed").click()
+
+    expect(page).to_have_url(f"{base_url}/admin/activity/")
+    expect(page.get_by_role("heading", name="Activity", exact=True)).to_be_visible()
+    expect(page.get_by_role("link", name="Books")).to_be_visible()
+
+    page.get_by_role("button", name="Sign out").click()
+
+    expect(page).to_have_url(f"{base_url}/admin/logout/")
+    expect(page.get_by_text("You have been signed out.")).to_be_visible()
+
+
+def test_the_history_page_under_a_mounted_prefix_names_its_object(
+    page: Page, base_url: str, signed_in: None, book: Book
+) -> None:
+    page.goto(f"{base_url}/admin/library/book/{book.pk}/history/")
+    wait_for_runtime(page)
+
+    expect(page).to_have_title("Books · next.dj admin")
+    expect(page.get_by_role("heading", name="History", exact=True)).to_be_visible()
+    expect(page.get_by_text("No history yet")).to_be_visible()
+    expect(
+        page.get_by_role("navigation", name="Breadcrumb").get_by_role(
+            "link", name="History"
+        )
+    ).to_have_attribute("href", f"/admin/library/book/{book.pk}/history/")
+
+
 def test_the_header_checkbox_drives_every_row_checkbox(
     page: Page, base_url: str, signed_in: None, demo_data: None, next_probe: PageProbe
 ) -> None:

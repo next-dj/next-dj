@@ -173,6 +173,7 @@ if TYPE_CHECKING:
         check_tag_templates_format,
     )
     from next.urls.checks import (
+        check_app_mounts,
         check_framework_routes_reachable,
         check_next_pages_configuration,
         check_reverse_name_collisions,
@@ -337,6 +338,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_tag_templates_format",
     ),
     "next.urls.checks": (
+        "check_app_mounts",
         "check_framework_routes_reachable",
         "check_next_pages_configuration",
         "check_reverse_name_collisions",
@@ -356,6 +358,7 @@ __all__ = [
     "check_action_applied_to_class",
     "check_action_guard_permissions",
     "check_app_directories_finder",
+    "check_app_mounts",
     "check_asset_kinds_are_loadable",
     "check_asset_renderers",
     "check_asset_version_moves_between_deploys",

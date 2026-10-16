@@ -2,7 +2,56 @@
 <html lang="en">
 {% component "page_head" %}
 <body class="min-h-screen bg-background text-foreground">
+  {% if is_auth_page %}
+    <main class="flex min-h-screen items-center justify-center px-4 py-12">
+  {% else %}
+    <div class="flex min-h-screen w-full">
+      {% component "admin_sidebar" brand="next.dj admin" app_list=app_list %}
+      <div class="flex flex-1 flex-col">
+        <header class="flex h-14 shrink-0 items-center justify-end border-b border-border bg-background px-6">
+          <div class="flex items-center gap-3 text-sm">
+            {% if user.is_authenticated %}
+              <span class="text-muted-foreground">{{ user.get_username }}</span>
+              <form action="{% action_url 'admin:logout' %}" method="post" class="inline">
+                {% csrf_token %}
+                <input type="hidden" name="_next_form_origin" value="{{ request.path }}">
+                {% component "button" type="submit" text="Sign out" variant="outline" size="sm" %}
+              </form>
+            {% else %}
+              {% component "button" href="/admin/login/" text="Sign in" variant="outline" size="sm" %}
+            {% endif %}
+          </div>
+        </header>
+        <main class="flex-1 overflow-y-auto px-6 py-8">
+          {% breadcrumbs as crumbs %}
+          <nav aria-label="Breadcrumb" class="mb-6 text-sm text-muted-foreground">
+            <ol class="flex flex-wrap items-center gap-1">
+              {% for crumb in crumbs %}
+                <li class="flex items-center gap-1">
+                  {% if not forloop.first %}<span aria-hidden="true">›</span>{% endif %}
+                  {% if crumb.current %}
+                    <a href="{{ crumb.url }}" aria-current="page" class="font-medium text-foreground">{{ crumb.label }}</a>
+                  {% elif crumb.url %}
+                    <a href="{{ crumb.url }}" class="hover:text-foreground">{{ crumb.label }}</a>
+                  {% else %}
+                    <span>{{ crumb.label }}</span>
+                  {% endif %}
+                </li>
+              {% endfor %}
+            </ol>
+          </nav>
+  {% endif %}
+
+  {% component "flash_messages" %}
   {% template %}
+
+  {% if is_auth_page %}
+    </main>
+  {% else %}
+        </main>
+      </div>
+    </div>
+  {% endif %}
   {% collect_scripts %}
 </body>
 </html>

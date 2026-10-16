@@ -72,7 +72,8 @@ The table runs roughly in order of how much it assumes.
    * - :repo:`admin <tree/main/examples/admin>`
      - Rebuilds the Django admin on next.dj over the stock ``ModelAdmin`` hooks, with request-aware form factories, guards on every mutating action, server-opened modal layers, keyed inline row forms, two page roots, and a middleware guard over the whole tree.
        Titles every model page, the changelist, the add, change, and delete forms, and the history, after its model through ``@page.metadata(inherit=True)``, and keeps the whole site out of search through ``SITE["INDEXABLE"] = False``, publishing no sitemap or robots file.
-     - :doc:`/content/howto/integrate-django-admin`, :doc:`/content/topics/multi-project`, :doc:`/content/topics/partial-rendering/index`
+       Its ``admin_audit`` application mounts its activity page and the per-object history page through ``mounts`` on its ``AppConfig``.
+     - :doc:`/content/howto/integrate-django-admin`, :doc:`/content/topics/multi-project`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/file-router`
 
 Shared assets
 -------------

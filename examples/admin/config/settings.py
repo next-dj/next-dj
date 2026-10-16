@@ -96,7 +96,10 @@ NEXT_FRAMEWORK = {
             "OPTIONS": {
                 # The hand-crafted logout form in `layout.djx` writes a bare
                 # `{% csrf_token %}`, which reads the token this processor seeds.
-                "context_processors": ["django.template.context_processors.csrf"]
+                "context_processors": [
+                    "django.template.context_processors.csrf",
+                    "shadcn_admin.context_processors.admin_shell",
+                ]
             },
         }
     ],

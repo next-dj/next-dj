@@ -10,13 +10,18 @@ Module summary
 ``resolve_base_dir`` returns ``settings.BASE_DIR`` coerced to ``pathlib.Path``, or ``None`` when it is unset, for backends that resolve project-relative paths.
 ``classify_dirs_entries`` splits a backend ``DIRS`` list into existing directory roots and plain skip-name segments, the same split the file router applies.
 A ``DIRS`` that is no sequence of trees raises :class:`~next.errors.InvalidDirsError`, a bare string included, because iterating a string would split it into characters.
-``PageRoot`` pairs a page tree with the label a report names it by.
+``PageRoot`` pairs a page tree with the label a report names it by, and with where the tree mounts.
+``prefix`` is its mount route in Django :func:`~django.urls.path` syntax, ``subdir`` the application subdirectory it is, ``app`` the label of the owning application, ``source`` how it reaches the URLconf, and ``namespace`` the URL namespace of its names, ``next`` unless a ``pages()`` include names another.
+``source`` is a ``PageSource``, one of ``"root"``, ``"mounts"``, and ``"urls"``, for a tree at the include point of ``next.urls``, a tree an ``AppConfig`` mounts through ``mount`` or ``mounts``, and a tree a URLconf mounts through ``pages()``.
+Every field past ``path`` and ``label`` defaults, so a custom backend that builds ``PageRoot(path=..., label=...)`` reports a tree at the include point.
+``route_trail(trail)`` returns the trail a page at the tree-relative ``trail`` routes by, prefix included, and ``name_trail(trail)`` the trail its URL name comes from, which leaves the prefix out for a ``pages()`` tree.
 It lives here rather than beside the router because the system checks build one too, and it is re-exported as ``next.urls.PageRoot`` for the router contract that produces it.
 
 The rest of the module is framework machinery and is excluded from the listing below.
 It holds ``walk_page_tree``, the depth-first page-tree walk the file router and the system checks both run, ``page_roots_shape_error``, the shared shape probe a check runs over what a router reports, ``template_edits_watched``, the ``DEBUG`` predicate the page, component, and static caches read before they stat anything, and ``normalise_route_name``, the one reading of a hyphen as an underscore that the URL parser and the directory check share.
 Those four sit beside ``PageRoot`` for the reason ``PageRoot`` sits here, that more than one subsystem reads each of them.
 ``WEB_SCHEMES``, ``is_int``, ``ROUTE_BRACKET_PATTERN``, and ``is_dynamic_trail`` join them for the same reason, the URL schemes a head tag or a sitemap may name, the strict int probe the metadata normaliser and the SEO checks share, and the bracket-segment pattern behind the predicate that tells a route with a parameter from a static one.
+``prefix_trail`` and ``join_trail`` sit beside that pattern, the first reading a mount prefix as a trail with ``<int:wallet>`` turned into ``[int:wallet]``, the second joining two trails with one slash, and the router, the URL checks, the breadcrumb resolution, and ``PageRoot.route_trail`` all build the full trail of a mounted page through them.
 ``TreeSource`` and ``load_tree_source`` are the one loader of a Python file at the top of a page tree, which ``sitemap.py``, ``robots.py``, and ``scripts.py`` all go through.
 ``load_tree_source`` executes the file as its own module, keeps any failure of that user code on the returned ``TreeSource`` for the checks to report, and records the file's modification time, so ``TreeSource.stale()`` tells a watched process to read it again and an edit shows without a restart.
 ``decode_url_path`` and ``exec_module_file`` are the smaller shared helpers behind them, and ``is_middleware`` and ``middleware_listed`` tell whether a ``MIDDLEWARE`` entry names a class or a subclass of it, for the checks that read the middleware order.
@@ -40,7 +45,7 @@ Public API
 
 .. automodule:: next.utils
    :members:
-   :exclude-members: walk_page_tree, page_roots_shape_error, template_edits_watched, normalise_route_name, stat_mtime_ns, resolved_tree, forget_resolved_trees, on_forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH, WEB_SCHEMES, is_int, ROUTE_BRACKET_PATTERN, is_dynamic_trail, TreeSource, load_tree_source, decode_url_path, exec_module_file, is_middleware, middleware_listed
+   :exclude-members: walk_page_tree, page_roots_shape_error, template_edits_watched, normalise_route_name, stat_mtime_ns, resolved_tree, forget_resolved_trees, on_forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH, WEB_SCHEMES, is_int, ROUTE_BRACKET_PATTERN, is_dynamic_trail, prefix_trail, join_trail, TreeSource, load_tree_source, decode_url_path, exec_module_file, is_middleware, middleware_listed
 
 See also
 --------

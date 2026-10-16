@@ -16,6 +16,7 @@ Sections
 Each page root with a ``sitemap.py`` is one section, served at ``/sitemap-<section>.xml``.
 The name is the ``section`` attribute of the file when it declares one, else the label of the innermost installed application whose directory holds the root, else the slugified directory name.
 Two trees that would take one name each declare a ``section`` of their own, and the checks warn until they do.
+A tree a URLconf mounts twice through ``pages()`` is still one section, which lists the URLs of the include the URLconf names first, see :ref:`topics-file-router-mounting`.
 
 ``@sitemap.items(..., section="products")`` moves the URLs of one route into a section of their own, so a large catalog pages separately from the static pages.
 

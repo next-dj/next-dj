@@ -10,7 +10,7 @@ The app follows the canonical next.dj layout, the one every example in this repo
 
 ```
 myapp/
-├── apps.py          # ready() imports deps and signals
+├── apps.py          # mount
 ├── models.py
 ├── deps.py          # DI providers, markers, @resolver.dependency
 ├── signals.py       # signal declarations and their receivers
@@ -21,7 +21,9 @@ myapp/
 └── static/myapp/
 ```
 
-The scaffold ships no `deps.py` and no `signals.py`, since it has nothing to inject and nothing to observe. Add them under those names when the example needs them and import both from `MyappConfig.ready()`. `config/settings.py` spells out `PAGES_DIR = "pages"` and `COMPONENTS_DIR = "_components"`, because a backend entry that lists its own `DIRS` has to name both, and the values are the framework defaults. Both stay settings so an existing project can keep the directory names it already has.
+The scaffold ships no `deps.py` and no `signals.py`, since it has nothing to inject and nothing to observe. Add them under those names when the example needs them, and the framework imports both at startup with no `ready()` code.
+
+`MyappConfig.mount` is the URL prefix of the app's `pages/` tree, in Django `path()` syntax and relative to where [`config/urls.py`](config/urls.py) includes `next.urls`. The scaffold ships `mount = ""`, so the welcome page stays on `/` and a copy keeps its URLs until it picks a prefix. An app with more than one tree declares `mounts = {"pages": "notes/", "admin_pages": "notes/admin/"}` instead, and `uv run python manage.py next routes` prints where every page landed. `config/settings.py` spells out `PAGES_DIR = "pages"` and `COMPONENTS_DIR = "_components"`, because a backend entry that lists its own `DIRS` has to name both, and the values are the framework defaults. Both stay settings so an existing project can keep the directory names it already has.
 
 ## Rename checklist
 
@@ -52,7 +54,7 @@ uv run python manage.py runserver
 uv run pytest
 ```
 
-The smoke tests in `tests/test_integration.py` fetch `/`, assert the welcome banner renders, read the head back through `next.testing.assert_metadata`, and check that every asset name resolves to a `/static/...` URL. Keep it green while you fill the scaffold in, then grow it into the example's own suite. Every example is gated at 100% coverage by `make test-examples`.
+The smoke tests in `tests/test_integration.py` fetch `/`, assert the welcome banner renders, read the head back through `next.testing.assert_metadata`, check that every asset name resolves to a `/static/...` URL, and read the route map back through `manage.py next routes`. Keep it green while you fill the scaffold in, then grow it into the example's own suite. Every example is gated at 100% coverage by `make test-examples`.
 
 ## Further reading
 

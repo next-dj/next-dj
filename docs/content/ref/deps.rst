@@ -146,13 +146,13 @@ Checks
 
 ``next.deps.checks`` registers the ``DObject`` checks, which read annotations, routes, and registries without running a query.
 
-- ``next.E170`` reports a ``DObject`` model whose default manager has no ``visible_to``.
-- ``next.E171`` reports a page ``DObject`` whose parent no earlier context callable provides.
-- ``next.E172`` reports a ``DObject`` with a parent on a form handler, a form factory, or a form hook, ``has_object_permission`` included.
-- ``next.E173`` reports a ``DObject`` on a ``@component.context`` callable.
-- ``next.E174`` reports a project that declares a ``DObject`` and registers no ``scope`` dependency.
-- ``next.E175`` reports a ``DObject`` on a callable whose type hints do not resolve, which raises ``TypeError`` on every resolve.
-- ``next.W135`` reports a page ``DObject`` whose route captures no kwarg of its name.
+- ``next.E155`` reports a ``DObject`` model whose default manager has no ``visible_to``.
+- ``next.E156`` reports a page ``DObject`` whose parent no earlier context callable provides.
+- ``next.E157`` reports a ``DObject`` with a parent on a form handler, a form factory, or a form hook, ``has_object_permission`` included.
+- ``next.E158`` reports a ``DObject`` on a ``@component.context`` callable.
+- ``next.E159`` reports a project that declares a ``DObject`` and registers no ``scope`` dependency.
+- ``next.E160`` reports a ``DObject`` on a callable whose type hints do not resolve, which raises ``TypeError`` on every resolve.
+- ``next.W128`` reports a page ``DObject`` whose full route, with every prefix and include around the tree, hands it no kwarg of its name.
 
 A ``Depends`` name nothing registered raises ``UnknownDependencyError`` at resolve time, with a ``Did you mean`` hint naming the closest registered dependency.
 See :doc:`system-checks` for the exact conditions.

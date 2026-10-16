@@ -10,15 +10,19 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
 from next.checks import NEXT
-from next.checks.common import RunMemo, discover_page_registrations, get_router_manager
+from next.checks.common import (
+    RunMemo,
+    discover_page_registrations,
+    get_router_manager,
+    iter_scanned_pages,
+)
 from next.components.context import component
 from next.components.sources import get_components_manager
 from next.conf import next_framework_settings
 from next.forms.checks.sources import iter_registered_actions
 from next.introspect import describe_callable
 from next.pages.manager import page
-from next.urls.errors import URLParameterError
-from next.urls.parser import default_url_parser
+from next.urls.routes import page_route
 
 from .introspect import HINT_ERRORS, cached_signature, cached_type_hints
 from .objects import HINT_ADVICE, SCOPE_DEPENDENCY, object_target, unresolved_object
@@ -33,6 +37,7 @@ if TYPE_CHECKING:
 
     from next.pages.registry import PageContextEntry
     from next.urls import RouterManager
+    from next.utils import PageRoot
 
 
 _FORM_HOOKS = (
@@ -56,12 +61,12 @@ class _ObjectParam(NamedTuple):
 
 
 class _PageRun(NamedTuple):
-    """A routed `page.py`, the kwargs its route captures, and its context run order.
+    """A routed `page.py`, the kwargs its full route hands it, and its context order.
 
-    `route_kwargs` is None for a route the parser refuses, and ancestors lead `steps`.
+    A refused route keeps its tree trail and no kwargs, and ancestors lead `steps`.
     """
 
-    url_path: str
+    route: str
     page_path: Path
     route_kwargs: frozenset[str] | None
     steps: tuple[tuple[str | None, PageContextEntry], ...]
@@ -117,23 +122,29 @@ def _params_of(funcs: Iterable[Callable[..., Any]]) -> tuple[_ObjectParam, ...]:
     return tuple(param for func in funcs for param in _object_params(func))
 
 
-def _route_kwargs(url_path: str) -> frozenset[str] | None:
-    """Return the kwargs the route of `url_path` captures, or None for a refused one."""
-    try:
-        _pattern, parameters = default_url_parser.parse_url_pattern(url_path)
-    except URLParameterError:
-        return None
-    return frozenset(parameters)
-
-
-def _page_run(url_path: str, page_path: Path) -> _PageRun:
+def _page_run(root: PageRoot, url_path: str, page_path: Path) -> _PageRun:
     """Return the run order of every context callable a render of `page_path` calls."""
     registry = page._context_manager
     inherited = [
         step for group in registry._inheritable_groups(page_path) for step in group
     ]
     steps = (*inherited, *registry._page_order(page_path).entries)
-    return _PageRun(url_path, page_path, _route_kwargs(url_path), steps)
+    route = page_route(root, url_path)
+    if route is None:
+        return _PageRun(url_path, page_path, None, steps)
+    return _PageRun(route.url, page_path, route.kwargs, steps)
+
+
+def _loaded_pages(
+    router_manager: RouterManager,
+) -> Iterator[tuple[PageRoot, str, Path]]:
+    """Yield each `page.py` that loaded once, with the tree the walk found it in."""
+    loaded = {path for _url_path, path in discover_page_registrations(router_manager)}
+    for router in router_manager.backends:
+        for root, url_path, page_path in iter_scanned_pages(router):
+            if page_path in loaded:
+                loaded.discard(page_path)
+                yield root, url_path, page_path
 
 
 def _component_callables() -> Iterator[Callable[..., Any]]:
@@ -182,8 +193,8 @@ def _form_callables() -> Iterator[Callable[..., Any]]:
 def _collect_sites(router_manager: RouterManager) -> _ObjectSites:
     """Read every place a `DObject` parameter can sit for one check run."""
     pages = tuple(
-        _page_run(url_path, page_path)
-        for url_path, page_path in discover_page_registrations(router_manager)
+        _page_run(root, url_path, page_path)
+        for root, url_path, page_path in _loaded_pages(router_manager)
     )
     return _ObjectSites(
         pages=pages,
@@ -249,7 +260,7 @@ def _marker(param: _ObjectParam) -> str:
 
 @register(NEXT)
 def check_object_managers(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a `DObject` model whose manager defines no `visible_to` (`next.E170`)."""
+    """Flag a `DObject` model whose manager defines no `visible_to` (`next.E155`)."""
     sites = object_sites()
     if sites is None:
         return []
@@ -269,7 +280,7 @@ def check_object_managers(*args, **kwargs) -> list[CheckMessage]:
                 "that manager does not define. Add visible_to(scope) to the "
                 "default manager, returning the rows the scope may see.",
                 obj=model,
-                id="next.E170",
+                id="next.E155",
             )
         )
     return errors
@@ -293,17 +304,17 @@ def _provides(
 def _route_warning(run: _PageRun, param: _ObjectParam) -> DjangoWarning:
     """Warn about a page context `DObject` whose route captures no kwarg of its name.
 
-    A warning, because a kwarg an outer `include` captures never shows in the route.
+    A warning, because the walk of the URLconf reads no include a lazy sequence hides.
     """
     captured = ", ".join(sorted(run.route_kwargs or ())) or "none"
     return DjangoWarning(
         f"{_marker(param)} on {_site(param)} looks its row up by the URL kwarg "
-        f'"{param.name}", but the route "{run.url_path}" of {run.page_path} '
-        f"captures {captured}. Unless an outer include captures it, rename the "
-        f"parameter after a captured segment or add a [{param.name}] directory "
-        "to the page path.",
+        f'"{param.name}", but the route "{run.route}" of {run.page_path} '
+        f"captures {captured}. Rename the parameter after a captured kwarg, add "
+        f"a [{param.name}] directory to the page path, or capture it in the "
+        "include that mounts the tree.",
         obj=str(run.page_path),
-        id="next.W135",
+        id="next.W128",
     )
 
 
@@ -312,10 +323,10 @@ def _parent_error(run: _PageRun, param: _ObjectParam) -> Error:
     return Error(
         f"{_marker(param)} on {_site(param)} filters by the context value "
         f'"{param.parent}", which no context callable running before it on the '
-        f'"{run.url_path}" route provides. Declare it with '
+        f'"{run.route}" route provides. Declare it with '
         f'@context("{param.parent}", inherit_context=True) in an ancestor page.py.',
         obj=str(run.page_path),
-        id="next.E171",
+        id="next.E156",
     )
 
 
@@ -343,7 +354,7 @@ def _page_run_messages(run: _PageRun) -> Iterator[CheckMessage]:
 
 @register(NEXT)
 def check_object_page_bindings(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a page `DObject` with no route kwarg (`next.W135`) or parent (`next.E171`).
+    """Flag a page `DObject` with no route kwarg (`next.W128`) or parent (`next.E156`).
 
     Each page is walked in its own render order, inherited ancestor callables first.
     """
@@ -357,7 +368,7 @@ def check_object_page_bindings(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_object_form_parents(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a parent `DObject` on a form handler or hook (`next.E172`).
+    """Flag a parent `DObject` on a form handler or hook (`next.E157`).
 
     Form dispatch resolves with no page context, so the parent is never there.
     """
@@ -371,7 +382,7 @@ def check_object_form_parents(*args, **kwargs) -> list[CheckMessage]:
             "context. Drop the parent and look the row up by its own URL kwarg, "
             "or load it in a page context and read it there.",
             obj=describe_callable(param.func),
-            id="next.E172",
+            id="next.E157",
         )
         for param in _params_of(sites.forms)
         if param.parent is not None
@@ -380,7 +391,7 @@ def check_object_form_parents(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_object_component_contexts(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a `DObject` on a `@component.context` callable (`next.E173`).
+    """Flag a `DObject` on a `@component.context` callable (`next.E158`).
 
     A component resolves with no URL kwargs, so the lookup never finds its pk.
     """
@@ -393,7 +404,7 @@ def check_object_component_contexts(*args, **kwargs) -> list[CheckMessage]:
             "kwarg, which a component context never receives. Load the row in "
             "a page context and read it from the template context by name.",
             obj=describe_callable(param.func),
-            id="next.E173",
+            id="next.E158",
         )
         for param in _params_of(sites.components)
     )
@@ -401,7 +412,7 @@ def check_object_component_contexts(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_object_scope(*args, **kwargs) -> list[CheckMessage]:
-    """Flag `DObject` parameters with no `scope` dependency registered (`next.E174`).
+    """Flag `DObject` parameters with no `scope` dependency registered (`next.E159`).
 
     A project that declares no `DObject` needs no scope, so the check stays silent.
     """
@@ -420,14 +431,14 @@ def check_object_scope(*args, **kwargs) -> list[CheckMessage]:
             "registers it, so every DObject lookup fails. Register it in the "
             f'deps.py of an app with @resolver.dependency("{SCOPE_DEPENDENCY}"), '
             "returning the user, the tenant, or whatever visible_to accepts.",
-            id="next.E174",
+            id="next.E159",
         )
     ]
 
 
 @register(NEXT)
 def check_object_hints(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a `DObject` whose callable's type hints do not resolve (`next.E175`).
+    """Flag a `DObject` whose callable's type hints do not resolve (`next.E160`).
 
     The resolver refuses such a parameter on every call, so the check names it first.
     """
@@ -440,7 +451,7 @@ def check_object_hints(*args, **kwargs) -> list[CheckMessage]:
             "the type hints of that callable do not resolve, so every resolve "
             f"raises TypeError. {HINT_ADVICE}",
             obj=describe_callable(func),
-            id="next.E175",
+            id="next.E160",
         )
         for func in _all_callables(sites)
         for name in _unresolved_params(func)

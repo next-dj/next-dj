@@ -77,7 +77,10 @@ from tests.support import (
     UrlSchemeCase,
     build_mock_http_request,
     handler_declared_here,
+    installed_apps,
     record_calls,
+    write_app,
+    write_urlconf,
 )
 
 
@@ -1050,6 +1053,60 @@ class TestBreadcrumbUrls:
             ).breadcrumbs
         assert crumbs == (Breadcrumb("Home", "/", current=True),)
         reversed_.assert_called_once_with("page_", urlconf=None, kwargs=None)
+
+
+class TestMountedTreeBreadcrumbs:
+    """A crumb inside a mounted tree reverses under its prefix and the prefix kwargs."""
+
+    CRUMBS = (Crumb("Home", ""), Crumb("Ops", "ops"), Crumb("Op", "ops/[int:pk]"))
+
+    def _crumbs(self, path: str) -> tuple[Breadcrumb, ...]:
+        request = _request(path)
+        request.resolver_match = resolve(path)
+        meta = Metadata(breadcrumbs=self.CRUMBS)
+        return resolve_metadata(meta, request=request).breadcrumbs
+
+    def _app(self, root, **declared: object) -> None:
+        write_app(root, "wallets", {"pages": ("", "ops", "ops/[int:pk]")}, **declared)
+
+    @pytest.mark.parametrize(
+        ("declared", "path", "urls"),
+        [
+            ({}, "/ops/4/", ["/", "/ops/", "/ops/4/"]),
+            ({"mount": "w/"}, "/w/ops/4/", ["/w/", "/w/ops/", "/w/ops/4/"]),
+            (
+                {"mounts": {"pages": "w/<int:wallet>/"}},
+                "/w/3/ops/4/",
+                ["/w/3/", "/w/3/ops/", "/w/3/ops/4/"],
+            ),
+        ],
+        ids=["unprefixed", "mount", "prefix_kwarg"],
+    )
+    def test_a_declared_prefix(self, tmp_path, declared, path, urls) -> None:
+        self._app(tmp_path, **declared)
+
+        with installed_apps(tmp_path, "wallets", urlconf=NAMESPACED_URLCONF):
+            crumbs = self._crumbs(path)
+
+        assert [crumb.url for crumb in crumbs] == urls
+        assert [crumb.current for crumb in crumbs] == [False, False, True]
+
+    def test_a_pages_include_in_its_namespace(self, tmp_path) -> None:
+        self._app(tmp_path)
+        urlconf = write_urlconf(
+            tmp_path,
+            "crumb_urls",
+            'path("org/<int:org>/w/", pages("wallets", namespace="money"))',
+        )
+
+        with installed_apps(tmp_path, "wallets", urlconf=urlconf):
+            crumbs = self._crumbs("/org/1/w/ops/4/")
+
+        assert [crumb.url for crumb in crumbs] == [
+            "/org/1/w/",
+            "/org/1/w/ops/",
+            "/org/1/w/ops/4/",
+        ]
 
 
 class TestLazyBreadcrumbs:

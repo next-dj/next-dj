@@ -2,13 +2,13 @@
 
 A full Django admin UI rebuilt on next.dj. Every page reads data straight from `django.contrib.admin` (`AdminSite._registry`, `ModelAdmin.get_changelist_instance`, `ModelAdmin.get_form`, `get_inline_instances`, `get_action_choices`, `save_model`, `delete_model`, `log_addition` / `log_change` / `log_deletions`), and none of `django/contrib/admin/templates/` ends up in the response. The HTML is shadcn-style Tailwind from the shared kit in [`../_shared/_components/`](../_shared/_components/).
 
-The example shows seven reusable patterns. A request-aware `@action(form_class=...)` factory that turns each `ModelAdmin.get_form` result into a per-request `Form` class. A shared actions module ([`shadcn_admin/forms.py`](shadcn_admin/forms.py)) that owns the add and change factories and handlers, with all per-request state collapsed into one frozen `AdminFormSpec` dataclass shared through `Depends("admin_spec")`. The `admin_form` composite keeps only the template and its `form_state` render context. Declarative guards on every mutating action, `login_required=True` at registration plus the matching `ModelAdmin` permission check inside the handler. Inline-formset validation that runs inside the main form's `clean()`, so failures route through the framework's re-render path instead of a 400. A single layout that branches between admin chrome and the centered auth chrome through one `{% if is_auth_page %}` and one `{% template %}`. An audit feed wired to `action_dispatched`, recording every admin dispatch through a single receiver without touching the handlers themselves. And `django.contrib.messages` plumbed end-to-end, where handlers write through `messages.success` / `messages.error`, `ModelAdmin.message_user` from custom bulk actions flows through the same channel, and one `flash_messages` component drains the queue at the top of every page.
+The example shows seven reusable patterns. A request-aware `@action(form_class=...)` factory that turns each `ModelAdmin.get_form` result into a per-request `Form` class. A shared actions module ([`shadcn_admin/forms.py`](shadcn_admin/forms.py)) that owns the add and change factories and handlers, with all per-request state collapsed into one frozen `AdminFormSpec` dataclass shared through `Depends("admin_spec")`. The `admin_form` composite keeps only the template and its `form_state` render context. Declarative guards on every mutating action, `login_required=True` at registration plus the matching `ModelAdmin` permission check inside the handler. Inline-formset validation that runs inside the main form's `clean()`, so failures route through the framework's re-render path instead of a 400. A single project-level layout that branches between admin chrome and the centered auth chrome through one `{% if is_auth_page %}` and one `{% template %}`. An audit feed wired to `action_dispatched`, recording every admin dispatch through a single receiver without touching the handlers themselves, with its pages mounted into the admin URL space by the app that owns the log. And `django.contrib.messages` plumbed end-to-end, where handlers write through `messages.success` / `messages.error`, `ModelAdmin.message_user` from custom bulk actions flows through the same channel, and one `flash_messages` component drains the queue at the top of every page.
 
 ## What you will see
 
 | URL | Description |
 | --- | --- |
-| `/` | Redirect to the dashboard. [`config/urls.py`](config/urls.py) mounts next.dj under `admin/` and points the site root at `reverse_lazy("next:page_")`, the router's name for `shadcn_admin/pages/page.py`. |
+| `/` | Redirect to the dashboard. [`config/urls.py`](config/urls.py) mounts next.dj under `admin/` and points the site root at `reverse_lazy("next:page_")`, the router's name for the dashboard in `shadcn_admin/pages/`. |
 | `/admin/login/` | Username and password sign-in. `AdminPermissionMiddleware` redirects every other path here for anonymous or non-staff users. |
 | `/admin/logout/` | Signed-out farewell page. The topbar Sign out form posts `admin:logout`, which clears the session and lands here. |
 | `/admin/` | Dashboard with one card per registered app and quick links to each model's changelist and Add page. |
@@ -23,7 +23,7 @@ A `library` app ships demo models. `Author`, `Tag`, `Book` (FK to Author, M2M to
 
 [`library/demo.py`](library/demo.py) holds the demo catalog and the `seed_demo` management command writes it, so every row of the table above has data behind it. It seeds 19 public-domain books by 7 authors under 6 tags, spread across all three `status` values, featured and plain, tagged and untagged, with and without a publication date, and chapters on two of them. `BookAdmin.list_per_page` is 12, so the book changelist opens on page 1 of 2 and every `list_filter` facet, including the `tags` "empty" branch, resolves to a non-empty result. Migrations carry schema only, so the catalog stays empty until you run the command, and a second run adds nothing. No account is seeded either, so `createsuperuser` remains the step that gives you a login.
 
-A second Django app `admin_audit` ships one model (`AdminActivityLog`) and one signal receiver. It hangs off the framework's `action_dispatched` signal and writes a row per dispatch. No change to `library` or `shadcn_admin` is required for it to work.
+A second Django app `admin_audit` ships one model (`AdminActivityLog`), one signal receiver and the two pages that read the audit trail, the activity feed and the per-object history. The receiver hangs off the framework's `action_dispatched` signal and writes a row per dispatch, and the pages mount into the admin URL space from the app's own `AppConfig` (section 8).
 
 ## How to run
 
@@ -40,14 +40,14 @@ Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_componen
 
 ## Walking the code
 
-### 1. Two-layer layout: chrome envelope, pages shell
+### 1. One project-level layout over every page tree
 
-The router walks two roots, listed in [`config/settings.py`](config/settings.py) under `NEXT_FRAMEWORK["PAGE_BACKENDS"]`:
+The router walks two kinds of roots, listed in [`config/settings.py`](config/settings.py) under `NEXT_FRAMEWORK["PAGE_BACKENDS"]`:
 
-- `DIRS = ["chrome"]`: the project-level page root. It contains a single [`chrome/layout.djx`](chrome/layout.djx) with the outermost HTML envelope: `<!DOCTYPE html>`, `<body>`, `{% component "page_head" %}`, and `{% collect_scripts %}`. Every page in the project gets wrapped by this layer first.
-- `APP_DIRS = True` and `PAGES_DIR = "pages"`: each installed app may ship a `pages/` tree. `shadcn_admin/pages/` owns the actual pages (dashboard, login, logout, changelist, add, change, delete, history, activity) and the single `pages/layout.djx` that wraps all of them.
+- `DIRS = ["chrome"]`: the project-level page root. It contains a single [`chrome/layout.djx`](chrome/layout.djx) with the HTML envelope (`<!DOCTYPE html>`, `<body>`, `{% component "page_head" %}`, `{% collect_scripts %}`) and the admin shell inside it. Every page of every tree is wrapped by this file and by no other layout.
+- `APP_DIRS = True` and `PAGES_DIR = "pages"`: each installed app may ship page trees. `shadcn_admin/pages/` owns the dashboard, login, logout, changelist, add, change and delete pages. `admin_audit` owns the activity feed and the history page in two trees of its own, mounted as section 8 shows.
 
-[`shadcn_admin/pages/layout.djx`](shadcn_admin/pages/layout.djx) sits **inside** the chrome envelope and keeps a single `{% template %}` wrapped differently based on a context flag. A layout carries exactly one placeholder. Composition fills the first and `next.W078` flags the rest, so the chrome branches sit **around** the placeholder, not inside two competing branches.
+The shell sits at project level because a `layout.djx` wraps only the pages of its own tree, and `inherit_context` reaches only the `page.py` files above a page in that tree. A shell in `shadcn_admin/pages/layout.djx` would leave the `admin_audit` pages bare, while the project root is the one layer every tree shares. The layout keeps a single `{% template %}` wrapped differently based on a context flag. A layout carries exactly one placeholder. Composition fills the first and `next.W078` flags the rest, so the chrome branches sit **around** the placeholder, not inside two competing branches.
 
 ```djx
 {% if is_auth_page %}
@@ -63,7 +63,7 @@ The router walks two roots, listed in [`config/settings.py`](config/settings.py)
 {% template %}
 ```
 
-`is_auth_page` comes from [`shadcn_admin/pages/page.py`](shadcn_admin/pages/page.py) through `@context("is_auth_page", inherit_context=True)`. It returns `request.path.startswith` against `/admin/login/` and `/admin/logout/`, so every descendant page picks it up without restating the rule.
+`is_auth_page` and `app_list` come from `admin_shell` in [`shadcn_admin/context_processors.py`](shadcn_admin/context_processors.py), listed under the router's `OPTIONS["context_processors"]`, so they reach every page whichever tree it lives in. `is_auth_page` tests `request.path.startswith` against `/admin/login/` and `/admin/logout/`. The dashboard template reads the same `app_list` for its cards, so its `page.py` declares nothing but its breadcrumb label (section 13). The price is that `shadcn_admin` no longer carries its own look, and a project installing it lists the processor and owns the layout.
 
 Component lookup is configured the same way: `shadcn_admin/_components/` (admin-specific composites: `admin_form`, `admin_sidebar`, `data_table`, …) plus the shared shadcn kit in [`../_shared/_components/`](../_shared/_components/).
 
@@ -71,7 +71,7 @@ Component lookup is configured the same way: `shadcn_admin/_components/` (admin-
 
 [`shadcn_admin/utils.py`](shadcn_admin/utils.py) holds `resolve_model_admin(app_label, model_name)`. It calls `apps.get_model` (raising `Http404` for unknown apps through `LookupError`) and reads `admin.site._registry` (raising `Http404` for models that exist but are not registered). Every admin page imports the helper, so the 404 contract lives in one file.
 
-`iter_app_list` in [`shadcn_admin/pages/page.py`](shadcn_admin/pages/page.py) rebuilds the structure of `AdminSite.get_app_list` without calling `reverse("admin:...")`. The classic admin URLConf is not mounted, and the dashboard URLs are written explicitly against our own routing.
+`app_list` in [`shadcn_admin/context_processors.py`](shadcn_admin/context_processors.py) rebuilds the structure of `AdminSite.get_app_list` without calling `reverse("admin:...")`. The classic admin URLConf is not mounted, and the dashboard URLs are written explicitly against our own routing.
 
 ### 3. Changelist via `ModelAdmin.get_changelist_instance`
 
@@ -98,7 +98,7 @@ def handle_change(form, spec=Depends("admin_spec")):
     return _persist(form, spec, change=True)
 ```
 
-The factories, the handlers, and the `form_state` render context all route through one frozen dataclass, `AdminFormSpec(request, app_label, model_name, model, model_admin, instance)`. `AdminFormSpec.resolve(...)` calls `apps.get_model`, reads `admin.site._registry`, and calls `ModelAdmin.get_object(request, pk)` exactly once per dispatch: it is registered as a named dependency (`@resolver.dependency("admin_spec")` in [`shadcn_admin/deps.py`](shadcn_admin/deps.py), which `ShadcnAdminConfig.ready()` imports), so every `Depends("admin_spec")` parameter within the same POST shares a single resolution. The factory wraps the base form into an `AdminForm` whose `get_initial()` returns the instance, so dispatch's `_build_form` takes the ModelForm `instance=` branch.
+The factories, the handlers, and the `form_state` render context all route through one frozen dataclass, `AdminFormSpec(request, app_label, model_name, model, model_admin, instance)`. `AdminFormSpec.resolve(...)` calls `apps.get_model`, reads `admin.site._registry`, and calls `ModelAdmin.get_object(request, pk)` exactly once per dispatch: it is registered as a named dependency (`@resolver.dependency("admin_spec")` in [`shadcn_admin/deps.py`](shadcn_admin/deps.py), which the framework imports at startup), so every `Depends("admin_spec")` parameter within the same POST shares a single resolution. Both factories call `_build_form_class`, which derives an `AdminForm` from `ModelAdmin.get_form(...)` and `BaseModelForm`. Its `get_initial()` returns the instance, so the dispatcher passes it to the ModelForm as `instance=`, and its `clean()` rebuilds the inline formsets against the same POST so a broken row surfaces on the main form.
 
 The [`admin_form` component](shadcn_admin/_components/admin_form/component.py) keeps the render side. `@component.context("form_state")` rebuilds the same form on GET and POST so a re-render after a validation failure preserves user input, and serialises it through the core `form_spec()` helper. Each resulting `FieldSpec` maps its `BoundField` to a stable `kind` (`textarea`/`checkbox`/`select`/`select_multi`/`input`) plus an `input_type` read straight from the widget, so the [`form_field` template](shadcn_admin/_components/form_field/component.djx) renders from `info.kind`, `info.bound`, and `info.is_extra` without knowing widget class names. Django's admin widget subclasses (`AdminTextareaWidget`, `AdminDateWidget`, …) and HTML5 input types (`email`, `number`, `date`, `password`, `url`) propagate without an extra lookup table.
 
@@ -164,7 +164,7 @@ The form template renders three submit buttons:
 
 ### 8. Audit feed driven by `action_dispatched`
 
-The [`admin_audit`](admin_audit/) Django app records every admin dispatch through a single signal receiver:
+The [`admin_audit`](admin_audit/) Django app records every admin dispatch through a single signal receiver in [`admin_audit/signals.py`](admin_audit/signals.py), which the framework imports at startup:
 
 ```python
 @receiver(action_dispatched)
@@ -184,7 +184,19 @@ def log_admin_action(
     AdminActivityLog.objects.create(...)
 ```
 
-`action_dispatched` carries the bound `form`, a copy of `url_kwargs`, and `dep_cache` (the per-dispatch cache of resolved named dependencies) out of the box. The form-bearing actions (`admin:add`, `admin:change`) resolve `Depends("admin_spec")`, so the receiver reads the same `AdminFormSpec` the handler used from `dep_cache["admin_spec"]` and captures the user. The actions that never resolve that dependency (`admin:delete`, `admin:bulk_action`) come through without an `admin_spec` entry, so those rows record action + target + status but leave the user field empty. The [`/admin/activity/` page](shadcn_admin/pages/activity/) reads the log and renders the latest 50 rows.
+`action_dispatched` carries the bound `form`, a copy of `url_kwargs`, and `dep_cache` (the per-dispatch cache of resolved named dependencies) out of the box. The form-bearing actions (`admin:add`, `admin:change`) resolve `Depends("admin_spec")`, so the receiver reads the same `AdminFormSpec` the handler used from `dep_cache["admin_spec"]` and captures the user. The actions that never resolve that dependency (`admin:delete`, `admin:bulk_action`) come through without an `admin_spec` entry, so those rows record action + target + status but leave the user field empty. The [`/admin/activity/` page](admin_audit/pages/page.py) reads the log and renders the latest 50 rows.
+
+The pages that read the trail live in the app that owns it, and the app declares where they mount in [`admin_audit/apps.py`](admin_audit/apps.py):
+
+```python
+class AdminAuditConfig(AppConfig):
+    mounts: ClassVar[dict[str, str]] = {
+        "pages": "activity/",
+        "object_pages": "<str:app_label>/<str:model_name>/<int:pk>/",
+    }
+```
+
+Each key names a page tree inside the app and each value is its URL prefix in Django `path()` syntax, relative to where `config/urls.py` includes `next.urls`. The prefix converters hand `app_label`, `model_name` and `pk` to the history page as URL kwargs, exactly as the bracketed directories above it once did. URL names carry the prefix, so `page_activity` and `page_str_app_label_str_model_name_int_pk_history` are the names they were inside `shadcn_admin` and every `page_reverse` still resolves. `mount = "activity/"` would be the shorthand for a lone `pages` tree. `uv run python manage.py next routes` prints the map, the audit rows marked `mounts` and the `shadcn_admin` rows marked `root`.
 
 ### 9. Flash messages through `django.contrib.messages`
 
@@ -195,7 +207,7 @@ Every success path writes a flash before redirecting:
 - login handler → `messages.success(request, "Welcome, admin.")` (a failed sign-in never reaches the handler, it comes back as an `AuthenticationForm` non-field error)
 - `BookAdmin.mark_as_published` → `self.message_user(request, "N book(s) marked as published.")` (Django's stock `ModelAdmin.message_user` writes through the same framework.)
 
-The [`flash_messages` component](../_shared/_components/flash_messages/component.py) drains pending messages off the request, maps Django's level tags (`success` / `error` / `warning` / `info`) to the shared `alert` component's variants, and is invoked once from `layout.djx` so both the admin chrome and the auth chrome surface flashes without repeating HTML. It lives in the shared kit, so the shortener and feature-flags banners answer to the same level mapping.
+The [`flash_messages` component](../_shared/_components/flash_messages/component.py) drains pending messages off the request, maps Django's level tags (`success` / `error` / `warning` / `info`) to the shared `alert` component's variants, and is invoked once from `chrome/layout.djx` so both the admin chrome and the auth chrome surface flashes without repeating HTML. It lives in the shared kit, so the shortener and feature-flags banners answer to the same level mapping.
 
 ### 10. Delete with `get_deleted_objects`
 
@@ -203,7 +215,7 @@ The [`flash_messages` component](../_shared/_components/flash_messages/component
 
 ### 11. History from `LogEntry`
 
-[`.../[int:pk]/history/page.py`](shadcn_admin/pages/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/%5Bint%3Apk%5D/history/page.py) queries `LogEntry.objects.filter(content_type=ct, object_id=pk).select_related("user")` and labels rows by `action_flag` (1 Added, 2 Changed, 3 Deleted).
+[`admin_audit/object_pages/history/page.py`](admin_audit/object_pages/history/page.py) queries `LogEntry.objects.filter(content_type=ct, object_id=pk).select_related("user")` and labels rows by `action_flag` (1 Added, 2 Changed, 3 Deleted). It imports `shadcn_admin.utils` for the 404 contract of section 2, the one import the audit app takes from the admin app.
 
 ### 12. Auth guard
 
@@ -247,7 +259,9 @@ def changelist_meta(app_label: str, model_name: str) -> MetadataDict:
     return {"title": capfirst(str(model._meta.verbose_name_plural))}
 ```
 
-`inherit=True` extends it to every page below the changelist, the add and change views that exist only as `template.djx` directories and the delete and history pages, so all five tabs read `Books · next.dj admin`. The callable takes the URL kwargs rather than the `changelist_state` context, because that context is page-local and absent on the sub-pages, and the lookup of section 2 reads the app registry without a query.
+`inherit=True` extends it to every page below the changelist in the same tree, the add and change views that exist only as `template.djx` directories and the delete page. The history page lives in another tree, so `history_meta` in its `page.py` states the same rule, and all five tabs read `Books · next.dj admin`. The callable takes the URL kwargs rather than the `changelist_state` context, because that context is page-local and absent on the sub-pages, and the lookup of section 2 reads the app registry without a query.
+
+The shell renders the trail through `{% breadcrumbs as crumbs %}`, so the crumbs are page metadata too. [`shadcn_admin/pages/page.py`](shadcn_admin/pages/page.py) declares `{"breadcrumb": "Dashboard"}`, the changelist labels its crumb with its own title, and every crumb reverses with the URL kwargs of the current match, so a delete page reads `Dashboard › Books` with both links filled. The activity feed and the history page declare `Activity` and `History`, and their crumbs reverse through the mount prefix, the history crumb with the `app_label`, `model_name` and `pk` the prefix captured. A trail stops at the edge of its page tree, like a layout does, so those two pages show their own crumb and nothing from `shadcn_admin` above it.
 
 Neither page root declares a `sitemap.py` or a robots source, so the framework mounts neither route and `/robots.txt` and `/sitemap.xml` answer 404. A sitemap hands crawlers the URLs worth indexing, and every URL here sits behind a login and says `noindex`. A robots file would be the wrong tool as well. `Disallow: /admin/` stops the fetch, a crawler that never fetches a page never reads its `noindex`, and a URL linked from elsewhere can still be listed as a bare address. The tag needs the fetch, so the admin leaves robots out and lets each page say `noindex, nofollow` itself.
 
@@ -256,7 +270,7 @@ Neither page root declares a `sitemap.py` or a robots source, so the framework m
 Six pieces of next.dj's form layer carry the example.
 
 - **`@action(form_class=callable)`.** [`next/forms/dispatch/build.py`](../../next/forms/dispatch/build.py) accepts a callable beside a `Form` subclass. `_resolve_form_class` runs the factory through `resolver.resolve_dependencies` once per request, so admin pages produce a class shaped by `ModelAdmin.get_form()` on the fly. A factory may also return a `(form_class, init_kwargs)` tuple. That branch skips `get_initial` and forwards the extra kwargs to the constructor, which is how the login action drives a form whose signature the dispatcher could not otherwise satisfy (see section 12).
-- **`{% form "action_name" %}`.** The tag takes a positional action name (a string literal or a context variable) plus optional `key="value"` HTML attributes rendered onto the opening `<form>` tag. `action`, `method`, and the `data-next-*` prefix are reserved for the framework. [`next/templatetags/forms.py`](../../next/templatetags/forms.py) compiles the value through `parser.compile_filter`, so the `admin_form` template keeps one `{% form %}` block and resolves `admin:add` or `admin:change` from `form_state.action_name` at render time, while [`action_bar`](shadcn_admin/_components/action_bar/component.djx) passes `id=` and `class=` straight on the tag. The companion `{% action_url %}` tag resolves the dispatch URL by action name for hand-crafted forms. The topbar Sign out form in [`pages/layout.djx`](shadcn_admin/pages/layout.djx) uses it.
+- **`{% form "action_name" %}`.** The tag takes a positional action name (a string literal or a context variable) plus optional `key="value"` HTML attributes rendered onto the opening `<form>` tag. `action`, `method`, and the `data-next-*` prefix are reserved for the framework. [`next/templatetags/forms.py`](../../next/templatetags/forms.py) compiles the value through `parser.compile_filter`, so the `admin_form` template keeps one `{% form %}` block and resolves `admin:add` or `admin:change` from `form_state.action_name` at render time, while [`action_bar`](shadcn_admin/_components/action_bar/component.djx) passes `id=` and `class=` straight on the tag. The companion `{% action_url %}` tag resolves the dispatch URL by action name for hand-crafted forms. The topbar Sign out form in [`chrome/layout.djx`](chrome/layout.djx) uses it.
 - **`{% form key=... %}` distinguishes repeated forms.** A form rendered once per row shares one action UID, so `key=` writes `data-next-key` and the client morphs the submitted instance rather than the first. The change view's per-row `admin:inline_change` forms key on the child primary key. The `next.W070` system check flags a looped `{% form %}` that carries neither a `key=` nor a wrapping `zone=`.
 - **`action_dispatched` carries `form` and `url_kwargs`.** [`next/forms/dispatch/`](../../next/forms/dispatch/) sends both fields on every successful dispatch (the form is `None` for handlers without a `form_class`). [`admin_audit.signals.log_admin_action`](admin_audit/signals.py) reads them to write one `AdminActivityLog` row per dispatch without ever touching the handlers it observes.
 - **`Form.clean()` → `ValidationError` re-renders the origin page.** The same path the framework already uses for field-level errors lets `AdminForm.clean()` validate inline formsets and surface their errors on the bound form, with the user's typed data preserved.
@@ -268,9 +282,9 @@ Six pieces of next.dj's form layer carry the example.
 - [`next/forms/signals.py`](../../next/forms/signals.py) for the `action_dispatched` / `form_validation_failed` payload contracts.
 - [`next/templatetags/forms.py`](../../next/templatetags/forms.py) for `{% form %}` argument compilation.
 - [`docs/content/topics/forms/actions.rst`](../../docs/content/topics/forms/actions.rst) for the form-action lifecycle, including the guards and the factory pattern used by sections 4 and 5 above.
-- [`docs/content/topics/layouts.rst`](../../docs/content/topics/layouts.rst) and [`docs/content/topics/pages.rst`](../../docs/content/topics/pages.rst) for the chrome / pages layering shown in section 1.
+- [`docs/content/topics/layouts.rst`](../../docs/content/topics/layouts.rst) and [`docs/content/topics/pages.rst`](../../docs/content/topics/pages.rst) for the project-level layout shown in section 1.
 - [`docs/content/topics/components.rst`](../../docs/content/topics/components.rst) for the component lookup configured under `_components/`.
-- [`docs/content/topics/context.rst`](../../docs/content/topics/context.rst) for `@context` and `inherit_context` used by `app_list` and `is_auth_page`.
+- [`docs/content/topics/context.rst`](../../docs/content/topics/context.rst) for the `@context` callables the pages declare and the context processors the router runs.
 - [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst) for `@resolver.dependency` and `Depends("name")` used by the `admin_spec` registration in section 4.
 - [`docs/content/topics/file-router.rst`](../../docs/content/topics/file-router.rst) for the `[str:app_label]/[int:pk]/` directory naming under `pages/`.
 - [`next/pages/metadata/`](../../next/pages/metadata/) for the metadata chain behind the settings tier and `@page.metadata(inherit=True)` in section 13.

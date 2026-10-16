@@ -27,6 +27,7 @@ from next.pages.errors import PageMetadataRequestError, PageMetadataShapeError
 from next.ports import router_access_slot
 from next.site import SiteOriginError, site_indexable, site_origin
 from next.site.headers import CLOSED_ROBOTS
+from next.utils import join_trail
 
 from .dicts import Text, Url
 from .hreflang import hreflang_urls, x_default_url
@@ -518,16 +519,34 @@ def forget_crumb_routes(**kwargs: object) -> None:
     _crumb_route.cache_clear()
 
 
+def _mount_of(match: ResolverMatch, template: str) -> tuple[str, dict[str, object]]:
+    """Return the mount prefix of the matched tree and the kwargs captured outside it.
+
+    A file router marks the views of a mounted tree, whose crumbs need both of them.
+    """
+    prefix: object = getattr(match.func, "next_route_prefix", "")
+    trail: object = getattr(match.func, "next_route_trail", None)
+    if not isinstance(prefix, str) or not isinstance(trail, str):
+        return "", {}
+    _name, own = _crumb_route(trail, template)
+    return prefix, {key: value for key, value in match.kwargs.items() if key not in own}
+
+
 def _crumb_url(
-    trail: str, match: ResolverMatch, template: str, urlconf: str | None
+    trail: str,
+    match: ResolverMatch,
+    template: str,
+    urlconf: str | None,
+    mount: tuple[str, dict[str, object]],
 ) -> str | None:
     """Reverse the page of `trail` with the URL kwargs of the current match."""
-    name, parameters = _crumb_route(trail, template)
+    prefix, outer = mount
+    name, parameters = _crumb_route(join_trail(prefix, trail), template)
     given = match.kwargs
     if any(key not in given for key in parameters):
         return None
     viewname = f"{match.namespace}:{name}" if match.namespace else name
-    kwargs = {key: given[key] for key in parameters}
+    kwargs = {**outer, **{key: given[key] for key in parameters}}
     try:
         return reverse(viewname, urlconf=urlconf, kwargs=kwargs or None)
     except NoReverseMatch:
@@ -545,9 +564,10 @@ def _linked_crumbs(
         return tuple(Breadcrumb(crumb.label, None) for crumb in crumbs)
     template = next_framework_settings.URL_NAME_TEMPLATE
     own = escape_uri_path(path)
+    mount = _mount_of(match, template)
     linked: list[Breadcrumb] = []
     for crumb in crumbs:
-        url = _crumb_url(crumb.trail, match, template, urlconf)
+        url = _crumb_url(crumb.trail, match, template, urlconf, mount)
         linked.append(
             Breadcrumb(crumb.label, url, current=url is not None and url == own)
         )

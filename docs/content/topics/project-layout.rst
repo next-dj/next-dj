@@ -61,16 +61,16 @@ The last column names what another application of the same project may use.
      - Keeps out
      - Open to other applications
    * - ``apps.py``
-     - The ``AppConfig`` with ``name``, an explicit ``label``, and a ``ready`` method that imports ``signals`` and ``deps``.
+     - The ``AppConfig`` with ``name``, an explicit ``label``, and an optional ``mount`` or ``mounts`` prefix.
      - Domain code, and model imports at module level, which run before the app registry is ready.
      - No.
    * - ``models.py``
-     - Fields, methods that act on one instance, a custom ``QuerySet`` for reads over many rows, and invariants in ``Meta.constraints`` and ``clean``.
+     - Fields, methods that act on one instance, a custom ``QuerySet`` for reads over many rows with ``visible_to(scope)`` on the default manager, and invariants in ``Meta.constraints`` and ``clean``.
      - Requests, responses, templates, and writes that span several models.
      - Yes.
        Foreign keys and ``QuerySet`` methods are how Django applications meet.
    * - ``services.py``
-     - Functions shaped ``f(user, *, ...)`` that span several models, open transactions, and send signals.
+     - Functions shaped ``f(scope, *, ...)`` that span several models, open transactions, and send signals, plus public reads that take no scope.
      - ``request``, ``HttpResponse``, and rendering.
      - Yes, it is the write surface of the application.
    * - ``forms.py``
@@ -82,7 +82,7 @@ The last column names what another application of the same project may use.
      - Logic beyond a call into a ``services.py``.
      - Yes, the signals it declares.
    * - ``deps.py``
-     - DI providers and named dependencies that turn the request into a value, such as the active tenant or a feature flag.
+     - DI providers and named dependencies that turn the request into a value, such as the ``scope`` every read filters by or a feature flag.
      - Domain rules and writes.
      - Named dependencies are project-wide through ``Depends("name")``, and markers are imported.
    * - ``admin.py``
@@ -107,9 +107,11 @@ The last column names what another application of the same project may use.
      - No.
        A page-tree component is visible only from templates of its own tree, and a kit shared across applications lives in a ``DIRS`` root.
 
-The framework imports two of these files itself.
-``autodiscover_forms()`` imports ``forms.py`` of every installed application when the ``next`` application is ready, unless ``FORM_AUTODISCOVER`` is ``False``, and ``django.contrib.admin`` imports ``admin.py``.
-``signals.py`` and ``deps.py`` are not discovered, so ``AppConfig.ready`` imports them explicitly.
+:doc:`application-layout` shows the ``scope`` dependency, the ``visible_to(scope)`` read, and the ``f(scope, *, ...)`` service in full.
+
+Four of these files load with no import of their own, so ``AppConfig.ready`` stays empty.
+When the ``next`` application is ready it imports ``deps.py``, then ``forms.py``, then ``signals.py`` of every installed application, all before any ``component.py``, and ``django.contrib.admin`` imports ``admin.py``.
+``DEPS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, and ``SIGNALS_AUTODISCOVER`` turn the three sweeps off one by one, and a project that turns one off imports those modules from ``AppConfig.ready``, see :doc:`/content/ref/settings`.
 
 .. code-block:: python
    :caption: notes/apps.py
@@ -120,9 +122,6 @@ The framework imports two of these files itself.
        default_auto_field = "django.db.models.BigAutoField"
        name = "notes"
        label = "notes"
-
-       def ready(self) -> None:
-           from notes import deps, signals
 
 Names the layout avoids
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -206,7 +205,7 @@ The tutorial creates ``models.py``, ``forms.py``, the page tree, and the tests.
 Two things are special about this tree.
 
 - ``pages/`` is the page root.
-  Every directory below it becomes a URL.
+  Every directory below it becomes a URL, except a private one whose name starts with an underscore.
 - ``_components/`` lives inside the page root.
   Every directory below it becomes a reusable component.
 
@@ -340,7 +339,22 @@ Several applications
 
 Several subject areas become several applications in ``INSTALLED_APPS``, each with the composition above.
 With ``APP_DIRS`` on, the file router walks the ``pages/`` tree of every installed application and serves the routes of all of them through the single ``include("next.urls")`` line.
-An application declares no URL prefix of its own, so the prefix is the first directory inside its ``pages/``, for example ``billing/pages/billing/invoices/page.py`` for ``/billing/invoices/``.
+By default the first directory inside ``pages/`` is the first URL segment, for example ``billing/pages/billing/invoices/page.py`` for ``/billing/invoices/``.
+An application that owns a prefix declares it on its ``AppConfig`` instead, and its tree loses the repeated directory.
+
+.. code-block:: python
+   :caption: billing/apps.py
+
+   from django.apps import AppConfig
+
+   class BillingConfig(AppConfig):
+       default_auto_field = "django.db.models.BigAutoField"
+       name = "billing"
+       label = "billing"
+       mount = "billing/"
+
+With that declaration ``billing/pages/invoices/page.py`` answers ``/billing/invoices/``, and its URL name ``next:page_billing_invoices`` stays the one the deeper tree had.
+An application with a second tree, such as a staff area beside its public pages, maps each subdirectory to its prefix through ``mounts``, as :ref:`topics-file-router-mounting` describes.
 Two applications that answer the same URL path are reported by the ``next.E015`` check.
 
 A layout in a project ``DIRS`` root such as ``chrome/`` wraps the pages of every application, as *Per project page DIRS* above shows.
@@ -385,7 +399,34 @@ Its ``label`` is set explicitly, because the default label is the last component
 
 ``INSTALLED_APPS`` lists ``"ledger.money.wallets"``.
 The file router finds the page tree of a nested application through ``AppConfig.path``, so ``ledger/money/wallets/pages/`` is walked like any other tree and its routes join those of every other application under the same ``include("next.urls")``.
-A context that wants a shared URL prefix spells it as the first directory of each of its page trees.
+
+Each application of a context declares its own prefix through ``mount`` or ``mounts``, such as ``mount = "money/wallets/"`` on ``WalletsConfig``.
+A context that wants to own its URL space instead keeps a ``urls.py`` of its own and mounts the trees of its applications there through ``pages()``.
+
+.. code-block:: python
+   :caption: ledger/money/urls.py
+
+   from django.urls import path
+
+   from next.urls import pages
+
+   urlpatterns = [
+       path("wallets/", pages("wallets")),
+       path("operations/", pages("operations")),
+   ]
+
+.. code-block:: python
+   :caption: config/urls.py
+
+   from django.urls import include, path
+
+   urlpatterns = [
+       path("money/", include("ledger.money.urls")),
+       path("", include("next.urls")),
+   ]
+
+The router finds these ``pages()`` calls through the nested include, takes the two trees out of ``include("next.urls")``, and names their pages in the ``wallets`` and ``operations`` namespaces, so ``page_reverse("", namespace="wallets")`` answers ``/money/wallets/``.
+A ``pages()`` include wins over a ``mount`` or ``mounts`` declaration of the same tree, and ``manage.py next routes`` lists where each tree ended up.
 
 Tests
 -----
@@ -438,6 +479,7 @@ See also
 .. seealso::
 
    :doc:`application-layout` for where models, querysets, services, and signals hold the logic.
-   :doc:`file-router` for the route shapes.
+   :doc:`file-router` for the route shapes and the mounting of application trees.
+   :doc:`/content/howto/mount-an-application-under-a-prefix` for a prefix recipe.
    :doc:`multi-project` for layouts that span several Django projects.
    :doc:`/content/howto/share-components-across-projects` for shared component patterns.

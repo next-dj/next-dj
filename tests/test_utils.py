@@ -10,19 +10,25 @@ from django.middleware.locale import LocaleMiddleware
 from django.test import override_settings
 
 from next.errors import InvalidDirsError
+from next.urls.dispatcher import scan_pages_tree
 from next.utils import (
+    PageRoot,
     TreeSource,
     classify_dirs_entries,
     exec_module_file,
     is_dynamic_trail,
     is_int,
     is_middleware,
+    join_trail,
     load_tree_source,
     middleware_listed,
+    prefix_trail,
     resolve_base_dir,
     stat_mtime_ns,
     template_edits_watched,
+    walk_page_tree,
 )
+from tests.support import write_page
 
 
 class TestStatMtimeNs:
@@ -196,6 +202,145 @@ class TestIsDynamicTrail:
         self, trail: str, *, expected: bool
     ) -> None:
         assert is_dynamic_trail(trail) is expected
+
+
+class TestPrefixTrail:
+    """A Django `path()` prefix reads as the bracket trail of the page directories."""
+
+    @pytest.mark.parametrize(
+        ("prefix", "trail"),
+        [
+            ("", ""),
+            ("/", ""),
+            ("shop/", "shop"),
+            ("/shop", "shop"),
+            ("w/<int:wallet>/ops/", "w/[int:wallet]/ops"),
+            ("<slug>/", "[slug]"),
+            ("a/<int:x>/<str:y>/", "a/[int:x]/[str:y]"),
+        ],
+        ids=["empty", "slash", "static", "leading", "typed", "untyped", "two"],
+    )
+    def test_a_prefix_becomes_a_trail(self, prefix: str, trail: str) -> None:
+        assert prefix_trail(prefix) == trail
+
+
+class TestJoinTrail:
+    """Two trails join with one slash, and an empty side adds nothing."""
+
+    @pytest.mark.parametrize(
+        ("head", "tail", "joined"),
+        [
+            ("", "", ""),
+            ("", "ops", "ops"),
+            ("w/[int:wallet]", "", "w/[int:wallet]"),
+            ("w/[int:wallet]", "ops/[int:pk]", "w/[int:wallet]/ops/[int:pk]"),
+        ],
+        ids=["both_empty", "no_head", "no_tail", "both"],
+    )
+    def test_the_join(self, head: str, tail: str, joined: str) -> None:
+        assert join_trail(head, tail) == joined
+
+
+class TestPageRootTrails:
+    """A tree answers routes under its prefix and names pages by its source."""
+
+    @pytest.mark.parametrize(
+        ("source", "prefix", "trail", "route", "name"),
+        [
+            ("root", "", "ops", "ops", "ops"),
+            ("root", "", "", "", ""),
+            ("mounts", "w/<int:wallet>/", "ops", "w/[int:wallet]/ops", None),
+            ("mounts", "w/<int:wallet>/", "", "w/[int:wallet]", None),
+            ("urls", "org/<int:org>/audit/", "log", "org/[int:org]/audit/log", "log"),
+            ("urls", "staff/", "", "staff", ""),
+        ],
+        ids=["root", "root_index", "mounts", "mounts_index", "urls", "urls_index"],
+    )
+    def test_route_and_name_trails(
+        self, source, prefix: str, trail: str, route: str, name: str | None
+    ) -> None:
+        root = PageRoot(path=Path(), label="x", prefix=prefix, source=source)
+
+        assert root.route_trail(trail) == route
+        assert root.name_trail(trail) == (route if name is None else name)
+
+    def test_the_defaults_describe_an_unprefixed_root_tree(self) -> None:
+        root = PageRoot(path=Path(), label="Root")
+
+        assert (root.prefix, root.subdir, root.app) == ("", "", "")
+        assert (root.source, root.namespace) == ("root", "next")
+        assert root.route_trail() == root.name_trail() == ""
+
+
+class TestPrivateDirectories:
+    """A directory whose name starts with `_` is a private folder, never a route."""
+
+    def _tree(self, root: Path) -> None:
+        for trail in ("", "about", "_drafts/wip", "about/_notes/x", "_components/card"):
+            write_page(root, trail)
+
+    def test_a_private_folder_routes_none_of_its_pages(self, tmp_path: Path) -> None:
+        self._tree(tmp_path)
+
+        assert [trail for trail, _page in walk_page_tree(tmp_path)] == ["", "about"]
+
+    def test_every_private_folder_is_reported_where_it_sits(
+        self, tmp_path: Path
+    ) -> None:
+        self._tree(tmp_path)
+        skipped: list[tuple[str, Path, str]] = []
+
+        list(
+            walk_page_tree(
+                tmp_path,
+                on_skipped_dir=lambda folder, root, trail: skipped.append(
+                    (folder.name, root, trail)
+                ),
+            )
+        )
+
+        assert sorted(skipped) == [
+            ("_components", tmp_path, ""),
+            ("_drafts", tmp_path, ""),
+            ("_notes", tmp_path, "about"),
+        ]
+
+    def test_a_named_skip_and_a_private_folder_report_alike(
+        self, tmp_path: Path
+    ) -> None:
+        self._tree(tmp_path)
+        write_page(tmp_path, "drafts/wip")
+        skipped: list[str] = []
+
+        routes = [
+            trail
+            for trail, _page in walk_page_tree(
+                tmp_path,
+                {"drafts"},
+                on_skipped_dir=lambda folder, _root, _trail: skipped.append(
+                    folder.name
+                ),
+            )
+        ]
+
+        assert routes == ["", "about"]
+        assert sorted(skipped) == ["_components", "_drafts", "_notes", "drafts"]
+
+    def test_the_components_folder_still_registers(self, tmp_path: Path) -> None:
+        self._tree(tmp_path)
+        registered: list[tuple[str, Path, str]] = []
+
+        with patch(
+            "next.urls.dispatcher.register_components_folder_from_router_walk",
+            lambda folder, root, trail: registered.append((folder.name, root, trail)),
+        ):
+            routes = [
+                trail
+                for trail, _page in scan_pages_tree(tmp_path, register_components=True)
+            ]
+
+        assert routes == ["", "about"]
+        assert registered == [("_components", tmp_path, "")]
 
 
 class _SourceError(Exception):

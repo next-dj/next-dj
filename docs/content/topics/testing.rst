@@ -287,6 +287,32 @@ Use it when a test suite does not go through the full request cycle and must tri
 It is intended for self-tests of the loader and for the rare case of rewritten ``page.py`` files within one session.
 A normal test suite does not call it, since each pytest session starts a fresh interpreter.
 
+.. _topics-testing-urlconf:
+
+Switching the URLconf
+~~~~~~~~~~~~~~~~~~~~~
+
+The routes of ``include("next.urls")`` leave out every tree the root URLconf mounts through ``pages()``, and they are cached until the routers reload.
+:func:`~django.test.override_settings` with ``ROOT_URLCONF`` sends ``setting_changed``, which reloads the routers on entry and again on exit, so the test sees the routes of the URLconf it names.
+
+pytest-django's ``@pytest.mark.urls`` assigns ``ROOT_URLCONF`` without that signal, before the test and again after it.
+``next.urls`` then keeps the routes built for the previous URLconf.
+A tree the previous URLconf mounted through ``pages()`` stays out of ``next.urls`` and answers nowhere, and a tree the new URLconf mounts answers under its new prefix and under its old route as well.
+A test that switches to a URLconf with ``pages()`` includes, or away from one, therefore uses ``override_settings``.
+
+.. code-block:: python
+   :caption: tests/test_staff.py
+
+   from django.test import override_settings
+
+   from next.testing import NextClient
+
+   @override_settings(ROOT_URLCONF="tests.staff_urls")
+   def test_staff_log(next_client: NextClient) -> None:
+       assert next_client.get("/staff/log/").status_code == 200
+
+Code that assigns ``ROOT_URLCONF`` directly calls ``router_manager.reload()`` from ``next.urls`` after each assignment, the one that restores the old value included.
+
 NextClient
 ----------
 

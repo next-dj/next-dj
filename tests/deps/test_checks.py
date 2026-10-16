@@ -24,10 +24,13 @@ from next.introspect import describe_callable
 from tests.support import (
     bound_dependency,
     check_ids,
+    installed_apps,
     isolated_form_registries,
     next_framework_settings_stand_in,
     routed,
+    write_app,
     write_page,
+    write_urlconf,
 )
 
 
@@ -89,6 +92,20 @@ COMPONENT_BACKEND = {
 
 CheckFunction = Callable[[], list[CheckMessage]]
 
+MOUNTED_WALLETS = pytest.mark.parametrize(
+    ("declared", "entry", "route"),
+    [
+        (
+            {"mounts": {"pages": "wallets/<int:wallet>/"}},
+            'path("", include("next.urls"))',
+            "/wallets/<int:wallet>/ops/",
+        ),
+        ({}, 'path("w/<int:wallet>/", pages("wallets"))', "/w/<int:wallet>/ops/"),
+        ({}, 'path("t/<int:wallet>/", include("next.urls"))', "/t/<int:wallet>/ops/"),
+    ],
+    ids=["mounts", "pages_include", "framework_include"],
+)
+
 
 def _run(
     root: Path, check: CheckFunction, *pages: tuple[str, str], **framework: object
@@ -97,6 +114,22 @@ def _run(
         write_page(root, trail, HEADER + body)
     with routed(root, **framework):
         return check()
+
+
+def _run_mounted(
+    root: Path, param: str, declared: dict[str, object], entry: str
+) -> list:
+    write_app(root, "wallets", {"pages": ()}, **declared)
+    write_page(
+        root / "wallets" / "pages",
+        "ops",
+        HEADER
+        + f'\n@context("row")\ndef row({param}: DObject[Group]) -> Group:\n'
+        + f"    return {param}\n",
+    )
+    urlconf = write_urlconf(root, "wallet_urls", entry)
+    with installed_apps(root, "wallets", urlconf=urlconf):
+        return check_object_page_bindings()
 
 
 def _rows(group: DObject[Group]) -> Group:
@@ -177,7 +210,7 @@ class TestFailedRouters:
 
 
 class TestManagers:
-    """A `DObject` model needs `visible_to` on its default manager (`next.E170`)."""
+    """A `DObject` model needs `visible_to` on its default manager (`next.E155`)."""
 
     def test_a_missing_hook_is_reported_once_per_model(self, tmp_path: Path) -> None:
         twice = GROUP_CONTEXT + (
@@ -185,7 +218,7 @@ class TestManagers:
             "    return group\n"
         )
         messages = _run(tmp_path / "pages", check_object_managers, (GROUP_ROUTE, twice))
-        assert check_ids(messages) == ["next.E170"]
+        assert check_ids(messages) == ["next.E155"]
         assert messages[0].obj is Group
         assert 'DObject[auth.Group] on parameter "group" of ' in messages[0].msg
         assert "auth.Group._default_manager.visible_to(scope)" in messages[0].msg
@@ -197,7 +230,7 @@ class TestManagers:
             ("[int:permission]", PERMISSION_ANCESTOR),
             (CHAIN_ROUTE, ROSTER_CHILD),
         )
-        assert check_ids(messages) == ["next.E170", "next.E170"]
+        assert check_ids(messages) == ["next.E155", "next.E155"]
         assert 'DObject[auth.Group, "permissions"]' in messages[1].msg
 
     def test_a_hooked_manager_is_silent(self, tmp_path: Path, scoped_models) -> None:
@@ -215,7 +248,7 @@ class TestManagers:
         messages = _run(
             tmp_path / "pages", check_object_managers, (GROUP_ROUTE, GROUP_CONTEXT)
         )
-        assert check_ids(messages) == ["next.E170"]
+        assert check_ids(messages) == ["next.E155"]
 
     def test_a_named_dependency_is_read_too(self, tmp_path: Path) -> None:
         def owner(permission: DObject[Permission]) -> Permission:
@@ -223,7 +256,7 @@ class TestManagers:
 
         with bound_dependency("owner", owner):
             messages = _run(tmp_path / "pages", check_object_managers)
-        assert check_ids(messages) == ["next.E170"]
+        assert check_ids(messages) == ["next.E155"]
         assert messages[0].obj is Permission
 
     def test_a_returned_marker_and_a_broken_hint_are_skipped(
@@ -238,7 +271,7 @@ class TestManagers:
 
 
 class TestRouteKwargs:
-    """A page `DObject` names a kwarg its route captures (`next.W135`)."""
+    """A page `DObject` names a kwarg its route captures (`next.W128`)."""
 
     def test_a_captured_kwarg_is_silent(self, tmp_path: Path) -> None:
         messages = _run(
@@ -257,7 +290,7 @@ class TestRouteKwargs:
         messages = _run(
             tmp_path / "pages", check_object_page_bindings, (trail, GROUP_CONTEXT)
         )
-        assert check_ids(messages) == ["next.W135"]
+        assert check_ids(messages) == ["next.W128"]
         assert captured in messages[0].msg
         assert 'by the URL kwarg "group"' in messages[0].msg
         assert messages[0].obj == str(tmp_path / "pages" / trail / "page.py")
@@ -270,17 +303,32 @@ class TestRouteKwargs:
         )
         assert messages == []
 
+    @MOUNTED_WALLETS
+    def test_a_kwarg_the_mount_captures_is_silent(
+        self, tmp_path: Path, declared: dict[str, object], entry: str, route: str
+    ) -> None:
+        assert _run_mounted(tmp_path, "wallet", declared, entry) == []
+
+    @MOUNTED_WALLETS
+    def test_a_kwarg_no_part_of_the_route_captures_warns(
+        self, tmp_path: Path, declared: dict[str, object], entry: str, route: str
+    ) -> None:
+        messages = _run_mounted(tmp_path, "account", declared, entry)
+        assert check_ids(messages) == ["next.W128"]
+        assert f'the route "{route}" of ' in messages[0].msg
+        assert "captures wallet." in messages[0].msg
+
     def test_a_callable_under_two_keys_warns_once(self, tmp_path: Path) -> None:
         body = (
             '\n@context("first")\n@context("second")\n'
             "def both(group: DObject[Group]) -> Group:\n    return group\n"
         )
         messages = _run(tmp_path / "pages", check_object_page_bindings, ("", body))
-        assert check_ids(messages) == ["next.W135"]
+        assert check_ids(messages) == ["next.W128"]
 
 
 class TestParents:
-    """A page parent comes from a context running before the marker (`next.E171`)."""
+    """A page parent comes from a context running before the marker (`next.E156`)."""
 
     def test_an_inherited_ancestor_value_binds_the_parent(self, tmp_path: Path) -> None:
         messages = _run(
@@ -298,15 +346,15 @@ class TestParents:
             ("[int:permission]", PERMISSION_LOCAL),
             (CHAIN_ROUTE, ROSTER_CHILD),
         )
-        assert check_ids(messages) == ["next.E171"]
+        assert check_ids(messages) == ["next.E156"]
         assert '"permissions"' in messages[0].msg
-        assert '"[int:permission]/[int:group]" route' in messages[0].msg
+        assert '"/<int:permission>/<int:group>/" route' in messages[0].msg
         assert '@context("permissions", inherit_context=True)' in messages[0].msg
         assert messages[0].obj == str(tmp_path / "pages" / CHAIN_ROUTE / "page.py")
 
     @pytest.mark.parametrize(
         ("child_key", "expected"),
-        [("roster", []), ("group", ["next.E171"])],
+        [("roster", []), ("group", ["next.E156"])],
         ids=["parent_runs_first", "child_runs_first"],
     )
     def test_the_merge_order_of_the_page_decides(
@@ -322,7 +370,7 @@ class TestParents:
 
     @pytest.mark.parametrize(
         ("decoration", "expected"),
-        [('"roster"', []), ('"roster", inherit_context=True', ["next.E171"])],
+        [('"roster"', []), ('"roster", inherit_context=True', ["next.E156"])],
         ids=["keyed_after_keyless", "inherited_before_keyless"],
     )
     def test_a_keyless_context_leaves_later_parents_unjudged(
@@ -342,8 +390,8 @@ class TestParents:
         [
             (None, "side", []),
             ("side", "side", []),
-            ("side", None, ["next.E171"]),
-            ("side", "main", ["next.E171"]),
+            ("side", None, ["next.E156"]),
+            ("side", "main", ["next.E156"]),
         ],
         ids=["unbound_parent", "same_zone", "unbound_child", "other_zone"],
     )
@@ -367,12 +415,12 @@ class TestParents:
 
 
 class TestFormParents:
-    """A form handler or hook declares no parent `DObject` (`next.E172`)."""
+    """A form handler or hook declares no parent `DObject` (`next.E157`)."""
 
     def test_a_handler_parent_is_reported(self, tmp_path: Path, forms_isolated) -> None:
         _registered(handler=_member)
         messages = _run(tmp_path / "pages", check_object_form_parents)
-        assert check_ids(messages) == ["next.E172"]
+        assert check_ids(messages) == ["next.E157"]
         assert messages[0].obj == describe_callable(_member)
         assert "a form handler or hook resolves with no page context" in (
             messages[0].msg
@@ -384,7 +432,7 @@ class TestFormParents:
         _registered(handler=_member, name="first_member_action")
         _registered(handler=_member, name="second_member_action")
         messages = _run(tmp_path / "pages", check_object_form_parents)
-        assert check_ids(messages) == ["next.E172"]
+        assert check_ids(messages) == ["next.E157"]
 
     def test_a_parentless_handler_is_silent(
         self, tmp_path: Path, forms_isolated
@@ -401,7 +449,7 @@ class TestFormParents:
                 return {}
 
         messages = _run(tmp_path / "pages", check_object_form_parents)
-        assert check_ids(messages) == ["next.E172"]
+        assert check_ids(messages) == ["next.E157"]
         assert messages[0].obj == describe_callable(MemberForm.get_initial)
 
     def test_an_object_permission_parent_is_reported(
@@ -412,7 +460,7 @@ class TestFormParents:
                 return True
 
         messages = _run(tmp_path / "pages", check_object_form_parents)
-        assert check_ids(messages) == ["next.E172"]
+        assert check_ids(messages) == ["next.E157"]
         assert messages[0].obj == describe_callable(GuardedForm.has_object_permission)
 
     @pytest.mark.parametrize("site", ["check_permissions", "done", "step"])
@@ -446,7 +494,7 @@ class TestFormParents:
             "step": StepForm.has_object_permission,
         }[site]
         messages = _run(tmp_path / "pages", check_object_form_parents)
-        assert check_ids(messages) == ["next.E172"]
+        assert check_ids(messages) == ["next.E157"]
         assert messages[0].obj == describe_callable(expected)
 
     def test_a_form_factory_parent_is_reported(
@@ -457,7 +505,7 @@ class TestFormParents:
 
         _registered(handler=_rows, form_class=factory)
         messages = _run(tmp_path / "pages", check_object_form_parents)
-        assert check_ids(messages) == ["next.E172"]
+        assert check_ids(messages) == ["next.E157"]
         assert messages[0].obj == describe_callable(factory)
 
     def test_a_plain_form_without_hooks_is_silent(
@@ -471,7 +519,7 @@ class TestFormParents:
 
 
 class TestComponentContexts:
-    """A `@component.context` callable declares no `DObject` (`next.E173`)."""
+    """A `@component.context` callable declares no `DObject` (`next.E158`)."""
 
     @pytest.mark.parametrize("location", ["page_tree", "project_root"])
     def test_a_component_marker_is_reported(
@@ -493,7 +541,7 @@ class TestComponentContexts:
             ("", ""),
             COMPONENT_BACKENDS=[backend],
         )
-        assert check_ids(messages) == ["next.E173"]
+        assert check_ids(messages) == ["next.E158"]
         assert "a component context never receives" in messages[0].msg
 
     def test_a_callable_under_two_keys_is_reported_once(
@@ -509,7 +557,7 @@ class TestComponentContexts:
             ("", ""),
             COMPONENT_BACKENDS=[backend],
         )
-        assert check_ids(messages) == ["next.E173"]
+        assert check_ids(messages) == ["next.E158"]
 
     @pytest.mark.parametrize(
         "configs", [[], COMPONENT_BACKEND], ids=["empty", "not_a_list"]
@@ -524,7 +572,7 @@ class TestComponentContexts:
 
 
 class TestHints:
-    """A `DObject` sits on a callable whose hints resolve (`next.E175`)."""
+    """A `DObject` sits on a callable whose hints resolve (`next.E160`)."""
 
     def test_an_unresolved_page_hint_is_reported(self, tmp_path: Path) -> None:
         body = (
@@ -532,13 +580,13 @@ class TestHints:
             '    return ""\n'
         )
         messages = _run(tmp_path / "pages", check_object_hints, ("", body))
-        assert check_ids(messages) == ["next.E175"]
+        assert check_ids(messages) == ["next.E160"]
         assert 'Parameter "group" of "roster"' in messages[0].msg
 
     def test_an_unresolved_dependency_hint_is_reported(self, tmp_path: Path) -> None:
         with bound_dependency("later", _unresolved):
             messages = _run(tmp_path / "pages", check_object_hints)
-        assert check_ids(messages) == ["next.E175"]
+        assert check_ids(messages) == ["next.E160"]
         assert messages[0].obj == describe_callable(_unresolved)
 
     @pytest.mark.parametrize(
@@ -559,13 +607,13 @@ class TestHints:
 
 
 class TestScope:
-    """A project with a `DObject` registers the `scope` dependency (`next.E174`)."""
+    """A project with a `DObject` registers the `scope` dependency (`next.E159`)."""
 
     def test_a_marker_without_scope_is_reported(self, tmp_path: Path) -> None:
         messages = _run(
             tmp_path / "pages", check_object_scope, (GROUP_ROUTE, GROUP_CONTEXT)
         )
-        assert check_ids(messages) == ["next.E174"]
+        assert check_ids(messages) == ["next.E159"]
         assert 'DObject[auth.Group] on parameter "group"' in messages[0].msg
         assert '@resolver.dependency("scope")' in messages[0].msg
 

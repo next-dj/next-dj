@@ -1,11 +1,13 @@
 import re
 import warnings
 from dataclasses import dataclass
+from io import StringIO
 
 import pytest
 from admin_audit.models import AdminActivityLog
 from django.core.management import call_command
 from django.db.models import UniqueConstraint
+from django.urls import reverse
 from library.demo import DEMO_BOOKS, seed_demo
 from library.models import Book, Chapter, Tag
 
@@ -18,16 +20,30 @@ from next.testing import (
     form_fields,
     hidden_fields,
 )
+from next.urls import page_reverse
 
 
 pytestmark = pytest.mark.django_db
 
 ELEMENT_ID_RE = re.compile(r'\sid="([^"]+)"')
+CRUMB_NAV_RE = re.compile(r'<nav aria-label="Breadcrumb"[^>]*>(.*?)</nav>', re.DOTALL)
+CRUMB_LINK_RE = re.compile(r'<a href="([^"]*)"( aria-current="page")?[^>]*>([^<]*)</a>')
 
 
 def action_form(client: NextClient, body: str, action_name: str) -> str:
     """Return the page form that posts `action_name`, found by its dispatch URL."""
     return find_form(body, action=client.get_action_url(action_name))
+
+
+def crumbs(html: str) -> list[tuple[str, str, bool]]:
+    """Return the breadcrumb links of the shell as `(label, href, current)`."""
+    nav = CRUMB_NAV_RE.search(html)
+    if nav is None:
+        return []
+    return [
+        (label, href, bool(current))
+        for href, current, label in CRUMB_LINK_RE.findall(nav.group(1))
+    ]
 
 
 def element_ids(html: str) -> list[str]:
@@ -53,8 +69,8 @@ class TestDashboard:
         for label in ("Library", "Books", "Authors", "Tags", "Chapters"):
             assert label in body
 
-    def test_two_layout_roots_produce_one_document(self, admin_client):
-        """`chrome/layout.djx` wraps `pages/layout.djx`, neither repeats."""
+    def test_the_project_layout_produces_one_document(self, admin_client):
+        """`chrome/layout.djx` is the only layout, so nothing in the shell repeats."""
         body = admin_client.get("/admin/").content.decode()
         assert body.count("<!DOCTYPE html>") == 1
         assert body.count("<body") == 1
@@ -1257,6 +1273,126 @@ class TestActivityLog:
         body = r.content.decode()
         assert "Sample tag" in body
         assert "library.tag" in body
+
+
+ROUTE_COLUMNS = ("url", "name", "app", "file", "source")
+
+
+def route_rows() -> dict[str, dict[str, str]]:
+    """Return the rows `manage.py next routes` prints, keyed by URL."""
+    out = StringIO()
+    call_command("next", "routes", stdout=out)
+    _header, *lines = out.getvalue().splitlines()
+    rows = (dict(zip(ROUTE_COLUMNS, line.split(), strict=True)) for line in lines)
+    return {row["url"]: row for row in rows}
+
+
+class TestMountedAuditPages:
+    """`admin_audit` mounts its two page trees through `AdminAuditConfig.mounts`."""
+
+    HISTORY_URL = "/admin/<str:app_label>/<str:model_name>/<int:pk>/history/"
+    HISTORY_NAME = "page_str_app_label_str_model_name_int_pk_history"
+
+    def test_the_history_page_receives_the_prefix_kwargs(self, admin_client, make_book):
+        book = make_book("Ulysses")
+        r = admin_client.get(f"/admin/library/book/{book.pk}/history/")
+        assert r.status_code == 200
+        assert r.resolver_match.kwargs == {
+            "app_label": "library",
+            "model_name": "book",
+            "pk": book.pk,
+        }
+        assert "Ulysses" in r.content.decode()
+
+    def test_the_activity_url_and_name_are_unchanged(self):
+        assert page_reverse("activity") == "/admin/activity/"
+        assert reverse("next:page_activity") == "/admin/activity/"
+
+    def test_the_history_url_and_name_are_unchanged(self):
+        kwargs = {"app_label": "library", "model_name": "tag", "pk": 7}
+        trail = "[str:app_label]/[str:model_name]/[int:pk]/history"
+        expected = "/admin/library/tag/7/history/"
+        assert page_reverse(trail, **kwargs) == expected
+        assert reverse(f"next:{self.HISTORY_NAME}", kwargs=kwargs) == expected
+
+    def test_the_route_map_lists_the_audit_trees_as_mounts(self):
+        rows = route_rows()
+        assert rows["/admin/activity/"] == {
+            "url": "/admin/activity/",
+            "name": "next:page_activity",
+            "app": "admin_audit",
+            "file": "admin_audit/pages/page.py",
+            "source": "mounts",
+        }
+        assert rows[self.HISTORY_URL] == {
+            "url": self.HISTORY_URL,
+            "name": f"next:{self.HISTORY_NAME}",
+            "app": "admin_audit",
+            "file": "admin_audit/object_pages/history/page.py",
+            "source": "mounts",
+        }
+
+    def test_the_admin_tree_stays_at_the_root_of_the_include(self):
+        rows = route_rows()
+        admin_rows = [row for row in rows.values() if row["app"] == "shadcn_admin"]
+        assert len(admin_rows) == 7
+        assert {row["source"] for row in admin_rows} == {"root"}
+        assert rows["/admin/"]["name"] == "next:page_"
+
+    @pytest.mark.parametrize(
+        "path", ["/admin/activity/", "/admin/library/book/{pk}/history/"]
+    )
+    def test_a_mounted_page_keeps_the_admin_shell(self, admin_client, book, path):
+        body = admin_client.get(path.format(pk=book.pk)).content.decode()
+        logout_url = admin_client.get_action_url("admin:logout")
+        assert body.count("<!DOCTYPE html>") == 1
+        assert body.count("<aside") == 1
+        assert body.count(f'action="{logout_url}"') == 1
+        assert body.count(">Library<") == 1
+
+    def test_the_auth_pages_keep_the_centered_chrome(self, next_client):
+        body = next_client.get("/admin/login/").content.decode()
+        assert "<aside" not in body
+        assert body.count("<main") == 1
+
+
+class TestBreadcrumbs:
+    """The shell renders the crumbs page metadata declares, tree by tree."""
+
+    def test_the_dashboard_is_its_own_crumb(self, admin_client):
+        body = admin_client.get("/admin/").content.decode()
+        assert crumbs(body) == [("Dashboard", "/admin/", True)]
+
+    def test_a_changelist_links_back_to_the_dashboard(self, admin_client):
+        body = admin_client.get("/admin/library/book/").content.decode()
+        assert crumbs(body) == [
+            ("Dashboard", "/admin/", False),
+            ("Books", "/admin/library/book/", True),
+        ]
+
+    def test_a_delete_page_reverses_its_ancestors_with_its_kwargs(
+        self, admin_client, book
+    ):
+        body = admin_client.get(f"/admin/library/book/{book.pk}/delete/").content
+        assert crumbs(body.decode()) == [
+            ("Dashboard", "/admin/", False),
+            ("Books", "/admin/library/book/", False),
+        ]
+
+    def test_the_history_crumb_reverses_with_the_prefix_kwargs(
+        self, admin_client, book
+    ):
+        url = f"/admin/library/book/{book.pk}/history/"
+        body = admin_client.get(url).content.decode()
+        assert crumbs(body) == [("History", url, True)]
+
+    def test_the_activity_crumb_reverses_under_its_prefix(self, admin_client):
+        body = admin_client.get("/admin/activity/").content.decode()
+        assert crumbs(body) == [("Activity", "/admin/activity/", True)]
+
+    def test_the_auth_chrome_renders_no_crumbs(self, next_client):
+        body = next_client.get("/admin/login/").content.decode()
+        assert crumbs(body) == []
 
 
 class TestFlashMessages:

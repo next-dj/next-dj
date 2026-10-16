@@ -456,7 +456,7 @@ A site whose rows belong to tenants returns the tenant the request acts under, a
 
 :doc:`/content/howto/scope-requests-per-tenant` covers where ``request.tenant`` comes from and why the client must not choose it.
 The scope is a named dependency like any other, so it resolves once per render, and a callable that lists rows asks for the same value through ``Depends("scope")``.
-A project that declares a ``DObject`` and registers no ``scope`` fails ``manage.py check`` with ``next.E174``.
+A project that declares a ``DObject`` and registers no ``scope`` fails ``manage.py check`` with ``next.E159``.
 
 Nested rows
 ~~~~~~~~~~~
@@ -497,14 +497,15 @@ Where DObject applies
 ~~~~~~~~~~~~~~~~~~~~~
 
 Page callables, form handlers and form hooks, and named dependencies resolve a ``DObject``.
-A form handler or hook reads the URL kwargs of the page the submission came from, but it resolves with no page context, so a ``DObject`` with a parent there is ``next.E172``.
+A form handler or hook reads the URL kwargs of the page the submission came from, but it resolves with no page context, so a ``DObject`` with a parent there is ``next.E157``.
 A submission whose origin is missing or names a page without the kwarg comes from the client rather than from the wiring, so the dispatcher answers it with 400 Bad Request and logs a warning instead of raising.
-A ``@component.context`` callable receives no URL kwargs at all, so any ``DObject`` there is ``next.E173``, and the component reads the row from the page context by name instead.
+A ``@component.context`` callable receives no URL kwargs at all, so any ``DObject`` there is ``next.E158``, and the component reads the row from the page context by name instead.
 
 ``manage.py check`` reads the annotations without running a query.
-``next.E170`` reports a model whose default manager has no ``visible_to``, ``next.W135`` a page ``DObject`` whose route captures no kwarg of its name, and ``next.E171`` a parent no earlier context callable provides.
-``next.E175`` reports a ``DObject`` written in a module whose type hints do not resolve, such as one under ``from __future__ import annotations`` that imports the model under ``TYPE_CHECKING``, where every resolve of the parameter raises ``TypeError`` rather than passing the raw kwarg.
-``next.W135`` is a warning because a kwarg an outer ``include()`` captures reaches the page at runtime without appearing in the page route.
+``next.E155`` reports a model whose default manager has no ``visible_to``, ``next.W128`` a page ``DObject`` whose full route hands it no kwarg of its name, and ``next.E156`` a parent no earlier context callable provides.
+``next.E160`` reports a ``DObject`` written in a module whose type hints do not resolve, such as one under ``from __future__ import annotations`` that imports the model under ``TYPE_CHECKING``, where every resolve of the parameter raises ``TypeError`` rather than passing the raw kwarg.
+The full route counts a ``mount`` or ``mounts`` prefix and the kwargs the includes around the tree capture, so a ``wallet`` the prefix ``wallets/<int:wallet>/`` captures satisfies a ``DObject`` named ``wallet``.
+``next.W128`` stays a warning because the walk of the URLconf cannot read an include hidden behind a lazy pattern sequence.
 See :doc:`/content/ref/system-checks` for the full conditions.
 
 Writing a custom provider

@@ -7,6 +7,8 @@ from next import context
 
 _LIMIT = 50
 
+metadata = {"breadcrumb": "Activity"}
+
 
 @context("activity_state")
 def activity_state() -> dict[str, Any]:

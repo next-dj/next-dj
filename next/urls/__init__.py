@@ -22,6 +22,7 @@ from .markers import (
     UrlKwargsProvider,
     get_multi_values,
 )
+from .mount import pages
 from .parser import URLPatternParser
 from .resolver import TrieURLResolver
 from .reverse import page_reverse, page_reverse_lazy, with_query
@@ -49,6 +50,7 @@ __all__ = [
     "get_multi_values",
     "page_reverse",
     "page_reverse_lazy",
+    "pages",
     "router_manager",
     "signals",
     "urlpatterns",

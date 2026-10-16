@@ -81,7 +81,7 @@ The scope is whatever owns the rows, a user here and a tenant in a multi-tenant 
        return request.user
 
 ``DObject[Note]`` loads the row a URL addresses through the same method, so a page never reaches a note its scope cannot see, see :ref:`topics-di-dobject`.
-A model never placed under ``DObject`` may skip ``visible_to``, while one that is placed there without it fails ``manage.py check`` with ``next.E170``.
+A model never placed under ``DObject`` may skip ``visible_to``, while one that is placed there without it fails ``manage.py check`` with ``next.E155``.
 See :doc:`django:topics/db/managers` for custom ``QuerySet`` classes and ``as_manager``.
 
 Invariants

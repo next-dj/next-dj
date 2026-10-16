@@ -21,6 +21,7 @@ from next.discovery import (
     get_router_manager,
     iter_page_tree_component_folders,
     iter_scanned_page_pairs,
+    iter_scanned_pages,
     page_tree_skip_names,
     read_page_roots,
     reset_router_manager_cache,
@@ -443,6 +444,39 @@ class TestScannedPairsCache:
         assert len(after) == len(before) + 1
 
 
+class TestScannedPageTrees:
+    """`iter_scanned_pages` names the tree each page was walked from."""
+
+    def test_each_page_carries_the_root_the_router_reports(
+        self, tmp_path: Path
+    ) -> None:
+        tree = tmp_path / "w"
+        write_page(tree, "ops")
+        root = PageRoot(path=tree, label="App", prefix="w/<int:wallet>/", source="urls")
+        router = _RootTreeRouter([])
+
+        with patch.object(router, "page_roots", return_value=[root, root]):
+            scanned = list(iter_scanned_pages(router))
+
+        assert scanned == [(root, "ops", tree / "ops" / "page.py")]
+
+    def test_a_directory_no_root_reports_reads_as_an_unmounted_tree(
+        self, tmp_path: Path
+    ) -> None:
+        write_page(tmp_path, "ops")
+        router = _RootTreeRouter([])
+
+        with patch("next.discovery.get_pages_directories", return_value=[tmp_path]):
+            ((root, url_path, _page),) = iter_scanned_pages(router)
+
+        assert (root.path, root.prefix, root.source, url_path) == (
+            tmp_path,
+            "",
+            "root",
+            "ops",
+        )
+
+
 class TestEveryPagesRootIsScanned:
     """`iter_scanned_page_pairs` walks every configured pages root."""
 
@@ -829,14 +863,17 @@ class TestFileRouterWalkParity:
     def test_a_custom_components_dir_moves_both_walks(self, tmp_path: Path) -> None:
         tree = tmp_path / "shell"
         self._build_tree(tree)
+        write_page(tree, "widgets/card")
         entry = file_router_config_entry(pages_dir=tree)
         components = [
             {
                 "BACKEND": "next.components.FileComponentsBackend",
                 "DIRS": [],
-                "COMPONENTS_DIR": "_widgets",
+                "COMPONENTS_DIR": "widgets",
             }
         ]
+        plain = RouterFactory.create_backend(entry)
+        plain_routes = [url for url, _page in iter_scanned_page_pairs(plain)]
 
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry], "COMPONENT_BACKENDS": components}
@@ -846,7 +883,8 @@ class TestFileRouterWalkParity:
 
             assert page_tree_skip_names(router) == router._skip_dir_names
 
-        assert "_components/card" in routes
+        assert "widgets/card" in plain_routes
+        assert "widgets/card" not in routes
 
 
 class TestPerRouterCachesKeyOnIdentity:
@@ -866,19 +904,17 @@ class TestPerRouterCachesKeyOnIdentity:
     def test_a_config_equal_subclass_keeps_its_own_scan(self, tmp_path: Path) -> None:
         tree = tmp_path / "shell"
         write_page(tree, "blog")
-        (tree / "_widgets").mkdir()
-        (tree / "_widgets" / "card").mkdir()
-        (tree / "_widgets" / "card" / "page.py").write_text('template = "x"\n')
+        write_page(tree, "widgets/card")
         plain = file_router(app_dirs=False, dirs=[tree])
-        custom = _CustomFolderRouter(
+        custom = _WidgetsFolderRouter(
             file_router_config_entry(app_dirs=False, dirs=[tree])
         )
 
         plain_routes = {url for url, _page in iter_scanned_page_pairs(plain)}
         custom_routes = {url for url, _page in iter_scanned_page_pairs(custom)}
 
-        assert "_widgets/card" in plain_routes
-        assert "_widgets/card" not in custom_routes
+        assert "widgets/card" in plain_routes
+        assert "widgets/card" not in custom_routes
 
     def test_an_unhashable_router_is_cached_without_being_hashed(
         self, tmp_path: Path

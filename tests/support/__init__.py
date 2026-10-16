@@ -126,6 +126,7 @@ from tests.support.helpers import (
     touch_later,
     typing_optional,
 )
+from tests.support.mounts import installed_apps, write_app, write_urlconf
 from tests.support.pages import (
     build_nested_page,
     build_page_request,
@@ -347,6 +348,7 @@ __all__ = [
     "importable_dir",
     "inspect_parameter",
     "install_visibility_hooks",
+    "installed_apps",
     "isolated_form_registries",
     "named_temp_py",
     "next_framework_settings_stand_in",
@@ -382,9 +384,11 @@ __all__ = [
     "unwrapped_decorator",
     "watching_components_entry",
     "wraps_decorator",
+    "write_app",
     "write_colocated_component_assets",
     "write_metadata_tree",
     "write_page",
     "write_page_chain",
     "write_tree",
+    "write_urlconf",
 ]

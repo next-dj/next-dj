@@ -17,7 +17,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 from next.diagnostics import FailureLog, exception_text
 from next.ports import page_scan_slot, router_access_slot
-from next.utils import page_roots_shape_error, walk_page_tree
+from next.utils import PageRoot, page_roots_shape_error, walk_page_tree
 
 
 if TYPE_CHECKING:
@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from next.urls import RouterBackend, RouterManager
-    from next.utils import PageRoot
 
 
 logger = logging.getLogger(__name__)
@@ -46,12 +45,12 @@ _router_manager_cache = _RouterManagerCache()
 
 @dataclass(frozen=True, slots=True)
 class _ScannedTrees:
-    """The pages and the component folders one walk of a router's trees found.
+    """The pages, their trees and the component folders one walk of a router found.
 
-    Both come from the same walk, since a second walk might disagree with the first.
+    All three come from one walk, since a second walk might disagree with the first.
     """
 
-    pairs: tuple[tuple[str, Path], ...]
+    pages: tuple[tuple[PageRoot, str, Path], ...]
     component_folders: tuple[tuple[Path, Path, str], ...]
 
 
@@ -349,6 +348,15 @@ def routed_page_trees(manager: RouterManager) -> list[tuple[PageRoot, frozenset[
     return found
 
 
+def _tree_root(reported: dict[Path, PageRoot], pages_dir: Path) -> PageRoot:
+    """Return the tree the router reports at `pages_dir`, an unmounted one by default.
+
+    The walk reads `get_pages_directories`, which may name a directory no root reports.
+    """
+    root = reported.get(pages_dir)
+    return PageRoot(path=pages_dir, label="Root") if root is None else root
+
+
 def _walk_page_trees(router: RouterBackend) -> _ScannedTrees:
     """Walk every tree `router` reports once, keeping both things checks read."""
     components_folder = _router_contract(router).components_folder
@@ -359,12 +367,17 @@ def _walk_page_trees(router: RouterBackend) -> _ScannedTrees:
         if folder.name == components_folder:
             folders.append((folder, tree_root, route_trail))
 
-    pairs = [
-        pair
+    reported: dict[Path, PageRoot] = {}
+    for root in get_page_roots(router):
+        reported.setdefault(root.path, root)
+    pages = tuple(
+        (_tree_root(reported, pages_dir), url_path, page_path)
         for pages_dir in get_pages_directories(router)
-        for pair in walk_page_tree(pages_dir, skip_names, on_skipped_dir=collect_folder)
-    ]
-    return _ScannedTrees(pairs=tuple(pairs), component_folders=tuple(folders))
+        for url_path, page_path in walk_page_tree(
+            pages_dir, skip_names, on_skipped_dir=collect_folder
+        )
+    )
+    return _ScannedTrees(pages=pages, component_folders=tuple(folders))
 
 
 def _scanned_trees(router: RouterBackend) -> _ScannedTrees:
@@ -382,7 +395,16 @@ def iter_scanned_page_pairs(router: RouterBackend) -> Iterator[tuple[str, Path]]
     The walk is the framework's own, not the backend's, so a backend that
     reports its trees through `page_roots` is checked whatever it routes from.
     """
-    yield from _scanned_trees(router).pairs
+    for _root, url_path, page_path in _scanned_trees(router).pages:
+        yield url_path, page_path
+
+
+def iter_scanned_pages(router: RouterBackend) -> Iterator[tuple[PageRoot, str, Path]]:
+    """Yield `(root, url_path, page_file)` per page, `url_path` relative to `root`.
+
+    The tree is the one the walk entered, so a reader can route the trail through it.
+    """
+    yield from _scanned_trees(router).pages
 
 
 def iter_page_tree_component_folders(
@@ -405,6 +427,7 @@ __all__ = [
     "get_router_manager",
     "iter_page_tree_component_folders",
     "iter_scanned_page_pairs",
+    "iter_scanned_pages",
     "page_tree_skip_names",
     "read_page_roots",
     "reset_router_manager_cache",

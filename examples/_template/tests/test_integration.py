@@ -1,3 +1,8 @@
+from io import StringIO
+
+from django.core.management import call_command
+from django.urls import reverse
+
 from next.testing import assert_metadata
 
 
@@ -27,3 +32,11 @@ def test_static_names_resolve_to_urls(next_client) -> None:
         '<link rel="icon" href="https://template.example/static/myapp/icon.svg" '
         'type="image/svg+xml">'
     ) in body
+
+
+def test_the_app_tree_mounts_where_its_config_says() -> None:
+    out = StringIO()
+    call_command("next", "routes", stdout=out)
+    _header, row = out.getvalue().splitlines()
+    assert row.split() == ["/", "next:page_", "myapp", "myapp/pages/page.py", "mounts"]
+    assert reverse("next:page_") == "/"

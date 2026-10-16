@@ -1,6 +1,6 @@
 import logging
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -27,14 +27,15 @@ from next.urls import (
 )
 from next.urls.manager import (
     SeoRoutesVersion,
-    _build_url_resolver,
     _LazyResolverSlot,
     _LazyUrlPatterns,
+    build_url_resolver,
     reload_router_settings,
     seo_routes_version,
 )
 from next.urls.signals import router_reloaded
 from tests.support import (
+    NAMESPACED_URLCONF,
     EntryRouter,
     file_router,
     file_router_config_entry,
@@ -392,6 +393,15 @@ class TestInstalledAppsMovesTheRouters:
         assert "page_catalogue" in installed
         assert "page_catalogue" not in after
 
+    def test_swapping_the_urlconf_rebuilds_the_routers(self) -> None:
+        """A swapped URLconf can mount other trees, so the routers follow it."""
+        before = router_manager.version
+
+        with override_settings(ROOT_URLCONF=NAMESPACED_URLCONF):
+            during = router_manager.version
+
+        assert before != during != router_manager.version
+
     def test_an_unrelated_setting_leaves_the_routers_where_they_are(self) -> None:
         """Only the app list rebuilds, so a stray setting costs no scan of the trees."""
         before = router_manager.version
@@ -433,11 +443,11 @@ class TestGlobalInstances:
             patterns = list(router_manager)
             assert patterns == ["url1", "url2"]
 
-    def test_generate_urls_for_app_returns_empty_list(self) -> None:
+    def test_empty_app_trees_yield_no_urls(self) -> None:
         """Empty per app URLs yield empty generate_urls."""
         router = file_router()
 
-        with patch.object(router, "_generate_urls_for_app", return_value=[]):
+        with patch.object(router, "_tree_urls", return_value=[]):
             urls = router.generate_urls()
             assert urls == []
 
@@ -454,7 +464,7 @@ class TestGlobalInstances:
 
         with (
             patch.object(router, "_get_installed_apps", return_value=["app1", "app2"]),
-            patch.object(router, "_generate_urls_for_app", return_value=[]),
+            patch.object(router, "_tree_urls", return_value=[]),
         ):
             urls = router.generate_urls()
             assert urls == []
@@ -779,7 +789,7 @@ class TestLazyUrlPatterns:
 
     def test_reversed_override_builds_patterns_once(self) -> None:
         """Explicit ``__reversed__`` walks one ``_patterns()`` build, not one per index."""
-        assert "__reversed__" in type(lazy_urlpatterns).__dict__
+        assert type(lazy_urlpatterns).__reversed__ is not Sequence.__reversed__
         with patch.object(
             type(lazy_urlpatterns), "_patterns", return_value=["r1", "r2", "f1"]
         ) as mock_patterns:
@@ -947,7 +957,7 @@ class TestBuildUrlResolver:
     def test_default_short_circuits_the_import_helper(self) -> None:
         """The default dotted path binds TrieURLResolver without importing."""
         with patch("next.backends.import_class_cached") as import_helper:
-            resolver = _build_url_resolver()
+            resolver = build_url_resolver()
         import_helper.assert_not_called()
         assert type(resolver) is TrieURLResolver
         assert isinstance(resolver.urlconf_name, _LazyUrlPatterns)
@@ -964,7 +974,7 @@ class TestBuildUrlResolver:
             patch("next.backends.next_framework_settings", mock_nf),
             pytest.raises(ImproperlyConfigured, match="could not be imported"),
         ):
-            _build_url_resolver()
+            build_url_resolver()
 
     @pytest.mark.parametrize(
         "dotted",
@@ -978,7 +988,7 @@ class TestBuildUrlResolver:
             patch("next.backends.next_framework_settings", mock_nf),
             pytest.raises(ImproperlyConfigured, match="URLResolver subclass"),
         ):
-            _build_url_resolver()
+            build_url_resolver()
 
     def test_settings_reload_swaps_urlpatterns_head_in_place(self) -> None:
         """A reload replaces urlpatterns[0] while the list keeps its identity."""
@@ -1017,7 +1027,7 @@ class TestLazyResolverSlot:
         """A fresh slot holds nothing until something reads it."""
         slot = _LazyResolverSlot()
         with patch(
-            "next.urls.manager._build_url_resolver", return_value="resolver"
+            "next.urls.manager.build_url_resolver", return_value="resolver"
         ) as mock_build:
             assert mock_build.call_count == 0
             assert slot[0] == "resolver"
@@ -1027,7 +1037,7 @@ class TestLazyResolverSlot:
     def test_sequence_protocol_without_list_inheritance(self) -> None:
         """Iteration, len, indexing, and slicing work without list inheritance."""
         slot = _LazyResolverSlot()
-        with patch("next.urls.manager._build_url_resolver", return_value="resolver"):
+        with patch("next.urls.manager.build_url_resolver", return_value="resolver"):
             assert not isinstance(slot, list)
             assert list(slot) == ["resolver"]
             assert len(slot) == 1
@@ -1038,7 +1048,7 @@ class TestLazyResolverSlot:
         """`reset()` drops the built resolver so the next read builds again."""
         slot = _LazyResolverSlot()
         with patch(
-            "next.urls.manager._build_url_resolver", side_effect=["first", "second"]
+            "next.urls.manager.build_url_resolver", side_effect=["first", "second"]
         ):
             assert slot[0] == "first"
             slot.reset()
