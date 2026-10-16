@@ -232,7 +232,7 @@ Common pitfalls
 
 ``post_action`` raises ``FormActionNotFoundError``.
    A form class registers only when its module is imported.
-   An app-level ``forms.py`` is imported by ``autodiscover_forms()``, which the ``next`` application calls from ``AppConfig.ready()``, so ``notes/forms.py`` needs no wiring at all.
+   The ``next`` application imports the ``forms.py`` of every installed application from ``AppConfig.ready()``, so ``notes/forms.py`` needs no wiring at all.
    A form or an ``@action`` handler declared inside the page tree registers with the ``page.py`` that holds it, so check that ``next_pages`` names the page root.
    The one case that needs a manual import is a project that sets ``FORM_AUTODISCOVER`` to ``False``, which turns the ``forms.py`` sweep off for every installed application.
 

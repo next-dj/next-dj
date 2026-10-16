@@ -9,9 +9,9 @@ A drag-and-drop Kanban board powered by co-located React components and a Vite b
 | `/` | List of active boards. Archived boards are hidden. |
 | `/board/<id>/` | Every column, card, and "New card" form rendered by the server, with React mounting drag-and-drop and optimistic create over the same markup. |
 | `/board/<id>/settings/` | Forms to rename a board, archive it, or add a column with a WIP limit. |
-| `POST move_card_form` | Move a card across columns. The card arrives through `DCard[Card]` and the target column is a `ModelChoiceField` narrowed to that card's board, so a foreign column never validates. Renumbers card positions inside an atomic transaction. |
+| `POST move_card_form` | Move a card across columns. The card arrives through `DCard[Card]` and the target column is a `ModelChoiceField` that `get_form_kwargs` narrows to that card's board, so a foreign column never validates. Renumbers card positions inside an atomic transaction. |
 | `POST create_card_form` | Create a card at the tail of a column under `select_for_update`. Rejected when the column is at its WIP limit. Redirects to `/board/<id>/?created=<card_id>`, which names the new row for the React layer. |
-| `POST create_column_form` | Append a column to the board with an optional `wip_limit`. |
+| `POST create_column_form` | Append a column with an optional `wip_limit` to the board whose settings page posted the form. |
 | `POST rename_board_form` | Update the board title. |
 | `POST archive_board_form` | Toggle the archived flag. Archived boards drop out of the index. |
 
@@ -40,7 +40,7 @@ Django resolves every `.jsx` asset to a dev-server URL, and the React Refresh pr
 
 Without the dev server running, those `<script type="module">` tags point at a port nobody is listening on and the browser drops them. The board keeps working: the columns, the cards, and the per-column "New card" form all come from the server, and only drag-and-drop and the optimistic create are missing. Section 6 covers that fallback in full.
 
-A typed route segment such as `[int:id]` puts a colon in the directory name, and the Vite dev server refuses to serve a path holding one before it consults `server.fs.allow`. Co-locating assets under a typed segment therefore needs `server: { fs: { strict: false } }`, which both `vite.config.ts` and `vitest.config.ts` carry. Only the dev server applies that guard, so the production build and Django static serving stay untouched.
+A typed route segment such as `[int:board]` puts a colon in the directory name, and the Vite dev server refuses to serve a path holding one before it consults `server.fs.allow`. Co-locating assets under a typed segment therefore needs `server: { fs: { strict: false } }`, which both `vite.config.ts` and `vitest.config.ts` carry. Only the dev server applies that guard, so the production build and Django static serving stay untouched.
 
 For a production-shaped build, hand the backend an empty origin so it resolves through the manifest instead of the dev server:
 
@@ -64,7 +64,7 @@ The React side has its own suite. `npm test` runs Vitest over the three co-locat
 Every route and component owns its asset files in the same directory:
 
 ```
-pages/board/[int:id]/
+pages/board/[int:board]/
 ├── page.py           <- @context callables building the board payload
 ├── page.jsx          <- named export Board plus the React island mount/unmount pair
 ├── page.test.jsx     <- Vitest + RTL tests for Board
@@ -90,7 +90,7 @@ pages/board/[int:id]/
 
 The outer HTML envelope is not in this tree. It lives in [`cockpit/layout.djx`](cockpit/layout.djx), the project-level page root listed in `PAGE_BACKENDS["DIRS"]`, while the routable pages come from the app through `APP_DIRS = True` and `PAGES_DIR = "pages"`.
 
-`layout.djx` renders the Board and Settings tabs with the shared `nav_link` component and feeds it `url_kwargs=board_url_kwargs`, an inherited `@context` that returns `{"id": board.pk}`. The tabs therefore reverse `next:page_board_int_id` and `next:page_board_int_id_settings` by name, and the call site never spells out the `[int:id]` converter or a literal `/board/<id>/` path.
+`layout.djx` renders the Board and Settings tabs with the shared `nav_link` component and feeds it `url_kwargs=board_url_kwargs`, an inherited `@context` that returns `{"board": board.pk}`. The tabs therefore reverse `next:page_board_int_board` and `next:page_board_int_board_settings` by name, and the call site never spells out the `[int:board]` converter or a literal `/board/<id>/` path.
 
 ### 2. Two calls in `apps.py`
 
@@ -101,11 +101,9 @@ class KanbanConfig(AppConfig):
             "jsx", extension=".jsx", slot="scripts", renderer="render_module_tag"
         )
         default_stems.register("template", "page")
-
-        from kanban import deps, signals
 ```
 
-`render_module_tag` is the framework's built-in renderer for ES module assets, so jsx files reuse it without a custom renderer. The `deps` import registers the `DBoard` and `DCard` providers, and the `signals` import wires the dev-mode `collector_finalized` receiver. No other integration point in the framework is touched.
+`render_module_tag` is the framework's built-in renderer for ES module assets, so jsx files reuse it without a custom renderer. Nothing else lives in `ready()`. The framework imports the `deps.py`, `forms.py` and `signals.py` of every installed app at startup, so [`kanban/deps.py`](kanban/deps.py) registers the `scope` dependency and the `DCard` provider, and [`kanban/signals.py`](kanban/signals.py) wires the dev-mode `collector_finalized` receiver, without an import anywhere. No other integration point in the framework is touched.
 
 ### 3. `ViteManifestBackend`
 
@@ -154,12 +152,12 @@ Both assets go in as URL-form module scripts rather than inline bodies. `@vitejs
 
 ```python
 @context("board", inherit_context=True, serialize=True)
-def board_payload(active_board: DBoard[Board], request: HttpRequest) -> dict:
-    cols = active_board.columns.prefetch_related(
+def board_payload(board: DObject[Board], request: HttpRequest) -> dict:
+    cols = board.columns.prefetch_related(
         Prefetch("cards", queryset=Card.objects.order_by("position"))
     ).order_by("position")
     return {
-        "id": active_board.pk,
+        "id": board.pk,
         "csrf": get_token(request),
         "move_card_url": form_action_manager.get_action_url("move_card_form"),
         "create_card_url": form_action_manager.get_action_url("create_card_form"),
@@ -190,27 +188,54 @@ Creating a card has the same shape plus one extra problem. The action answers wi
 
 `CreateCardForm` binds its column through `ModelChoiceField`, so an unknown id fails on the field instead of in a hand-written lookup, and `clean()` performs a best-effort count check so common posts surface a friendly error before the save runs. The authoritative check sits inside `CreateCardForm.on_valid()` under `Column.objects.select_for_update()` and returns `HttpResponseBadRequest` if a concurrent post fills the slot between form validation and insertion. All five form classes live in the app-level [`kanban/forms.py`](kanban/forms.py) picked up by autodiscover, because every one of them is shared across pages or components. The React layer reflects the limit live through the WIP badge that turns red when `cards.length` exceeds `wip_limit`, and a rejected create rolls its optimistic card back out.
 
-### 9. Binding a form to a row, two ways
+### 9. Every board through one scope
 
-`RenameBoardForm` and `ArchiveBoardForm` are `ModelForm`s over the board the operator is already looking at, so they declare `Meta.instance_from_url = {"id": "pk"}`. The framework's `ModelForm.get_initial` turns that mapping into `get_object_or_404(Board, pk=url_kwargs["id"])`, so neither form carries a hidden id and neither handler runs a query. A key naming a field the model does not have is caught at `manage.py check` time as `next.E048`, and the same `Meta` key on a non-`ModelForm` as `next.E049`.
+Every board a page or a settings form loads by URL arrives as `DObject[Board]` from `next.deps`. The parameter is named after the `[int:board]` segment, so `board: DObject[Board]` reads the pk out of the `board` URL kwarg and loads the row through `Board.objects.visible_to(scope)`, and a pk that query does not return answers `404`. That is why the directory is `[int:board]` rather than `[int:id]`, because the kwarg name is the parameter name and a parameter called `id` would shadow the builtin. `manage.py check` reports a `DObject` whose route captures no kwarg of its name as `next.W135`.
 
-`CreateColumnForm` cannot use that route. It creates a row under the board rather than editing one, so there is no instance to load. It carries `board_id` as a hidden field instead and its `on_valid` takes `board: DBoard[Board]`, which `BoardProvider` resolves from `url_kwargs["id"]` when a page renders and from POST `board_id` when the dispatcher handles the action. `MoveCardForm` takes its subject the same way: `on_valid` declares `card: DCard[Card]` and `CardProvider` resolves it from POST `card_id`, the key both sides read off the shared `CARD_PARAM` constant.
+`scope` is a named dependency the project registers itself, in [`kanban/deps.py`](kanban/deps.py):
 
-The two providers answer `static_can_handle` differently, and the difference is the point. `BoardProvider` settles a `DBoard[...]` parameter from the annotation alone, so it returns `True`, becomes the terminal of that parameter in the compiled injection plan, and implements `compile_resolve` to read the model out of the annotation once per plan instead of once per resolve. `CardProvider` also needs a POST `card_id` before it owns anything, so it returns `False` for a foreign annotation and `None` for `DCard[...]`, which keeps it a runtime candidate whose `can_handle` runs per request, and the compiler never asks it for a filler. `BoardProvider` routes both `resolve` and its compiled filler through one module-level fetch helper, so the two paths cannot drift apart.
+```python
+@resolver.dependency("scope")
+def scope(request: HttpRequest) -> AbstractBaseUser | AnonymousUser:
+    return request.user
+```
+
+The demo has no accounts, so `BoardQuerySet.visible_to` in [`kanban/models.py`](kanban/models.py) ignores the visitor and returns every board, archived ones included. That method is the one place a project with accounts narrows boards by membership, and every board page, settings form and card action follows it without another edit. The index and its counts still query `Board.objects` directly and would move onto `visible_to` in the same change. A project that declares a `DObject` and registers no `scope` fails `manage.py check` with `next.E174`, and a model whose default manager has no `visible_to` with `next.E170`.
+
+`RenameBoardForm` and `ArchiveBoardForm` are `ModelForm`s over the board the operator is already looking at. Both inherit `get_initial` from `BoardSettingsForm`, a base marked `Meta.abstract = True` so it registers no action of its own, and that `get_initial` takes `board: DObject[Board]` and returns it, so the dispatcher binds the instance from the `board` kwarg of the posted origin URL and neither form carries a hidden id. `Meta.instance_from_url` would load the same row with a plain `get_object_or_404`, past `visible_to`, which is why both forms ask the resolver instead. `CreateColumnForm` creates a row under the board rather than editing one, so its `on_valid` takes `board: DObject[Board]` directly and the form carries no board field at all.
+
+The React island posts `move_card_form` and `create_card_form` through `fetch` with no origin URL, so those actions have no URL kwarg to look a row up by and `DObject` does not apply. `MoveCardForm` names its card in POST `card_id`, which `CardProvider` resolves for `on_valid` as `card: DCard[Card]`, the key both sides read off the shared `CARD_PARAM` constant. The target column needs the card earlier, while the form validates, so `MoveCardForm.get_form_kwargs` hands the constructor the columns of the visible board the posted card sits on:
+
+```python
+@classmethod
+def get_form_kwargs(cls, request, user=Depends("scope")):
+    card_pk = request.POST.get(CARD_PARAM, "")
+    visible = Board.objects.visible_to(user)
+    is_pk = card_pk.isascii() and card_pk.isdigit()
+    boards = visible.filter(columns__cards=card_pk) if is_pk else visible.none()
+    targets = Column.objects.filter(board__in=boards)
+    return {**super().get_form_kwargs(request), "targets": targets}
+```
+
+The dispatcher resolves `get_form_kwargs` through the same injection as every other form hook and binds the form as `MoveCardForm(data=..., files=..., **kwargs)`. `super().get_form_kwargs(request)` keeps the `initial` that `get_initial` supplies, and `__init__` narrows `target_column` to `targets`, so a column on another board never validates and the move answers `400`. A `card_id` that is no pk at all offers no target either, rather than reaching the database. `CreateCardForm.get_form_kwargs` does the same for the column a new card lands in and hands the constructor the columns of every board `visible_to` returns, so a project that narrows the method also refuses a card posted into a column of a board the visitor cannot see.
+
+The `?moved=<card_id>` flag of section 7 reads its card the same way. The `moved_card` context takes `board: DObject[Board]` and looks the card up among that board's cards only, so a flag naming a card on another board renders no preview.
+
+The provider behind `DObject` and `CardProvider` answer `static_can_handle` differently, and the difference is the point. The framework settles a `DObject[...]` parameter from the annotation alone, so it becomes the terminal of that parameter in the compiled injection plan and reads the model and its `visible_to` once per plan. `CardProvider` needs a POST `card_id` before it owns anything, so it returns `False` for a foreign annotation and `None` for `DCard[...]`, which keeps it a runtime candidate whose `can_handle` runs per request, and the compiler never asks it for a filler.
 
 Modules that use these markers never start with `from __future__ import annotations` and import both the marker and the model at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate, such as a marker or a model imported only under `if TYPE_CHECKING`, drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
 
 ### 10. One title for the board and its settings page
 
-No template spells the `<title>`. [`cockpit/layout.djx`](cockpit/layout.djx) calls the shared `page_head` component, which renders the builtin `{% metadata %}` tag, and the tag folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with whatever the page tree declares. The settings tier holds the template `{title} · {site_name}` and a `default`, `NEXT_FRAMEWORK["SITE"]["NAME"]` fills `{site_name}`, and the index renders that default because it names no title of its own. [`board/[int:id]/page.py`](kanban/pages/board/%5Bint%3Aid%5D/page.py) adds the one dynamic tier:
+No template spells the `<title>`. [`cockpit/layout.djx`](cockpit/layout.djx) calls the shared `page_head` component, which renders the builtin `{% metadata %}` tag, and the tag folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with whatever the page tree declares. The settings tier holds the template `{title} · {site_name}` and a `default`, `NEXT_FRAMEWORK["SITE"]["NAME"]` fills `{site_name}`, and the index renders that default because it names no title of its own. [`board/[int:board]/page.py`](kanban/pages/board/%5Bint%3Aboard%5D/page.py) adds the one dynamic tier:
 
 ```python
 @page.metadata(inherit=True)
-def board_meta(active_board: DBoard[Board]) -> MetadataDict:
-    return {"title": active_board.title}
+def board_meta(board: DObject[Board]) -> MetadataDict:
+    return {"title": board.title}
 ```
 
-`active_board` goes through the `BoardProvider` of section 9, so the board tab reads `Roadmap · next.dj Kanban`. A metadata callable runs for its own page only unless it says `inherit=True`, and this one has to say it. `board/<id>/settings/` is a virtual page, a `template.djx` with no `page.py` beside it, so it has nowhere to register a callable of its own. `inherit=True` puts the board callable into the metadata chain of every page below it, the provider reads the same `id` URL kwarg there, and the settings tab carries the board title instead of the site default. The integration tests pin the index, board and settings titles.
+`board` loads through the `visible_to` of section 9, so the board tab reads `Roadmap · next.dj Kanban`. A metadata callable runs for its own page only unless it says `inherit=True`, and this one has to say it. `board/<id>/settings/` is a virtual page, a `template.djx` with no `page.py` beside it, so it has nowhere to register a callable of its own. `inherit=True` puts the board callable into the metadata chain of every page below it, `DObject` reads the same `board` URL kwarg there, and the settings tab carries the board title instead of the site default. The integration tests pin the index, board and settings titles.
 
 ## Gotchas
 
@@ -227,7 +252,7 @@ The settings page hosts three independent `<form>` blocks. Each one posts to its
 - [`kanban/apps.py`](kanban/apps.py): `KanbanConfig.ready()` with the two registry calls.
 - [`kanban/signals.py`](kanban/signals.py): `inject_vite_dev_assets` receiver wired in `DEBUG` mode.
 - [`kanban/backends.py`](kanban/backends.py): `ViteManifestBackend` dev/prod URL routing.
-- [`kanban/deps.py`](kanban/deps.py): `DBoard` and `DCard` markers with `BoardProvider` and `CardProvider`.
+- [`kanban/deps.py`](kanban/deps.py): the `scope` dependency and the `DCard` marker with its `CardProvider`.
 - [`vite.config.ts`](vite.config.ts): glob multi-entry build that discovers all co-located `.jsx` files.
 - [`vitest.config.ts`](vitest.config.ts): Vitest setup targeting `kanban/**/*.test.{jsx,tsx}`.
 - [`next/static/assets.py`](../../next/static/assets.py): the public `KindRegistry` API used by `apps.py`.
@@ -237,6 +262,7 @@ The settings page hosts three independent `<form>` blocks. Each one posts to its
 - [`next/static/manager.py`](../../next/static/manager.py): placeholder-driven injection that dispatches per-asset renderers through `getattr` on the active backend.
 - [`next/components/context.py`](../../next/components/context.py): `@component.context` and the `serialize=True` flag.
 - [`next/forms/manager.py`](../../next/forms/manager.py): `form_action_manager.get_action_url(...)` used by the page to lift the move and create endpoint URLs into the React layer.
-- [`next/deps/providers.py`](../../next/deps/providers.py): `RegisteredParameterProvider` ABC used by `BoardProvider`/`CardProvider`.
+- [`next/deps/providers.py`](../../next/deps/providers.py): `RegisteredParameterProvider` ABC used by `CardProvider`.
+- [`next/deps/objects.py`](../../next/deps/objects.py): `DObject` and the provider that loads its row through `visible_to(scope)`.
 - [`next/pages/metadata/`](../../next/pages/metadata/): the metadata chain behind `@page.metadata(inherit=True)` in section 10.
-- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst): `next.E048` / `next.E049` for `Meta.instance_from_url`.
+- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst): `next.E170` to `next.E175` and `next.W135` for `DObject` and the `scope` dependency.

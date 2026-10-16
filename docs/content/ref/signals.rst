@@ -8,6 +8,17 @@ Module summary
 
 ``next.signals`` is an aggregator that re-exports every framework signal.
 Importing a signal from ``next.signals`` is equivalent to importing it from its subpackage.
+The module also holds ``receiver``, which ``next`` re-exports.
+
+Receiver decorator
+------------------
+
+.. autofunction:: next.signals.receiver
+
+Without ``on_commit`` the decorator hands every argument to ``django.dispatch.receiver``.
+With ``on_commit=True`` it connects strongly, schedules the decorated function through :func:`~django.db.transaction.on_commit` on the database the ``using`` keyword of the signal names, and keys the connection on ``dispatch_uid`` or, when none is given, on the function the way Django keys it, so ``disconnect(func)`` removes it and a plain connection of the same function to the same signal and sender makes it a no-op.
+A ``weak=True`` beside ``on_commit=True`` raises ``ValueError``.
+See :ref:`topics-signals` for when to defer a receiver.
 
 Signal catalog
 --------------

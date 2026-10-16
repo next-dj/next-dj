@@ -8,8 +8,9 @@ from __future__ import annotations
 from . import signals
 from .cache import REQUEST_DEP_CACHE_ATTR, render_dep_cache
 from .context import RESERVED_KEYS, ResolutionContext
-from .errors import DependencyCycleError, UnknownDependencyError
+from .errors import DependencyCycleError, UnboundObjectError, UnknownDependencyError
 from .markers import DDependencyBase, Depends
+from .objects import DObject
 from .providers import ParameterProvider, RegisteredParameterProvider
 from .registry import ProviderRegistry, provider_registry
 from .resolver import DependencyResolver, resolver
@@ -19,6 +20,7 @@ __all__ = [
     "REQUEST_DEP_CACHE_ATTR",
     "RESERVED_KEYS",
     "DDependencyBase",
+    "DObject",
     "DependencyCycleError",
     "DependencyResolver",
     "Depends",
@@ -26,6 +28,7 @@ __all__ = [
     "ProviderRegistry",
     "RegisteredParameterProvider",
     "ResolutionContext",
+    "UnboundObjectError",
     "UnknownDependencyError",
     "provider_registry",
     "render_dep_cache",

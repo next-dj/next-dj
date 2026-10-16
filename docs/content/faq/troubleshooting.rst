@@ -340,7 +340,7 @@ UnknownDependencyError
 The resolver raises ``UnknownDependencyError`` when ``Depends("name")`` or a bare ``Depends()`` names a dependency nothing has registered.
 The message carries the dependency name, the parameter, and the callable with its source path.
 When a registered name is close to the missing one, the message ends with a ``Did you mean`` hint naming it.
-Register the callable with ``resolver.dependency("name")`` from a module imported in ``AppConfig.ready``, or fix the name at the ``Depends`` site.
+Register the callable with ``resolver.dependency("name")`` in the ``deps.py`` of an app, which the framework imports at startup, or fix the name at the ``Depends`` site.
 
 DI parameter resolves to None
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -380,7 +380,7 @@ Use ``make_resolution_context`` from the same module when you need finer control
 Custom marker not handled
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Confirm that the provider class is imported during ``AppConfig.ready``.
+Confirm that the provider class lives in the ``deps.py`` of an installed app, or in a module imported from it or from ``AppConfig.ready``, and that ``DEPS_AUTODISCOVER`` is not ``False``.
 ``RegisteredParameterProvider`` registers at class creation, so a marker stays unhandled for exactly as long as the module defining its provider goes unimported.
 A class that registers after the first resolve joins the provider list by priority and the affected plans recompile, so a late import costs order predictability rather than correctness.
 

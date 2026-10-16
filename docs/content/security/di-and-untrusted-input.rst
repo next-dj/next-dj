@@ -53,6 +53,7 @@ The ``is_public`` filter prevents an attacker from reading a private note by gue
 
 The same scoping rule applies to the ModelForm ``Meta.instance_from_url`` key.
 Its default ``get_initial`` runs an unscoped ``get_object_or_404(model, slug=<value>)``, so a form that edits a per-user row must override ``get_initial`` with a scoped query such as ``get_object_or_404(Note, slug=slug, owner=request.user)``.
+A row addressed by its primary key loads scoped with no ``get_initial`` override through ``DObject`` in ``get_form_kwargs``, which reads it through ``visible_to(scope)``, see :ref:`topics-di-dobject`.
 See :doc:`/content/topics/forms/modelforms` for the full pattern.
 
 URL kwargs on a POST

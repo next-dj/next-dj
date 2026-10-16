@@ -12,7 +12,7 @@ from django.http import (
     HttpResponseRedirect,
 )
 
-from next.deps import REQUEST_DEP_CACHE_ATTR
+from next.deps import REQUEST_DEP_CACHE_ATTR, UnboundObjectError
 from next.deps.resolver import current_resolver
 from next.forms.origin import resolve_origin
 from next.forms.signals import (
@@ -22,7 +22,7 @@ from next.forms.signals import (
     wizard_step_submitted,
 )
 
-from .build import _bind_form_for_post, _call_get_initial, _resolve_form_class
+from .build import _construct_form, _form_for_class, _resolve_form_class
 from .permissions import (
     _check_access,
     _check_page_access,
@@ -79,10 +79,6 @@ class FormActionDispatch:
         The posted origin page authorizes the request before anything renders it, so a
         submission never reaches a page body the requester would be refused on a visit.
         """
-        handler = meta.get("handler")
-        form_class = meta.get("form_class")
-        wizard_class = meta.get("wizard_class")
-
         if request.method != "POST":
             return HttpResponseNotAllowed(["POST"])
 
@@ -101,6 +97,35 @@ class FormActionDispatch:
             origin_match=origin_match,
         )
         setattr(request, REQUEST_DEP_CACHE_ATTR, state.dep_cache)
+        try:
+            return FormActionDispatch._route(backend, request, action_name, meta, state)
+        except UnboundObjectError as exc:
+            if exc.parent:
+                raise
+            logger.warning(
+                "action %r received an origin without the URL kwarg %r",
+                action_name,
+                exc.key,
+            )
+            return HttpResponseBadRequest(
+                f"Action {action_name!r} needs a URL kwarg the origin lacks."
+            )
+
+    @staticmethod
+    def _route(
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        action_name: str,
+        meta: "ActionMeta",
+        state: "_DispatchState",
+    ) -> "HttpResponseBase":
+        """Run the wizard, handler-only or form branch the action declares.
+
+        Every URL kwarg comes from the posted origin, so a miss at any depth is a 400.
+        """
+        handler = meta.get("handler")
+        form_class = meta.get("form_class")
+        wizard_class = meta.get("wizard_class")
 
         if wizard_class is not None:
             return _dispatch_wizard(backend, request, action_name, wizard_class, state)
@@ -216,18 +241,18 @@ class FormActionDispatch:
         state: "_DispatchState",
     ) -> HttpResponse:
         if params.init_kwargs:
-            form = _bind_form_for_post(
-                params.form_class, request, None, init_kwargs=params.init_kwargs
+            form = _construct_form(
+                params.form_class, params.init_kwargs, request=request
             )
         else:
-            initial_data = _call_get_initial(
+            form = _form_for_class(
                 params.form_class,
                 request,
                 state.url_kwargs,
                 deps=(state.dep_cache, state.dep_stack),
+                bound=True,
                 action_name=params.action_name,
             )
-            form = _bind_form_for_post(params.form_class, request, initial_data)
         denial = _enforce_object_permissions(form, request, params.action_name, state)
         if denial is not None:
             return denial

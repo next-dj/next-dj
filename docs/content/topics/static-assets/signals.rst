@@ -6,7 +6,7 @@ Static signals
 The static pipeline emits ``asset_registered``, ``collector_finalized``, ``html_injected``, and ``static_backend_loaded`` from ``next.static.signals``.
 
 Import either from ``next.static.signals`` or from the aggregator ``next.signals``.
-Import receiver modules from ``AppConfig.ready`` so receivers exist before the first request.
+Receivers in the ``signals.py`` of an app connect at startup, before the first request, since the framework imports that module from every installed app.
 
 .. contents::
    :local:

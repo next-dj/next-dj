@@ -1,24 +1,22 @@
 from __future__ import annotations
 
-from django.dispatch import receiver
-
 from next.forms.signals import (
     action_dispatched,
     form_access_denied,
     form_validation_failed,
 )
+from next.signals import receiver
 
 from .models import AuditEntry
 
 
-@receiver(action_dispatched)
+@receiver(action_dispatched, on_commit=True)
 def _on_action_dispatched(
     action_name: str, duration_ms: float, response_status: int, **kwargs
 ) -> None:
-    """Record one signal-sourced row per successful dispatch.
+    """Record one signal-sourced row per successful dispatch, once its writes commit.
 
-    Mirrors the backend channel but keeps no request payload, only the
-    timing and HTTP status carried by the signal.
+    Unlike the backend channel it keeps no payload, only the signal's timing and status.
     """
     AuditEntry.objects.create(
         action_name=action_name,
@@ -29,7 +27,7 @@ def _on_action_dispatched(
     )
 
 
-@receiver(form_validation_failed)
+@receiver(form_validation_failed, on_commit=True)
 def _on_form_validation_failed(
     action_name: str, error_count: int, field_names: tuple[str, ...], **kwargs
 ) -> None:
@@ -43,7 +41,7 @@ def _on_form_validation_failed(
     )
 
 
-@receiver(form_access_denied)
+@receiver(form_access_denied, on_commit=True)
 def _on_form_access_denied(action_name: str, layer: str, reason: str, **kwargs) -> None:
     """Record one signal-sourced row per dynamic permission-hook denial.
 

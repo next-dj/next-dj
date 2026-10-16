@@ -8,6 +8,7 @@ from next.deps import (
     provider_registry,
 )
 from next.deps.markers import DependsProvider
+from next.deps.objects import ObjectProvider
 from next.deps.signals import provider_registered
 from next.forms.markers import CleanedDataProvider, FormProvider
 from next.pages.context import ContextByNameProvider
@@ -173,11 +174,11 @@ class TestResolverSync:
         planned = DependencyResolver()
         stub = DeferringProvider("plain")
         planned.prepend_provider(stub)
-        _late(5)
+        late = _late(5)
         assert planned.resolve_dependencies(_plain) == {"plain": "STUB"}
         assert planned._providers[0] is stub
-        assert isinstance(planned._providers[1], RegisteredParameterProvider)
-        assert planned._providers[1].priority == 5
+        assert _index_of(planned, ObjectProvider) == 1
+        assert _index_of(planned, late) == 2
 
     def test_manual_append_lands_behind_the_auto_providers(self) -> None:
         planned = DependencyResolver()
@@ -185,7 +186,7 @@ class TestResolverSync:
         planned.add_provider(stub)
         assert planned.resolve_dependencies(_plain) == {"plain": "STUB"}
         assert planned._providers[-1] is stub
-        assert isinstance(planned._providers[0], DependsProvider)
+        assert isinstance(planned._providers[0], ObjectProvider)
 
     def test_explicit_resolver_never_reads_the_registry(self) -> None:
         planned = DependencyResolver(UrlKwargsProvider())
@@ -207,7 +208,7 @@ class TestResolverSync:
         planned.resolve_dependencies(_plain)
         # The resync rebuilds every auto instance from the registry, and the
         # class the caller took out stays out while the newcomer joins.
-        assert _index_of(planned, late) == 0
+        assert _index_of(planned, late) == _index_of(planned, ObjectProvider) + 1
         assert all(type(p) is not DependsProvider for p in planned._providers)
 
     def test_removing_an_auto_provider_outlives_a_reloaded_declaration(self) -> None:

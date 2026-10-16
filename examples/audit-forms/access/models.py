@@ -1,6 +1,13 @@
-from typing import ClassVar
+from typing import ClassVar, Self
 
+from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 from django.db import models
+
+
+class AccessRequestQuerySet(models.QuerySet):
+    def visible_to(self, user: AbstractBaseUser | AnonymousUser) -> Self:
+        """Return every request, since the portal has no accounts to narrow them by."""
+        return self.all()
 
 
 class AccessRequest(models.Model):
@@ -12,6 +19,8 @@ class AccessRequest(models.Model):
     expires_in_days = models.PositiveSmallIntegerField()
     status = models.CharField(max_length=12, default="pending")
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AccessRequestQuerySet.as_manager()
 
     class Meta:
         ordering: ClassVar = ["-created_at"]

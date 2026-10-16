@@ -1,32 +1,11 @@
-import inspect
+from django.http import HttpRequest
 
-from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionContext
+from next.deps import resolver
 from notes.access import get_active_tenant
 from notes.models import Tenant
 
 
-class DTenant(DDependencyBase["Tenant"]):
-    """DI marker that resolves to the active `Tenant` for the request."""
-
-    __slots__ = ()
-
-
-class TenantProvider(RegisteredParameterProvider):
-    """Resolve `DTenant` parameters from `request.tenant`."""
-
-    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
-        """Match the bare `DTenant` annotation when a request is attached."""
-        if param.annotation is not DTenant:
-            return False
-        request = getattr(context, "request", None)
-        if request is None:
-            return False
-        return get_active_tenant(request) is not None
-
-    def static_can_handle(self, param: inspect.Parameter) -> bool | None:
-        """Rule out a foreign annotation. A match still needs an active tenant."""
-        return None if param.annotation is DTenant else False
-
-    def resolve(self, _param: inspect.Parameter, context: ResolutionContext) -> Tenant:
-        """Return the `Tenant` previously stashed by `TenantMiddleware`."""
-        return get_active_tenant(context.request)
+@resolver.dependency("scope")
+def scope(request: HttpRequest) -> Tenant | None:
+    """Return the tenant of the request, which narrows every note lookup."""
+    return get_active_tenant(request)

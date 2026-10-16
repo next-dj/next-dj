@@ -109,6 +109,7 @@ When ``registry_empty`` is true the message also explains that no actions are re
 Form base classes
 ~~~~~~~~~~~~~~~~~
 
+``get_form_kwargs`` is the opt-in classmethod that returns the constructor kwargs, see :ref:`topics-forms-actions-form-kwargs`.
 ``check_permissions`` and ``has_object_permission`` are the opt-in dynamic permission hooks.
 Both return ``PermissionOutcome``, the ``bool | HttpResponse | None`` alias re-exported from ``next.forms``.
 See :ref:`topics-forms-actions-dynamic-guards` for the authoring contract and the ordering against the static guard.
@@ -120,10 +121,10 @@ See :ref:`topics-forms-actions-dynamic-guards` for the authoring contract and th
    :members:
 
 .. autoclass:: next.forms.BaseForm
-   :members: get_initial, get_success_message, on_valid, check_permissions, has_object_permission
+   :members: get_initial, get_form_kwargs, get_success_message, on_valid, check_permissions, has_object_permission
 
 .. autoclass:: next.forms.BaseModelForm
-   :members: get_initial, get_success_message, on_valid, check_permissions, has_object_permission
+   :members: get_initial, get_form_kwargs, get_success_message, on_valid, check_permissions, has_object_permission
 
 Form wizard
 ~~~~~~~~~~~

@@ -1,8 +1,8 @@
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
-from notes.deps import DTenant
-from notes.models import Note
+from notes.models import Note, Tenant
 
+from next import Depends
 from next.forms import ComponentWidget, Form
 from next.pages import MetadataDict
 from next.urls import page_reverse
@@ -23,14 +23,14 @@ class NoteCreateForm(Form):
     )
 
     def on_valid(
-        self, request: HttpRequest, active_tenant: DTenant
+        self, request: HttpRequest, tenant: Tenant = Depends("scope")
     ) -> HttpResponseRedirect:
         """Create a new note scoped to the active tenant and redirect to its editor."""
         note_obj = Note.objects.create(
-            tenant=active_tenant,
+            tenant=tenant,
             title=self.cleaned_data["title"],
             body=self.cleaned_data.get("body", ""),
         )
         return HttpResponseRedirect(
-            page_reverse("notes/[int:note_id]/edit", note_id=note_obj.pk)
+            page_reverse("notes/[int:note]/edit", note=note_obj.pk)
         )

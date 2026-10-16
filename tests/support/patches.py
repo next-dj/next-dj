@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 from django.contrib.staticfiles.storage import StaticFilesStorage
 
 from next.deps import provider_registry, resolver
+from next.deps.resolver import _holder, current_resolver
 from next.static import default_kinds, default_placeholders
 from next.static.discovery import default_stems
 from tests.support.components import write_colocated_component_assets
@@ -60,6 +61,16 @@ def restored_provider_registry() -> Generator[None, None, None]:
         resolver._suppressed = suppressed
         resolver._registry_seen = -1
         resolver._rebuild()
+
+
+@contextmanager
+def restored_resolver() -> Generator[None, None, None]:
+    """Restore the object behind the resolver holder, so no swap outlives the block."""
+    original = current_resolver()
+    try:
+        yield
+    finally:
+        _holder._wrapped = original
 
 
 @contextmanager

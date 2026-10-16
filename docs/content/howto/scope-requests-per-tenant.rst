@@ -12,7 +12,8 @@ Solution
 --------
 
 Resolve the tenant once in :doc:`middleware <django:topics/http/middleware>` and stash it on the request.
-A dependency provider, a :doc:`context processor <django:ref/templates/api>`, and a custom static backend each read it back from there.
+The ``scope`` dependency hands it to ``visible_to`` on every tenant-owned model, so pages and forms load rows through ``DObject`` and see only the rows of that tenant.
+A :doc:`context processor <django:ref/templates/api>` and a custom static backend read the tenant back from the request as well.
 
 .. warning::
 
@@ -215,88 +216,30 @@ On error pages where the middleware short-circuited, the attribute is absent and
        """Return the tenant attached to `request` by `TenantMiddleware`."""
        return getattr(request, "tenant", None)
 
-Inject the tenant into pages
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Make the tenant the scope
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A ``DDependencyBase`` marker plus a ``RegisteredParameterProvider`` lets page and action callables ask for the tenant by type.
-The provider matches the bare ``DTenant`` annotation when a request carries a tenant.
-
-.. code-block:: python
-   :caption: notes/deps.py, the marker
-
-   from notes.middleware import get_active_tenant
-
-   from next.deps import DDependencyBase, RegisteredParameterProvider
-
-   class DTenant(DDependencyBase["Tenant"]):
-       """DI marker that resolves to the active `Tenant` for the request."""
-
-       __slots__ = ()
-
-   class TenantProvider(RegisteredParameterProvider):
-       def can_handle(self, param, context):
-           if param.annotation is not DTenant:
-               return False
-           request = context.request
-           if request is None:
-               return False
-           return get_active_tenant(request) is not None
-
-       def static_can_handle(self, param):
-           return param.annotation is DTenant
-
-       def resolve(self, _param, context):
-           return get_active_tenant(context.request)
-
-Unlike ``DFlag[Flag]``, ``DTenant`` is matched by class identity rather than ``get_origin``, so it carries no type parameter and the provider compares ``param.annotation`` to the class directly.
-``static_can_handle`` decides the parameter from the annotation alone, so the plan claims it at compile time and no other provider is consulted for it per request.
-
-Import the module from ``AppConfig.ready`` so the auto-registry wires the provider once the app registry is populated.
-``RegisteredParameterProvider`` registers the provider as a side effect of class definition, so importing the module is the whole registration step.
-A top-level import in ``apps.py`` also registers the provider, but only when the provider module reaches no model, so ``ready`` is the placement that always holds.
+Every tenant-owned model answers which of its rows a tenant may see through ``visible_to`` on its default manager.
 
 .. code-block:: python
-   :caption: notes/apps.py
+   :caption: notes/models.py, the tenant-owned rows
 
-   from django.apps import AppConfig
+   class NoteQuerySet(models.QuerySet):
+       def visible_to(self, scope):
+           if scope is None:
+               return self.none()
+           return self.filter(tenant=scope)
 
-   class NotesConfig(AppConfig):
-       default_auto_field = "django.db.models.BigAutoField"
-       name = "notes"
+   class Note(models.Model):
+       tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+       title = models.CharField(max_length=200)
 
-       def ready(self) -> None:
-           from notes import deps  # imported for its registration side effect
+       objects = NoteQuerySet.as_manager()
 
-           _ = deps
-
-The ``_ = deps`` line documents the intentional side-effect import so a linter does not flag it as unused.
-
-A page context function now requests the tenant by name and type, and the resolver hands back the model instance.
-Keep real annotations in these modules, because the resolver compares parameter annotations by identity.
+The named dependency ``scope`` hands ``visible_to`` the tenant of the request.
 
 .. code-block:: python
-   :caption: notes/pages/notes/page.py
-
-   from notes.deps import DTenant
-   from notes.models import Note
-
-   from next import context
-
-   @context("notes")
-   def notes(active_tenant: DTenant) -> list[Note]:
-       """Return every note that belongs to the active tenant."""
-       return list(Note.objects.filter(tenant=active_tenant))
-
-Every query that reaches tenant-owned rows filters on the resolved tenant.
-A query that omits the filter reads the whole table, and no amount of care in the middleware repairs that.
-
-Share the tenant through a named dependency
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-When several callables in one render need the tenant, register the accessor as a named dependency instead.
-
-.. code-block:: python
-   :caption: notes/deps.py, the named dependency
+   :caption: notes/deps.py
 
    from django.http import HttpRequest
    from notes.middleware import get_active_tenant
@@ -304,11 +247,19 @@ When several callables in one render need the tenant, register the accessor as a
 
    from next.deps import resolver
 
-   @resolver.dependency("active_tenant")
-   def active_tenant(request: HttpRequest) -> Tenant | None:
+   @resolver.dependency("scope")
+   def scope(request: HttpRequest) -> Tenant | None:
        return get_active_tenant(request)
 
-Any callable then asks for the value by name.
+The ``next`` application imports ``notes/deps.py`` at startup, so the registration needs no ``AppConfig.ready`` code.
+The scope resolves once per render, and every callable of that render shares the value.
+A request without a tenant gets ``None``, which ``visible_to`` answers with no rows.
+Keep real annotations in ``deps.py`` and in every page module, because the resolver reads them at runtime.
+
+Load rows through the scope
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A list asks for the scope by name.
 
 .. code-block:: python
    :caption: notes/pages/notes/page.py
@@ -317,33 +268,80 @@ Any callable then asks for the value by name.
 
    from next import Depends, context
 
-   @context("note_count")
-   def note_count(tenant: Tenant | None = Depends("active_tenant")) -> int:
-       if tenant is None:
-           return 0
-       return Note.objects.filter(tenant=tenant).count()
+   @context("notes")
+   def notes(scope: Tenant | None = Depends("scope")) -> list[Note]:
+       return list(Note.objects.visible_to(scope))
 
-The same ``notes.deps`` import in ``AppConfig.ready`` that registers the provider runs this decorator before the first request.
-The marker route re-resolves for every parameter that carries ``DTenant``, while the named dependency is resolved once and memoised for the rest of the pass.
-Keep the marker for callables that prefer to ask by type.
+A page that addresses one row takes it as ``DObject``, named after the route segment that carries its primary key.
+
+.. code-block:: python
+   :caption: notes/pages/notes/[int:note]/page.py
+
+   from notes.models import Note
+
+   from next import context
+   from next.deps import DObject
+
+   @context("note")
+   def note(note: DObject[Note]) -> Note:
+       return note
+
+``DObject`` reads the row through ``visible_to(scope)``, so the primary key of another tenant's note answers 404 exactly like a key that matches no row.
+A query that skips ``visible_to`` reads the whole table, and no amount of care in the middleware repairs that, so every read of tenant-owned rows starts from it.
+See :ref:`topics-di-dobject` for rows nested under a parent row.
+
+Create and edit rows for the tenant
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The forms take the tenant from the same dependency through ``get_form_kwargs``, so neither a factory nor a hidden field carries it.
+
+.. code-block:: python
+   :caption: notes/forms.py
+
+   from typing import Any
+
+   from notes.models import Note, Tenant
+
+   import next.forms
+   from next import Depends
+   from next.deps import DObject
+
+   class NoteCreateForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["title"]
+
+       @classmethod
+       def get_form_kwargs(cls, scope: Tenant | None = Depends("scope")) -> dict[str, Any]:
+           return {"instance": Note(tenant=scope)}
+
+   class NoteEditForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["title"]
+
+       @classmethod
+       def get_form_kwargs(cls, note: DObject[Note]) -> dict[str, Any]:
+           return {"instance": note}
+
+The create form saves the new row under the tenant of the request, and the edit form loads the row through ``visible_to`` on the render and again on the POST.
+The edit form serves pages whose route captures ``note``, such as ``notes/[int:note]/edit/``, see :doc:`use-modelform-for-crud`.
 
 Lift the tenant to every descendant page
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A ``@context(..., inherit_context=True)`` callable on the workspace root publishes the tenant once, and every nested page reads it without re-resolving.
+A ``@context(..., inherit_context=True)`` callable on the workspace root publishes the tenant once, and every nested page reads it by name.
 
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from notes.deps import DTenant
    from notes.models import Tenant
 
-   from next import context
+   from next import Depends, context
 
    @context("tenant", inherit_context=True)
-   def tenant(active_tenant: DTenant) -> Tenant:
-       """Expose the active tenant under `tenant` to every workspace page."""
-       return active_tenant
+   def tenant(scope: Tenant | None = Depends("scope")) -> Tenant | None:
+       return scope
 
 Theme the chrome with a context processor
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -409,7 +407,7 @@ Send the same path under two tenant hosts and confirm the responses diverge.
 
 The Acme response lists only Acme notes.
 The Globex response lists only Globex notes.
-A host that matches no tenant row returns ``404``.
+A host that matches no tenant row returns ``404``, and so does the page of an Acme note requested under the Globex host.
 
 Under the membership shape the same check signs in as an Acme member, reads the notes page, then signs in as a Globex member and confirms that neither response carries the other tenant's rows.
 
@@ -423,7 +421,7 @@ See also
 
 .. seealso::
 
-   :doc:`/content/topics/dependency-injection` for the request-scoped provider pattern.
+   :doc:`/content/topics/dependency-injection` for ``DObject`` and the ``scope`` dependency.
    :doc:`/content/topics/static-assets/backends` for the request-aware backend contract.
    :doc:`/content/topics/context` for ``inherit_context`` and context processors.
    :doc:`/content/internals/request-lifecycle` for where middleware sits in the request path.

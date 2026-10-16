@@ -10,10 +10,8 @@ class KanbanConfig(AppConfig):
     label = "kanban"
 
     def ready(self) -> None:
-        """Register JSX kind, page stem, and connect signal handlers."""
+        """Register the JSX asset kind and the `page` stem for co-located templates."""
         default_kinds.register(
             "jsx", extension=".jsx", slot="scripts", renderer="render_module_tag"
         )
         default_stems.register("template", "page")
-
-        from kanban import deps, signals

@@ -81,15 +81,17 @@ See :doc:`actions` for the anchor-file rule, the ``Meta.scope`` override, and th
 Autodiscover
 ------------
 
-``NextFrameworkConfig.ready`` calls ``autodiscover_forms()`` once on startup.
-It imports the ``forms`` submodule of every installed app so shared forms declared in ``app/forms.py`` register before the first request arrives.
-Set ``NEXT_FRAMEWORK["FORM_AUTODISCOVER"] = False`` to disable the automatic import.
+At startup the ``next`` application imports the ``forms`` submodule of every installed app, so shared forms declared in ``app/forms.py`` register before the first request arrives.
+The ``deps`` modules of all apps load first, so a form finds every provider and named dependency in place.
+Set ``NEXT_FRAMEWORK["FORM_AUTODISCOVER"] = False`` to disable the automatic import and import the ``forms`` modules from ``AppConfig.ready`` instead.
+``next.forms.autodiscover_forms()`` runs the same sweep on a manual call, and the key turns it off as well.
 
 Handling submissions
 --------------------
 
 Override ``on_valid`` to run code after the form passes validation, and declare ``get_initial`` as a classmethod to prepopulate the form before its first render.
-The framework calls both through the dependency injector, so each may declare any parameter the injector resolves.
+Declare ``get_form_kwargs`` as a classmethod when the constructor needs further arguments, such as an ``instance`` the scope may see.
+The framework calls all three through the dependency injector, so each may declare any parameter the injector resolves.
 The default ``on_valid`` saves first on a ``ModelForm``, then follows ``Meta.success_url`` when it is declared and the origin page otherwise, with ``Meta.success_message`` queued as a flash message.
 See :doc:`actions` for the default behaviour, the return contract, and the full signature rules of both hooks.
 
@@ -130,8 +132,8 @@ next.dj keeps the same set of decisions and moves them onto the form class itsel
      - ``check_permissions``, a dependency-injected classmethod evaluated per request
      - :ref:`topics-forms-actions-dynamic-guards`
    * - ``get_form_kwargs``
-     - A ``form_class`` factory returning a ``(FormClass, init_kwargs)`` tuple
-     - *Dynamic form classes* in :doc:`actions`
+     - ``get_form_kwargs``, a dependency-injected classmethod returning the constructor kwargs
+     - :ref:`topics-forms-actions-form-kwargs`
    * - ``get_initial``
      - ``get_initial``, a classmethod with the same dependency-injected signature
      - *Handling submissions* above
@@ -143,7 +145,7 @@ The guards also protect the POST endpoint rather than the page, so rendering a g
 Shared dependency cache
 -----------------------
 
-``get_initial``, the handler, and the re-render share one per-request dependency cache.
+``get_initial``, ``get_form_kwargs``, the handler, and the re-render share one per-request dependency cache.
 An expensive provider such as a tenant lookup or a permission check runs once per request, even when validation fails and the page re-renders.
 See :doc:`validation-rerender` for the cache mechanics and the access path.
 

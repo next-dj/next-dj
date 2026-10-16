@@ -25,9 +25,10 @@ if TYPE_CHECKING:
     # `context` is both a submodule and a callable inside `next.pages`, so the
     # import points at the defining module to keep the name unambiguous.
     from next.pages.manager import context, page
+    from next.signals import receiver
 
 
-__all__ = ["VERSION", "Depends", "action", "component", "context", "page"]
+__all__ = ["VERSION", "Depends", "action", "component", "context", "page", "receiver"]
 
 __title__ = "Next Django Framework"
 __version__ = "0.10.0"
@@ -42,6 +43,7 @@ _LAZY_ATTRIBUTES: dict[str, str] = {
     "component": "next.components",
     "action": "next.forms",
     "Depends": "next.deps",
+    "receiver": "next.signals",
 }
 
 

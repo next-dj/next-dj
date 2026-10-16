@@ -40,6 +40,14 @@ if TYPE_CHECKING:
         check_consent_cookie_secure,
         check_consent_settings,
     )
+    from next.deps.checks import (
+        check_object_component_contexts,
+        check_object_form_parents,
+        check_object_hints,
+        check_object_managers,
+        check_object_page_bindings,
+        check_object_scope,
+    )
     from next.forms.checks import (
         check_action_applied_to_class,
         check_action_guard_permissions,
@@ -195,6 +203,14 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_consent_cookie_options",
         "check_consent_cookie_secure",
         "check_consent_settings",
+    ),
+    "next.deps.checks": (
+        "check_object_component_contexts",
+        "check_object_form_parents",
+        "check_object_hints",
+        "check_object_managers",
+        "check_object_page_bindings",
+        "check_object_scope",
     ),
     "next.forms.checks": (
         "check_action_applied_to_class",
@@ -408,6 +424,12 @@ __all__ = [
     "check_no_zone_in_component",
     "check_nonce_on_shared_pages",
     "check_nonce_templates",
+    "check_object_component_contexts",
+    "check_object_form_parents",
+    "check_object_hints",
+    "check_object_managers",
+    "check_object_page_bindings",
+    "check_object_scope",
     "check_page_functions",
     "check_page_metadata_shape",
     "check_page_module_imports",

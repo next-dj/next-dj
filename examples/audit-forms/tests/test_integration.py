@@ -22,7 +22,7 @@ from next.testing import (
 )
 
 
-pytestmark = pytest.mark.django_db
+pytestmark = pytest.mark.django_db(transaction=True)
 
 
 WIZARD_ACTION = "access_request_wizard"

@@ -9,7 +9,14 @@ from access.models import AccessRequest, AuditEntry
 from access.policy import POLICY_FIELD, AcknowledgedStep
 from access.signals import _on_form_access_denied
 from django.contrib.sessions.backends.db import SessionStore
+from django.db import connection, transaction
 from django.http import HttpRequest, QueryDict
+
+from next.forms.signals import (
+    action_dispatched,
+    form_access_denied,
+    form_validation_failed,
+)
 
 
 pytestmark = pytest.mark.django_db
@@ -295,6 +302,70 @@ class TestAccessDeniedReceiver:
         )
         entry.created_at = datetime(2026, 4, 25, 12, 30, 0, tzinfo=UTC)
         assert "signal/access_denied" in str(entry)
+
+
+SIGNAL_SENDS = [
+    pytest.param(
+        action_dispatched,
+        {"duration_ms": 1.5, "response_status": 303},
+        AuditEntry.KIND_DISPATCHED,
+        id="dispatched",
+    ),
+    pytest.param(
+        form_validation_failed,
+        {"error_count": 1, "field_names": ("email",)},
+        AuditEntry.KIND_VALIDATION_FAILED,
+        id="validation_failed",
+    ),
+    pytest.param(
+        form_access_denied,
+        {"layer": "view", "reason": "denied"},
+        AuditEntry.KIND_ACCESS_DENIED,
+        id="access_denied",
+    ),
+]
+
+
+class RollbackError(Exception):
+    pass
+
+
+def _send_then_roll_back(signal, payload: dict[str, object]) -> None:
+    with transaction.atomic():
+        queued = len(connection.run_on_commit)
+        signal.send(sender=AuditEntry, action_name="access_request_wizard", **payload)
+        assert not AuditEntry.objects.exists()
+        assert len(connection.run_on_commit) == queued + 1
+        raise RollbackError
+
+
+class TestSignalChannelWaitsForTheCommit:
+    """Signal rows land once the sender's transaction commits, never on rollback."""
+
+    @pytest.mark.parametrize(("signal", "payload", "kind"), SIGNAL_SENDS)
+    def test_the_row_lands_once_the_transaction_commits(
+        self, django_capture_on_commit_callbacks, signal, payload, kind
+    ) -> None:
+        with django_capture_on_commit_callbacks(execute=True) as callbacks:
+            signal.send(
+                sender=AuditEntry, action_name="access_request_wizard", **payload
+            )
+            assert not AuditEntry.objects.filter(kind=kind).exists()
+        assert len(callbacks) == 1
+        row = AuditEntry.objects.get(kind=kind)
+        assert row.source == AuditEntry.SOURCE_SIGNAL
+
+    @pytest.mark.parametrize(("signal", "payload", "kind"), SIGNAL_SENDS)
+    def test_a_rolled_back_transaction_records_nothing(
+        self, django_capture_on_commit_callbacks, signal, payload, kind
+    ) -> None:
+        with (
+            django_capture_on_commit_callbacks(execute=True) as callbacks,
+            pytest.raises(RollbackError),
+        ):
+            _send_then_roll_back(signal, payload)
+        assert callbacks == []
+        assert not AuditEntry.objects.exists()
 
 
 class TestProgressBarSteps:

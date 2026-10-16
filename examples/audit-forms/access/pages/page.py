@@ -1,11 +1,16 @@
 from access.models import AccessRequest, AuditEntry
+from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 
-from next import context
+from next import Depends, context
 
 
 @context("recent_requests")
-def recent_requests() -> list[AccessRequest]:
-    return list(AccessRequest.objects.order_by("-created_at", "-pk")[:5])
+def recent_requests(
+    user: AbstractBaseUser | AnonymousUser = Depends("scope"),
+) -> list[AccessRequest]:
+    """Return the five newest requests the visitor may see."""
+    requests = AccessRequest.objects.visible_to(user)
+    return list(requests.order_by("-created_at", "-pk")[:5])
 
 
 @context("recent_audit")

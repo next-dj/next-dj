@@ -29,6 +29,7 @@ from tests.support import (
     CountingWizardBackend,
     IntentOnlyShaper,
     build_mock_http_request,
+    install_visibility_hooks,
     tick_scenario,
 )
 
@@ -66,6 +67,12 @@ def site_model(transactional_db) -> Iterator[type[Model]]:
             model.objects.clear_cache()
             with connection.schema_editor() as editor:
                 editor.delete_model(model)
+
+
+@pytest.fixture()
+def scoped_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give the auth and contenttypes default managers a `visible_to` hook."""
+    install_visibility_hooks(monkeypatch)
 
 
 @pytest.fixture()

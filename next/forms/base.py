@@ -5,7 +5,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Final, override
+from typing import Any, Final, Protocol, cast, override
 
 from django import forms as django_forms
 from django.conf import settings
@@ -19,6 +19,7 @@ from django.shortcuts import get_object_or_404
 
 from next.caches import BoundedCache
 from next.conf import next_framework_settings
+from next.deps import render_dep_cache
 from next.introspect import defining_file
 
 from .backends import (
@@ -27,7 +28,9 @@ from .backends import (
     _resolved_path_str,
     build_action_guard,
 )
+from .dispatch.build import _initial_form_kwargs, _resolve_and_call
 from .manager import form_action_manager
+from .origin import url_kwargs_for_request
 from .registration import registration_diagnostics
 from .uid import redirect_to_origin
 
@@ -333,7 +336,45 @@ class _PermissionHooks:
         return None
 
 
-class BaseForm(_PermissionHooks, DjangoBaseForm):
+class _InitialSource(Protocol):
+    """A form class exposing the DI-resolved `get_initial` classmethod."""
+
+    @classmethod
+    def get_initial(cls) -> object: ...
+
+
+class _FormKwargsHook:
+    """Opt-in DI-resolved constructor kwargs hook shared by both form bases.
+
+    The presence flag keeps a form without the override on the `get_initial` path.
+    """
+
+    _has_get_form_kwargs: bool = False
+
+    @override
+    def __init_subclass__(cls, **kwargs) -> None:
+        """Stamp the per-subclass hook-presence flag via __func__ identity."""
+        super().__init_subclass__(**kwargs)
+        cls._has_get_form_kwargs = _stamp_hook_flag(
+            _FormKwargsHook.get_form_kwargs, cls.get_form_kwargs
+        )
+
+    @classmethod
+    def get_form_kwargs(cls, request: HttpRequest) -> dict[str, Any]:
+        """Return the constructor kwargs, data and files aside, built from get_initial.
+
+        It resolves `get_initial` in the cache its caller hangs on the request.
+        """
+        initial_data = _resolve_and_call(
+            cast("type[_InitialSource]", cls).get_initial,
+            request,
+            url_kwargs_for_request(request),
+            deps=(render_dep_cache(request), []),
+        )
+        return _initial_form_kwargs(cls, initial_data)
+
+
+class BaseForm(_FormKwargsHook, _PermissionHooks, DjangoBaseForm):
     """Custom `BaseForm` extended with `get_initial` and `on_valid`."""
 
     default_renderer = _div_form_renderer
@@ -362,7 +403,7 @@ class BaseForm(_PermissionHooks, DjangoBaseForm):
         return redirect_to_origin(request)
 
 
-class BaseModelForm(_PermissionHooks, DjangoBaseModelForm):
+class BaseModelForm(_FormKwargsHook, _PermissionHooks, DjangoBaseModelForm):
     """Custom `BaseModelForm` with `get_initial` and `on_valid` support."""
 
     default_renderer = _div_form_renderer

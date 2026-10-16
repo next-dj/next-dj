@@ -4,6 +4,8 @@ from collections.abc import Callable, Iterable
 from difflib import get_close_matches
 from typing import Any, override
 
+from django.core.exceptions import ImproperlyConfigured
+
 from next.introspect import describe_callable
 
 
@@ -61,4 +63,37 @@ class UnknownDependencyError(LookupError):
         )
 
 
-__all__ = ["DependencyCycleError", "UnknownDependencyError"]
+class UnboundObjectError(ImproperlyConfigured):
+    """Raised when a `DObject` parameter finds no URL kwarg or parent to look up by.
+
+    A missing source is a wiring mistake, not a missing row, so it never reads as 404.
+    """
+
+    def __init__(
+        self,
+        param_name: str,
+        key: str,
+        *,
+        parent: bool = False,
+        available: Iterable[str] = (),
+    ) -> None:
+        """Record the parameter and the key it found nothing under."""
+        self.param_name = param_name
+        self.key = key
+        self.parent = parent
+        if parent:
+            detail = (
+                f'finds no "{key}" in the context it resolves in. Declare '
+                f'@context("{key}", inherit_context=True) in an ancestor page.py, '
+                "since a form handler or hook resolves with no page context."
+            )
+        else:
+            captured = ", ".join(sorted(available)) or "none"
+            detail = (
+                f'finds no URL kwarg "{key}" (captured: {captured}). It reads the '
+                "kwarg named like itself, so rename it after a captured segment."
+            )
+        super().__init__(f'DObject parameter "{param_name}" {detail}')
+
+
+__all__ = ["DependencyCycleError", "UnboundObjectError", "UnknownDependencyError"]

@@ -462,6 +462,23 @@ class TestNoteEditPage:
         )
         assert 'src="/static/next/components/markdown_preview.mjs"' not in body
 
+    @override_settings(DEBUG=False)
+    def test_another_tenants_note_answers_404(
+        self, next_client: NextClient, acme_note: Note
+    ) -> None:
+        response = next_client.get(
+            f"/notes/{acme_note.pk}/edit/", HTTP_X_TENANT="globex"
+        )
+        assert response.status_code == 404
+        assert acme_note.title not in response.content.decode()
+
+    @override_settings(DEBUG=False)
+    def test_unknown_note_answers_404(
+        self, next_client: NextClient, acme: Tenant
+    ) -> None:
+        response = next_client.get("/notes/999999/edit/", HTTP_X_TENANT="acme")
+        assert response.status_code == 404
+
 
 class TestDebugAffordance:
     """The `?tenant=<slug>` demo path sets a cookie and redirects."""

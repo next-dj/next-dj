@@ -19,7 +19,6 @@
     {% #slot "content" %}
       {% form "create_column_form" %}
         <div class="space-y-2">
-          <input type="hidden" name="board_id" value="{{ board.id }}">
           {% #component "field" label="Title" for_id="column-title" %}
             {% #slot "control" %}
               <input id="column-title" type="text" name="title"

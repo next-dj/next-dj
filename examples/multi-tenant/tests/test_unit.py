@@ -13,7 +13,7 @@ from markup import render_markdown
 from notes.backends import TenantPrefixStaticBackend
 from notes.context_processors import tenant_theme
 from notes.demo import DEMO_TENANTS, seed_demo
-from notes.deps import DTenant, TenantProvider
+from notes.deps import scope
 from notes.middleware import TenantMiddleware
 from notes.models import Note, Tenant
 from notes.signals import _on_form_access_denied
@@ -197,53 +197,31 @@ class TestTenantMiddleware:
         assert cookie["max-age"] == 0
 
 
-class TestTenantProvider:
-    """`TenantProvider` resolves DTenant only when a request carries a tenant."""
+class TestScopeDependency:
+    """The `scope` dependency hands `visible_to` the tenant of the request."""
 
-    def _context(self, request: object | None) -> Mock:
-        return Mock(request=request)
-
-    def _param(self, annotation: object) -> Mock:
-        param = Mock()
-        param.annotation = annotation
-        return param
-
-    @pytest.mark.parametrize(
-        ("annotation", "http_request", "expected"),
-        [
-            (DTenant, _tenant_request(), True),
-            (int, _tenant_request(), False),
-            (DTenant, HttpRequest(), False),
-            (DTenant, None, False),
-        ],
-        ids=[
-            "dtenant_with_request_tenant",
-            "other_annotation",
-            "request_without_tenant",
-            "no_request",
-        ],
-    )
-    def test_can_handle(self, annotation, http_request, expected) -> None:
-        provider = TenantProvider()
-        context = self._context(http_request)
-        assert provider.can_handle(self._param(annotation), context) is expected
-
-    @pytest.mark.parametrize(
-        ("annotation", "expected"),
-        [(DTenant, None), (int, False)],
-        ids=["dtenant_waits_for_context", "other_annotation"],
-    )
-    def test_static_can_handle(self, annotation, expected) -> None:
-        provider = TenantProvider()
-        assert provider.static_can_handle(self._param(annotation)) is expected
-
-    def test_resolve_returns_request_tenant(
+    def test_scope_is_the_request_tenant(
         self, tenant_request: Callable[..., HttpRequest]
     ) -> None:
-        provider = TenantProvider()
         request = tenant_request()
-        resolved = provider.resolve(self._param(DTenant), self._context(request))
-        assert resolved is request.tenant
+        assert scope(request) is request.tenant
+
+    def test_scope_is_none_without_a_tenant(self) -> None:
+        assert scope(HttpRequest()) is None
+
+
+class TestNoteVisibility:
+    """`Note.objects.visible_to` narrows every note read to one tenant."""
+
+    def test_tenant_sees_only_its_own_notes(self, payer_tenant: Tenant) -> None:
+        other = Tenant.objects.create(slug="other", name="Other")
+        own = Note.objects.create(tenant=payer_tenant, title="own")
+        Note.objects.create(tenant=other, title="foreign")
+        assert list(Note.objects.visible_to(payer_tenant)) == [own]
+
+    def test_no_tenant_sees_no_note(self, payer_tenant: Tenant) -> None:
+        Note.objects.create(tenant=payer_tenant, title="own")
+        assert not Note.objects.visible_to(None).exists()
 
 
 class TestShippedThemes:

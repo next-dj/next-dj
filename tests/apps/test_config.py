@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import ast
+import gc
 from contextlib import ExitStack
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 from unittest.mock import Mock, patch
 
 import pytest
@@ -54,8 +55,13 @@ from tests.support import (
     RaisingRootsRouter,
     importable_dir,
     routed,
+    throwaway_apps,
     write_tree,
 )
+
+
+if TYPE_CHECKING:
+    from django.dispatch import Signal
 
 
 _PROCESS_SLOTS = (
@@ -393,6 +399,47 @@ class TestComponentsInstall:
             components_manager.reload()
 
 
+def _appending(log: Path, entry: str) -> str:
+    """Return a module body that appends ``entry`` to ``log`` when it executes."""
+    return (
+        "from pathlib import Path\n\n"
+        f"with Path({str(log)!r}).open('a') as log:\n"
+        f"    log.write({entry + chr(10)!r})\n"
+    )
+
+
+class TestAppModulesLoadBeforeComponents:
+    """``ready()`` imports every app ``deps.py`` before any ``component.py`` runs."""
+
+    def test_deps_module_runs_before_an_eager_component_module(
+        self, tmp_path: Path
+    ) -> None:
+        log = tmp_path / "order.log"
+        root = tmp_path / "_components"
+        probe = root / "probe"
+        probe.mkdir(parents=True)
+        (probe / "component.djx").write_text("<div/>")
+        (probe / "component.py").write_text(_appending(log, "component"))
+        backend = {"DIRS": [str(root)], "COMPONENTS_DIR": "_components"}
+        (tmp_path / "apps").mkdir()
+        config = apps.get_app_config("next")
+        try:
+            with (
+                throwaway_apps(tmp_path / "apps") as make_app,
+                override_settings(
+                    NEXT_FRAMEWORK={
+                        "COMPONENT_BACKENDS": [backend],
+                        "LAZY_COMPONENT_MODULES": False,
+                    }
+                ),
+            ):
+                make_app(deps=_appending(log, "deps"))
+                config.ready()
+        finally:
+            components_manager.reload()
+        assert log.read_text().splitlines() == ["deps", "component"]
+
+
 class TestDependencyResolverInstall:
     """``ready()`` points the DI singleton at the configured resolver class."""
 
@@ -409,8 +456,8 @@ class TestDependencyResolverInstall:
         "autoreload",
         "templates",
         "staticfiles",
+        "autodiscover",
         "components",
-        "autodiscover_forms",
     )
 
     def test_ready_applies_the_setting_before_it_imports_user_modules(self) -> None:
@@ -437,8 +484,8 @@ class TestDependencyResolverInstall:
             "autoreload.install",
             "templates.install",
             "staticfiles.install",
+            "autodiscover.install",
             "components.install",
-            "autodiscover_forms",
         ]
 
     @pytest.mark.parametrize(
@@ -528,6 +575,13 @@ class TestDependencyResolverInstall:
         assert seo_manager.version != before
 
 
+def _live_count(signal: Signal) -> int:
+    """Count the receivers still alive, since a collected weak one drops at random."""
+    gc.collect()
+    signal._clear_dead_receivers()
+    return len(signal.receivers)
+
+
 class TestReceiversConnectInReady:
     """Every invalidation receiver is wired by `ready()`, once, never at import time."""
 
@@ -535,9 +589,9 @@ class TestReceiversConnectInReady:
         "signal", [setting_changed, settings_reloaded, router_reloaded]
     )
     def test_a_second_ready_adds_no_receiver(self, signal) -> None:
-        before = len(signal.receivers)
+        before = _live_count(signal)
         apps.get_app_config("next").ready()
-        assert len(signal.receivers) == before
+        assert _live_count(signal) == before
 
     def test_no_module_connects_a_receiver_at_import_time(self) -> None:
         connected = [

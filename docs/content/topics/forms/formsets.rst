@@ -196,17 +196,18 @@ Validating an inline formset
 A parent form that owns an inline formset attaches the formset on construction and validates it inside ``clean``.
 Raising ``ValidationError`` from ``clean`` routes the failure through the standard re-render pipeline.
 
-Pass the parent instance through a ``form_class`` factory, because the constructor needs ``instance=`` before it can rebind the inline formset to the POST data.
-The factory returns ``(FormClass, init_kwargs)`` and the dispatcher passes those kwargs to the constructor.
+Pass the parent instance through ``get_form_kwargs``, because the constructor needs ``instance=`` before it can rebind the inline formset to the POST data.
+The hook loads the note through ``DObject``, which reads it through ``visible_to(scope)``, see :ref:`topics-di-dobject`, and the dispatcher passes the returned kwargs to the constructor.
 ``NoteForm.__init__`` rebinds ``row_formset`` to ``self.data`` with ``instance=self.instance`` so the formset validates against the same POST as the parent form.
-A parent form that declares ``Meta.instance_from_url`` gets the same ``instance=`` from the default ``get_initial``, which replaces both the factory and the handler when the page needs no extra logic.
-The parent form is ``abstract`` because it dispatches only through the ``update_note`` factory action, not as a standalone ``note_form`` action.
+A parent form that declares ``Meta.instance_from_url`` gets the same ``instance=`` from the default ``get_initial`` without the hook, through an unscoped lookup.
+The parent form is ``abstract`` because it dispatches only through the ``update_note`` action, not as a standalone ``note_form`` action.
 
 .. code-block:: python
    :caption: notes/forms.py
 
    from notes.models import Note, Row
 
+   from next.deps import DObject
    from next.forms import ModelForm, inlineformset_factory
 
    RowFormSet = inlineformset_factory(Note, Row, fields=("label",), extra=1)
@@ -216,6 +217,10 @@ The parent form is ``abstract`` because it dispatches only through the ``update_
            model = Note
            fields = ("title", "body")
            abstract = True
+
+       @classmethod
+       def get_form_kwargs(cls, note: DObject[Note]) -> dict:
+           return {"instance": note}
 
        def __init__(self, *args, **kwargs):
            super().__init__(*args, **kwargs)
@@ -232,21 +237,14 @@ The parent form is ``abstract`` because it dispatches only through the ``update_
            return cleaned
 
 .. code-block:: python
-   :caption: notes/pages/notes/[id]/edit/page.py
+   :caption: notes/pages/notes/[int:note]/edit/page.py
 
    from django.http import HttpResponseRedirect
-   from django.shortcuts import get_object_or_404
    from notes.forms import NoteForm
-   from notes.models import Note
 
    from next import action
-   from next.urls import DUrl
 
-   def note_form_factory(note_id: DUrl["id", int]) -> tuple:
-       note = get_object_or_404(Note, pk=note_id)
-       return NoteForm, {"instance": note}
-
-   @action("update_note", form_class=note_form_factory)
+   @action("update_note", form_class=NoteForm)
    def update_note(form: NoteForm) -> HttpResponseRedirect:
        form.save()
        form.row_formset.save()

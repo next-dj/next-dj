@@ -21,7 +21,6 @@ from next.deps.resolver import (
 )
 from next.diagnostics import reset_failure_logs
 from next.discovery import reset_router_manager_cache
-from next.forms.autodiscover import autodiscover_forms
 from next.forms.backends import forget_action_urls
 from next.forms.manager import form_action_manager
 from next.forms.wizard import forget_wizard_backend
@@ -76,7 +75,7 @@ from next.urls.manager import (
 from next.urls.ports import RouterAccessImpl
 from next.urls.signals import router_reloaded
 
-from . import autoreload, components, staticfiles, templates
+from . import autodiscover, autoreload, components, staticfiles, templates
 
 
 if TYPE_CHECKING:
@@ -164,7 +163,7 @@ class NextFrameworkConfig(AppConfig):
         _connect(setting_changed, _SETTING_CHANGED)
         _connect(settings_reloaded, _SETTINGS_RELOADED)
         _connect(router_reloaded, _ROUTER_RELOADED)
-        # Ahead of every install, because component discovery and form autodiscovery
+        # Ahead of every install, because app autodiscovery and component discovery
         # import user modules that must see the configured resolver, not the base one.
         apply_resolver_setting()
         # The ports are bound before the installs for the same reason, and so a
@@ -181,8 +180,8 @@ class NextFrameworkConfig(AppConfig):
         autoreload.install()
         templates.install()
         staticfiles.install()
+        autodiscover.install()
         components.install()
-        autodiscover_forms()
 
 
 __all__ = ["NextFrameworkConfig"]

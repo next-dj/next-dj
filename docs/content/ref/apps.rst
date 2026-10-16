@@ -26,8 +26,8 @@ It then runs seventeen startup steps in a fixed order.
 #. ``autoreload.install()``
 #. ``templates.install()``
 #. ``staticfiles.install()``
+#. ``autodiscover.install()``
 #. ``components.install()``
-#. ``autodiscover_forms()``
 
 Every signal receiver of the framework is connected in the first three steps and nowhere else, none at import time.
 Each table lists its receivers in the order they run, and each is connected with ``dispatch_uid`` set to its module and qualified name, so a second ``ready`` call connects nothing twice.
@@ -38,10 +38,11 @@ Each table lists its receivers in the order they run, and each is connected with
   A reload that replaces the routers from code changes what they report without touching settings, so every memo derived from the old routers goes with them, see :doc:`/content/howto/reload-routes-from-code`.
 
 ``apply_resolver_setting()`` points the dependency-injection singleton at the class named by ``DEPENDENCY_RESOLVER``, see :doc:`settings`.
-It runs ahead of every install because the two discovery steps import user modules, and a ``component.py`` or a ``forms.py`` that resolves at import time has to see the configured resolver rather than the base one.
+It runs ahead of every install because the two discovery steps import user modules, and a ``component.py``, a ``deps.py``, a ``forms.py``, or a ``signals.py`` that resolves at import time has to see the configured resolver rather than the base one.
 
-``autodiscover_forms()`` imports the ``forms`` submodule of every installed app so shared forms register before the first request arrives.
-It respects the ``FORM_AUTODISCOVER`` setting and is a no-op when that setting is ``False``.
+``autodiscover.install()`` imports the ``deps``, ``forms``, and ``signals`` submodules of every installed app, finishing one module name across all apps before it starts the next.
+It runs ahead of ``components.install()``, so a ``component.py`` imported in the last step finds every provider and named dependency registered.
+``DEPS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, and ``SIGNALS_AUTODISCOVER`` turn the three sweeps off one by one, see :doc:`settings`.
 
 Steps five to twelve bind the seven :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
 They also run ahead of the discovery steps so a discovery failure leaves no process behind with a slot still empty.
@@ -90,6 +91,12 @@ Autoreload installer
 
 ``install()`` swaps Django's ``StatReloader`` for ``NextStatReloader`` and connects the ``autoreload_started`` signal, and ``uninstall()`` puts the original class back.
 See :doc:`/content/internals/autoreload` for the idempotence contract and the test cleanup.
+
+Autodiscover installer
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: next.apps.autodiscover
+   :members:
 
 Components installer
 ~~~~~~~~~~~~~~~~~~~~

@@ -60,6 +60,8 @@ _RETIRED_IDS = frozenset(
     | {f"next.W{number:03d}" for number in range(47, 54)}
     | {f"next.W{number:03d}" for number in range(64, 67)}
     | {"next.W073"}
+    | {f"next.E{number:03d}" for number in range(152, 170)}
+    | {f"next.W{number:03d}" for number in range(126, 135)}
 )
 
 _CHECKS_REFERENCE = (

@@ -4,11 +4,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from django import forms
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 
 from next.forms import Form
 from next.forms.backends import ActionRegistration, RegistryFormActionBackend
 from next.forms.dispatch import FormActionDispatch
+from next.forms.dispatch.build import _form_action_context_callable
 from next.forms.dispatch.responses import _normalize_handler_response
 from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
@@ -197,3 +198,52 @@ class TestBenchDispatchEndToEnd:
         post.items.return_value = [("name", "bench")]
         request = build_mock_http_request(method="POST", POST=post, FILES=None)
         benchmark(FormActionDispatch.dispatch, backend, request, "bench_action", meta)
+
+
+_BUILD_KWARGS: dict[str, object] = {"prefix": "bench", "initial": {"name": "bench"}}
+
+
+class _KwargsHookBenchForm(Form):
+    """The bench form again, its constructor kwargs coming from the hook."""
+
+    name = forms.CharField(max_length=32)
+
+    @classmethod
+    def get_form_kwargs(cls, request: HttpRequest) -> dict[str, object]:
+        return dict(_BUILD_KWARGS)
+
+
+def _bench_form_factory() -> tuple[type[Form], dict[str, object]]:
+    return _BenchForm, dict(_BUILD_KWARGS)
+
+
+class TestBenchFormBuild:
+    """One render-time form build per round, through each constructor kwargs source.
+
+    Both builds yield the same prefixed form, so the two numbers compare evenly.
+    """
+
+    @pytest.mark.benchmark(group="forms.build")
+    def test_build_through_get_form_kwargs(self, benchmark) -> None:
+        build = _form_action_context_callable(_KwargsHookBenchForm)
+        request = build_mock_http_request(method="GET")
+        namespace = benchmark(build, request)
+        assert namespace.form.prefix == "bench"
+        assert namespace.form.initial == {"name": "bench"}
+
+    @pytest.mark.benchmark(group="forms.build")
+    def test_build_through_factory_function(self, benchmark) -> None:
+        build = _form_action_context_callable(_bench_form_factory)
+        request = build_mock_http_request(method="GET")
+        namespace = benchmark(build, request)
+        assert namespace.form.prefix == "bench"
+        assert namespace.form.initial == {"name": "bench"}
+
+    @pytest.mark.benchmark(group="forms.build")
+    def test_build_through_get_initial(self, benchmark) -> None:
+        """The form without the hook override keeps the plain `get_initial` path."""
+        build = _form_action_context_callable(_BenchForm)
+        request = build_mock_http_request(method="GET")
+        assert _BenchForm._has_get_form_kwargs is False
+        namespace = benchmark(build, request)
+        assert namespace.form.initial == {}

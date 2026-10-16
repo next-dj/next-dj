@@ -1,9 +1,10 @@
 import base64
 import re
+from unittest.mock import patch
 
 import pytest
 from django.urls import reverse
-from kanban.models import Board, Card, Column
+from kanban.models import Board, BoardQuerySet, Card, Column
 
 from next.testing import NextClient, assert_metadata, init_payload
 
@@ -146,6 +147,19 @@ class TestBoardView:
         body = _settings_html(next_client, board)
         assert board.title in body
 
+    def test_tabs_link_back_to_the_board_and_its_settings(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        body = _board_html(next_client, board)
+        assert f'href="/board/{board.pk}/"' in body
+        assert f'href="/board/{board.pk}/settings/"' in body
+
+    @pytest.mark.parametrize("path", ["/board/99999/", "/board/99999/settings/"])
+    def test_unknown_board_answers_404(
+        self, next_client: NextClient, board: Board, path: str
+    ) -> None:
+        assert next_client.get(path).status_code == 404
+
 
 class TestSettings:
     """Settings page renders three forms and each one mutates state."""
@@ -212,11 +226,34 @@ class TestSettings:
         board.refresh_from_db()
         assert board.title == "Fixed title"
 
+    @pytest.mark.parametrize(
+        ("action", "data"),
+        [
+            ("rename_board_form", {"title": "Hijack"}),
+            ("archive_board_form", {"archived": "1"}),
+            ("create_column_form", {"title": "Hijack"}),
+        ],
+        ids=["rename", "archive", "create_column"],
+    )
+    def test_settings_forms_posted_for_an_unknown_board_answer_404(
+        self, next_client: NextClient, board: Board, action: str, data: dict
+    ) -> None:
+        columns = board.columns.count()
+        response = next_client.post_action(
+            action, data, origin="/board/99999/settings/"
+        )
+        assert response.status_code == 404
+        board.refresh_from_db()
+        assert board.title == "Roadmap"
+        assert board.archived is False
+        assert board.columns.count() == columns
+
     def test_add_column_form_post(self, next_client: NextClient, board: Board) -> None:
         before = board.columns.count()
         response = next_client.post_action(
             "create_column_form",
-            {"board_id": board.pk, "title": "New", "wip_limit": "5"},
+            {"title": "New", "wip_limit": "5"},
+            origin=f"/board/{board.pk}/settings/",
         )
         assert response.status_code == 302
         assert board.columns.count() == before + 1
@@ -268,12 +305,15 @@ class TestMoveCard:
         card.refresh_from_db()
         assert card.column.board_id == board.pk
 
+    @pytest.mark.parametrize(
+        "card_id", ["99999", "abc"], ids=["unknown", "non_numeric"]
+    )
     def test_forged_card_id_rejected(
-        self, next_client: NextClient, done: Column
+        self, next_client: NextClient, done: Column, card_id: str
     ) -> None:
         response = next_client.post_action(
             "move_card_form",
-            {"card_id": "99999", "target_column": done.pk, "target_position": "0"},
+            {"card_id": card_id, "target_column": done.pk, "target_position": "0"},
         )
         assert response.status_code == 400
 
@@ -305,7 +345,9 @@ class TestPreviewComponent:
         assert f'data-kanban-preview="{card.pk}"' in body
 
     @pytest.mark.parametrize(
-        "query", ["", "?moved=99999"], ids=["no_moved_query", "unknown_card_id"]
+        "query",
+        ["", "?moved=99999", "?moved=abc"],
+        ids=["no_moved_query", "unknown_card_id", "non_numeric_card_id"],
     )
     def test_preview_hidden_without_a_moved_card(
         self, next_client: NextClient, board: Board, query
@@ -313,6 +355,18 @@ class TestPreviewComponent:
         response = next_client.get(f"/board/{board.pk}/{query}")
         assert response.status_code == 200
         assert "Move complete" not in response.content.decode()
+
+    def test_a_card_from_another_board_is_not_previewed(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        secret = Board.objects.create(title="Secret", slug="secret")
+        column = Column.objects.create(board=secret, title="Hidden", position=0)
+        card = Card.objects.create(column=column, title="Top secret card", position=0)
+        response = next_client.get(f"/board/{board.pk}/?moved={card.pk}")
+        body = response.content.decode()
+        assert response.status_code == 200
+        assert "Move complete" not in body
+        assert "Top secret card" not in body
 
 
 class TestCreateCard:
@@ -350,6 +404,20 @@ class TestCreateCard:
         )
         assert response.status_code == 400
         assert progress.cards.filter(title="Over the limit").count() == 0
+
+    def test_a_column_on_a_board_outside_the_scope_is_refused(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        secret = Board.objects.create(title="Secret", slug="secret")
+        hidden = Column.objects.create(board=secret, title="Hidden", position=0)
+        with patch.object(
+            BoardQuerySet, "visible_to", lambda qs, _user: qs.exclude(slug="secret")
+        ):
+            response = next_client.post_action(
+                "create_card_form", {"column": hidden.pk, "title": "Injected"}
+            )
+        assert response.status_code == 400
+        assert not hidden.cards.exists()
 
     def test_wip_limit_none_allows_unlimited(
         self, next_client: NextClient, backlog: Column

@@ -16,7 +16,7 @@ Overview
 
 The resolver runs at several call sites.
 Page context functions, the page render function, component context functions, and the form dispatch all pass through it.
-The form dispatch resolves the form-class factory, ``get_initial``, ``@action`` handlers, ``on_valid``, and ``wizard.done``.
+The form dispatch resolves the form-class factory, ``get_initial``, ``get_form_kwargs``, ``@action`` handlers, ``on_valid``, and ``wizard.done``.
 Every call site shares one provider list and one set of markers.
 Custom providers and tests can import ``resolver`` from ``next.deps`` and call ``resolver.resolve_dependencies``.
 
@@ -63,29 +63,32 @@ Built-in providers
 The framework discovers a fixed list of providers and instantiates them on first use.
 Each one carries an explicit ``priority`` value, the resolver consults them from lowest to highest, and the first match wins.
 
-1. Named dependency provider (priority 10).
+1. Object provider (priority 0).
+   A parameter annotated ``DObject[Model]`` receives the row the URL addresses, read through the ``visible_to`` method of the model manager, see `Model rows with DObject`_.
+2. Named dependency provider (priority 10).
    A parameter with default ``Depends(...)`` receives the resolved dependency.
-2. Context by default provider (priority 20).
+3. Context by default provider (priority 20).
    A parameter with a ``Context(...)`` default receives the named context value.
-3. Context by name provider (priority 30).
+4. Context by name provider (priority 30).
    A parameter whose name matches a context key receives that context value.
-4. Form provider (priority 40).
+5. Form provider (priority 40).
    A parameter named ``form`` or annotated ``DForm[FormClass]`` receives the bound form during action dispatch.
-5. Cleaned data provider (priority 40).
+6. Cleaned data provider (priority 40).
    A parameter named ``cleaned_data`` receives the merged wizard cleaned data on a wizard ``done()`` handler.
-6. HttpRequest provider (priority 50).
+7. HttpRequest provider (priority 50).
    A parameter annotated ``HttpRequest`` or ``HttpRequest | None`` receives the current request, and one annotated with a concrete subclass receives it only when the request is an instance of that subclass.
-7. Consent provider (priority 50).
+8. Consent provider (priority 50).
    A parameter annotated ``Consent`` receives the visitor's consent, and an undecided visitor on a page a shared cache holds, see :doc:`/content/topics/scripts/consent`.
-8. URL annotation provider (priority 60).
+9. URL annotation provider (priority 60).
    A parameter annotated ``DUrl[T]`` reads the captured URL segment and coerces it to ``T``.
-9. URL kwargs provider (priority 70).
-   A parameter whose name matches a captured URL segment resolves to that value.
-   The value is coerced to the parameter annotation when one is present and is left as the captured string otherwise.
-   A plain ``note_id: int`` on a ``[note_id]`` route therefore arrives already parsed, so ``DUrl`` is only needed to read a segment under a different name.
-10. Query string provider (priority 80).
+10. URL kwargs provider (priority 70).
+    A parameter whose name matches a captured URL segment resolves to that value.
+    The value is coerced to the parameter annotation when one is present and is left as the captured string otherwise.
+    A plain ``note_id: int`` on a ``[note_id]`` route therefore arrives already parsed, so ``DUrl`` is only needed to read a segment under a different name.
+11. Query string provider (priority 80).
     A parameter annotated ``DQuery[T]`` reads ``request.GET`` by parameter name and coerces to ``T``.
 
+The object provider comes first so that nothing reaches a ``DObject`` parameter around ``visible_to``, neither a ``Depends`` default nor a context value or URL kwarg of the same name.
 The order makes the default-driven and marker-driven providers decisive.
 ``Depends`` and ``Context`` look only at the parameter default.
 ``DUrl`` and ``DQuery`` look only at the annotation.
@@ -316,7 +319,7 @@ Use ``resolver.dependency`` to register a callable that any handler can ask for 
        return {"name": "Notes", "version": "1.0"}
 
 Named dependencies and custom providers live in the ``deps.py`` of the application, see :doc:`project-layout`.
-next.dj does not discover that module, so ``AppConfig.ready`` imports it and the decorator runs before the first request.
+At startup the ``next`` application imports the ``deps.py`` of every installed application, ahead of any ``forms.py`` or ``component.py``, so the decorator runs before the first request with no ``AppConfig.ready`` code, see ``DEPS_AUTODISCOVER`` in :doc:`/content/ref/settings`.
 The registered callable can take any provider-resolved parameters because it is itself dispatched through the resolver.
 
 Diagnosing a dependency cycle
@@ -371,73 +374,204 @@ Here ``settings`` does not need ``profile`` at all, so the fix is to drop that p
 
 When both dependencies genuinely need shared data, move that data into a third dependency and have both depend on it.
 
+.. _topics-di-dobject:
+
+Model rows with DObject
+-----------------------
+
+A parameter annotated ``DObject[Model]`` receives the row whose primary key the URL kwarg of the same name carries.
+The lookup always goes through ``Model._default_manager.visible_to(scope)``, so the parameter only ever holds a row the current scope may see.
+The model defines that method on its default manager, usually as a custom ``QuerySet`` method, see :doc:`application-layout`.
+
+.. code-block:: python
+   :caption: notes/models.py
+
+   from django.conf import settings
+   from django.db import models
+
+   class NoteQuerySet(models.QuerySet):
+       def visible_to(self, scope):
+           if not scope.is_authenticated:
+               return self.none()
+           return self.filter(owner=scope)
+
+   class Note(models.Model):
+       owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+       title = models.CharField(max_length=200)
+
+       objects = NoteQuerySet.as_manager()
+
+.. code-block:: python
+   :caption: notes/pages/notes/[int:note]/page.py
+
+   from notes.models import Note
+
+   from next import context
+   from next.deps import DObject
+
+   @context("note")
+   def note(note: DObject[Note]) -> Note:
+       return note
+
+A row the scope does not see, a primary key that matches no row, and a value the primary key field cannot parse all answer 404, never 403, so a response never tells a hidden row from a missing one.
+A missing URL kwarg is a wiring mistake rather than a missing row, and on a page it raises ``UnboundObjectError``, a subclass of :exc:`~django.core.exceptions.ImproperlyConfigured` that names the kwargs the route did capture.
+The lookup takes the first matching row, so a ``visible_to`` that joins a many-valued relation and repeats a row needs no ``distinct()``.
+A row loads once per render, so two callables that ask for the same row share one query.
+
+The marker refuses a shape no lookup could serve.
+A model class that is abstract or not a model at all raises ``TypeError`` where the annotation is written.
+A bare ``DObject`` and a ``DObject`` inside a union such as ``DObject[Note] | None`` raise ``TypeError`` when the resolver first resolves the callable, since a missing row is a 404 rather than ``None``.
+
+The scope dependency
+~~~~~~~~~~~~~~~~~~~~
+
+The framework does not decide what a scope is and ships no default for it.
+The project registers the named dependency ``scope`` once, in the ``deps.py`` of one of its applications, and ``visible_to`` receives exactly the value it returns.
+A site whose rows belong to users returns the user.
+
+.. code-block:: python
+   :caption: notes/deps.py
+
+   from django.http import HttpRequest
+
+   from next.deps import resolver
+
+   @resolver.dependency("scope")
+   def scope(request: HttpRequest):
+       return request.user
+
+A site whose rows belong to tenants returns the tenant the request acts under, and ``visible_to`` filters on it.
+
+.. code-block:: python
+   :caption: notes/deps.py, the tenant variant
+
+   from django.http import HttpRequest
+   from notes.models import Tenant
+
+   from next.deps import resolver
+
+   @resolver.dependency("scope")
+   def scope(request: HttpRequest) -> Tenant | None:
+       return getattr(request, "tenant", None)
+
+:doc:`/content/howto/scope-requests-per-tenant` covers where ``request.tenant`` comes from and why the client must not choose it.
+The scope is a named dependency like any other, so it resolves once per render, and a callable that lists rows asks for the same value through ``Depends("scope")``.
+A project that declares a ``DObject`` and registers no ``scope`` fails ``manage.py check`` with ``next.E174``.
+
+Nested rows
+~~~~~~~~~~~
+
+``DObject[Model, "parent"]`` also requires the row to belong to a parent the render loaded earlier.
+``parent`` names a context value set before the parameter resolves, either by an ancestor ``@context("parent", inherit_context=True)`` or by an earlier ``@context("parent")`` in the same ``page.py``.
+The lookup filters the rows by the model field of that same name, so a comment URL under another post answers 404 even when both rows are visible.
+
+.. code-block:: python
+   :caption: blog/pages/posts/[int:post]/page.py
+
+   from blog.models import Post
+
+   from next import context
+   from next.deps import DObject
+
+   @context("post", inherit_context=True)
+   def post(post: DObject[Post]) -> Post:
+       return post
+
+.. code-block:: python
+   :caption: blog/pages/posts/[int:post]/comments/[int:comment]/page.py
+
+   from blog.models import Comment
+
+   from next import context
+   from next.deps import DObject
+
+   @context("comment")
+   def comment(comment: DObject[Comment, "post"]) -> Comment:
+       return comment
+
+Each level loads its own row through ``visible_to``, so the chain never reaches the child of a parent the scope could not see.
+A parent value of ``None`` answers 404 without a query, and a parent name the context does not hold raises ``UnboundObjectError``.
+A linter that reads the string as a forward reference, such as ruff with ``F821``, accepts ``DObject[Comment, Literal["post"]]``, which the marker treats the same way.
+
+Where DObject applies
+~~~~~~~~~~~~~~~~~~~~~
+
+Page callables, form handlers and form hooks, and named dependencies resolve a ``DObject``.
+A form handler or hook reads the URL kwargs of the page the submission came from, but it resolves with no page context, so a ``DObject`` with a parent there is ``next.E172``.
+A submission whose origin is missing or names a page without the kwarg comes from the client rather than from the wiring, so the dispatcher answers it with 400 Bad Request and logs a warning instead of raising.
+A ``@component.context`` callable receives no URL kwargs at all, so any ``DObject`` there is ``next.E173``, and the component reads the row from the page context by name instead.
+
+``manage.py check`` reads the annotations without running a query.
+``next.E170`` reports a model whose default manager has no ``visible_to``, ``next.W135`` a page ``DObject`` whose route captures no kwarg of its name, and ``next.E171`` a parent no earlier context callable provides.
+``next.E175`` reports a ``DObject`` written in a module whose type hints do not resolve, such as one under ``from __future__ import annotations`` that imports the model under ``TYPE_CHECKING``, where every resolve of the parameter raises ``TypeError`` rather than passing the raw kwarg.
+``next.W135`` is a warning because a kwarg an outer ``include()`` captures reaches the page at runtime without appearing in the page route.
+See :doc:`/content/ref/system-checks` for the full conditions.
+
 Writing a custom provider
 -------------------------
 
 For data sources the built-in providers do not cover, register a parameter provider.
+A model row the URL addresses is already covered by ``DObject``, so a custom provider serves other sources.
 The base classes are ``RegisteredParameterProvider`` and ``DDependencyBase``.
 
 .. code-block:: python
-   :caption: notes/deps.py, the note marker
+   :caption: notes/deps.py, the header marker
 
    from typing import get_args, get_origin
 
-   from django.http import Http404
-
    from next.deps import DDependencyBase, RegisteredParameterProvider
 
-   class DNote[T](DDependencyBase[T]):
+   class DHeader[T](DDependencyBase[T]):
        __slots__ = ()
 
-   class NoteProvider(RegisteredParameterProvider):
+   class HeaderProvider(RegisteredParameterProvider):
        def can_handle(self, param, _context) -> bool:
-           return get_origin(param.annotation) is DNote
+           return get_origin(param.annotation) is DHeader
 
        def static_can_handle(self, param) -> bool | None:
-           return get_origin(param.annotation) is DNote
+           return get_origin(param.annotation) is DHeader
 
        def resolve(self, param, context):
-           (model_cls,) = get_args(param.annotation)
-           pk = context.url_kwargs.get("id")
-           if pk is None and context.request is not None:
-               pk = context.request.POST.get("note_id")
+           (target,) = get_args(param.annotation)
+           request = context.request
+           raw = None if request is None else request.headers.get(param.name.replace("_", "-"))
+           if raw is None:
+               return None
            try:
-               return model_cls.objects.get(pk=pk)
-           except model_cls.DoesNotExist as exc:
-               raise Http404 from exc
+               return target(raw)
+           except ValueError:
+               return None
 
-One marker can serve both a page render and a form action handler.
-A page render captures the identifier in the URL, while a form action carries it in the POST body.
-The ``resolve`` method above checks both sources, so the same ``DNote[Note]`` parameter works in either call site.
-The form template carries the identifier in a hidden input so the POST branch can read it.
-See ``examples/kanban`` for a marker that serves both call sites.
+The parameter name names the header, so ``x_request_id: DHeader[str]`` reads ``X-Request-Id`` and ``DHeader[int]`` coerces the value, answering ``None`` for an absent or malformed header.
+A header reaches a page render and a form action handler alike, so the same parameter works at either call site.
+A header is client input, so the callable treats the value as untrusted, see :doc:`/content/security/di-and-untrusted-input`.
 
 Use the new marker.
 
 .. code-block:: python
-   :caption: notes/pages/notes/[id]/page.py
+   :caption: notes/pages/notes/page.py
 
-   from notes.deps import DNote
-   from notes.models import Note
+   from notes.deps import DHeader
 
    from next import context
 
-   @context("note")
-   def current_note(note: DNote[Note]) -> Note:
-       return note
+   @context("request_id")
+   def request_id(x_request_id: DHeader[str]) -> str | None:
+       return x_request_id
 
 Two rules apply to the marker class.
 
 Python 3.12 generic syntax.
-   ``class DNote[T](DDependencyBase[T])`` makes ``DNote[Note]`` a parameterised generic whose ``get_origin`` is ``DNote``.
-   A non generic ``class DNote(DDependencyBase[Note])`` does not behave like a parameter marker.
+   ``class DHeader[T](DDependencyBase[T])`` makes ``DHeader[str]`` a parameterised generic whose ``get_origin`` is ``DHeader``.
+   A non generic ``class DHeader(DDependencyBase[str])`` does not behave like a parameter marker.
 
-Import the provider module.
-   A provider class registers itself when its module is imported, and the natural place to force that import is ``AppConfig.ready`` of the application that owns the provider.
+Declare the provider in ``deps.py``.
+   A provider class registers itself when its module is imported, and the ``deps.py`` of every installed application is imported at startup.
+   A provider declared in another module needs an import from ``deps.py`` or from ``AppConfig.ready``.
    A class that registers later still joins the provider list by priority, and the plans compiled without it are recompiled.
 
 A custom provider that does not declare ``priority`` inherits the ``RegisteredParameterProvider`` default of ``100``.
-The ten built-in providers occupy the range ``10`` (named dependency) through ``80`` (query string), so the default keeps a custom provider after every built-in.
+The eleven built-in providers occupy the range ``0`` (object) through ``80`` (query string), so the default keeps a custom provider after every built-in.
 ``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
 Set ``priority`` on the subclass when the new provider has to claim a parameter the built-ins would otherwise match, for example a value below ``60`` for an annotation that should outrank ``DUrl``.
 
@@ -446,7 +580,7 @@ Static verdicts
 
 The resolver asks each provider ``static_can_handle(param)`` once per callable and compiles the answers into that callable's injection plan.
 ``True`` claims the parameter in every context and ends the walk, ``False`` rules the provider out for that parameter for good, and ``None`` keeps ``can_handle`` running on every resolve.
-``NoteProvider`` above answers from the annotation alone, so its marker parameters are settled at compile time and no ``can_handle`` runs per request.
+``HeaderProvider`` above answers from the annotation alone, so its marker parameters are settled at compile time and no ``can_handle`` runs per request.
 
 The parameter reaches the hook with its type hint already resolved through ``typing.get_type_hints``, extras included, so a hook compares real types even where the annotation was written as a string and can match on the metadata of an ``Annotated[...]`` hint.
 A hint the framework cannot evaluate falls back to the raw annotation as written, and the plan built from it is not cached, so an annotation that only a later import can resolve takes effect on the next resolve.
@@ -456,7 +590,7 @@ A provider handed to ``add_provider``, ``prepend_provider``, ``register``, or th
 
 A provider that answers ``True`` may go one step further and implement ``compile_resolve(param)``, which returns the call the plan makes with the resolution context alone.
 That hook is spelled by ``CompilingParameterProvider``, a second protocol extending ``ParameterProvider``, so a provider that stops at the mandatory three methods still satisfies the first one.
-``NoteProvider`` above would read ``get_args(param.annotation)`` there, once per plan, and return a closure that is left with the lookup and the query.
+``HeaderProvider`` above would read ``get_args(param.annotation)`` and the header name there, once per plan, and return a closure that is left with the header read.
 Returning ``None`` from the hook keeps the parameter on the plain ``resolve`` path, and so does leaving the hook undefined.
 
 Resolution cache
@@ -465,7 +599,7 @@ Resolution cache
 Each resolution pass wraps a per-render dependency cache in a fresh ``DependencyCache``.
 The wrapper is new per call, but one backing store spans the whole page render, the callable ``cache`` of the ``page.py``, its ``render()`` function, every ``@context`` callable, and every ``@page.metadata`` callable.
 A ``Depends("name")`` provider therefore runs once per render, for the first of these callables that asks for it, and every later one reads the value it returned.
-The cache memoises ``Depends("name")`` callables only, keyed by the registered name.
+The cache memoises ``Depends("name")`` callables, keyed by the registered name, and the rows ``DObject`` parameters load.
 
 A second context function in the same page render that asks for the same ``Depends("name")`` dependency receives the memoised value, not a fresh call.
 To share one value across several context functions in the same render, register it with ``resolver.dependency("active_tenant")`` and ask for it through ``Depends("active_tenant")`` in each callable that needs it.
@@ -522,7 +656,7 @@ Real annotations remove that failure mode outright, which is why a ``page.py`` o
 Two rules.
 
 Do not use future annotations in modules with DI parameters.
-   ``page.py``, ``component.py``, action handlers, and any ``get_initial`` need real annotations.
+   ``page.py``, ``component.py``, action handlers, and any ``get_initial`` or ``get_form_kwargs`` need real annotations.
    Plain Python files that only import the framework can use future annotations freely.
    A provider class is never introspected by :func:`typing.get_type_hints`, but a callable registered through ``resolver.dependency`` is, so a ``deps.py`` that holds named dependencies keeps real annotations as well.
 

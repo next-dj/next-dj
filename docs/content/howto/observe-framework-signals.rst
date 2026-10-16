@@ -13,7 +13,7 @@ Solution
 --------
 
 next.dj emits :doc:`Django signals <django:topics/signals>` from every subsystem.
-Connect plain receivers from ``AppConfig.ready`` and forward each payload to your metrics store or tracer.
+Connect plain receivers in the ``signals.py`` of an app and forward each payload to your metrics store or tracer.
 This is the production counterpart of ``SignalRecorder``, which captures the same signals inside tests.
 
 This page stays task focused.
@@ -274,18 +274,8 @@ The first error reaches the caller that asked for the reload once the whole chai
 Connect receivers at startup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Import ``obs.signals`` from ``AppConfig.ready`` so the ``@receiver`` decorators run once at startup.
-
-.. code-block:: python
-   :caption: obs/apps.py
-
-   from django.apps import AppConfig
-
-   class ObsConfig(AppConfig):
-       name = "obs"
-
-       def ready(self) -> None:
-           from obs import signals  # noqa: F401
+The ``next`` application imports ``obs/signals.py`` at startup, so the ``@receiver`` decorators run once with no ``AppConfig.ready`` code.
+A project that sets ``SIGNALS_AUTODISCOVER`` to ``False`` imports ``obs.signals`` from ``AppConfig.ready`` instead, see :doc:`/content/ref/settings`.
 
 Verification
 ------------

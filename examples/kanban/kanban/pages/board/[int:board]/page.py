@@ -1,71 +1,67 @@
 from django.db.models import Prefetch, QuerySet
 from django.http import HttpRequest
 from django.middleware.csrf import get_token
-from kanban.deps import DBoard
 from kanban.models import Board, Card, Column
 
 from next import context, page
+from next.deps import DObject
 from next.forms.manager import form_action_manager
 from next.pages import MetadataDict
 
 
 @page.metadata(inherit=True)
-def board_meta(active_board: DBoard[Board]) -> MetadataDict:
+def board_meta(board: DObject[Board]) -> MetadataDict:
     """Title the board and its settings page after the resolved board row."""
-    return {"title": active_board.title}
+    return {"title": board.title}
 
 
 @context("board_object", inherit_context=True)
-def board_object(active_board: DBoard[Board]) -> Board:
+def board_object(board: DObject[Board]) -> Board:
     """Expose the board ORM instance for server-rendered iteration."""
-    return active_board
+    return board
 
 
 @context("board_url_kwargs", inherit_context=True)
-def board_url_kwargs(active_board: DBoard[Board]) -> dict[str, int]:
+def board_url_kwargs(board: DObject[Board]) -> dict[str, int]:
     """Expose the reverse() kwargs for the current board route.
 
     Shared by the nav_link calls in the board layout so the tabs link back to themselves
     using `url_name` without hard-coding the URL converter on the call site.
     """
-    return {"id": active_board.pk}
+    return {"board": board.pk}
 
 
 @context("columns", inherit_context=True)
-def columns(active_board: DBoard[Board]) -> QuerySet[Column]:
+def columns(board: DObject[Board]) -> QuerySet[Column]:
     """Return the ordered columns of the active board for the template."""
-    return active_board.columns.all()
+    return board.columns.all()
 
 
 @context("moved_card", inherit_context=True)
-def moved_card(request: HttpRequest) -> Card | None:
-    """Return the just-moved card when the redirect carried a `?moved=` flag."""
-    pk = request.GET.get("moved")
-    if not pk:
+def moved_card(board: DObject[Board], request: HttpRequest) -> Card | None:
+    """Return the card a `?moved=` flag names, when it sits on this board."""
+    pk = request.GET.get("moved", "")
+    if not (pk.isascii() and pk.isdigit()):
         return None
-    try:
-        return Card.objects.select_related("column").get(pk=pk)
-    except Card.DoesNotExist:
-        return None
+    cards = Card.objects.select_related("column").filter(column__board=board)
+    return cards.filter(pk=pk).first()
 
 
 @context("board", inherit_context=True, serialize=True)
-def board_payload(
-    active_board: DBoard[Board], request: HttpRequest
-) -> dict[str, object]:
+def board_payload(board: DObject[Board], request: HttpRequest) -> dict[str, object]:
     """Expose the full board tree under the merged board JS context key.
 
     Drives the React layer at `window.Next.context.board` and includes
     excerpts and wip_limits so client renders match the SSR fallback.
     """
-    cols = active_board.columns.prefetch_related(
+    cols = board.columns.prefetch_related(
         Prefetch("cards", queryset=Card.objects.order_by("position"))
     ).order_by("position")
     return {
-        "id": active_board.pk,
-        "title": active_board.title,
-        "slug": active_board.slug,
-        "archived": active_board.archived,
+        "id": board.pk,
+        "title": board.title,
+        "slug": board.slug,
+        "archived": board.archived,
         "csrf": get_token(request),
         "move_card_url": form_action_manager.get_action_url("move_card_form"),
         "create_card_url": form_action_manager.get_action_url("create_card_form"),

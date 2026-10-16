@@ -132,12 +132,12 @@ The next ``get_cached_flag`` call refetches from the database.
        post_save.connect(_invalidate_on_save, sender=Flag)
        post_delete.connect(_invalidate_on_delete, sender=Flag)
 
-Wire the provider and receivers at app ready
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Connect the receivers at app ready
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``flags.deps`` registers ``FlagProvider`` with the resolver as a side effect of import.
-Neither Django nor next.dj discovers ``deps.py`` or ``signals.py``, so ``AppConfig.ready`` imports both explicitly.
-Both ``flags.deps`` and ``flags.signals`` reach ``flags.models`` through their import chains, so ``AppConfig.ready`` defers the imports until the app registry is populated.
+``flags.deps`` registers ``FlagProvider`` with the resolver as a side effect of import, and the ``next`` application imports the ``deps.py`` and ``signals.py`` of every installed app at startup, see ``DEPS_AUTODISCOVER`` and ``SIGNALS_AUTODISCOVER`` in :doc:`/content/ref/settings`.
+``flags.signals`` connects through a ``connect()`` function rather than decorated receivers, so ``AppConfig.ready`` still calls it.
+``flags.signals`` reaches ``flags.models`` through its import chain, so ``AppConfig.ready`` defers the import until the app registry is populated.
 A top-level import in ``apps.py`` would run while Django is still loading app configs, and defining the ``Flag`` model at that point raises :exc:`~django.core.exceptions.AppRegistryNotReady`.
 
 .. code-block:: python
@@ -150,13 +150,11 @@ A top-level import in ``apps.py`` would run while Django is still loading app co
        name = "flags"
 
        def ready(self) -> None:
-           """Import providers and connect receivers once the app registry is populated."""
-           from flags import deps, signals  # imported for their registration side effect
+           """Connect the receivers once the app registry is populated."""
+           from flags import signals
 
-           _ = deps
            signals.connect()
 
-The ``_ = deps`` line documents the intentional side-effect import.
 ``signals.connect`` runs at ready time, so the signal connections happen after the app registry knows ``Flag``.
 
 Consume the marker in a component

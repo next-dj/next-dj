@@ -8,8 +8,8 @@
     </div>
     {% #component "nav" %}
       {% #slot "content" %}
-        {% component "nav_link" url_name="next:page_board_int_id" url_kwargs=board_url_kwargs label="Board" variant="tabs" %}
-        {% component "nav_link" url_name="next:page_board_int_id_settings" url_kwargs=board_url_kwargs label="Settings" variant="tabs" %}
+        {% component "nav_link" url_name="next:page_board_int_board" url_kwargs=board_url_kwargs label="Board" variant="tabs" %}
+        {% component "nav_link" url_name="next:page_board_int_board_settings" url_kwargs=board_url_kwargs label="Settings" variant="tabs" %}
       {% /slot %}
     {% /component %}
   </header>

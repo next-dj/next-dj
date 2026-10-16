@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from tests.support.apps import AppFactory, throwaway_apps
 from tests.support.attribution import (
     handler_declared_here,
     unwrapped_decorator,
@@ -97,6 +98,7 @@ from tests.support.deps import (
     DeferringProvider,
     OtherForm,
     PlanEntry,
+    install_visibility_hooks,
     plan_by_name,
     plan_entries,
 )
@@ -156,6 +158,7 @@ from tests.support.patches import (
     patched_watch_sources,
     record_calls,
     restored_provider_registry,
+    restored_resolver,
     restored_static_registries,
     static_names_resolved_by,
 )
@@ -266,6 +269,7 @@ __all__ = [
     "WITH_BASE",
     "AForm",
     "AbsoluteUrlCase",
+    "AppFactory",
     "AppFinderCase",
     "AppRootRouter",
     "BuildManifestBackend",
@@ -342,6 +346,7 @@ __all__ = [
     "handler_declared_here",
     "importable_dir",
     "inspect_parameter",
+    "install_visibility_hooks",
     "isolated_form_registries",
     "named_temp_py",
     "next_framework_settings_stand_in",
@@ -364,10 +369,12 @@ __all__ = [
     "record_path_calls",
     "resolve_page_metadata",
     "restored_provider_registry",
+    "restored_resolver",
     "restored_static_registries",
     "routed",
     "site_settings",
     "static_names_resolved_by",
+    "throwaway_apps",
     "tick_scenario",
     "touch_later",
     "typing_optional",

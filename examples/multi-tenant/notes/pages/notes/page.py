@@ -1,7 +1,6 @@
-from notes.deps import DTenant
-from notes.models import Note
+from notes.models import Note, Tenant
 
-from next import context
+from next import Depends, context
 from next.pages import MetadataDict
 
 
@@ -9,6 +8,6 @@ metadata: MetadataDict = {"title": "Notes"}
 
 
 @context("notes")
-def notes(active_tenant: DTenant) -> list[Note]:
+def notes(tenant: Tenant = Depends("scope")) -> list[Note]:
     """Return every note that belongs to the active tenant."""
-    return list(Note.objects.filter(tenant=active_tenant))
+    return list(Note.objects.visible_to(tenant))

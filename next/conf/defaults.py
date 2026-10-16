@@ -82,7 +82,9 @@ DEFAULTS: dict[str, Any] = {
     "STRICT_CONTEXT": False,
     "STRICT_LOADING": False,
     "LAZY_COMPONENT_MODULES": False,
+    "DEPS_AUTODISCOVER": True,
     "FORM_AUTODISCOVER": True,
+    "SIGNALS_AUTODISCOVER": True,
     "FORM_ANCHOR_FILES": None,
     "JS_CONTEXT_SERIALIZER": None,
     "FORM_WIZARD_BACKEND": {

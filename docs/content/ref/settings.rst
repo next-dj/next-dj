@@ -23,6 +23,7 @@ A singular ``*_BACKEND`` key holds the one engine for a concern.
 A subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``, ``URL_``, ``TEMPLATE_``, ``JS_``, ``PARTIAL_``) groups related keys.
 ``NEXT_JS_OPTIONS`` stands outside the prefix scheme and configures the bundled client runtime.
 ``METADATA``, ``SITE``, ``SEO``, and ``CONSENT`` stand outside it as the scopes of one concern each, and ``CSRF_DELIVERY`` and ``CSP_NONCE`` as single values.
+The ``*_AUTODISCOVER`` keys share a suffix instead, one per application module the framework imports at startup.
 
 .. _ref-settings-merge:
 
@@ -53,7 +54,7 @@ Each key accepts one shape, and a value of any other type is dropped in favour o
 - ``CSRF_DELIVERY`` accepts a string naming a mode.
 - ``STATIC_VERSION`` accepts a string or ``None``.
 - ``URL_NAME_TEMPLATE`` also accepts a string, but a format template such as ``page_{name}`` rather than a dotted path.
-- The bool flags (``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, ``CSP_NONCE``) accept any value and pass through ``bool()``.
+- The bool flags (``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``DEPS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, ``SIGNALS_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, ``CSP_NONCE``) accept any value and pass through ``bool()``.
 
 A dropped value is reported at ``manage.py check`` as ``next.E076``, or under the code the key owns where it carries one, and a bool flag holding a non-bool is reported as ``next.W072``.
 A top-level key that is not in this catalog is reported as ``next.E035``, and the merged view raises ``AttributeError`` for it, so a typo never reaches a read site as a default.
@@ -149,16 +150,6 @@ Default value.
        }
    ]
 
-FORM_AUTODISCOVER
-~~~~~~~~~~~~~~~~~
-
-Boolean that controls whether ``NextFrameworkConfig.ready`` imports the ``forms`` submodule of every installed app on startup.
-
-Default value ``True``.
-
-When ``True``, shared forms declared in ``app/forms.py`` register before the first request arrives.
-Set to ``False`` to disable the automatic import and manage registration manually.
-
 FORM_ANCHOR_FILES
 ~~~~~~~~~~~~~~~~~
 
@@ -233,6 +224,43 @@ A version that never changes leaves the version guard silent at runtime, so a de
 ``SSE.HEARTBEAT_SECONDS`` is the keepalive period in seconds for an async stream source, and ``SSE.RETRY_MS`` is the ``EventSource`` reconnect hint in milliseconds sent in the leading stream frame.
 
 See :doc:`/content/topics/partial-rendering/reference` for the wire protocol and :doc:`/content/topics/partial-rendering/sse` for the stream contract.
+
+Application modules
+-------------------
+
+``NextFrameworkConfig.ready`` imports three conventional modules from every installed app, the third-party ones included.
+All ``deps`` modules load first, then all ``forms`` modules, then all ``signals`` modules, so a form finds the providers and named dependencies of every app already registered.
+An app without the module is skipped, and a module that fails to import raises its own error out of ``ready``.
+A key set to ``False`` turns off that one sweep, and the project imports the modules it wants from ``AppConfig.ready`` instead.
+
+DEPS_AUTODISCOVER
+~~~~~~~~~~~~~~~~~
+
+Boolean that controls whether the ``deps`` submodule of every installed app is imported on startup.
+
+Default value ``True``.
+
+When ``True``, the named dependencies and parameter providers declared in ``app/deps.py`` register before any form, component, or page module loads.
+
+FORM_AUTODISCOVER
+~~~~~~~~~~~~~~~~~
+
+Boolean that controls whether the ``forms`` submodule of every installed app is imported on startup.
+
+Default value ``True``.
+
+When ``True``, shared forms declared in ``app/forms.py`` register before the first request arrives.
+``next.forms.autodiscover_forms`` runs the same sweep on a manual call and honours the key as well.
+
+SIGNALS_AUTODISCOVER
+~~~~~~~~~~~~~~~~~~~~
+
+Boolean that controls whether the ``signals`` submodule of every installed app is imported on startup.
+
+Default value ``True``.
+
+When ``True``, the receivers declared in ``app/signals.py`` connect before the first request arrives.
+Set it to ``False`` when an installed package keeps a ``signals.py`` that must load only behind a switch of its own, since the sweep imports that module as well.
 
 Routing
 -------

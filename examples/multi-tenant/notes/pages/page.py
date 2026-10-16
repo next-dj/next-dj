@@ -1,33 +1,26 @@
-from typing import TYPE_CHECKING
+from notes.models import Note, Tenant
 
-from notes.deps import DTenant
-from notes.models import Note
-
-from next import context, page
+from next import Depends, context, page
 from next.pages import MetadataDict
 
 
-if TYPE_CHECKING:
-    from notes.models import Tenant
-
-
 @page.metadata(inherit=True)
-def workspace_meta(active_tenant: DTenant) -> MetadataDict:
+def workspace_meta(tenant: Tenant = Depends("scope")) -> MetadataDict:
     """Brand every tab with the tenant and keep its workspace out of the index."""
     return {
-        "site_name": active_tenant.name,
-        "title": {"default": active_tenant.name},
+        "site_name": tenant.name,
+        "title": {"default": tenant.name},
         "robots": {"index": False},
     }
 
 
 @context("tenant", inherit_context=True)
-def tenant(active_tenant: DTenant) -> "Tenant":
+def tenant(active_tenant: Tenant = Depends("scope")) -> Tenant:
     """Expose the active tenant under `tenant` to every workspace page."""
     return active_tenant
 
 
 @context("recent_notes")
-def recent_notes(active_tenant: DTenant) -> list[Note]:
+def recent_notes(tenant: Tenant = Depends("scope")) -> list[Note]:
     """Return the five most recently updated notes for the landing card."""
-    return list(Note.objects.filter(tenant=active_tenant)[:5])
+    return list(Note.objects.visible_to(tenant)[:5])

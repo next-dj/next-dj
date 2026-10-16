@@ -14,7 +14,7 @@ const entries = Object.fromEntries(
 export default defineConfig({
   plugins: [react()],
   root: path.resolve(__dirname),
-  // A typed route segment is spelled [int:id], and the dev server refuses a path
+  // A typed route segment is spelled [int:board], and the dev server refuses a path
   // with a colon before it consults server.fs.allow. vitest.config.ts matches.
   server: { fs: { strict: false } },
   build: {

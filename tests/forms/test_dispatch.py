@@ -29,9 +29,8 @@ from next.forms import (
 )
 from next.forms.dispatch import FormActionDispatch
 from next.forms.dispatch.build import (
-    _bind_form_for_post,
+    _construct_form,
     _form_action_context_callable,
-    _form_from_initial_data,
     _resolve_form_class,
 )
 from next.forms.manager import build_form_namespace_for_action, form_action_manager
@@ -831,12 +830,12 @@ class TestFormClassInitKwargs:
             mock_post = MagicMock()
             mock_post.get.return_value = "ok"
             request = mock_http_request(method="POST", POST=mock_post, FILES=None)
-            form = _bind_form_for_post(
-                _CustomInitForm, request, None, init_kwargs={"label_suffix": suffix}
+            form = _construct_form(
+                _CustomInitForm, {"label_suffix": suffix}, request=request
             )
         else:
-            form = _form_from_initial_data(
-                _CustomInitForm, None, init_kwargs={"label_suffix": suffix}
+            form = _construct_form(
+                _CustomInitForm, {"label_suffix": suffix}, request=None
             )
         assert isinstance(form, _CustomInitForm)
         assert form.label_suffix == suffix

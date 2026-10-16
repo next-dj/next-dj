@@ -191,6 +191,40 @@ The base signatures carry no positional arguments of their own.
 ``BaseForm.get_initial(cls)`` takes none, and ``BaseModelForm.get_initial(cls, **url_kwargs)`` accepts the URL kwargs as keywords.
 Declare only the parameters an override actually reads.
 
+.. _topics-forms-actions-form-kwargs:
+
+``get_form_kwargs`` builds the constructor arguments
+----------------------------------------------------
+
+Override ``get_form_kwargs`` as a classmethod when the form constructor needs more than ``get_initial`` supplies, such as an ``instance`` loaded through ``DObject``, a ``prefix``, or an argument of a custom ``__init__``.
+The classmethod is DI-resolved exactly like ``get_initial``, and its result is the keyword arguments of the constructor.
+
+.. code-block:: python
+   :caption: notes/pages/notes/[int:note]/edit/page.py
+
+   from django.http import HttpRequest
+   from notes.models import Note
+
+   import next.forms
+   from next.deps import DObject
+
+   class NoteEditForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["title", "body"]
+
+       @classmethod
+       def get_form_kwargs(cls, request: HttpRequest, note: DObject[Note]) -> dict:
+           return {**super().get_form_kwargs(request), "instance": note}
+
+The default returns ``{"instance": ...}`` when ``get_initial`` answers a model instance and ``{"initial": ...}`` otherwise, so an override that starts from ``super().get_form_kwargs(request)`` keeps the ``get_initial`` behaviour and adds its own keys.
+A form that does not override the method never calls it and goes straight to ``get_initial``.
+
+The dispatcher calls the hook on the GET render of the page and on the POST, where it runs after ``check_permissions`` and before ``has_object_permission``.
+The dispatcher passes ``data`` and ``files`` itself, so a result that carries either key, or a result that is not a dict, raises ``TypeError``.
+The default resolves ``get_initial`` in the dependency cache of the override, on the GET render and on the POST alike, so a dependency both ask for resolves once.
+A ``FormWizard`` builds its step forms through its own ``get_form_kwargs`` and never calls this hook on a step form, see :doc:`wizard`.
+
 Form-less actions
 -----------------
 
@@ -299,12 +333,13 @@ A ``form_class=`` argument may be a factory callable instead of a form class.
 The factory is dependency-injected, so it can read ``request`` and URL kwargs, and it returns one of two shapes.
 
 A plain form class.
-   The dispatcher then calls ``get_initial`` on it and binds the form as usual.
+   The dispatcher then calls ``get_form_kwargs`` or ``get_initial`` on it and binds the form as usual.
 
 A ``(FormClass, init_kwargs)`` tuple.
-   When ``init_kwargs`` is non-empty, the dispatcher passes ``**init_kwargs`` straight to the form constructor and skips ``get_initial``.
+   When ``init_kwargs`` is non-empty, the dispatcher passes ``**init_kwargs`` straight to the form constructor and skips both ``get_form_kwargs`` and ``get_initial``.
    An empty dict behaves like returning the bare class, so a class with no ``get_initial`` needs at least the neutral ``{"initial": {}}``.
-   Use the tuple when the constructor needs arguments that ``get_initial`` cannot supply, such as a preloaded model ``instance`` or a formset ``queryset``.
+   Use the tuple for a class that has no hooks of its own, such as a formset or a third-party form.
+   A ``next.forms`` class takes the same arguments from its own ``get_form_kwargs``, see :ref:`topics-forms-actions-form-kwargs`.
 
 .. code-block:: python
    :caption: page.py — a factory returning the tuple form
@@ -425,7 +460,7 @@ The base signatures take no parameters of their own, and an override declares on
 The signature is open, so an override pulls ``request``, captured URL kwargs, ``DUrl[...]`` markers, ``Depends(...)`` providers, or nothing at all, following the same rule as the other DI hooks.
 
 Unlike the static guard, the dynamic hooks intentionally run application code.
-``check_permissions`` runs after the origin and the dependency cache are set up and after the form class is resolved, before ``get_initial`` and form binding.
+``check_permissions`` runs after the origin and the dependency cache are set up and after the form class is resolved, before ``get_form_kwargs``, ``get_initial``, and form binding.
 ``has_object_permission`` runs after the form is bound, so ``self.instance`` is the loaded target on a ``ModelForm``, and before ``is_valid`` and the handler.
 
 .. code-block:: python
@@ -517,7 +552,7 @@ It does not re-render the origin page.
 The hook runs on the bound form before validation, so the 403 is a deliberate authorization refusal independent of whether the submitted data is valid.
 This differs from a validation failure, which re-renders the origin with field errors, see :doc:`validation-rerender`.
 
-The hooks share the per-request dependency cache with ``get_initial`` and ``on_valid``.
+The hooks share the per-request dependency cache with ``get_form_kwargs``, ``get_initial``, and ``on_valid``.
 A provider resolved inside a hook is not resolved again downstream in the same dispatch, so a tenant or permission lookup runs once across the hook and the rest of the pipeline.
 
 The ``form_access_denied`` signal fires on an origin-page or dynamic-hook denial, never on the static guard path, see :ref:`topics-forms-signals-form-access-denied` for its sender, payload, and receiver rules.
@@ -525,7 +560,7 @@ The ``form_access_denied`` signal fires on an origin-page or dynamic-hook denial
 On a ``FormWizard`` the ``check_permissions`` classmethod runs per step POST, before the step form binds, so a denied step writes no storage.
 The wizard class has no object-level hook of its own.
 A step form that declares ``has_object_permission`` has it enforced after the step binds and before ``is_valid``.
-A wizard step binds from posted data and ``get_form_kwargs`` and never runs ``get_initial`` or ``Meta.instance_from_url``, so a ``ModelForm`` step sees a fresh unsaved ``self.instance`` rather than a URL-addressed row, unlike a standalone form.
+A wizard step binds from posted data and the ``get_form_kwargs`` of the wizard and never runs the ``get_form_kwargs`` or ``get_initial`` of the step form or its ``Meta.instance_from_url``, so a ``ModelForm`` step sees a fresh unsaved ``self.instance`` rather than a URL-addressed row, unlike a standalone form.
 
 .. note::
 

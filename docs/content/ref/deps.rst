@@ -6,7 +6,7 @@ Dependency injection reference
 Module summary
 --------------
 
-``next.deps`` exposes the resolver, the parameter providers and their registry, the dependency cache, and the public markers used in annotations.
+``next.deps`` exposes the resolver, the parameter providers and their registry, the dependency cache, and the public markers used in annotations, ``DObject`` among them.
 
 Public API
 ----------
@@ -94,6 +94,19 @@ Markers
 .. automodule:: next.deps.markers
    :members:
 
+Objects
+~~~~~~~
+
+.. automodule:: next.deps.objects
+   :members: DObject, ObjectProvider
+
+``DObject`` is re-exported from ``next.deps``.
+``DObject[Model]`` loads the row whose primary key the URL kwarg of the parameter name holds, and ``DObject[Model, "parent"]`` also filters by the field ``parent`` against the context value of the same name, which may be spelled ``Literal["parent"]``.
+Every lookup reads ``Model._default_manager.visible_to(scope)``, where ``scope`` is the value of the named dependency ``"scope"``, which the project registers through ``resolver.dependency`` and the framework never defaults.
+A hidden, missing, or unparsable row raises :exc:`~django.http.Http404`, and a parent value of ``None`` does the same.
+``ObjectProvider`` fills the parameter at priority ``0``, ahead of every other shipped provider, and keeps each row in the per-render dependency cache.
+See :ref:`topics-di-dobject` for the topic guide.
+
 Cache
 ~~~~~
 
@@ -107,7 +120,9 @@ Errors
    :members:
 
 ``DependencyCycleError`` carries the chain that closed the loop on ``cycle``, and ``UnknownDependencyError`` carries the missing ``name``, the ``param_name`` it was asked for, the ``suggestion`` a close registered name produced, and the ``func`` the failed resolve attributed it to.
-Both are re-exported from ``next.deps``, so a caller never imports the module directly.
+``UnboundObjectError`` subclasses :exc:`~django.core.exceptions.ImproperlyConfigured` and carries the ``param_name`` of the ``DObject`` parameter, the ``key`` it found nothing under, and ``parent``, which is ``True`` when that key is a missing parent context value rather than a missing URL kwarg.
+The form dispatcher answers an ``UnboundObjectError`` for a missing URL kwarg with 400 Bad Request and a logged warning, since the origin the client sent lacks the kwarg, and lets the parent variant raise.
+All three are re-exported from ``next.deps``, so a caller never imports the module directly.
 
 Context
 ~~~~~~~
@@ -129,9 +144,18 @@ See :doc:`signals` for the ``provider_registered`` signal.
 Checks
 ------
 
-The layer registers no system check.
+``next.deps.checks`` registers the ``DObject`` checks, which read annotations, routes, and registries without running a query.
+
+- ``next.E170`` reports a ``DObject`` model whose default manager has no ``visible_to``.
+- ``next.E171`` reports a page ``DObject`` whose parent no earlier context callable provides.
+- ``next.E172`` reports a ``DObject`` with a parent on a form handler, a form factory, or a form hook, ``has_object_permission`` included.
+- ``next.E173`` reports a ``DObject`` on a ``@component.context`` callable.
+- ``next.E174`` reports a project that declares a ``DObject`` and registers no ``scope`` dependency.
+- ``next.E175`` reports a ``DObject`` on a callable whose type hints do not resolve, which raises ``TypeError`` on every resolve.
+- ``next.W135`` reports a page ``DObject`` whose route captures no kwarg of its name.
+
 A ``Depends`` name nothing registered raises ``UnknownDependencyError`` at resolve time, with a ``Did you mean`` hint naming the closest registered dependency.
-See :doc:`system-checks` for the checks the other layers register.
+See :doc:`system-checks` for the exact conditions.
 
 See also
 --------

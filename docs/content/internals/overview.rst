@@ -60,7 +60,7 @@ Subsystems
      - Test client, signal recorder, isolation.
      - ``next.testing``
    * - App
-     - Django ``AppConfig`` that wires autoreload, template-tag builtins, staticfiles integration, component bootstrap, form autodiscovery, and the eight ports during ``ready()``.
+     - Django ``AppConfig`` that wires autoreload, template-tag builtins, staticfiles integration, app module autodiscovery of ``deps``, ``forms``, and ``signals``, component bootstrap, and the eight ports during ``ready()``.
      - ``next.apps``
 
 Bootstrap
@@ -74,8 +74,9 @@ The first three connect every signal receiver of the framework, in three ordered
 The fourth, ``apply_resolver_setting()``, points the dependency-injection singleton at the configured resolver class, ahead of every step that imports user modules.
 The next eight bind the seven ``next.ports`` slots that the request path, the URL patterns, the watcher, and the checks all read, each one taking the implementation from the area that owns it, and move ``seo_routes_version`` right after the SEO routes slot so the lazy urlpatterns rebuild with its routes.
 They run early for the same reason the resolver setting does, so no discovery failure leaves a process behind with an unbound port.
-The next four install autoreload, template-tag builtins, staticfiles integration, and component bootstrap into the Django runtime.
-The last, ``autodiscover_forms()``, registers shared forms before the first request arrives.
+The next three install autoreload, template-tag builtins, and staticfiles integration into the Django runtime.
+Then ``autodiscover.install()`` imports the ``deps``, ``forms``, and ``signals`` modules of every installed application, so providers, shared forms, and receivers register before the first request arrives.
+The last, ``components.install()``, bootstraps the components into the Django runtime, after the providers a ``component.py`` may need are in place.
 See :doc:`/content/ref/apps` for the canonical ordering and the full API.
 
 The boot pays for registration and wiring.

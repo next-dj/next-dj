@@ -1,8 +1,11 @@
+from typing import Self
+
 import pytest
+from django.contrib.auth.models import Group
 from django.http import HttpRequest
 from django.test import RequestFactory
 
-from next.deps import Depends
+from next.deps import Depends, DObject
 from next.deps.introspect import (
     cached_accepts_var_keyword,
     cached_signature,
@@ -60,6 +63,10 @@ def _handler_component(value: int = Context("page_value"), key_3: str = "") -> s
     return f"{value}:{key_3}"
 
 
+def _handler_object(group: DObject[Group]) -> Group:
+    return group
+
+
 _FOUR_MARKERS_KWARGS: dict[str, object] = {
     "request": RequestFactory().get("/"),
     "slug": "hello",
@@ -102,6 +109,51 @@ def _linear_resolver() -> LinearDependencyResolver:
 
 def _resolve_four_markers(planned: DependencyResolver) -> dict[str, object]:
     return planned.resolve_dependencies(_handler_four_markers, **_FOUR_MARKERS_KWARGS)
+
+
+_OBJECT_PK = 7
+
+
+class _StandInRows:
+    """Rows answering every lookup with one unsaved row, so no query is ever made."""
+
+    def __init__(self, row: Group) -> None:
+        self._row = row
+
+    def visible_to(self, scope: object) -> Self:
+        return self
+
+    def filter(self, **lookups: object) -> Self:
+        return self
+
+    def order_by(self) -> Self:
+        return self
+
+    def __getitem__(self, window: slice) -> list[Group]:
+        return [self._row]
+
+
+@pytest.fixture()
+def stand_in_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give the `Group` manager a `visible_to` that never reaches the database."""
+    rows = _StandInRows(Group(pk=_OBJECT_PK, name="bench"))
+    monkeypatch.setattr(
+        Group._default_manager, "visible_to", rows.visible_to, raising=False
+    )
+
+
+def _scoped_resolver() -> DependencyResolver:
+    """Fresh resolver with its providers loaded and the `scope` dependency bound."""
+    fresh = DependencyResolver()
+    fresh.dependency("scope")(lambda: "tenant")
+    fresh._sync_providers()
+    return fresh
+
+
+def _resolve_object(
+    fresh: DependencyResolver, cache: dict[str, object] | None = None
+) -> dict[str, object]:
+    return fresh.resolve_dependencies(_handler_object, group=_OBJECT_PK, _cache=cache)
 
 
 class TestBenchDependencyResolver:
@@ -250,6 +302,43 @@ class TestBenchInjectionPlan:
             rounds=_PLAN_ROUNDS,
             warmup_rounds=_PLAN_WARMUP_ROUNDS,
         )
+
+
+@pytest.mark.usefixtures("stand_in_rows")
+class TestBenchObjectFill:
+    """A `DObject` parameter compiled once, then replayed with and without its row.
+
+    `visible_to` answers from memory, so the rounds measure the injection path alone.
+    """
+
+    @pytest.mark.benchmark(group="deps.objects")
+    def test_compile_cold(self, benchmark) -> None:
+        """First resolve of the handler, compiling the filler that reads the model."""
+
+        def setup() -> tuple[tuple[DependencyResolver], dict[str, object]]:
+            return (_scoped_resolver(),), {}
+
+        benchmark.pedantic(
+            _resolve_object,
+            setup=setup,
+            rounds=_PLAN_ROUNDS,
+            warmup_rounds=_PLAN_WARMUP_ROUNDS,
+        )
+
+    @pytest.mark.benchmark(group="deps.objects")
+    def test_replay_cached_row(self, benchmark) -> None:
+        """Warm resolver whose row already sits in the render cache."""
+        warm = _scoped_resolver()
+        cache: dict[str, object] = {}
+        _resolve_object(warm, cache)
+        benchmark(_resolve_object, warm, cache)
+
+    @pytest.mark.benchmark(group="deps.objects")
+    def test_replay_fetch(self, benchmark) -> None:
+        """Warm resolver with a fresh cache, paying the scope and the lookup."""
+        warm = _scoped_resolver()
+        _resolve_object(warm)
+        benchmark(_resolve_object, warm)
 
 
 class TestBenchIntrospectionCache:

@@ -408,7 +408,7 @@ When two context functions need the same expensive value, register the callable 
    def tenant_seats(tenant: Tenant = Depends("active_tenant")) -> int:
        return tenant.seats
 
-Import ``notes/deps.py`` from ``AppConfig.ready`` so the registration runs before the first request.
+The ``next`` application imports ``notes/deps.py`` at startup, so the registration runs before the first request, see ``DEPS_AUTODISCOVER`` in :doc:`/content/ref/settings`.
 
 The resolution cache memoises a ``Depends("name")`` value by its registered name and shares the store across every ``@context`` callable of one page render, so the first callable to ask pays the query and the rest read the result.
 The unkeyed dict shape is the other answer, and it fits when the two values belong in one merge anyway.

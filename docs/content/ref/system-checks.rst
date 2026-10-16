@@ -15,7 +15,7 @@ Check registration
 
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
-The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
+The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
 
 Each of these modules registers checks.
 ``next.pages.checks``, ``next.forms.checks``, ``next.partial.checks``, and ``next.seo.checks`` are packages rather than single modules, and importing the package imports every submodule that carries a check.
@@ -742,6 +742,26 @@ Errors
      - The consent cookie's ``max_age`` option is not a positive int.
        A value that is not an int is replaced by the default age, and zero or less makes the browser drop the cookie at once, so the choice is not kept.
      - ``next.consent.checks``
+   * - ``next.E170``
+     - A model under ``DObject`` has a default manager that defines no callable ``visible_to``, so every lookup of that model fails.
+     - ``next.deps.checks``
+   * - ``next.E171``
+     - A ``DObject`` with a parent sits on a page context callable that runs before any context callable provides a value under the parent name, such as ``@context("post", inherit_context=True)`` in an ancestor ``page.py``.
+       A parent read after a keyless callable is not judged, since its keys are known only at render time.
+     - ``next.deps.checks``
+   * - ``next.E172``
+     - A ``DObject`` with a parent sits on a form handler, a form factory, or one of the form hooks ``get_initial``, ``get_form_kwargs``, ``check_permissions``, ``has_object_permission``, and ``on_valid``, which resolve with no page context, so the parent is never there.
+     - ``next.deps.checks``
+   * - ``next.E173``
+     - A ``DObject`` parameter sits on a ``@component.context`` callable, which resolves with no URL kwargs, so the lookup never finds its pk.
+     - ``next.deps.checks``
+   * - ``next.E174``
+     - The project declares a ``DObject`` parameter and no ``scope`` dependency is registered, so no lookup can call ``visible_to``.
+       Register it with ``@resolver.dependency("scope")`` in the ``deps.py`` of an app.
+     - ``next.deps.checks``
+   * - ``next.E175``
+     - A ``DObject`` parameter sits on a callable whose type hints do not resolve, such as a module under ``from __future__ import annotations`` that imports a name of the signature under ``TYPE_CHECKING``, so the annotation stays a string and every resolve raises ``TypeError``.
+     - ``next.deps.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -830,7 +850,7 @@ Warnings
        Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.
      - ``next.partial.checks.backends``
    * - ``next.W072``
-     - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, or ``CSP_NONCE``, holds a non-bool value.
+     - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``DEPS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, ``SIGNALS_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, or ``CSP_NONCE``, holds a non-bool value.
        The ``bool()`` coercion turns a falsy-looking string such as ``'False'`` into ``True``, so the written value can mean the opposite of the intent.
      - ``next.conf.checks``
    * - ``next.W074``
@@ -1031,6 +1051,10 @@ Warnings
    * - ``next.W125``
      - The consent cookie's ``samesite`` option is ``"None"`` while ``secure`` is not ``True``, so a browser rejects the cookie on a page that is not served over https.
      - ``next.consent.checks``
+   * - ``next.W135``
+     - A ``DObject`` parameter on a context callable that a routed ``page.py`` runs, an inherited one included, is named after no kwarg the route of that page captures, so the lookup finds no URL kwarg.
+       A warning rather than an error, because a kwarg an outer ``include()`` captures reaches the page at runtime and the route of the page tree never shows it, while a kwarg missing at runtime raises ``UnboundObjectError``.
+     - ``next.deps.checks``
 
 Codes are assigned per check and are not contiguous.
 

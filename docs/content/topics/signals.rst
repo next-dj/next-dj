@@ -15,7 +15,7 @@ Import surface
 --------------
 
 Every signal lives in the subpackage that emits it.
-The aggregator ``next.signals`` re-exports every name so handlers can pull from a single import.
+The aggregator ``next.signals`` re-exports every name so handlers can pull from a single import, and it also holds ``receiver``, the decorator described under `Receiver patterns`_.
 
 .. code-block:: python
    :caption: through the aggregator
@@ -161,33 +161,22 @@ The partial-rendering stream signals appear in context in :doc:`/content/topics/
 Receiver patterns
 -----------------
 
-Connect once at startup.
+Receivers live in the ``signals.py`` of an application.
+At startup the ``next`` application imports that module from every installed application, after every ``deps.py`` and ``forms.py``, so the receivers connect once with no ``AppConfig.ready`` code.
+:doc:`application-layout` covers when an application declares a signal of its own.
 
-Django's app registry is not fully initialised at module import time, so the import of ``signals.py``, the module that holds the receivers, lives inside ``ready`` rather than at module level.
+The sweep covers third-party applications as well.
+A package whose ``signals.py`` is meant to load only behind a switch of its own gets imported anyway, so such a project sets ``SIGNALS_AUTODISCOVER`` to ``False`` and imports the ``signals`` modules it wants from ``AppConfig.ready``, see :doc:`/content/ref/settings`.
 
-.. code-block:: python
-   :caption: notes/apps.py
-
-   from django.apps import AppConfig
-
-   class NotesConfig(AppConfig):
-       name = "notes"
-
-       def ready(self) -> None:
-           from notes import signals  # noqa: F401
-
-Neither Django nor next.dj discovers ``signals.py``, so this import is what connects the receivers.
-:doc:`application-layout` covers when an application declares a signal of its own and how a receiver defers its writes.
-
-Use ``django.dispatch.receiver`` to connect a callable to a signal.
+``receiver`` from ``next``, also importable from ``next.signals``, connects a callable to a signal.
+Without ``on_commit`` it is ``django.dispatch.receiver`` with the same arguments, so either import works.
 
 .. code-block:: python
    :caption: notes/signals.py
 
    import logging
 
-   from django.dispatch import receiver
-
+   from next import receiver
    from next.signals import action_dispatched
 
    logger = logging.getLogger(__name__)
@@ -197,6 +186,40 @@ Use ``django.dispatch.receiver`` to connect a callable to a signal.
        logger.info("action dispatched: %s", kwargs["action_name"])
 
 Several receivers can connect to one signal and they run in connection order.
+
+Waiting for the commit
+~~~~~~~~~~~~~~~~~~~~~~
+
+A receiver runs inside whatever transaction the sender has open.
+A receiver that writes to the database, sends mail, or queues a task connects with ``on_commit=True``, so its work never outlives a rolled-back change.
+
+.. code-block:: python
+   :caption: notes/signals.py
+
+   from django.db.models.signals import post_save
+   from notes.models import Note
+   from notes.services import reindex_note
+
+   from next import receiver
+
+   @receiver(post_save, sender=Note, on_commit=True)
+   def reindex(sender, instance, **kwargs) -> None:
+       reindex_note(instance)
+
+The call waits for the commit of the outermost transaction and never runs when the transaction rolls back, and a rolled-back savepoint drops only the calls scheduled inside it.
+Outside a transaction, in autocommit, it runs at once.
+The receiver waits on the database named by the ``using`` keyword of the signal, which the save, delete, and many-to-many model signals send, and on the default database for a signal that sends none.
+An ``async def`` receiver runs at the commit through ``asgiref.sync.async_to_sync``.
+
+A deferred receiver differs from a plain one in a few ways.
+
+- Its return value never reaches the list ``send`` returns.
+- An exception it raises inside a transaction surfaces at the commit, out of the outermost ``atomic`` block, and not out of ``send``, so ``send_robust`` does not catch it and the commit hooks queued after it never run.
+- It is connected strongly, so a ``weak=True`` beside ``on_commit=True`` raises ``ValueError``.
+- Decorating the same function twice connects it once, and a function already connected as a plain receiver of the same signal and sender is not connected again, as Django treats one function connected twice.
+- ``signal.disconnect(func)`` removes it like any receiver, and a ``dispatch_uid`` passed to the decorator works with ``disconnect`` the same way.
+
+See :func:`~django.db.transaction.on_commit` for the Django side.
 
 Failure contract
 ~~~~~~~~~~~~~~~~

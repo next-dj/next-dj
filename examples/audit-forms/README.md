@@ -43,9 +43,11 @@ Tailwind loads via the Play CDN in [`portal/layout.djx`](portal/layout.djx). No 
 `AuditEntry.source` distinguishes them.
 
 - `source="backend"`: written by `AuditedFormActionBackend.dispatch` in [`access/backends.py`](access/backends.py). It runs synchronously inside the dispatch path so it has direct access to `request.POST` and the resolved `HttpResponse`. It writes two rows per dispatch: `request_started` (with the captured POST payload) and `dispatched` (with `response_status` and the redirect target).
-- `source="signal"`: written by the receivers in [`access/signals.py`](access/signals.py). They subscribe to `next.forms.signals.action_dispatched`, `form_validation_failed`, and `form_access_denied`, using only the kwargs the framework ships in those signals. They never see the raw request, which is the whole point: the signal channel is decoupled from the backend class.
+- `source="signal"`: written by the receivers in [`access/signals.py`](access/signals.py). They subscribe to `next.forms.signals.action_dispatched`, `form_validation_failed`, and `form_access_denied`, using only the kwargs the framework ships in those signals. They never see the raw request, which is the whole point: the signal channel is decoupled from the backend class. Each receiver connects through `next.signals.receiver(..., on_commit=True)`, so its row lands once the transaction the dispatch ran in commits and never for a dispatch that rolled back. Under the default `ATOMIC_REQUESTS = False` there is no open transaction and the row lands at once. The framework imports `signals.py` at startup, so `AccessConfig` has no `ready()` at all.
 
 The two channels intentionally overlap on `kind="dispatched"` so the admin page can show them side by side. Pick whichever fits your project, or run both, like this example does.
+
+The integration suite runs under `django_db(transaction=True)`, so every request commits as it does under `runserver` and the signal rows land where the assertions look for them. `TestSignalChannelWaitsForTheCommit` in the unit suite pins both sides of `on_commit`: inside a transaction the row waits for the commit, and a transaction that rolls back leaves no row at all.
 
 > **PII caveat.** `_safe_form_payload` strips control fields (`csrfmiddlewaretoken`, `_next_form_origin`, and the `policy_acknowledged` gate field) but stores every other POST value verbatim, including emails and free-text reasons. If you adopt this pattern in production, extend `_RESERVED_FORM_KEYS` with any password / secret / personal-data field name your forms collect, or hash sensitive values before persisting. Multi-value fields (checkbox groups, multi-selects) are preserved via `request.POST.lists()`.
 
@@ -113,7 +115,7 @@ The framework fires `next.forms.signals.form_access_denied` **only** on a dynami
 
 ```python
 # access/signals.py
-@receiver(form_access_denied)
+@receiver(form_access_denied, on_commit=True)
 def _on_form_access_denied(action_name, layer, reason, **kwargs):
     AuditEntry.objects.create(
         action_name=action_name,
@@ -163,7 +165,9 @@ The example ships three composite components, each pairing one `.djx` with a `co
 
 ### 6. Per-request audit trail (`AuditEntry.request` FK)
 
-The audit log can be read globally at `/admin/audit/` or per-request at `/request/<request_id>/audit/`. The router walks the file tree and emits both patterns from one app. `pages/request/[step]/page.py` becomes `request/<str:step>/`, and `pages/request/[int:request_id]/audit/page.py` becomes `request/<int:request_id>/audit/`. Django's URL resolver picks the int variant first, so `/request/5/audit/` reaches the per-request page even though `5` would also be a valid `<str:step>`.
+The audit log can be read globally at `/admin/audit/` or per-request at `/request/<id>/audit/`. The router walks the file tree and emits both patterns from one app. `pages/request/[step]/page.py` becomes `request/<str:step>/`, and `pages/request/[int:access_request]/audit/page.py` becomes `request/<int:access_request>/audit/`. Django's URL resolver picks the int variant first, so `/request/5/audit/` reaches the per-request page even though `5` would also be a valid `<str:step>`.
+
+The page loads the request as `DObject[AccessRequest]` from `next.deps`. The parameter is named after the `[int:access_request]` segment, so it reads the pk out of that URL kwarg and loads the row through `AccessRequest.objects.visible_to(scope)`, and a pk the query does not return answers `404`. `scope` is the named dependency [`access/deps.py`](access/deps.py) registers, the visitor in `request.user`. The portal has no accounts, so `visible_to` in [`access/models.py`](access/models.py) returns every request, and it is the one method a deployment narrows to the requester and the reviewers. The landing's `recent_requests` context reads through it too, taking the visitor as `Depends("scope")`. The `access_request` and `entries` contexts and the `audit_meta` callable of section 11 all declare the same parameter, and `entries` reads the trail off `access_request.audit_entries`. The segment is not `[int:request]` because the resolver reserves `request` for the `HttpRequest` itself.
 
 The correlation column on `AuditEntry.request` is **only** populated by the backend channel, on the **dispatched** row of the final step. The wizard's `done` stores `request.session["access_request_just_created"]` right after `AccessRequest.objects.create(...)`, and `AuditedFormActionBackend.dispatch` pops that key after `super()` returns. Signal-channel rows stay unlinked by design, because the signal channel sees only the kwargs the signal ships, and `AccessRequest.id` is not among them.
 
@@ -214,7 +218,8 @@ The two filters stack rather than compete. `zone="audit-table"` on the decorator
 
 |  | Backend channel | Signal channel |
 | --- | --- | --- |
-| Where written | inside `AuditedFormActionBackend.dispatch` | `@receiver(action_dispatched / form_validation_failed / form_access_denied)` |
+| Where written | inside `AuditedFormActionBackend.dispatch` | `@receiver(action_dispatched / form_validation_failed / form_access_denied, on_commit=True)` |
+| When written | at once, inside any transaction the dispatch runs in, so a rollback takes the row with it | after that transaction commits, never on rollback |
 | Sees raw POST? | yes | no, only the signal kwargs |
 | Sees response status? | yes | yes (via signal kwarg) |
 | Records permission denials? | partially, a denial raises before the `dispatched` row, leaving only the `request_started` row with no reason | yes, `form_access_denied` carries `layer` and `reason` |
@@ -304,11 +309,11 @@ The test suite asserts the server contract (the envelopes, the zone targets, the
 metadata: MetadataDict = {"title": "Request access", "robots": {"index": False}}
 ```
 
-`/admin/audit/` has the same shape titled `Audit log`, and one title covers all three wizard steps. The per-request trail is dynamic, so [`request/[int:request_id]/audit/page.py`](access/pages/request/%5Bint%3Arequest_id%5D/audit/page.py) registers a callable that names the `access_request` context as its parameter and gets the row that context already fetched:
+`/admin/audit/` has the same shape titled `Audit log`, and one title covers all three wizard steps. The per-request trail is dynamic, so [`request/[int:access_request]/audit/page.py`](access/pages/request/%5Bint%3Aaccess_request%5D/audit/page.py) registers a callable that declares the same `DObject` as the `access_request` context and gets the same row:
 
 ```python
 @page.metadata
-def audit_meta(access_request: AccessRequest) -> MetadataDict:
+def audit_meta(access_request: DObject[AccessRequest]) -> MetadataDict:
     return {"title": f"Request #{access_request.pk}", "robots": {"index": False}}
 ```
 
@@ -324,5 +329,7 @@ The row carries the requester's name and email, and the title uses the primary k
 - [`next/forms/checks/config.py`](../../next/forms/checks/config.py): `next.E044` (`FORM_ACTION_BACKENDS` is no list), `next.E068` (backend path cannot be imported), `next.E045` (wrong backend type).
 - [`next/forms/checks/wizards.py`](../../next/forms/checks/wizards.py): `next.W057` (a step form registered as an action) and `next.W059` (a field two steps both declare).
 - [`next/pages/metadata/`](../../next/pages/metadata/): the metadata chain behind the dicts and the `@page.metadata` callable of section 11.
+- [`next/signals.py`](../../next/signals.py): the `receiver` decorator and its `on_commit=True` mode.
+- [`next/deps/objects.py`](../../next/deps/objects.py): `DObject` and the provider that loads its row through `visible_to(scope)`.
 - [`next/testing/capture.py`](../../next/testing/capture.py): `SignalRecorder` and `capture_signals` helpers used in the tests.
 - [`next/testing/plugin.py`](../../next/testing/plugin.py): the pytest plugin behind the `next_pages`, `next_clear_cache`, and `next_client` entries this example's `pytest.ini` uses.

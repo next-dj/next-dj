@@ -53,7 +53,7 @@ A request to ``/_next/form/<uid>/`` follows a fixed pipeline.
 4. That page authorizes the request through its own ``render()``, and a response it returns is sent as the answer to the submission.
 5. The shared dependency cache is installed on the request.
 6. The form class resolves through the dependency resolver and ``check_permissions`` runs on it, see :ref:`topics-forms-actions-dynamic-guards`.
-7. The form is constructed with POST data, uploaded files, and the initial data that ``get_initial`` returns.
+7. The form is constructed with POST data, uploaded files, and the kwargs that ``get_form_kwargs`` returns, or the initial data of ``get_initial`` when the class does not override that hook.
 8. ``has_object_permission`` runs on the bound form.
 9. A request that names validate fields short circuits here.
    The form validates, the response carries only the errors of the named fields, and the handler never runs.
@@ -135,13 +135,17 @@ The dispatcher does not rerun the validation of any other form.
 Influencing the re-render
 -------------------------
 
-One hook lets a page customise the form before it reaches the template.
+Two hooks let a page customise the form before it reaches the template.
 
 The ``get_initial`` hook.
    Override ``get_initial`` on the form class to shape the initial data or the bound model instance.
    The hook runs on the initial GET render and again on every POST bind, where its return value seeds the bound form's ``initial`` and, for a ModelForm, its ``instance``.
    On the re-render the submitted POST values win over the seeded initial, so the user sees what they typed.
-   The one path that skips ``get_initial`` on POST is a ``form_class`` factory that returns a ``(FormClass, init_kwargs)`` tuple, see :doc:`actions`.
+   Two paths skip ``get_initial`` on POST, a ``form_class`` factory that returns a ``(FormClass, init_kwargs)`` tuple and a ``get_form_kwargs`` override that does not call ``super()``, see :doc:`actions`.
+
+The ``get_form_kwargs`` hook.
+   Override ``get_form_kwargs`` to hand the constructor further arguments, such as a prefix or an instance loaded through ``DObject``.
+   It runs on the same two occasions, and the bound form on the re-render is the one built from its result, see :ref:`topics-forms-actions-form-kwargs`.
 
 Redirecting back to the origin
 ------------------------------

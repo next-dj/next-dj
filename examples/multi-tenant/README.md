@@ -4,7 +4,7 @@ A workspace for two independent tenants (Acme and Globex) that share the same Dj
 
 > **Trust boundary.** The `X-Tenant` header is attacker-controlled. Anybody can send `X-Tenant: globex` with `curl`, so this shape isolates tenants only behind a reverse proxy that owns the header. That proxy must be the single route to the application, the application must bind to an address the public network cannot reach, the proxy must derive the slug from something it owns (a host mapping, a client certificate, its own session) rather than from anything the client sent, and it must set the header on every request it forwards so an inbound copy is overwritten instead of passed along. A proxy that fills the header in only when it is absent keeps the client's forged value, and that single misconfiguration removes the isolation entirely. Run this example with nothing in front of it and every visitor picks their own tenant.
 >
-> Two shapes need no proxy at all: read the tenant out of the signed-in user's membership rows, or out of `request.get_host()`, which `ALLOWED_HOSTS` narrows to the names the project publishes. [`docs/content/howto/scope-requests-per-tenant.rst`](../../docs/content/howto/scope-requests-per-tenant.rst) puts all three side by side in trust order. This example reads the header because that is the shape which shows a custom `RegisteredParameterProvider` and a request-aware static backend with the fewest moving parts, not because it is the shape to reach for first.
+> Two shapes need no proxy at all: read the tenant out of the signed-in user's membership rows, or out of `request.get_host()`, which `ALLOWED_HOSTS` narrows to the names the project publishes. [`docs/content/howto/scope-requests-per-tenant.rst`](../../docs/content/howto/scope-requests-per-tenant.rst) puts all three side by side in trust order. This example reads the header because that is the shape which shows a request-scoped `scope` dependency and a request-aware static backend with the fewest moving parts, not because it is the shape to reach for first.
 
 > **What a tenant row may put in the document.** `Tenant.primary_color` lands in an inline `style` attribute on `<body>`, where a value like `red;background:url(https://evil.test/beacon)` appends declarations of its own, so `accent_color` in [`notes/themes.py`](notes/themes.py) passes the column through only when it is a bare hex colour and substitutes the project default otherwise. `Tenant.theme` is held at arm's length the same way one layer up: the column stores a key the project maps to a stylesheet it ships, never a reference a row wrote, which section 2 walks through.
 
@@ -15,7 +15,7 @@ A workspace for two independent tenants (Acme and Globex) that share the same Dj
 | `/` | Workspace landing for the active tenant. Welcome card plus the five most recent notes. |
 | `/notes/` | All notes that belong to the active tenant, rendered as `note_card` composites. |
 | `/notes/new/` | Create a note. The handler stamps the active tenant on the row and redirects to its editor. |
-| `/notes/<id>/edit/` | Note editor whose body field renders a `markdown_textarea` with its preview pane. |
+| `/notes/<id>/edit/` | Note editor whose body field renders a `markdown_textarea` with its preview pane. Another tenant's note id answers `404`. |
 | `/_t/<slug>/static/<path>` | The per-tenant asset prefix every `<link>` and `<script>` URL carries, the `next.min.js` runtime included, forwarded to Django staticfiles by [`config/urls.py`](config/urls.py). |
 
 Two tenants ship with the example in [`notes/demo.py`](notes/demo.py):
@@ -60,16 +60,30 @@ Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_componen
 The chain has three links:
 
 1. [`notes/middleware.py`](notes/middleware.py) parses `X-Tenant` and looks up the matching `Tenant` row. Missing slug → `400`. Unknown slug → `404`. Match → `request.tenant = tenant`. Both refusals answer with a fixed body built from a module constant, never from the submitted slug, and the middleware docstring carries the proxy obligations the header shape rests on. Paths under `/_t/` return early without resolving anything, because the per-tenant asset URLs of section 2 already carry the slug in the path and a browser never puts the header on an asset request. That early return is safe only because nothing tenant-owned lives under the prefix: [`config/urls.py`](config/urls.py) discards the slug and serves the same shared file whichever tenant a URL names, so the prefix is a cache key rather than an isolation boundary, and no page route can be reached through it.
-2. [`notes/deps.py`](notes/deps.py) defines `DTenant` (a `DDependencyBase` marker) and `TenantProvider`, a `RegisteredParameterProvider`. The provider matches when `param.annotation is DTenant` and `request.tenant` is set. `static_can_handle` answers `False` for any other annotation, so the plan compiler keeps the provider out of unrelated parameters, and `None` for `DTenant`, whose tenant check stays in `can_handle`. `apps.py` imports the module on startup so the auto-registry picks it up.
-3. Pages and form actions request the tenant by name and type:
+2. [`notes/deps.py`](notes/deps.py) registers the named dependency `scope`, which returns the tenant of the request through `get_active_tenant`. The framework imports the `deps.py` and `signals.py` of every installed app at startup, so `NotesConfig` has no `ready()` at all.
 
    ```python
-   @context("notes")
-   def notes(active_tenant: DTenant) -> list[Note]:
-       return list(Note.objects.filter(tenant=active_tenant))
+   @resolver.dependency("scope")
+   def scope(request: HttpRequest) -> Tenant | None:
+       return get_active_tenant(request)
    ```
 
-   The framework injects the `Tenant` instance directly. Every query in the example that reaches a tenant-owned row carries that filter: the two note listings, the `Note.objects.create` of the create form, and the `get_object_or_404(Note, pk=note_id, tenant=tenant)` behind both the editor's `note` context and its `get_initial`. Middleware that attaches a tenant repairs nothing if one queryset forgets to use it. Page modules never start with `from __future__ import annotations` and import `DTenant` at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate, such as a marker or a model imported only under `if TYPE_CHECKING`, drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
+3. Every read of a tenant-owned row goes through one `QuerySet` method in [`notes/models.py`](notes/models.py), and pages and form actions ask for the tenant by its dependency name:
+
+   ```python
+   class NoteQuerySet(models.QuerySet):
+       def visible_to(self, tenant: Tenant | None) -> Self:
+           return self.filter(tenant=tenant)
+
+
+   @context("notes")
+   def notes(tenant: Tenant = Depends("scope")) -> list[Note]:
+       return list(Note.objects.visible_to(tenant))
+   ```
+
+   The framework fixes the name `scope`. `DObject` from `next.deps` passes that dependency to the `visible_to` of the default manager whenever it loads a row by URL kwarg, which is how the editor of section 6 reaches its note. So the two note listings, the editor's `note` context, its metadata and the `get_initial` of its form all narrow by the same method, and only the `Note.objects.create` of the create form names the tenant itself. Middleware that attaches a tenant repairs nothing if one queryset forgets to use it, which is why the filter lives in the one method every reader calls. A project that declares a `DObject` without registering `scope` fails `manage.py check` with `next.E174`, and a model whose default manager has no `visible_to` fails it with `next.E170`.
+
+   A request without a tenant never reaches a page, because the middleware answers it first. Should one slip through, `visible_to(None)` filters on `tenant IS NULL`, which the non-nullable foreign key never matches, so the read comes back empty instead of unscoped. Page modules never start with `from __future__ import annotations` and import `Tenant`, `Note` and `DObject` at runtime. The resolver does evaluate string hints through `get_type_hints`, but a single name it cannot evaluate, such as a marker or a model imported only under `if TYPE_CHECKING`, drops the whole callable back to its raw annotations, where `get_origin` sees a string and the parameter silently falls through to another provider.
 
 ### 2. Per-tenant asset URLs
 
@@ -152,42 +166,50 @@ The `<main>` element in that layout delegates its width to the shared [`containe
 
 ```python
 @context("tenant", inherit_context=True)
-def tenant(active_tenant: DTenant) -> "Tenant":
+def tenant(active_tenant: Tenant = Depends("scope")) -> Tenant:
     return active_tenant
 
 
 @context("recent_notes")
-def recent_notes(active_tenant: DTenant) -> list[Note]:
-    return list(Note.objects.filter(tenant=active_tenant)[:5])
+def recent_notes(tenant: Tenant = Depends("scope")) -> list[Note]:
+    return list(Note.objects.visible_to(tenant)[:5])
 ```
 
 `inherit_context=True` lifts `tenant` to every descendant page, so [`notes/layout.djx`](notes/pages/notes/layout.djx) and both form templates print `tenant.slug` without re-resolving anything. `recent_notes` carries no flag, so it stays on the landing page that renders it and the `/notes/` list does not pay for a query it never shows.
 
 ### 6. The two note forms and the shared preview
 
-[`notes/pages/notes/new/page.py`](notes/pages/notes/new/page.py) defines `NoteCreateForm`, a plain `next.forms.Form` with no model behind it. The template reaches it as `{% form "note_create_form" %}`, the snake_case name the framework derives from the class. Its `on_valid` takes `active_tenant: DTenant` and passes it straight to `Note.objects.create`, so the tenant is stamped on the row by the same provider the pages use and the browser never sees a tenant field it could tamper with. The redirect goes to the new note's editor, not back to the list, so the author keeps typing where they left off.
+[`notes/pages/notes/new/page.py`](notes/pages/notes/new/page.py) defines `NoteCreateForm`, a plain `next.forms.Form` with no model behind it. The template reaches it as `{% form "note_create_form" %}`, the snake_case name the framework derives from the class. Its `on_valid` takes `tenant: Tenant = Depends("scope")` and passes it straight to `Note.objects.create`, so the tenant is stamped on the row by the same dependency the pages read and the browser never sees a tenant field it could tamper with. The redirect goes to the new note's editor, not back to the list, so the author keeps typing where they left off.
 
 Both forms declare their widgets with `next.forms.ComponentWidget`, naming the shared kit's `input` component and its `markdown_textarea` composite and passing `rows` and `placeholder` through as component props, so `{{ form.title }}` renders through the shared kit's `input` and `textarea` components instead of Django's default HTML. A `ComponentWidget` naming a component that does not resolve is reported as `next.W054` at `manage.py check` time.
 
-[`notes/pages/notes/[int:note_id]/edit/page.py`](notes/pages/notes/[int:note_id]/edit/page.py) defines `NoteEditForm`, a `ModelForm` whose `Meta.fields` lists only `title` and `body`. There is no extra id field. The form binds to an instance through `get_initial`, which reads the URL kwarg `note_id`, derives the tenant from the request via `get_active_tenant(request)`, and routes the lookup through `get_object_or_404(Note, pk=note_id, tenant=tenant)`, so a tenant requesting another tenant's note id receives a `404`. On a valid submission `on_valid` calls `self.save()` and redirects back to the editor.
+[`notes/pages/notes/[int:note]/edit/page.py`](notes/pages/notes/%5Bint%3Anote%5D/edit/page.py) defines `NoteEditForm`, a `ModelForm` whose `Meta.fields` lists only `title` and `body`. There is no extra id field. The form binds to an instance through `get_initial`, which declares the note it edits and returns it:
+
+```python
+@classmethod
+def get_initial(cls, note: DObject[Note]) -> Note:
+    return note
+```
+
+`DObject[Note]` reads the pk out of the URL kwarg named like the parameter, which is why the directory is `[int:note]`, and loads the row through `Note.objects.visible_to(scope)`. A pk the active tenant does not own is a row that query never returns, so another tenant's note id answers `404` on the editor page and on the form post alike, and no helper repeats the lookup. The `note` context and the `note_meta` callable of section 8 declare the same parameter. `manage.py check` reports a `DObject` whose route captures no kwarg of its name as `next.W135`. On a valid submission `on_valid` calls `self.save()` and redirects back to the editor.
 
 The body field names the shared `markdown_textarea` composite, which renders the plain `textarea` control and nests the `markdown_preview` pane ([`examples/_shared/_components/markdown_preview/`](../_shared/_components/markdown_preview/)) right under it. No page template names the pane and no page context prepares its HTML. The pane renders its `source` prop through `render_markdown` from the shared [`examples/_shared/markup.py`](../_shared/markup.py), which escapes the raw body before the `markdown` package sees it, strips unsafe link URLs, and wraps the result in `SafeString`. The create page has no body yet and renders the empty string, which `render_markdown` answers with its placeholder paragraph, so the pane is never a blank box on first paint. A `ComponentWidget` render carries the full render frame, so the nested call resolves and the shell's co-located `component.mjs` is auto-discovered and served as a module script. `TenantPrefixStaticBackend` rewrites its `/static/next/components/markdown_preview.mjs` URL to `/_t/<slug>/static/...` so the script rides the same per-tenant prefix as the co-located CSS. The shell, the client behaviour, and the server-side render are all shared with the wiki form.
 
 ### 7. Dynamic permission hooks on the edit form
 
-The `get_object_or_404` in `get_initial` keeps one tenant from loading another tenant's note id. It does not cover two rules that are not about ownership. `NoteEditForm` layers those as the framework's two DI-resolved permission hooks.
+The `DObject` in `get_initial` keeps one tenant from loading another tenant's note id. It does not cover two rules that are not about ownership. `NoteEditForm` layers those as the framework's two DI-resolved permission hooks.
 
 ```python
 class NoteEditForm(ModelForm):
     @classmethod
-    def check_permissions(cls, tenant: DTenant) -> PermissionOutcome:
+    def check_permissions(cls, tenant: Tenant = Depends("scope")) -> PermissionOutcome:
         return tenant.is_active
 
     def has_object_permission(self) -> PermissionOutcome:
         return not self.instance.locked
 ```
 
-`check_permissions` is the view-level gate. The dispatcher resolves its parameters the same way it resolves `get_initial`, so the hook receives the active `Tenant` through the `DTenant` provider and declares nothing else. It runs after the static `ActionGuard` and after the origin page has authorized the submission, and before `get_initial`, so a suspended tenant (`is_active=False`) is refused before any note is loaded. The middleware resolves a suspended tenant exactly like an active one, and the ownership `404` would still let a suspended tenant reach its own notes, so this rule exists only at the hook layer. Returning `False` denies with `403`.
+`check_permissions` is the view-level gate. The dispatcher resolves its parameters the same way it resolves `get_initial`, so the hook receives the active `Tenant` through the `scope` dependency and declares nothing else. It runs after the static `ActionGuard` and after the origin page has authorized the submission, and before `get_initial`, so a suspended tenant (`is_active=False`) is refused before any note is loaded. The middleware resolves a suspended tenant exactly like an active one, and the ownership `404` would still let a suspended tenant reach its own notes, so this rule exists only at the hook layer. Returning `False` denies with `403`.
 
 `has_object_permission` is the object-level gate. It runs after binding, so `self.instance` is the loaded note. A `locked` note belongs to its tenant and loads without a `404`, yet must stay read-only, so the hook returns `False` to deny with a bare `403` and no re-render. Returning `True` allows the edit through to `is_valid`.
 
@@ -195,7 +217,7 @@ A bare `403` carries no body to re-render, so the editor says up front what the 
 
 Both hooks emit `next.signals.form_access_denied` on a denial, carrying the `action_name`, `uid`, `request`, the `layer` (`"view"` or `"object"`), and the `reason` (`"raised"`, `"denied"`, or `"response"`). The signal stays silent when both hooks allow the request.
 
-The `notes` app consumes that signal. [`notes/signals.py`](notes/signals.py) connects a receiver that logs each denial under the `notes.access` logger, reading the active tenant through `get_active_tenant` so the line names the tenant whose edit was refused. `NotesConfig.ready` imports the module so the connection is live at startup.
+The `notes` app consumes that signal. [`notes/signals.py`](notes/signals.py) connects a receiver that logs each denial under the `notes.access` logger, reading the active tenant through `get_active_tenant` so the line names the tenant whose edit was refused. The framework imports `signals.py` at startup, so the connection is live without an import in `ready()`.
 
 ```python
 from .access import get_active_tenant
@@ -220,15 +242,15 @@ def _on_form_access_denied(action_name, layer, reason, request, **kwargs):
 
 ```python
 @page.metadata(inherit=True)
-def workspace_meta(active_tenant: DTenant) -> MetadataDict:
+def workspace_meta(tenant: Tenant = Depends("scope")) -> MetadataDict:
     return {
-        "site_name": active_tenant.name,
-        "title": {"default": active_tenant.name},
+        "site_name": tenant.name,
+        "title": {"default": tenant.name},
         "robots": {"index": False},
     }
 ```
 
-`inherit=True` runs the callable for every page below the root, the way `inherit_context=True` shares the `tenant` context of section 5. `site_name` feeds the `{title} · {site_name}` template of the settings tier, so `/notes/` reads `Notes · Acme Industries` under `X-Tenant: acme` and `Notes · Globex Corporation` under `globex`. `title.default` is what a page without a title of its own renders, which makes the landing tab the bare tenant name. The settings tier keeps its own `default`, which `manage.py check` requires beside a template, but no workspace page renders it any more. The pages below add titles in the two usual forms, a one-line dict on `/notes/` and `/notes/new/`, and on the editor a `@page.metadata` callable that names the `note` context and gets the row that context already scoped to the tenant. A workspace is private to its tenant, so the root callable says `noindex` once for all of them. One parametrized integration test walks both tenants through the landing, the list, the create form and the editor.
+`inherit=True` runs the callable for every page below the root, the way `inherit_context=True` shares the `tenant` context of section 5. `site_name` feeds the `{title} · {site_name}` template of the settings tier, so `/notes/` reads `Notes · Acme Industries` under `X-Tenant: acme` and `Notes · Globex Corporation` under `globex`. `title.default` is what a page without a title of its own renders, which makes the landing tab the bare tenant name. The settings tier keeps its own `default`, which `manage.py check` requires beside a template, but no workspace page renders it any more. The pages below add titles in the two usual forms, a one-line dict on `/notes/` and `/notes/new/`, and on the editor a `@page.metadata` callable that declares `note: DObject[Note]` and gets the row the `note` context already loaded through `visible_to`. A workspace is private to its tenant, so the root callable says `noindex` once for all of them. One parametrized integration test walks both tenants through the landing, the list, the create form and the editor.
 
 ## Gotchas
 
@@ -242,12 +264,12 @@ def workspace_meta(active_tenant: DTenant) -> MetadataDict:
 - [`next/static/manager.py`](../../next/static/manager.py): the `StaticManager.inject` call site that threads `request`.
 - [`next/urls/backends.py`](../../next/urls/backends.py): the `FileRouterBackend.DIRS` handling that makes `root_pages/` work.
 - [`next/components/backends.py`](../../next/components/backends.py): the matching `FileComponentsBackend.DIRS` handling for `root_blocks/`.
-- [`next/deps/providers.py`](../../next/deps/providers.py): the `RegisteredParameterProvider` ABC used by `TenantProvider`.
+- [`next/deps/objects.py`](../../next/deps/objects.py): `DObject` and the provider that loads its row through `visible_to(scope)`.
 - [`next/pages/registry.py`](../../next/pages/registry.py): the `inherit_context` walk that lifts `tenant` to every descendant page.
 - [`next/pages/metadata/`](../../next/pages/metadata/): the metadata chain that runs the inherited tenant callable of section 8.
 - [`docs/content/topics/static-assets/backends.rst`](../../docs/content/topics/static-assets/backends.rst): the request-aware output section that this example anchors.
 - [`docs/content/security/static-assets.rst`](../../docs/content/security/static-assets.rst): the rule behind the theme key table in section 2.
-- [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst): the request-scoped provider pattern.
+- [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst): named dependencies and `Depends`.
 - [`docs/content/howto/enforce-object-level-permissions.rst`](../../docs/content/howto/enforce-object-level-permissions.rst): the `check_permissions` and `has_object_permission` hooks used in section 7.
 - [`docs/content/topics/forms/signals.rst`](../../docs/content/topics/forms/signals.rst): the `form_access_denied` payload contract.
-- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst): `next.W054` for `ComponentWidget`.
+- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst): `next.W054` for `ComponentWidget`, `next.E170` to `next.E175` and `next.W135` for `DObject` and `scope`.

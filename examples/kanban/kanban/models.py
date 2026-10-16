@@ -1,8 +1,13 @@
-from __future__ import annotations
+from typing import ClassVar, Self
 
-from typing import ClassVar
-
+from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 from django.db import models
+
+
+class BoardQuerySet(models.QuerySet):
+    def visible_to(self, user: AbstractBaseUser | AnonymousUser) -> Self:
+        """Return every board, since the demo has no accounts to narrow them by."""
+        return self.all()
 
 
 class Board(models.Model):
@@ -12,6 +17,8 @@ class Board(models.Model):
     slug = models.SlugField(max_length=140, unique=True)
     archived = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = BoardQuerySet.as_manager()
 
     class Meta:
         ordering: ClassVar = ["-created_at"]

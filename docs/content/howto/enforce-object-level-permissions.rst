@@ -47,6 +47,7 @@ The route segment ``[slug]`` captures the lookup value.
 The default ``get_initial`` loads ``Note.objects.get(slug=<captured slug>)`` through :func:`~django.shortcuts.get_object_or_404`.
 The dispatcher binds the form against that instance, then resolves ``has_object_permission``.
 At that point ``self.instance`` is the loaded ``Note``, so the hook compares its owner against the current user.
+That lookup itself is unscoped, so the hook is what refuses a foreign row, while a row loaded through ``DObject`` and ``visible_to(scope)`` never reaches the form in the first place, see :ref:`topics-di-dobject`.
 
 Combine it with a login requirement
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

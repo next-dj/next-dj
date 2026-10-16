@@ -9,14 +9,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self
 
+from django.dispatch import Signal
+
 from next import signals as framework_signals
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from types import TracebackType
-
-    from django.dispatch import Signal
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,9 +125,8 @@ def capture_framework_signals() -> SignalRecorder:
 
     Handy when a test verifies that nothing unexpected fires.
     """
-    tracked = tuple(
-        getattr(framework_signals, name) for name in framework_signals.__all__
-    )
+    exported = (getattr(framework_signals, name) for name in framework_signals.__all__)
+    tracked = tuple(value for value in exported if isinstance(value, Signal))
     return SignalRecorder(*tracked).start()
 
 

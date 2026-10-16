@@ -1,7 +1,11 @@
 import inspect
 from typing import NamedTuple
 
+import pytest
 from django import forms
+from django.contrib.auth.models import Group, Permission, User
+from django.contrib.contenttypes.models import ContentType
+from django.db.models import QuerySet
 
 from next.deps import ResolutionContext
 from next.deps.plan import InjectionPlan, ParameterFiller, ParameterPlan
@@ -68,3 +72,30 @@ class DeferringProvider:
 
     def static_can_handle(self, param: inspect.Parameter) -> bool | None:
         return None
+
+
+def _visible_content_types(scope: object) -> QuerySet[ContentType]:
+    return ContentType.objects.filter(app_label=scope)
+
+
+def _visible_permissions(scope: object) -> QuerySet[Permission]:
+    return Permission.objects.filter(content_type__app_label=scope)
+
+
+def _visible_groups(scope: object) -> QuerySet[Group]:
+    if isinstance(scope, User):
+        return scope.groups.all()
+    return Group.objects.filter(name__startswith=f"{scope}:")
+
+
+def install_visibility_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give the auth and contenttypes default managers a `visible_to` hook.
+
+    A group is visible to a member user or a name prefix, the rest to an app label.
+    """
+    for model, hook in (
+        (ContentType, _visible_content_types),
+        (Permission, _visible_permissions),
+        (Group, _visible_groups),
+    ):
+        monkeypatch.setattr(model._default_manager, "visible_to", hook, raising=False)

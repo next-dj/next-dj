@@ -11,9 +11,10 @@ from next.components import component
 from next.deps import Depends
 from next.forms import action
 from next.pages import context, page
+from next.signals import receiver
 
 
-_CURATED = frozenset({"Depends", "action", "component", "context", "page"})
+_CURATED = frozenset({"Depends", "action", "component", "context", "page", "receiver"})
 
 AREA_EXPORTS: dict[str, frozenset[str]] = {
     "next.consent": frozenset(
@@ -237,6 +238,7 @@ class TestCuratedSurface:
         assert next_dj.component is component
         assert next_dj.action is action
         assert next_dj.Depends is Depends
+        assert next_dj.receiver is receiver
 
     def test_unknown_name_raises_attribute_error(self) -> None:
         with pytest.raises(AttributeError, match="no attribute 'nonexistent'"):

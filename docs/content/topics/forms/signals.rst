@@ -5,7 +5,7 @@ Form signals
 
 The forms subsystem emits ``action_registered``, ``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``, ``form_backend_loaded``, and ``wizard_backend_loaded`` from ``next.forms.signals``.
 All eight import equivalently from the owning module or from the aggregator ``next.signals``.
-Register receiver imports from ``AppConfig.ready`` so receivers exist before the first request.
+Receivers in the ``signals.py`` of an app connect at startup, before the first request.
 
 Every dispatch-time signal (``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``) carries two shared keyword arguments.
 ``uid`` is the registry identity of the action, the same value the dispatch URL and the ``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores no uid in its meta.
@@ -19,19 +19,8 @@ Read what you need from it inside the receiver and do not retain the object past
 Connecting receivers
 --------------------
 
-Receivers live in ``signals.py``, a module that neither Django nor next.dj imports on its own.
-Import that module from ``AppConfig.ready`` so every receiver is connected before the first request.
-
-.. code-block:: python
-   :caption: notes/apps.py
-
-   from django.apps import AppConfig
-
-   class NotesConfig(AppConfig):
-       name = "notes"
-
-       def ready(self) -> None:
-           from notes import signals  # noqa: F401, PLC0415
+Receivers live in ``signals.py``, which the ``next`` application imports from every installed app at startup, so every receiver is connected before the first request.
+A project that sets ``SIGNALS_AUTODISCOVER`` to ``False`` imports the module from ``AppConfig.ready`` instead, see :doc:`/content/ref/settings`.
 
 .. _topics-forms-signals-action-registered:
 

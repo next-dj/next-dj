@@ -10,6 +10,7 @@ import inspect
 import logging
 import threading
 from operator import attrgetter
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast, override
 
 from django.utils.functional import SimpleLazyObject, empty
@@ -306,6 +307,10 @@ class DependencyResolver:
     def get_dependency(self, name: str) -> Callable[..., Any] | None:
         """Return the callable bound to `name`, or None when nothing is bound."""
         return self._dependency_callables.get(name)
+
+    def dependencies(self) -> Mapping[str, Callable[..., Any]]:
+        """Return a read-only view of every named dependency and its callable."""
+        return MappingProxyType(self._dependency_callables)
 
     def unregister_dependency(self, name: str) -> None:
         """Drop the binding for `name`, tolerating a name that has none."""
