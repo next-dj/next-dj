@@ -1,17 +1,20 @@
 """Guard and permission-hook enforcement for the form action dispatch pipeline."""
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import urlsplit, urlunsplit
 
 from django.conf import settings
 from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.core.exceptions import PermissionDenied
+from django.forms import BaseModelForm
 from django.http import HttpResponse, HttpResponseRedirect, QueryDict
 from django.shortcuts import resolve_url
 
 from next.forms.signals import form_access_denied
 from next.forms.uid import posted_origin_path, redirect_or_fallback
 from next.pages import page
+from next.permissions.manager import permission_manager
 
 from .build import _resolve_and_call
 
@@ -21,6 +24,7 @@ if TYPE_CHECKING:
     from typing import Protocol
 
     from django import forms as django_forms
+    from django.db.models import Model
     from django.http import HttpRequest, HttpResponseBase
 
     from next.forms.backends import ActionGuard
@@ -40,6 +44,11 @@ if TYPE_CHECKING:
 
         def has_object_permission(self) -> "PermissionOutcome": ...
 
+    class _PermissionHolder(Protocol):
+        """A user Django's auth backends answer `has_perm` for."""
+
+        def has_perm(self, perm: str, obj: "Model | None" = None) -> bool: ...
+
 
 def _redirect_to_login(next_url: str) -> HttpResponseRedirect:
     """Build the LOGIN_URL redirect with `next_url`, dropped past the redirect cap.
@@ -54,18 +63,63 @@ def _redirect_to_login(next_url: str) -> HttpResponseRedirect:
     return redirect_or_fallback(urlunsplit(target), login_url)
 
 
+_NO_PERMISSIONS: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _Split:
+    """The guard permissions checked up front and the ones a predicate answers."""
+
+    version: int
+    static: tuple[str, ...]
+    registered: tuple[str, ...]
+
+
+_splits: dict[tuple[str, ...], _Split] = {}
+
+
+def _split_permissions(permissions: tuple[str, ...]) -> _Split:
+    """Split guard permissions into the static ones and the registered object ones.
+
+    The split is kept per tuple until the permission registry changes.
+    """
+    version = permission_manager.version
+    held = _splits.get(permissions)
+    if held is not None and held.version == version:
+        return held
+    registered = tuple(
+        perm for perm in permissions if permission_manager.is_registered(perm)
+    )
+    static = (
+        tuple(perm for perm in permissions if perm not in registered)
+        if registered
+        else permissions
+    )
+    held = _splits[permissions] = _Split(version, static, registered)
+    return held
+
+
+def _object_permissions(guard: "ActionGuard | None") -> tuple[str, ...]:
+    """Return the guard permissions a registered predicate answers per object."""
+    if guard is None or not guard.permissions:
+        return _NO_PERMISSIONS
+    return _split_permissions(guard.permissions).registered
+
+
 def _check_access(
-    request: "HttpRequest", guard: "ActionGuard"
+    request: "HttpRequest", guard: "ActionGuard", *, object_stage: bool = False
 ) -> HttpResponseRedirect | None:
     """Enforce the action guard with `AccessMixin` semantics.
 
-    Anonymous users get a login redirect whose `next` is the validated posted
-    origin, authenticated users missing a permission raise PermissionDenied.
+    Anonymous users are sent to log in, and `object_stage` defers registered perms.
     """
     user = getattr(request, "user", None)
     if user is None or not user.is_authenticated:
         return _redirect_to_login(posted_origin_path(request) or "/")
-    if guard.permissions and not user.has_perms(guard.permissions):
+    permissions = guard.permissions
+    if permissions and object_stage:
+        permissions = _split_permissions(permissions).static
+    if permissions and not user.has_perms(permissions):
         raise PermissionDenied
     return None
 
@@ -202,6 +256,42 @@ def _enforce_view_permissions(
     return _enforce_permission_hook(
         request, action_name, state, hook=hook, layer="view"
     )
+
+
+def _permission_object(form: "django_forms.Form") -> "Model | None":
+    """Return the saved instance a model form edits, `None` for anything else."""
+    if not isinstance(form, BaseModelForm):
+        return None
+    instance: Model = form.instance
+    return None if instance._state.adding else instance
+
+
+def _enforce_registered_permissions(
+    form: "django_forms.Form",
+    request: "HttpRequest",
+    action_name: str,
+    permissions: tuple[str, ...],
+    state: "_DispatchState",
+) -> None:
+    """Check each registered guard permission against the object the form binds.
+
+    A denial raises PermissionDenied, as a `has_object_permission` returning False does.
+    """
+    if not permissions:
+        return
+    obj = _permission_object(form)
+    user = cast("_PermissionHolder", request.user)
+    for perm in permissions:
+        if not user.has_perm(perm, obj):
+            _emit_form_access_denied(
+                request,
+                action_name,
+                state.uid,
+                layer="object",
+                reason="denied",
+                sender=state.signal_sender,
+            )
+            raise PermissionDenied
 
 
 def _enforce_object_permissions(

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from django.template import Context
 from django.template.base import Template
@@ -15,6 +17,9 @@ from next.partial.registry import (
 from next.partial.signals import patch_op_registered, zone_registered
 from next.partial.zone import ZoneOptions
 from next.testing import capture_signals
+
+
+_PAGE = Path("/srv/pages/page.py")
 
 
 class TestBuiltinOps:
@@ -151,34 +156,34 @@ class TestZonesOf:
     """`zones_of` derives the named zones of a compiled template."""
 
     def test_indexes_zones_by_name(self) -> None:
-        zones = zones_of(_zoned_template())
+        zones = zones_of(_zoned_template(), _PAGE)
         assert set(zones) == {"first", "second"}
         assert isinstance(zones["first"], ZoneInfo)
 
     def test_carries_tag_and_lazy(self) -> None:
-        zones = zones_of(_zoned_template())
+        zones = zones_of(_zoned_template(), _PAGE)
         assert zones["first"].tag == "div"
         assert zones["first"].lazy is None
         assert zones["second"].tag == "tbody"
         assert zones["second"].lazy == "load"
 
     def test_carries_no_poll_without_the_kwarg(self) -> None:
-        zones = zones_of(_zoned_template())
+        zones = zones_of(_zoned_template(), _PAGE)
         assert zones["first"].poll is None
         assert zones["second"].poll is None
 
     def test_zone_info_carries_poll(self) -> None:
         template = Template('{% zone "z" poll="5s" %}b{% endzone %}')
-        info = zones_of(template)["z"]
+        info = zones_of(template, _PAGE)["z"]
         assert info.poll == 5000
 
     def test_zone_info_carries_structured_options(self) -> None:
-        zones = zones_of(_zoned_template())
+        zones = zones_of(_zoned_template(), _PAGE)
         assert zones["first"].options == ZoneOptions()
         assert zones["second"].options == ZoneOptions(tag="tbody", lazy="load")
 
     def test_zone_info_scalars_delegate_to_options(self) -> None:
-        zones = zones_of(_zoned_template())
+        zones = zones_of(_zoned_template(), _PAGE)
         info = zones["second"]
         assert info.lazy == info.options.lazy
         assert info.poll == info.options.poll
@@ -186,25 +191,25 @@ class TestZonesOf:
 
     def test_zone_info_options_carry_the_delivery_attrs(self) -> None:
         template = Template('{% zone "z" poll="5s" %}b{% endzone %}')
-        info = zones_of(template)["z"]
+        info = zones_of(template, _PAGE)["z"]
         assert info.options == ZoneOptions(poll=5000)
         assert info.options.delivery_attrs == ' data-next-poll="5000"'
 
     def test_empty_template_has_no_zones(self) -> None:
-        assert zones_of(Template("plain {{ x }}")) == {}
+        assert zones_of(Template("plain {{ x }}"), _PAGE) == {}
 
     def test_memoised_per_object(self) -> None:
         template = _zoned_template()
-        assert zones_of(template) is zones_of(template)
+        assert zones_of(template, _PAGE) is zones_of(template, _PAGE)
 
     def test_distinct_objects_get_distinct_entries(self) -> None:
-        first = zones_of(_zoned_template())
-        second = zones_of(_zoned_template())
+        first = zones_of(_zoned_template(), _PAGE)
+        second = zones_of(_zoned_template(), _PAGE)
         assert first is not second
         assert set(first) == set(second)
 
     def test_partial_renders_standalone(self) -> None:
-        zones = zones_of(_zoned_template())
+        zones = zones_of(_zoned_template(), _PAGE)
         out = zones["first"].partial.render(Context({"a": "deep"}))
         assert out == "<p>deep</p>"
 
@@ -224,15 +229,15 @@ class TestZoneInfoNested:
     """`ZoneInfo.nested` names the zones declared inside the zone body."""
 
     def test_leaf_zone_has_no_nested_names(self) -> None:
-        zones = zones_of(_nested_template())
+        zones = zones_of(_nested_template(), _PAGE)
         assert zones["deep"].nested == frozenset()
 
     def test_zone_names_its_direct_child(self) -> None:
-        zones = zones_of(_nested_template())
+        zones = zones_of(_nested_template(), _PAGE)
         assert zones["inner"].nested == frozenset({"deep"})
 
     def test_nesting_is_transitive(self) -> None:
-        zones = zones_of(_nested_template())
+        zones = zones_of(_nested_template(), _PAGE)
         assert zones["outer"].nested == frozenset({"inner", "deep"})
 
     def test_placeholder_branch_stays_out(self) -> None:
@@ -240,12 +245,12 @@ class TestZoneInfoNested:
             '{% zone "host" lazy="load" %}body{% placeholder %}'
             '{% zone "ph" %}x{% endzone %}{% endzone %}'
         )
-        zones = zones_of(template)
+        zones = zones_of(template, _PAGE)
         assert set(zones) == {"host", "ph"}
         assert zones["host"].nested == frozenset()
 
     def test_plain_zone_map_carries_empty_nested(self) -> None:
-        zones = zones_of(_zoned_template())
+        zones = zones_of(_zoned_template(), _PAGE)
         assert zones["first"].nested == frozenset()
         assert zones["second"].nested == frozenset()
 
@@ -256,14 +261,14 @@ class TestZoneRegisteredSignal:
     def test_fires_once_per_object(self) -> None:
         template = _zoned_template()
         with capture_signals(zone_registered) as recorded:
-            zones_of(template)
-            zones_of(template)
+            zones_of(template, _PAGE)
+            zones_of(template, _PAGE)
         names = sorted(str(event.kwargs["zone_name"]) for event in recorded)
         assert names == ["first", "second"]
 
     def test_sends_lazy_and_poll_kwargs(self) -> None:
         with capture_signals(zone_registered) as recorded:
-            zones_of(Template('{% zone "z" poll="5s" %}b{% endzone %}'))
+            zones_of(Template('{% zone "z" poll="5s" %}b{% endzone %}'), _PAGE)
         assert len(recorded) == 1
         event = recorded.first_for(zone_registered)
         assert event.kwargs["zone_name"] == "z"
@@ -271,7 +276,7 @@ class TestZoneRegisteredSignal:
         assert event.kwargs["poll"] == 5000
 
     def test_quiet_without_receivers(self) -> None:
-        assert zones_of(_zoned_template())
+        assert zones_of(_zoned_template(), _PAGE)
 
 
 class TestZoneRequested:

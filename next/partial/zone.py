@@ -12,6 +12,8 @@ from django.utils.text import unescape_string_literal
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from django.template.base import Origin, Parser, Token
     from django.template.context import Context
 
@@ -192,6 +194,37 @@ class ZoneNode(Node):
         return render_zone_standalone(self.partial, self.name, options, context)
 
 
+type Ancestor = type[Node] | tuple[type[Node], ...]
+"""A node class, or several, whose subtree a walk tells apart."""
+
+
+def child_nodelists(node: Node) -> "Iterator[NodeList]":
+    """Yield each child node list a node declares on `child_nodelists`."""
+    for attr in node.child_nodelists:
+        nodelist = getattr(node, attr, None)
+        if isinstance(nodelist, NodeList):
+            yield nodelist
+
+
+def nodes_under(
+    nodelist: NodeList, ancestor: "Ancestor", *, inside: bool = False
+) -> "Iterator[Node]":
+    """Yield every node below an `ancestor` node, at any depth."""
+    for node in nodelist:
+        if inside:
+            yield node
+        now_inside = inside or isinstance(node, ancestor)
+        for child in child_nodelists(node):
+            yield from nodes_under(child, ancestor, inside=now_inside)
+
+
+def zones_under(nodelist: NodeList, ancestor: "Ancestor") -> "Iterator[str]":
+    """Yield the name of every zone below an `ancestor` node, zone bodies included."""
+    for node in nodes_under(nodelist, ancestor):
+        if isinstance(node, ZoneNode):
+            yield node.name
+
+
 def _parse_options(token: "Token") -> tuple[str, ZoneOptions]:
     """Return the zone name and its parsed rendering options."""
     bits = token.split_contents()
@@ -300,11 +333,15 @@ __all__ = [
     "LAZY_ATTR",
     "POLL_ATTR",
     "ZONE_ATTR",
+    "Ancestor",
     "ZoneNode",
     "ZoneOptions",
     "ZonePartial",
+    "child_nodelists",
     "do_zone",
+    "nodes_under",
     "register",
     "render_zone_body",
     "render_zone_standalone",
+    "zones_under",
 ]

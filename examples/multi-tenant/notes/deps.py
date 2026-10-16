@@ -1,7 +1,7 @@
 from django.http import HttpRequest
 
 from next.deps import resolver
-from notes.access import get_active_tenant
+from notes.middleware import get_active_tenant
 from notes.models import Tenant
 
 

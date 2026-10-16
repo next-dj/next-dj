@@ -59,7 +59,7 @@ Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_componen
 
 The chain has three links:
 
-1. [`notes/middleware.py`](notes/middleware.py) parses `X-Tenant` and looks up the matching `Tenant` row. Missing slug → `400`. Unknown slug → `404`. Match → `request.tenant = tenant`. Both refusals answer with a fixed body built from a module constant, never from the submitted slug, and the middleware docstring carries the proxy obligations the header shape rests on. Paths under `/_t/` return early without resolving anything, because the per-tenant asset URLs of section 2 already carry the slug in the path and a browser never puts the header on an asset request. That early return is safe only because nothing tenant-owned lives under the prefix: [`config/urls.py`](config/urls.py) discards the slug and serves the same shared file whichever tenant a URL names, so the prefix is a cache key rather than an isolation boundary, and no page route can be reached through it.
+1. [`notes/middleware.py`](notes/middleware.py) parses `X-Tenant` and looks up the matching `Tenant` row. Missing slug → `400`. Unknown slug → `404`. Match → `request.tenant = tenant`, which the module's `get_active_tenant` reads back for every Python consumer. Both refusals answer with a fixed body built from a module constant, never from the submitted slug, and the middleware docstring carries the proxy obligations the header shape rests on. Paths under `/_t/` return early without resolving anything, because the per-tenant asset URLs of section 2 already carry the slug in the path and a browser never puts the header on an asset request. That early return is safe only because nothing tenant-owned lives under the prefix: [`config/urls.py`](config/urls.py) discards the slug and serves the same shared file whichever tenant a URL names, so the prefix is a cache key rather than an isolation boundary, and no page route can be reached through it.
 2. [`notes/deps.py`](notes/deps.py) registers the named dependency `scope`, which returns the tenant of the request through `get_active_tenant`. The framework imports the `deps.py` and `signals.py` of every installed app at startup, so `NotesConfig` has no `ready()` at all.
 
    ```python
@@ -215,12 +215,14 @@ class NoteEditForm(ModelForm):
 
 A bare `403` carries no body to re-render, so the editor says up front what the guard will refuse. The template reads the same `locked` flag off the `note` context, shows a warning alert, and disables the save button. The disabled button only announces the rule. The hook is what enforces it.
 
+Neither rule mentions a user, which is why they stay hooks rather than `next.permissions` predicates. A predicate answers `user.has_perm(perm, note)` for an account, and this workspace signs nobody in, so every visitor is anonymous and holds no permission at all. The tenant comes from the request, which a predicate never sees.
+
 Both hooks emit `next.signals.form_access_denied` on a denial, carrying the `action_name`, `uid`, `request`, the `layer` (`"view"` or `"object"`), and the `reason` (`"raised"`, `"denied"`, or `"response"`). The signal stays silent when both hooks allow the request.
 
 The `notes` app consumes that signal. [`notes/signals.py`](notes/signals.py) connects a receiver that logs each denial under the `notes.access` logger, reading the active tenant through `get_active_tenant` so the line names the tenant whose edit was refused. The framework imports `signals.py` at startup, so the connection is live without an import in `ready()`.
 
 ```python
-from .access import get_active_tenant
+from .middleware import get_active_tenant
 
 
 @receiver(form_access_denied)

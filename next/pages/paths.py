@@ -7,14 +7,10 @@ and dropped by the lifecycle that rebuilds a composition.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from next.caches import PageCache
 from next.utils import MAX_ANCESTOR_WALK_DEPTH
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +38,11 @@ def page_path_info(file_path: Path) -> PagePathInfo:
         info = _build_page_path_info(file_path)
         _PAGE_PATH_INFO_CACHE[file_path] = info
     return info
+
+
+def page_template_path(page_path: Path) -> Path:
+    """Return the template a component tag of the page resolves against."""
+    return Path(page_path_info(page_path).template_path).resolve()
 
 
 def _build_page_path_info(file_path: Path) -> PagePathInfo:

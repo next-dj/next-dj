@@ -16,7 +16,6 @@ from typing import Any, cast, override
 from django import template
 from django.template.base import (
     FilterExpression,
-    Node,
     NodeList,
     Parser,
     Token,
@@ -26,7 +25,7 @@ from django.template.base import (
 from django.utils.safestring import SafeString
 
 from next.components import collect_visible_components, get_component, render_component
-from next.components.nodes import ComponentTagNode
+from next.components.nodes import ComponentTagNode, SetSlotTagNode, SlotTagNode
 from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY, SLOT_KEY_PREFIX
 from next.conf import fail_loudly, next_framework_settings
 from next.seeding import COLLECTOR_KEY, REQUEST_KEY, TEMPLATE_PATH_KEY
@@ -152,7 +151,7 @@ class _SlotCollector:
     slots: dict[str, str]
 
 
-class SlotNode(Node):
+class SlotNode(SlotTagNode):
     """Fills a named slot of the component whose body holds it."""
 
     def __init__(self, name: str, nodelist: NodeList) -> None:
@@ -338,7 +337,7 @@ class ComponentNode(ComponentTagNode):
         return render_component(info, render_ctx, request=request)
 
 
-class SetSlotNode(Node):
+class SetSlotNode(SetSlotTagNode):
     """Uses injected slot HTML from the parent, or renders the fallback body."""
 
     def __init__(self, name: str, nodelist: NodeList) -> None:

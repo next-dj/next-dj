@@ -16,6 +16,7 @@ _BUILTIN_MODULES = (
     "next.templatetags.next_static",
     "next.templatetags.pages",
     "next.templatetags.partial",
+    "next.templatetags.permissions",
     "next.templatetags.scripts",
 )
 
@@ -33,6 +34,7 @@ _NEXT_TAG_NAMES = (
     "component",
     "consented",
     "form",
+    "has_perm",
     "metadata",
     "script",
     "set_slot",

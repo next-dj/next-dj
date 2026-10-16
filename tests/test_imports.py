@@ -8,6 +8,8 @@ import textwrap
 from pathlib import Path
 from typing import TypeAliasType
 
+import pytest
+
 from tests.django_setup import PROJECT_ROOT
 
 
@@ -197,6 +199,57 @@ def _setup_with_early_app(app_parent: Path) -> str | None:
         env={**os.environ, "PYTHONPATH": os.pathsep.join([str(app_parent), "."])},
     )
     return _failure(completed)
+
+
+def _loaded_by(module: str) -> set[str]:
+    """Return every module a fresh interpreter holds after importing `module`.
+
+    Settings are configured but `django.setup()` never runs, so no app is loaded.
+    """
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import importlib, json, sys\n"
+                "from django.conf import settings\n"
+                "from tests.django_setup import build_test_settings\n"
+                "settings.configure(**build_test_settings())\n"
+                "importlib.import_module(sys.stdin.read())\n"
+                "print(json.dumps(sorted(sys.modules)))\n"
+            ),
+        ],
+        cwd=PROJECT_ROOT,
+        input=module,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return set(json.loads(completed.stdout))
+
+
+@pytest.fixture(scope="module")
+def loaded() -> set[str]:
+    return _loaded_by("next.permissions")
+
+
+class TestPermissionsImportHygiene:
+    """The permissions area loads before the app registry and apart from its users."""
+
+    def test_no_auth_model_is_imported(self, loaded: set[str]) -> None:
+        assert "next.permissions.backends" in loaded
+        assert "django.contrib.auth.models" not in loaded
+
+    @pytest.mark.parametrize("area", ["next.forms", "next.partial"])
+    def test_no_area_that_uses_it_is_imported(
+        self, loaded: set[str], area: str
+    ) -> None:
+        assert (
+            sorted(
+                name for name in loaded if name == area or name.startswith(f"{area}.")
+            )
+            == []
+        )
 
 
 class TestImportOrder:

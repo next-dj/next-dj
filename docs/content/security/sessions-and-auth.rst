@@ -27,6 +27,7 @@ The action guard is the one place the framework reads the user itself.
 Beyond that guard the framework runs project code that reads the user on its behalf.
 A submission is authorized by the page its origin names, which means that page's ``render()`` runs on the POST and whatever identity check it performs decides the answer, see :doc:`/content/topics/pages`.
 The dynamic ``check_permissions`` and ``has_object_permission`` hooks read the user the same way, from application code the dispatcher calls.
+A permission registered in a ``permissions.py`` runs its predicate on the user and the bound row, through ``ObjectPermissionBackend`` in ``AUTHENTICATION_BACKENDS``, see :doc:`/content/topics/permissions`.
 
 Where the framework writes to the session
 -----------------------------------------

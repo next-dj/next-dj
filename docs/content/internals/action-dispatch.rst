@@ -45,7 +45,10 @@ Pipeline
        ViewHook -- "allow, wizard_class" --> WizardStep["Bind current wizard step"]
        HandlerOnly --> HandlerOnlyResponse["Handler response or HTTP 204"]
        HandlerOnly --> ActionDispatched["action_dispatched signal"]
-       Build --> ObjectHook{"has_object_permission hook"}
+       Build --> RegisteredPerms{"Registered permissions on the bound row"}
+       RegisteredPerms -- "deny" --> RegisteredDenied["HTTP 403"]
+       RegisteredPerms -- "deny" --> AccessDenied
+       RegisteredPerms -- allow --> ObjectHook{"has_object_permission hook"}
        WizardStep --> ObjectHook
        ObjectHook -- "deny" --> ObjectDenied["HTTP 403 or response"]
        ObjectHook -- "deny" --> AccessDenied
@@ -149,6 +152,11 @@ Access guard
 An action that declares ``login_required`` or ``permission_required`` carries an ``ActionGuard`` in its registry metadata under the ``guard`` key.
 The shared pipeline enforces this static guard right after origin resolution and ahead of the page authorization, ``get_initial``, and form binding, so no application code or database access runs for a request the static guard denies.
 An anonymous user receives a redirect to ``LOGIN_URL`` whose ``next`` is the validated posted origin, and an authenticated user missing a permission raises ``PermissionDenied``.
+
+On the form-class branch the guard leaves out every permission ``next.permissions`` has registered, and ``_enforce_registered_permissions`` checks them once the form binds, as ``user.has_perm(perm, obj)``.
+``obj`` is the instance of a ``ModelForm`` that edits a saved row and ``None`` otherwise, and a refusal raises ``PermissionDenied`` after sending ``form_access_denied`` with ``layer="object"`` and ``reason="denied"``.
+The split between the two sets is kept per permission tuple until the registry version moves.
+The wizard and handler-only branches bind no form at the guard, so the guard checks every permission there with no object.
 Every backend that delegates to ``FormActionDispatch.dispatch`` inherits the enforcement.
 
 Origin page authorization

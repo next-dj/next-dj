@@ -114,8 +114,8 @@ Each family owns its own signal rather than sharing one, so a receiver connected
    * - ``form_access_denied``
      - ``FormActionDispatch``
      - ``action_name``, ``uid``, ``request``, ``layer``, ``reason``
-     - When the origin page or a dynamic permission hook denies a request, never on the static guard path.
-       ``layer`` is ``"page"``, ``"view"``, or ``"object"``.
+     - When the origin page, a dynamic permission hook, or a registered permission checked on the bound form denies a request, never on the static guard path.
+       ``layer`` is ``"page"``, ``"view"``, or ``"object"``, and a registered permission refused on the bound form is ``"object"`` with ``"denied"``.
        ``reason`` is ``"raised"``, ``"denied"``, or ``"response"``, and a ``"page"`` denial is always ``"response"``.
    * - ``form_backend_loaded``
      - The form action backend class
@@ -151,6 +151,11 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``PatchOpRegistry``
      - ``name``
      - After a custom patch verb is registered through ``register_patch_op``.
+   * - ``permission_registered``
+     - ``PermissionRegistry``
+     - ``name``, ``predicate``
+     - After ``add_perm`` binds a predicate to a new permission name.
+       ``predicate`` is the ``Predicate`` registered, and a repeated registration of an equal predicate sends nothing.
    * - ``provider_registered``
      - The ``RegisteredParameterProvider`` subclass
      - none
@@ -295,6 +300,12 @@ Dependencies
 ~~~~~~~~~~~~
 
 .. automodule:: next.deps.signals
+   :members:
+
+Permissions
+~~~~~~~~~~~
+
+.. automodule:: next.permissions.signals
    :members:
 
 Server

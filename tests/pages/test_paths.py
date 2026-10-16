@@ -4,7 +4,13 @@ import pytest
 
 from next.caches import BoundedCache
 from next.pages import paths as paths_mod
-from next.pages.paths import clear_page_path_info, forget_page_path_info, page_path_info
+from next.pages.checks.metadata import templates as metadata_templates
+from next.pages.paths import (
+    clear_page_path_info,
+    forget_page_path_info,
+    page_path_info,
+    page_template_path,
+)
 from next.utils import MAX_ANCESTOR_WALK_DEPTH
 from tests.support import assert_bounded_by_insert_age
 
@@ -140,3 +146,30 @@ class TestPagePathInfoBound:
             page_path_info,
             [tmp_path / name / "page.py" for name in ("a", "b", "c")],
         )
+
+
+class TestPageTemplatePath:
+    """The template a component tag of a page resolves against, as a resolved path."""
+
+    def test_the_sibling_template_djx(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1")
+        (tmp_path / "template.djx").write_text("<p>body</p>")
+        assert page_template_path(page_file) == (tmp_path / "template.djx").resolve()
+
+    def test_the_page_itself_without_a_template(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1")
+        assert page_template_path(page_file) == page_file.resolve()
+
+    def test_a_symlinked_tree_resolves(self, tmp_path) -> None:
+        real = tmp_path / "real"
+        real.mkdir()
+        (real / "page.py").write_text("x = 1")
+        (real / "template.djx").write_text("<p>body</p>")
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        assert page_template_path(link / "page.py") == (real / "template.djx")
+
+    def test_the_metadata_check_module_re_exports_it(self) -> None:
+        assert metadata_templates.page_template_path is page_template_path

@@ -1,6 +1,6 @@
 from typing import Any
 
-from access.policy import POLICY_FIELD
+from access.forms import POLICY_FIELD
 from django import forms as django_forms
 
 from next import component

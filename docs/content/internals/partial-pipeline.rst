@@ -125,8 +125,9 @@ Rendering a zone
 ``render_zone`` takes the page path and the requested names and performs five steps.
 
 First it compiles the page, through ``page.composed_template_for``, which is the same composed template a full render uses, layout chain included.
-Second it indexes the zones of that template with ``zones_of``.
-Third it reduces the requested names to the declared ones, deduplicated in request order.
+Second it indexes the zones of that template with ``zones_of(template, page_path)``.
+Third it reduces the requested names to the declared ones that may render on their own, deduplicated in request order.
+A zone whose ``ZoneInfo.standalone`` is ``False``, one under a ``{% has_perm %}``, an ``{% if %}``, or a ``{% for %}``, or in the body of a component whose template reaches a ``{% has_perm %}``, is dropped as if it were undeclared.
 An undeclared name is dropped, so one stale name in a batch never poisons the rest, and only a batch left with nothing declared raises ``UnknownZoneError``, which the view turns into a 400.
 
 Fourth it builds the render context for the batch.
@@ -146,6 +147,8 @@ The two registries in ``next.partial.registry`` have nothing in common but their
 
 ``zones`` is a read-through index rather than a registration point.
 ``zones_of`` walks a compiled template once for its ``ZoneNode`` instances, builds a ``ZoneInfo`` per name, and memoises the mapping in a ``WeakKeyDictionary`` keyed on the template object.
+The page path anchors the component lookups of ``next.partial.guards``, the analysis ``next.E163`` reads as well, which sets ``standalone`` on each ``ZoneInfo``.
+The entry keeps the files that analysis read with their modification times, so with ``DEBUG`` on an edit to one of them recomputes ``standalone`` on the next read.
 A recompiled page is a different object, so it gets a fresh entry and the old one is collected with the template it belonged to.
 The first read of a template announces each zone through ``zone_registered``, which is why the signal fires on a render rather than at startup.
 

@@ -25,16 +25,18 @@
     {% else %}
       <p class="px-2 text-sm text-muted-foreground">No registered apps.</p>
     {% endif %}
-    <div class="mt-6">
-      <div class="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Auditing</div>
-      <ul class="space-y-0.5">
-        <li>
-          <a href="/admin/activity/"
-             class="block rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground">
-            Activity feed
-          </a>
-        </li>
-      </ul>
-    </div>
+    {% has_perm "admin_audit.view_adminactivitylog" %}
+      <div class="mt-6">
+        <div class="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Auditing</div>
+        <ul class="space-y-0.5">
+          <li>
+            <a href="/admin/activity/"
+               class="block rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground">
+              Activity feed
+            </a>
+          </li>
+        </ul>
+      </div>
+    {% endhas_perm %}
   </nav>
 </aside>

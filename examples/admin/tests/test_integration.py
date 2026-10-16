@@ -5,11 +5,15 @@ from io import StringIO
 
 import pytest
 from admin_audit.models import AdminActivityLog
+from django.contrib import admin
+from django.contrib.auth.models import Group, Permission
+from django.core.checks import run_checks
 from django.core.management import call_command
 from django.db.models import UniqueConstraint
 from django.urls import reverse
 from library.demo import DEMO_BOOKS, seed_demo
 from library.models import Book, Chapter, Tag
+from shadcn_admin.forms import AdminFormSpec, AdminInlineSpec, InlineRights
 
 from next.testing import (
     NextClient,
@@ -384,12 +388,15 @@ class TestChangelistChrome:
         assert "ACTION CHECKBOX" not in body
         assert "action checkbox" not in body.lower()
 
-    def test_delete_selected_description_is_interpolated(self, admin_client):
-        """Django ships `delete_selected` with a `%(verbose_name_plural)s` slot."""
-        r = admin_client.get("/admin/library/tag/")
-        body = r.content.decode()
+    def test_action_descriptions_are_interpolated(self, admin_client):
+        """`mark_as_published` carries a `%(verbose_name_plural)s` slot."""
+        body = admin_client.get("/admin/library/book/").content.decode()
         assert "%(verbose_name_plural)s" not in body
-        assert "Delete selected tags" in body
+        assert "Mark selected books as published" in body
+
+    def test_the_site_offers_no_delete_selected(self, admin_client):
+        body = admin_client.get("/admin/library/tag/").content.decode()
+        assert 'value="delete_selected"' not in body
 
     def test_action_labels_come_from_a_version_stable_admin_api(self, admin_client):
         """`get_actions` answers a tuple on Django 5.2 and an `Action` from 6.0.
@@ -404,7 +411,6 @@ class TestChangelistChrome:
         assert r.status_code == 200
         body = r.content.decode()
         assert "Mark selected books as published" in body
-        assert "Delete selected books" in body
 
 
 class TestBulkAction:
@@ -1477,3 +1483,517 @@ class TestPageMetadata:
     )
     def test_no_seo_route_is_mounted(self, admin_client, path):
         assert admin_client.get(path).status_code == 404
+
+
+def _book_payload(book: Book, **fields: str) -> dict[str, str]:
+    return {
+        "title": book.title,
+        "author": str(book.author.pk),
+        "status": book.status,
+        "summary": "",
+        "price": "0",
+        **fields,
+    }
+
+
+class StockChapterInline(admin.TabularInline):
+    model = Chapter
+
+
+class TestObjectPermissions:
+    """The editor changes and deletes draft books only, the superuser everything."""
+
+    def test_has_perm_asks_the_predicates_for_the_editor(self, editor, make_book):
+        draft = make_book(status=Book.DRAFT)
+        published = make_book(status=Book.PUBLISHED)
+        assert editor.has_perm("library.change_book", draft) is True
+        assert editor.has_perm("library.change_book", published) is False
+        assert editor.has_perm("library.change_book") is True
+        assert editor.has_perm("library.delete_book", published) is False
+        assert editor.has_perm("admin_audit.view_adminactivitylog") is False
+
+    def test_the_superuser_holds_every_row(self, admin_user, make_book):
+        published = make_book(status=Book.PUBLISHED)
+        assert admin_user.has_perm("library.change_book", published) is True
+        assert admin_user.has_perm("library.delete_book", published) is True
+
+    def test_the_editor_sees_the_library_and_nothing_else(self, editor_client):
+        body = editor_client.get("/admin/").content.decode()
+        assert "Books" in body
+        assert "Admin activity" not in body
+        assert "Users" not in body
+
+    def test_a_draft_offers_save_and_delete_to_the_editor(
+        self, editor_client, make_book
+    ):
+        draft = make_book(status=Book.DRAFT)
+        body = editor_client.get(f"/admin/library/book/{draft.pk}/change/")
+        html = body.content.decode()
+        assert 'name="_save_continue"' in html
+        assert f"/admin/library/book/{draft.pk}/delete/" in html
+        assert "data-read-only" not in html
+
+    def test_a_published_book_is_read_only_for_the_editor(
+        self, editor_client, make_book
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        html = editor_client.get(
+            f"/admin/library/book/{published.pk}/change/"
+        ).content.decode()
+        assert "data-read-only" in html
+        assert 'name="_save_continue"' not in html
+        assert f"/admin/library/book/{published.pk}/delete/" not in html
+
+    def test_a_published_book_keeps_its_buttons_for_the_superuser(
+        self, admin_client, make_book
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        html = admin_client.get(
+            f"/admin/library/book/{published.pk}/change/"
+        ).content.decode()
+        assert 'name="_save_continue"' in html
+        assert "data-read-only" not in html
+
+    def test_the_editor_saves_a_draft(self, editor_client, make_book):
+        draft = make_book("Draft", status=Book.DRAFT)
+        r = editor_client.post_action(
+            "admin:change",
+            _book_payload(draft, title="Revised"),
+            origin=f"/admin/library/book/{draft.pk}/change/",
+        )
+        assert r.status_code == 302
+        draft.refresh_from_db()
+        assert draft.title == "Revised"
+
+    def test_the_editor_cannot_save_a_published_book(self, editor_client, make_book):
+        published = make_book("Locked", status=Book.PUBLISHED)
+        r = editor_client.post_action(
+            "admin:change",
+            _book_payload(published, title="Hacked"),
+            origin=f"/admin/library/book/{published.pk}/change/",
+        )
+        assert r.status_code == 403
+        published.refresh_from_db()
+        assert published.title == "Locked"
+
+    def test_demoting_a_published_book_to_draft_is_refused(
+        self, editor_client, make_book
+    ):
+        published = make_book("Locked", status=Book.PUBLISHED)
+        r = editor_client.post_action(
+            "admin:change",
+            _book_payload(published, title="Hacked", status=Book.DRAFT),
+            origin=f"/admin/library/book/{published.pk}/change/",
+        )
+        assert r.status_code == 403
+        published.refresh_from_db()
+        assert (published.title, published.status) == ("Locked", Book.PUBLISHED)
+
+    def test_an_invalid_demotion_is_refused_too(self, editor_client, make_book):
+        published = make_book("Locked", status=Book.PUBLISHED)
+        r = editor_client.post_action(
+            "admin:change",
+            _book_payload(published, title="", status=Book.DRAFT),
+            origin=f"/admin/library/book/{published.pk}/change/",
+        )
+        assert r.status_code == 403
+
+    def test_publishing_a_draft_shows_the_refusal(self, editor_client, make_book):
+        draft = make_book("Draft", status=Book.DRAFT)
+        r = editor_client.post_action(
+            "admin:change",
+            _book_payload(draft, status=Book.PUBLISHED),
+            origin=f"/admin/library/book/{draft.pk}/change/",
+        )
+        assert "You may not save this book in this state." in r.content.decode()
+
+    def test_the_editor_may_not_publish_a_draft(self, editor_client, make_book):
+        draft = make_book("Draft", status=Book.DRAFT)
+        r = editor_client.post_action(
+            "admin:change",
+            _book_payload(draft, status=Book.PUBLISHED),
+            origin=f"/admin/library/book/{draft.pk}/change/",
+        )
+        assert r.status_code == 200
+        draft.refresh_from_db()
+        assert draft.status == Book.DRAFT
+
+    def test_the_editor_may_not_add_a_published_book(self, editor_client, author):
+        r = editor_client.post_action(
+            "admin:add",
+            {
+                "title": "Born published",
+                "author": str(author.pk),
+                "status": Book.PUBLISHED,
+                "summary": "",
+                "price": "0",
+            },
+            origin="/admin/library/book/add/",
+        )
+        assert r.status_code == 200
+        assert not Book.objects.filter(title="Born published").exists()
+
+    def test_the_superuser_publishes_a_draft(self, admin_client, make_book):
+        draft = make_book("Draft", status=Book.DRAFT)
+        r = admin_client.post_action(
+            "admin:change",
+            _book_payload(draft, status=Book.PUBLISHED),
+            origin=f"/admin/library/book/{draft.pk}/change/",
+        )
+        assert r.status_code == 302
+        draft.refresh_from_db()
+        assert draft.status == Book.PUBLISHED
+
+    def test_the_superuser_saves_a_published_book(self, admin_client, make_book):
+        published = make_book("Locked", status=Book.PUBLISHED)
+        r = admin_client.post_action(
+            "admin:change",
+            _book_payload(published, title="Revised"),
+            origin=f"/admin/library/book/{published.pk}/change/",
+        )
+        assert r.status_code == 302
+        published.refresh_from_db()
+        assert published.title == "Revised"
+
+    def test_the_editor_cannot_delete_a_published_book(self, editor_client, make_book):
+        published = make_book(status=Book.PUBLISHED)
+        r = editor_client.post_action(
+            "admin:delete", origin=f"/admin/library/book/{published.pk}/delete/"
+        )
+        assert r.status_code == 403
+        assert Book.objects.filter(pk=published.pk).exists()
+
+    def test_the_editor_deletes_a_draft(self, editor_client, make_book):
+        draft = make_book(status=Book.DRAFT)
+        r = editor_client.post_action(
+            "admin:delete", origin=f"/admin/library/book/{draft.pk}/delete/"
+        )
+        assert r.status_code == 302
+        assert not Book.objects.filter(pk=draft.pk).exists()
+
+    def test_chapters_of_a_published_book_are_locked_for_the_editor(
+        self, editor_client, make_book, make_chapter
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        chapter = make_chapter(published)
+        r = editor_client.post_action(
+            "admin:inline_change",
+            {
+                "_inline": "chapter",
+                "_inline_pk": str(chapter.pk),
+                "number": "1",
+                "title": "Hacked",
+                "word_count": "1",
+            },
+            origin=f"/admin/library/book/{published.pk}/change/",
+        )
+        assert r.status_code == 403
+        chapter.refresh_from_db()
+        assert chapter.title == "Intro"
+
+    def test_the_editor_cannot_add_a_chapter_to_a_published_book(
+        self, editor_client, make_book
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        r = editor_client.post_action(
+            "admin:inline_add",
+            {"_inline": "chapter", "number": "9", "title": "New", "word_count": "1"},
+            origin=f"/admin/library/book/{published.pk}/change/",
+        )
+        assert r.status_code == 403
+        assert not published.chapters.exists()
+
+    def test_a_standalone_chapter_of_a_published_book_is_locked(
+        self, editor_client, make_book, make_chapter
+    ):
+        chapter = make_chapter(make_book(status=Book.PUBLISHED))
+        r = editor_client.post_action(
+            "admin:delete", origin=f"/admin/library/chapter/{chapter.pk}/delete/"
+        )
+        assert r.status_code == 403
+
+    def test_bulk_publish_skips_the_rows_the_editor_may_not_change(
+        self, editor_client, author, make_book
+    ):
+        draft = make_book("Draft", author=author, status=Book.DRAFT)
+        archived = make_book("Archived", author=author, status=Book.ARCHIVED)
+        editor_client.post_action(
+            "admin:bulk_action",
+            {
+                "action": "mark_as_published",
+                "_selected_action": [str(draft.pk), str(archived.pk)],
+            },
+            origin="/admin/library/book/",
+        )
+        draft.refresh_from_db()
+        archived.refresh_from_db()
+        assert draft.status == Book.DRAFT
+        assert archived.status == Book.ARCHIVED
+
+    @pytest.mark.parametrize("account", ["editor", "superuser"])
+    def test_a_forged_delete_selected_deletes_nothing(
+        self, account, editor_client, admin_client, make_book
+    ):
+        client = editor_client if account == "editor" else admin_client
+        book = make_book(status=Book.DRAFT)
+        client.post_action(
+            "admin:bulk_action",
+            {
+                "action": "delete_selected",
+                "post": "yes",
+                "_selected_action": [str(book.pk)],
+            },
+            origin="/admin/library/book/",
+        )
+        assert Book.objects.filter(pk=book.pk).exists()
+
+    def test_the_superuser_bulk_publishes_any_book(
+        self, admin_client, author, make_book
+    ):
+        archived = make_book("Archived", author=author, status=Book.ARCHIVED)
+        admin_client.post_action(
+            "admin:bulk_action",
+            {"action": "mark_as_published", "_selected_action": [str(archived.pk)]},
+            origin="/admin/library/book/",
+        )
+        archived.refresh_from_db()
+        assert archived.status == Book.PUBLISHED
+
+    def test_deleting_an_author_never_cascades_past_the_editor(
+        self, editor_client, make_book
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        author_pk = published.author_id
+        page = editor_client.get(f"/admin/library/author/{author_pk}/delete/")
+        assert page.status_code == 200
+        assert "books" in page.content.decode().lower()
+        r = editor_client.post_action(
+            "admin:delete", origin=f"/admin/library/author/{author_pk}/delete/"
+        )
+        assert r.status_code == 403
+        assert Book.objects.filter(pk=published.pk).exists()
+
+    def test_the_editor_deletes_an_author_of_drafts_only(
+        self, editor_client, make_book
+    ):
+        draft = make_book(status=Book.DRAFT)
+        r = editor_client.post_action(
+            "admin:delete", origin=f"/admin/library/author/{draft.author_id}/delete/"
+        )
+        assert r.status_code == 302
+        assert not Book.objects.filter(pk=draft.pk).exists()
+
+    def test_the_superuser_deletes_an_author_and_their_books(
+        self, admin_client, make_book
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        r = admin_client.post_action(
+            "admin:delete",
+            origin=f"/admin/library/author/{published.author_id}/delete/",
+        )
+        assert r.status_code == 302
+        assert not Book.objects.filter(pk=published.pk).exists()
+
+    def test_a_chapter_add_offers_and_accepts_drafts_only(
+        self, editor_client, make_book
+    ):
+        draft = make_book("Open draft", status=Book.DRAFT)
+        published = make_book("Closed book", status=Book.PUBLISHED)
+        html = editor_client.get("/admin/library/chapter/add/").content.decode()
+        assert "Open draft" in html
+        assert "Closed book" not in html
+        r = editor_client.post_action(
+            "admin:add",
+            {
+                "book": str(published.pk),
+                "number": "9",
+                "title": "In",
+                "word_count": "1",
+            },
+            origin="/admin/library/chapter/add/",
+        )
+        assert r.status_code == 200
+        assert not Chapter.objects.filter(book=published).exists()
+        r = editor_client.post_action(
+            "admin:add",
+            {"book": str(draft.pk), "number": "9", "title": "In", "word_count": "1"},
+            origin="/admin/library/chapter/add/",
+        )
+        assert r.status_code == 302
+        assert Chapter.objects.filter(book=draft).exists()
+
+    def test_a_chapter_cannot_move_into_a_published_book(
+        self, editor_client, make_book, make_chapter
+    ):
+        chapter = make_chapter(make_book(status=Book.DRAFT))
+        published = make_book(status=Book.PUBLISHED)
+        editor_client.post_action(
+            "admin:change",
+            {"book": str(published.pk), "number": "7", "title": "M", "word_count": "1"},
+            origin=f"/admin/library/chapter/{chapter.pk}/change/",
+        )
+        chapter.refresh_from_db()
+        assert chapter.book.status == Book.DRAFT
+
+    def test_the_superuser_adds_a_chapter_to_a_published_book(
+        self, admin_client, make_book
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        r = admin_client.post_action(
+            "admin:add",
+            {
+                "book": str(published.pk),
+                "number": "9",
+                "title": "In",
+                "word_count": "1",
+            },
+            origin="/admin/library/chapter/add/",
+        )
+        assert r.status_code == 302
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/admin/auth/user/",
+            "/admin/auth/user/{pk}/change/",
+            "/admin/auth/user/{pk}/history/",
+            "/admin/auth/user/{pk}/delete/",
+            "/admin/auth/user/add/",
+            "/admin/auth/group/",
+        ],
+    )
+    def test_the_editor_reads_nothing_outside_the_library(
+        self, path, editor_client, admin_client, admin_user
+    ):
+        url = path.format(pk=admin_user.pk)
+        assert editor_client.get(url).status_code == 403
+        assert admin_client.get(url).status_code == 200
+
+    def test_a_tag_on_a_published_book_stays_for_the_editor(
+        self, editor_client, make_book, make_tag
+    ):
+        tag = make_tag("Classic")
+        make_book(status=Book.PUBLISHED).tags.add(tag)
+        r = editor_client.post_action(
+            "admin:delete", origin=f"/admin/library/tag/{tag.pk}/delete/"
+        )
+        assert r.status_code == 403
+        assert Tag.objects.filter(pk=tag.pk).exists()
+
+    def test_a_tag_on_drafts_only_is_the_editors_to_delete(
+        self, editor_client, make_book, make_tag
+    ):
+        tag = make_tag("Working title")
+        make_book(status=Book.DRAFT).tags.add(tag)
+        r = editor_client.post_action(
+            "admin:delete", origin=f"/admin/library/tag/{tag.pk}/delete/"
+        )
+        assert r.status_code == 302
+        assert not Tag.objects.filter(pk=tag.pk).exists()
+
+    def test_the_sidebar_offers_the_activity_feed_to_its_readers(
+        self, editor_client, admin_client
+    ):
+        assert "Activity feed" not in editor_client.get("/admin/").content.decode()
+        assert "Activity feed" in admin_client.get("/admin/").content.decode()
+
+    def test_the_activity_feed_refuses_the_editor(self, editor_client, admin_client):
+        assert editor_client.get("/admin/activity/").status_code == 403
+        assert admin_client.get("/admin/activity/").status_code == 200
+
+    def test_group_rights_on_a_plain_model_keep_save_and_delete(
+        self, django_user_model
+    ):
+        role = Group.objects.create(name="Group managers")
+        role.permissions.set(
+            Permission.objects.filter(
+                content_type__app_label="auth",
+                codename__in=["view_group", "change_group", "delete_group"],
+            )
+        )
+        manager = django_user_model.objects.create_user("manager", is_staff=True)
+        manager.groups.add(role)
+        target = Group.objects.create(name="Reviewers")
+        client = NextClient()
+        client.force_login(manager)
+
+        html = client.get(f"/admin/auth/group/{target.pk}/change/").content.decode()
+        assert 'name="_save_continue"' in html
+        assert f"/admin/auth/group/{target.pk}/delete/" in html
+        assert "data-read-only" not in html
+
+        r = client.post_action(
+            "admin:change",
+            {"name": "Senior reviewers"},
+            origin=f"/admin/auth/group/{target.pk}/change/",
+        )
+        assert r.status_code == 302
+        target.refresh_from_db()
+        assert target.name == "Senior reviewers"
+
+    def test_a_plain_model_without_the_right_reads_only(self, django_user_model):
+        role = Group.objects.create(name="Group readers")
+        role.permissions.set(
+            Permission.objects.filter(
+                content_type__app_label="auth", codename="view_group"
+            )
+        )
+        reader = django_user_model.objects.create_user("reader", is_staff=True)
+        reader.groups.add(role)
+        client = NextClient()
+        client.force_login(reader)
+        html = client.get(f"/admin/auth/group/{role.pk}/change/").content.decode()
+        assert "data-read-only" in html
+        assert f"/admin/auth/group/{role.pk}/delete/" not in html
+
+    def test_the_editor_sees_the_chapters_of_a_published_book_read_only(
+        self, editor_client, make_book, make_chapter
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        chapter = make_chapter(published)
+        html = editor_client.get(
+            f"/admin/library/book/{published.pk}/change/"
+        ).content.decode()
+        assert f'data-inline-read-only="{chapter.pk}"' in html
+        assert f'data-next-key="{chapter.pk}"' not in html
+        assert 'data-next-key="chapter"' not in html
+        assert "Add chapter" not in html
+
+    @pytest.mark.parametrize(
+        ("account", "status"),
+        [("editor", Book.DRAFT), ("superuser", Book.PUBLISHED)],
+        ids=["editor-draft", "superuser-published"],
+    )
+    def test_inline_rows_stay_editable_where_the_right_holds(
+        self, account, status, editor_client, admin_client, make_book, make_chapter
+    ):
+        client = editor_client if account == "editor" else admin_client
+        book = make_book(status=status)
+        chapter = make_chapter(book)
+        html = client.get(f"/admin/library/book/{book.pk}/change/").content.decode()
+        assert f'data-next-key="{chapter.pk}"' in html
+        assert 'data-next-key="chapter"' in html
+        assert "data-inline-read-only" not in html
+
+    def test_a_stock_inline_asks_the_model_level_rights(self, rf, admin_user, book):
+        request = rf.get("/")
+        request.user = admin_user
+        spec = AdminFormSpec.resolve(request, "library", "book", book.pk)
+        rights = AdminInlineSpec(spec, StockChapterInline(Book, admin.site)).rights
+        assert rights == InlineRights(
+            "library.change_chapter", "library.add_chapter", book, row_rules=False
+        )
+
+    def test_seed_demo_creates_the_editor_once(self, db, django_user_model):
+        call_command("seed_demo", stdout=StringIO())
+        call_command("seed_demo", stdout=StringIO())
+        editor = django_user_model.objects.get(username="editor")
+        assert editor.is_staff is True
+        assert editor.is_superuser is False
+        assert editor.check_password("editor") is True
+
+    def test_the_permission_checks_find_nothing(self, db):
+        found = {message.id for message in run_checks()}
+        assert found.isdisjoint(
+            {"next.E161", "next.E162", "next.E163", "next.W129", "next.W130"}
+        )

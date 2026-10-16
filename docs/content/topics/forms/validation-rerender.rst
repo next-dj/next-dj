@@ -49,15 +49,17 @@ A request to ``/_next/form/<uid>/`` follows a fixed pipeline.
 
 1. The dispatcher resolves the action UID to its handler and form class.
 2. The static ``ActionGuard`` runs, so a denied request never reaches application code, see :ref:`topics-forms-actions-guards`.
+   A permission registered in a ``permissions.py`` waits for the bound form on a class-bound form.
 3. The posted origin resolves to its page module and typed URL kwargs.
 4. That page authorizes the request through its own ``render()``, and a response it returns is sent as the answer to the submission.
 5. The shared dependency cache is installed on the request.
 6. The form class resolves through the dependency resolver and ``check_permissions`` runs on it, see :ref:`topics-forms-actions-dynamic-guards`.
 7. The form is constructed with POST data, uploaded files, and the kwargs that ``get_form_kwargs`` returns, or the initial data of ``get_initial`` when the class does not override that hook.
-8. ``has_object_permission`` runs on the bound form.
-9. A request that names validate fields short circuits here.
-   The form validates, the response carries only the errors of the named fields, and the handler never runs.
-10. ``form.is_valid()`` runs.
+8. The registered permissions of ``Meta.permission_required`` are checked on the bound row as ``user.has_perm(perm, obj)``, see :ref:`topics-permissions`.
+9. ``has_object_permission`` runs on the bound form.
+10. A request that names validate fields short circuits here.
+    The form validates, the response carries only the errors of the named fields, and the handler never runs.
+11. ``form.is_valid()`` runs.
     On a valid form the handler is called with the dependency-resolved parameters and its return value goes to the client.
     On an invalid form the dispatcher loads the origin page, reattaches the cached dependencies, and re-renders the template with ``form`` set to the bound failing form.
 

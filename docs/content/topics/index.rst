@@ -52,6 +52,9 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`dependency-injection`
    Markers, providers, the resolver, request scoped cache.
 
+:doc:`permissions`
+   Object permissions in ``permissions.py``, the backend, the ``{% has_perm %}`` tag, and form guards.
+
 :doc:`signals`
    Every signal emitted by the framework, with payload tables.
 
@@ -89,6 +92,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
    static-assets/index
    partial-rendering/index
    dependency-injection
+   permissions
    signals
    testing
    extending

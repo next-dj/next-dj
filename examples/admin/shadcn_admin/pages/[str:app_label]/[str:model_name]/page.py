@@ -139,6 +139,8 @@ def changelist_state(
 ) -> dict[str, Any]:
     """Render changelist data from `ModelAdmin.get_changelist_instance(request)`."""
     model, model_admin = utils.resolve_model_admin(app_label, model_name)
+    if not model_admin.has_view_or_change_permission(request):
+        raise PermissionDenied
     cl = model_admin.get_changelist_instance(request)
     visible = _visible_columns(cl)
     return {

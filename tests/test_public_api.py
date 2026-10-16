@@ -136,6 +136,19 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "static_assets_slot",
         }
     ),
+    "next.permissions": frozenset(
+        {
+            "ObjectPermissionBackend",
+            "PermissionAlreadyRegisteredError",
+            "Predicate",
+            "add_perm",
+            "checks",
+            "has_perm",
+            "perms_for",
+            "predicate",
+            "signals",
+        }
+    ),
     "next.scripts": frozenset(
         {"Script", "ScriptsSourceImportError", "Strategy", "checks", "signals"}
     ),

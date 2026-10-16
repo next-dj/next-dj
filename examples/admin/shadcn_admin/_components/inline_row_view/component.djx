@@ -1,0 +1,8 @@
+<dl data-inline-read-only="{{ row.pk }}" class="grid grid-cols-1 gap-3 rounded-md border border-border p-3 text-sm md:grid-cols-3">
+  {% for info in row.fields %}
+    <div>
+      <dt class="text-xs font-medium text-muted-foreground">{{ info.bound.label }}</dt>
+      <dd>{{ info.bound.value|default_if_none:"" }}</dd>
+    </div>
+  {% endfor %}
+</dl>

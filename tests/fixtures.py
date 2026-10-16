@@ -1,4 +1,4 @@
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from pathlib import Path
 
 import pytest
@@ -22,14 +22,17 @@ from next.pages import Page
 from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
 from next.pages.metadata.hreflang import forget_translated_urls
 from next.pages.registry import PageContextRegistry
+from next.permissions.manager import PermissionManager
 from next.ports import partial_shaper_slot
 from next.server import NextStatReloader
 from next.urls import URLPatternParser
 from tests.support import (
+    OBJECT_PERMISSION_BACKENDS,
     CountingWizardBackend,
     IntentOnlyShaper,
     build_mock_http_request,
     install_visibility_hooks,
+    restored_permissions,
     tick_scenario,
 )
 
@@ -239,3 +242,38 @@ def counting_wizard_backend() -> Generator[CountingWizardBackend, None, None]:
             wizard_backend_manager._backend = cached
         else:
             wizard_backend_manager.reset()
+
+
+@pytest.fixture()
+def isolated_permissions() -> Generator[PermissionManager, None, None]:
+    """Yield the shared permission manager empty and restore its permissions after."""
+    with restored_permissions() as manager:
+        yield manager
+
+
+@pytest.fixture()
+def object_permission_backend() -> Generator[None, None, None]:
+    """List `ObjectPermissionBackend` after `ModelBackend` for the test."""
+    with override_settings(AUTHENTICATION_BACKENDS=OBJECT_PERMISSION_BACKENDS):
+        yield
+
+
+@pytest.fixture()
+def findable_templates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Callable[[str, str], str]:
+    """Return a writer of templates the default engine finds by a test-unique name.
+
+    The cached loader keeps a name across tests, so each name carries the tmp folder.
+    """
+    folder = tmp_path / "templates"
+    folder.mkdir()
+    engine = Engine.get_default()
+    monkeypatch.setattr(engine, "dirs", [*engine.dirs, str(folder)])
+
+    def write(name: str, text: str) -> str:
+        full = f"{tmp_path.name}_{name}"
+        (folder / full).write_text(text)
+        return full
+
+    return write

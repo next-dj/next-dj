@@ -1,7 +1,7 @@
 from typing import Any, ClassVar
 
+from access.forms import POLICY_FIELD, AcknowledgedStep
 from access.models import AccessRequest
-from access.policy import POLICY_FIELD, AcknowledgedStep
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponse
 

@@ -18,6 +18,9 @@ from next.components.sources import get_components_manager
 from next.conf import next_framework_settings
 from next.pages import page
 from next.pages.checks.composed import iter_composed_pages
+from next.partial.guards import Components, guarded_zones
+from next.partial.zone import zones_under
+from next.permissions.nodes import HasPermNode
 
 from .codes import (
     E_CONTEXT_ZONE_UNKNOWN,
@@ -26,10 +29,11 @@ from .codes import (
     E_NON_ASCII_ZONE,
     E_ZONE_IN_COMPONENT,
     E_ZONE_IN_FOR,
+    E_ZONE_IN_HAS_PERM,
     E_ZONE_IN_IF,
     W_WITH_OVER_ZONE,
 )
-from .nodes import significant, zone_nodes, zones_directly_in_with, zones_under
+from .nodes import significant, zone_nodes, zones_directly_in_with
 
 
 if TYPE_CHECKING:
@@ -41,9 +45,19 @@ if TYPE_CHECKING:
 
 _MIN_DUPLICATE_COUNT: Final = 2
 
+_HAS_PERM_REASON: Final = (
+    "A standalone zone render does not check the enclosing permission again, so the "
+    "zone would render for users the block refuses. Put the tag inside the zone, or "
+    "the zone outside the block or the component."
+)
+
 _ZONE_SLUG = re.compile(r"\A[A-Za-z0-9_-]+\Z")
 
-_TAG_LABELS: Final[dict[type[Node], str]] = {ForNode: "{% for %}", IfNode: "{% if %}"}
+_TAG_LABELS: Final[dict[type[Node], str]] = {
+    ForNode: "{% for %}",
+    IfNode: "{% if %}",
+    HasPermNode: "{% has_perm %}",
+}
 
 
 @register(Tags.templates, NEXT)
@@ -116,6 +130,39 @@ def check_zone_not_in_if(*args, **kwargs) -> list[CheckMessage]:
             "condition inside the zone body instead."
         ),
     )
+
+
+@register(Tags.templates, NEXT)
+def check_zone_not_in_has_perm(*args, **kwargs) -> list[CheckMessage]:
+    """Error when a zone renders inside a `{% has_perm %}` block (`next.E163`).
+
+    A zone in the body of a component counts when its template reaches such a block.
+    """
+    manager = get_components_manager()
+    messages: list[CheckMessage] = []
+    for page_path, template in iter_composed_pages():
+        components = Components(manager, page_path)
+        messages.extend(
+            Error(
+                _has_perm_message(zone_name, component, page_path),
+                obj=str(page_path),
+                id=E_ZONE_IN_HAS_PERM,
+            )
+            for zone_name, component in guarded_zones(template.nodelist, components)
+        )
+    return messages
+
+
+def _has_perm_message(zone_name: str, component: str | None, page_path: "Path") -> str:
+    """Return the `next.E163` text for a zone the page or a component guards."""
+    if component is None:
+        where = f"is nested inside a {_TAG_LABELS[HasPermNode]} block"
+    else:
+        where = (
+            f'sits in the body of the component "{component}", whose template '
+            "reaches a {% has_perm %} block or a reference the check cannot follow"
+        )
+    return f'Zone "{zone_name}" in {page_path} {where}. {_HAS_PERM_REASON}'
 
 
 def _ancestor_check(
@@ -284,6 +331,7 @@ __all__ = [
     "check_no_zone_in_component",
     "check_with_directly_over_zone",
     "check_zone_name_is_slug",
+    "check_zone_not_in_has_perm",
     "check_zone_not_in_if",
     "check_zone_not_in_loop",
 ]

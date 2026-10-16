@@ -102,7 +102,7 @@ The ``{% form %}`` tag injects the token automatically.
 Manual forms need ``{% csrf_token %}`` plus a fresh cookie.
 
 When the token is fine, the 403 can come from an access guard.
-An authenticated user missing a ``Meta.permission_required`` permission gets ``PermissionDenied``.
+An authenticated user missing a ``Meta.permission_required`` permission gets ``PermissionDenied``, and so does one whose registered predicate refuses the bound row, see :ref:`topics-permissions`.
 A dynamic permission hook, ``check_permissions`` or ``has_object_permission``, returning ``False`` or raising ``PermissionDenied`` produces the same bare 403, see :ref:`topics-forms-actions-dynamic-guards`.
 See :ref:`topics-forms-actions-guards`.
 
@@ -292,7 +292,7 @@ Partial rendering
 Zone GET returns HTTP 400
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A response body of ``unknown zone`` means the requested name matches no ``{% zone %}`` in the composed page.
+A response body of ``unknown zone`` means the requested name matches no ``{% zone %}`` in the composed page, or names one that may not render on its own, under a ``{% has_perm %}``, an ``{% if %}``, or a ``{% for %}``, or in the body of a component whose template reaches a ``{% has_perm %}``, which ``next.E163``, ``next.E063``, and ``next.E062`` report at ``manage.py check``.
 Check that ``data-next-target`` names the same string as the zone tag on the page that serves the request.
 A response body of ``zone in dynamic body`` means the page body comes from a ``render`` function returning a string, so there is no compiled template source to render the slice standalone.
 Move the zone to a page whose body comes from a template source.

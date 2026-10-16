@@ -5,8 +5,8 @@ from types import ModuleType
 
 import pytest
 from access.backends import _safe_form_payload, _step_from_origin
+from access.forms import POLICY_FIELD, AcknowledgedStep
 from access.models import AccessRequest, AuditEntry
-from access.policy import POLICY_FIELD, AcknowledgedStep
 from access.signals import _on_form_access_denied
 from django.contrib.sessions.backends.db import SessionStore
 from django.db import connection, transaction

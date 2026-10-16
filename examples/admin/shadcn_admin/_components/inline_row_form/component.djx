@@ -1,0 +1,17 @@
+{% form "admin:inline_change" key=row.pk class="rounded-md border border-border p-3 space-y-3" %}
+  <input type="hidden" name="_inline" value="{{ token }}">
+  <input type="hidden" name="_inline_pk" value="{{ row.pk }}">
+  <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+    {% for info in row.fields %}
+      {% component "form_field" info=info %}
+    {% endfor %}
+  </div>
+  {% if row.errors %}
+    <ul class="space-y-0.5 text-xs text-destructive">
+      {% for err in row.errors %}<li>{{ err }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+  <div class="flex justify-end">
+    {% component "button" type="submit" text="Save" variant="outline" %}
+  </div>
+{% endform %}

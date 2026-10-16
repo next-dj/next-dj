@@ -21,7 +21,8 @@ from next.conf import next_framework_settings
 from next.consent.checks import category_list_problem
 from next.consent.manager import consent_categories, consent_configured, server_render
 from next.pages.checks.composed import iter_composed_pages
-from next.pages.checks.metadata.templates import TemplateSearch, page_template_path
+from next.pages.checks.metadata.templates import TemplateSearch
+from next.pages.paths import page_template_path
 from next.static import ScriptInjectionPolicy
 from next.static.assets import static_name
 from next.static.errors import StaticAssetTraversalError

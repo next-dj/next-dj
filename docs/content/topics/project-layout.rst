@@ -29,6 +29,7 @@ A page at any depth reaches the domain through the same absolute import, such as
      forms.py
      signals.py
      deps.py
+     permissions.py
      admin.py
      migrations/
      tests/
@@ -85,6 +86,10 @@ The last column names what another application of the same project may use.
      - DI providers and named dependencies that turn the request into a value, such as the ``scope`` every read filters by or a feature flag.
      - Domain rules and writes.
      - Named dependencies are project-wide through ``Depends("name")``, and markers are imported.
+   * - ``permissions.py``
+     - The object permissions of the application, a predicate taking ``()``, ``(user)``, or ``(user, obj)`` registered per ``app_label.codename`` through ``add_perm``.
+     - The request, the tenant, and writes, which a form hook or a service reads.
+     - Yes, through ``user.has_perm()``, which answers a permission of any application.
    * - ``admin.py``
      - ``ModelAdmin`` registrations whose ``save_model`` and admin actions call ``services.py``.
      - Writes that bypass ``services.py``.
@@ -109,9 +114,9 @@ The last column names what another application of the same project may use.
 
 :doc:`application-layout` shows the ``scope`` dependency, the ``visible_to(scope)`` read, and the ``f(scope, *, ...)`` service in full.
 
-Four of these files load with no import of their own, so ``AppConfig.ready`` stays empty.
-When the ``next`` application is ready it imports ``deps.py``, then ``forms.py``, then ``signals.py`` of every installed application, all before any ``component.py``, and ``django.contrib.admin`` imports ``admin.py``.
-``DEPS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, and ``SIGNALS_AUTODISCOVER`` turn the three sweeps off one by one, and a project that turns one off imports those modules from ``AppConfig.ready``, see :doc:`/content/ref/settings`.
+Five of these files load with no import of their own, so ``AppConfig.ready`` stays empty.
+When the ``next`` application is ready it imports ``deps.py``, then ``permissions.py``, then ``forms.py``, then ``signals.py`` of every installed application, all before any ``component.py``, and ``django.contrib.admin`` imports ``admin.py``.
+``DEPS_AUTODISCOVER``, ``PERMISSIONS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, and ``SIGNALS_AUTODISCOVER`` turn the four sweeps off one by one, and a project that turns one off imports those modules from ``AppConfig.ready``, see :doc:`/content/ref/settings`.
 
 .. code-block:: python
    :caption: notes/apps.py

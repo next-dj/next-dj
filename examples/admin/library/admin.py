@@ -1,34 +1,37 @@
+import copy
 from typing import ClassVar
 
 from django.contrib import admin
-from django.db.models import QuerySet
+from django.db.models import ForeignKey, QuerySet
+from django.forms import ModelChoiceField
 from django.http import HttpRequest
+from shadcn_admin.admin import ParentRowPermissions, RowPermissionAdmin, may
 
 from library.models import Author, Book, Chapter, Tag
 
 
-class ChapterInline(admin.TabularInline):
+class ChapterInline(ParentRowPermissions, admin.TabularInline):
     model = Chapter
     extra = 1
     fields = ("number", "title", "word_count")
 
 
 @admin.register(Author)
-class AuthorAdmin(admin.ModelAdmin):
+class AuthorAdmin(RowPermissionAdmin):
     list_display = ("full_name", "email", "born_in")
     search_fields = ("full_name", "email")
     list_filter = ("born_in",)
 
 
 @admin.register(Tag)
-class TagAdmin(admin.ModelAdmin):
+class TagAdmin(RowPermissionAdmin):
     list_display = ("name", "slug")
     search_fields = ("name", "slug")
     prepopulated_fields: ClassVar = {"slug": ("name",)}
 
 
 @admin.register(Book)
-class BookAdmin(admin.ModelAdmin):
+class BookAdmin(RowPermissionAdmin):
     list_display = ("title", "author", "status", "is_featured", "published_at", "price")
     list_filter = ("status", "tags", "is_featured")
     search_fields = ("title", "summary", "author__full_name")
@@ -44,13 +47,32 @@ class BookAdmin(admin.ModelAdmin):
         permissions=["change"],
     )
     def mark_as_published(self, request: HttpRequest, queryset: QuerySet[Book]) -> None:
-        """Flip the selected books to `published` status in a single UPDATE."""
-        updated = queryset.update(status=Book.PUBLISHED)
+        """Publish the selected books the user may change now and once published."""
+        allowed = [b.pk for b in queryset if self._may_publish(request, b)]
+        updated = queryset.filter(pk__in=allowed).update(status=Book.PUBLISHED)
         self.message_user(request, f"{updated} book(s) marked as published.")
+
+    def _may_publish(self, request: HttpRequest, book: Book) -> bool:
+        published = copy.copy(book)
+        published.status = Book.PUBLISHED
+        return self.has_change_permission(request, book) and self.has_change_permission(
+            request, published
+        )
 
 
 @admin.register(Chapter)
-class ChapterAdmin(admin.ModelAdmin):
+class ChapterAdmin(RowPermissionAdmin):
     list_display = ("book", "number", "title", "word_count")
     search_fields = ("title", "book__title")
     list_filter = ("book",)
+
+    def formfield_for_foreignkey(
+        self, db_field: ForeignKey, request: HttpRequest, **kwargs
+    ) -> ModelChoiceField:
+        """Offer only the books the user may change as a chapter's book."""
+        if db_field.name == "book":
+            editable = [
+                b.pk for b in Book.objects.all() if may(request, "change", Book, b)
+            ]
+            kwargs["queryset"] = Book.objects.filter(pk__in=editable)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)

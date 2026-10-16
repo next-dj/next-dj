@@ -25,6 +25,11 @@ MISSING_TENANT_DEBUG_HINT = " In DEBUG you may also pass ?tenant=<slug> for a de
 UNKNOWN_TENANT_BODY = "Unknown tenant."
 
 
+def get_active_tenant(request: HttpRequest) -> Tenant | None:
+    """Return the tenant `TenantMiddleware` attached to `request`, if any."""
+    return getattr(request, "tenant", None)
+
+
 def is_debug_fallback_enabled() -> bool:
     """Return whether the DEBUG-only query/cookie fallbacks are active."""
     return bool(settings.DEBUG)

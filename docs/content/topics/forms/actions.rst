@@ -430,6 +430,13 @@ A submission whose ``_next_form_origin`` is missing or not a same-site path gets
 An origin so long that the login URL would exceed the length Django allows in a redirect ``Location`` sends the user to plain ``LOGIN_URL`` with no ``next``.
 An authenticated user missing a permission gets :exc:`~django.core.exceptions.PermissionDenied`, which Django renders as HTTP 403.
 
+A permission registered through ``add_perm`` in a ``permissions.py`` is an object permission, and a class-bound form checks it on the row it edits rather than up front.
+The static guard leaves it out, and once the form binds the dispatcher asks ``user.has_perm(perm, form.instance)`` for a ``ModelForm`` that edits a saved row, or ``user.has_perm(perm, None)`` for a new record and a plain ``Form``.
+The check runs once, before ``has_object_permission`` and validation, and a refusal is HTTP 403 with ``form_access_denied`` sent as ``layer="object"`` and ``reason="denied"``.
+A ``FormWizard`` and a handler-only ``@action`` bind no form at that point, so their guard checks every listed permission up front with no object, registered ones included.
+Load the row through ``DObject`` in ``get_form_kwargs`` rather than ``Meta.instance_from_url``, whose unscoped lookup answers a refused user 403 for an existing id and 404 for a missing one.
+See :ref:`topics-permissions` for the predicates and the backend that answers them.
+
 Unlike ``Meta.abstract``, which is own-class-only, the guard keys survive subclassing through plain class-attribute lookup.
 A subclass that declares no ``Meta`` of its own inherits the base ``Meta`` and stays guarded.
 A subclass that declares its own ``Meta`` shadows the base one entirely and registers unguarded.
@@ -443,6 +450,8 @@ Hide the form in the template when the page should not show it to anonymous visi
 
 The guard is stored as an ``ActionGuard`` on the action's registry metadata, so a custom backend that delegates to the standard pipeline inherits the enforcement.
 The ``next.W060`` check warns when ``permission_required`` is declared while ``django.contrib.auth`` is not installed.
+The ``next.W129`` check warns about a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, since such a guard refuses every user but a superuser.
+It reads the model permissions off the model classes, so a ``Permission`` row created only by a data migration or through the admin draws it, and declaring that permission in ``Meta.permissions`` or silencing the code quiets it.
 
 .. _topics-forms-actions-dynamic-guards:
 
@@ -541,7 +550,7 @@ The hook return type alias is ``next.forms.PermissionOutcome``, equal to ``bool 
 The two hooks combine with the static guard in a fixed order.
 The static guard runs first and pre-database.
 A request it denies never reaches a dynamic hook, so the static guard stays the cheap default for the authentication-and-named-permission case.
-``check_permissions`` runs next, then the form binds, then ``has_object_permission`` runs on the bound form.
+``check_permissions`` runs next, then the form binds, then the registered permissions of ``Meta.permission_required`` are checked on the bound row, then ``has_object_permission`` runs on the bound form.
 
 The view hook resolves on the resolved form class, so a factory ``form_class`` is covered as well, see `Dynamic form classes`_.
 A handler-only ``@action`` carries no class to host a method, so it has no dynamic hook.
@@ -555,7 +564,7 @@ This differs from a validation failure, which re-renders the origin with field e
 The hooks share the per-request dependency cache with ``get_form_kwargs``, ``get_initial``, and ``on_valid``.
 A provider resolved inside a hook is not resolved again downstream in the same dispatch, so a tenant or permission lookup runs once across the hook and the rest of the pipeline.
 
-The ``form_access_denied`` signal fires on an origin-page or dynamic-hook denial, never on the static guard path, see :ref:`topics-forms-signals-form-access-denied` for its sender, payload, and receiver rules.
+The ``form_access_denied`` signal fires on an origin-page denial, a dynamic-hook denial, and a registered permission refused on the bound form, never on the static guard path, see :ref:`topics-forms-signals-form-access-denied` for its sender, payload, and receiver rules.
 
 On a ``FormWizard`` the ``check_permissions`` classmethod runs per step POST, before the step form binds, so a denied step writes no storage.
 The wizard class has no object-level hook of its own.
@@ -751,6 +760,9 @@ The registration and scope checks are listed here, the wizard checks on :doc:`wi
 
 ``next.W060`` (Warning)
    An action declares ``permission_required`` while ``django.contrib.auth`` is not in ``INSTALLED_APPS``, so the permission check cannot resolve users or permissions.
+
+``next.W129`` (Warning)
+   An action declares a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, so the guard refuses every user but a superuser.
 
 ``next.W061`` (Warning)
    An action declares ``Meta.success_message`` while the messages framework is not fully installed.

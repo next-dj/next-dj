@@ -78,7 +78,7 @@ def render_zone(
     start = time.perf_counter()
     kwargs = url_kwargs or {}
     template = page.composed_template_for(page_path)
-    zones = zones_of(template)
+    zones = zones_of(template, page_path)
     rendered_names = _renderable_zone_names(zone_names, zones)
 
     if context_data is None:
@@ -114,12 +114,16 @@ def _renderable_zone_names(
 ) -> tuple[str, ...]:
     """Return the declared names of a batch, deduplicated in request order.
 
-    An undeclared name is dropped and so is one nested in another name of the batch,
-    whose body renders once inside it. A batch with nothing declared raises.
+    An undeclared, bound or batch-nested name is dropped, and an empty result raises.
     """
-    declared = tuple(name for name in dict.fromkeys(zone_names) if name in zones)
+    declared = tuple(
+        name
+        for name in dict.fromkeys(zone_names)
+        if name in zones and zones[name].standalone
+    )
     if zone_names and not declared:
-        raise UnknownZoneError(zone_names[0], tuple(sorted(zones)))
+        open_names = sorted(name for name, info in zones.items() if info.standalone)
+        raise UnknownZoneError(zone_names[0], tuple(open_names))
     if len(declared) < _NESTABLE_BATCH:
         return declared
     covered = frozenset[str]().union(*(zones[name].nested for name in declared))

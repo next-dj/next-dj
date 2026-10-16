@@ -49,9 +49,11 @@ def _form_zone(request: "HttpRequest", page_path: "Path | None") -> str | None:
 
 
 def _declared_zones(page_path: "Path") -> frozenset[str]:
-    """Return the zone names the origin page declares."""
+    """Return the zone names the origin page declares that render on their own."""
     template = page.composed_template_for(page_path)
-    return frozenset(zones_of(template))
+    return frozenset(
+        name for name, info in zones_of(template, page_path).items() if info.standalone
+    )
 
 
 def _zone_overrides(

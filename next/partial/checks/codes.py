@@ -17,6 +17,7 @@ E_COMPOSED_TEMPLATE_SYNTAX: Final = "next.E072"
 E_BACKEND_WITHOUT_PATH: Final = "next.E073"
 E_CONTEXT_ZONE_UNKNOWN: Final = "next.E078"
 E_OP_BAD_NAME: Final = "next.E090"
+E_ZONE_IN_HAS_PERM: Final = "next.E163"
 
 W_WITH_OVER_ZONE: Final = "next.W067"
 W_FORM_BACKEND_NOT_AWARE: Final = "next.W068"
@@ -36,6 +37,7 @@ __all__ = [
     "E_OP_BAD_NAME",
     "E_ZONE_IN_COMPONENT",
     "E_ZONE_IN_FOR",
+    "E_ZONE_IN_HAS_PERM",
     "E_ZONE_IN_IF",
     "W_ASSET_VERSION_FROZEN",
     "W_FORM_BACKEND_NOT_AWARE",

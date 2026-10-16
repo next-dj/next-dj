@@ -1,6 +1,9 @@
+import copy
 from typing import Any
 
+from django.contrib.auth import get_permission_codename
 from django.http import HttpRequest
+from shadcn_admin.admin import RowPermissionAdmin
 from shadcn_admin.forms import AdminFormSpec, AdminInlineSpec, build_inline_formsets
 
 from next import Depends, component
@@ -15,16 +18,18 @@ def form_state(
 ) -> dict[str, Any]:
     """Build add/change context, binding the form to POST so re-render shows errors."""
     form_cls = spec.model_admin.get_form(
-        spec.request, spec.instance, change=spec.is_change
+        spec.request, spec.stored, change=spec.is_change
     )
+    working = copy.copy(spec.stored)
     if request.method == "POST":
         bound = form_cls(
-            request.POST, request.FILES, instance=spec.instance, auto_id=spec.auto_id
+            request.POST, request.FILES, instance=working, auto_id=spec.auto_id
         )
         bound.is_valid()
     else:
-        bound = form_cls(instance=spec.instance, auto_id=spec.auto_id)
-    fieldsets = spec.model_admin.get_fieldsets(spec.request, spec.instance)
+        bound = form_cls(instance=working, auto_id=spec.auto_id)
+    fieldsets = spec.model_admin.get_fieldsets(spec.request, spec.stored)
+    opts = spec.model._meta
     if spec.is_change:
         inlines: list[Any] = []
         related_sections = AdminInlineSpec.build_sections(spec)
@@ -40,6 +45,10 @@ def form_state(
         "model_name": spec.model_name,
         "pk": pk,
         "is_change": spec.is_change,
+        "instance": spec.stored,
+        "row_rules": isinstance(spec.model_admin, RowPermissionAdmin),
+        "change_perm": f"{opts.app_label}.{get_permission_codename('change', opts)}",
+        "delete_perm": f"{opts.app_label}.{get_permission_codename('delete', opts)}",
         "verbose_name": str(spec.model._meta.verbose_name),
         "form": bound,
         "form_spec": form_spec(bound, fieldsets=fieldsets),

@@ -17,6 +17,9 @@ from next.partial.registry.zones import _zone_cache
 from next.partial.zone import ZONE_ATTR, ZoneNode
 
 
+_PAGE = Path("/srv/pages/page.py")
+
+
 class _Boom:
     """A context value whose stringification raises at render time."""
 
@@ -201,7 +204,7 @@ class TestRegistryIsolatedFromGetPath:
         assert len(_zone_cache) == 0
 
         template = page_instance.composed_template_for(page_file)
-        zones = zones_of(template)
+        zones = zones_of(template, page_file)
         assert set(zones) == {"z"}
         assert len(_zone_cache) == 1
 
@@ -222,7 +225,7 @@ class TestRegistryMemoisationAndInvalidation:
             tmp_path, '{% zone "z" %}<p>{{ t }}</p>{% endzone %}'
         )
         template = page_instance.composed_template_for(page_file)
-        assert zones_of(template) is zones_of(template)
+        assert zones_of(template, page_file) is zones_of(template, page_file)
 
     def test_mtime_recompile_adds_distinct_entry(
         self, page_instance: Page, tmp_path: Path, watched_template_edits
@@ -233,7 +236,7 @@ class TestRegistryMemoisationAndInvalidation:
         djx.write_text('{% zone "z" %}<p>{{ t }}</p>{% endzone %}')
 
         first = page_instance.composed_template_for(page_file)
-        first_zones = zones_of(first)
+        first_zones = zones_of(first, page_file)
 
         djx.write_text('{% zone "z" %}<p>EDITED {{ t }}</p>{% endzone %}')
         future = time.time() + 2
@@ -241,7 +244,7 @@ class TestRegistryMemoisationAndInvalidation:
 
         second = page_instance.composed_template_for(page_file)
         assert second is not first
-        second_zones = zones_of(second)
+        second_zones = zones_of(second, page_file)
         assert second_zones is not first_zones
         # both compiled objects still referenced, so two live entries, no dupes
         assert len(_zone_cache) == 2
@@ -258,7 +261,7 @@ class TestRegistryWeakCollection:
 
     def test_dropped_template_leaves_the_cache(self) -> None:
         template = Template('{% zone "z" %}<p>{{ t }}</p>{% endzone %}')
-        zones_of(template)
+        zones_of(template, _PAGE)
         assert len(_zone_cache) == 1
         del template
         gc.collect()
@@ -272,7 +275,7 @@ class TestRegistryWeakCollection:
         djx = tmp_path / "template.djx"
         djx.write_text('{% zone "z" %}<p>{{ t }}</p>{% endzone %}')
 
-        zones_of(page_instance.composed_template_for(page_file))
+        zones_of(page_instance.composed_template_for(page_file), page_file)
         assert len(_zone_cache) == 1
 
         djx.write_text('{% zone "z" %}<p>v2 {{ t }}</p>{% endzone %}')
@@ -280,7 +283,7 @@ class TestRegistryWeakCollection:
         os.utime(djx, (future, future))
 
         # the recompile drops the only strong ref to the old compiled object
-        zones_of(page_instance.composed_template_for(page_file))
+        zones_of(page_instance.composed_template_for(page_file), page_file)
         gc.collect()
         assert len(_zone_cache) == 1
 
@@ -310,7 +313,7 @@ class TestLayoutAndComponentComposites:
         )
 
         template = page_instance.composed_template_for(page_file)
-        assert set(zones_of(template)) == {"footer", "main"}
+        assert set(zones_of(template, page_file)) == {"footer", "main"}
 
         out = page_instance.render(page_file, m="M", f="F")
         assert f'<main><div {ZONE_ATTR}="main"><p>M</p></div></main>' in out
@@ -321,7 +324,7 @@ class TestLayoutAndComponentComposites:
             '{% component "card" title="Hi" %}'
             '{% zone "side" %}<p>{{ s }}</p>{% endzone %}'
         )
-        zones = zones_of(template)
+        zones = zones_of(template, _PAGE)
         assert set(zones) == {"side"}
         out = zones["side"].partial.render(Context({"s": "ok"}))
         assert out == "<p>ok</p>"

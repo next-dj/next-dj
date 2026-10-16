@@ -1,6 +1,7 @@
 import pytest
 from django.template import Context, Engine, TemplateSyntaxError
-from django.template.base import Template
+from django.template.base import Template, TextNode
+from django.template.defaulttags import ForNode, IfNode
 from django.test import RequestFactory
 
 from next.partial.zone import (
@@ -10,8 +11,12 @@ from next.partial.zone import (
     ZoneNode,
     ZoneOptions,
     ZonePartial,
+    child_nodelists,
+    nodes_under,
     render_zone_standalone,
+    zones_under,
 )
+from next.permissions.nodes import HasPermNode
 
 
 def _render(source: str, **ctx) -> str:
@@ -288,3 +293,52 @@ class TestRequestFixture:
         node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
         out = node.partial.render(Context({"request": request}))
         assert out == "/"
+
+
+class TestNodeWalks:
+    """The walkers the guard analysis and the zone checks read node trees with."""
+
+    def test_nodes_under_yields_every_node_below_the_ancestor(self) -> None:
+        template = Template(
+            '<x>{% has_perm "x.y" %}<a>{% if c %}<b>{% endif %}{% endhas_perm %}<c>'
+        )
+        found = list(nodes_under(template.nodelist, HasPermNode))
+        assert [type(node).__name__ for node in found] == [
+            "TextNode",
+            "IfNode",
+            "TextNode",
+        ]
+        assert [node.s for node in found if isinstance(node, TextNode)] == [
+            "<a>",
+            "<b>",
+        ]
+
+    def test_nodes_under_nothing_without_the_ancestor(self) -> None:
+        template = Template("<x>{% if c %}<b>{% endif %}")
+        assert list(nodes_under(template.nodelist, HasPermNode)) == []
+
+    def test_an_ancestor_tuple_counts_each_class(self) -> None:
+        template = Template(
+            '{% if a %}{% zone "i" %}x{% endzone %}{% endif %}'
+            '{% for x in y %}{% zone "f" %}x{% endzone %}{% endfor %}'
+            '{% zone "open" %}x{% endzone %}'
+        )
+        assert list(zones_under(template.nodelist, (IfNode, ForNode))) == ["i", "f"]
+
+    def test_zones_under_walks_zone_bodies_and_branches(self) -> None:
+        template = Template(
+            '{% zone "a" %}{% has_perm "x.y" %}{% zone "b" %}{% zone "c" %}'
+            "{% endzone %}{% endzone %}{% endhas_perm %}{% endzone %}"
+            '{% has_perm "x.y" %}plain{% else %}{% zone "d" %}{% endzone %}'
+            "{% endhas_perm %}"
+        )
+        assert list(zones_under(template.nodelist, HasPermNode)) == ["b", "c", "d"]
+
+    def test_zones_under_nothing_without_the_ancestor(self) -> None:
+        template = Template('{% zone "a" %}{% zone "b" %}{% endzone %}{% endzone %}')
+        assert list(zones_under(template.nodelist, HasPermNode)) == []
+
+    def test_child_nodelists_skips_a_missing_list(self) -> None:
+        (node,) = Template('{% has_perm "a.b" %}x{% endhas_perm %}').nodelist
+        node.nodelist_false = None
+        assert list(child_nodelists(node)) == [node.nodelist_true]

@@ -49,6 +49,7 @@ END_TAGS = frozenset(
         "filter",
         "for",
         "form",
+        "has_perm",
         "if",
         "ifchanged",
         "language",

@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Any
 
 from django.urls import Resolver404, resolve
 
+from access.forms import POLICY_FIELD
 from access.models import AuditEntry
-from access.policy import POLICY_FIELD
 from next.forms import RegistryFormActionBackend
 
 

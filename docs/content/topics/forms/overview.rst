@@ -140,6 +140,7 @@ next.dj keeps the same set of decisions and moves them onto the form class itsel
 
 Two differences are worth stating rather than inferring.
 The ``Meta`` guard keys are static and freeze at import time, while ``check_permissions`` and its object-level sibling ``has_object_permission`` run per request and may read the database.
+A ``permission_required`` name registered in a ``permissions.py`` is checked on the bound row rather than at import time, see :ref:`topics-permissions`.
 The guards also protect the POST endpoint rather than the page, so rendering a guarded form on a public page is allowed and hiding it in the template is the author's job.
 
 Shared dependency cache

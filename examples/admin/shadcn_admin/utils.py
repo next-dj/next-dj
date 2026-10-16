@@ -1,6 +1,7 @@
 from django.apps import apps
 from django.contrib import admin
 from django.contrib.admin.options import ModelAdmin
+from django.core.exceptions import PermissionDenied
 from django.db.models import Model
 from django.http import Http404, HttpRequest
 
@@ -34,12 +35,14 @@ def resolve_model_admin(
 def resolve_object_or_404(
     request: HttpRequest, app_label: str, model_name: str, pk: int
 ) -> tuple[type[Model], ModelAdmin, Model]:
-    """Like `resolve_model_admin` but also fetch the object, 404 when it is missing."""
+    """Fetch the object the user may view, 404 when it is missing, 403 when hidden."""
     model, model_admin = resolve_model_admin(app_label, model_name)
     obj = model_admin.get_object(request, pk)
     if obj is None:
         msg = f"Object {app_label}.{model_name} with pk={pk} not found."
         raise Http404(msg)
+    if not model_admin.has_view_or_change_permission(request, obj):
+        raise PermissionDenied
     return model, model_admin, obj
 
 

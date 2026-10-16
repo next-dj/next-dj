@@ -152,7 +152,8 @@ An anonymous POST redirects to ``LOGIN_URL`` with ``next`` set to the origin pag
 The guard protects the mutation, not the markup.
 A GET still renders the page and its form, so hide the form in the template when anonymous visitors should not see it.
 See :ref:`topics-forms-actions-guards` for the full semantics, including guard inheritance.
-For a per-request decision that the static keys cannot express, such as owner-only edits, override ``check_permissions`` or ``has_object_permission`` on the form class.
+For owner-only edits, register the rule as a predicate in ``permissions.py`` and name it in ``Meta.permission_required``, see :doc:`/content/howto/enforce-object-level-permissions`.
+For a per-request decision that reads the request itself, override ``check_permissions`` or ``has_object_permission`` on the form class.
 See :ref:`topics-forms-actions-dynamic-guards` for those hooks.
 
 Verification

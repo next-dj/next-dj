@@ -71,6 +71,9 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``provider_registered``
      - Dependencies
      - When a ``RegisteredParameterProvider`` subclass joins the registry.
+   * - ``permission_registered``
+     - Permissions
+     - After ``add_perm`` binds a predicate to a new permission name.
    * - ``route_registered``
      - URLs
      - After a URL pattern is created for a discovered page.
@@ -97,7 +100,7 @@ Every signal the framework emits is listed below with the subsystem that emits i
      - After the wizard ``done`` method returns a response below HTTP 400 for the final step.
    * - ``form_access_denied``
      - Forms
-     - When the origin page or a dynamic permission hook denies a request, never on the static guard path.
+     - When the origin page, a dynamic permission hook, or a registered permission on the bound form denies a request, never on the static guard path.
    * - ``form_backend_loaded``
      - Forms
      - After a form action backend is created from its configuration entry.

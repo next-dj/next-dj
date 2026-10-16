@@ -179,6 +179,28 @@ Its changelist narrows to ``visible_to(request.user)``, so an action only ever r
 A ``page.py`` follows the same split.
 Its context functions read lists through ``QuerySet`` methods such as ``Note.objects.visible_to(scope).pinned()``, take the row a URL addresses as ``DObject[Note]``, and send writes through a form or a service.
 
+Permissions
+-----------
+
+A rule about who may act on one row goes into ``permissions.py`` as a predicate registered under a permission name, a function of the user and the row, or of the user alone where the row does not matter.
+``visible_to(scope)`` decides which rows a reader sees at all, and the predicate decides what a user may do with a row it sees, such as edit it or delete it.
+
+.. code-block:: python
+   :caption: notes/permissions.py
+
+   from next.permissions import add_perm, predicate
+
+   @predicate
+   def is_owner(user, note):
+       return note is not None and note.owner_id == user.pk
+
+   add_perm("notes.edit_note", is_owner)
+
+The ``next`` application imports the ``permissions.py`` of every installed application at startup, after the ``deps.py`` modules and before the ``forms.py`` ones.
+``ObjectPermissionBackend`` in ``AUTHENTICATION_BACKENDS`` answers ``user.has_perm("notes.edit_note", note)`` from the predicate, so the ``Meta.permission_required`` of a form and the ``{% has_perm %}`` tag of a template ask the same rule.
+A predicate reads the user and the row and nothing else, and one declared as ``(user)`` reads the user alone, so a check that needs the request stays in the ``has_object_permission`` hook of the form.
+See :doc:`permissions` for the backend, the tag, and the forms integration.
+
 Signals
 -------
 
@@ -239,7 +261,7 @@ The table names each familiar pattern, where Django already provides it, and wha
      - Form actions, each an ``on_valid`` or an ``@action`` handler served at its own endpoint behind its guards, and ``FormWizard`` as a command split into steps.
    * - Strategy and adapter
      - ``AUTHENTICATION_BACKENDS`` and the cache and storage backends.
-     - The backend keys of ``NEXT_FRAMEWORK`` such as ``PAGE_BACKENDS`` and ``STATIC_BACKENDS``, and providers in ``deps.py`` that adapt the request to a domain value.
+     - The backend keys of ``NEXT_FRAMEWORK`` such as ``PAGE_BACKENDS`` and ``STATIC_BACKENDS``, providers in ``deps.py`` that adapt the request to a domain value, and ``ObjectPermissionBackend``, which answers ``has_perm`` from ``permissions.py``.
    * - Template method
      - Template inheritance with ``{% block %}`` and class-based views.
      - ``layout.djx`` with ``{% template %}``, composed with the page template into one template per page.
@@ -254,10 +276,10 @@ The table names each familiar pattern, where Django already provides it, and wha
      - Components with props and slots, and zones inside a page.
    * - Specification
      - ``Q`` objects and ``QuerySet`` methods.
-     - Nothing beyond Django.
+     - Predicates in ``permissions.py``, composed with ``&``, ``|``, and ``~``.
    * - Registry
      - The ``apps`` registry and ``admin.site``.
-     - Form classes and providers that register on class definition, ``deps.py``, ``forms.py``, and ``signals.py`` imported at startup, and components registered from ``_components/`` folders.
+     - Form classes and providers that register on class definition, ``deps.py``, ``permissions.py``, ``forms.py``, and ``signals.py`` imported at startup, and components registered from ``_components/`` folders.
    * - Memento and state
      - Sessions.
      - ``FormWizard`` drafts kept in the storage named by ``FORM_WIZARD_BACKEND``.
@@ -277,5 +299,6 @@ See also
 
    :doc:`project-layout` for the files of an application and the project sizes.
    :doc:`dependency-injection` for the providers that live in ``deps.py``.
+   :doc:`permissions` for the predicates that live in ``permissions.py``.
    :doc:`signals` for the signals the framework sends.
    :doc:`/content/topics/forms/actions` for the ``Meta`` guards on a form.

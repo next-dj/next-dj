@@ -1,4 +1,5 @@
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
@@ -11,6 +12,8 @@ from django.urls import NoReverseMatch, include, path, re_path
 from django.views import View
 
 from next.checks import reset_check_caches
+from next.forms import RegistryFormActionBackend
+from next.forms.manager import form_action_manager
 from next.forms.uid import reverse_form_action
 from next.testing import override_next_settings
 from next.urls import PageRoot, RouterBackend
@@ -29,6 +32,7 @@ from tests.support import (
     file_router_config_entry,
     importable_dir,
     installed_apps,
+    isolated_form_registries,
     patch_checks_router_manager_with_routers,
     routed,
     write_app,
@@ -474,6 +478,63 @@ class _CallableView:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """Return a plain response."""
         return HttpResponse("instance")
+
+
+_TENANT_PAGE = """
+from django.http import HttpResponse
+from next.forms import action
+
+template = '{% form "tenant_ping" %}<button>go</button>{% endform %}'
+
+
+@action("tenant_ping")
+def tenant_ping():
+    return HttpResponse("pong")
+"""
+
+
+class TenantFormActionBackend(RegistryFormActionBackend):
+    """A project backend whose actions exist only once its page modules run."""
+
+
+def _tenant_tree(tmp_path: Path) -> Path:
+    root = tmp_path / "pages"
+    write_page(root, "", _TENANT_PAGE)
+    return root
+
+
+@pytest.fixture()
+def tenant_backend(monkeypatch) -> Iterator[TenantFormActionBackend]:
+    """Serve the form actions through a fresh project backend nothing has filled."""
+    backend = TenantFormActionBackend()
+    with isolated_form_registries():
+        monkeypatch.setattr(form_action_manager, "_backends", [backend])
+        yield backend
+
+
+class TestFrameworkRoutesBeforeDiscovery:
+    """`next.E149` run first discovers the pages that register the form actions."""
+
+    def test_a_custom_backend_dispatch_is_recognised(
+        self, tmp_path, tenant_backend: TenantFormActionBackend
+    ) -> None:
+        with routed(_tenant_tree(tmp_path)):
+            assert list(tenant_backend.iter_actions()) == []
+            assert check_framework_routes_reachable() == []
+        assert [meta["name"] for meta in tenant_backend.iter_actions()] == [
+            "tenant_ping"
+        ]
+
+    def test_a_pattern_above_the_include_is_still_e149(
+        self, tmp_path, tenant_backend: TenantFormActionBackend
+    ) -> None:
+        urlconf = _urlconf(
+            "tenant_catch_all", re_path(r"^.*$", _mine), path("", include("next.urls"))
+        )
+        with routed(_tenant_tree(tmp_path)), override_settings(ROOT_URLCONF=urlconf):
+            errors = check_framework_routes_reachable()
+        assert [error.id for error in errors] == ["next.E149", "next.E149"]
+        assert "form action endpoint" in errors[1].msg
 
 
 class TestFrameworkRoutesReachable:

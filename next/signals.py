@@ -46,6 +46,7 @@ from next.partial.signals import (
     zone_registered,
     zone_rendered,
 )
+from next.permissions.signals import permission_registered
 from next.scripts.signals import scripts_registered
 from next.seo.signals import sitemap_backend_loaded
 from next.server.signals import watch_specs_ready
@@ -133,6 +134,7 @@ __all__ = [
     "page_rendered",
     "partial_backend_loaded",
     "patch_op_registered",
+    "permission_registered",
     "provider_registered",
     "receiver",
     "route_registered",

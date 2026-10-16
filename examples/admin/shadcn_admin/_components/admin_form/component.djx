@@ -6,7 +6,11 @@
         {% form "admin:discard" class="discard-in-layer" %}
           {% component "button" type="submit" text="Discard" variant="ghost" %}
         {% endform %}
-        {% component "button" href=form_state.delete_url text="Delete" variant="outline" %}
+        {% if form_state.row_rules %}
+          {% has_perm form_state.delete_perm form_state.instance %}{% component "button" href=form_state.delete_url text="Delete" variant="outline" %}{% endhas_perm %}
+        {% else %}
+          {% has_perm form_state.delete_perm %}{% component "button" href=form_state.delete_url text="Delete" variant="outline" %}{% endhas_perm %}
+        {% endif %}
       {% /slot %}
     {% endif %}
   {% /component %}
@@ -30,12 +34,13 @@
         {% endfor %}
       </div>
 
-      <div class="flex items-center justify-end gap-2 pt-2">
-        {% component "button" href=form_state.changelist_url text="Cancel" variant="outline" %}
-        {% component "button" type="submit" name="_save_addanother" text="Save and add another" variant="outline" %}
-        {% component "button" type="submit" name="_save_continue" text="Save and continue editing" variant="outline" %}
-        {% component "button" type="submit" text="Save" variant="default" %}
-      </div>
+      {% if not form_state.is_change %}
+        {% component "save_bar" %}
+      {% elif form_state.row_rules %}
+        {% has_perm form_state.change_perm form_state.instance %}{% component "save_bar" %}{% else %}{% component "save_bar" read_only=True %}{% endhas_perm %}
+      {% else %}
+        {% has_perm form_state.change_perm %}{% component "save_bar" %}{% else %}{% component "save_bar" read_only=True %}{% endhas_perm %}
+      {% endif %}
     </div>
   {% endform %}
 

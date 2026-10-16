@@ -3,7 +3,7 @@
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from django.http import (
     HttpResponse,
@@ -27,7 +27,9 @@ from .permissions import (
     _check_access,
     _check_page_access,
     _enforce_object_permissions,
+    _enforce_registered_permissions,
     _enforce_view_permissions,
+    _object_permissions,
 )
 from .responses import (
     _HTTP_ERROR_FLOOR,
@@ -54,6 +56,8 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+type _Branch = Literal["wizard", "handler", "form"]
 
 
 class FormActionDispatch:
@@ -123,19 +127,16 @@ class FormActionDispatch:
 
         Every URL kwarg comes from the posted origin, so a miss at any depth is a 400.
         """
-        handler = meta.get("handler")
-        form_class = meta.get("form_class")
-        wizard_class = meta.get("wizard_class")
-
-        if wizard_class is not None:
+        branch = _branch(meta)
+        if branch == "wizard":
+            wizard_class = cast("type[FormWizard]", meta.get("wizard_class"))
             return _dispatch_wizard(backend, request, action_name, wizard_class, state)
-
-        if form_class is None and handler is not None:
+        if branch == "handler":
+            handler = cast("Callable[..., Any]", meta.get("handler"))
             return FormActionDispatch._dispatch_handler_only(
                 backend, handler, request, action_name, state
             )
-
-        if form_class is not None:
+        if branch == "form":
             return FormActionDispatch._dispatch_form_class(
                 backend, request, action_name, meta, state
             )
@@ -163,7 +164,8 @@ class FormActionDispatch:
         """
         guard = meta.get("guard")
         if guard is not None:
-            denial = _check_access(request, guard)
+            object_stage = bool(guard.permissions) and _branch(meta) == "form"
+            denial = _check_access(request, guard, object_stage=object_stage)
             if denial is not None:
                 return denial
         return _check_page_access(
@@ -200,6 +202,7 @@ class FormActionDispatch:
             handler=meta.get("handler"),
             form_class=resolved_form_class,
             init_kwargs=init_kwargs,
+            object_permissions=_object_permissions(meta.get("guard")),
         )
         return FormActionDispatch._dispatch_with_form(backend, request, params, state)
 
@@ -253,6 +256,9 @@ class FormActionDispatch:
                 bound=True,
                 action_name=params.action_name,
             )
+        _enforce_registered_permissions(
+            form, request, params.action_name, params.object_permissions, state
+        )
         denial = _enforce_object_permissions(form, request, params.action_name, state)
         if denial is not None:
             return denial
@@ -356,6 +362,20 @@ class FormActionDispatch:
         )
 
 
+def _branch(meta: "ActionMeta") -> "_Branch | None":
+    """Return the branch `_route` takes for an action, `None` when it declares none.
+
+    The guard reads it too, so only the form branch defers its registered permissions.
+    """
+    if meta.get("wizard_class") is not None:
+        return "wizard"
+    if meta.get("form_class") is not None:
+        return "form"
+    if meta.get("handler") is not None:
+        return "handler"
+    return None
+
+
 @dataclass(slots=True)
 class _DispatchState:
     """Bundle of mutable dispatch state threaded through helper methods."""
@@ -456,6 +476,7 @@ class _FormDispatchParams:
     handler: "Callable[..., Any] | None"
     form_class: "type[django_forms.Form]"
     init_kwargs: dict[str, Any] = field(default_factory=dict)
+    object_permissions: tuple[str, ...] = ()
 
 
 __all__ = ["FormActionDispatch"]

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from next.static import StaticFilesBackend
-from notes.access import get_active_tenant
+from notes.middleware import get_active_tenant
 
 
 if TYPE_CHECKING:

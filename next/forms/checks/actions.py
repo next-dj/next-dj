@@ -4,6 +4,7 @@ from django.conf import settings
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
 from next.checks import NEXT
+from next.permissions.manager import permission_manager
 from next.utils import middleware_listed
 
 from .sources import diagnostics, iter_registered_actions
@@ -144,6 +145,30 @@ def check_action_guard_permissions(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
+@register(NEXT)
+def check_action_guard_permissions_known(*args, **kwargs) -> list[CheckMessage]:
+    """Warn when permission_required names a permission nothing grants (`next.W129`).
+
+    Without `django.contrib.auth` no permission resolves, which `next.W060` reports.
+    """
+    if "django.contrib.auth" not in settings.INSTALLED_APPS:
+        return []
+    return [
+        DjangoWarning(
+            f"Form action {meta.get('name')!r} declares permission_required "
+            f"{perm!r}, which no installed model defines and no add_perm() "
+            "registers, so the guard refuses every user but a superuser. Fix the "
+            "name, or register the permission with next.permissions.add_perm().",
+            obj=settings,
+            id="next.W129",
+        )
+        for meta in iter_registered_actions()
+        if (guard := meta.get("guard")) is not None
+        for perm in guard.permissions
+        if not permission_manager.known(perm)
+    ]
+
+
 def _declares_success_message(target: object) -> bool:
     """Return True when the class declares a non-empty Meta.success_message."""
     return bool(getattr(getattr(target, "Meta", None), "success_message", ""))
@@ -174,6 +199,7 @@ def check_success_message_framework(*args, **kwargs) -> list[CheckMessage]:
 __all__ = [
     "check_action_applied_to_class",
     "check_action_guard_permissions",
+    "check_action_guard_permissions_known",
     "check_form_action_collisions",
     "check_forms_outside_base_dir",
     "check_instance_from_url_on_non_model_form",

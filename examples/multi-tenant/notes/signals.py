@@ -5,7 +5,7 @@ from django.http import HttpRequest
 
 from next.signals import form_access_denied
 
-from .access import get_active_tenant
+from .middleware import get_active_tenant
 
 
 logger = logging.getLogger("notes.access")

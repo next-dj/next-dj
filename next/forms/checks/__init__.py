@@ -6,6 +6,7 @@ Importing the package registers every check.
 from .actions import (
     check_action_applied_to_class,
     check_action_guard_permissions,
+    check_action_guard_permissions_known,
     check_form_action_collisions,
     check_forms_outside_base_dir,
     check_instance_from_url_on_non_model_form,
@@ -37,6 +38,7 @@ from .wizards import (
 __all__ = [
     "check_action_applied_to_class",
     "check_action_guard_permissions",
+    "check_action_guard_permissions_known",
     "check_component_widget_components",
     "check_component_widget_field_types",
     "check_form_action_backends_configuration",

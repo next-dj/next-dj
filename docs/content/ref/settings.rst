@@ -54,7 +54,7 @@ Each key accepts one shape, and a value of any other type is dropped in favour o
 - ``CSRF_DELIVERY`` accepts a string naming a mode.
 - ``STATIC_VERSION`` accepts a string or ``None``.
 - ``URL_NAME_TEMPLATE`` also accepts a string, but a format template such as ``page_{name}`` rather than a dotted path.
-- The bool flags (``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``DEPS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, ``SIGNALS_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, ``CSP_NONCE``) accept any value and pass through ``bool()``.
+- The bool flags (``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``DEPS_AUTODISCOVER``, ``PERMISSIONS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, ``SIGNALS_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, ``CSP_NONCE``) accept any value and pass through ``bool()``.
 
 A dropped value is reported at ``manage.py check`` as ``next.E076``, or under the code the key owns where it carries one, and a bool flag holding a non-bool is reported as ``next.W072``.
 A top-level key that is not in this catalog is reported as ``next.E035``, and the merged view raises ``AttributeError`` for it, so a typo never reaches a read site as a default.
@@ -228,8 +228,8 @@ See :doc:`/content/topics/partial-rendering/reference` for the wire protocol and
 Application modules
 -------------------
 
-``NextFrameworkConfig.ready`` imports three conventional modules from every installed app, the third-party ones included.
-All ``deps`` modules load first, then all ``forms`` modules, then all ``signals`` modules, so a form finds the providers and named dependencies of every app already registered.
+``NextFrameworkConfig.ready`` imports four conventional modules from every installed app, the third-party ones included.
+All ``deps`` modules load first, then all ``permissions`` modules, then all ``forms`` modules, then all ``signals`` modules, so a form finds the providers, named dependencies, and object permissions of every app already registered.
 An app without the module is skipped, and a module that fails to import raises its own error out of ``ready``.
 A key set to ``False`` turns off that one sweep, and the project imports the modules it wants from ``AppConfig.ready`` instead.
 
@@ -241,6 +241,15 @@ Boolean that controls whether the ``deps`` submodule of every installed app is i
 Default value ``True``.
 
 When ``True``, the named dependencies and parameter providers declared in ``app/deps.py`` register before any form, component, or page module loads.
+
+PERMISSIONS_AUTODISCOVER
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Boolean that controls whether the ``permissions`` submodule of every installed app is imported on startup.
+
+Default value ``True``.
+
+When ``True``, the predicates that ``app/permissions.py`` registers through ``add_perm`` are in place before any ``forms.py`` loads, see :doc:`/content/topics/permissions`.
 
 FORM_AUTODISCOVER
 ~~~~~~~~~~~~~~~~~

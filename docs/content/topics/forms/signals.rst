@@ -223,13 +223,13 @@ An error response from ``done``, status 400 or above, skips the signal and keeps
 form_access_denied
 ------------------
 
-Fires when the origin page or a dynamic permission hook denies a request, never on the static ``ActionGuard`` path.
+Fires when the origin page, a dynamic permission hook, or a registered permission checked on the bound form denies a request, never on the static ``ActionGuard`` path.
 The sender is ``FormActionDispatch``.
 See :ref:`topics-forms-actions-dynamic-guards` for the hooks themselves and :doc:`/content/topics/pages` for the page-level check.
 
 The payload carries ``action_name``, ``uid``, ``request``, ``layer``, and ``reason``.
-``layer`` is ``"page"`` when the ``render()`` of the origin page answered the submission with a response, ``"view"`` for a ``check_permissions`` denial, or ``"object"`` for a ``has_object_permission`` denial.
-``reason`` is ``"raised"`` when a hook raised :exc:`~django.core.exceptions.PermissionDenied`, ``"denied"`` when it returned ``False``, or ``"response"`` when it returned an ``HttpResponse`` short-circuit.
+``layer`` is ``"page"`` when the ``render()`` of the origin page answered the submission with a response, ``"view"`` for a ``check_permissions`` denial, or ``"object"`` for a ``has_object_permission`` denial or a registered ``Meta.permission_required`` permission refused on the bound form, see :ref:`topics-permissions`.
+``reason`` is ``"raised"`` when a hook raised :exc:`~django.core.exceptions.PermissionDenied`, ``"denied"`` when it returned ``False`` or a registered permission was refused, or ``"response"`` when it returned an ``HttpResponse`` short-circuit.
 A ``"page"`` denial is always ``"response"``, because a page refuses by returning one.
 
 The dispatcher builds the payload and sends the signal only when at least one receiver is connected, so an audit receiver adds no cost to an allowed request.

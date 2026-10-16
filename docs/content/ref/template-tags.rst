@@ -244,9 +244,24 @@ Partial rendering
    It is valid only between a ``{% zone %}`` and its ``{% endzone %}``, and a lazy zone without it is reported as ``next.E064``.
    The branch belongs to lazy zones only, so a zone without ``lazy=`` rejects it with ``TemplateSyntaxError`` when the template compiles.
 
-A zone belongs to a page or layout, not a component, and may not sit inside a ``{% for %}`` or an ``{% if %}``.
+A zone belongs to a page or layout, not a component, and may not sit inside a ``{% for %}``, an ``{% if %}``, or a ``{% has_perm %}``.
 A zone directly inside a ``{% with %}`` draws the ``next.W067`` warning because the bindings are invisible to a standalone zone render.
 The :doc:`zone placement checks </content/ref/system-checks>` enforce each rule at ``manage.py check`` time.
+
+Permissions
+-----------
+
+.. describe:: {% has_perm "<app_label.codename>" [<obj>] %}...{% else %}...{% endhas_perm %}
+
+   Renders its body for a user who holds the permission and the optional ``else`` branch for everyone else.
+   The user is read off the request of the render, the full page, component, and zone renders alike, and the ``user`` context variable stands in when no request is bound.
+   With an object the tag asks ``user.has_perm(perm, obj)``, and an object that resolves to ``None`` or to nothing renders the ``else`` branch without asking.
+   Without an object it asks ``user.has_perm(perm)``, the model-level question, which model permissions answer as well as registered predicates.
+   The permission is a quoted name or a variable, and one that resolves to nothing or to an empty string renders the ``else`` branch.
+   Any argument count other than one or two raises ``TemplateSyntaxError`` at parse time.
+   A literal name nothing grants is ``next.W130``.
+   A ``{% zone %}`` inside the block, or in the body of a component whose template reaches one, is ``next.E163``, and a standalone render of such a zone is refused as an unknown zone.
+   A template that runs ``{% load rules %}`` gets django-rules' own ``has_perm`` tag in its place, see :doc:`/content/topics/permissions`.
 
 Layouts
 -------
@@ -325,3 +340,4 @@ See also
    :doc:`/content/topics/partial-rendering/zones` for the ``{% zone %}`` tag.
    :doc:`/content/topics/seo/metadata` for the ``{% metadata %}`` tag and :doc:`/content/topics/seo/breadcrumbs` for ``{% breadcrumbs %}``.
    :doc:`/content/topics/scripts/index` for ``{% collect_head %}``, ``{% script %}``, and ``{% #consented %}``.
+   :doc:`/content/topics/permissions` for ``{% has_perm %}``.

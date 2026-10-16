@@ -18,8 +18,17 @@ _DEPS_PROBE_BODY = (
     "    if name.startswith('discovered_') and name.endswith('.deps')\n"
     ")\n"
 )
+_PERMISSION_BODY = (
+    "from next.permissions import add_perm\n\n"
+    "add_perm(__name__.partition('.')[0] + '.probe', lambda user, obj: True)\n"
+)
+_PERMISSIONS_PROBE_BODY = (
+    "from next.permissions.manager import permission_manager\n\n"
+    "SEEN = tuple(name for name, _rule in permission_manager.registry.items())\n"
+)
 _SWITCHES = (
     ("deps", "DEPS_AUTODISCOVER"),
+    ("permissions", "PERMISSIONS_AUTODISCOVER"),
     ("forms", "FORM_AUTODISCOVER"),
     ("signals", "SIGNALS_AUTODISCOVER"),
 )
@@ -53,13 +62,15 @@ def _loads(app: str) -> list[str]:
 class TestImportOrder:
     """Each module name finishes across every app before the next name starts."""
 
-    def test_deps_then_forms_then_signals_across_apps(self, make_app) -> None:
+    def test_deps_then_permissions_then_forms_then_signals(self, make_app) -> None:
         first = _full_app(make_app)
         second = _full_app(make_app)
         autodiscover.install()
         assert _imported(first, second) == [
             f"{first}.deps",
             f"{second}.deps",
+            f"{first}.permissions",
+            f"{second}.permissions",
             f"{first}.forms",
             f"{second}.forms",
             f"{first}.signals",
@@ -71,6 +82,13 @@ class TestImportOrder:
         later = make_app(deps=_RECORDING_BODY)
         autodiscover.install()
         assert f"{later}.deps" in sys.modules[f"{earlier}.forms"].SEEN
+
+    @pytest.mark.usefixtures("isolated_permissions")
+    def test_a_form_module_sees_the_permissions_of_a_later_app(self, make_app) -> None:
+        earlier = make_app(forms=_PERMISSIONS_PROBE_BODY)
+        later = make_app(permissions=_PERMISSION_BODY)
+        autodiscover.install()
+        assert (f"{later}.probe",) == sys.modules[f"{earlier}.forms"].SEEN
 
 
 class TestSwitches:

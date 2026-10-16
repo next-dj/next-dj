@@ -40,6 +40,23 @@ def templated_page(directory: Path, source: str, body: str | None = "<p>x</p>") 
     return write_page(directory, source=source, body=body)
 
 
+def layout_root(tmp_path: Path) -> Path:
+    """Return a `pages` root in `tmp_path` with an `<html>` layout over every page."""
+    root = tmp_path / "pages"
+    root.mkdir()
+    (root / "layout.djx").write_text("<html>{% template %}</html>")
+    return root
+
+
+def component_template(pages: Path, name: str, body: str) -> Path:
+    """Write the `component.djx` of the component `name` under the `pages` root."""
+    folder = pages / "_components" / name
+    folder.mkdir(parents=True)
+    path = folder / "component.djx"
+    path.write_text(body)
+    return path
+
+
 def metadata_page(directory: Path, metadata: str) -> Path:
     """Write a templated page whose `page.py` holds the `metadata` dict literal."""
     return templated_page(directory, f"metadata = {metadata}\n")

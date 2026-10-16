@@ -68,6 +68,7 @@ compat = [
     "django-widget-tweaks>=1.5",
     "django-htmx>=1.19",
     "django-allauth>=65.18",
+    "rules>=3.5",
 ]
 e2e = [
     "pytest-playwright==0.9.0",

@@ -15,7 +15,7 @@ Check registration
 
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
-The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
+The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
 
 Each of these modules registers checks.
 ``next.pages.checks``, ``next.forms.checks``, ``next.partial.checks``, and ``next.seo.checks`` are packages rather than single modules, and importing the package imports every submodule that carries a check.
@@ -175,7 +175,16 @@ The package splits into ``backends`` for the ``PARTIAL_BACKENDS`` entries, ``for
 
 .. automodule:: next.partial.checks
    :members:
-   :exclude-members: E_BACKENDS_NOT_A_LIST, E_BACKEND_WITHOUT_PATH, E_COMPOSED_TEMPLATE_SYNTAX, E_CONTEXT_ZONE_UNKNOWN, E_DUPLICATE_ZONE, E_LAZY_WITHOUT_PLACEHOLDER, E_NON_ASCII_ZONE, E_OP_BAD_NAME, E_ZONE_IN_COMPONENT, E_ZONE_IN_FOR, E_ZONE_IN_IF, W_FORM_BACKEND_NOT_AWARE, W_FORM_IN_FOR_NO_KEY, W_MANIFEST_VERSION_NO_STORAGE, W_TOO_MANY_BACKENDS, W_WITH_OVER_ZONE
+   :exclude-members: E_BACKENDS_NOT_A_LIST, E_BACKEND_WITHOUT_PATH, E_COMPOSED_TEMPLATE_SYNTAX, E_CONTEXT_ZONE_UNKNOWN, E_DUPLICATE_ZONE, E_LAZY_WITHOUT_PLACEHOLDER, E_NON_ASCII_ZONE, E_OP_BAD_NAME, E_ZONE_IN_COMPONENT, E_ZONE_IN_FOR, E_ZONE_IN_HAS_PERM, E_ZONE_IN_IF, W_FORM_BACKEND_NOT_AWARE, W_FORM_IN_FOR_NO_KEY, W_MANIFEST_VERSION_NO_STORAGE, W_TOO_MANY_BACKENDS, W_WITH_OVER_ZONE
+
+Permissions
+~~~~~~~~~~~
+
+``next.permissions.checks`` reads the registered predicates, ``AUTHENTICATION_BACKENDS``, and every literal permission name a ``{% has_perm %}`` tag carries in a composed page or a component template.
+``next.W129`` for a ``permission_required`` name lives in ``next.forms.checks.actions``, and ``next.E163`` for a zone inside the tag lives in ``next.partial.checks.zones``, beside the other zone placement checks.
+
+.. automodule:: next.permissions.checks
+   :members:
 
 Apps
 ~~~~
@@ -426,10 +435,12 @@ Errors
      - A zone name is not an ASCII slug, so it cannot travel in the latin-1 ``X-Next-Zone`` header.
      - ``next.partial.checks.zones``
    * - ``next.E062``
-     - A ``{% zone %}`` sits inside a ``{% for %}`` loop, which a standalone zone render cannot reproduce.
+     - A ``{% zone %}`` sits inside a ``{% for %}`` loop at any depth, one nested in another zone under the loop included, which a standalone zone render cannot reproduce.
+       The runtime refuses such a zone as an unknown zone.
      - ``next.partial.checks.zones``
    * - ``next.E063``
-     - A ``{% zone %}`` sits inside an ``{% if %}`` block, whose condition a standalone zone render cannot evaluate.
+     - A ``{% zone %}`` sits inside an ``{% if %}`` block at any depth, one nested in another zone under the block included, whose condition a standalone zone render cannot evaluate.
+       The runtime refuses such a zone as an unknown zone.
      - ``next.partial.checks.zones``
    * - ``next.E064``
      - A ``lazy=`` zone declares no ``{% placeholder %}`` branch to show until its body arrives.
@@ -775,6 +786,22 @@ Errors
    * - ``next.E160``
      - A ``DObject`` parameter sits on a callable whose type hints do not resolve, such as a module under ``from __future__ import annotations`` that imports a name of the signature under ``TYPE_CHECKING``, so the annotation stays a string and every resolve raises ``TypeError``.
      - ``next.deps.checks``
+   * - ``next.E161``
+     - A registered permission is checked by a leaf callable whose signature the predicate cannot call, one that takes ``*args``, requires a keyword-only parameter, takes more than two positional parameters, or has no signature Python can read.
+       A composite is judged leaf by leaf, the message names the permission, the leaf, and the reason, and the hint restates the rule, ``()``, ``(user)``, or ``(user, obj)`` with ``**kwargs`` allowed.
+     - ``next.permissions.checks``
+   * - ``next.E162``
+     - Object permissions are registered while ``AUTHENTICATION_BACKENDS`` lists no ``ObjectPermissionBackend`` or subclass of it, so ``user.has_perm()`` never consults their predicates.
+       The message names ``"next.permissions.ObjectPermissionBackend"`` to add next to ``ModelBackend``, and the hint names the ``backend`` argument ``login()`` needs once two backends are listed.
+     - ``next.permissions.checks``
+   * - ``next.E163``
+     - A ``{% zone %}`` renders inside a ``{% has_perm %}`` block, whose permission a standalone zone render does not check again, so the zone would render for users the block refuses.
+       One message covers a zone at any depth under the block in the composed page, one nested in another zone included.
+       The other names a component and covers a zone anywhere in its body, any slot or the children, when its template, followed through nested components, a literal ``{% extends %}``, and a literal ``{% include %}``, reaches a ``{% has_perm %}`` or a reference the check cannot follow, such as an unresolved component, a template name in a variable, a missing template, or one that does not compile.
+       The rule over-refuses on purpose, and the runtime refuses the same zones as an unknown zone, from the same analysis.
+       A component whose Python ``render()`` decides what it shows is not analysed, nor an ``{% if %}`` or a ``{% for %}`` its own template wraps around its slot or children, since ``next.E062`` and ``next.E063`` read the composed page alone.
+       Move the zone outside the block or put the block inside the zone.
+     - ``next.partial.checks.zones``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -1078,6 +1105,17 @@ Warnings
        A tree that ``pages()`` mounts twice is judged by the include the URLconf lists first.
        A warning rather than an error, because the walk cannot read an include hidden behind a lazy pattern sequence, while a kwarg missing at runtime raises ``UnboundObjectError``.
      - ``next.deps.checks``
+   * - ``next.W129``
+     - A form action declares a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, so the guard refuses every user but a superuser.
+       A permission django-rules registers counts as known while ``rules.permissions.ObjectPermissionBackend`` is listed in ``AUTHENTICATION_BACKENDS``.
+       Silent while ``django.contrib.auth`` is not installed, which ``next.W060`` reports.
+       A model permission counts as known when a model class declares it, through ``default_permissions`` or ``Meta.permissions``, so a ``Permission`` row created only by a data migration or through the admin draws the warning, and declaring it in ``Meta.permissions`` or listing the code in ``SILENCED_SYSTEM_CHECKS`` quiets it.
+     - ``next.forms.checks.actions``
+   * - ``next.W130``
+     - A ``{% has_perm %}`` in a composed page or a component template names, as a literal, a permission no installed model defines and no ``add_perm()`` registers, so the tag renders its ``else`` branch for every user but a superuser.
+       The message names the first template holding each such name, and a name a variable carries is not read.
+       A permission django-rules registers counts as known, and a ``Permission`` row that only the database holds does not, as for ``next.W129``.
+     - ``next.permissions.checks``
 
 Codes are assigned per check and are not contiguous.
 

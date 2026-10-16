@@ -188,6 +188,15 @@ A few placements break a standalone zone render, and a system check catches each
 
 A zone name must be unique within a page's composed template, the layout chain plus the page template.
 A zone may not sit inside a ``{% for %}`` or a ``{% if %}``, because a standalone render does not see loop variables or the condition that gated the block.
+The rule holds at any depth, so a zone nested in another zone under the loop or the condition is reported too (``next.E062``, ``next.E063``).
+A zone may not sit inside a ``{% has_perm %}`` either, because a standalone render does not check the enclosing permission again and would render the zone for users the block refuses (``next.E163``).
+The same holds for a zone anywhere in the body of a component whose template reaches a ``{% has_perm %}``, followed through nested components, a literal ``{% extends %}``, and a literal ``{% include %}``.
+A reference the analysis cannot follow, an unresolved component, a template name in a variable, a missing template, or one that does not compile, counts as a ``{% has_perm %}``, so the rule refuses more than it has to on purpose.
+At runtime every zone these rules report counts as undeclared, so a standalone request answers 400 ``unknown zone``, a form re-render that names it falls back to an extract-morph of a full render, and ``Patches.morph_zone`` raises ``UnknownZoneError``.
+With ``DEBUG`` on, an edit to a component, an extended, or an included template makes the next request analyse the zones again.
+A component whose Python ``render()`` decides what it shows is not analysed, since the analysis reads templates and a condition in Python is invisible to it.
+An ``{% if %}`` or a ``{% for %}`` that a component's own template wraps around its slot or children is not analysed either, since the component analysis looks only for ``{% has_perm %}`` and unfollowable references and ``next.E062`` and ``next.E063`` read the composed page alone, so a zone in such a body renders on its own without that condition.
+Put the ``{% has_perm %}`` inside the zone instead, so every render of the zone checks it for the user it renders for, see :doc:`/content/topics/permissions`.
 A zone may not sit directly inside a ``{% with %}`` either, because the with-bindings are not visible to a standalone zone render.
 This one is the warning ``next.W067`` rather than an error, so move the bindings into a context provider or inside the zone body.
 A ``lazy=`` zone needs a ``{% placeholder %}`` branch that holds something, and a branch of whitespace alone still earns ``next.E064``, because the check reads the significant nodes of the branch rather than its presence.

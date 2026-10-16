@@ -94,6 +94,9 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 :doc:`deps`
    ``next.deps`` for the dependency resolver and providers.
 
+:doc:`permissions`
+   ``next.permissions`` for object permission predicates and the authentication backend that answers them.
+
 :doc:`conf`
    ``next.conf`` for settings loading and the ``extend_default_backend`` helper.
 
@@ -164,6 +167,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    csrf
    scripts
    deps
+   permissions
    conf
    server
    signals

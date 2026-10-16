@@ -19,6 +19,7 @@ from django.urls import NoReverseMatch, Resolver404, resolve
 from next.checks import NEXT, SEO
 from next.checks.common import (
     WALK_HINT,
+    discover_page_registrations,
     errors_for_unknown_keys,
     get_page_roots,
     get_router_manager,
@@ -404,7 +405,11 @@ _PROBE_UID = "probe"
 
 
 def _framework_routes() -> tuple[tuple[str, Callable[[], str], frozenset[Any]], ...]:
-    """Return the label, reverse call and serving views of each framework endpoint."""
+    """Return the label, reverse call and serving views of each framework endpoint.
+
+    A `page.py` registers its actions as it runs, so the page tree is discovered first.
+    """
+    discover_page_registrations()
     action_views = frozenset(
         pattern.callback
         for pattern in form_routes_slot.get()

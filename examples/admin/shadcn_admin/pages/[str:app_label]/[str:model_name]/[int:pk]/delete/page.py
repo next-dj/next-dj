@@ -1,12 +1,33 @@
 from typing import Any
 
 from django.contrib import messages
+from django.contrib.admin.options import ModelAdmin
 from django.contrib.admin.utils import get_deleted_objects
 from django.core.exceptions import PermissionDenied
+from django.db.models import Model
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from shadcn_admin import utils
 
 from next import action, context
+
+
+def deletion(
+    request: HttpRequest, model_admin: ModelAdmin, obj: Model
+) -> tuple[dict[str, int], set[str], list[Model], bool]:
+    """Return what deleting `obj` takes and whether the user may do all of it.
+
+    Every row the delete cascades to must be one the user may delete, as Django's own
+    `delete_view` demands, so a parent never removes rows the user could not.
+    """
+    _to_delete, model_count, perms_needed, protected = get_deleted_objects(
+        [obj], request, model_admin.admin_site
+    )
+    allowed = (
+        model_admin.has_delete_permission(request, obj)
+        and not perms_needed
+        and not protected
+    )
+    return model_count, perms_needed, protected, allowed
 
 
 @context("delete_state")
@@ -17,9 +38,7 @@ def delete_state(
     model, model_admin, obj = utils.resolve_object_or_404(
         request, app_label, model_name, pk
     )
-    _to_delete, model_count, perms_needed, protected = get_deleted_objects(
-        [obj], request, model_admin.admin_site
-    )
+    model_count, perms_needed, protected, allowed = deletion(request, model_admin, obj)
     return {
         "app_label": app_label,
         "model_name": model_name,
@@ -32,11 +51,7 @@ def delete_state(
         "protected": [str(p) for p in protected],
         "changelist_url": utils.changelist_url(app_label, model_name),
         "change_url": utils.change_url(app_label, model_name, pk),
-        "can_delete": (
-            model_admin.has_delete_permission(request, obj)
-            and not perms_needed
-            and not protected
-        ),
+        "can_delete": allowed,
     }
 
 
@@ -48,7 +63,7 @@ def delete(
     model, model_admin, obj = utils.resolve_object_or_404(
         request, app_label, model_name, pk
     )
-    if not model_admin.has_delete_permission(request, obj):
+    if not deletion(request, model_admin, obj)[3]:
         raise PermissionDenied
     obj_repr = str(obj)
     model_admin.log_deletions(request, [obj])

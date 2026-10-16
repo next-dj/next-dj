@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from next.forms.checks import (
         check_action_applied_to_class,
         check_action_guard_permissions,
+        check_action_guard_permissions_known,
         check_component_widget_components,
         check_component_widget_field_types,
         check_form_action_backends_configuration,
@@ -121,8 +122,14 @@ if TYPE_CHECKING:
         check_single_partial_backend,
         check_with_directly_over_zone,
         check_zone_name_is_slug,
+        check_zone_not_in_has_perm,
         check_zone_not_in_if,
         check_zone_not_in_loop,
+    )
+    from next.permissions.checks import (
+        check_has_perm_names,
+        check_permission_backend,
+        check_permission_predicates,
     )
     from next.scripts.checks import (
         check_consented_categories,
@@ -216,6 +223,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
     "next.forms.checks": (
         "check_action_applied_to_class",
         "check_action_guard_permissions",
+        "check_action_guard_permissions_known",
         "check_component_widget_components",
         "check_component_widget_field_types",
         "check_form_action_backends_configuration",
@@ -286,8 +294,14 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_single_partial_backend",
         "check_with_directly_over_zone",
         "check_zone_name_is_slug",
+        "check_zone_not_in_has_perm",
         "check_zone_not_in_if",
         "check_zone_not_in_loop",
+    ),
+    "next.permissions.checks": (
+        "check_has_perm_names",
+        "check_permission_backend",
+        "check_permission_predicates",
     ),
     "next.scripts.checks": (
         "check_consented_categories",
@@ -357,6 +371,7 @@ __all__ = [
     "SEO",
     "check_action_applied_to_class",
     "check_action_guard_permissions",
+    "check_action_guard_permissions_known",
     "check_app_directories_finder",
     "check_app_mounts",
     "check_asset_kinds_are_loadable",
@@ -399,6 +414,7 @@ __all__ = [
     "check_forms_outside_base_dir",
     "check_framework_routes_reachable",
     "check_gated_blocking_scripts",
+    "check_has_perm_names",
     "check_inline_asset_bodies_are_loadable",
     "check_instance_from_url_on_non_model_form",
     "check_instance_from_url_unknown_field",
@@ -440,6 +456,8 @@ __all__ = [
     "check_pages_structure",
     "check_partial_backend_names_a_path",
     "check_partial_backends_is_a_list",
+    "check_permission_backend",
+    "check_permission_predicates",
     "check_repeated_form_has_key",
     "check_request_in_context",
     "check_reserved_js_context_keys",
@@ -492,6 +510,7 @@ __all__ = [
     "check_wizard_step_file_fields",
     "check_wizard_url_param_route",
     "check_zone_name_is_slug",
+    "check_zone_not_in_has_perm",
     "check_zone_not_in_if",
     "check_zone_not_in_loop",
     "register_all",

@@ -38,11 +38,11 @@ Each table lists its receivers in the order they run, and each is connected with
   A reload that replaces the routers from code changes what they report without touching settings, so every memo derived from the old routers goes with them, see :doc:`/content/howto/reload-routes-from-code`.
 
 ``apply_resolver_setting()`` points the dependency-injection singleton at the class named by ``DEPENDENCY_RESOLVER``, see :doc:`settings`.
-It runs ahead of every install because the two discovery steps import user modules, and a ``component.py``, a ``deps.py``, a ``forms.py``, or a ``signals.py`` that resolves at import time has to see the configured resolver rather than the base one.
+It runs ahead of every install because the two discovery steps import user modules, and a ``component.py``, a ``deps.py``, a ``permissions.py``, a ``forms.py``, or a ``signals.py`` that resolves at import time has to see the configured resolver rather than the base one.
 
-``autodiscover.install()`` imports the ``deps``, ``forms``, and ``signals`` submodules of every installed app, finishing one module name across all apps before it starts the next.
+``autodiscover.install()`` imports the ``deps``, ``permissions``, ``forms``, and ``signals`` submodules of every installed app, finishing one module name across all apps before it starts the next.
 It runs ahead of ``components.install()``, so a ``component.py`` imported in the last step finds every provider and named dependency registered.
-``DEPS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, and ``SIGNALS_AUTODISCOVER`` turn the three sweeps off one by one, see :doc:`settings`.
+``DEPS_AUTODISCOVER``, ``PERMISSIONS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, and ``SIGNALS_AUTODISCOVER`` turn the four sweeps off one by one, see :doc:`settings`.
 
 Steps five to twelve bind the seven :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
 They also run ahead of the discovery steps so a discovery failure leaves no process behind with a slot still empty.

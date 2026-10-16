@@ -4,7 +4,7 @@ from library.demo import seed_demo
 
 
 class Command(BaseCommand):
-    help = "Create the demo tags, authors, books and chapters."
+    help = "Create the demo catalog and the editor account."
 
     def handle(self, *args: object, **options: object) -> None:
         """Seed the demo dataset and report it on stdout."""

@@ -11,6 +11,7 @@ from next.conf import next_framework_settings
 
 MODULES: Final[tuple[tuple[str, str], ...]] = (
     ("deps", "DEPS_AUTODISCOVER"),
+    ("permissions", "PERMISSIONS_AUTODISCOVER"),
     ("forms", "FORM_AUTODISCOVER"),
     ("signals", "SIGNALS_AUTODISCOVER"),
 )
