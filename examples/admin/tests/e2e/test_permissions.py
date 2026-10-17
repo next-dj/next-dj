@@ -16,13 +16,13 @@ from next.testing import NextClient
 
 pytestmark = pytest.mark.e2e
 
-RECENT_ACTIVITY = "recent-activity"
-ZONE_HEADERS = {"X-Next-Request": "1", "X-Next-Zone": RECENT_ACTIVITY}
+DASHBOARD_PANELS = "dashboard-panels"
+ZONE_HEADERS = {"X-Next-Request": "1", "X-Next-Zone": DASHBOARD_PANELS}
 OUTLINE_HEADERS = {"X-Next-Request": "1", "X-Next-Zone": "outline"}
 
 
 def is_activity_poll(response: Response) -> bool:
-    return RECENT_ACTIVITY in response.request.headers.get("x-next-zone", "")
+    return DASHBOARD_PANELS in response.request.headers.get("x-next-zone", "")
 
 
 def sign_in_as_editor(page: Page, base_url: str, next_path: str) -> None:
@@ -124,7 +124,7 @@ def test_an_anonymous_zone_request_is_sent_to_the_login(
     assert response.headers["location"] == "/admin/login/?next=/admin/"
 
 
-def test_the_editor_reads_the_else_branch_and_cannot_fetch_the_zone(
+def test_the_editor_gets_no_activity_panel_and_no_rows_from_the_zone(
     page: Page, base_url: str, editor
 ) -> None:
     AdminActivityLog.objects.create(
@@ -132,11 +132,11 @@ def test_the_editor_reads_the_else_branch_and_cannot_fetch_the_zone(
     )
     sign_in_as_editor(page, base_url, "/admin/")
 
-    expect(page.get_by_text("may read the audit log")).to_be_visible()
-    expect(page.locator(f"[data-next-zone='{RECENT_ACTIVITY}']")).to_have_count(0)
+    expect(page.get_by_role("heading", name="Recent activity")).to_have_count(0)
+    expect(page.get_by_role("link", name="Activity feed")).to_have_count(0)
     expect(page.get_by_text("Frankenstein")).to_have_count(0)
     response = page.request.get(f"{base_url}/admin/", headers=ZONE_HEADERS)
-    assert response.status == 403
+    assert response.status == 200
     assert "Frankenstein" not in response.text()
 
 
@@ -147,7 +147,7 @@ def test_the_superuser_watches_the_activity_zone_refresh(
     page.clock.install()
     page.goto(f"{base_url}/admin/")
     wait_for_runtime(page)
-    feed = page.locator(f"[data-next-zone='{RECENT_ACTIVITY}']")
+    feed = page.locator(f"[data-next-zone='{DASHBOARD_PANELS}']")
     expect(feed).to_contain_text("No activity yet.")
 
     AdminActivityLog.objects.create(

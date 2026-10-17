@@ -1,5 +1,6 @@
 from django.urls import reverse
 from wiki.models import Article
+from wiki.services import latest_articles
 
 from next import context
 from next.pages import MetadataDict
@@ -38,4 +39,4 @@ def file_pages() -> list[dict[str, str]]:
 @context("articles")
 def articles() -> list[Article]:
     """Latest published articles, freshest first."""
-    return list(Article.objects.all())
+    return latest_articles()

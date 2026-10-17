@@ -85,6 +85,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 SILENCED_SYSTEM_CHECKS = ["next.W059"]
 
 NEXT_FRAMEWORK = {
+    "BOUNDARIES": "strict",
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",

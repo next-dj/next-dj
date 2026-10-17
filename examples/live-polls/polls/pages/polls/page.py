@@ -1,6 +1,5 @@
-from django.db.models import Count, QuerySet, Sum, Value
-from django.db.models.functions import Coalesce
-from polls.models import Poll
+from polls import services
+from polls.models import PollQuerySet
 
 from next import context
 from next.pages import MetadataDict
@@ -10,18 +9,15 @@ metadata: MetadataDict = {"title": "Polls"}
 
 
 @context("polls")
-def polls() -> QuerySet[Poll]:
+def polls() -> PollQuerySet:
     """Return polls annotated with aggregate counts for the index page.
 
     The annotations let `poll_card` read counts instead of issuing per-row queries.
     """
-    return Poll.objects.annotate(
-        choice_count=Count("choices", distinct=True),
-        total_votes=Coalesce(Sum("choices__votes"), Value(0)),
-    )
+    return services.poll_index()
 
 
 @context("active_polls_count", inherit_context=True)
 def active_polls_count() -> int:
     """Expose the count of polls to every descendant page header."""
-    return Poll.objects.count()
+    return services.poll_count()

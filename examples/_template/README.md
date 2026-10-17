@@ -1,29 +1,49 @@
 # `_template`: starter scaffold for a next.dj example
 
-The skeleton copied for every new example in this repository. It runs and its test passes, but it demonstrates nothing on its own. Copy the folder, work through the rename checklist, then fill in the feature you want to show.
+The skeleton copied for every new example in this repository. It runs and its tests pass, but it demonstrates nothing beyond the starter itself. Copy the folder, work through the rename checklist, then fill in the feature you want to show.
+
+## Where it comes from
+
+The scaffold is the output of the two project templates next.dj ships, run from an empty folder:
+
+```bash
+uv run django-admin startproject --template="$(uv run python -c 'import next.conf; print(next.conf.__path__[0])')/project_template" config .
+uv run python manage.py startapp --template="$(uv run python -c 'import next.conf; print(next.conf.__path__[0])')/app_template" myapp
+```
+
+The first command writes `manage.py`, the `config/` settings package, the project-level page root `chrome/` and the `home` app with the public welcome page. The second writes the `myapp` app: an `Item` model with `ItemQuerySet.visible_to`, `create_item` and `rename_item` in `services.py`, an `item_created` signal, object permissions in `permissions.py`, an abstract `ItemForm` in `forms.py`, an `ItemAdmin` that writes through the services, and a page tree at `/myapp/`. `myapp` is then added to `INSTALLED_APPS` by hand, as after any `startapp`.
+
+Everything in the folder is that output, formatted by the repository's ruff, with these additions on top:
+
+- The shared UI kit. `config/settings.py` puts [`../_shared/`](../_shared/) on `sys.path`, lists `../_shared/static` in `STATICFILES_DIRS` and `../_shared/_components` in `COMPONENT_BACKENDS["DIRS"]`, and [`chrome/layout.djx`](chrome/layout.djx) renders the envelope through the shared `page_head` and `app_shell` components.
+- `STATIC_VERSION`, `SITE` and `METADATA` under `NEXT_FRAMEWORK`, with the tab icon shipped as `home/static/home/icon.svg`.
+- `pytest.ini` and the tests under `tests/`, which replace the Django `TestCase` module the app template writes into `myapp/tests/`, since every example drives its pages through `next.testing.NextClient` with plain pytest.
+- `@override` on `ItemAdmin.save_model`, which tells ruff the boolean positional `change` is the signature Django calls.
+- This README.
 
 ## Layout
 
-Two page roots feed one file router. `chrome/` is the project-level root listed in `PAGE_BACKENDS["DIRS"]`, and its `layout.djx` is the outermost HTML envelope wrapped around every page. `myapp/pages/` is the per-app root the router finds through `APP_DIRS=True`, and it holds the pages themselves. Components resolve the same way, from the app's `pages/_components/` and from the shared kit in [`../_shared/_components/`](../_shared/_components/) listed in `COMPONENT_BACKENDS["DIRS"]`. `STATICFILES_DIRS` picks up `../_shared/static` alongside the example's own `static/`, which is how the shadcn palette and its tokens arrive. The tab icon is the app static file `myapp/static/myapp/icon.svg`, declared under `icons` in `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`, and the head renders it as `<link rel="icon">`.
+Two kinds of page roots feed one file router. `chrome/` is the project-level root listed in `PAGE_BACKENDS["DIRS"]`, and its `layout.djx` is the outermost HTML envelope wrapped around every page. `home/pages/` and `myapp/pages/` are per-app roots the router finds through `APP_DIRS=True`, each mounted at the prefix its `AppConfig.mount` declares, `""` for `home` and `"myapp/"` for `myapp`. `uv run python manage.py next routes` prints where every page landed. Components resolve from `_components/` folders inside a page tree and from the shared kit.
+
+`LoginRequiredMiddleware` closes every page by default. The welcome page declares `page.public()`, and `/myapp/` sends an anonymous visitor to the admin sign-in. `NEXT_FRAMEWORK["BOUNDARIES"] = "strict"` makes `manage.py check --tag boundaries` fail on any boundary finding, so a page tree reads rows through `.objects.visible_to(...)` or a function of `services.py` and writes through a form or a service, as `myapp` already does.
 
 The app follows the canonical next.dj layout, the one every example in this repository shares:
 
 ```
 myapp/
 ├── apps.py          # mount
-├── models.py
-├── deps.py          # DI providers, markers, @resolver.dependency
-├── signals.py       # signal declarations and their receivers
-├── pages/           # PAGES_DIR, the page tree
-│   ├── _components/ # COMPONENTS_DIR, components scoped to the tree
-│   ├── page.py
-│   └── template.djx
-└── static/myapp/
+├── models.py        # Item, ItemQuerySet.visible_to
+├── services.py      # create_item, rename_item
+├── signals.py       # item_created
+├── permissions.py   # add_perm predicates
+├── forms.py         # abstract ItemForm
+├── admin.py         # ItemAdmin over the services
+└── pages/           # PAGES_DIR, the page tree
+    ├── page.py
+    └── template.djx
 ```
 
-The scaffold ships no `deps.py` and no `signals.py`, since it has nothing to inject and nothing to observe. Add them under those names when the example needs them, and the framework imports both at startup with no `ready()` code.
-
-`MyappConfig.mount` is the URL prefix of the app's `pages/` tree, in Django `path()` syntax and relative to where [`config/urls.py`](config/urls.py) includes `next.urls`. The scaffold ships `mount = ""`, so the welcome page stays on `/` and a copy keeps its URLs until it picks a prefix. An app with more than one tree declares `mounts = {"pages": "notes/", "admin_pages": "notes/admin/"}` instead, and `uv run python manage.py next routes` prints where every page landed. `config/settings.py` spells out `PAGES_DIR = "pages"` and `COMPONENTS_DIR = "_components"`, because a backend entry that lists its own `DIRS` has to name both, and the values are the framework defaults. Both stay settings so an existing project can keep the directory names it already has.
+Add a `deps.py` for DI providers and named dependencies when the example needs one, and the framework imports it at startup with no `ready()` code, like `signals.py`, `permissions.py` and `forms.py`.
 
 ## Rename checklist
 
@@ -31,7 +51,7 @@ The scaffold ships deliberately generic names. Each rename touches more than one
 
 | Rename | Also update |
 | --- | --- |
-| `myapp/` | `INSTALLED_APPS` in [`config/settings.py`](config/settings.py), and `next_pages` in [`pytest.ini`](pytest.ini) |
+| `myapp/` | `INSTALLED_APPS` in [`config/settings.py`](config/settings.py), `next_pages` in [`pytest.ini`](pytest.ini), the `myapp.*` permission names in `permissions.py` and `forms.py`, and the `related_name` and constraint name in `models.py` |
 | `chrome/` | `PAGE_BACKENDS["DIRS"]` |
 | `next.dj template`, `https://template.example` and `Next.dj example template` | `NAME` and `URL` under `NEXT_FRAMEWORK["SITE"]`, and the `title` default under `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in `config/settings.py`, the tab title of every page that declares none |
 | The site `description` | `description` under `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`, the search snippet of every page that declares none |
@@ -39,22 +59,22 @@ The scaffold ships deliberately generic names. Each rename touches more than one
 ## Conventions
 
 - Tailwind loads from the Play CDN through the shared `page_head` component. No build step, no Node.
-- The tab title is metadata, not a prop. `page_head` renders `{% metadata %}`, which folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` with whatever each `page.py` declares as `metadata = {...}` or under `@page.metadata`. `NEXT_FRAMEWORK["SITE"]` names the site and its origin, `NAME` fills `{site_name}` and `URL` is what canonical, Open Graph and icon links are absolute on. The defaults hold the viewport, the tab icon, a site description and a `title` template with its default, so every page shows the default until it declares a title of its own, which then renders as `{title} · {site_name}`. `INDEXABLE` is left at `"auto"`, so the dev server with `DEBUG = True` renders every page `noindex` and a deploy renders them indexable. `uv run python manage.py check --deploy --tag seo` passes on the scaffold as shipped, keep it that way as pages arrive.
-- Project-local assets are spelled as staticfiles names, never as `/static/...` literals. `page_head` registers `shared/css/tokens.css`, `shared/css/base.css` and `shared/js/base.mjs` through `{% use_style %}` and `{% use_module %}`. A name follows `STATIC_URL` and carries the storage digest, a literal path does neither. The icon under `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` is the one literal path, because settings load before staticfiles can resolve a name.
-- `pytest.ini` is the whole test scaffold. `addopts` opts into the framework's pytest plugin with `-p next.testing.plugin`, `next_pages` points it at the page tree it imports once per session so the router is populated before the first request, `next_clear_cache` empties the cache between tests, and the `next_client` fixture is the test client that speaks the partial protocol.
-- `STATIC_VERSION` names the deploy stamp, and every example serving its assets off disk inherits that line from here. The tag lands on every asset URL as a `v` parameter and on every partial response as the asset version, and the [examples README](../README.md#conventions-every-example-follows) explains what it guards, when to bump it, and which examples derive it from something else.
-- Every file is intentionally short. Fill in what you need, drop what you do not.
+- The tab title is metadata, not a prop. `page_head` renders `{% metadata %}`, which folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` with whatever each `page.py` declares as `metadata = {...}` or under `@page.metadata`. `NEXT_FRAMEWORK["SITE"]` names the site and its origin, `NAME` fills `{site_name}` and `URL` is what canonical, Open Graph and icon links are absolute on. `INDEXABLE` is left at `"auto"`, so the dev server with `DEBUG = True` renders every page `noindex` and a deploy renders them indexable. `uv run python manage.py check --deploy --tag seo` passes on the scaffold as shipped, keep it that way as pages arrive.
+- Project-local assets are spelled as staticfiles names, never as `/static/...` literals. `page_head` registers `shared/css/tokens.css`, `shared/css/base.css` and `shared/js/base.mjs` through `{% use_style %}` and `{% use_module %}`. The icon under `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` is the one literal path, because settings load before staticfiles can resolve a name.
+- `pytest.ini` is the whole test scaffold. `addopts` opts into the framework's pytest plugin with `-p next.testing.plugin`, `next_pages` points it at the page trees it imports once per session, `next_clear_cache` empties the cache between tests, and the `next_client` fixture is the test client that speaks the partial protocol. `tests/conftest.py` holds the users and items the tests share.
+- `STATIC_VERSION` names the deploy stamp. The tag lands on every asset URL as a `v` parameter and on every partial response as the asset version, and the [examples README](../README.md#conventions-every-example-follows) explains what it guards.
 
 ## How to run
 
 ```bash
 cd examples/_template
 uv run python manage.py migrate
+uv run python manage.py createsuperuser
 uv run python manage.py runserver
 uv run pytest
 ```
 
-The smoke tests in `tests/test_integration.py` fetch `/`, assert the welcome banner renders, read the head back through `next.testing.assert_metadata`, check that every asset name resolves to a `/static/...` URL, and read the route map back through `manage.py next routes`. Keep it green while you fill the scaffold in, then grow it into the example's own suite. Every example is gated at 100% coverage by `make test-examples`.
+`/` is public, `/myapp/` lists the items of the signed-in user and adds new ones, and `/admin/` edits them through the same services. `tests/test_integration.py` drives the welcome page, its head and asset URLs, the route map, the item page with its form, and the admin add and change views, and `tests/test_unit.py` covers the services, `visible_to` and the permissions. Every example is gated at 100% coverage by `make test-examples`.
 
 ## Further reading
 

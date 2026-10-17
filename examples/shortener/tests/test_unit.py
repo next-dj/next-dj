@@ -10,11 +10,7 @@ from shortener import cache as cache_module
 from shortener.cache import flush_clicks, increment_clicks
 from shortener.deps import DLink, LinkProvider
 from shortener.models import Link
-from shortener.pages.page import (
-    SLUG_ATTEMPTS_PER_LENGTH,
-    SLUG_MAX_LENGTH,
-    _create_link_with_unique_slug,
-)
+from shortener.services import SLUG_ATTEMPTS_PER_LENGTH, SLUG_MAX_LENGTH, create_link
 from shortener.signals import action_counts
 
 from next.forms.dispatch import FormActionDispatch
@@ -56,7 +52,7 @@ class TestFlushClicksDecrMissing:
 
 
 class TestGenerateSlugIntegrityRetry:
-    """`_create_link_with_unique_slug` retries on IntegrityError."""
+    """`create_link` retries on IntegrityError."""
 
     def test_retries_until_unique(self, make_link) -> None:
         make_link("abcdef")
@@ -64,23 +60,23 @@ class TestGenerateSlugIntegrityRetry:
         # retry uses the next random slug from `secrets.choice`.
         candidates = iter(["abcdef", "xyz123"])
         with mock.patch(
-            "shortener.pages.page._random_slug",
+            "shortener.services._random_slug",
             side_effect=lambda _length: next(candidates),
         ):
-            link = _create_link_with_unique_slug("https://example.com/second")
+            link = create_link(url="https://example.com/second")
         assert link.slug == "xyz123"
 
     def test_raises_when_slug_space_exhausted(self, make_link) -> None:
         make_link("fixed")
         total = SLUG_ATTEMPTS_PER_LENGTH * (SLUG_MAX_LENGTH - 6 + 1)
         with (
-            mock.patch("shortener.pages.page._random_slug", return_value="fixed"),
+            mock.patch("shortener.services._random_slug", return_value="fixed"),
             mock.patch.object(
                 Link.objects, "create", side_effect=IntegrityError("dup")
             ),
             pytest.raises(RuntimeError, match="Could not allocate"),
         ):
-            _create_link_with_unique_slug("https://example.com/x")
+            create_link(url="https://example.com/x")
         assert total > 0
 
 

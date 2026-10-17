@@ -1,5 +1,6 @@
 from django.db.models import QuerySet
 from wiki.models import Article
+from wiki.services import article_index
 
 from next.seo import sitemap
 
@@ -12,4 +13,4 @@ exclude = ["search"]
 )
 def articles() -> QuerySet[Article]:
     """List every article row, paged by the database instead of loaded at once."""
-    return Article.objects.only("slug", "updated_at").order_by("pk")
+    return article_index()

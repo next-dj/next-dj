@@ -215,7 +215,7 @@ Two serialize providers feed one JS object here, the component-level `results` a
 
 ### 7. Inherit context across the layout chain
 
-`polls/page.py` declares `active_polls_count` with `inherit_context=True` so descendant pages, including the detail page and its child stream endpoint, share the same value without a second query. The root layout reads it for the header badge. The `[int:id]/page.py` adds `poll` with `inherit_context=True`. The nested `[int:id]/layout.djx` and the inner template both consume `poll` directly, demonstrating context flow without a context processor.
+`polls/page.py` declares `active_polls_count` with `inherit_context=True` so descendant pages, including the detail page and its child stream endpoint, share the same value without a second query. Both index callables ask [`polls/services.py`](polls/services.py), `poll_index()` over the `with_totals()` method of `PollQuerySet` and `poll_count()`, since a poll has no owner to narrow it by and `NEXT_FRAMEWORK["BOUNDARIES"] = "strict"` lets a page tree read only through `visible_to(...)` or a function of `services.py`. The root layout reads it for the header badge. The `[int:id]/page.py` adds `poll` with `inherit_context=True`. The nested `[int:id]/layout.djx` and the inner template both consume `poll` directly, demonstrating context flow without a context processor.
 
 ### 8. DI through `DPoll[Poll]`
 

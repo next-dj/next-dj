@@ -2,6 +2,7 @@ from typing import Any, ClassVar
 
 from access.forms import POLICY_FIELD, AcknowledgedStep
 from access.models import AccessRequest
+from access.services import create_access_request
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponse
 
@@ -77,7 +78,7 @@ class AccessRequestWizard(FormWizard):
         before the fields reach the model instead of being declared on it.
         """
         fields = {k: v for k, v in cleaned_data.items() if k != POLICY_FIELD}
-        access_request = AccessRequest.objects.create(**fields)
+        access_request = create_access_request(**fields)
         request.session["access_request_just_created"] = access_request.pk
         request.session.modified = True
         return (

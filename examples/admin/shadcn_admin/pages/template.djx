@@ -11,22 +11,9 @@
     {% #component "empty_state" title="No models registered" description="Add `@admin.register(...)` to expose models in this dashboard." %}{% /component %}
   {% endif %}
 
-  <section aria-labelledby="recent-activity-title" class="rounded-lg border border-border bg-card p-6">
-    <h2 id="recent-activity-title" class="mb-4 text-sm font-semibold">Recent activity</h2>
-    {% has_perm "admin_audit.view_adminactivitylog" %}
-      {% zone "recent-activity" tag="ul" poll="5s" %}
-        {% for entry in recent_activity %}
-          <li class="flex items-center justify-between gap-4 border-b border-border py-2 text-sm last:border-0">
-            <span><span class="rounded-full bg-muted px-2 py-0.5 text-xs">{{ entry.action }}</span> {{ entry.object_repr|default:"—" }}</span>
-            <span class="text-xs text-muted-foreground">{{ entry.user|default:"—" }} · {{ entry.timestamp|date:"Y-m-d H:i:s" }}</span>
-          </li>
-        {% empty %}
-          <li class="text-sm text-muted-foreground">No activity yet.</li>
-        {% endfor %}
-      {% endzone %}
-      <a href="{% url 'next:page_activity' %}" class="mt-4 inline-block text-sm text-muted-foreground hover:text-foreground">All activity</a>
-    {% else %}
-      <p class="text-sm text-muted-foreground">Recent admin actions show here for accounts that may read the audit log.</p>
-    {% endhas_perm %}
-  </section>
+  {% zone "dashboard-panels" poll="5s" %}
+    {% for panel in dashboard_panels %}
+      {% component "dashboard_panel" panel=panel %}
+    {% endfor %}
+  {% endzone %}
 </div>

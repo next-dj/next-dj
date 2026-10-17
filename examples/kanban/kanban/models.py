@@ -9,6 +9,14 @@ class BoardQuerySet(models.QuerySet):
         """Return every board, since the demo has no accounts to narrow them by."""
         return self.all()
 
+    def active(self) -> Self:
+        """Return the boards still in use, newest first."""
+        return self.filter(archived=False).order_by("-created_at")
+
+    def archived(self) -> Self:
+        """Return the boards taken out of the index."""
+        return self.filter(archived=True)
+
 
 class Board(models.Model):
     """A Kanban board owns an ordered list of columns and metadata."""
@@ -26,6 +34,11 @@ class Board(models.Model):
     def __str__(self) -> str:
         """Return the human-readable board title."""
         return self.title
+
+    def card(self, pk: int | str) -> "Card | None":
+        """Return the card `pk` names when it sits on this board, with its column."""
+        cards = Card.objects.select_related("column").filter(column__board=self)
+        return cards.filter(pk=pk).first()
 
 
 class Column(models.Model):

@@ -4,6 +4,7 @@ from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 from wiki.deps import DArticle
 from wiki.models import RESERVED_SLUGS, Article
+from wiki.services import slug_taken, update_article
 
 from next import context, page
 from next.forms import ComponentWidget, ModelForm, PermissionOutcome
@@ -32,8 +33,13 @@ class ArticleEditForm(ModelForm):
 
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
         """Persist edits to an existing article and redirect to its public URL."""
-        self.save()
-        return HttpResponseRedirect(self.instance.url)
+        article = update_article(
+            article_id=self.instance.pk,
+            slug=self.cleaned_data["slug"],
+            title=self.cleaned_data["title"],
+            body_md=self.cleaned_data["body_md"],
+        )
+        return HttpResponseRedirect(article.url)
 
     def clean_slug(self) -> str:
         """Reject reserved prefixes and slugs taken by another article."""
@@ -41,8 +47,7 @@ class ArticleEditForm(ModelForm):
         if slug in RESERVED_SLUGS:
             msg = "This slug collides with a file route."
             raise django_forms.ValidationError(msg)
-        clash = Article.objects.filter(slug=slug).exclude(pk=self.instance.pk).exists()
-        if clash:
+        if slug_taken(slug, exclude_pk=self.instance.pk):
             msg = "Slug already taken by another article."
             raise django_forms.ValidationError(msg)
         return slug

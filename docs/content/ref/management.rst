@@ -7,7 +7,7 @@ Module summary
 --------------
 
 The ``next`` application ships two management commands.
-``next`` dispatches the next.dj subcommands, ``routes`` and ``permissions`` among them, and ``showmetadata`` is a thin shell over the metadata of ``next.pages``.
+``next`` dispatches the next.dj subcommands, ``routes``, ``permissions``, and ``boundaries`` among them, and ``showmetadata`` is a thin shell over the metadata of ``next.pages``.
 
 next
 ----
@@ -17,6 +17,7 @@ Each module of ``next.management.subcommands`` whose name does not start with an
 
 Django's own options, such as ``--settings`` and ``--skip-checks``, belong to ``next`` and go before the subcommand name, because the parser of a subcommand does not know them.
 Like any Django command, ``next`` runs the system checks before the subcommand, so ``--skip-checks`` prints the table of a project whose checks fail.
+A subcommand that sets ``skips_checks = True`` starts without them, which ``boundaries`` does, since it reports the very findings that fail the checks.
 
 .. code-block:: bash
    :caption: Django options before the subcommand
@@ -99,6 +100,70 @@ The share page lifts the login of ``notes/pages/notes/proxy.py`` through its own
 A URL that resolves to no page is a ``CommandError``.
 The rule of an action is its owner rule and its ``Meta`` guard, since the rule of the posted origin page joins only per request, see :doc:`/content/security/actions`.
 
+boundaries
+~~~~~~~~~~
+
+``manage.py next boundaries`` prints the boundary debt of the project, one row per application and code, with four columns.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 85
+
+   * - Column
+     - Content
+   * - ``App``
+     - The label of the application, ``-`` for a record of ``boundaries.toml`` whose file lies in no application.
+   * - ``Code``
+     - A code ``boundaries.toml`` may record.
+   * - ``Found``
+     - How many findings of the code the files of the application hold.
+   * - ``Recorded``
+     - How many of them ``boundaries.toml`` records.
+
+.. code-block:: text
+   :caption: manage.py next boundaries
+
+   App      Code       Found  Recorded
+   library  next.W136  1      1
+   Findings: 1, recorded in boundaries.toml: 1. Mode: strict.
+
+The last line sums both columns and names the mode of ``NEXT_FRAMEWORK["BOUNDARIES"]``, and a project without findings prints ``No boundary findings.`` with the mode.
+The command starts without the system checks, so it answers while ``manage.py check`` fails, and exits with status zero whatever it finds, unless ``boundaries.toml`` or the import scan is broken or the boundaries go unchecked, which stop it with a ``CommandError``.
+
+``manage.py next boundaries <app>`` prints the Module Canvas of one application, what it owns, publishes, and leans on, one section after another.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 85
+
+   * - Section
+     - Content
+   * - ``Models``
+     - Each model of the application with its relation fields that point at a model of another application.
+   * - ``Publishes``
+     - Each signal its ``signals.py`` declares and each public function of its ``services`` module.
+   * - ``Listens``
+     - Each signal or sender of another application its receivers name, with the file and the line.
+   * - ``DI keys``
+     - Each named dependency it provides, with the file and the line.
+   * - ``Pages``
+     - Its pages, actions, and declaring components, in the four columns of `permissions`_.
+   * - ``Risks``
+     - Each action open to anyone while nothing declares it public.
+   * - ``Depends on``
+     - Each application it has an edge to, with the count of every kind of edge.
+   * - ``Used by``
+     - Each application with an edge to it, counted the same way.
+
+An empty section prints a dash, and a label that names no application of the project is a ``CommandError`` that lists the labels there are.
+In every mode a missing grimp, an import graph grimp cannot build, a ``boundaries.toml`` that breaks its format, and a strict mode that goes unchecked, ``next.W148``, are a ``CommandError`` as well.
+
+``manage.py next boundaries --refreeze`` writes ``boundaries.toml`` and prints what it wrote.
+Without a file it records every finding, and with one it only shrinks the records, then prints how many findings it left unrecorded.
+It records the whole project, so it takes no application label.
+A ``boundaries.toml`` it cannot read and a project without ``BASE_DIR`` stop it with a ``CommandError``.
+:doc:`/content/topics/boundaries` explains the ratchet the file holds.
+
 showmetadata
 ------------
 
@@ -125,5 +190,6 @@ See also
 
    :doc:`/content/topics/file-router` for the routes ``next routes`` lists.
    :doc:`/content/topics/permissions` for the rules ``next permissions`` lists.
+   :doc:`/content/topics/boundaries` for the findings ``next boundaries`` counts.
    :doc:`/content/topics/seo/auditing` for where the ``showmetadata`` command fits beside the checks and the tests.
    :doc:`metadata` for the metadata the command reads.

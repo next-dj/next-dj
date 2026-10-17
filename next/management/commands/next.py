@@ -26,6 +26,14 @@ class Command(BaseCommand):
             subcommand.add_arguments(subparser)
 
     @override
+    def execute(self, *args: Any, **options: Any) -> str | None:
+        """Skip the system checks for a subcommand that reports them itself."""
+        subcommand = load_subcommands().get(options.get("subcommand", ""))
+        if subcommand is not None and subcommand.skips_checks:
+            options["skip_checks"] = True
+        return super().execute(*args, **options)
+
+    @override
     def handle(self, *args: Any, **options: Any) -> None:
         """Hand the parsed options to the subcommand the parser picked."""
         load_subcommands()[options["subcommand"]].handle(self, **options)

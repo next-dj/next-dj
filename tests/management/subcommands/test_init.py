@@ -34,13 +34,13 @@ class TestLoadSubcommands:
     """Every public module of the package is one subcommand, found by name."""
 
     def test_the_shipped_subcommands(self) -> None:
-        assert list(load_subcommands()) == ["permissions", "routes"]
+        assert list(load_subcommands()) == ["boundaries", "permissions", "routes"]
 
     @pytest.mark.usefixtures("extra_subcommands")
     def test_a_new_module_is_a_new_subcommand_in_name_order(self) -> None:
         loaded = load_subcommands()
 
-        assert list(loaded) == ["alpha", "permissions", "routes", "zeta"]
+        assert list(loaded) == ["alpha", "boundaries", "permissions", "routes", "zeta"]
         assert all(isinstance(each, BaseSubcommand) for each in loaded.values())
 
     @pytest.mark.usefixtures("extra_subcommands")

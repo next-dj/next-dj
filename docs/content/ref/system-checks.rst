@@ -15,7 +15,7 @@ Check registration
 
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
-The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
+The imported modules are ``next.apps.checks``, ``next.boundaries.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
 
 Each of these modules registers checks.
 ``next.pages.checks``, ``next.forms.checks``, ``next.partial.checks``, and ``next.seo.checks`` are packages rather than single modules, and importing the package imports every submodule that carries a check.
@@ -29,7 +29,7 @@ The fourth describes a configuration every development checkout has, so reportin
 ``check_runtime_bundles_deployed`` (``next.W090``) asks the static files a deployment serves for the client runtime, which a source checkout builds only on demand.
 The other four read the settings a deployment runs on, ``check_site_url_for_deploy`` (``next.W110``, ``next.W122``) and ``check_seo_sources_on_closed_site`` (``next.W111``) with the ``seo`` tag, ``check_script_deploy`` (``next.W118``), and ``check_consent_cookie_secure`` (``next.W119``).
 
-Every next.dj check carries the ``next`` tag.
+Every next.dj check but the boundary ones carries the ``next`` tag.
 That tag is the importable string constant ``next.checks.NEXT``, so a project check joins the framework ones by decorating itself with ``@register(NEXT)`` rather than by repeating the literal.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
@@ -37,6 +37,7 @@ A tagged run reports what a full run reports, and ``--tag next --deploy`` adds t
 The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check, every page metadata check, and the site checks.
 ``manage.py check --tag seo`` runs the metadata, crawler-document, and site checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.
 Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
+The boundary checks carry the ``boundaries`` tag alone, the importable constant ``next.checks.BOUNDARIES``, so ``manage.py check --tag next`` leaves them out, ``manage.py check --tag boundaries`` runs them alone, and a run without a tag runs them with the rest, see `Boundaries`_.
 
 ``next.checks.reset_check_caches`` drops every per-run check cache so the next run rebuilds from the current sources.
 The cached state covers the router manager with the ``page.py`` pass memoised on it, the components manager, the collected URL patterns, the page module memo, the context and metadata registries with the settings tier, and the seo sources with their items registry.
@@ -187,6 +188,16 @@ Permissions
 .. automodule:: next.permissions.checks
    :members:
 
+Boundaries
+~~~~~~~~~~
+
+``next.boundaries.checks`` registers one check, ``check_boundaries``, which turns every finding of ``boundaries_manager.report()`` into a message whose hint closes with the address of its section in :doc:`/content/topics/boundaries`.
+Its codes are ``next.E167`` through ``next.E171``, ``next.E173``, ``next.W136`` through ``next.W149``, and ``next.I001``, and ``next.E172`` for the ``BOUNDARIES`` setting lives in ``next.conf.checks``.
+:doc:`boundaries` lists the level of each code and whether ``boundaries.toml`` may record it.
+
+.. automodule:: next.boundaries.checks
+   :members:
+
 Apps
 ~~~~
 
@@ -214,7 +225,7 @@ The layer contributes the ``DObject`` checks of ``next.deps.checks``, listed und
 Check code reference
 --------------------
 
-The codes follow the :doc:`Django convention <django:ref/checks>` ``next.X<NNN>`` where ``X`` is ``E`` for errors and ``W`` for warnings.
+The codes follow the :doc:`Django convention <django:ref/checks>` ``next.X<NNN>`` where ``X`` is ``E`` for errors, ``W`` for warnings, and ``I`` for info.
 One code stands for one condition, so silencing it through ``SILENCED_SYSTEM_CHECKS`` never takes an unrelated failure down with it.
 The ``Emitted by`` column names the module that builds the message, which for the three check packages is the submodule rather than the package.
 
@@ -815,6 +826,27 @@ Errors
      - An access declaration binds to a file that is neither a ``page.py`` or ``proxy.py`` of a page tree nor a ``component.py``, such as a helper module that calls ``page.login_required()`` for the page, so it guards nothing.
        The message names the file, and the hint asks for the call at the top level of the segment module.
      - ``next.pages.checks.access``
+   * - ``next.E167``
+     - Two or more apps depend on each other in a cycle, one error per ordered pair of apps of the group that an edge joins, at the first edge of the pair, with the shortest cycle through the first app as its witness.
+     - ``next.boundaries.checks``
+   * - ``next.E168``
+     - A file holds more findings of one code than ``boundaries.toml`` records for it.
+     - ``next.boundaries.checks``
+   * - ``next.E169``
+     - ``boundaries.toml`` records more findings of one code in a file than the file still holds.
+     - ``next.boundaries.checks``
+   * - ``next.E170``
+     - ``boundaries.toml`` is no valid TOML or breaks its schema.
+     - ``next.boundaries.checks``
+   * - ``next.E171``
+     - ``NEXT_FRAMEWORK['BOUNDARIES']`` is ``'strict'`` and some boundary warnings are not recorded in ``boundaries.toml``.
+     - ``next.boundaries.checks``
+   * - ``next.E172``
+     - ``NEXT_FRAMEWORK['BOUNDARIES']`` names no mode, so the boundary checks run as under ``'warn'``.
+     - ``next.conf.checks``
+   * - ``next.E173``
+     - grimp cannot build the import graph of the project packages, and no other boundary check runs.
+     - ``next.boundaries.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -1148,6 +1180,62 @@ Warnings
      - A ``public()`` in a ``proxy.py`` or a ``page.py`` lifts the requirements of a ``proxy.py`` above it, so a guarded parent has a public part.
        The lift is allowed, and the warning names the file that lifts and the files it lifts, one message per lifting file, so the opening is never silent.
      - ``next.pages.checks.access``
+   * - ``next.W136``
+     - An app imports a module of another app other than its ``models``, ``services`` or ``signals``.
+     - ``next.boundaries.checks``
+   * - ``next.W137``
+     - An app imports a file of a page tree or a component folder of another app.
+     - ``next.boundaries.checks``
+   * - ``next.W138``
+     - A file of a page tree reads ``.objects`` without ``.visible_to(...)``.
+     - ``next.boundaries.checks``
+   * - ``next.W139``
+     - A file of a page tree saves a model past a form, or sets a field on an object it saves.
+     - ``next.boundaries.checks``
+   * - ``next.W140``
+     - An app loads a model of another app with ``apps.get_model``.
+     - ``next.boundaries.checks``
+   * - ``next.W141``
+     - An app provides a DI key named after another app.
+     - ``next.boundaries.checks``
+   * - ``next.W142``
+     - An app receives a signal or a sender of another app outside its ``signals.py``.
+     - ``next.boundaries.checks``
+   * - ``next.W143``
+     - A signal a ``signals.py`` of the project declares is sent outside a ``services.py``.
+     - ``next.boundaries.checks``
+   * - ``next.W144``
+     - An app refreshes a zone that only pages of another app declare.
+     - ``next.boundaries.checks``
+   * - ``next.W145``
+     - The root ``__init__.py`` of an app defines a model.
+     - ``next.boundaries.checks``
+   * - ``next.W146``
+     - A module re-exports names of another app, by ``import *`` or by ``__all__``.
+     - ``next.boundaries.checks``
+   * - ``next.W147``
+     - A module at the root of an app is named for a role next.dj reads from another module, such as ``providers.py`` for ``deps.py``.
+     - ``next.boundaries.checks``
+   * - ``next.W148``
+     - ``BOUNDARIES`` is ``'strict'``, but the boundaries go unchecked, because grimp is not installed or ``BASE_DIR`` is not set.
+     - ``next.boundaries.checks``
+   * - ``next.W149``
+     - ``add_perm`` registers a permission whose label names another app of the project.
+     - ``next.boundaries.checks``
+
+Info
+~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 12 58 30
+
+   * - Code
+     - Condition
+     - Emitted by
+   * - ``next.I001``
+     - grimp is not installed and ``BOUNDARIES`` is ``'warn'``, so the boundary checks are off.
+     - ``next.boundaries.checks``
 
 Codes are assigned per check and are not contiguous.
 
@@ -1158,3 +1246,4 @@ See also
 
    :doc:`/content/intro/install` for the first ``manage.py check`` run.
    :doc:`/content/faq/troubleshooting` for symptoms that map to individual ``next.*`` codes.
+   :doc:`/content/topics/boundaries` for the boundary codes from the project side.

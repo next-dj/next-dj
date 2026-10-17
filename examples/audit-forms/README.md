@@ -134,7 +134,7 @@ Because the denied step writes no draft and no `dispatched` row, this `access_de
 
 The acknowledgement lives on all three steps on purpose, and the framework warns about exactly that shape. `next.W059` fires when two static `Meta.steps` declare the same field name, because the merged mapping `get_all_cleaned_data()` returns keeps only the value from the last step that declared it, so the earlier steps' answers are gone.
 
-Nothing in this example reads the acknowledgement out of that merged mapping, so the collapse costs nothing. `check_permissions` reads the tick per step straight from the POST being dispatched (`AcknowledgedStep.is_acknowledged(request)`, which asks the field's own `CheckboxInput` so the gate cannot disagree with the bound form), and that is the per-step read `get_cleaned_data_for_step()` exists to give, one step earlier in the request. `done` drops the key before `AccessRequest.objects.create`, and `step_section` filters it out of the fields each section renders, so the merged value is never user data anyone consumes. A real per-step answer, a value each step must keep, would call for `wizard.get_cleaned_data_for_step("identity")` instead.
+Nothing in this example reads the acknowledgement out of that merged mapping, so the collapse costs nothing. `check_permissions` reads the tick per step straight from the POST being dispatched (`AcknowledgedStep.is_acknowledged(request)`, which asks the field's own `CheckboxInput` so the gate cannot disagree with the bound form), and that is the per-step read `get_cleaned_data_for_step()` exists to give, one step earlier in the request. `done` drops the key before `create_access_request`, and `step_section` filters it out of the fields each section renders, so the merged value is never user data anyone consumes. A real per-step answer, a value each step must keep, would call for `wizard.get_cleaned_data_for_step("identity")` instead.
 
 Because the warning describes the shape correctly and the shape is intended, it is silenced by id in settings rather than worked around:
 
@@ -153,7 +153,7 @@ Each step is a bare `django.forms.ModelForm` (or `Form`). The wizard owns dispat
 - `ScopeStep`: a `ModelForm` on `["project_slug", "reason", "expires_in_days"]`.
 - `ApprovalStep`: a fieldless `Form` that only confirms the merged request.
 
-The wizard binds the current step's form to the POST, validates only that step's fields, and saves the cleaned data through the wizard backend. On a non-final step it 302-redirects to the next step's URL, computed by swapping the `[step]` segment of the origin path. On the final step it calls `done(request, cleaned_data)` with the merged dict of every step, so one `AccessRequest.objects.create` builds the row once, past the acknowledgement control field every step carries. No per-step `.save()`, no hidden id fields, no hand-written routing.
+The wizard binds the current step's form to the POST, validates only that step's fields, and saves the cleaned data through the wizard backend. On a non-final step it 302-redirects to the next step's URL, computed by swapping the `[step]` segment of the origin path. On the final step it calls `done(request, cleaned_data)` with the merged dict of every step, so one `create_access_request` call in [`access/services.py`](access/services.py) builds the row once, past the acknowledgement control field every step carries. No per-step `.save()`, no hidden id fields, no hand-written routing.
 
 ### 5. Three composite components, two patterns
 
@@ -171,7 +171,7 @@ The audit log can be read globally at `/admin/audit/` or per-request at `/reques
 
 The page loads the request as `DObject[AccessRequest]` from `next.deps`. The parameter is named after the `[int:access_request]` segment, so it reads the pk out of that URL kwarg and loads the row through `AccessRequest.objects.visible_to(scope)`, and a pk the query does not return answers `404`. `scope` is the named dependency [`access/deps.py`](access/deps.py) registers, the visitor in `request.user`. The portal has no accounts, so `visible_to` in [`access/models.py`](access/models.py) returns every request, and it is the one method a deployment narrows to the requester and the reviewers. The landing's `recent_requests` context reads through it too, taking the visitor as `Depends("scope")`. The `access_request` and `entries` contexts and the `audit_meta` callable of section 11 all declare the same parameter, and `entries` reads the trail off `access_request.audit_entries`. The segment is not `[int:request]` because the resolver reserves `request` for the `HttpRequest` itself.
 
-The correlation column on `AuditEntry.request` is **only** populated by the backend channel, on the **dispatched** row of the final step. The wizard's `done` stores `request.session["access_request_just_created"]` right after `AccessRequest.objects.create(...)`, and `AuditedFormActionBackend.dispatch` pops that key after `super()` returns. Signal-channel rows stay unlinked by design, because the signal channel sees only the kwargs the signal ships, and `AccessRequest.id` is not among them.
+The correlation column on `AuditEntry.request` is **only** populated by the backend channel, on the **dispatched** row of the final step. The wizard's `done` stores `request.session["access_request_just_created"]` right after `create_access_request(...)`, and `AuditedFormActionBackend.dispatch` pops that key after `super()` returns. Signal-channel rows stay unlinked by design, because the signal channel sees only the kwargs the signal ships, and `AccessRequest.id` is not among them.
 
 ### 7. Wizard backend, not hidden form fields
 
@@ -205,12 +205,12 @@ from next.partial import zone_requested
 def entries(request: HttpRequest) -> list[AuditEntry] | None:
     if not zone_requested(request, "audit-table"):
         return None
-    qs = AuditEntry.objects.all()
     requested_kind = request.GET.get("kind", "")
-    if requested_kind in _VALID_KIND_FILTERS:
-        qs = qs.filter(kind=requested_kind)
-    return list(qs[:100])
+    kind = requested_kind if requested_kind in _VALID_KIND_FILTERS else ""
+    return audit_entries(kind=kind, limit=100)
 ```
+
+The query itself lives in `audit_entries` in [`access/services.py`](access/services.py), next to `audit_totals` and `recent_audit`, because a page tree reads rows only through `visible_to(...)` or a function of `services.py`. `NEXT_FRAMEWORK["BOUNDARIES"] = "strict"` makes `manage.py check --tag boundaries` hold every page to that rule.
 
 On the full render the provider returns `None` and the query never runs. On the zone GET, where `X-Next-Zone: audit-table` is set, `zone_requested` is true and the rows load. The `?kind=` filter still reads `request.GET`, so it works on the zone request the same way it worked on the old full page. Without the runtime the placeholder simply stays, so the critical, always-needed content lives outside the lazy zone by design.
 
@@ -270,7 +270,7 @@ The page module did not change for routing or steps. The only Python edit is the
 # access/pages/request/[step]/page.py
 def done(self, request, cleaned_data):
     fields = {k: v for k, v in cleaned_data.items() if k != POLICY_FIELD}
-    access_request = AccessRequest.objects.create(**fields)
+    access_request = create_access_request(**fields)
     request.session["access_request_just_created"] = access_request.pk
     request.session.modified = True
     return (

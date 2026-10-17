@@ -1,7 +1,6 @@
-from django.db.models import Q
 from django.http import HttpRequest
 from django.urls import reverse
-from wiki.models import Article
+from wiki.services import search_articles
 
 from next import context
 from next.pages import MetadataDict
@@ -40,6 +39,4 @@ def results(request: HttpRequest) -> dict[str, list]:
         for entry in FILE_DOC_CATALOGUE
         if needle in entry["title"].lower() or needle in entry["haystack"]
     ]
-    text_match = Q(title__icontains=needle) | Q(body_md__icontains=needle)
-    article_matches = list(Article.objects.filter(text_match))
-    return {"file_pages": file_matches, "articles": article_matches}
+    return {"file_pages": file_matches, "articles": search_articles(needle)}

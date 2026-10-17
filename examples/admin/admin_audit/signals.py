@@ -2,9 +2,17 @@ from typing import Any
 
 from django import forms as django_forms
 from django.dispatch import receiver
+from django.utils import timezone
+from shadcn_admin.services import NavLink, Panel, PanelRow, Visitor
+from shadcn_admin.signals import nav_requested, panels_requested
 
 from admin_audit.models import AdminActivityLog
 from next.forms.signals import action_dispatched
+from next.urls import page_reverse
+
+
+READ_LOG = "admin_audit.view_adminactivitylog"
+FEED_SIZE = 5
 
 
 _ACTION_TO_KIND = {
@@ -43,4 +51,37 @@ def log_admin_action(
         model_name=str(kwargs.get("model_name", "")),
         object_repr=object_repr,
         response_status=response_status,
+    )
+
+
+@receiver(nav_requested)
+def offer_activity_link(user: Visitor, **kwargs) -> tuple[NavLink, ...]:
+    """Add the activity feed to the sidebar of a user who may read the log."""
+    if not user.has_perm(READ_LOG):
+        return ()
+    return (NavLink("Auditing", "Activity feed", page_reverse("activity")),)
+
+
+@receiver(panels_requested)
+def offer_recent_activity(user: Visitor, **kwargs) -> tuple[Panel, ...]:
+    """Fill the dashboard with the newest admin actions for a user who may read them."""
+    if not user.has_perm(READ_LOG):
+        return ()
+    rows = tuple(
+        PanelRow(
+            entry.action,
+            entry.object_repr,
+            f"{entry.user or '—'} · "
+            f"{timezone.localtime(entry.timestamp):%Y-%m-%d %H:%M:%S}",
+        )
+        for entry in AdminActivityLog.objects.visible_to(user).recent(FEED_SIZE)
+    )
+    return (
+        Panel(
+            "Recent activity",
+            rows,
+            "No activity yet.",
+            link_label="All activity",
+            link_url=page_reverse("activity"),
+        ),
     )

@@ -1,0 +1,6 @@
+version = 1
+
+[[violation]]
+file = "library/admin.py"
+code = "next.W136"
+count = 1

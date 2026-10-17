@@ -204,8 +204,8 @@ See :doc:`permissions` for the backend, the tag, and the forms integration.
 Signals
 -------
 
-An application talks to a neighbour by importing a function from the neighbour's ``services``, ``models``, or ``signals`` module.
-A signal replaces that import only where the import would create a cycle, which happens when the neighbour already imports this application.
+An application talks to a neighbour by importing a function from the neighbour's ``services``, ``models``, or ``signals`` module, the three modules :ref:`topics-boundaries-public-modules` names.
+A signal replaces that import only where the import would create a cycle, which happens when the neighbour already imports this application, and ``manage.py check`` reports such a cycle as ``next.E167``.
 In the example an ``activity`` application imports ``notes`` to record what happens to notes, so ``notes`` cannot import ``activity`` back and announces the archive through ``note_archived`` instead.
 
 .. code-block:: python
@@ -298,6 +298,7 @@ See also
 .. seealso::
 
    :doc:`project-layout` for the files of an application and the project sizes.
+   :doc:`boundaries` for the checks that report logic outside its place.
    :doc:`dependency-injection` for the providers that live in ``deps.py``.
    :doc:`permissions` for the predicates that live in ``permissions.py``.
    :doc:`signals` for the signals the framework sends.

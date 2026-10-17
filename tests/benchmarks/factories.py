@@ -106,3 +106,49 @@ class StandInRows:
     def __getitem__(self, window: slice) -> list[Group]:
         """Return the one row, whatever the window."""
         return [self._row]
+
+
+def build_boundary_apps(count: int) -> dict[str, dict[str, str]]:
+    """Return `count` apps in a ring, each joined to the next by all eight edge kinds."""
+    apps: dict[str, dict[str, str]] = {}
+    for index in range(count):
+        label = f"ring{index:02d}"
+        target = f"ring{(index + 1) % count:02d}"
+        source = f"ring{(index - 1) % count:02d}"
+        apps[label] = {
+            "models.py": (
+                "from django.db import models\n\n\n"
+                "class Item(models.Model):\n"
+                f'    peer = models.ForeignKey("{target}.Item", null=True, '
+                "on_delete=models.CASCADE)\n"
+            ),
+            "utils.py": "helper = 1\n",
+            "services.py": (
+                "from django.apps import apps\n\n"
+                f"from {target}.utils import helper\n\n"
+                f'peer = apps.get_model("{target}", "Item")\n'
+            ),
+            "signals.py": (
+                "from django.dispatch import Signal, receiver\n\n\n"
+                "changed = Signal()\n\n"
+                f"from {source}.signals import changed as upstream\n\n\n"
+                "@receiver(upstream)\n"
+                "def on_upstream(sender, **kwargs):\n    pass\n"
+            ),
+            "deps.py": (
+                "from next.deps import resolver\n\n\n"
+                f'@resolver.dependency("{label}_value")\n'
+                "def value():\n    return 1\n"
+            ),
+            "pages/page.py": (
+                "from next.deps import Depends\n\n\n"
+                f'def render(request, peer=Depends("{target}_value")):\n'
+                f'    Patches(request).refresh(zone="{target}")\n\n\n'
+                f"template = \"{{% zone '{label}' %}}{{{{ peer }}}}{{% endzone %}}\"\n"
+            ),
+            f"pages/_components/{label}_badge/component.djx": (
+                f"{{% component '{target}_badge' %}}"
+                f"{{% has_perm '{target}.view_item' %}}x{{% endhas_perm %}}\n"
+            ),
+        }
+    return apps

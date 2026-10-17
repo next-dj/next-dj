@@ -1,0 +1,44 @@
+from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.test import TestCase
+from next.testing import capture_signals
+
+from {{ app_name }}.models import Item
+from {{ app_name }}.services import create_item, rename_item
+from {{ app_name }}.signals import item_created
+
+
+class CreateItemTests(TestCase):
+    def setUp(self) -> None:
+        self.user = get_user_model().objects.create_user("alice", password="secret")
+
+    def test_the_item_belongs_to_the_user(self) -> None:
+        item = create_item(self.user, title="First")
+        self.assertEqual(item.owner, self.user)
+
+    def test_the_new_item_is_announced(self) -> None:
+        with capture_signals(item_created) as recorder:
+            item = create_item(self.user, title="First")
+        self.assertEqual([event.kwargs["item"] for event in recorder], [item])
+
+    def test_an_empty_title_is_refused(self) -> None:
+        with self.assertRaises(ValidationError):
+            create_item(self.user, title="")
+        self.assertFalse(Item.objects.exists())
+
+
+class RenameItemTests(TestCase):
+    def setUp(self) -> None:
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user("alice", password="secret")
+        self.stranger = user_model.objects.create_user("bob", password="secret")
+        self.item = create_item(self.owner, title="First")
+
+    def test_the_owner_renames_the_item(self) -> None:
+        rename_item(self.owner, item_id=self.item.pk, title="Second")
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.title, "Second")
+
+    def test_a_stranger_cannot_reach_the_item(self) -> None:
+        with self.assertRaises(Item.DoesNotExist):
+            rename_item(self.stranger, item_id=self.item.pk, title="Second")

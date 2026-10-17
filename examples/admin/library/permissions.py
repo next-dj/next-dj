@@ -1,7 +1,16 @@
-from shadcn_admin.permissions import Visitor, is_staff
+from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 
 from library.models import Book, Chapter, Tag
 from next.permissions import add_perm, predicate
+
+
+type Visitor = AbstractBaseUser | AnonymousUser
+
+
+@predicate
+def uses_admin(user: Visitor) -> bool:
+    """Return whether `user` works the admin, asked of the rule the admin registers."""
+    return user.has_perm("shadcn_admin.use_admin")
 
 
 @predicate
@@ -29,14 +38,14 @@ def carried_by_drafts_only(_user: Visitor, tag: Tag | None) -> bool:
 
 
 for verb in ("add", "change", "delete"):
-    add_perm(f"library.{verb}_author", is_staff)
-add_perm("library.add_tag", is_staff)
-add_perm("library.change_tag", is_staff)
-add_perm("library.delete_tag", is_staff & (no_row | carried_by_drafts_only))
+    add_perm(f"library.{verb}_author", uses_admin)
+add_perm("library.add_tag", uses_admin)
+add_perm("library.change_tag", uses_admin)
+add_perm("library.delete_tag", uses_admin & (no_row | carried_by_drafts_only))
 
-add_perm("library.add_book", is_staff)
-add_perm("library.change_book", is_staff & (no_row | is_draft))
-add_perm("library.delete_book", is_staff & (no_row | is_draft))
-add_perm("library.add_chapter", is_staff)
-add_perm("library.change_chapter", is_staff & (no_row | in_draft_book))
-add_perm("library.delete_chapter", is_staff & (no_row | in_draft_book))
+add_perm("library.add_book", uses_admin)
+add_perm("library.change_book", uses_admin & (no_row | is_draft))
+add_perm("library.delete_book", uses_admin & (no_row | is_draft))
+add_perm("library.add_chapter", uses_admin)
+add_perm("library.change_chapter", uses_admin & (no_row | in_draft_book))
+add_perm("library.delete_chapter", uses_admin & (no_row | in_draft_book))

@@ -25,18 +25,21 @@
     {% else %}
       <p class="px-2 text-sm text-muted-foreground">No registered apps.</p>
     {% endif %}
-    {% has_perm "admin_audit.view_adminactivitylog" %}
+    {% regroup admin_nav by section as sections %}
+    {% for section in sections %}
       <div class="mt-6">
-        <div class="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Auditing</div>
+        <div class="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{{ section.grouper }}</div>
         <ul class="space-y-0.5">
-          <li>
-            <a href="/admin/activity/"
-               class="block rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground">
-              Activity feed
-            </a>
-          </li>
+          {% for link in section.list %}
+            <li>
+              <a href="{{ link.url }}"
+                 class="block rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground">
+                {{ link.label }}
+              </a>
+            </li>
+          {% endfor %}
         </ul>
       </div>
-    {% endhas_perm %}
+    {% endfor %}
   </nav>
 </aside>

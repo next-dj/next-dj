@@ -75,6 +75,9 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`application-layout`
    Where models, querysets, services, and signals hold the logic of an application.
 
+:doc:`boundaries`
+   The graph of edges between applications, the rules it breaks, the ``boundaries.toml`` ratchet, and the strict mode.
+
 :doc:`multi-project`
    Shared UI kit and per project page DIRS.
 
@@ -102,6 +105,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
    extending
    project-layout
    application-layout
+   boundaries
    multi-project
 
 .. seealso::

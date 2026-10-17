@@ -1,5 +1,7 @@
+from django.db.models import Model
 from django.http import HttpRequest
 
+from next import Depends
 from next.deps import resolver
 from shadcn_admin.forms import AdminFormSpec
 
@@ -14,3 +16,9 @@ def admin_spec(
     `get_initial`, the action handler, and any re-render context in the same POST.
     """
     return AdminFormSpec.resolve(request, app_label, model_name, pk=pk)
+
+
+@resolver.dependency("admin_object")
+def admin_object(spec: AdminFormSpec = Depends("admin_spec")) -> Model | None:
+    """Return the row an admin URL names, `404` when missing and `403` when hidden."""
+    return spec.instance

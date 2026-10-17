@@ -2,6 +2,7 @@ from django import forms
 from django.http import Http404, HttpRequest, HttpResponse
 from shortener.cache import pending_clicks
 from shortener.models import Link
+from shortener.services import delete_link, find_link, top_links
 
 from next import action, context, page
 from next.forms import ModelForm
@@ -17,7 +18,7 @@ page.public()
 
 @context("recent_links", inherit_context=True)
 def recent_links() -> list[Link]:
-    return list(Link.objects.order_by("-clicks", "-created_at")[:10])
+    return top_links(10)
 
 
 @context("pending_clicks")
@@ -40,18 +41,17 @@ class EditLinkForm(ModelForm):
         slug = request.POST.get("slug")
         if not slug:
             return None
-        return Link.objects.filter(slug=slug).first()
+        return find_link(slug)
 
 
 @action("delete_link")
-def delete_link(request: HttpRequest) -> HttpResponse:
+def delete_link_row(request: HttpRequest) -> HttpResponse:
     """Delete the posted link and drop its row from the list in place.
 
     A live runtime removes the addressed row by its slug key without a reload.
     """
     slug = request.POST.get("slug", "")
-    deleted, _ = Link.objects.filter(slug=slug).delete()
-    if not deleted:
+    if not delete_link(slug=slug):
         raise Http404
     return (
         Patches(request)

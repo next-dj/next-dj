@@ -154,6 +154,24 @@ Each one costs a full walk of the page tree, which is why it is paid once per de
 
 See :ref:`ref-system-checks` for the full catalog.
 
+Boundaries
+----------
+
+Hold the boundaries between applications in CI, so a new edge across them fails the build rather than the next refactor.
+
+.. code-block:: bash
+   :caption: shell
+
+   uv run python manage.py check --tag boundaries --fail-level WARNING
+
+- The CI environment installs the ``boundaries`` extra, because without grimp the strict mode answers with ``next.W148`` and the ``"warn"`` mode only with the info message ``next.I001``, which fails no run.
+- ``NEXT_FRAMEWORK["BOUNDARIES"]`` is ``"strict"``, so a finding that ``boundaries.toml`` does not record fails even a plain ``manage.py check``.
+- ``boundaries.toml`` is committed with the project, since it is the record of the debt the build accepts.
+- CI never writes ``boundaries.toml``, because only ``manage.py next boundaries --refreeze`` does, and a checkout without the file counts every finding in full.
+- A change to ``boundaries.toml`` goes through review like code, since a smaller record pays debt off and a larger one accepts new debt.
+
+See :doc:`/content/topics/boundaries` for the rules, the ratchet, and the modes.
+
 Access control tests
 --------------------
 

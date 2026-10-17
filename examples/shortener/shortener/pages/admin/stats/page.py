@@ -1,6 +1,5 @@
-from django.db.models import Count, Sum
 from shortener.cache import pending_clicks
-from shortener.models import Link
+from shortener.services import link_totals
 from shortener.signals import action_counts
 
 from next import context
@@ -12,14 +11,7 @@ metadata: MetadataDict = {"title": "Stats"}
 
 @context("totals")
 def totals() -> dict[str, int]:
-    aggregate = Link.objects.aggregate(
-        link_count=Count("id"), total_clicks=Sum("clicks")
-    )
-    return {
-        "links": aggregate["link_count"],
-        "clicks": int(aggregate["total_clicks"] or 0),
-        "pending": sum(pending_clicks().values()),
-    }
+    return {**link_totals(), "pending": sum(pending_clicks().values())}
 
 
 @context("form_actions")

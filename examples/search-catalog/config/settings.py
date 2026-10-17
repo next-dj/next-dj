@@ -78,6 +78,7 @@ GA_MEASUREMENT_ID = "G-DEMO0000"
 META_PIXEL_ID = "100000000000000"
 
 NEXT_FRAMEWORK = {
+    "BOUNDARIES": "strict",
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",

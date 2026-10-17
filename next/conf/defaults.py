@@ -14,6 +14,15 @@ USER_SETTING: str = "NEXT_FRAMEWORK"
 AUTO: Final = "auto"
 """The value of every setting whose mode the framework picks per request."""
 
+WARN: Final = "warn"
+"""The default mode of `BOUNDARIES`, which reports what the ratchet does not cover."""
+
+STRICT: Final = "strict"
+"""The mode of `BOUNDARIES` that also fails on every finding the ratchet misses."""
+
+BOUNDARIES_MODES: Final = (WARN, STRICT)
+"""The modes `BOUNDARIES` accepts."""
+
 DEFAULTS: dict[str, Any] = {
     "PAGE_BACKENDS": [
         {
@@ -92,4 +101,5 @@ DEFAULTS: dict[str, Any] = {
         "BACKEND": "next.forms.SessionFormWizardBackend",
         "OPTIONS": {},
     },
+    "BOUNDARIES": WARN,
 }

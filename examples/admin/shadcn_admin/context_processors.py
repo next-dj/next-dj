@@ -6,6 +6,7 @@ from django.contrib import admin
 from django.http import HttpRequest
 
 from shadcn_admin import utils
+from shadcn_admin.services import admin_nav
 
 
 _AUTH_PREFIXES = (utils.LOGIN_URL, utils.LOGOUT_URL)
@@ -50,5 +51,6 @@ def admin_shell(request: HttpRequest) -> dict[str, Any]:
     """Feed the shell in `chrome/layout.djx` on every page of every app tree."""
     return {
         "app_list": app_list(request),
+        "admin_nav": admin_nav(request.user),
         "is_auth_page": request.path.startswith(_AUTH_PREFIXES),
     }

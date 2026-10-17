@@ -22,7 +22,7 @@ Partial rendering uses a single protocol backend, so only the first entry runs.
 A singular ``*_BACKEND`` key holds the one engine for a concern.
 A subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``, ``URL_``, ``TEMPLATE_``, ``JS_``, ``PARTIAL_``) groups related keys.
 ``NEXT_JS_OPTIONS`` stands outside the prefix scheme and configures the bundled client runtime.
-``METADATA``, ``SITE``, ``SEO``, and ``CONSENT`` stand outside it as the scopes of one concern each, and ``CSRF_DELIVERY`` and ``CSP_NONCE`` as single values.
+``METADATA``, ``SITE``, ``SEO``, and ``CONSENT`` stand outside it as the scopes of one concern each, and ``CSRF_DELIVERY``, ``CSP_NONCE``, and ``BOUNDARIES`` as single values.
 The ``*_AUTODISCOVER`` keys share a suffix instead, one per application module the framework imports at startup.
 
 .. _ref-settings-merge:
@@ -51,7 +51,7 @@ Each key accepts one shape, and a value of any other type is dropped in favour o
 - The list keys (``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``PARTIAL_BACKENDS``, ``TEMPLATE_LOADERS``, ``FORM_ANCHOR_FILES``) accept a list.
 - The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``, ``METADATA``, ``SITE``, ``SEO``, ``CONSENT``) accept a dict.
 - The dotted-path keys (``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string naming an importable class, and ``JS_CONTEXT_SERIALIZER`` accepts such a dotted path or ``None``.
-- ``CSRF_DELIVERY`` accepts a string naming a mode.
+- ``CSRF_DELIVERY`` and ``BOUNDARIES`` accept a string naming a mode.
 - ``STATIC_VERSION`` accepts a string or ``None``.
 - ``URL_NAME_TEMPLATE`` also accepts a string, but a format template such as ``page_{name}`` rather than a dotted path.
 - The bool flags (``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``DEPS_AUTODISCOVER``, ``PERMISSIONS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, ``SIGNALS_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, ``CSP_NONCE``) accept any value and pass through ``bool()``.
@@ -663,6 +663,22 @@ Without it, only a page whose tree declares scripts or whose render meets a ``{%
 ``manage.py check`` reports a value the scope cannot use, see :ref:`ref-system-checks`.
 See :doc:`/content/topics/scripts/consent`.
 
+Boundaries
+----------
+
+BOUNDARIES
+~~~~~~~~~~
+
+String naming the mode of the boundary checks.
+
+Default value ``"warn"``.
+
+``"warn"`` reports a boundary finding that ``boundaries.toml`` does not record as a warning, which leaves the exit status of ``manage.py check`` at zero.
+``"strict"`` adds ``next.E171`` while such a finding remains, so the run fails until each one is fixed or recorded.
+The project template of next.dj sets ``"strict"``.
+A string outside the two reads as ``"warn"`` and is ``next.E172``, and a value that is no string is dropped as ``next.E076``.
+See :doc:`/content/topics/boundaries`.
+
 Patching defaults
 -----------------
 
@@ -706,4 +722,5 @@ See also
    :doc:`/content/topics/static-assets/js-context` for ``NEXT_JS_OPTIONS``.
    :doc:`/content/topics/seo/metadata` for ``METADATA`` and :doc:`/content/topics/seo/site` for ``SITE``.
    :doc:`/content/topics/scripts/index` for ``CONSENT`` and :doc:`/content/security/csp-and-nonce` for ``CSP_NONCE``.
+   :doc:`/content/topics/boundaries` for ``BOUNDARIES``.
    :class:`next.static.runtime.ScriptInjectionPolicy` for the policy enum.

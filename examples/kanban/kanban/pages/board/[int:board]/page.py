@@ -1,4 +1,4 @@
-from django.db.models import Prefetch, QuerySet
+from django.db.models import QuerySet
 from django.http import HttpRequest
 from django.middleware.csrf import get_token
 from kanban.models import Board, Card, Column
@@ -43,8 +43,7 @@ def moved_card(board: DObject[Board], request: HttpRequest) -> Card | None:
     pk = request.GET.get("moved", "")
     if not (pk.isascii() and pk.isdigit()):
         return None
-    cards = Card.objects.select_related("column").filter(column__board=board)
-    return cards.filter(pk=pk).first()
+    return board.card(pk)
 
 
 @context("board", inherit_context=True, serialize=True)
@@ -54,9 +53,7 @@ def board_payload(board: DObject[Board], request: HttpRequest) -> dict[str, obje
     Drives the React layer at `window.Next.context.board` and includes
     excerpts and wip_limits so client renders match the SSR fallback.
     """
-    cols = board.columns.prefetch_related(
-        Prefetch("cards", queryset=Card.objects.order_by("position"))
-    ).order_by("position")
+    cols = board.columns.prefetch_related("cards").order_by("position")
     return {
         "id": board.pk,
         "title": board.title,

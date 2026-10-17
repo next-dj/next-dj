@@ -53,6 +53,7 @@ gate.save(update_fields=['enabled', 'updated_at'])
 
 ```python
 NEXT_FRAMEWORK = {
+    "BOUNDARIES": "strict",
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
@@ -180,7 +181,7 @@ Inside the admin `template.djx` the `for`-loop binds `flag` to each Flag row. `{
 
 ### 6. Bulk-toggle form
 
-[`flags/pages/admin/page.py`](flags/pages/admin/page.py) declares a single self-registering `BulkToggleForm` (auto-name `bulk_toggle_form`, rendered with `{% form "bulk_toggle_form" %}`) handling a checkbox grid. The submit logic lives in `on_valid`:
+[`flags/pages/admin/page.py`](flags/pages/admin/page.py) declares a single self-registering `BulkToggleForm` (auto-name `bulk_toggle_form`, rendered with `{% form "bulk_toggle_form" %}`) handling a checkbox grid. `on_valid` hands the submitted names to `set_enabled_flags` in [`flags/services.py`](flags/services.py):
 
 ```python
 class BulkToggleForm(Form):
@@ -195,22 +196,18 @@ class BulkToggleForm(Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["enabled_names"].choices = [
-            (name, name) for name in Flag.objects.values_list("name", flat=True)
+            (name, name) for name in services.flag_names()
         ]
 
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
-        enabled = set(self.cleaned_data["enabled_names"])
-        for flag in Flag.objects.all():
-            should_be_on = flag.name in enabled
-            if flag.enabled != should_be_on:
-                flag.enabled = should_be_on
-                flag.save(update_fields=["enabled", "updated_at"])
+        services.set_enabled_flags(enabled_names=self.cleaned_data["enabled_names"])
         return super().on_valid(request)
 ```
 
 Three details worth noting:
 
 - `choices` is populated in `__init__` rather than at class-define time so the field reflects the current set of flags on every request.
+- The write and every read of the pages live in `flags/services.py`, because `NEXT_FRAMEWORK["BOUNDARIES"] = "strict"` holds a page tree to reading through `visible_to(...)` or a function of `services.py` and to writing through a form or a service. Flags have no owner to narrow them by, so the pages ask the service functions.
 - Only **changed** flags are saved. Untouched rows do not fire `post_save`, so the cache-invalidation receiver invalidates nothing unless there is a real state transition.
 - The redirect and the flash come from the declarative success contract. `Meta.success_url` and `Meta.success_message` let the overridden `on_valid` end with `super().on_valid(request)` instead of a hand-built `HttpResponseRedirect`. The base method redirects to the URL `page_reverse_lazy("admin")` resolves once the URLconf is ready, and flashes "Flag toggles saved." through Django's messages framework. The admin template calls the shared `flash_messages` component, which drains the queue and maps each level tag onto an `alert` variant.
 

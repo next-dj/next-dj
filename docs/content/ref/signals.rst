@@ -70,6 +70,11 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - The ``StaticAsset`` instance
      - ``collector``, ``backend``
      - After a file is registered with a backend and added to the collector.
+   * - ``baseline_refrozen``
+     - ``BoundariesManager``
+     - ``refrozen``
+     - After ``manage.py next boundaries --refreeze`` writes ``boundaries.toml``.
+       ``refrozen`` is the ``Refrozen`` value with the path, whether the file was created, the entries and findings it records, and the findings it left unrecorded.
    * - ``collector_finalized``
      - The static collector
      - ``page_path``, ``request``
@@ -306,6 +311,12 @@ Permissions
 ~~~~~~~~~~~
 
 .. automodule:: next.permissions.signals
+   :members:
+
+Boundaries
+~~~~~~~~~~
+
+.. automodule:: next.boundaries.signals
    :members:
 
 Server

@@ -1,6 +1,6 @@
 from catalog.deps import DFilters, DPage
-from catalog.models import Category, Product
-from catalog.services import cached_search
+from catalog.models import Category
+from catalog.services import brands, cached_search
 from catalog.zones import CATEGORY_ZONES, zone_target
 from django.shortcuts import get_object_or_404
 
@@ -39,4 +39,4 @@ def page_obj(category: Category, filters: DFilters, page: DPage) -> dict:
 @context("all_brands")
 def all_brands(category: Category) -> list[str]:
     """Return every brand that has products inside the current category."""
-    return Product.objects.filter(category=category).brand_list()
+    return brands(category)

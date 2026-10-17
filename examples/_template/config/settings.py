@@ -4,20 +4,21 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = "django-insecure-template-key-replace-me"
+SECRET_KEY = "django-insecure-!6-apo%7t-ng2%pv-pt2fm!$z*&%x6qfxy7k1^@ebq6on)fcp&"
 
 DEBUG = True
 
 ALLOWED_HOSTS: list[str] = []
 
 INSTALLED_APPS = [
+    "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "next",
-    # Add your app here
+    "home",
     "myapp",
 ]
 
@@ -27,6 +28,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.auth.middleware.LoginRequiredMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -54,12 +56,20 @@ DATABASES = {
     "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
 }
 
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "next-example-template",
-    }
-}
+validation = "django.contrib.auth.password_validation"
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": f"{validation}.UserAttributeSimilarityValidator"},
+    {"NAME": f"{validation}.MinimumLengthValidator"},
+    {"NAME": f"{validation}.CommonPasswordValidator"},
+    {"NAME": f"{validation}.NumericPasswordValidator"},
+]
+
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "next.permissions.ObjectPermissionBackend",
+]
+
+LOGIN_URL = "admin:login"
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
@@ -68,23 +78,21 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
-# The shared UI kit under examples/_shared/ supplies the static files and root component
-# tree that shadcn-style components such as `{% component "button" %}` render from.
 SHARED_DIR = BASE_DIR.parent / "_shared"
 sys.path.insert(0, str(SHARED_DIR))
-STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
+STATICFILES_DIRS = [SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 NEXT_FRAMEWORK = {
+    "BOUNDARIES": "strict",
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            # Project-level page root with the HTML envelope, next to `APP_DIRS`.
             "DIRS": [str(BASE_DIR / "chrome")],
             "PAGES_DIR": "pages",
-            "OPTIONS": {"context_processors": []},
+            "OPTIONS": {},
         }
     ],
     "COMPONENT_BACKENDS": [
@@ -100,7 +108,7 @@ NEXT_FRAMEWORK = {
         "DEFAULTS": {
             "viewport": "width=device-width, initial-scale=1",
             "icons": {
-                "icon": {"url": "/static/myapp/icon.svg", "type": "image/svg+xml"}
+                "icon": {"url": "/static/home/icon.svg", "type": "image/svg+xml"}
             },
             "description": (
                 "A next.dj starter with one page root, the shared UI kit and one test."

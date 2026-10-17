@@ -1,10 +1,17 @@
-from typing import ClassVar
+from typing import ClassVar, Self
 
 from django.conf import settings
+from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 from django.db import models
 
 
 class AdminActivityLogQuerySet(models.QuerySet):
+    def visible_to(self, user: AbstractBaseUser | AnonymousUser) -> Self:
+        """Return every entry to a user who may read the audit log, and none else."""
+        if user.has_perm("admin_audit.view_adminactivitylog"):
+            return self.all()
+        return self.none()
+
     def recent(self, limit: int) -> "AdminActivityLogQuerySet":
         """Return the newest `limit` entries with their users, newest first."""
         return self.select_related("user")[:limit]

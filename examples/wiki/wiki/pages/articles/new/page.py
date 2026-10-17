@@ -1,6 +1,7 @@
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
-from wiki.models import RESERVED_SLUGS, Article
+from wiki.models import RESERVED_SLUGS
+from wiki.services import create_article, slug_taken
 
 from next import page
 from next.forms import ComponentWidget, Form
@@ -28,7 +29,7 @@ class ArticleCreateForm(Form):
 
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
         """Persist a new article and redirect to its public URL."""
-        article = Article.objects.create(
+        article = create_article(
             slug=self.cleaned_data["slug"],
             title=self.cleaned_data["title"],
             body_md=self.cleaned_data.get("body_md", ""),
@@ -41,7 +42,7 @@ class ArticleCreateForm(Form):
         if slug in RESERVED_SLUGS:
             msg = "This slug collides with a file route."
             raise django_forms.ValidationError(msg)
-        if Article.objects.filter(slug=slug).exists():
+        if slug_taken(slug):
             msg = "Slug already taken by another article."
             raise django_forms.ValidationError(msg)
         return slug

@@ -1,6 +1,7 @@
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
-from notes.models import Note, Tenant
+from notes.models import Tenant
+from notes.services import create_note
 
 from next import Depends, page
 from next.forms import ComponentWidget, Form
@@ -28,8 +29,8 @@ class NoteCreateForm(Form):
         self, request: HttpRequest, tenant: Tenant = Depends("scope")
     ) -> HttpResponseRedirect:
         """Create a new note scoped to the active tenant and redirect to its editor."""
-        note_obj = Note.objects.create(
-            tenant=tenant,
+        note_obj = create_note(
+            tenant,
             title=self.cleaned_data["title"],
             body=self.cleaned_data.get("body", ""),
         )

@@ -1,7 +1,8 @@
 import pytest
+from admin_audit.models import AdminActivityLog
 from django.contrib.auth.models import AnonymousUser
 from library.models import Book
-from library.permissions import in_draft_book, is_draft, no_row
+from library.permissions import in_draft_book, is_draft, no_row, uses_admin
 from shadcn_admin.permissions import is_staff
 
 from next.permissions import has_perm
@@ -15,6 +16,14 @@ class TestPredicates:
         assert is_staff(editor) is True
         assert is_staff(django_user_model.objects.create_user("reader")) is False
         assert is_staff(AnonymousUser()) is False
+
+    def test_uses_admin_asks_the_rule_of_the_admin(
+        self, editor, admin_user, django_user_model
+    ) -> None:
+        assert uses_admin(editor) is True
+        assert uses_admin(admin_user) is True
+        assert uses_admin(django_user_model.objects.create_user("reader")) is False
+        assert uses_admin(AnonymousUser()) is False
 
     def test_no_row(self, editor, book) -> None:
         assert no_row(editor, None) is True
@@ -43,6 +52,16 @@ class TestBookScope:
         assert list(Book.objects.visible_to(editor)) == [book]
         assert not Book.objects.visible_to(reader).exists()
         assert not Book.objects.visible_to(AnonymousUser()).exists()
+
+
+class TestActivityScope:
+    def test_only_a_reader_of_the_audit_log_sees_its_entries(
+        self, editor, admin_user
+    ) -> None:
+        entry = AdminActivityLog.objects.create(action="add", response_status=302)
+        assert list(AdminActivityLog.objects.visible_to(admin_user)) == [entry]
+        assert not AdminActivityLog.objects.visible_to(editor).exists()
+        assert not AdminActivityLog.objects.visible_to(AnonymousUser()).exists()
 
 
 class TestRegisteredRules:

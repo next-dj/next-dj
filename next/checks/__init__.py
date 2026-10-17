@@ -16,12 +16,16 @@ NEXT: str = "next"
 SEO: str = "seo"
 """System-check tag selecting the `next.seo` checks."""
 
+BOUNDARIES: str = "boundaries"
+"""System-check tag selecting the boundary checks, which `NEXT` leaves out."""
+
 
 if TYPE_CHECKING:
     from next.apps.checks import (
         check_builtin_tag_libraries_complete,
         check_django_templates_backend_present,
     )
+    from next.boundaries.checks import check_boundaries
     from next.components.checks import (
         check_component_context_registration_files,
         check_component_module_imports,
@@ -31,6 +35,7 @@ if TYPE_CHECKING:
         check_next_components_configuration,
     )
     from next.conf.checks import (
+        check_next_framework_boundaries_mode,
         check_next_framework_unknown_top_level_keys,
         check_next_framework_value_types,
     )
@@ -202,6 +207,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_builtin_tag_libraries_complete",
         "check_django_templates_backend_present",
     ),
+    "next.boundaries.checks": ("check_boundaries",),
     "next.components.checks": (
         "check_component_context_registration_files",
         "check_component_module_imports",
@@ -211,6 +217,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_next_components_configuration",
     ),
     "next.conf.checks": (
+        "check_next_framework_boundaries_mode",
         "check_next_framework_unknown_top_level_keys",
         "check_next_framework_value_types",
     ),
@@ -383,6 +390,7 @@ _LAZY_ATTRIBUTES: dict[str, str] = {
 }
 
 __all__ = [
+    "BOUNDARIES",
     "NEXT",
     "SEO",
     "check_action_applied_to_class",
@@ -393,6 +401,7 @@ __all__ = [
     "check_asset_kinds_are_loadable",
     "check_asset_renderers",
     "check_asset_version_moves_between_deploys",
+    "check_boundaries",
     "check_builtin_tag_libraries_complete",
     "check_component_context_registration_files",
     "check_component_module_imports",
@@ -457,6 +466,7 @@ __all__ = [
     "check_metadata_tag_rendered",
     "check_metadata_title_templates",
     "check_next_components_configuration",
+    "check_next_framework_boundaries_mode",
     "check_next_framework_unknown_top_level_keys",
     "check_next_framework_value_types",
     "check_next_pages_configuration",

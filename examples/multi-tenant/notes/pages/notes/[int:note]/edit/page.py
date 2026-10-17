@@ -2,6 +2,7 @@ from typing import ClassVar
 
 from django.http import HttpRequest, HttpResponseRedirect
 from notes.models import Note, Tenant
+from notes.services import update_note
 
 from next import Depends, context, page
 from next.deps import DObject
@@ -36,11 +37,18 @@ class NoteEditForm(ModelForm):
         """Object-level gate. A locked note is read-only even for its tenant."""
         return not self.instance.locked
 
-    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
-        """Persist edits and redirect back to the note editor."""
-        self.save()
+    def on_valid(
+        self, request: HttpRequest, tenant: Tenant = Depends("scope")
+    ) -> HttpResponseRedirect:
+        """Persist edits through the service and redirect back to the note editor."""
+        saved = update_note(
+            tenant,
+            note_id=self.instance.pk,
+            title=self.cleaned_data["title"],
+            body=self.cleaned_data["body"],
+        )
         return HttpResponseRedirect(
-            page_reverse("notes/[int:note]/edit", note=self.instance.pk)
+            page_reverse("notes/[int:note]/edit", note=saved.pk)
         )
 
 

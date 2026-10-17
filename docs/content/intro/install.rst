@@ -242,6 +242,47 @@ Three framework checks carry Django's ``deploy`` flag and stay silent until the 
 ``next.E017`` reports a ``page.py`` that raises while importing, ``next.E084`` reports the same for a ``component.py``, and ``next.E072`` reports a composed page template that fails to compile.
 A typo in a page module is invisible to a plain ``manage.py check`` and named by ``next.E017`` here, so run the deploy variant whenever a page stops responding for no visible reason.
 
+.. _intro-install-project-template:
+
+Start from the project template
+-------------------------------
+
+The steps above build the project by hand, the way the tutorial continues it.
+A new project that wants the layout of :doc:`/content/topics/project-layout` from the first commit starts from the two templates next.dj ships instead, in place of the plain ``startproject`` and ``startapp`` of `Create a Django project`_.
+Both are directories of the installed package, and the commands below ask Python where it lies.
+
+.. code-block:: bash
+   :caption: shell
+
+   uv add "next.dj[boundaries]"
+   uv run django-admin startproject --template="$(uv run python -c 'import next.conf; print(next.conf.__path__[0])')/project_template" config .
+   uv run python manage.py startapp --template="$(uv run python -c 'import next.conf; print(next.conf.__path__[0])')/app_template" shop
+
+The project template writes ``manage.py``, the ``config`` package, a ``chrome/`` page root with a ``layout.djx`` that renders the head through ``{% metadata %}``, and a ``home`` application whose welcome page at ``/`` declares ``page.public()``.
+Its settings list ``django.contrib.admin``, ``next``, and ``home``, place ``LoginRequiredMiddleware`` right after ``AuthenticationMiddleware`` so every other page asks for a login, add ``ObjectPermissionBackend`` to ``AUTHENTICATION_BACKENDS``, and set ``LOGIN_URL = "admin:login"``.
+``NEXT_FRAMEWORK`` turns the boundary checks to ``"strict"``, see :doc:`/content/topics/boundaries`.
+
+The application template writes one application in the composition the layout prescribes.
+It holds an ``Item`` model with ``visible_to`` on its ``QuerySet`` and its first migration, ``create_item`` and ``rename_item`` in ``services.py``, an ``item_created`` signal, object permissions in ``permissions.py``, an abstract ``ItemForm`` in ``forms.py``, an ``ItemAdmin`` that writes through the services, a page tree mounted at ``/shop/``, and tests.
+``startapp`` adds no entry to ``INSTALLED_APPS``, so the new application joins the list by hand.
+
+.. code-block:: python
+   :caption: config/settings.py, the installed applications
+
+   INSTALLED_APPS = [
+       "django.contrib.admin",
+       "django.contrib.auth",
+       "django.contrib.contenttypes",
+       "django.contrib.sessions",
+       "django.contrib.messages",
+       "django.contrib.staticfiles",
+       "next",
+       "home",
+       "shop",
+   ]
+
+Then ``migrate``, ``createsuperuser``, and ``runserver`` start the site, ``/shop/`` sends an anonymous visitor to the admin sign-in, and ``manage.py check`` reports no issues.
+
 Next steps
 ----------
 

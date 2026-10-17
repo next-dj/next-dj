@@ -74,6 +74,9 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``permission_registered``
      - Permissions
      - After ``add_perm`` binds a predicate to a new permission name.
+   * - ``baseline_refrozen``
+     - Boundaries
+     - After ``manage.py next boundaries --refreeze`` writes ``boundaries.toml``.
    * - ``route_registered``
      - URLs
      - After a URL pattern is created for a discovered page.

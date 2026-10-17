@@ -7,6 +7,7 @@ A next.dj project is a Django project, and its unit of code is the Django applic
 Each application owns the models, migrations, pages, and components of one subject area, and its files carry fixed names, so every application opens the same way.
 This page names those files and their roles, shows the Notes project from the tutorial in that shape, and covers how a project grows from one application to many.
 :doc:`application-layout` decides which of those files a piece of logic belongs in, and :doc:`multi-project` covers several Django projects in one repository.
+:doc:`boundaries` checks on every ``manage.py check`` that the applications keep to these roles.
 
 .. contents::
    :local:
@@ -17,6 +18,7 @@ Application composition
 
 Domain code sits flat at the root of the application under fixed names, and the URL tree grows only inside ``pages/``.
 A page at any depth reaches the domain through the same absolute import, such as ``from notes.services import archive_note``, because the domain code never moves when the URL tree does.
+The ``startapp`` template of next.dj writes this shape for a new application, see :ref:`intro-install-project-template`.
 
 .. code-block:: text
    :caption: one application
@@ -52,7 +54,7 @@ A page at any depth reaches the domain through the same absolute import, such as
            template.djx
 
 Every file has one role.
-The last column names what another application of the same project may use.
+The last column names what another application of the same project may use, and the boundary checks hold the project to it, see :ref:`topics-boundaries-public-modules`.
 
 .. list-table::
    :header-rows: 1
@@ -86,7 +88,7 @@ The last column names what another application of the same project may use.
    * - ``deps.py``
      - DI providers and named dependencies that turn the request into a value, such as the ``scope`` every read filters by or a feature flag.
      - Domain rules and writes.
-     - Named dependencies are project-wide through ``Depends("name")``, and markers are imported.
+     - Named dependencies are project-wide through ``Depends("name")``, while the module itself stays private.
    * - ``permissions.py``
      - The object permissions of the application, a predicate taking ``()``, ``(user)``, or ``(user, obj)`` registered per ``app_label.codename`` through ``add_perm``.
      - The request, the tenant, and writes, which a form hook or a service reads.
@@ -136,6 +138,7 @@ Names the layout avoids
 The reason is the same for all of them, one obvious place per role.
 Reads live on the ``QuerySet``, DI in ``deps.py``, signals and their receivers in ``signals.py``, and the operations other applications call in ``services.py``.
 A ``backends.py`` that subclasses a real next.dj backend, such as ``StaticFilesBackend`` or ``FileRouterBackend``, keeps its name.
+``next.W147`` reports the other names at the root of an application, see :ref:`topics-boundaries-file-names`.
 
 Delivery stays in pages
 -----------------------
@@ -149,7 +152,7 @@ A relative import in such a module has no parent package to resolve against, and
 Domain code therefore lives at the application root, and the page reaches it through an absolute import.
 
 A ``page.py`` reads through model and ``QuerySet`` methods and writes through a form or a function of ``services.py``.
-:doc:`application-layout` shows both sides of that call.
+:doc:`application-layout` shows both sides of that call, and :ref:`topics-boundaries-visible-to` and :ref:`topics-boundaries-writes` describe the checks that report a read or a write past them.
 
 The Notes project
 -----------------
@@ -485,6 +488,7 @@ See also
 .. seealso::
 
    :doc:`application-layout` for where models, querysets, services, and signals hold the logic.
+   :doc:`boundaries` for the checks that hold applications to their roles.
    :doc:`file-router` for the route shapes and the mounting of application trees.
    :doc:`/content/howto/mount-an-application-under-a-prefix` for a prefix recipe.
    :doc:`multi-project` for layouts that span several Django projects.

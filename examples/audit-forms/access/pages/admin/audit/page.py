@@ -1,4 +1,5 @@
 from access.models import AuditEntry
+from access.services import audit_entries, audit_totals
 from django.http import HttpRequest
 
 from next import context
@@ -22,11 +23,9 @@ def entries(request: HttpRequest) -> list[AuditEntry] | None:
     """
     if not zone_requested(request, "audit-table"):
         return None
-    qs = AuditEntry.objects.all()
     requested_kind = request.GET.get("kind", "")
-    if requested_kind in _VALID_KIND_FILTERS:
-        qs = qs.filter(kind=requested_kind)
-    return list(qs[:100])
+    kind = requested_kind if requested_kind in _VALID_KIND_FILTERS else ""
+    return audit_entries(kind=kind, limit=100)
 
 
 @context("active_kind")
@@ -36,7 +35,4 @@ def active_kind(request: HttpRequest) -> str:
 
 @context("totals")
 def totals() -> dict[str, int]:
-    return {
-        "backend": AuditEntry.objects.filter(source=AuditEntry.SOURCE_BACKEND).count(),
-        "signal": AuditEntry.objects.filter(source=AuditEntry.SOURCE_SIGNAL).count(),
-    }
+    return audit_totals()

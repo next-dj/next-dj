@@ -1,5 +1,6 @@
 from catalog.landing import FAQ, LEAD_ZONE, faq_node, landing_offers
-from catalog.models import Category, Lead, Product
+from catalog.models import Category, Product
+from catalog.services import create_lead
 from django import forms
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404
@@ -31,7 +32,7 @@ class LaunchCodeForm(Form):
 
     def on_valid(self, request: HttpRequest, category: DUrl[str]) -> HttpResponse:
         """Store the lead and thank the visitor in place of the form."""
-        lead = Lead.objects.create(
+        lead = create_lead(
             category=get_object_or_404(Category, slug=category),
             email=self.cleaned_data["email"],
         )

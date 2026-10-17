@@ -5,7 +5,7 @@ from typing import Any
 from django.core.cache import cache
 from django.core.paginator import Paginator
 
-from .models import Category, Filters, Product
+from .models import Category, Filters, Lead, Product
 
 
 CACHE_KEY_PREFIX = "catalog.search."
@@ -59,3 +59,45 @@ def cached_search(
     }
     cache.set(key, payload, CACHE_TTL)
     return payload
+
+
+def featured_products(count: int) -> list[Product]:
+    """Return the `count` newest products in stock, the grid of the home page."""
+    in_stock = Product.objects.filter(in_stock=True).select_related("category")
+    return list(in_stock.order_by("-created_at")[:count])
+
+
+def list_categories() -> list[Category]:
+    """Return every category in name order."""
+    return list(Category.objects.all())
+
+
+def brands(category: Category | None = None) -> list[str]:
+    """Return the brands of the catalog, or of one category when it is given."""
+    products = Product.objects.all()
+    if category is not None:
+        products = products.filter(category=category)
+    return products.brand_list()
+
+
+def product_in(category: Category, slug: str) -> Product:
+    """Return the product `slug` names inside `category`, or raise `DoesNotExist`."""
+    return Product.objects.select_related("category").get(category=category, slug=slug)
+
+
+def category_slugs() -> list[str]:
+    """Return the slug of every category, the one column a listing URL needs."""
+    return list(Category.objects.values_list("slug", flat=True))
+
+
+def product_addresses() -> list[tuple[str, str]]:
+    """Return the category slug and slug of every product, the columns its URL needs."""
+    return list(Product.objects.values_list("category__slug", "slug"))
+
+
+def create_lead(*, category: Category, email: str) -> Lead:
+    """Store a visitor who asked for the launch code of `category`."""
+    lead = Lead(category=category, email=email)
+    lead.full_clean()
+    lead.save()
+    return lead

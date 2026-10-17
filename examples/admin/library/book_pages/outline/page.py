@@ -3,13 +3,13 @@ from typing import Any, ClassVar
 from django.http import HttpRequest, HttpResponse
 from library import services
 from library.models import Book, Chapter
-from shadcn_admin import utils
 
 from next import context, page
 from next.deps import DObject
 from next.forms import ComponentWidget, ModelForm
 from next.pages import MetadataDict
 from next.partial import Patches
+from next.urls import page_reverse
 
 
 OUTLINE_ZONE = "outline"
@@ -39,7 +39,12 @@ def book(book: DObject[Book]) -> Book:
 @context("change_url")
 def change_url(book: DObject[Book]) -> str:
     """Return the change view of the book, the page that links here."""
-    return utils.change_url("library", "book", book.pk)
+    return page_reverse(
+        "[str:app_label]/[str:model_name]/[int:pk]/change",
+        app_label="library",
+        model_name="book",
+        pk=book.pk,
+    )
 
 
 @context("outline", zone=OUTLINE_ZONE)

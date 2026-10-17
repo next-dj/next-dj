@@ -1,0 +1,27 @@
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
+from django.test import TestCase
+
+from {{ app_name }}.models import Item
+from {{ app_name }}.services import create_item
+
+
+class VisibleToTests(TestCase):
+    def setUp(self) -> None:
+        user_model = get_user_model()
+        self.alice = user_model.objects.create_user("alice", password="secret")
+        self.bob = user_model.objects.create_user("bob", password="secret")
+        self.admin = user_model.objects.create_superuser("admin", password="secret")
+        self.mine = create_item(self.alice, title="Mine")
+        self.theirs = create_item(self.bob, title="Theirs")
+
+    def test_a_user_sees_only_their_items(self) -> None:
+        self.assertQuerySetEqual(Item.objects.visible_to(self.alice), [self.mine])
+
+    def test_a_superuser_sees_every_item(self) -> None:
+        self.assertQuerySetEqual(
+            Item.objects.visible_to(self.admin), [self.theirs, self.mine]
+        )
+
+    def test_an_anonymous_visitor_sees_nothing(self) -> None:
+        self.assertFalse(Item.objects.visible_to(AnonymousUser()).exists())

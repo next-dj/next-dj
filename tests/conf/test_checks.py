@@ -5,7 +5,12 @@ from django.conf import settings
 from django.core.checks import run_checks
 from django.test import override_settings
 
-from next.checks import NEXT, check_next_framework_value_types, register_all
+from next.checks import (
+    NEXT,
+    check_next_framework_boundaries_mode,
+    check_next_framework_value_types,
+    register_all,
+)
 from next.conf.checks import _KEY_TYPES
 from next.conf.settings import NextFrameworkSettings
 from next.forms.checks import (
@@ -27,6 +32,7 @@ VALID_TYPED_VALUES: dict[str, object] = {
     "DEPENDENCY_RESOLVER": "next.deps.DependencyResolver",
     "COMPONENT_TEMPLATE_LOADER": "next.components.CachedComponentTemplateLoader",
     "CSRF_DELIVERY": "auto",
+    "BOUNDARIES": "warn",
     "NEXT_JS_OPTIONS": {},
     "METADATA": {},
     "SITE": {},
@@ -262,3 +268,37 @@ class TestMessageWording:
             "Fix the value in settings.NEXT_FRAMEWORK, or silence this check "
             "by adding its id to SILENCED_SYSTEM_CHECKS."
         )
+
+
+class TestBoundariesMode:
+    """`check_next_framework_boundaries_mode` refuses a mode it does not know."""
+
+    @pytest.mark.parametrize("mode", ["warn", "strict"])
+    def test_a_known_mode(self, mode: str) -> None:
+        with override_settings(NEXT_FRAMEWORK={"BOUNDARIES": mode}):
+            assert check_next_framework_boundaries_mode() == []
+
+    @pytest.mark.parametrize(
+        "next_framework",
+        [{}, {"BOUNDARIES": 42}, ["not a dict"]],
+        ids=["absent", "not_a_string", "setting_not_a_dict"],
+    )
+    def test_nothing_to_judge(self, next_framework: object) -> None:
+        with override_settings(NEXT_FRAMEWORK=next_framework):
+            assert check_next_framework_boundaries_mode() == []
+
+    def test_an_unknown_mode(self) -> None:
+        with override_settings(NEXT_FRAMEWORK={"BOUNDARIES": "loud"}):
+            (message,) = check_next_framework_boundaries_mode()
+
+        assert message.id == "next.E172"
+        assert message.msg == (
+            "NEXT_FRAMEWORK['BOUNDARIES'] is 'loud', which names no mode, so the "
+            "boundary checks run as under 'warn'. Write one of 'warn', 'strict'."
+        )
+
+    def test_it_runs_under_the_next_tag(self) -> None:
+        register_all()
+        with override_settings(NEXT_FRAMEWORK={"BOUNDARIES": "loud"}):
+            messages = run_checks(tags=[NEXT])
+        assert [m.id for m in messages if m.id == "next.E172"] == ["next.E172"]

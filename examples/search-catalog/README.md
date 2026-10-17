@@ -168,7 +168,7 @@ The handler points `request.GET` at the preset's params before morphing, so the 
 
 ### 9. `cached_search` and the LocMem hit path
 
-The read lives on the model. `ProductQuerySet.matching` in [`catalog/models.py`](catalog/models.py) applies the search term, the brands, the price range, the stock toggle and the sort, so a page asks `Product.objects.matching(filters)` and gets an ordinary chainable queryset back. [`catalog/services.py`](catalog/services.py) holds the one function that crosses the cache, the paginator and the model: `cached_search` scopes that queryset to a category when one is given and materialises the page slice into a list so the cached payload does not depend on a queryset closure that can grow stale across requests. The cache key is a stable blake2b hash of a sorted JSON encoding of the filter set, page number, page size, and category PK. Two identical GETs produce one cache key and serve the second request from memory for `CACHE_TTL = 60` seconds, which the [`tests/test_integration.py::TestCacheHit`](tests/test_integration.py) tests verify through the cache backend's internal map.
+The read lives on the model. `ProductQuerySet.matching` in [`catalog/models.py`](catalog/models.py) applies the search term, the brands, the price range, the stock toggle and the sort, so a caller asks `Product.objects.matching(filters)` and gets an ordinary chainable queryset back. The pages never ask it themselves. A product is public, there is no visitor to narrow it by, so every read of the page tree goes through a function of [`catalog/services.py`](catalog/services.py), and `NEXT_FRAMEWORK["BOUNDARIES"] = "strict"` makes `manage.py check --tag boundaries` hold the tree to that. `cached_search` is the one function there that crosses the cache, the paginator and the model. It scopes that queryset to a category when one is given and materialises the page slice into a list so the cached payload does not depend on a queryset closure that can grow stale across requests. The cache key is a stable blake2b hash of a sorted JSON encoding of the filter set, page number, page size, and category PK. Two identical GETs produce one cache key and serve the second request from memory for `CACHE_TTL = 60` seconds, which the [`tests/test_integration.py::TestCacheHit`](tests/test_integration.py) tests verify through the cache backend's internal map.
 
 The database carries the same filter set. `Product` declares `db_index=True` on `brand` and two composite indexes, `product_cat_stock_idx` over `(category, in_stock)` and `product_price_idx` over `price`, which is what the category listing and the price range read. Both names are spelled out rather than left to Django, because the auto-generated name is truncated to a cap that moved between Django versions and an unnamed index would drift under `makemigrations --check` on part of the support matrix. [`0003_explicit_index_names`](catalog/migrations/0003_explicit_index_names.py) renames the two indexes an older run had created.
 
@@ -196,24 +196,23 @@ cache = 300
 
 @sitemap.items("catalog/[category]")
 def categories() -> Iterator[SitemapEntry]:
-    for slug in Category.objects.values_list("slug", flat=True):
+    for slug in category_slugs():
         yield SitemapEntry(kwargs={"category": slug})
 
 
 @sitemap.items("shop/[category]")
 def landings() -> Iterator[SitemapEntry]:
-    for slug in Category.objects.values_list("slug", flat=True):
+    for slug in category_slugs():
         yield SitemapEntry(kwargs={"category": slug}, priority=0.8)
 
 
 @sitemap.items("catalog/[category]/[slug]")
 def products() -> Iterator[SitemapEntry]:
-    rows = Product.objects.values_list("category__slug", "slug")
-    for category, slug in rows:
+    for category, slug in product_addresses():
         yield SitemapEntry(kwargs={"category": category, "slug": slug})
 ```
 
-The trail is the directory path of the page and the kwargs are what reverses it, so the entries go through the router and come out as `/catalog/electronics/`, `/shop/electronics/` and `/catalog/electronics/iphone-15/`. `values_list` fetches the columns a URL needs and nothing else, so the listings, the landings and the products cost three queries and no model instances. `/` and `/catalog/` are listed on their own because they carry no parameter. `SITE["URL"]` is `https://catalog.example`, so every `<loc>` is absolute on the published origin, and the self canonical of section 11 moves onto the same origin with it.
+The trail is the directory path of the page and the kwargs are what reverses it, so the entries go through the router and come out as `/catalog/electronics/`, `/shop/electronics/` and `/catalog/electronics/iphone-15/`. `category_slugs` and `product_addresses` in [`catalog/services.py`](catalog/services.py) fetch through `values_list` the columns a URL needs and nothing else, so the listings, the landings and the products cost three queries and no model instances. `/` and `/catalog/` are listed on their own because they carry no parameter. `SITE["URL"]` is `https://catalog.example`, so every `<loc>` is absolute on the published origin, and the self canonical of section 11 moves onto the same origin with it.
 
 `cache = 300` wraps the sitemap views in `cache_page` for five minutes on the default cache, the same `LocMemCache` the search of section 7 already uses. The document is rebuilt from the tables on every uncached request, so a catalog of any size pays for the query once per window instead of once per crawler visit, and the integration test creates a product after the first request and reads the same document back. The catalog declares no robots source, so `/robots.txt` is not served here. The [markdown-blog](../markdown-blog/) and the [wiki](../wiki/) each declare a `robots.py`. The integration tests read the document back through `next.testing.parse_sitemap` and the heads through `next.testing.assert_metadata`.
 
@@ -234,7 +233,7 @@ class LaunchCodeForm(Form):
         requires_runtime = True
 
     def on_valid(self, request: HttpRequest, category: DUrl[str]) -> HttpResponse:
-        lead = Lead.objects.create(
+        lead = create_lead(
             category=get_object_or_404(Category, slug=category),
             email=self.cleaned_data["email"],
         )
@@ -244,7 +243,7 @@ class LaunchCodeForm(Form):
 
 `cache` is a module attribute the page response reads, a `CacheDict` of `Cache-Control` directives, here `public, max-age=300, stale-while-revalidate=60`. A shared cache may keep the page, so the framework keeps everything personal out of its HTML. The CSRF token is not embedded, the runtime fetches it from `/_next/csrf/` before a form posts, and no cookie is set. Consent is not read either, section 14 explains what that means for the tags. A response that sets a cookie anyway is sent with `Cache-Control: private` and a logged warning, so a mistake costs caching rather than leaking one visitor's page to the next.
 
-The cached HTML carries no CSRF token, so a browser without JavaScript that submits the form gets a 403 from the CSRF middleware, and a `<noscript>` note says so. With the runtime the submit fetches the token first and posts as usual. `Meta.requires_runtime = True` states that contract, and it keeps quiet the system check that warns about a form on a shared page posting without a token. `on_valid` stores a `Lead` row and morphs the `lead-form` zone into a thank-you, and without the partial switch the same envelope falls back to a 303 back to the landing. The category comes from the same `get_object_or_404` lookup the category listing of section 5 runs.
+The cached HTML carries no CSRF token, so a browser without JavaScript that submits the form gets a 403 from the CSRF middleware, and a `<noscript>` note says so. With the runtime the submit fetches the token first and posts as usual. `Meta.requires_runtime = True` states that contract, and it keeps quiet the system check that warns about a form on a shared page posting without a token. `on_valid` stores a `Lead` row through `create_lead` in [`catalog/services.py`](catalog/services.py) and morphs the `lead-form` zone into a thank-you, and without the partial switch the same envelope falls back to a 303 back to the landing. The category comes from the same `get_object_or_404` lookup the category listing of section 5 runs.
 
 A visitor signs up without an account, so the page declares `page.public()`, which tells `manage.py check` the form is open to everyone on purpose instead of reporting `next.W134`.
 

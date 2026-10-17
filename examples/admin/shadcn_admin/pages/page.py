@@ -1,14 +1,15 @@
-from admin_audit.models import AdminActivityLog, AdminActivityLogQuerySet
+from django.http import HttpRequest
+from shadcn_admin.services import Panel, dashboard_panels
 
 from next import context
 
 
-RECENT_ACTIVITY_ZONE = "recent-activity"
+DASHBOARD_PANELS_ZONE = "dashboard-panels"
 
 metadata = {"breadcrumb": "Dashboard"}
 
 
-@context("recent_activity", zone=RECENT_ACTIVITY_ZONE)
-def recent_activity() -> AdminActivityLogQuerySet:
-    """Return the five newest admin actions, read only where the template iterates."""
-    return AdminActivityLog.objects.recent(5)
+@context("dashboard_panels", zone=DASHBOARD_PANELS_ZONE)
+def panels(request: HttpRequest) -> tuple[Panel, ...]:
+    """Return the panels the installed apps fill for the visitor, polled as one zone."""
+    return dashboard_panels(request.user)

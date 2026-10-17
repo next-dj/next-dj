@@ -1,4 +1,4 @@
-from flags.models import Flag
+from flags.services import flags_named
 
 from next import context
 from next.pages import MetadataDict
@@ -11,7 +11,7 @@ DEMO_FLAG_NAMES = ("beta_checkout", "dark_sidebar", "ai_suggestions")
 
 @context("demo_flags")
 def demo_flags() -> list[dict[str, object]]:
-    known = {f.name: f for f in Flag.objects.filter(name__in=DEMO_FLAG_NAMES)}
+    known = flags_named(DEMO_FLAG_NAMES)
     return [
         {
             "name": name,

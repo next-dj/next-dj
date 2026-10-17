@@ -257,10 +257,10 @@ PROTECTED_PATHS = (
     "/admin/library/book/{pk}/outline/",
 )
 
-RECENT_ACTIVITY = "recent-activity"
+DASHBOARD_PANELS = "dashboard-panels"
 
 PERMISSION_CHECKS = frozenset(
-    [f"next.E{number}" for number in range(161, 168)]
+    [f"next.E{number}" for number in range(161, 167)]
     + [f"next.W{number}" for number in range(129, 136)]
 )
 
@@ -314,7 +314,7 @@ class TestTreeAccess:
         assert next_client.get(path).status_code == 200
 
     def test_an_anonymous_zone_request_redirects_to_the_login(self, next_client):
-        r = next_client.get_zones("/admin/", RECENT_ACTIVITY)
+        r = next_client.get_zones("/admin/", DASHBOARD_PANELS)
         assert r.status_code == 302
         assert r["Location"] == "/admin/login/?next=/admin/"
 
@@ -365,46 +365,48 @@ class TestTreeAccess:
         )
 
 
-class TestRecentActivityZone:
-    """The dashboard zone lives inside `{% has_perm %}` and its render asks again."""
+class TestDashboardPanels:
+    """`admin_audit` fills a dashboard panel through `panels_requested` for its readers."""
 
     def test_the_superuser_sees_the_newest_entries(self, admin_client):
         log_entry("Frankenstein")
         body = admin_client.get("/admin/").content.decode()
-        assert f'data-next-zone="{RECENT_ACTIVITY}"' in body
+        assert f'data-next-zone="{DASHBOARD_PANELS}"' in body
+        assert "Recent activity" in body
         assert "Frankenstein" in body
-        assert "may read the audit log" not in body
+        assert 'href="/admin/activity/"' in body
 
     def test_the_zone_shows_an_empty_feed(self, admin_client):
-        r = admin_client.get_zones("/admin/", RECENT_ACTIVITY)
-        assert "No activity yet." in envelope_of(r).html_for_zone(RECENT_ACTIVITY)
+        r = admin_client.get_zones("/admin/", DASHBOARD_PANELS)
+        assert "No activity yet." in envelope_of(r).html_for_zone(DASHBOARD_PANELS)
 
     def test_a_zone_render_carries_an_entry_logged_after_the_page(self, admin_client):
         admin_client.get("/admin/")
         log_entry("Dracula")
-        r = admin_client.get_zones("/admin/", RECENT_ACTIVITY)
+        r = admin_client.get_zones("/admin/", DASHBOARD_PANELS)
         assert r.status_code == 200
-        assert "Dracula" in envelope_of(r).html_for_zone(RECENT_ACTIVITY)
+        assert "Dracula" in envelope_of(r).html_for_zone(DASHBOARD_PANELS)
 
-    def test_the_editor_reads_the_else_branch(self, editor_client):
+    def test_the_editor_gets_no_panel(self, editor_client):
         log_entry("Frankenstein")
         body = editor_client.get("/admin/").content.decode()
-        assert f'data-next-zone="{RECENT_ACTIVITY}"' not in body
+        assert "Recent activity" not in body
         assert "Frankenstein" not in body
-        assert "may read the audit log" in body
 
-    def test_a_zone_request_from_the_editor_is_forbidden(self, editor_client):
+    def test_a_zone_request_from_the_editor_carries_no_entry(self, editor_client):
         log_entry("Frankenstein")
-        r = editor_client.get_zones("/admin/", RECENT_ACTIVITY)
-        assert r.status_code == 403
-        assert b"Frankenstein" not in r.content
+        r = editor_client.get_zones("/admin/", DASHBOARD_PANELS)
+        assert r.status_code == 200
+        html = envelope_of(r).html_for_zone(DASHBOARD_PANELS)
+        assert "Recent activity" not in html
+        assert "Frankenstein" not in html
 
     def test_the_feed_keeps_the_five_newest(self, admin_client):
         for number in range(7):
             log_entry(f"Entry {number}")
         html = envelope_of(
-            admin_client.get_zones("/admin/", RECENT_ACTIVITY)
-        ).html_for_zone(RECENT_ACTIVITY)
+            admin_client.get_zones("/admin/", DASHBOARD_PANELS)
+        ).html_for_zone(DASHBOARD_PANELS)
         assert html.count("<li") == 5
 
 

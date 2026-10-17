@@ -32,6 +32,7 @@ DICT_KEYS: Final[frozenset[str]] = frozenset(
 )
 STR_KEYS: Final[frozenset[str]] = frozenset(
     {
+        "BOUNDARIES",
         "COMPONENT_TEMPLATE_LOADER",
         "CSRF_DELIVERY",
         "DEPENDENCY_RESOLVER",

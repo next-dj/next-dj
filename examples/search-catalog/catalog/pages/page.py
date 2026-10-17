@@ -1,4 +1,5 @@
 from catalog.models import Category, Product
+from catalog.services import featured_products, list_categories
 
 from next import context
 from next.urls import DQuery
@@ -17,14 +18,10 @@ def featured(show: DQuery[int] = DEFAULT_FEATURED) -> list[Product]:
     upper bound so a large request cannot exhaust the database.
     """
     count = max(1, min(MAX_FEATURED, show))
-    return list(
-        Product.objects.filter(in_stock=True)
-        .select_related("category")
-        .order_by("-created_at")[:count]
-    )
+    return featured_products(count)
 
 
 @context("categories")
 def categories() -> list[Category]:
     """Return every category for the landing-page navigation grid."""
-    return list(Category.objects.all())
+    return list_categories()

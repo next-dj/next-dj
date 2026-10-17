@@ -12,6 +12,7 @@ from asgiref.sync import async_to_sync
 from django.db import transaction
 from django.dispatch import Signal, receiver as django_receiver
 
+from next.boundaries.signals import baseline_refrozen
 from next.components.signals import (
     component_backend_loaded,
     component_registered,
@@ -118,6 +119,7 @@ __all__ = [
     "action_dispatched",
     "action_registered",
     "asset_registered",
+    "baseline_refrozen",
     "collector_finalized",
     "component_backend_loaded",
     "component_registered",

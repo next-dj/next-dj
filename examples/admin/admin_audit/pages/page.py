@@ -1,6 +1,7 @@
 from typing import Any
 
 from admin_audit.models import AdminActivityLog
+from django.http import HttpRequest
 
 from next import context, page
 
@@ -13,9 +14,9 @@ page.permission_required("admin_audit.view_adminactivitylog")
 
 
 @context("activity_state")
-def activity_state() -> dict[str, Any]:
+def activity_state(request: HttpRequest) -> dict[str, Any]:
     """Return the latest activity entries as table rows."""
-    entries = AdminActivityLog.objects.recent(_LIMIT)
+    entries = AdminActivityLog.objects.visible_to(request.user).recent(_LIMIT)
     rows = [
         {
             "timestamp": entry.timestamp,

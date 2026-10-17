@@ -1,0 +1,41 @@
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+from django.urls import reverse
+from next.testing import find_form, form_action, hidden_fields
+
+from {{ app_name }}.models import Item
+from {{ app_name }}.services import create_item
+
+PAGE = "/{{ app_name }}/"
+
+
+class ItemsPageTests(TestCase):
+    def setUp(self) -> None:
+        user_model = get_user_model()
+        self.alice = user_model.objects.create_user("alice", password="secret")
+        self.bob = user_model.objects.create_user("bob", password="secret")
+
+    def test_an_anonymous_visitor_is_sent_to_sign_in(self) -> None:
+        response = self.client.get(PAGE)
+        self.assertRedirects(
+            response,
+            f"{reverse('admin:login')}?next={PAGE}",
+            fetch_redirect_response=False,
+        )
+
+    def test_the_page_lists_only_the_visitors_items(self) -> None:
+        create_item(self.alice, title="Mine")
+        create_item(self.bob, title="Theirs")
+        self.client.force_login(self.alice)
+        response = self.client.get(PAGE)
+        self.assertContains(response, "Mine")
+        self.assertNotContains(response, "Theirs")
+
+    def test_the_form_creates_an_item_for_the_visitor(self) -> None:
+        self.client.force_login(self.alice)
+        form = find_form(self.client.get(PAGE).content.decode())
+        response = self.client.post(
+            form_action(form), {**hidden_fields(form), "title": "Posted"}
+        )
+        self.assertRedirects(response, PAGE)
+        self.assertTrue(Item.objects.filter(owner=self.alice, title="Posted").exists())

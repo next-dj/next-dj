@@ -97,6 +97,9 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 :doc:`permissions`
    ``next.permissions`` for object permission predicates and the authentication backend that answers them.
 
+:doc:`boundaries`
+   ``next.boundaries`` for the graph of edges between applications, its rules, and the ``boundaries.toml`` ratchet.
+
 :doc:`conf`
    ``next.conf`` for settings loading and the ``extend_default_backend`` helper.
 
@@ -141,7 +144,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    Django system checks that the framework contributes.
 
 :doc:`management`
-   The ``showmetadata`` management command.
+   The ``next`` and ``showmetadata`` management commands.
 
 .. rubric:: Templates and decorators
 
@@ -168,6 +171,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    scripts
    deps
    permissions
+   boundaries
    conf
    server
    signals

@@ -153,9 +153,7 @@ Both assets go in as URL-form module scripts rather than inline bodies. `@vitejs
 ```python
 @context("board", inherit_context=True, serialize=True)
 def board_payload(board: DObject[Board], request: HttpRequest) -> dict:
-    cols = board.columns.prefetch_related(
-        Prefetch("cards", queryset=Card.objects.order_by("position"))
-    ).order_by("position")
+    cols = board.columns.prefetch_related("cards").order_by("position")
     return {
         "id": board.pk,
         "csrf": get_token(request),
@@ -200,7 +198,7 @@ def scope(request: HttpRequest) -> AbstractBaseUser | AnonymousUser:
     return request.user
 ```
 
-The demo has no accounts, so `BoardQuerySet.visible_to` in [`kanban/models.py`](kanban/models.py) ignores the visitor and returns every board, archived ones included. That method is the one place a project with accounts narrows boards by membership, and every board page, settings form and card action follows it without another edit. The index and its counts still query `Board.objects` directly and would move onto `visible_to` in the same change. A project that declares a `DObject` and registers no `scope` fails `manage.py check` with `next.E159`, and a model whose default manager has no `visible_to` with `next.E155`.
+The demo has no accounts, so `BoardQuerySet.visible_to` in [`kanban/models.py`](kanban/models.py) ignores the visitor and returns every board, archived ones included. That method is the one place a project with accounts narrows boards by membership, and every board page, settings form and card action follows it without another edit. The index and its counts read through it as well, `Board.objects.visible_to(user).active()` and `.archived()` with the visitor taken as `Depends("scope")`, because `NEXT_FRAMEWORK["BOUNDARIES"] = "strict"` holds every read of a page tree to `visible_to(...)` or a function of `services.py`. A project that declares a `DObject` and registers no `scope` fails `manage.py check` with `next.E159`, and a model whose default manager has no `visible_to` with `next.E155`.
 
 `RenameBoardForm` and `ArchiveBoardForm` are `ModelForm`s over the board the operator is already looking at. Both inherit `get_initial` from `BoardSettingsForm`, a base marked `Meta.abstract = True` so it registers no action of its own, and that `get_initial` takes `board: DObject[Board]` and returns it, so the dispatcher binds the instance from the `board` kwarg of the posted origin URL and neither form carries a hidden id. `Meta.instance_from_url` would load the same row with a plain `get_object_or_404`, past `visible_to`, which is why both forms ask the resolver instead. `CreateColumnForm` creates a row under the board rather than editing one, so its `on_valid` takes `board: DObject[Board]` directly and the form carries no board field at all.
 

@@ -9,7 +9,7 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 
 from next.checks import NEXT
 
-from .defaults import USER_SETTING
+from .defaults import BOUNDARIES_MODES, USER_SETTING, WARN
 from .merge import OPTIONAL_STR_KEYS, UNSET, accepted_value
 from .settings import NextFrameworkSettings
 
@@ -129,7 +129,27 @@ def _non_bool_warnings(raw: dict[str, Any]) -> list[CheckMessage]:
     ]
 
 
+@register(NEXT)
+def check_next_framework_boundaries_mode(*args, **kwargs) -> list[CheckMessage]:
+    """Require `BOUNDARIES` to name a mode of the boundary checks (`next.E172`)."""
+    raw = getattr(settings, USER_SETTING, None)
+    value = raw.get("BOUNDARIES") if isinstance(raw, dict) else None
+    if not isinstance(value, str) or value in BOUNDARIES_MODES:
+        return []
+    modes = ", ".join(repr(mode) for mode in BOUNDARIES_MODES)
+    return [
+        Error(
+            f"NEXT_FRAMEWORK['BOUNDARIES'] is {value!r}, which names no mode, so the "
+            f"boundary checks run as under {WARN!r}. Write one of {modes}.",
+            hint=_SILENCE_HINT,
+            obj=settings,
+            id="next.E172",
+        )
+    ]
+
+
 __all__ = [
+    "check_next_framework_boundaries_mode",
     "check_next_framework_unknown_top_level_keys",
     "check_next_framework_value_types",
     "errors_for_unknown_keys",

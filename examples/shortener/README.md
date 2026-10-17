@@ -34,6 +34,7 @@ Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_componen
 
 ```python
 NEXT_FRAMEWORK = {
+    "BOUNDARIES": "strict",
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
@@ -56,6 +57,8 @@ NEXT_FRAMEWORK = {
 The router walks two roots. `DIRS` names the project-level page root [`host/`](host/), which owns the single outermost `layout.djx`. `APP_DIRS = True` adds the `pages/` tree of every installed app, so the pages themselves live in [`shortener/pages/`](shortener/pages/). Component lookup is layered the same way: the shared shadcn kit in [`../_shared/_components/`](../_shared/_components/) through `DIRS`, plus any `_components/` folder the page walk meets inside a page tree.
 
 The app keeps the canonical next.dj layout. The page tree sits in `pages/` with its components in `pages/_components/`, the DI provider in [`deps.py`](shortener/deps.py) and the signal receiver in [`signals.py`](shortener/signals.py), both imported from [`apps.py`](shortener/apps.py). The two directory names stay settings, so a project that already has its own keeps them.
+
+Every read and write of a `Link` lives in [`services.py`](shortener/services.py), `latest_links`, `top_links`, `find_link`, `link_totals`, `create_link` and `delete_link`, and the pages call them. `"BOUNDARIES": "strict"` turns that habit into a check: `manage.py check --tag boundaries` fails when a page tree reads `.objects` without `.visible_to(...)` or saves past a form, and a link has no owner to narrow it by, so the pages ask the services.
 
 ### 2. Page, template, layout: how a URL is rendered
 
@@ -92,7 +95,7 @@ Three patterns, each useful:
 ```python
 @context("recent_links")
 def recent_links() -> list[Link]:
-    return list(Link.objects.all()[:5])
+    return latest_links(5)
 ```
 
 Renders as `{{ recent_links }}` in the template.
@@ -127,7 +130,7 @@ def admin_pending_clicks() -> dict[str, int]:
 ```python
 @context("recent_links", inherit_context=True)
 def recent_links() -> list[Link]:
-    return list(Link.objects.order_by("-clicks", "-created_at")[:10])
+    return top_links(10)
 ```
 
 Declared once in [`admin/page.py`](shortener/pages/admin/page.py), available in `admin/stats/` and `admin/links/<slug>/` templates. Use it for toolbar-level data. Do not mark heavy queries `inherit_context=True` unless every sub-page actually needs them.
@@ -153,7 +156,7 @@ class CreateLinkForm(Form):
 
 `on_valid` receives only the parameters it declares. The DI resolver fills what the signature asks for. Delegating to `super().on_valid(request)` follows `Meta.success_url`, which `page_reverse_lazy()` fills from the route tree instead of a path literal, and the dispatcher flashes `Meta.success_message` (interpolated over `cleaned_data` with `%` formatting) through `django.contrib.messages`. The home page calls the shared `flash_messages` component, which drains the queue and maps each level tag onto an `alert` variant, so an error flash is red rather than green. `ComponentWidget("input", type="url", ...)` makes `{{ form.url }}` render through the shared `input` component instead of Django's default widget, so a form field and a hand-written control look identical.
 
-Creating the row is its own problem: [`_create_link_with_unique_slug`](shortener/pages/page.py) tries random six-character slugs inside `transaction.atomic()` and catches `IntegrityError` from the unique constraint, widening the slug by one character every ten collisions. The database decides uniqueness, so two concurrent submissions cannot both win a slug.
+Creating the row is its own problem: [`create_link`](shortener/services.py) tries random six-character slugs inside `transaction.atomic()` and catches `IntegrityError` from the unique constraint, widening the slug by one character every ten collisions. The database decides uniqueness, so two concurrent submissions cannot both win a slug.
 
 [`pages/template.djx`](shortener/pages/template.djx) renders the form by its auto-name:
 

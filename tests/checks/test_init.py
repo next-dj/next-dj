@@ -10,7 +10,7 @@ import next.checks as checks_package
 from next.checks import _LAZY_ATTRIBUTES, _LAZY_SOURCES_BY_MODULE
 
 
-_EAGER = frozenset({"NEXT", "SEO", "register_all", "reset_check_caches"})
+_EAGER = frozenset({"BOUNDARIES", "NEXT", "SEO", "register_all", "reset_check_caches"})
 _NEXT_ROOT = pathlib.Path(inspect.getfile(checks_package)).parent.parent
 _CHECK_ID = re.compile(r"^next\.[EWI]\d+$")
 
@@ -69,7 +69,7 @@ _CHECKS_REFERENCE = (
     / "ref"
     / "system-checks.rst"
 )
-_REFERENCE_ROW = re.compile(r"^   \* - ``(next\.[EW]\d{3})``$", re.MULTILINE)
+_REFERENCE_ROW = re.compile(r"^   \* - ``(next\.[EWI]\d{3})``$", re.MULTILINE)
 
 
 def _defined_check_names(module_path: pathlib.Path) -> frozenset[str]:
