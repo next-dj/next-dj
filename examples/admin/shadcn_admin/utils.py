@@ -9,7 +9,6 @@ from next.urls import page_reverse
 
 
 # Literals, because a lazy reverse cannot answer the per-request `startswith`.
-ADMIN_PREFIX = "/admin/"
 LOGIN_URL = "/admin/login/"
 LOGOUT_URL = "/admin/logout/"
 
@@ -49,11 +48,6 @@ def resolve_object_or_404(
 def dashboard_url() -> str:
     """URL of the admin dashboard (`/admin/`)."""
     return page_reverse()
-
-
-def login_url() -> str:
-    """URL of the login page."""
-    return page_reverse("login")
 
 
 def logout_url() -> str:

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from access.models import AccessRequest, AuditEntry
 from django.core.cache import caches
+from django.core.checks import run_checks
 from django.http import HttpRequest
 
 from next.forms import FormActionNotFoundError
@@ -787,3 +788,10 @@ class TestPageMetadata:
             title=title.format(pk=pk),
             robots="noindex" if noindex else None,
         )
+
+
+class TestOpenActions:
+    """Nobody signs in here, so every page with an action declares itself public."""
+
+    def test_no_action_is_left_without_an_access_rule(self) -> None:
+        assert "next.W134" not in {message.id for message in run_checks()}

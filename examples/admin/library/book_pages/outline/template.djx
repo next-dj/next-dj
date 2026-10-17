@@ -1,0 +1,52 @@
+<div class="space-y-6">
+  {% #component "page_header" eyebrow="Outline" title=book.title description=book.author.full_name %}
+    {% #slot "actions" %}
+      {% component "button" href=change_url text="Edit book" variant="outline" %}
+    {% /slot %}
+  {% /component %}
+
+  {% zone "outline" %}
+    <div class="space-y-6">
+      <div class="overflow-x-auto rounded-lg border border-border bg-card">
+        <table class="w-full text-sm">
+          <thead class="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th class="px-3 py-2 text-left font-medium">No.</th>
+              <th class="px-3 py-2 text-left font-medium">Chapter</th>
+              <th class="px-3 py-2 text-right font-medium">Words</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-border">
+            {% for chapter in outline.chapters %}
+              <tr data-next-key="{{ chapter.pk }}">
+                <td class="px-3 py-2 text-muted-foreground">{{ chapter.number }}</td>
+                <td class="px-3 py-2">{{ chapter.title }}</td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ chapter.word_count }}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="3" class="px-3 py-6 text-center text-muted-foreground">No chapters yet.</td></tr>
+            {% endfor %}
+          </tbody>
+          <tfoot class="border-t border-border text-xs text-muted-foreground">
+            <tr>
+              <td colspan="2" class="px-3 py-2">{{ outline.chapters|length }} chapter{{ outline.chapters|length|pluralize }}</td>
+              <td class="px-3 py-2 text-right tabular-nums" data-outline-words>{{ outline.words }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      {% form "add_chapter_form" zone="outline" %}
+        <div class="grid gap-3 sm:grid-cols-[1fr_10rem_auto] sm:items-end">
+          {% #component "field" label="Chapter title" for_id="id_title" error=form.title.errors.0 %}
+            {% #slot "control" %}{{ form.title }}{% /slot %}
+          {% /component %}
+          {% #component "field" label="Words" for_id="id_word_count" error=form.word_count.errors.0 %}
+            {% #slot "control" %}{{ form.word_count }}{% /slot %}
+          {% /component %}
+          {% component "button" type="submit" text="Append chapter" %}
+        </div>
+      {% endform %}
+    </div>
+  {% endzone %}
+</div>

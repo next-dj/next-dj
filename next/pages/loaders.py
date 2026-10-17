@@ -11,12 +11,13 @@ import logging
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, ClassVar, Final, override
 
 from next.caches import PageCache
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
 from next.pages.errors import PageModuleImportError
+from next.permissions.access import declarations
 from next.utils import (
     MAX_ANCESTOR_WALK_DEPTH,
     classify_dirs_entries,
@@ -42,6 +43,10 @@ logger = logging.getLogger(__name__)
 
 # A token no template source contains, so filling the slot is unambiguous.
 _BODY_SLOT = "\x00next-page-body\x00"
+
+PROXY_MODULE: Final = "proxy.py"
+
+PAGE_MODULE: Final = "page.py"
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +112,7 @@ def _load_stamps(loads: Iterable[_PageLoad | None]) -> tuple[int | None, ...]:
 
 @dataclass(frozen=True, slots=True)
 class AncestorStamps:
-    """The `page.py` files above one page, root first, and the load stamps a memo read.
+    """The modules one memo reads, root first, with the load stamps it read them at.
 
     A memo over them rebuilds when one of them reloads, not on a load of another file.
     """
@@ -222,6 +227,7 @@ def _forget(file_path: Path) -> None:
         _FAILED_PATHS.discard(file_path)
         _stamps.pop(file_path, None)
         _generation.value += 1
+    declarations.forget(file_path)
 
 
 def _page_load(file_path: Path) -> _PageLoad | None:
@@ -247,7 +253,8 @@ def _page_load(file_path: Path) -> _PageLoad | None:
         return cached
 
     try:
-        module = _load_python_module(file_path)
+        with declarations.collecting(file_path):
+            module = _load_python_module(file_path)
     except Exception as exc:
         if stat_mtime_ns(file_path) is None:
             # Removed between the stat and the execution, so absent rather than broken.
@@ -273,11 +280,14 @@ def reset_module_memo() -> None:
     A rewrite within the same mtime tick would otherwise return the stale module.
     """
     with _MEMO_WRITE_LOCK:
+        loaded = (*_stamps, *_MODULE_MEMO, *_FAILED_PATHS)
         _MODULE_MEMO.clear()
         _FAILED_PATHS.clear()
         _stamps.clear()
         _version.value += 1
         _generation.value += 1
+    for file_path in loaded:
+        declarations.forget(file_path)
 
 
 def _pages_dirs_for_config(config: dict) -> list[Path]:
@@ -336,14 +346,11 @@ def forget_app_page_roots(*, setting: str, **kwargs) -> None:
         forget_page_roots()
 
 
-_TREE_DEPTHS: PageCache[Path, tuple[tuple[Path, ...], int]] = PageCache()
+_TREE_DEPTHS: PageCache[Path, tuple[tuple[Path, ...], int | None]] = PageCache()
 
 
-def page_tree_depth(start_dir: Path) -> int:
-    """Return the number of directories from `start_dir` up to its page tree root.
-
-    A directory outside every tree returns the walk cap, memoised per set of trees.
-    """
+def _tree_depth(start_dir: Path) -> int | None:
+    """Return the directories from `start_dir` to its tree root, `None` outside one."""
     roots = _page_roots()
     held = _TREE_DEPTHS.get(start_dir)
     if held is not None and held[0] is roots:
@@ -354,10 +361,35 @@ def page_tree_depth(start_dir: Path) -> int:
         for root in roots
         if resolved.is_relative_to(root)
     ]
-    depths.append(MAX_ANCESTOR_WALK_DEPTH)
-    depth = min(depths)
+    depth = min(depths) if depths else None
     _TREE_DEPTHS[start_dir] = (roots, depth)
     return depth
+
+
+def page_tree_depth(start_dir: Path) -> int:
+    """Return the number of directories from `start_dir` up to its page tree root.
+
+    A directory outside every tree returns the walk cap.
+    """
+    depth = _tree_depth(start_dir)
+    if depth is None:
+        return MAX_ANCESTOR_WALK_DEPTH
+    return min(depth, MAX_ANCESTOR_WALK_DEPTH)
+
+
+def in_page_tree(start_dir: Path) -> bool:
+    """Return whether `start_dir` lies inside a page tree some router routes."""
+    return _tree_depth(start_dir) is not None
+
+
+def proxy_modules(file_path: Path) -> tuple[Path, ...]:
+    """Return the `proxy.py` paths over `file_path` inside its page tree, root first.
+
+    The walk stops at the tree root, so a mounted tree inherits nothing from its host.
+    """
+    depth = page_tree_depth(file_path.parent)
+    ancestors = page_path_info(file_path).ancestors[:depth]
+    return tuple(ancestor.parent / PROXY_MODULE for ancestor in reversed(ancestors))
 
 
 def _read_string_list(module: types.ModuleType, attr: str) -> list[str]:

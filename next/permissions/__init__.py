@@ -3,19 +3,25 @@
 `user.has_perm(perm, obj)` reaches the predicates through `ObjectPermissionBackend`.
 """
 
-from . import checks, signals
+from . import signals
+from .access import check, declared
 from .backends import ObjectPermissionBackend
-from .errors import PermissionAlreadyRegisteredError
+from .errors import PermissionAlreadyRegisteredError, UnknownAccessObjectError
 from .manager import add_perm, has_perm, perms_for
-from .markers import Predicate, predicate
+from .markers import AccessRule, Denial, Predicate, Requirement, predicate
 
 
 __all__ = [
+    "AccessRule",
+    "Denial",
     "ObjectPermissionBackend",
     "PermissionAlreadyRegisteredError",
     "Predicate",
+    "Requirement",
+    "UnknownAccessObjectError",
     "add_perm",
-    "checks",
+    "check",
+    "declared",
     "has_perm",
     "perms_for",
     "predicate",

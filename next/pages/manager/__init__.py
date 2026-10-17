@@ -1,4 +1,4 @@
-"""The `Page` manager and its process-wide singleton.
+"""The `Page` manager, its process-wide singleton and the `proxy` of `proxy.py`.
 
 `context` is an alias of `page.context`, which user code applies as `@context`.
 """
@@ -17,6 +17,7 @@ from next.conf import next_framework_settings
 from next.deps.cache import render_dep_cache
 from next.deps.resolver import current_resolver
 from next.introspect import declared_file, registering_file
+from next.pages.access import Proxy, TreeDeclarations
 from next.pages.loaders import (
     LayoutTemplateLoader,
     build_registered_loaders,
@@ -43,6 +44,7 @@ from next.pages.signals import page_rendered, template_loaded
 from next.pages.visits import visit_request
 from next.ports import static_assets_slot
 from next.seeding import (
+    DEP_CACHE_KEY,
     JS_CONTEXT_KEY,
     JS_SERIALIZERS_KEY,
     METADATA_KEY,
@@ -88,8 +90,11 @@ class _BodyResolution:
     dynamic: bool = False
 
 
-class Page:
-    """Coordinate template loading, context, layouts, rendering, and URL wiring."""
+class Page(TreeDeclarations):
+    """Coordinate template loading, context, layouts, rendering, and URL wiring.
+
+    Its access declarations bind the `page.py` that makes them and no page below it.
+    """
 
     def __init__(self) -> None:
         """Initialise fresh registries and the layout loader.
@@ -100,6 +105,11 @@ class Page:
         self._templates = PageTemplateCache(self._layout_loader)
         self._context_manager = PageContextRegistry()
         self._metadata_registry = PageMetadataRegistry()
+
+    @property
+    def contexts(self) -> PageContextRegistry:
+        """Return the registry of every `@context`, read by the checks and the tools."""
+        return self._context_manager
 
     def register_template(self, file_path: Path, template_str: str) -> None:
         """Store rendered template source for `file_path`.
@@ -284,6 +294,7 @@ class Page:
         context_data[METADATA_KEY] = MetadataThunk(
             self._metadata_registry, file_path, request, url_kwargs, dep_cache
         )
+        context_data[DEP_CACHE_KEY] = dep_cache
 
         if request is not None:
             context_data[REQUEST_KEY] = request
@@ -544,6 +555,7 @@ class Page:
 
 page: Page = Page()
 context = page.context
+proxy: Proxy = Proxy()
 
 
 def reset_context_registry() -> None:
@@ -572,6 +584,7 @@ __all__ = [
     "Page",
     "context",
     "page",
+    "proxy",
     "reset_context_registry",
     "reset_metadata_registry",
     "reset_page_registrations",

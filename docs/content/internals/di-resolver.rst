@@ -103,7 +103,10 @@ Each provider claims a parameter through ``can_handle`` at resolve time, or clai
 The compiled plan keeps that order, but a static verdict removes the check from every parameter the provider provably never owns.
 
 Every ``RegisteredParameterProvider`` subclass carries a ``priority`` class attribute, and the resolver sorts the registry by it.
-The ten built-in providers pin the values ``10`` through ``80``, which yields ``DependsProvider``, ``ContextByDefaultProvider``, ``ContextByNameProvider``, ``FormProvider``, ``CleanedDataProvider``, ``HttpRequestProvider``, ``ConsentProvider``, ``UrlByAnnotationProvider``, ``UrlKwargsProvider``, and ``QueryParamProvider``.
+The twelve built-in providers pin the values ``0`` through ``1000``, which yields ``ObjectProvider``, ``DependsProvider``, ``ContextByDefaultProvider``, ``ContextByNameProvider``, ``FormProvider``, ``CleanedDataProvider``, ``HttpRequestProvider``, ``ConsentProvider``, ``UrlByAnnotationProvider``, ``UrlKwargsProvider``, ``QueryParamProvider``, and ``UnservedObjectProvider``.
+``ObjectProvider`` at ``0`` claims every annotation that names ``DObject``, unions included, and ``UnservedObjectProvider`` at ``1000`` claims the same annotations last and raises :exc:`~django.core.exceptions.ImproperlyConfigured`, so a ``DObject`` parameter that no provider loads fails rather than receiving the raw URL kwarg.
+``ContextByNameProvider`` and ``UrlKwargsProvider`` rule a ``DObject`` annotation out in ``static_can_handle`` and ``can_handle`` both, so a context value or a URL kwarg of the same name never fills it around ``visible_to``.
+A resolver built over an explicit provider list sees no auto-registered provider, so a ``DObject`` there without ``ObjectProvider`` resolves to ``None`` rather than to the raw kwarg.
 ``FormProvider`` and ``CleanedDataProvider`` share priority ``40``, and ``HttpRequestProvider`` and ``ConsentProvider`` share ``50``.
 
 See :doc:`/content/topics/dependency-injection` for the single source of truth on this order and what each provider matches.

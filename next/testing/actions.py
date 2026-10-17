@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+from next.discovery import discover_page_registrations
+from next.forms.errors import FormActionNotFoundError
 from next.forms.manager import form_action_manager
 
 
@@ -14,9 +16,12 @@ if TYPE_CHECKING:
 def resolve_action_url(action_name: str) -> str:
     """Return the reverse URL for a registered form action by name.
 
-    Wraps `form_action_manager.get_action_url` so tests do not need to import the
-    manager singleton directly. Raises `FormActionNotFoundError` for unknown actions.
+    A miss imports every routed `page.py` and asks again, so no visit comes first.
     """
+    try:
+        return form_action_manager.get_action_url(action_name)
+    except FormActionNotFoundError:
+        discover_page_registrations()
     return form_action_manager.get_action_url(action_name)
 
 

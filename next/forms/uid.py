@@ -1,12 +1,11 @@
 """Dispatch-URL reversing, origin-path validation, and origin redirects."""
 
-from contextlib import suppress
-
-from django.core.exceptions import DisallowedRedirect
 from django.http import HttpRequest, HttpResponseRedirect
 from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
 from django.utils.encoding import escape_uri_path
+
+from next.utils import redirect_or_fallback
 
 
 URL_NAME_FORM_ACTION = "form_action"
@@ -78,18 +77,6 @@ def posted_origin_path(request: HttpRequest) -> str | None:
     return validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
 
 
-def redirect_or_fallback(
-    target: str, fallback: str, *, status: int = 302
-) -> HttpResponseRedirect:
-    """Redirect to `target`, or to `fallback` when Django refuses it as a Location.
-
-    A handler has already run by now, so a target past the length cap is not a 400.
-    """
-    with suppress(DisallowedRedirect):
-        return HttpResponseRedirect(target, status=status)
-    return HttpResponseRedirect(fallback, status=status)
-
-
 def redirect_to_origin(
     request: HttpRequest, fallback: str = "/"
 ) -> HttpResponseRedirect:
@@ -106,7 +93,6 @@ __all__ = [
     "current_origin_path",
     "is_path_only",
     "posted_origin_path",
-    "redirect_or_fallback",
     "redirect_to_origin",
     "reverse_form_action",
     "validated_origin_path",

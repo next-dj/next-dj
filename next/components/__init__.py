@@ -15,6 +15,7 @@ from .context import (
     component,
     context,
 )
+from .errors import ComponentModuleImportError
 from .facade import (
     collect_visible_components,
     get_component,
@@ -46,6 +47,7 @@ __all__ = [
     "ComponentContextManager",
     "ComponentContextRegistry",
     "ComponentInfo",
+    "ComponentModuleImportError",
     "ComponentRegistry",
     "ComponentRenderStrategy",
     "ComponentRenderer",

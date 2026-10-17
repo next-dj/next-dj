@@ -49,6 +49,9 @@ JS_SERIALIZERS_KEY: Final = "_next_js_context_serializers"
 METADATA_KEY: Final = "_next_metadata"
 """Context key carrying the metadata thunk the `{% metadata %}` tag resolves."""
 
+DEP_CACHE_KEY: Final = "_next_dep_cache"
+"""Context key carrying the dependency cache the contexts of a page render filled."""
+
 
 @dataclass(frozen=True, slots=True)
 class RenderFrame:
@@ -126,6 +129,7 @@ __all__ = [
     "ACTION_ANCHOR_KEY",
     "COLLECTOR_KEY",
     "COMPONENT_MODULE_PATH_KEY",
+    "DEP_CACHE_KEY",
     "EMPTY_FRAME",
     "JS_CONTEXT_KEY",
     "JS_SERIALIZERS_KEY",

@@ -255,7 +255,7 @@ The table names each familiar pattern, where Django already provides it, and wha
      - The framework signals, importable from ``next.signals``, and ``receiver(..., on_commit=True)`` for a receiver that waits for the commit.
    * - Chain of responsibility
      - Middleware.
-     - The ``layout.djx`` chain that wraps every page below a layout, and ``inherit_context=True`` that passes a context value down the tree.
+     - The ``layout.djx`` chain that wraps every page below a layout, the ``proxy.py`` chain whose access every page below it inherits until a ``public()`` lifts it, and ``inherit_context=True`` that passes a context value down the tree.
    * - Command
      - Management commands.
      - Form actions, each an ``on_valid`` or an ``@action`` handler served at its own endpoint behind its guards, and ``FormWizard`` as a command split into steps.

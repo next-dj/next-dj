@@ -30,6 +30,11 @@ def form_state(
         bound = form_cls(instance=working, auto_id=spec.auto_id)
     fieldsets = spec.model_admin.get_fieldsets(spec.request, spec.stored)
     opts = spec.model._meta
+    row_rules = isinstance(spec.model_admin, RowPermissionAdmin)
+    if spec.is_change and row_rules:
+        object_links = spec.model_admin.get_object_links(spec.request, spec.stored)
+    else:
+        object_links = []
     if spec.is_change:
         inlines: list[Any] = []
         related_sections = AdminInlineSpec.build_sections(spec)
@@ -46,7 +51,8 @@ def form_state(
         "pk": pk,
         "is_change": spec.is_change,
         "instance": spec.stored,
-        "row_rules": isinstance(spec.model_admin, RowPermissionAdmin),
+        "row_rules": row_rules,
+        "object_links": object_links,
         "change_perm": f"{opts.app_label}.{get_permission_codename('change', opts)}",
         "delete_perm": f"{opts.app_label}.{get_permission_codename('delete', opts)}",
         "verbose_name": str(spec.model._meta.verbose_name),

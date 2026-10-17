@@ -26,6 +26,7 @@ from .build import _construct_form, _form_for_class, _resolve_form_class
 from .permissions import (
     _check_access,
     _check_page_access,
+    _check_tree_access,
     _enforce_object_permissions,
     _enforce_registered_permissions,
     _enforce_view_permissions,
@@ -86,23 +87,8 @@ class FormActionDispatch:
         if request.method != "POST":
             return HttpResponseNotAllowed(["POST"])
 
-        origin_match = resolve_origin(request)
-        refusal = FormActionDispatch._refuse_access(
-            request, meta, origin_match, action_name
-        )
-        if refusal is not None:
-            return refusal
-
-        state = _DispatchState(
-            url_kwargs=dict(origin_match.url_kwargs) if origin_match else {},
-            dep_cache={},
-            dep_stack=[],
-            uid=meta.get("uid"),
-            origin_match=origin_match,
-        )
-        setattr(request, REQUEST_DEP_CACHE_ATTR, state.dep_cache)
         try:
-            return FormActionDispatch._route(backend, request, action_name, meta, state)
+            return FormActionDispatch._admitted(backend, request, action_name, meta)
         except UnboundObjectError as exc:
             if exc.parent:
                 raise
@@ -114,6 +100,31 @@ class FormActionDispatch:
             return HttpResponseBadRequest(
                 f"Action {action_name!r} needs a URL kwarg the origin lacks."
             )
+
+    @staticmethod
+    def _admitted(
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        action_name: str,
+        meta: "ActionMeta",
+    ) -> "HttpResponseBase":
+        """Route the action once the page tree, its guard and the origin admit it."""
+        origin_match = resolve_origin(request)
+        dep_cache: dict[str, Any] = {}
+        refusal = FormActionDispatch._refuse_access(
+            request, meta, origin_match, action_name, dep_cache
+        )
+        if refusal is not None:
+            return refusal
+        state = _DispatchState(
+            url_kwargs=dict(origin_match.url_kwargs) if origin_match else {},
+            dep_cache=dep_cache,
+            dep_stack=[],
+            uid=meta.get("uid"),
+            origin_match=origin_match,
+        )
+        setattr(request, REQUEST_DEP_CACHE_ATTR, state.dep_cache)
+        return FormActionDispatch._route(backend, request, action_name, meta, state)
 
     @staticmethod
     def _route(
@@ -157,11 +168,23 @@ class FormActionDispatch:
         meta: "ActionMeta",
         origin_match: "OriginMatch | None",
         action_name: str,
+        dep_cache: dict[str, Any],
     ) -> "HttpResponseBase | None":
-        """Return the denial of the action guard or of the origin page, or None.
+        """Return the denial of the page tree, the action guard or the origin page.
 
-        The action's guard answers first, it is cheaper and names the origin it denies.
+        The rule of the owner and of the origin page answers before the guard of `Meta`.
         """
+        denial = _check_tree_access(
+            request,
+            meta.get("file_path"),
+            origin_match,
+            dep_cache,
+            action_name=action_name,
+            uid=meta.get("uid"),
+            sender=_DispatchState.signal_sender,
+        )
+        if denial is not None:
+            return denial
         guard = meta.get("guard")
         if guard is not None:
             object_stage = bool(guard.permissions) and _branch(meta) == "form"

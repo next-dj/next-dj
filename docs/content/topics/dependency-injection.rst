@@ -89,6 +89,7 @@ Each one carries an explicit ``priority`` value, the resolver consults them from
     A parameter annotated ``DQuery[T]`` reads ``request.GET`` by parameter name and coerces to ``T``.
 
 The object provider comes first so that nothing reaches a ``DObject`` parameter around ``visible_to``, neither a ``Depends`` default nor a context value or URL kwarg of the same name.
+The context by name and URL kwargs providers refuse a ``DObject`` annotation as well, and a ``DObject`` parameter that no provider loads raises :exc:`~django.core.exceptions.ImproperlyConfigured` instead of receiving the raw kwarg.
 The order makes the default-driven and marker-driven providers decisive.
 ``Depends`` and ``Context`` look only at the parameter default.
 ``DUrl`` and ``DQuery`` look only at the annotation.
@@ -462,7 +463,7 @@ Nested rows
 ~~~~~~~~~~~
 
 ``DObject[Model, "parent"]`` also requires the row to belong to a parent the render loaded earlier.
-``parent`` names a context value set before the parameter resolves, either by an ancestor ``@context("parent", inherit_context=True)`` or by an earlier ``@context("parent")`` in the same ``page.py``.
+``parent`` names a context value set before the parameter resolves, by an ancestor ``@context("parent", inherit_context=True)`` or by an earlier ``@context("parent")`` in the same ``page.py``, see :ref:`topics-layouts-inherited-context` for the run order.
 The lookup filters the rows by the model field of that same name, so a comment URL under another post answers 404 even when both rows are visible.
 
 .. code-block:: python
@@ -500,9 +501,10 @@ Page callables, form handlers and form hooks, and named dependencies resolve a `
 A form handler or hook reads the URL kwargs of the page the submission came from, but it resolves with no page context, so a ``DObject`` with a parent there is ``next.E157``.
 A submission whose origin is missing or names a page without the kwarg comes from the client rather than from the wiring, so the dispatcher answers it with 400 Bad Request and logs a warning instead of raising.
 A ``@component.context`` callable receives no URL kwargs at all, so any ``DObject`` there is ``next.E158``, and the component reads the row from the page context by name instead.
+An access declaration of a ``page.py`` or a ``proxy.py`` names its row as ``permission_required(perm, obj=DObject[Model])``, which loads by the URL kwarg named after the ``model_name`` of the model and shares the cached row with a ``DObject`` parameter of the same model and primary key, see :ref:`topics-proxy`.
 
 ``manage.py check`` reads the annotations without running a query.
-``next.E155`` reports a model whose default manager has no ``visible_to``, ``next.W128`` a page ``DObject`` whose full route hands it no kwarg of its name, and ``next.E156`` a parent no earlier context callable provides.
+``next.E155`` reports a model whose default manager has no ``visible_to``, ``next.W128`` a page ``DObject`` whose full route hands it no kwarg of its name, ``next.E164`` the same for an ``obj=DObject[Model]`` of an access declaration, and ``next.E156`` a parent no earlier context callable provides.
 ``next.E160`` reports a ``DObject`` written in a module whose type hints do not resolve, such as one under ``from __future__ import annotations`` that imports the model under ``TYPE_CHECKING``, where every resolve of the parameter raises ``TypeError`` rather than passing the raw kwarg.
 The full route counts a ``mount`` or ``mounts`` prefix and the kwargs the includes around the tree capture, so a ``wallet`` the prefix ``wallets/<int:wallet>/`` captures satisfies a ``DObject`` named ``wallet``.
 ``next.W128`` stays a warning because the walk of the URLconf cannot read an include hidden behind a lazy pattern sequence.

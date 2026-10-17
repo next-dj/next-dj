@@ -22,6 +22,7 @@ from django.http import HttpRequest
 
 from next.deps import DDependencyBase, RegisteredParameterProvider
 from next.deps.markers import marker_origin, unwrap_annotated
+from next.deps.objects import names_object
 
 from .parser import _coerce_url_value
 
@@ -201,14 +202,19 @@ def _url_type_hint(args: tuple[object, ...]) -> type:
 
 
 class UrlKwargsProvider(RegisteredParameterProvider):
-    """Fill parameters by name from `url_kwargs`."""
+    """Fill parameters by name from `url_kwargs`, a `DObject` one never."""
 
     priority = 70
 
     @override
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Return True when `url_kwargs` contains this parameter name."""
-        return param.name in context.url_kwargs
+        return param.name in context.url_kwargs and not names_object(param.annotation)
+
+    @override
+    def static_can_handle(self, param: inspect.Parameter) -> bool | None:
+        """Rule out a `DObject` annotation, whose raw kwarg is the unscoped pk."""
+        return False if names_object(param.annotation) else None
 
     @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:

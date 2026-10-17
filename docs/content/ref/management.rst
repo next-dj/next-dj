@@ -7,7 +7,7 @@ Module summary
 --------------
 
 The ``next`` application ships two management commands.
-``next`` dispatches the next.dj subcommands, and ``showmetadata`` is a thin shell over the metadata of ``next.pages``.
+``next`` dispatches the next.dj subcommands, ``routes`` and ``permissions`` among them, and ``showmetadata`` is a thin shell over the metadata of ``next.pages``.
 
 next
 ----
@@ -26,7 +26,7 @@ Like any Django command, ``next`` runs the system checks before the subcommand, 
 routes
 ~~~~~~
 
-``manage.py next routes`` prints one row per routed page, in resolution order, with five columns.
+``manage.py next routes`` prints one row per routed page, in resolution order, with six columns.
 
 .. list-table::
    :header-rows: 1
@@ -44,21 +44,60 @@ routes
      - The ``page.py``, or the ``template.djx`` of a virtual page, relative to ``BASE_DIR`` when it lies under it.
    * - ``Source``
      - ``root`` for a tree at the include point of ``next.urls``, ``mounts`` for a tree an ``AppConfig`` mounts through ``mount`` or ``mounts``, ``urls.py`` for a tree a URLconf mounts through ``pages()``.
+   * - ``Access``
+     - The access rule of the page, spelled as in `permissions`_.
 
 .. code-block:: text
    :caption: manage.py next routes
 
-   URL                                Name                                     App      File                        Source
-   /staff/                            audit:page_                              audit    audit/pages/page.py         urls.py
-   /staff/log/                        audit:page_log                           audit    audit/pages/log/page.py     urls.py
-   /wallets/                          next:page_wallets                        wallets  wallets/pages/page.py       mounts
-   /wallets/<int:wallet>/operations/  next:page_wallets_int_wallet_operations  wallets  wallets/operations/page.py  mounts
-   /                                  next:page_                               notes    notes/pages/page.py         root
+   URL                                Name                                     App      File                        Source   Access
+   /staff/                            audit:page_                              audit    audit/pages/page.py         urls.py  login, perm audit.view_entry
+   /staff/log/                        audit:page_log                           audit    audit/pages/log/page.py     urls.py  login, perm audit.view_entry
+   /wallets/                          next:page_wallets                        wallets  wallets/pages/page.py       mounts   login
+   /wallets/<int:wallet>/operations/  next:page_wallets_int_wallet_operations  wallets  wallets/operations/page.py  mounts   login, perm wallets.view_wallet on wallets.Wallet
+   /                                  next:page_                               notes    notes/pages/page.py         root     -
 
 A tree of ``next.urls`` is listed only when the root URLconf includes ``next.urls``.
 The table lists exactly the routed pages, so a page whose route the URL parser refuses and a ``page.py`` with no body source to render are left out.
 Under :func:`~django.conf.urls.i18n.i18n_patterns` a URL carries the prefix of ``LANGUAGE_CODE``.
 :ref:`topics-file-router-mounting` covers the three sources.
+
+permissions
+~~~~~~~~~~~
+
+``manage.py next permissions`` prints the access rule of every page, every action, and every component whose ``component.py`` declares access, with four columns.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 85
+
+   * - Column
+     - Content
+   * - ``Kind``
+     - ``page``, ``action``, or ``component``.
+   * - ``Endpoint``
+     - The URL of a page, the name of an action, or the name of a component.
+   * - ``Access``
+     - The requirements in the order the chain declares them, ``login`` and one ``perm <name>`` per permission with ``on <app_label.Model>`` for the row of a page or a ``proxy.py`` and ``on <name>`` for the context a component names, ``public`` for an endpoint whose rule a ``public()`` opened, in its own ``page.py`` or in a ``proxy.py`` above, ``login (middleware)`` for an endpoint without requirements whose rule is not public while ``LoginRequiredMiddleware`` is listed, ``broken`` for a chain holding a file that failed to import or, in the table of one page, for a page whose composed template does not compile, and ``-`` for an open endpoint.
+   * - ``Sources``
+     - The files the requirements come from, root first, relative to ``BASE_DIR`` when they lie under it, ``public (file)`` naming the file whose ``public()`` opened a public rule, or the broken file.
+
+.. code-block:: text
+   :caption: manage.py next permissions
+
+   Kind       Endpoint                  Access                                     Sources
+   page       /notes/                   login                                      notes/pages/notes/proxy.py
+   page       /notes/<int:note>/edit/   login, perm notes.edit_note on notes.Note  notes/pages/notes/proxy.py, notes/pages/notes/[int:note]/edit/page.py
+   page       /notes/<int:note>/share/  public                                     public (notes/pages/notes/[int:note]/share/page.py)
+   page       /login/                   public                                     public (notes/pages/login/page.py)
+   action     note_edit_form            login, perm notes.edit_note on notes.Note  notes/pages/notes/proxy.py, notes/pages/notes/[int:note]/edit/page.py
+   component  admin_toolbar             perm notes.moderate                        notes/pages/_components/admin_toolbar/component.py
+
+The share page lifts the login of ``notes/pages/notes/proxy.py`` through its own ``page.public()``, so its ``Sources`` column names that ``page.py``, and ``manage.py check`` lists the same lift as ``next.W135``.
+
+``manage.py next permissions <url>`` narrows the table to the page the URL resolves to, the actions declared in its directory, and the declaring components its composed template renders, nested ones included.
+A URL that resolves to no page is a ``CommandError``.
+The rule of an action is its owner rule and its ``Meta`` guard, since the rule of the posted origin page joins only per request, see :doc:`/content/security/actions`.
 
 showmetadata
 ------------
@@ -85,5 +124,6 @@ See also
 .. seealso::
 
    :doc:`/content/topics/file-router` for the routes ``next routes`` lists.
+   :doc:`/content/topics/permissions` for the rules ``next permissions`` lists.
    :doc:`/content/topics/seo/auditing` for where the ``showmetadata`` command fits beside the checks and the tests.
    :doc:`metadata` for the metadata the command reads.

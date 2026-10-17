@@ -105,6 +105,7 @@ Terms used throughout the next.dj documentation.
    layout
       A ``layout.djx`` file in an ancestor directory.
       Wraps every descendant page.
+      It holds markup alone, and the access of its directory and every page below it lives in a :term:`proxy.py`.
 
    JS context policy
       Algorithm class that resolves duplicate serialised keys for ``window.Next.context``.
@@ -176,6 +177,10 @@ Terms used throughout the next.dj documentation.
    provider
       A class that produces a value for a parameter.
       Implements ``can_handle`` and ``resolve``.
+
+   proxy.py
+      A module in a directory of a page tree that declares the access of that directory and every page below it, through ``proxy.login_required()``, ``proxy.permission_required()``, and ``proxy.public()``.
+      It holds no context and no data, and a ``public()`` in a deeper file lifts what it requires, see :doc:`/content/topics/proxy`.
 
    request cache
       The dependency cache a form dispatch attaches to the request, shared by its handler and by the context functions, metadata callables, and components of the re-render.

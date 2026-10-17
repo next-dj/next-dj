@@ -9,7 +9,8 @@ from django.template.base import Node, NodeList, TextNode
 from django.template.defaulttags import ForNode, WithNode
 
 from next.forms.nodes import FormNode
-from next.partial.zone import ZoneNode, child_nodelists
+from next.partial.zone import ZoneNode
+from next.utils import child_nodelists
 
 
 if TYPE_CHECKING:

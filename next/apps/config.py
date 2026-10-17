@@ -24,6 +24,7 @@ from next.discovery import reset_router_manager_cache
 from next.forms.backends import forget_action_urls
 from next.forms.manager import form_action_manager
 from next.forms.wizard import forget_wizard_backend
+from next.pages.access import forget_page_access
 from next.pages.loaders import (
     forget_additional_layouts,
     forget_app_page_roots,
@@ -43,6 +44,7 @@ from next.pages.responses import forget_response_policies
 from next.pages.watch import forget_watch_state
 from next.partial.manager import forget_asset_version, forget_partial_backend
 from next.partial.ports import PartialShaperImpl
+from next.permissions.access import forget_login_middleware
 from next.ports import (
     form_routes_slot,
     page_scan_slot,
@@ -95,6 +97,7 @@ _SETTING_CHANGED: Final[tuple[Callable[..., None], ...]] = (
     forget_storage_state,
     reload_app_routers,
     forget_script_srcs,
+    forget_login_middleware,
     staticfiles.reinstall_finders,
     templates.reinstall_builtins,
 )
@@ -115,6 +118,7 @@ _SETTINGS_RELOADED: Final[tuple[Callable[..., None], ...]] = (
     forget_context_processors,
     forget_csrf_delivery,
     forget_response_policies,
+    forget_page_access,
     forget_component_backends,
     reset_components_manager_cache,
     forget_wizard_backend,

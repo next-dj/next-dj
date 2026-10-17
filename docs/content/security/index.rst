@@ -14,6 +14,9 @@ next.dj inherits the Django security model and adds a few subsystem specific sur
 :doc:`sessions-and-auth`
    What the framework does with the session and the authenticated user, and what it leaves to Django.
 
+:doc:`actions`
+   The rule a form action answers to, the forged origin, and the public action warning.
+
 :doc:`static-assets`
    Origin, hash, and integrity for shipped CSS and JS.
 
@@ -36,6 +39,7 @@ next.dj inherits the Django security model and adds a few subsystem specific sur
    overview
    csrf-and-forms
    sessions-and-auth
+   actions
    static-assets
    csp-and-nonce
    di-and-untrusted-input

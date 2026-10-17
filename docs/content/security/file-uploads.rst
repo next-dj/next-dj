@@ -18,9 +18,9 @@ The framework runs no size check, no content sniff, and no filename rewrite of i
 
 Four framework behaviours around uploads are worth knowing before writing that code.
 
-Actions are unauthenticated by default.
-   The dispatch endpoint accepts a POST from any visitor, so an upload action without a guard lets an anonymous client write files.
-   Declare ``Meta.login_required`` on the form, or a stricter guard, see :ref:`topics-forms-actions-guards`.
+An action nothing guards is open to anyone.
+   The dispatch endpoint accepts a POST from any visitor, so an upload action under no access rule of its page tree and with no guard of its own lets an anonymous client write files, which ``next.W134`` reports.
+   Declare ``proxy.login_required()`` in a ``proxy.py`` over the page, ``Meta.login_required`` on the form, or a stricter guard, see :doc:`actions`.
 
 The inline validate pass never validates a file field.
    A field-level validate request runs the bound form and then drops every file field from the set of fields it reports on, so a file field's validators run only on the full submit.

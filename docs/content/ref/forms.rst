@@ -59,7 +59,7 @@ Framework machinery.
    The forms system checks live in ``next.forms.checks``, a package of one-word submodules, ``actions``, ``config``, ``widgets``, and ``wizards`` for the checks themselves and ``sources`` for the registration readers they share.
    The framework application config imports the package at startup, and the forms package re-exports it, so ``next.forms.checks`` names the same package either way.
    ``FormActionNotFoundError``, ``UnstorableWizardValueError``, and ``UnregisteredComponentError`` live in ``next.forms.errors`` and are re-exported at the package level.
-   The UID helpers ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``ORIGIN_FIELD_NAME``, ``FORM_ORIGIN_OVERRIDE_KEY``, ``MAX_ORIGIN_LENGTH``, ``reverse_form_action``, ``current_origin_path``, ``is_path_only``, ``validated_origin_path``, ``posted_origin_path``, and ``redirect_or_fallback`` live in ``next.forms.uid``.
+   The UID helpers ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``ORIGIN_FIELD_NAME``, ``FORM_ORIGIN_OVERRIDE_KEY``, ``MAX_ORIGIN_LENGTH``, ``reverse_form_action``, ``current_origin_path``, ``is_path_only``, ``validated_origin_path``, and ``posted_origin_path`` live in ``next.forms.uid``.
    The test isolation helper ``reset_form_registration_state`` belongs to ``next.testing``, documented under :doc:`/content/ref/testing`.
 
 Internal hooks.
@@ -297,8 +297,8 @@ The cap sits far above Django's 2048-character URL cap, because a long page URL 
 ``posted_origin_path`` answers the validated origin field of a POST and ``None`` for any other method.
 ``redirect_to_origin`` builds the success redirect back to the page named by the posted origin field.
 It falls back to ``fallback`` when the request is not a POST, when the field is absent or off-site, and when the origin exceeds the length Django allows in a redirect ``Location``, which a non-ASCII origin under the cap can still do once encoded.
-``redirect_or_fallback`` is the helper behind that last case, and the login redirect and the no-runtime ``Patches.response`` share it, answering ``fallback`` whenever Django refuses the target as a ``Location``.
-It is re-exported from ``next.forms``.
+The helper behind that last case is ``redirect_or_fallback`` in ``next.utils``, which the login redirect and the no-runtime ``Patches.response`` share, answering ``fallback`` whenever Django refuses the target as a ``Location``.
+It stays out of every curated namespace.
 ``FORM_ORIGIN_OVERRIDE_KEY`` names the render-context key whose value overrides the origin of a rendered form, which the partial shaping layer sets to the next step URL on a wizard advance.
 
 .. automodule:: next.forms.uid

@@ -4,8 +4,14 @@ import pytest
 from django.conf import settings as django_settings
 from django.test import override_settings
 
-from next.permissions import ObjectPermissionBackend, add_perm, predicate
+from next.permissions import (
+    ObjectPermissionBackend,
+    add_perm,
+    checks as permission_checks,
+    predicate,
+)
 from next.permissions.checks import (
+    check_declared_permissions_known,
     check_has_perm_names,
     check_permission_backend,
     check_permission_predicates,
@@ -20,8 +26,12 @@ from tests.support import (
     MODEL_BACKEND,
     OBJECT_PERMISSION_BACKENDS,
     check_ids,
+    next_framework_settings_stand_in,
     patch_checks_router_manager,
+    routed,
+    write_page,
 )
+from tests.support.access import COMPONENTS, page_source, write_proxy
 
 
 pytestmark = pytest.mark.usefixtures("isolated_permissions")
@@ -267,3 +277,72 @@ class TestHasPermNames:
             patch_checks_router_manager(pages_directory=pages),
         ):
             assert check_ids(check_has_perm_names()) == ["next.W130"]
+
+
+@pytest.mark.usefixtures("isolated_declarations")
+class TestDeclaredPermissionsKnown:
+    """next.W131 names each file whose declaration asks for an ungranted permission."""
+
+    @pytest.fixture()
+    def project(self, tmp_path) -> Path:
+        root = tmp_path / "pages"
+        write_proxy(root, 'proxy.permission_required("auth.no_such_proxy")\n')
+        write_page(
+            root,
+            "a",
+            page_source(
+                'page.permission_required(("auth.view_group", "auth.no_such_page"))\n'
+            ),
+        )
+        card = root / "_components" / "card"
+        card.mkdir(parents=True)
+        (card / "component.py").write_text(
+            "from next.components import component\n\n"
+            'component.permission_required("auth.no_such_card")\n'
+        )
+        (card / "component.djx").write_text("card")
+        return root
+
+    def test_every_declaring_file_is_named(self, project) -> None:
+        with routed(project, COMPONENT_BACKENDS=COMPONENTS):
+            messages = check_declared_permissions_known()
+
+        assert {m.id for m in messages} == {"next.W131"}
+        assert {m.obj: m.msg.split()[0] for m in messages} == {
+            str(project / "proxy.py"): "permission_required('auth.no_such_proxy')",
+            str(project / "a" / "page.py"): "permission_required('auth.no_such_page')",
+            str(project / "_components" / "card" / "component.py"): (
+                "permission_required('auth.no_such_card')"
+            ),
+        }
+
+    def test_a_registered_permission_is_silent(self, project) -> None:
+        for perm in ("no_such_proxy", "no_such_page", "no_such_card"):
+            add_perm(f"auth.{perm}", no_params)
+
+        with routed(project, COMPONENT_BACKENDS=COMPONENTS):
+            assert check_declared_permissions_known() == []
+
+    def test_without_component_backends_the_tree_alone_is_read(
+        self, project, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(
+            permission_checks,
+            "next_framework_settings",
+            next_framework_settings_stand_in(COMPONENT_BACKENDS=None),
+        )
+        with routed(project):
+            messages = check_declared_permissions_known()
+
+        assert str(project / "_components" / "card" / "component.py") not in {
+            m.obj for m in messages
+        }
+
+    def test_without_contrib_auth_it_is_silent(self, project) -> None:
+        installed = [
+            app
+            for app in django_settings.INSTALLED_APPS
+            if app != "django.contrib.auth"
+        ]
+        with routed(project), override_settings(INSTALLED_APPS=installed):
+            assert check_declared_permissions_known() == []

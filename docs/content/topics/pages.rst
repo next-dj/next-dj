@@ -194,6 +194,26 @@ Pass ``serializer=`` with a ``JsContextSerializer`` instance to use a per-key se
    def featured_payload() -> dict:
        return {"id": 1, "title": "Hello"}
 
+Page access
+-----------
+
+A ``page.py`` declares the access of its own page through ``page.login_required()``, ``page.permission_required(perm, obj=None)``, and ``page.public()``.
+The declaration binds that page alone, its actions, and its zone requests, and no page below it.
+A requirement a section shares lives in a ``proxy.py`` of the section directory, which binds the directory and every page below it, see :doc:`proxy`.
+
+.. code-block:: python
+   :caption: notes/pages/notes/[int:note]/edit/page.py
+
+   from notes.models import Note
+
+   from next import page
+   from next.deps import DObject
+
+   page.permission_required("notes.edit_note", obj=DObject[Note])
+
+``page.public()`` lifts the requirements of every ``proxy.py`` above the page for that page alone, and ``manage.py check`` lists the lift as ``next.W135``.
+See :ref:`topics-permissions-tree` for the order of the checks and the answer to a refusal.
+
 Custom template loaders
 -----------------------
 
@@ -580,6 +600,7 @@ Fail quiet, the default.
    A deployment that never reads its logs therefore reads a broken page as a missing one, which is the reason :doc:`/content/deployment/settings` recommends ``STRICT_LOADING`` in production.
 
 The blast radius is one page in every mode.
+A broken ``proxy.py`` reaches further, since it closes every page below it the same way, see :ref:`topics-proxy`.
 The broken page still gets its URL pattern, so the error surfaces at the view rather than while the URL configuration is built, and every sibling page keeps its pattern and keeps serving.
 The record is keyed by modification time, so saving a fixed ``page.py`` clears it on the next request without a restart.
 ``manage.py check --deploy`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message, which catches a broken page before traffic reaches it.
@@ -594,6 +615,7 @@ See also
 
    :doc:`layouts` for how the layout chain wraps the page body.
    :doc:`context` for ``@context`` patterns and inheritance.
+   :doc:`proxy` for the access a section declares over its pages.
    :doc:`seo/metadata` for the metadata a page declares and the head it renders.
    :doc:`/content/internals/page-discovery` for the discovery pipeline.
    :doc:`/content/ref/pages` for the public API.

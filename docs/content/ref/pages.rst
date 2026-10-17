@@ -6,7 +6,7 @@ Pages reference
 Module summary
 --------------
 
-``next.pages`` exposes the ``Page`` coordinator and its ``page`` singleton, the ``@context`` decorator, the ``Context`` and ``ContextResult`` value objects, the ``PageModuleImportError`` raised by a broken ``page.py`` and the ``PageContextShapeError`` raised by a keyless ``@context`` answering no mapping, and the ``checks`` and ``signals`` submodules.
+``next.pages`` exposes the ``Page`` coordinator and its ``page`` singleton, the ``proxy`` declarations of a ``proxy.py``, the ``@context`` decorator, the ``Context`` and ``ContextResult`` value objects, the ``PageModuleImportError`` raised by a broken ``page.py`` and the ``PageContextShapeError`` raised by a keyless ``@context`` answering no mapping, and the ``checks`` and ``signals`` submodules.
 It also exposes the page metadata names a page module uses most, the ``ResolvedMetadata`` value, the ``MetadataDict`` input shape, the ``Replace`` and ``RESET`` markers, the ``ld`` nodes, the ``MetadataRenderer`` contract with its ``HtmlMetadataRenderer``, and the four ``PageMetadata*`` errors, see :doc:`metadata`.
 The ``CacheDict`` and ``HeadersDict`` shapes of the ``cache`` and ``headers`` a ``page.py`` declares, and the ``CacheControl`` value a ``cache`` normalises to, complete the surface, see `Response policy`_ below.
 
@@ -34,11 +34,38 @@ Public API
 
    The process-wide ``Page`` coordinator that every router-built view renders through.
 
+.. autodata:: next.pages.proxy
+   :no-value:
+
+   The ``Proxy`` instance a ``proxy.py`` declares through.
+   ``Proxy`` is documented with ``next.pages.access`` below, and it shares ``login_required``, ``permission_required``, and ``public`` with ``Page`` through ``TreeDeclarations``.
+
+Access declarations
+~~~~~~~~~~~~~~~~~~~
+
+``page.login_required()``, ``page.permission_required(perm, *, obj=None)``, and ``page.public()`` declare the access of the ``page.py`` that calls them, and the same calls on ``proxy`` the access of a ``proxy.py``, its directory, and every page below it, see :doc:`/content/topics/proxy`.
+``perm`` is a permission name or a tuple of names, and ``obj`` is ``DObject[Model]``, whose row loads through ``visible_to(scope)`` by the URL kwarg named after the ``model_name`` of the model.
+Any other ``perm``, and an ``obj`` that is a string, a bare model, or a ``DObject`` with a parent, raises ``TypeError`` at the call.
+``public()`` lifts the requirements of every ``proxy.py`` above the file for what the file covers, and a requirement declared below binds again.
+A public rule sets the ``login_required`` attribute of the page view to ``False``, which ``LoginRequiredMiddleware`` reads.
+A view answers a refusal with a redirect to ``LOGIN_URL`` for an anonymous user, :exc:`~django.core.exceptions.PermissionDenied` for a missing permission, a 404 for a row the scope does not see, and a 404 or the import failure for a chain that holds a broken file, see :ref:`topics-permissions-tree`.
+
+``next.pages.access`` reads the rule of each page once per reload of a file in its chain.
+``page_access(file_path)`` returns a ``PageAccess`` with the joined ``rule`` and the first ``broken`` file, and ``owner_access(file_path)`` the rule of the page in the directory of any file of a tree, which an action answers to.
+The joined ``rule`` is an ``AccessRule`` whose ``sources`` name the files of the requirements, or the file that opened a public rule, and whose ``lifted`` names the files a ``public()`` lifted.
+``refusal(file_path, request, url_kwargs, dep_cache, *, middleware=False)`` is the check a page view and a foreign zone morph run, and ``middleware=True`` adds the login ``LoginRequiredMiddleware`` would ask, for a path the middleware never sees.
+``url_lookup(request, url_kwargs, dep_cache)`` returns the lookup that loads the row an ``obj=DObject[Model]`` names, from the same cache a ``DObject`` parameter reads.
+``middleware_login(rule)`` tells whether the middleware asks a login of a rule, true only for a rule without requirements that is not public, and ``admits(file_path, request)`` tells whether a request passes the rule of a page without loading any object, which the breadcrumbs of a host page read.
+
+.. automodule:: next.pages.access
+   :exclude-members: refusal
+
 Cross-area contract
 ~~~~~~~~~~~~~~~~~~~
 
-Fourteen ``Page`` methods carry no leading underscore because other framework areas call them, not because application code should.
+Fourteen ``Page`` methods and the ``contexts`` property carry no leading underscore because other framework areas call them, not because application code should.
 ``composed_template_for``, ``build_render_context``, ``render_with_static_assets``, ``authorization_outcome``, ``has_template``, ``zone_bindings``, ``create_url_pattern``, ``render``, ``clear_template_caches``, ``static_metadata``, ``fold_metadata``, ``metadata_chain``, ``metadata_declaration``, and ``metadata_registrations`` serve ``next.forms``, ``next.partial``, ``next.urls``, ``next.testing``, ``next.seo``, the metadata checks, and the ``showmetadata`` command.
+``contexts`` hands the registry of every ``@context`` to the checks, the run order of a page included.
 ``next.forms`` and ``next.partial`` read the first six, ``next.urls`` builds every page pattern through ``create_url_pattern``, and ``next.testing`` calls ``render`` and ``clear_template_caches`` from its rendering and isolation helpers.
 ``next.partial`` folds the ``meta`` patch verb through ``fold_metadata``, ``next.seo`` and the response policy read ``static_metadata``, and the checks and ``showmetadata`` read the chain through the last three.
 They follow the underscore rule of :doc:`/content/faq/general`, so they are safe from removal without notice.
@@ -53,7 +80,7 @@ Its ``__init__`` holds ``Page`` and the ``page`` singleton, ``templates`` holds 
 
 .. automodule:: next.pages.manager
    :members:
-   :exclude-members: page, context, resolver
+   :exclude-members: page, context, layout, resolver
 
 .. automodule:: next.pages.manager.templates
    :members:
@@ -86,6 +113,13 @@ The manager already consults ``module.template`` directly, so registering this l
 
 .. autoclass:: next.pages.loaders.PythonTemplateLoader
    :members:
+
+``proxy_modules(file_path)`` returns the ``proxy.py`` paths over a page inside its page tree, root first, and the walk stops at the tree root, so a mounted tree inherits nothing from its host.
+``in_page_tree(directory)`` tells whether a directory lies inside a tree some router serves.
+
+.. autofunction:: next.pages.loaders.proxy_modules
+
+.. autofunction:: next.pages.loaders.in_page_tree
 
 ``LayoutTemplateLoader`` composes nested ``layout.djx`` wrappers around the page template, walking every ancestor directory upward from the page, bounded at 64 levels.
 It is no ``TemplateLoader``, because the chain supplies a body and this wraps one, so it is never registered through ``TEMPLATE_LOADERS``.
@@ -122,6 +156,7 @@ Scan
 ``iter_existing_scanned_pages`` yields each existing ``page.py`` once across routers.
 ``iter_existing_scanned_page_pairs`` yields the route of each ``page.py`` beside its path, for a check that reports a page by its URL.
 ``iter_serialized_page_context_keys`` yields the ``page.py`` path and key of every keyed ``serialize=True`` context function.
+``iter_proxy_modules`` yields every ``proxy.py`` of the routed trees, which ``next.E017`` imports beside the pages.
 
 .. automodule:: next.pages.scan
    :members:
@@ -210,18 +245,24 @@ System checks
 
 ``next.pages.checks`` registers the Django system checks for the pages subsystem.
 They run through ``uv run python manage.py check``, except ``check_page_module_imports``, which is a deployment check and runs under ``manage.py check --deploy``.
-The package splits by subject into ``contexts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, and ``zones``, and importing the package registers every one of them.
+The package splits by subject into ``access``, ``contexts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, and ``zones``, and importing the package registers every one of them.
 ``metadata`` is a package of its own, ``scope``, ``titles``, ``shape``, ``head``, ``ld``, ``links``, ``pages``, and ``templates``, and ``responses`` owns the ``cache``, ``headers``, ``CSRF_DELIVERY``, and ``CSRF_USE_SESSIONS`` checks, see :doc:`system-checks` for the codes each one owns.
+``access`` owns the checks of the access declarations, ``next.E165``, ``next.E166``, ``next.W132``, ``next.W133``, and ``next.W135``, while ``next.E164`` for an ``obj=DObject[Model]`` lives with the ``DObject`` checks in ``next.deps.checks``.
 
-The package exports thirty-one check callables.
+The package exports thirty-seven check callables.
 
+- ``check_conditional_get_order``.
 - ``check_context_functions``.
 - ``check_context_processor_signature``.
 - ``check_context_reads_foreign_zone``.
 - ``check_context_registration_files``.
 - ``check_csrf_delivery``.
+- ``check_csrf_endpoint_reversible``.
 - ``check_csrf_in_session``.
+- ``check_declaring_modules``.
+- ``check_guarded_components_on_public_pages``.
 - ``check_layout_templates``.
+- ``check_lifted_requirements``.
 - ``check_metadata_callable_returns_mapping``.
 - ``check_metadata_enum_values``.
 - ``check_metadata_head_literals``.
@@ -235,12 +276,13 @@ The package exports thirty-one check callables.
 - ``check_metadata_social_folds``.
 - ``check_metadata_tag_rendered``.
 - ``check_metadata_title_templates``.
-- ``check_metadata_url_schemes``.
 - ``check_page_functions``.
 - ``check_page_metadata_shape``.
 - ``check_page_module_imports``.
 - ``check_page_response_declarations``.
 - ``check_pages_structure``.
+- ``check_proxies_over_pages``.
+- ``check_public_beside_requirements``.
 - ``check_request_in_context``.
 - ``check_shared_page_responses``.
 - ``check_single_keyless_context``.

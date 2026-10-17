@@ -17,10 +17,12 @@ from django.template.base import NodeList
 from next.checks import NEXT
 from next.components.sources import get_components_manager
 from next.conf import next_framework_settings
+from next.pages.checks.access import tree_pages
 from next.pages.checks.composed import iter_composed_pages
 from next.pages.checks.metadata.templates import TemplateSearch
 from next.pages.paths import page_template_path
 
+from .access import declared, declared_files
 from .backends import ObjectPermissionBackend
 from .manager import listed_backends, permission_manager
 from .markers import signature_problem
@@ -134,7 +136,42 @@ def check_has_perm_names(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
+def _load_declarations() -> None:
+    """Run every page, `proxy.py` and `component.py`, so each declaration is in."""
+    tree_pages()
+    if not isinstance(next_framework_settings.COMPONENT_BACKENDS, list):
+        return
+    for backend in get_components_manager().backends:
+        backend.import_component_modules()
+
+
+@register(NEXT)
+def check_declared_permissions_known(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about a declared permission nothing grants (`next.W131`).
+
+    A proxy, a page and a component bind it the same way, so each file is named.
+    """
+    if "django.contrib.auth" not in settings.INSTALLED_APPS:
+        return []
+    _load_declarations()
+    return [
+        DjangoWarning(
+            f"permission_required({perm!r}) in {file_path} names a permission no "
+            "installed model defines and no add_perm() registers, so every user but "
+            "a superuser is refused. Fix the name, or register the permission with "
+            "next.permissions.add_perm().",
+            obj=str(file_path),
+            id="next.W131",
+        )
+        for file_path in declared_files()
+        for requirement in declared(file_path).requirements
+        for perm in requirement.perms
+        if not permission_manager.known(perm)
+    ]
+
+
 __all__ = [
+    "check_declared_permissions_known",
     "check_has_perm_names",
     "check_permission_backend",
     "check_permission_predicates",

@@ -103,7 +103,7 @@ Open redirect.
 
 Object-level authorization.
    A lookup keyed only on a URL value loads whatever row matches, regardless of who owns it.
-   The ModelForm ``Meta.instance_from_url`` lookup is unscoped, so scope it to the user or tenant.
+   The ModelForm ``Meta.instance_from_url`` lookup reads through ``visible_to(scope)`` once the model manager defines ``visible_to`` and the project registers ``scope``, and it is unscoped otherwise, so give the model that hook or scope the lookup by hand.
    See :doc:`/content/topics/forms/modelforms` for the ownership-scoped pattern and :doc:`di-and-untrusted-input` for the posted origin path that feeds the lookup.
 
 Server-authored redirects
@@ -123,16 +123,18 @@ Validate or whitelist any destination that traces back to a request value before
 Access control
 --------------
 
-Form actions are unauthenticated by default.
-The ``/_next/form/<uid>/`` endpoint accepts a POST from any visitor, so a registered edit or delete action runs without an identity check unless the handler adds one.
+Every form action answers at ``/_next/form/<uid>/``, an endpoint any visitor can POST to.
+An action declared in a page tree answers to the access its page and the ``proxy.py`` files above it declare, and a forged origin lifts none of it, see :doc:`actions`.
+An action nothing guards, declared under no requirement, with no ``Meta`` guard, and without ``LoginRequiredMiddleware``, runs for anonymous visitors, which ``next.W134`` reports.
 
 Enforce access at one of these layers.
 
+- Declare ``proxy.login_required()`` or ``proxy.permission_required()`` in a ``proxy.py`` for a section, or the same calls on ``page`` for one page, which also bind its actions and its zones, see :ref:`topics-permissions-tree`.
 - Declare ``Meta.login_required`` and ``Meta.permission_required`` on the form class, or the same keywords on ``@action``, for a static guard checked before any application code, see :ref:`topics-forms-actions-guards`.
 - Override ``check_permissions`` or ``has_object_permission`` on the form class for a per-request decision against the database, the tenant, or the loaded row, see :ref:`topics-forms-actions-dynamic-guards`.
 - Check ``request.user.is_authenticated`` and ownership inside ``on_valid`` before ``self.save()``.
 - Return a response from the ``render()`` of the page that carries the form, which the dispatcher runs on the submission before any handler, so one check covers the visit and every action posted from that page, see :doc:`/content/topics/pages`.
-- Apply a project-wide login requirement through middleware, see :doc:`/content/howto/require-login-on-pages`.
+- Apply a project-wide login requirement through Django's ``LoginRequiredMiddleware``, see :doc:`/content/howto/require-login-on-pages`.
 - Enforce a policy in a custom form action backend that wraps every dispatch.
 
 An action that mutates data and an action that loads an instance through ``instance_from_url`` both need this guard.
@@ -143,13 +145,14 @@ Rate limiting.
    A custom ``FormActionBackend`` that wraps every dispatch is the documented extension point for rate limiting, see the ``FORM_ACTION_BACKENDS`` example in :doc:`/content/deployment/settings`.
 
 A zone GET carries no endpoint of its own.
-It travels the page's own URL through the same routed view, so the page's guards, its middleware, and its ``render`` function all apply exactly as they do on a full visit, and a page that is closed to a visitor stays closed for every zone inside it.
+It travels the page's own URL through the same routed view, so the page's access rule, its middleware, and its ``render`` function all apply exactly as they do on a full visit, and a page that is closed to a visitor stays closed for every zone inside it.
+A zone inside a ``{% has_perm %}`` block of the page asks that block again and answers 403 to a user it refuses, and a zone in the body of a component that decides what it shows is refused as an unknown zone, see :doc:`/content/topics/permissions`.
 
 An SSE stream is a response the project returns from one of its own pages, not an endpoint the framework mounts.
 The authorization of that page is therefore the only gate on the stream, and a stream that fans out rows a visitor may not read needs the filter in the generator that produces them, see :doc:`/content/topics/partial-rendering/sse`.
 
 Every zone morph enforces page-level access on its own.
-A ``morph(zone=..., page=...)`` onto a foreign page re-runs that page's authorization chain and raises ``ForeignPageNotAuthorizedError`` on a denial or ``DynamicForeignPageError`` for a dynamic body, see :doc:`/content/topics/partial-rendering/reference`.
+A ``morph(zone=..., page=...)`` onto a foreign page checks that page's access rule and re-runs its authorization chain, and raises ``ForeignPageNotAuthorizedError`` on a denial or ``DynamicForeignPageError`` for a dynamic body, see :doc:`/content/topics/partial-rendering/reference`.
 A ``morph(zone=...)`` without ``page=`` renders the posted origin page and authorizes it the same way, raising ``ForeignPageNotAuthorizedError`` when that page refuses the requester.
 
 What a custom backend must preserve
@@ -157,7 +160,7 @@ What a custom backend must preserve
 
 Replacing a backend replaces the code that enforces a guarantee, so each family carries an obligation the bundled implementation meets for you.
 
-- A ``FormActionBackend`` whose ``dispatch`` drives the pipeline by hand rather than delegating to ``FormActionDispatch.dispatch`` runs no ``ActionGuard`` check, so ``Meta.login_required`` and ``Meta.permission_required`` stop applying to every action it serves, and ``check_permissions`` and ``has_object_permission`` stop running with them.
+- A ``FormActionBackend`` whose ``dispatch`` drives the pipeline by hand rather than delegating to ``FormActionDispatch.dispatch`` runs no page tree access rule and no ``ActionGuard`` check, so the ``proxy.py`` and page declarations, ``Meta.login_required``, and ``Meta.permission_required`` stop applying to every action it serves, and ``check_permissions`` and ``has_object_permission`` stop running with them.
 - The same hand-rolled ``dispatch`` also skips the authorization of the resolved origin page, so a guard living in a page's ``render()`` stops covering the submissions that backend serves.
 - A ``FormWizardBackend`` keeps each draft reachable only by the requester that wrote it, which both bundled backends get by keying on the session, so a store keyed on anything a client supplies hands one visitor another's partially entered data.
 - A ``StaticBackend`` that overrides a tag renderer takes on the URL escaping, because the finished tag is spliced past the template engine and the bundled renderers escape ``str(url)`` through :func:`html.escape`, see :doc:`static-assets`.

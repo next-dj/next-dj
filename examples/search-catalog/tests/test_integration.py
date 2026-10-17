@@ -9,6 +9,7 @@ from catalog.landing import FAQ, LEAD_ZONE
 from catalog.models import Category, Lead, Product
 from catalog.zones import CATEGORY_ZONES, LISTING_ZONES, zone_target
 from django.core.cache import cache
+from django.core.checks import run_checks
 
 from next.testing import (
     NextClient,
@@ -931,3 +932,10 @@ class TestLandingSignup:
         response = self._submit(next_client, "not-an-email")
         assert response.status_code == 200
         assert not Lead.objects.exists()
+
+
+class TestOpenActions:
+    """Nobody signs in here, so every page with an action declares itself public."""
+
+    def test_no_action_is_left_without_an_access_rule(self) -> None:
+        assert "next.W134" not in {message.id for message in run_checks()}

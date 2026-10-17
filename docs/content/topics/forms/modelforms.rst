@@ -58,7 +58,7 @@ A string names a URL kwarg that doubles as the model lookup field.
            fields = ["slug", "title", "body"]
            instance_from_url = "slug"
 
-On a page whose route captures ``slug``, the default ``get_initial`` runs ``get_object_or_404(Note, slug=<captured value>)`` and binds the result as the form instance.
+On a page whose route captures ``slug``, the default ``get_initial`` loads the ``Note`` whose ``slug`` is the captured value and binds it as the form instance.
 
 Dict form
 ~~~~~~~~~
@@ -74,7 +74,7 @@ A dict maps a URL kwarg name to a different model lookup field for the case wher
            fields = ["slug", "title", "body"]
            instance_from_url = {"id": "pk"}
 
-Here the route captures ``id`` and the form loads the instance with ``get_object_or_404(Note, pk=<captured value>)``.
+Here the route captures ``id`` and the form loads the ``Note`` whose ``pk`` is the captured value.
 The dict key is the URL kwarg name and the value is the model field used in the lookup.
 
 The value may also traverse a relation with the usual double-underscore lookup, so ``{"author_slug": "author__slug"}`` finds the row through its related model.
@@ -89,19 +89,22 @@ A missing URL kwarg yields an unbound form.
 On a create page with no ``[slug]`` segment, the captured kwarg is absent, ``get_initial`` returns an empty dict, and the form renders fresh.
 
 A not-found object yields a 404.
-When the kwarg is present but no row matches, :func:`~django.shortcuts.get_object_or_404` raises ``Http404`` and the request returns the standard 404 response.
+When the kwarg is present but no row matches, the lookup raises ``Http404`` and the request returns the standard 404 response.
 
 The field named by ``instance_from_url`` should be unique.
-:func:`~django.shortcuts.get_object_or_404` turns only the not-found case into a 404, so a lookup matching several rows surfaces as a server error instead.
+A scoped lookup takes the first matching row, and an unscoped one runs :func:`~django.shortcuts.get_object_or_404`, which turns only the not-found case into a 404, so a lookup matching several rows surfaces as a server error there.
 
-Ownership is not scoped by default
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Scoping the lookup
+~~~~~~~~~~~~~~~~~~
+
+The lookup reads through ``visible_to(scope)`` as ``DObject`` does once both halves exist, a ``visible_to`` on the default manager of the model and a ``scope`` dependency the project registers, see :ref:`topics-di-dobject`.
+A row the scope cannot see then answers 404 exactly like a missing one, and a lookup by the primary key shares the row a ``DObject`` of the same render loaded.
 
 .. warning::
 
-   The default ``get_initial`` runs an unscoped ``get_object_or_404(model, slug=<value>)`` on a value that the URL, or on a POST the hidden ``_next_form_origin`` path, supplies, so any user who reaches the action can load and save a row they do not own by sending another value.
+   Without both halves the default ``get_initial`` runs an unscoped :func:`~django.shortcuts.get_object_or_404` on a value that the URL, or on a POST the hidden ``_next_form_origin`` path, supplies, so any user who reaches the action can load and save a row they do not own by sending another value.
 
-Load the row through ``DObject`` in ``get_form_kwargs`` instead.
+A form can also load the row through ``DObject`` in ``get_form_kwargs``.
 ``DObject`` reads the row through ``visible_to(scope)`` and answers 404 for a row the scope cannot see, see :ref:`topics-di-dobject`.
 It looks the row up by primary key, so the route captures the key under the name of the parameter.
 
@@ -125,7 +128,7 @@ It looks the row up by primary key, so the route captures the key under the name
 
 The form declares no ``instance_from_url``, because the hook supplies the instance on the GET render and on the POST alike.
 A create page captures no ``note`` kwarg, so it keeps a form of its own, see :ref:`separate create and edit forms <topics-forms-modelforms-separate>`.
-A lookup by another field stays in ``get_initial``, see `Custom get_initial escape hatch`_.
+``instance_from_url`` covers a lookup by another field under the same scope.
 See :doc:`/content/security/di-and-untrusted-input` for the untrusted-input rules and :doc:`/content/security/overview` for object-level authorization.
 
 Before and after
@@ -246,8 +249,8 @@ Override it only when the redirect target differs or extra logic must run after 
 
 .. warning::
 
-   The action endpoint requires no authentication by default, so any visitor who can POST to it reaches ``on_valid`` and ``self.save()``.
-   Check ``request.user.is_authenticated`` and the row's ownership in ``on_valid`` before saving, especially when ``instance_from_url`` loads the instance from a user-controlled value.
+   An action answers to the access its page and the ``proxy.py`` files above it declare, and an action nothing guards lets any visitor who can POST to it reach ``on_valid`` and ``self.save()``, which ``next.W134`` reports, see :doc:`/content/security/actions`.
+   Check the row's ownership before saving, especially when ``instance_from_url`` loads the instance unscoped from a user-controlled value.
    The ``has_object_permission`` hook is the first-class place for that check, since it runs after binding with ``self.instance`` set to the loaded row, see :ref:`topics-forms-actions-dynamic-guards` and the :ref:`howto-enforce-object-level-permissions` recipe.
    See :doc:`/content/security/overview` for access control and :doc:`/content/howto/require-login-on-pages` for a project-wide login requirement.
 
@@ -274,7 +277,7 @@ Call ``self.save_m2m()`` after ``note.save()`` when the model has many-to-many f
 Custom get_initial escape hatch
 -------------------------------
 
-Define ``get_initial`` only when the lookup the page needs cannot be expressed by ``instance_from_url`` or ``DObject``, for example a slug lookup that has to stay scoped.
+Define ``get_initial`` only when the lookup the page needs cannot be expressed by ``instance_from_url`` or ``DObject``, for example one that filters on more than the URL kwargs.
 
 .. code-block:: python
 
@@ -293,7 +296,8 @@ Define ``get_initial`` only when the lookup the page needs cannot be expressed b
        def get_initial(cls, slug: str | None = None, scope=Depends("scope")):
            if slug is None:
                return {}
-           return get_object_or_404(Note.objects.visible_to(scope), slug=slug)
+           notes = Note.objects.visible_to(scope).filter(archived=False)
+           return get_object_or_404(notes, slug=slug)
 
 The ``scope`` dependency answers the same value ``DObject`` passes to ``visible_to``, so the lookup sees only the rows the scope may see.
 Declare ``get_initial`` as a ``classmethod`` with a DI-friendly signature.

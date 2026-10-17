@@ -8,15 +8,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
 from urllib.parse import urljoin, urlsplit
 
+from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
 from django.utils.functional import Promise
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.safestring import SafeData
 
+from next.deps import render_dep_cache
 from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog, type_name
 from next.forms.origin import resolve_origin, resolve_url_to_page
-from next.forms.uid import redirect_or_fallback, validated_origin_path
+from next.forms.uid import validated_origin_path
 from next.pages import page as page_manager
+from next.pages.access import refusal
 from next.pages.metadata import resolve_metadata
 from next.pages.metadata.fold import fold_metadata
 from next.pages.metadata.normalize import normalize_metadata
@@ -27,6 +30,7 @@ from next.static.assets import default_kinds
 from next.static.manager import default_manager
 from next.static.runtime import RESERVED_PAYLOAD_KEYS
 from next.static.serializers import resolve_serializer
+from next.utils import redirect_or_fallback
 
 from . import keys
 from .envelope import Asset, Envelope, FormMeta, Patch
@@ -74,6 +78,7 @@ _META_PASSES: tuple[type[BaseException], ...] = (
 )
 
 _SEE_OTHER = 303
+_FORBIDDEN = 403
 _NO_STORE = "private, no-store"
 _META_SOURCE = "Patches.meta"
 
@@ -138,6 +143,27 @@ def _local_url(base: str | None, href: str) -> str:
 def _is_reserved_event(name: str) -> bool:
     """Return True when the name belongs to the framework client-bus channel."""
     return name in _RESERVED_EVENT_NAMES or name.startswith(_RESERVED_EVENT_PREFIXES)
+
+
+def _refuse_access(
+    page_path: "Path", request: HttpRequest, url_kwargs: "Mapping[str, Any]"
+) -> None:
+    """Raise when the access rule of `page_path` refuses `request`, as its view would.
+
+    It asks the middleware login too, which the foreign page view never met.
+    """
+    try:
+        redirect = refusal(
+            page_path,
+            request,
+            dict(url_kwargs),
+            render_dep_cache(request),
+            middleware=True,
+        )
+    except PermissionDenied:
+        raise ForeignPageNotAuthorizedError(page_path, _FORBIDDEN) from None
+    if redirect is not None:
+        raise ForeignPageNotAuthorizedError(page_path, redirect.status_code)
 
 
 class Patches:
@@ -294,6 +320,7 @@ class Patches:
         foreign_path = self._foreign_page_path(page)
         kwargs = dict(url_kwargs or {})
         visit_url = page if isinstance(page, str) else None
+        _refuse_access(foreign_path, request, kwargs)
         denial, dynamic = self._foreign_authorization(
             foreign_path, request, kwargs, visit_url
         )
@@ -729,6 +756,7 @@ class Patches:
         if self._origin_authorized:
             return
         page_path = self._resolve_page_path()
+        _refuse_access(page_path, self._require_request(), self._origin_url_kwargs())
         match = self._origin_match()
         denial, _dynamic = page_manager.authorization_outcome(
             page_path,

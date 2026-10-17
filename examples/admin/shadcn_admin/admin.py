@@ -59,6 +59,12 @@ class RowPermissionAdmin(admin.ModelAdmin):
         RowPermissionForm.__name__ = base.__name__
         return RowPermissionForm
 
+    def get_object_links(
+        self, request: HttpRequest, obj: Model
+    ) -> list[tuple[str, str]]:
+        """Return the `(label, url)` pages about `obj` its change view links to."""
+        return []
+
     def refusal(self, obj: Model) -> str:
         """Return the form error for a save the user may not make."""
         return f"You may not save this {obj._meta.verbose_name} in this state."

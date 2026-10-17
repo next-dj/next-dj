@@ -35,7 +35,6 @@ from next.forms.dispatch.permissions import (
     _check_access,
     _emit_form_access_denied,
     _normalize_permission,
-    _redirect_to_login,
 )
 from next.forms.manager import form_action_manager
 from next.forms.signals import action_dispatched, form_access_denied
@@ -225,26 +224,6 @@ class TestGuardRegistration:
         meta = form_action_manager.default_backend.get_meta(action_name)
         assert meta is not None
         assert meta.get("guard") == expected
-
-
-class TestRedirectToLogin:
-    """_redirect_to_login mirrors django.contrib.auth.views.redirect_to_login."""
-
-    def test_appends_next_to_login_url(self) -> None:
-        resp = _redirect_to_login("/boards/1/")
-        assert resp.status_code == 302
-        assert resp.url == "/accounts/login/?next=/boards/1/"
-
-    def test_preserves_existing_login_url_query(self, settings) -> None:
-        settings.LOGIN_URL = "/login/?theme=dark"
-        resp = _redirect_to_login("/x/")
-        assert "theme=dark" in resp.url
-        assert "next=/x/" in resp.url
-
-    @pytest.mark.usefixtures("cap_redirects")
-    def test_next_past_the_redirect_cap_is_dropped(self) -> None:
-        resp = _redirect_to_login("/search/?q=" + "\u044f" * 3000)
-        assert resp.url == "/accounts/login/"
 
 
 class TestCheckAccess:

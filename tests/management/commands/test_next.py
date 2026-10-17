@@ -26,8 +26,8 @@ class TestNextCommand:
             call_command("next", "routes", stdout=out, stderr=err)
 
         assert out.getvalue().splitlines() == [
-            "URL      Name             App   File                      Source",
-            "/about/  next:page_about  blog  blog/pages/about/page.py  root",
+            "URL      Name             App   File                      Source  Access",
+            "/about/  next:page_about  blog  blog/pages/about/page.py  root    -",
         ]
         assert err.getvalue() == ""
 

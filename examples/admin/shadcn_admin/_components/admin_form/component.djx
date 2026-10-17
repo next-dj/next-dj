@@ -6,6 +6,9 @@
         {% form "admin:discard" class="discard-in-layer" %}
           {% component "button" type="submit" text="Discard" variant="ghost" %}
         {% endform %}
+        {% for label, url in form_state.object_links %}
+          {% component "button" href=url text=label variant="outline" %}
+        {% endfor %}
         {% if form_state.row_rules %}
           {% has_perm form_state.delete_perm form_state.instance %}{% component "button" href=form_state.delete_url text="Delete" variant="outline" %}{% endhas_perm %}
         {% else %}

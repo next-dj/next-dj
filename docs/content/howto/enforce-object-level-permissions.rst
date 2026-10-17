@@ -91,9 +91,9 @@ The dispatcher binds the form against the loaded row and then asks ``user.has_pe
 
 .. warning::
 
-   ``Meta.instance_from_url`` loads the row through an unscoped :func:`~django.shortcuts.get_object_or_404` on the model, and the registered permission is checked only after that row has loaded.
-   A refused user then gets 403 for an id that exists and 404 for one that does not, which lets them probe which ids exist.
-   Load the row through ``DObject`` as above, so a row outside the scope answers 404 exactly like a missing one, see :doc:`/content/topics/forms/modelforms`.
+   ``Meta.instance_from_url`` reads through ``visible_to(scope)`` too in this project, which defines ``visible_to`` and registers ``scope``, while a model without ``visible_to`` loads through an unscoped :func:`~django.shortcuts.get_object_or_404`.
+   The registered permission is checked only after that row has loaded, so an unscoped lookup gives a refused user 403 for an id that exists and 404 for one that does not, which lets them probe which ids exist.
+   Keep the lookup scoped through ``DObject`` or a ``visible_to`` manager, so a row outside the scope answers 404 exactly like a missing one, see :doc:`/content/topics/forms/modelforms`.
 
 Render the link and the form
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -108,7 +108,7 @@ The note page, whose context carries ``note``, shows the edit link only to a use
    {% endhas_perm %}
 
 The edit page renders the form by name.
-A ``GET`` still renders it, because the guard protects the mutation, not the markup.
+A ``GET`` still renders it, because the ``Meta`` guard protects the mutation, not the markup.
 
 .. code-block:: jinja
    :caption: notes/pages/notes/[int:note]/edit/template.djx
@@ -118,6 +118,28 @@ A ``GET`` still renders it, because the guard protects the mutation, not the mar
      {{ form.body }}
      <button type="submit">Save</button>
    {% endform %}
+
+Close the edit page itself
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The page can declare the same permission on the row it loads, so the ``GET`` of the edit page and every action declared beside it answer to it as well.
+
+.. code-block:: python
+   :caption: notes/pages/notes/[int:note]/edit/page.py
+
+   from notes.models import Note
+
+   from next import context, page
+   from next.deps import DObject
+
+   page.permission_required("notes.edit_note", obj=DObject[Note])
+
+   @context("note")
+   def note(note: DObject[Note]) -> Note:
+       return note
+
+The check loads the row by the URL kwarg ``note`` through ``visible_to(scope)`` before any context runs, answers 404 for a row outside the scope and 403 for a refused user, and the ``note`` context reads the same row from the cache, see :ref:`topics-permissions-tree`.
+The ``Meta`` guard on the form still checks the bound row after the page rule, so the visit and the submission agree on who may edit.
 
 Check against the request
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -211,6 +233,6 @@ See also
 
    :ref:`topics-permissions` for predicates, the backend, the tag, and django-rules side by side.
    :ref:`topics-forms-actions-dynamic-guards` for the full hook contract and the view-level companion.
-   :doc:`/content/topics/forms/modelforms` for ``DObject`` in ``get_form_kwargs`` and the unscoped ``instance_from_url``.
+   :doc:`/content/topics/forms/modelforms` for ``DObject`` in ``get_form_kwargs`` and the scope of ``instance_from_url``.
    :doc:`/content/security/di-and-untrusted-input` for the untrusted-input rules behind the loaded row.
    :doc:`/content/howto/require-login-on-pages` for the project-wide login requirement.

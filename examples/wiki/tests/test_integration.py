@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from django.conf import settings
+from django.core.checks import run_checks
 from django.core.exceptions import ValidationError
 from django.db import connection
 from django.http import Http404
@@ -703,3 +704,10 @@ class TestRobots:
             "",
             "Sitemap: https://wiki.example/sitemap.xml",
         ]
+
+
+class TestOpenActions:
+    """Nobody signs in here, so every page with an action declares itself public."""
+
+    def test_no_action_is_left_without_an_access_rule(self) -> None:
+        assert "next.W134" not in {message.id for message in run_checks()}

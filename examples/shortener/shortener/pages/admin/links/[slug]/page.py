@@ -8,6 +8,9 @@ from next.pages import MetadataDict
 from next.partial import Patches
 
 
+page.public()
+
+
 @page.metadata
 def link_meta(link: DLink[Link]) -> MetadataDict:
     """Title the detail tab after the slug the provider resolved."""

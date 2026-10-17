@@ -16,7 +16,7 @@ from .errors import (
     PageMetadataTemplateError,
     PageModuleImportError,
 )
-from .manager import Page, context, page
+from .manager import Page, context, page, proxy
 from .metadata import (
     RESET,
     HtmlMetadataRenderer,
@@ -52,5 +52,6 @@ __all__ = [
     "context",
     "ld",
     "page",
+    "proxy",
     "signals",
 ]

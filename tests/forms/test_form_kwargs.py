@@ -667,6 +667,21 @@ class TestCallerCacheOnTheRequest:
         assert form.initial == {"name": "acme"}
         assert not hasattr(request, REQUEST_DEP_CACHE_ATTR)
 
+    def test_a_render_hands_back_the_cache_the_request_carried(
+        self, mock_http_request
+    ) -> None:
+        def tenant() -> str:
+            return "acme"
+
+        carried: dict[str, object] = {}
+        request = mock_http_request(method="GET")
+        setattr(request, REQUEST_DEP_CACHE_ATTR, carried)
+        build = _form_action_context_callable(_shared_tenant_form())
+        with bound_dependency("tenant", tenant):
+            form = build(request, {}).form
+        assert form.prefix == "acme"
+        assert getattr(request, REQUEST_DEP_CACHE_ATTR) is carried
+
     def test_a_post_resolves_the_shared_dependency_once(
         self, mock_http_request
     ) -> None:

@@ -31,7 +31,7 @@ Convention with explicit names
 ------------------------------
 
 The rejected alternative is naming by inference, where a class name or a module name decides what a file becomes.
-The framework defines a small set of file conventions instead (``page.py``, ``layout.djx``, ``template.djx``, ``component.djx``), and settings such as ``PAGES_DIR`` and ``COMPONENTS_DIR`` override where those conventions apply.
+The framework defines a small set of file conventions instead (``page.py``, ``proxy.py``, ``layout.djx``, ``template.djx``, ``component.djx``), and settings such as ``PAGES_DIR`` and ``COMPONENTS_DIR`` override where those conventions apply.
 The cost is verbosity, because a page directory carries two files where a single decorated function would do.
 The gain is that the meaning of a file is readable from its name without running the project.
 
@@ -96,7 +96,7 @@ The class is the unit of registration, file scope decides its reach, and ``__ini
 Every action posts to one endpoint, ``/_next/form/<uid>/``, where the ``uid`` is a stable short id derived from the action's scope and name, so moving a form between pages never changes the URL configuration.
 
 The cost is that registration happens on import and reaches further than a single view would.
-An action is live as soon as its module is imported, and the endpoint accepts a POST from any visitor until the form declares a guard.
+An action is live as soon as its module is imported, and the endpoint accepts a POST from any visitor until the form, its page, or a ``proxy.py`` above it declares a guard.
 :doc:`/content/security/overview` states where the identity check belongs and which guard keys enforce it.
 
 Small public surfaces

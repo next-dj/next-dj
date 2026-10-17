@@ -11,6 +11,7 @@ from next.caches import PageCache
 from next.conf import fail_loudly, next_framework_settings
 from next.deps.cache import render_dep_cache
 from next.diagnostics import watch_degraded
+from next.pages.access import page_access, refusal
 from next.pages.loaders import (
     build_registered_loaders,
     has_load_errors,
@@ -46,9 +47,13 @@ _SUCCESS: Final = range(200, 300)
 
 
 class _RoutedPageView(Protocol):
-    """A page view carrying the `page.py` path form dispatch maps an origin URL to."""
+    """A page view carrying the `page.py` path form dispatch maps an origin URL to.
+
+    `login_required` is the attribute `LoginRequiredMiddleware` reads off a view.
+    """
 
     next_page_path: Path
+    login_required: bool
 
     def __call__(self, request: HttpRequest, **kwargs) -> HttpResponseBase: ...
 
@@ -62,7 +67,7 @@ def unified_view(
 ) -> Callable[..., HttpResponseBase]:
     """Return the static or the resolving view of a page, as its body source requires.
 
-    The view carries `next_page_path`, so form dispatch maps an origin URL back to it.
+    Dispatch maps an origin back by `next_page_path`, and its rule loads the proxies.
     """
     has_render = module is not None and callable(getattr(module, "render", None))
     view = (
@@ -70,7 +75,9 @@ def unified_view(
         if has_render or broken_at_build
         else _static_view(page, file_path)
     )
-    cast("_RoutedPageView", view).next_page_path = file_path
+    routed = cast("_RoutedPageView", view)
+    routed.next_page_path = file_path
+    routed.login_required = not page_access(file_path).rule.public
     return view
 
 
@@ -104,6 +111,10 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
     def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
         watch_degraded()
         _raise_load_error(file_path)
+        dep_cache = render_dep_cache(request)
+        denial = refusal(file_path, request, kwargs, dep_cache)
+        if denial is not None:
+            return denial
         shaper = partial_shaper_slot.get()
         intent = shaper.intent(request)
         if intent.zones:
@@ -111,7 +122,6 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
                 file_path, request, intent, dynamic_body=False, url_kwargs=dict(kwargs)
             )
             return finish_zone_response(zone, zone_policy(page, file_path), request)
-        dep_cache = render_dep_cache(request)
         policy = response_policy(
             page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
         )
@@ -147,6 +157,9 @@ def _resolving_view(
             _raise_load_error(file_path)
             active_module = module
         dep_cache = render_dep_cache(request)
+        denial = refusal(file_path, request, kwargs, dep_cache)
+        if denial is not None:
+            return denial
         shaper = partial_shaper_slot.get()
         intent = shaper.intent(request)
         resolution = page._resolve_page_body(

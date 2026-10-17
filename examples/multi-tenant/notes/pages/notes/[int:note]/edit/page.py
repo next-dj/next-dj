@@ -10,6 +10,9 @@ from next.pages import MetadataDict
 from next.urls import page_reverse
 
 
+page.public()
+
+
 class NoteEditForm(ModelForm):
     class Meta:
         model = Note
@@ -43,7 +46,7 @@ class NoteEditForm(ModelForm):
 
 @context("note")
 def note(note: DObject[Note]) -> Note:
-    """Expose the note the URL names to the template, scoped to the active tenant."""
+    """Return the note the URL names, scoped to the active tenant, for the template."""
     return note
 
 

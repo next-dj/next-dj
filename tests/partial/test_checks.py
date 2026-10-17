@@ -212,9 +212,27 @@ class TestZoneInIfCheck:
         with _composed_pages((page_file, body)):
             assert checks.check_zone_not_in_if() == []
 
+    @pytest.mark.usefixtures("guard_tags")
+    def test_a_tag_the_check_cannot_read(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "staffonly")
+        body = (
+            '{% load guard_tags %}{% staffonly %}{% zone "outer" %}'
+            '{% zone "inner" %}x{% endzone %}{% endzone %}{% endstaffonly %}'
+        )
+        with _composed_pages((page_file, body)):
+            messages = checks.check_zone_not_in_if()
+        assert [m.id for m in messages] == [checks.E_ZONE_IN_IF] * 2
+        assert all("inside a {% staffonly %} block" in m.msg for m in messages)
+
+    def test_a_django_block_tag_is_silent(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "spaceless")
+        body = '{% spaceless %}{% zone "guard" %}x{% endzone %}{% endspaceless %}'
+        with _composed_pages((page_file, body)):
+            assert checks.check_zone_not_in_if() == []
+
 
 class TestZoneInHasPermCheck:
-    """`next.E163` fires when a zone sits inside a `{% has_perm %}`, either branch."""
+    """`next.E163` stays silent for a `{% has_perm %}` the zone render asks again."""
 
     @pytest.mark.parametrize(
         "body",
@@ -236,9 +254,7 @@ class TestZoneInHasPermCheck:
     def test_zone_in_has_perm(self, tmp_path: Path, body: str) -> None:
         page_file = _page_dir(tmp_path, "perm")
         with _composed_pages((page_file, body)):
-            messages = checks.check_zone_not_in_has_perm()
-        assert [m.id for m in messages] == [checks.E_ZONE_IN_HAS_PERM]
-        assert "{% has_perm %}" in messages[0].msg
+            assert checks.check_zone_not_in_has_perm() == []
 
     def test_zone_outside_has_perm_is_silent(self, tmp_path: Path) -> None:
         page_file = _page_dir(tmp_path, "no_perm")
@@ -258,9 +274,7 @@ class TestZoneInHasPermCheck:
             "{% endhas_perm %}{% endzone %}"
         )
         with _composed_pages((page_file, body)):
-            messages = checks.check_zone_not_in_has_perm()
-        assert [m.id for m in messages] == [checks.E_ZONE_IN_HAS_PERM]
-        assert messages[0].msg.startswith('Zone "inner"')
+            assert checks.check_zone_not_in_has_perm() == []
 
     def test_the_code_is_e163(self) -> None:
         assert checks.E_ZONE_IN_HAS_PERM == "next.E163"
@@ -308,8 +322,9 @@ class TestZoneInGuardedComponentPart:
         assert [m.id for m in messages] == [checks.E_ZONE_IN_HAS_PERM]
         assert messages[0].msg.startswith(
             f'Zone "cz" in {page_file} sits in the body of the component "guarded", '
-            "whose template reaches a {% has_perm %} block or a reference the check "
-            "cannot follow."
+            "which has a component.py, or whose template reaches a {% has_perm %} "
+            "block, a condition around its body or a reference the check cannot "
+            "follow."
         )
         assert messages[0].obj == str(page_file)
 
@@ -326,24 +341,25 @@ class TestZoneInGuardedComponentPart:
     ) -> None:
         assert self._messages(pages, GUARDED_CHILDREN, body) == []
 
-    def test_a_python_only_component_guards_nothing(self, pages: Path) -> None:
+    def test_a_component_with_a_module_guards(self, pages: Path) -> None:
         folder = pages / "_components" / "guarded"
         folder.mkdir(parents=True)
         (folder / "component.py").write_text("x = 1\n")
-        assert self._messages(pages, None, CHILDREN_BODY) == []
+        messages = self._messages(pages, None, CHILDREN_BODY)
+        assert [m.id for m in messages] == [checks.E_ZONE_IN_HAS_PERM]
 
     def test_a_repeated_zone_is_named_once(self, pages: Path) -> None:
         body = fill_slot("content") + fill_slot("content")
         messages = self._messages(pages, GUARDED_SET_SLOT, body)
         assert [m.id for m in messages] == [checks.E_ZONE_IN_HAS_PERM]
 
-    def test_the_page_block_wins_over_the_component(self, pages: Path) -> None:
+    def test_a_page_block_beside_the_component_is_silent(self, pages: Path) -> None:
         body = f'{{% has_perm "{PERM}" %}}{SECRET_ZONE}{{% endhas_perm %}}' + (
             CHILDREN_BODY
         )
         messages = self._messages(pages, GUARDED_CHILDREN, body)
         assert [m.id for m in messages] == [checks.E_ZONE_IN_HAS_PERM]
-        assert "is nested inside a {% has_perm %} block" in messages[0].msg
+        assert 'the component "guarded"' in messages[0].msg
 
 
 class TestLazyPlaceholderCheck:

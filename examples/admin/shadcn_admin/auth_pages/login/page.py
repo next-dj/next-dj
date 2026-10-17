@@ -6,7 +6,10 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from shadcn_admin import utils
 
-from next import action, context
+from next import action, context, page
+
+
+page.public()
 
 
 def admin_login_form_factory(
@@ -31,7 +34,7 @@ def admin_login(request: HttpRequest, form: AuthenticationForm) -> HttpResponse:
     user = form.get_user()
     if user is None:  # pragma: no cover
         messages.error(request, "Invalid username or password.")
-        return HttpResponseRedirect(utils.login_url())
+        return HttpResponseRedirect(utils.LOGIN_URL)
     login(request, user)
     messages.success(request, f"Welcome, {user.get_username()}.")
     return HttpResponseRedirect(request.POST.get("next") or utils.dashboard_url())

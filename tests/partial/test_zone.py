@@ -11,7 +11,6 @@ from next.partial.zone import (
     ZoneNode,
     ZoneOptions,
     ZonePartial,
-    child_nodelists,
     nodes_under,
     render_zone_standalone,
     zones_under,
@@ -337,8 +336,3 @@ class TestNodeWalks:
     def test_zones_under_nothing_without_the_ancestor(self) -> None:
         template = Template('{% zone "a" %}{% zone "b" %}{% endzone %}{% endzone %}')
         assert list(zones_under(template.nodelist, HasPermNode)) == []
-
-    def test_child_nodelists_skips_a_missing_list(self) -> None:
-        (node,) = Template('{% has_perm "a.b" %}x{% endhas_perm %}').nodelist
-        node.nodelist_false = None
-        assert list(child_nodelists(node)) == [node.nodelist_true]

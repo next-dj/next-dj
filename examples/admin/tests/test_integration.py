@@ -9,7 +9,9 @@ from django.contrib import admin
 from django.contrib.auth.models import Group, Permission
 from django.core.checks import run_checks
 from django.core.management import call_command
+from django.db import connection
 from django.db.models import UniqueConstraint
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from library.demo import DEMO_BOOKS, seed_demo
 from library.models import Book, Chapter, Tag
@@ -221,6 +223,16 @@ class TestActionGuards:
         assert r.status_code == 403
         assert Tag.objects.filter(pk=tag.pk).exists()
 
+    def test_staff_without_model_rights_cannot_run_a_bulk_action(
+        self, editor_client, editor
+    ):
+        r = editor_client.post_action(
+            "admin:bulk_action",
+            {"action": "unknown", "_selected_action": [str(editor.pk)]},
+            origin="/admin/auth/user/",
+        )
+        assert r.status_code == 403
+
     def test_non_staff_bulk_action_post_is_forbidden(
         self, next_client, django_user_model, make_book
     ):
@@ -234,6 +246,341 @@ class TestActionGuards:
         assert r.status_code == 403
         book.refresh_from_db()
         assert book.status == Book.DRAFT
+
+
+PROTECTED_PATHS = (
+    "/admin/",
+    "/admin/library/book/",
+    "/admin/library/book/add/",
+    "/admin/activity/",
+    "/admin/library/book/{pk}/history/",
+    "/admin/library/book/{pk}/outline/",
+)
+
+RECENT_ACTIVITY = "recent-activity"
+
+PERMISSION_CHECKS = frozenset(
+    [f"next.E{number}" for number in range(161, 168)]
+    + [f"next.W{number}" for number in range(129, 136)]
+)
+
+ACTIVITY_ACCESS = (
+    "login, perm shadcn_admin.use_admin, perm admin_audit.view_adminactivitylog"
+)
+
+BOOK_ACCESS = (
+    "login, perm shadcn_admin.use_admin, perm library.change_book on library.Book"
+)
+
+
+def permission_rows(*args: str) -> dict[str, tuple[str, str, str]]:
+    """Return the rows `manage.py next permissions` prints, keyed by endpoint."""
+    out = StringIO()
+    call_command("next", "permissions", *args, stdout=out)
+    _header, *lines = out.getvalue().splitlines()
+    rows = (re.split(r"\s{2,}", line.strip()) for line in lines)
+    return {name: (kind, access, sources) for kind, name, access, sources in rows}
+
+
+def log_entry(object_repr: str) -> AdminActivityLog:
+    return AdminActivityLog.objects.create(
+        action="change",
+        app_label="library",
+        model_name="book",
+        object_repr=object_repr,
+        response_status=302,
+    )
+
+
+class TestTreeAccess:
+    """`proxy.py` closes each admin tree and the auth tree stays public."""
+
+    @pytest.mark.parametrize("path", PROTECTED_PATHS)
+    def test_an_anonymous_visit_redirects_to_the_login(self, next_client, book, path):
+        url = path.format(pk=book.pk)
+        r = next_client.get(url)
+        assert r.status_code == 302
+        assert r["Location"] == f"/admin/login/?next={url}"
+
+    @pytest.mark.parametrize("path", PROTECTED_PATHS)
+    def test_a_signed_in_non_staff_user_is_forbidden(
+        self, next_client, django_user_model, book, path
+    ):
+        next_client.force_login(django_user_model.objects.create_user("reader"))
+        assert next_client.get(path.format(pk=book.pk)).status_code == 403
+
+    @pytest.mark.parametrize("path", ["/admin/login/", "/admin/logout/"])
+    def test_the_auth_pages_answer_an_anonymous_visit(self, next_client, path):
+        assert next_client.get(path).status_code == 200
+
+    def test_an_anonymous_zone_request_redirects_to_the_login(self, next_client):
+        r = next_client.get_zones("/admin/", RECENT_ACTIVITY)
+        assert r.status_code == 302
+        assert r["Location"] == "/admin/login/?next=/admin/"
+
+    def test_an_anonymous_sign_out_post_redirects_to_the_login(self, next_client):
+        r = next_client.post_action("admin:logout", origin="/admin/")
+        assert r.status_code == 302
+        assert r["Location"] == "/admin/login/?next=/admin/"
+
+    def test_the_permission_table_names_each_rule_and_its_file(self):
+        rows = permission_rows()
+        assert rows["/admin/"] == (
+            "page",
+            "login, perm shadcn_admin.use_admin",
+            "shadcn_admin/pages/proxy.py",
+        )
+        assert rows["/admin/activity/"] == (
+            "page",
+            ACTIVITY_ACCESS,
+            "admin_audit/pages/proxy.py, admin_audit/pages/page.py",
+        )
+        assert rows["/admin/login/"] == (
+            "page",
+            "public",
+            "public (shadcn_admin/auth_pages/login/page.py)",
+        )
+        assert rows["admin:login"][1] == "public"
+        assert rows["admin:logout"][1] == "login (middleware)"
+
+    def test_the_permission_table_narrows_to_one_url(self):
+        rows = permission_rows("/admin/library/book/1/history/")
+        assert rows["/admin/<str:app_label>/<str:model_name>/<int:pk>/history/"] == (
+            "page",
+            "login, perm shadcn_admin.use_admin",
+            "admin_audit/object_pages/proxy.py",
+        )
+
+    def test_the_permission_table_names_the_book_rule_and_its_file(self):
+        rows = permission_rows("/admin/library/book/1/outline/")
+        assert rows["/admin/library/book/<int:book>/outline/"] == (
+            "page",
+            BOOK_ACCESS,
+            "library/book_pages/proxy.py",
+        )
+        assert rows["add_chapter_form"] == (
+            "action",
+            BOOK_ACCESS,
+            "library/book_pages/proxy.py",
+        )
+
+
+class TestRecentActivityZone:
+    """The dashboard zone lives inside `{% has_perm %}` and its render asks again."""
+
+    def test_the_superuser_sees_the_newest_entries(self, admin_client):
+        log_entry("Frankenstein")
+        body = admin_client.get("/admin/").content.decode()
+        assert f'data-next-zone="{RECENT_ACTIVITY}"' in body
+        assert "Frankenstein" in body
+        assert "may read the audit log" not in body
+
+    def test_the_zone_shows_an_empty_feed(self, admin_client):
+        r = admin_client.get_zones("/admin/", RECENT_ACTIVITY)
+        assert "No activity yet." in envelope_of(r).html_for_zone(RECENT_ACTIVITY)
+
+    def test_a_zone_render_carries_an_entry_logged_after_the_page(self, admin_client):
+        admin_client.get("/admin/")
+        log_entry("Dracula")
+        r = admin_client.get_zones("/admin/", RECENT_ACTIVITY)
+        assert r.status_code == 200
+        assert "Dracula" in envelope_of(r).html_for_zone(RECENT_ACTIVITY)
+
+    def test_the_editor_reads_the_else_branch(self, editor_client):
+        log_entry("Frankenstein")
+        body = editor_client.get("/admin/").content.decode()
+        assert f'data-next-zone="{RECENT_ACTIVITY}"' not in body
+        assert "Frankenstein" not in body
+        assert "may read the audit log" in body
+
+    def test_a_zone_request_from_the_editor_is_forbidden(self, editor_client):
+        log_entry("Frankenstein")
+        r = editor_client.get_zones("/admin/", RECENT_ACTIVITY)
+        assert r.status_code == 403
+        assert b"Frankenstein" not in r.content
+
+    def test_the_feed_keeps_the_five_newest(self, admin_client):
+        for number in range(7):
+            log_entry(f"Entry {number}")
+        html = envelope_of(
+            admin_client.get_zones("/admin/", RECENT_ACTIVITY)
+        ).html_for_zone(RECENT_ACTIVITY)
+        assert html.count("<li") == 5
+
+
+OUTLINE = "outline"
+
+
+def outline_url(book: Book) -> str:
+    return f"/admin/library/book/{book.pk}/outline/"
+
+
+def append(client: NextClient, book: Book, title: str, **kwargs):
+    return client.post_action(
+        "add_chapter_form",
+        {"title": title, "word_count": "300"},
+        origin=outline_url(book),
+        **kwargs,
+    )
+
+
+class TestBookOutline:
+    """`library/book_pages/proxy.py` asks `change_book` on the book the URL names."""
+
+    def test_the_editor_reads_the_outline_of_a_draft(
+        self, editor_client, make_book, make_chapter
+    ):
+        draft = make_book("Mathilda", status=Book.DRAFT)
+        make_chapter(draft, 1, "Intro", 100)
+        make_chapter(draft, 2, "Rising", 250)
+        r = editor_client.get(outline_url(draft))
+        assert r.status_code == 200
+        body = r.content.decode()
+        assert f'data-next-zone="{OUTLINE}"' in body
+        assert body.index("Intro") < body.index("Rising")
+        assert "data-outline-words>350<" in body
+
+    def test_an_empty_draft_says_so(self, editor_client, make_book):
+        body = editor_client.get(outline_url(make_book(status=Book.DRAFT))).content
+        assert "No chapters yet." in body.decode()
+
+    def test_the_editor_is_refused_a_published_book(self, editor_client, make_book):
+        published = make_book("Dracula", status=Book.PUBLISHED)
+        r = editor_client.get(outline_url(published))
+        assert r.status_code == 403
+        assert b"Dracula" not in r.content
+
+    def test_a_zone_request_from_the_editor_on_a_published_book_is_forbidden(
+        self, editor_client, make_book, make_chapter
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        make_chapter(published, title="Secret")
+        r = editor_client.get_zones(outline_url(published), OUTLINE)
+        assert r.status_code == 403
+        assert b"Secret" not in r.content
+
+    def test_the_editor_renders_the_zone_of_a_draft(
+        self, editor_client, make_book, make_chapter
+    ):
+        draft = make_book(status=Book.DRAFT)
+        make_chapter(draft, title="Opening")
+        r = editor_client.get_zones(outline_url(draft), OUTLINE)
+        assert r.status_code == 200
+        assert "Opening" in envelope_of(r).html_for_zone(OUTLINE)
+
+    def test_the_editor_may_not_append_to_a_published_book(
+        self, editor_client, make_book
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        assert append(editor_client, published, "Coda").status_code == 403
+        assert not published.chapters.exists()
+
+    def test_the_editor_appends_a_chapter_to_a_draft(
+        self, editor_client, make_book, make_chapter
+    ):
+        draft = make_book(status=Book.DRAFT)
+        make_chapter(draft, 1, "Intro", 100)
+        r = append(editor_client, draft, "Coda")
+        assert r.status_code == 303
+        assert r["Location"] == outline_url(draft)
+        added = draft.chapters.get(title="Coda")
+        assert (added.number, added.word_count) == (2, 300)
+
+    def test_a_partial_append_morphs_the_outline(self, editor_client, make_book):
+        draft = make_book(status=Book.DRAFT)
+        r = append(editor_client, draft, "Prologue", partial=True)
+        assert r.status_code == 200
+        assert envelope_of(r).zone_targets() == [OUTLINE]
+        assert "Prologue" in envelope_of(r).html_for_zone(OUTLINE)
+        assert draft.chapters.get().number == 1
+
+    def test_a_blank_title_rerenders_with_its_error(self, editor_client, make_book):
+        draft = make_book(status=Book.DRAFT)
+        r = append(editor_client, draft, "")
+        assert r.status_code == 200
+        assert "This field is required." in r.content.decode()
+        assert not draft.chapters.exists()
+
+    def test_a_partial_blank_title_reports_the_invalid_form(
+        self, editor_client, make_book
+    ):
+        draft = make_book(status=Book.DRAFT)
+        r = append(editor_client, draft, "", partial=True)
+        assert r["X-Next-Form"] == "invalid"
+        assert envelope_of(r).form_meta()["errors"]["title"] == [
+            "This field is required."
+        ]
+        assert not draft.chapters.exists()
+
+    def test_the_superuser_works_a_published_book(self, admin_client, make_book):
+        published = make_book("Dracula", status=Book.PUBLISHED)
+        url = outline_url(published)
+        assert admin_client.get(url).status_code == 200
+        assert admin_client.get_zones(url, OUTLINE).status_code == 200
+        assert append(admin_client, published, "Epilogue").status_code == 303
+        assert published.chapters.get().title == "Epilogue"
+
+    def test_an_anonymous_append_redirects_to_the_login(self, next_client, book):
+        r = append(next_client, book, "Coda")
+        assert r.status_code == 302
+        assert r["Location"].startswith("/admin/login/")
+        assert not book.chapters.exists()
+
+    def test_an_anonymous_zone_request_redirects_to_the_login(self, next_client, book):
+        r = next_client.get_zones(outline_url(book), OUTLINE)
+        assert r.status_code == 302
+        assert r["Location"] == f"/admin/login/?next={outline_url(book)}"
+
+    def test_the_rule_and_the_page_read_the_book_once(self, editor_client, make_book):
+        draft = make_book(status=Book.DRAFT)
+        with CaptureQueriesContext(connection) as queries:
+            assert editor_client.get(outline_url(draft)).status_code == 200
+        reads = [
+            q for q in queries.captured_queries if 'FROM "library_book"' in q["sql"]
+        ]
+        assert len(reads) == 1
+
+    def test_an_unknown_book_is_not_found(self, admin_client):
+        assert admin_client.get("/admin/library/book/999/outline/").status_code == 404
+
+    def test_the_crumbs_lead_with_the_dashboard(self, admin_client, book):
+        body = admin_client.get(outline_url(book)).content.decode()
+        assert crumbs(body) == [
+            ("Dashboard", "/admin/", False),
+            ("Books", "/admin/library/book/", False),
+            ("Outline", outline_url(book), True),
+        ]
+
+    def test_the_page_is_titled_after_the_book(self, admin_client, make_book):
+        target = make_book("Ulysses")
+        assert_metadata(
+            admin_client.get(outline_url(target)), title="Ulysses · next.dj admin"
+        )
+
+    def test_the_outline_links_back_to_the_change_view(self, admin_client, book):
+        body = admin_client.get(outline_url(book)).content.decode()
+        assert f'href="/admin/library/book/{book.pk}/change/"' in body
+
+    @pytest.mark.parametrize(
+        ("client_name", "status", "linked"),
+        [
+            ("editor_client", Book.DRAFT, True),
+            ("editor_client", Book.PUBLISHED, False),
+            ("admin_client", Book.PUBLISHED, True),
+        ],
+    )
+    def test_the_change_view_links_the_outline_it_may_open(
+        self, request, make_book, client_name, status, linked
+    ):
+        client = request.getfixturevalue(client_name)
+        target = make_book(status=status)
+        body = client.get(f"/admin/library/book/{target.pk}/change/").content.decode()
+        assert (f'href="{outline_url(target)}"' in body) is linked
+
+    def test_a_model_without_object_links_offers_none(self, admin_client, make_tag):
+        tag = make_tag()
+        body = admin_client.get(f"/admin/library/tag/{tag.pk}/change/").content
+        assert "/outline/" not in body.decode()
 
 
 class TestDemoSeed:
@@ -1281,7 +1628,7 @@ class TestActivityLog:
         assert "library.tag" in body
 
 
-ROUTE_COLUMNS = ("url", "name", "app", "file", "source")
+ROUTE_COLUMNS = ("url", "name", "app", "file", "source", "access")
 
 
 def route_rows() -> dict[str, dict[str, str]]:
@@ -1289,7 +1636,9 @@ def route_rows() -> dict[str, dict[str, str]]:
     out = StringIO()
     call_command("next", "routes", stdout=out)
     _header, *lines = out.getvalue().splitlines()
-    rows = (dict(zip(ROUTE_COLUMNS, line.split(), strict=True)) for line in lines)
+    rows = (
+        dict(zip(ROUTE_COLUMNS, line.split(maxsplit=5), strict=True)) for line in lines
+    )
     return {row["url"]: row for row in rows}
 
 
@@ -1329,6 +1678,7 @@ class TestMountedAuditPages:
             "app": "admin_audit",
             "file": "admin_audit/pages/page.py",
             "source": "mounts",
+            "access": ACTIVITY_ACCESS,
         }
         assert rows[self.HISTORY_URL] == {
             "url": self.HISTORY_URL,
@@ -1336,14 +1686,17 @@ class TestMountedAuditPages:
             "app": "admin_audit",
             "file": "admin_audit/object_pages/history/page.py",
             "source": "mounts",
+            "access": "login, perm shadcn_admin.use_admin",
         }
 
-    def test_the_admin_tree_stays_at_the_root_of_the_include(self):
+    def test_both_admin_trees_mount_at_the_root_of_the_include(self):
         rows = route_rows()
         admin_rows = [row for row in rows.values() if row["app"] == "shadcn_admin"]
         assert len(admin_rows) == 7
-        assert {row["source"] for row in admin_rows} == {"root"}
+        assert {row["source"] for row in admin_rows} == {"mounts"}
         assert rows["/admin/"]["name"] == "next:page_"
+        assert rows["/admin/login/"]["file"] == "shadcn_admin/auth_pages/login/page.py"
+        assert rows["/admin/logout/"]["name"] == "next:page_logout"
 
     @pytest.mark.parametrize(
         "path", ["/admin/activity/", "/admin/library/book/{pk}/history/"]
@@ -1390,11 +1743,18 @@ class TestBreadcrumbs:
     ):
         url = f"/admin/library/book/{book.pk}/history/"
         body = admin_client.get(url).content.decode()
-        assert crumbs(body) == [("History", url, True)]
+        assert crumbs(body) == [
+            ("Dashboard", "/admin/", False),
+            ("Books", "/admin/library/book/", False),
+            ("History", url, True),
+        ]
 
     def test_the_activity_crumb_reverses_under_its_prefix(self, admin_client):
         body = admin_client.get("/admin/activity/").content.decode()
-        assert crumbs(body) == [("Activity", "/admin/activity/", True)]
+        assert crumbs(body) == [
+            ("Dashboard", "/admin/", False),
+            ("Activity", "/admin/activity/", True),
+        ]
 
     def test_the_auth_chrome_renders_no_crumbs(self, next_client):
         body = next_client.get("/admin/login/").content.decode()
@@ -1994,6 +2354,4 @@ class TestObjectPermissions:
 
     def test_the_permission_checks_find_nothing(self, db):
         found = {message.id for message in run_checks()}
-        assert found.isdisjoint(
-            {"next.E161", "next.E162", "next.E163", "next.W129", "next.W130"}
-        )
+        assert found.isdisjoint(PERMISSION_CHECKS)

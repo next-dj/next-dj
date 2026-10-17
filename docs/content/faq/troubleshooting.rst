@@ -177,11 +177,10 @@ See :doc:`/content/ref/template-tags` for the three outcomes.
 next.E084 on a component.py that fails to import
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A ``component.py`` raised while importing, so the framework loads it as nothing.
-The component still renders, because its template is a separate file, and only the ``@component.context`` values of that module vanish from the body.
+A ``component.py`` raised while importing, so the component renders as an empty string, since the access it would have declared is unknown, and under ``next.conf.fail_loudly`` it raises ``ComponentModuleImportError`` with the import failure as ``__cause__``.
 The report names the exception type and message, so fix the named error and the module loads.
 The check imports every discovered ``component.py``, so it runs under ``manage.py check --deploy`` rather than on a plain ``manage.py check``.
-See :doc:`/content/topics/components` for the degraded render.
+See :doc:`/content/topics/components` for the closed render.
 
 Component prop does not resolve
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -292,7 +291,8 @@ Partial rendering
 Zone GET returns HTTP 400
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A response body of ``unknown zone`` means the requested name matches no ``{% zone %}`` in the composed page, or names one that may not render on its own, under a ``{% has_perm %}``, an ``{% if %}``, or a ``{% for %}``, or in the body of a component whose template reaches a ``{% has_perm %}``, which ``next.E163``, ``next.E063``, and ``next.E062`` report at ``manage.py check``.
+A response body of ``unknown zone`` means the requested name matches no ``{% zone %}`` in the composed page, or names one that may not render on its own, under an ``{% if %}`` or a ``{% for %}`` of the page, or in the body of a component that decides what that part shows, or under a block tag from a module outside ``django.`` and ``next.``, which ``next.E063``, ``next.E062``, and ``next.E163`` report at ``manage.py check``.
+A zone GET that answers 403 hit a ``{% has_perm %}`` block above one of the requested zones that refuses the user, or the access rule of the page itself, see :ref:`topics-permissions-tree`.
 Check that ``data-next-target`` names the same string as the zone tag on the page that serves the request.
 A response body of ``zone in dynamic body`` means the page body comes from a ``render`` function returning a string, so there is no compiled template source to render the slice standalone.
 Move the zone to a page whose body comes from a template source.

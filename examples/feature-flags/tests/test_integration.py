@@ -5,6 +5,7 @@ import re
 
 import pytest
 from django.core.cache import cache
+from django.core.checks import run_checks
 from flags.cache import FLAG_PREFIX, get_cached_flag
 from flags.deps import WRITE_GATE_FLAG
 from flags.metrics import render_counts
@@ -355,3 +356,10 @@ class TestPageMetadata:
         assert_metadata(
             next_client.get(path), title=title, robots="noindex" if noindex else None
         )
+
+
+class TestOpenActions:
+    """Nobody signs in here, so every page with an action declares itself public."""
+
+    def test_no_action_is_left_without_an_access_rule(self) -> None:
+        assert "next.W134" not in {message.id for message in run_checks()}

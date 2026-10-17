@@ -1,14 +1,21 @@
-"""The predicates a permission is checked by, composable with `&`, `|` and `~`."""
+"""The predicates a permission is checked by and the access an endpoint declares."""
 
 import inspect
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final, Literal
+
+from django.db.models import Model
 
 
 type Operator = Literal["&", "|", "~"]
 
 type Test = Callable[..., object]
+
+type AccessKind = Literal["login", "permission"]
+
+type AccessObject = str | type[Model]
 
 _MAX_ARITY: Final = 2
 
@@ -157,4 +164,105 @@ def predicate(test: Test) -> Predicate:
     )
 
 
-__all__ = ["Operator", "Predicate", "Test", "predicate", "signature_problem"]
+@dataclass(frozen=True, slots=True)
+class Requirement:
+    """One condition an endpoint declares, a login or permissions on an optional object.
+
+    `obj` is a model whose row the URL names for a page, a context name for a component.
+    """
+
+    kind: AccessKind
+    source: Path
+    perms: tuple[str, ...] = ()
+    obj: AccessObject | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a login carrying permissions or a permission carrying none."""
+        if self.kind == "login" and (self.perms or self.obj is not None):
+            msg = "A login requirement carries no permission and no object."
+            raise ValueError(msg)
+        if self.kind == "permission" and not self.perms:
+            msg = "A permission requirement names at least one permission."
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
+class AccessRule:
+    """The requirements of one endpoint in the order its chain declared them.
+
+    A public rule names the file that opened it in `sources` and those it lifted.
+    """
+
+    requirements: tuple[Requirement, ...] = ()
+    public: bool = False
+    sources: tuple[Path, ...] = ()
+    lifted: tuple[Path, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Denial:
+    """Why a check refused, the requester logged out or short of a permission."""
+
+    reason: AccessKind
+    requirement: Requirement
+
+
+OPEN: Final = AccessRule()
+
+
+def joined(rules: Iterable[AccessRule], *, public: bool = False) -> AccessRule:
+    """Return one rule holding the requirements of `rules` in order, each once.
+
+    Rules joined side by side lift nothing of one another, unlike a chain.
+    """
+    requirements: dict[Requirement, None] = {}
+    sources: dict[Path, None] = {}
+    lifted: dict[Path, None] = {}
+    for rule in rules:
+        requirements.update(dict.fromkeys(rule.requirements))
+        sources.update(dict.fromkeys(rule.sources))
+        lifted.update(dict.fromkeys(rule.lifted))
+    if not requirements and not public:
+        return OPEN
+    kept = tuple(lifted) if public else ()
+    return AccessRule(tuple(requirements), public, tuple(sources), kept)
+
+
+def chained(rules: Iterable[AccessRule]) -> AccessRule:
+    """Return the rule a chain of files gives, root first, a public file lifting above.
+
+    A file that pairs `public()` with its own requirements lifts nothing of the chain.
+    """
+    requirements: dict[Requirement, None] = {}
+    opened: AccessRule | None = None
+    lifted: tuple[Path, ...] = ()
+    for rule in rules:
+        if rule.public and not rule.requirements and (requirements or opened is None):
+            lifted = tuple(dict.fromkeys(item.source for item in requirements))
+            requirements.clear()
+            opened = rule
+        if rule.requirements:
+            requirements.update(dict.fromkeys(rule.requirements))
+            opened = None
+    if requirements:
+        sources = tuple(dict.fromkeys(item.source for item in requirements))
+        return AccessRule(tuple(requirements), sources=sources)
+    if opened is None:
+        return OPEN
+    return AccessRule(public=True, sources=opened.sources, lifted=lifted)
+
+
+__all__ = [
+    "OPEN",
+    "AccessObject",
+    "AccessRule",
+    "Denial",
+    "Operator",
+    "Predicate",
+    "Requirement",
+    "Test",
+    "chained",
+    "joined",
+    "predicate",
+    "signature_problem",
+]

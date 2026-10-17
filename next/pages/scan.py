@@ -7,9 +7,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from next.discovery import first_visit, get_router_manager, iter_scanned_page_pairs
+from next.discovery import (
+    first_visit,
+    get_router_manager,
+    iter_scanned_page_pairs,
+    routed_page_trees,
+)
 
-from .loaders import load_python_module_memo
+from .loaders import PROXY_MODULE, load_python_module_memo
 from .manager import page
 
 
@@ -57,6 +62,18 @@ def load_scanned_page_modules(router_manager: RouterManager) -> list[tuple[str, 
     ]
 
 
+def iter_proxy_modules(router_manager: RouterManager) -> Iterator[Path]:
+    """Yield every `proxy.py` of the routed trees once, the ones in skipped folders too.
+
+    The chain of a file in a skipped folder reads the `proxy.py` there, so checks do.
+    """
+    seen: set[Path] = set()
+    for root, _skip_names in routed_page_trees(router_manager):
+        for proxy in sorted(root.path.rglob(PROXY_MODULE)):
+            if first_visit(proxy, seen):
+                yield proxy
+
+
 def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
     """Yield the `page.py` path and key of every keyed `serialize=True` context.
 
@@ -68,7 +85,7 @@ def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
         return
     # A page registers only once it runs, so the walk imports before the registry reads.
     pages = load_scanned_page_modules(router_manager)
-    serialized = page._context_manager.serialized_keys()
+    serialized = page.contexts.serialized_keys()
     for _url_path, page_path in pages:
         for key in serialized.get(page_path, ()):
             yield page_path, key
@@ -77,6 +94,7 @@ def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
 __all__ = [
     "iter_existing_scanned_page_pairs",
     "iter_existing_scanned_pages",
+    "iter_proxy_modules",
     "iter_serialized_page_context_keys",
     "load_scanned_page_modules",
 ]

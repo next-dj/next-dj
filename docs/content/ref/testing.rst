@@ -58,6 +58,7 @@ Actions
 ~~~~~~~
 
 ``resolve_action_url`` and ``build_form_for`` exercise a registered action without crafting POST bodies.
+A name the registry does not hold makes ``resolve_action_url``, and through it ``NextClient.post_action``, import every routed ``page.py`` once and ask again, so a test needs no visit of the page first, and a name still missing raises ``FormActionNotFoundError``.
 
 .. automodule:: next.testing.actions
    :members:

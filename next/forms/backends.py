@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, override
 from weakref import WeakSet
 
+from django.contrib.auth.decorators import login_not_required
 from django.core.exceptions import ImproperlyConfigured
 from django.http import Http404
 from django.urls import get_script_prefix, path
@@ -478,8 +479,11 @@ class RegistryFormActionBackend(FormActionBackend):
 
     @cached_property
     def _action_view(self) -> "Callable[..., HttpResponseBase]":
-        """Return the dispatch view, built once so every URL build shares it."""
-        return require_http_methods(["GET", "POST"])(self.dispatch)
+        """Return the dispatch view, built once so every URL build shares it.
+
+        `LoginRequiredMiddleware` passes it, because dispatch applies the page rule.
+        """
+        return login_not_required(require_http_methods(["GET", "POST"])(self.dispatch))
 
     @override
     def dispatch(self, request: "HttpRequest", uid: str) -> "HttpResponseBase":

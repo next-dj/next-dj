@@ -150,7 +150,7 @@ Django's own lexer locates that region, so a placeholder written inside ``{% ver
 The innermost layout wraps the page body, the outermost layout wraps everything.
 Composition is string substitution, not Django template inheritance, so no page needs an explicit ``{% extends %}``.
 
-The user-facing rules for layout discovery, the placeholder contract, and layout-level context live in :doc:`/content/topics/layouts`.
+The user-facing rules for layout discovery, the placeholder contract, and the context a segment ``page.py`` passes down live in :doc:`/content/topics/layouts`.
 
 Body source priority
 --------------------

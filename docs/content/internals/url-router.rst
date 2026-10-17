@@ -154,6 +154,8 @@ The trees the walk finds through ``pages()`` drop out of the auto-assembly of ``
 A tree mounted through ``mount`` or ``mounts`` carries its prefix in each pattern string, so the trie indexes the full path.
 A ``pages()`` tree builds tree-relative patterns through the first ``FileRouterBackend``, wraps them in the ``URL_RESOLVER`` class, and rebuilds them when the router version moves, while Django joins in the outer route.
 A view of a prefixed tree or of a ``pages()`` tree carries ``next_route_prefix`` and ``next_route_trail``, which the breadcrumb resolution reads to reverse the crumbs of its ancestors.
+The same prefix leads the crumbs across the tree boundary, because the resolution reverses each step of the prefix in the namespace of the match, takes the deepest one that resolves to a page of another tree, and folds that host page's crumbs ahead of the tree's own.
+The views also carry ``next_page_path`` and the ``login_required`` attribute ``LoginRequiredMiddleware`` reads, ``False`` for a page whose rule is public through ``page.public()`` or a ``proxy.public()`` above it, and the ``proxy.py`` chain of a page ends at the root of its own tree.
 
 Reload mechanics
 ----------------

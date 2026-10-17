@@ -12,12 +12,16 @@ import importlib.util
 import logging
 import os
 import re
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal, TypeGuard, override
 from urllib.parse import unquote_to_bytes
 
 from django.conf import settings
+from django.core.exceptions import DisallowedRedirect
+from django.http import HttpResponseRedirect
+from django.template.base import NodeList
 from django.utils.encoding import repercent_broken_unicode
 from django.utils.module_loading import import_string
 
@@ -28,7 +32,9 @@ from next.errors import InvalidDirsError
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Callable, Generator, Iterable, Mapping
+    from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
+
+    from django.template.base import Node
 
 
 logger = logging.getLogger(__name__)
@@ -451,3 +457,23 @@ def is_middleware(entry: object, base: str) -> bool:
 def middleware_listed(middleware: Iterable[object], base: str) -> bool:
     """Whether `middleware` lists the class `base` or a subclass of it."""
     return any(is_middleware(entry, base) for entry in middleware)
+
+
+def child_nodelists(node: Node) -> Iterator[NodeList]:
+    """Yield each child node list a node declares on `child_nodelists`."""
+    for attr in node.child_nodelists:
+        nodelist = getattr(node, attr, None)
+        if isinstance(nodelist, NodeList):
+            yield nodelist
+
+
+def redirect_or_fallback(
+    target: str, fallback: str, *, status: int = 302
+) -> HttpResponseRedirect:
+    """Redirect to `target`, or to `fallback` when Django refuses it as a Location.
+
+    A handler has already run by now, so a target past the length cap is not a 400.
+    """
+    with suppress(DisallowedRedirect):
+        return HttpResponseRedirect(target, status=status)
+    return HttpResponseRedirect(fallback, status=status)

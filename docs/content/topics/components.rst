@@ -458,9 +458,9 @@ Page-tree ``component.py`` modules follow a different path.
 The URL router walks each page tree and ``register_components_folder_from_router_walk`` imports every ``component.py`` it registers inline.
 They are available regardless of ``LAZY_COMPONENT_MODULES``.
 
-A ``component.py`` whose body raises while it imports does not fail the render.
-The loader logs the traceback, holds the exception under that file path, and hands the renderer nothing, which degrades the component to its bare ``component.djx`` template.
-Every ``@component.context`` of that module therefore stays out of the body, and a template rendering a key one of them published prints the empty string instead.
+A ``component.py`` whose body raises while it imports closes the component.
+The loader logs the traceback and holds the exception under that file path, and the component renders as an empty string, since the access it would have declared is unknown, and under ``next.conf.fail_loudly`` it raises ``ComponentModuleImportError`` with the import failure as ``__cause__``.
+A declaration made before the failing line would otherwise be lost silently, so no part of the component renders without it.
 The held error is what ``next.E084`` reports, so a broken module that nobody noticed in a rendered page is still named by ``manage.py check --deploy``.
 
 The ``LAZY_COMPONENT_MODULES`` flag gates the ``DIRS`` bulk import only.

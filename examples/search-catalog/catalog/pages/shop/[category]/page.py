@@ -13,6 +13,8 @@ from next.urls import DUrl
 
 cache: CacheDict = {"public": True, "max_age": 300, "stale_while_revalidate": 60}
 
+page.public()
+
 
 class LaunchCodeForm(Form):
     """Sign a visitor up from the cached page, which embeds no CSRF token.

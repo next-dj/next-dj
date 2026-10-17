@@ -35,7 +35,8 @@ Layouts and context.
    A shared page envelope costs an ``{% extends %}`` line in every template and a repeated ``get_context_data`` on every view.
    A ``layout.djx`` wraps every page under its directory instead, and layouts nest down the tree.
    A ``@context`` decorator publishes named values into the template scope, optionally inherited by every descendant page.
-   See :doc:`/content/topics/layouts` and :doc:`/content/topics/context`.
+   A ``proxy.py`` declares the login and the permissions a directory and every page below it require, and the framework checks them on the page, its actions, and its zones.
+   See :doc:`/content/topics/layouts`, :doc:`/content/topics/context`, and :doc:`/content/topics/proxy`.
 
 Dependency injection.
    A Django view receives the request and the URL kwargs and fetches everything else itself, which repeats the same lookup in every view that needs it.
@@ -91,9 +92,9 @@ What the model costs
 
 Each of the seven mechanisms above trades something away, and the trade lands on the same few places.
 
-The filesystem rule makes a rename a behaviour change, because moving a directory moves the URL, the URL name, and the layout chain at once, and no static check finds a ``{% url %}`` call left behind.
+The filesystem rule makes a rename a behaviour change, because moving a directory moves the URL, the URL name, the layout chain, and the ``proxy.py`` chain at once, and no static check finds a ``{% url %}`` call left behind.
 Resolution by name makes a context key a contract no tool checks, and a published context key shadows a captured URL segment carrying the same name.
-Registration on import makes a form action live the moment its module is imported, reachable by any visitor until the class declares a guard.
+Registration on import makes a form action live the moment its module is imported, reachable by any visitor until the class, its page, or a ``proxy.py`` above it declares a guard.
 Composition by substitution gives a layout one placeholder and no override across the chain, so there is no ``{% block %}`` and no ``{{ block.super }}``.
 
 :doc:`/content/misc/design-philosophy` states the rejected alternative and the cost beside every principle, and :doc:`limitations` lists the boundaries the model does not cross.

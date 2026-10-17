@@ -5,12 +5,15 @@ from access.models import AccessRequest
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponse
 
+from next import page
 from next.forms import ComponentWidget, FormWizard, PermissionOutcome
 from next.pages import MetadataDict
 from next.partial import Patches, PatchResponse, partial_intent
 
 
 metadata: MetadataDict = {"title": "Request access", "robots": {"index": False}}
+
+page.public()
 
 
 class IdentityStep(AcknowledgedStep, django_forms.ModelForm):

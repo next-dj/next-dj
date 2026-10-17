@@ -109,6 +109,7 @@ The inherit_context flag
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``inherit_context=True`` makes a keyed value visible to every descendant route, not only to the page that declares it.
+A section that shares a value declares it in the ``page.py`` of its directory, and the access of the section lives in a ``proxy.py`` that holds no context, see :doc:`proxy`.
 
 .. code-block:: python
    :caption: notes/pages/page.py
@@ -225,7 +226,7 @@ Resolution order
 The framework computes the template scope in this order.
 
 1. URL kwargs from the matched route are seeded into the context dict.
-2. Inherited context functions from every ancestor ``page.py``, bounded at 64 levels, the outermost file first and each file's callables in the order the file declares them.
+2. Inherited context functions from every ancestor ``page.py``, bounded at 64 levels, the outermost directory first, and each file's callables in the order the file declares them.
    Each one resolves its parameters against the context the pass has collected so far, so a callable reads a value an outer file or an earlier sibling published, and that value beats a captured URL segment of the same name.
    A key an outer file already published is not computed again by a nearer callable, which is skipped.
 3. Page level context functions declared in the current ``page.py``.
@@ -251,6 +252,7 @@ Inheritance rules
 
 Inherited context follows the filesystem route tree.
 The framework walks up from the current ``page.py`` directory and runs every ``@context`` callable marked ``inherit_context=True`` that it finds in ancestor ``page.py`` files.
+The walk follows the directories on disk, not the URL, so a tree mounted under a prefix of another tree inherits nothing from the ``page.py`` files of the host.
 
 - A ``page.py`` at ``notes/pages/`` publishes inherited values for every page under that root.
 - A ``page.py`` at ``notes/pages/admin/`` publishes inherited values only for pages under ``/admin/``.
@@ -262,7 +264,7 @@ Page metadata folds the other way round, the segment nearest to the page wins, s
 
 The chain is read from the registry of ``@context`` registrations rather than probed on disk, so a ``page.py`` deleted inside a running process keeps publishing its inherited values until the registry is rebuilt.
 
-The current page can shadow an inherited value by declaring a context function with the same key.
+The current page can shadow a value an ancestor ``page.py`` inherits by declaring a context function with the same key.
 The page level value takes precedence on that page's own render, and every layout wrapper in the chain sees it, while the descendants of the page still receive the outer value.
 
 ``inherit_context=True`` and ``zone=`` are incompatible, and combining them raises ``ValueError`` at registration.

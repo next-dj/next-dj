@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, override
 
 from next.deps import RESERVED_KEYS, DependencyResolver, RegisteredParameterProvider
+from next.deps.objects import names_object
 
 
 if TYPE_CHECKING:
@@ -128,12 +129,18 @@ class ContextByNameProvider(RegisteredParameterProvider):
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Return True when context_data holds this name and no provider owns it."""
         name = param.name
-        return name not in RESERVED_KEYS and name in context.context_data
+        return (
+            name not in RESERVED_KEYS
+            and name in context.context_data
+            and not names_object(param.annotation)
+        )
 
     @override
     def static_can_handle(self, param: inspect.Parameter) -> bool | None:
-        """Rule out the reserved names for good, so the plan drops this provider."""
-        return False if param.name in RESERVED_KEYS else None
+        """Rule out the reserved names and a `DObject` annotation for good."""
+        if param.name in RESERVED_KEYS or names_object(param.annotation):
+            return False
+        return None
 
     @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:

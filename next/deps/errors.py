@@ -76,24 +76,33 @@ class UnboundObjectError(ImproperlyConfigured):
         *,
         parent: bool = False,
         available: Iterable[str] = (),
+        declared: bool = False,
     ) -> None:
-        """Record the parameter and the key it found nothing under."""
+        """Record the parameter, or the model of an `obj=`, and the key it lacks."""
         self.param_name = param_name
         self.key = key
         self.parent = parent
-        if parent:
-            detail = (
-                f'finds no "{key}" in the context it resolves in. Declare '
-                f'@context("{key}", inherit_context=True) in an ancestor page.py, '
-                "since a form handler or hook resolves with no page context."
+        captured = ", ".join(sorted(available)) or "none"
+        if declared:
+            message = (
+                f"permission_required(obj=DObject[{param_name}]) finds no URL kwarg "
+                f'"{key}" (captured: {captured}). It reads the kwarg named after the '
+                f"model, so capture it as a [{key}] segment."
+            )
+        elif parent:
+            message = (
+                f'DObject parameter "{param_name}" finds no "{key}" in the context '
+                f'it resolves in. Declare @context("{key}", inherit_context=True) in '
+                "an ancestor page.py, since a form handler or hook resolves with no "
+                "page context."
             )
         else:
-            captured = ", ".join(sorted(available)) or "none"
-            detail = (
-                f'finds no URL kwarg "{key}" (captured: {captured}). It reads the '
-                "kwarg named like itself, so rename it after a captured segment."
+            message = (
+                f'DObject parameter "{param_name}" finds no URL kwarg "{key}" '
+                f"(captured: {captured}). It reads the kwarg named like itself, so "
+                "rename it after a captured segment."
             )
-        super().__init__(f'DObject parameter "{param_name}" {detail}')
+        super().__init__(message)
 
 
 __all__ = ["DependencyCycleError", "UnboundObjectError", "UnknownDependencyError"]

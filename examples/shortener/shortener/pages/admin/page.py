@@ -3,7 +3,7 @@ from django.http import Http404, HttpRequest, HttpResponse
 from shortener.cache import pending_clicks
 from shortener.models import Link
 
-from next import action, context
+from next import action, context, page
 from next.forms import ModelForm
 from next.pages import MetadataDict
 from next.partial import Patches
@@ -11,6 +11,8 @@ from next.urls import page_reverse_lazy
 
 
 metadata: MetadataDict = {"title": "Admin panel", "robots": {"index": False}}
+
+page.public()
 
 
 @context("recent_links", inherit_context=True)

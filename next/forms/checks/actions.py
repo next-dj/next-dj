@@ -1,9 +1,13 @@
 """System checks for the form classes and `@action` handlers a project registers."""
 
+from pathlib import Path
+
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
 from next.checks import NEXT
+from next.pages.access import owner_access
+from next.permissions.access import login_middleware_active
 from next.permissions.manager import permission_manager
 from next.utils import middleware_listed
 
@@ -169,6 +173,51 @@ def check_action_guard_permissions_known(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
+def _open_actions() -> dict[Path, list[str]]:
+    """Return the actions of each page tree file that nothing guards, by file.
+
+    An action declared outside a tree answers to the rule of its origin page alone.
+    """
+    found: dict[Path, list[str]] = {}
+    for meta in iter_registered_actions():
+        if meta.get("guard") is not None:
+            continue
+        source = Path(meta["file_path"])
+        owner = owner_access(source)
+        if owner is None or owner.broken is not None:
+            continue
+        if owner.rule.requirements or owner.rule.public:
+            continue
+        found.setdefault(source, []).append(meta["name"])
+    return found
+
+
+@register(NEXT)
+def check_public_actions(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about an action of a page tree that nothing guards (`next.W134`).
+
+    A guarding `proxy.py`, a page declaration, a `Meta` guard or the middleware counts.
+    """
+    if login_middleware_active():
+        return []
+    return [
+        DjangoWarning(
+            f"{source} declares the actions {', '.join(map(repr, names))}, and no "
+            "requirement from a proxy.py above it, no declaration of its page, no "
+            "Meta guard and no LoginRequiredMiddleware guard them, so anyone may "
+            "post to them.",
+            hint=(
+                "Declare page.login_required() or permission_required(), guard the "
+                "directory with a proxy.py, set login_required on the action Meta, "
+                "or declare page.public() if the actions are meant for everyone."
+            ),
+            obj=str(source),
+            id="next.W134",
+        )
+        for source, names in _open_actions().items()
+    ]
+
+
 def _declares_success_message(target: object) -> bool:
     """Return True when the class declares a non-empty Meta.success_message."""
     return bool(getattr(getattr(target, "Meta", None), "success_message", ""))
@@ -205,6 +254,7 @@ __all__ = [
     "check_instance_from_url_on_non_model_form",
     "check_instance_from_url_unknown_field",
     "check_invalid_form_meta_scope",
+    "check_public_actions",
     "check_shared_action_name_collisions",
     "check_success_message_framework",
 ]

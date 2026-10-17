@@ -1,5 +1,3 @@
-from typing import Self
-
 import pytest
 from django.contrib.auth.models import Group
 from django.http import HttpRequest
@@ -15,6 +13,7 @@ from next.deps.linear import LinearDependencyResolver
 from next.deps.resolver import DependencyResolver
 from next.pages.context import Context
 from next.urls import DUrl
+from tests.benchmarks.factories import StandInRows
 from tests.support import build_mock_http_request
 
 
@@ -114,29 +113,10 @@ def _resolve_four_markers(planned: DependencyResolver) -> dict[str, object]:
 _OBJECT_PK = 7
 
 
-class _StandInRows:
-    """Rows answering every lookup with one unsaved row, so no query is ever made."""
-
-    def __init__(self, row: Group) -> None:
-        self._row = row
-
-    def visible_to(self, scope: object) -> Self:
-        return self
-
-    def filter(self, **lookups: object) -> Self:
-        return self
-
-    def order_by(self) -> Self:
-        return self
-
-    def __getitem__(self, window: slice) -> list[Group]:
-        return [self._row]
-
-
 @pytest.fixture()
 def stand_in_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     """Give the `Group` manager a `visible_to` that never reaches the database."""
-    rows = _StandInRows(Group(pk=_OBJECT_PK, name="bench"))
+    rows = StandInRows(Group(pk=_OBJECT_PK, name="bench"))
     monkeypatch.setattr(
         Group._default_manager, "visible_to", rows.visible_to, raising=False
     )

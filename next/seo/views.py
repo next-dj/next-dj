@@ -9,6 +9,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Concatenate, Final, NamedTuple, cast
 
 from django.conf import settings
+from django.contrib.auth.decorators import login_not_required
 from django.contrib.sitemaps.views import SitemapIndexItem, x_robots_tag
 from django.core.paginator import EmptyPage, PageNotAnInteger
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseNotFound
@@ -355,8 +356,7 @@ type _Route[**P] = Callable[Concatenate[HttpRequest, P], HttpResponse]
 def _seo_view[**P](route: str) -> Callable[[_Route[P]], _Route[P]]:
     """Restrict an SEO view to `GET` and `HEAD`, with a plain 404 and a 503 on failure.
 
-    The view and its template run project code, so the response is rendered inside the
-    guard. A 503 asks crawlers to retry, while a 500 reads as a failing site.
+    It renders inside the guard for the 503 and is open under `LoginRequiredMiddleware`.
     """
 
     def decorate(view: _Route[P]) -> _Route[P]:
@@ -382,7 +382,7 @@ def _seo_view[**P](route: str) -> Callable[[_Route[P]], _Route[P]]:
                 return _not_found(_NOT_FOUND)
             return _unavailable()
 
-        return site_robots(require_safe(answer))
+        return login_not_required(site_robots(require_safe(answer)))
 
     return decorate
 

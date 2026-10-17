@@ -4,13 +4,15 @@ from django.http import HttpRequest, HttpResponseRedirect
 from flags.deps import WRITE_GATE_FLAG, FlagService
 from flags.models import Flag
 
-from next import Depends, context
+from next import Depends, context, page
 from next.forms import Form
 from next.pages import MetadataDict
 from next.urls import page_reverse_lazy
 
 
 metadata: MetadataDict = {"title": "Flag admin", "robots": {"index": False}}
+
+page.public()
 
 
 class BulkToggleForm(Form):

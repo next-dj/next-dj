@@ -364,6 +364,16 @@ class PageContextRegistry:
                     inherited_context[name] = result[name]
         return inherited_context
 
+    def run_order(self, file_path: Path) -> _OrderedEntries:
+        """Return every callable a render of `file_path` runs, in the order of the run.
+
+        The inheritable callables of the ancestor pages lead, root first.
+        """
+        inherited = tuple(
+            step for group in self._inheritable_groups(file_path) for step in group
+        )
+        return inherited + self._page_order(file_path).entries
+
     def _sync_memos(self) -> None:
         """Drop the per-path memos once the registry changed after they were built."""
         if self._memo_version != self._version:

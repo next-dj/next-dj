@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import pytest
 from django.core.cache import cache
+from django.core.checks import run_checks
 from django.core.management import call_command
 from shortener.cache import CLICK_PREFIX, increment_clicks, pending_clicks
 from shortener.models import Link
@@ -427,3 +428,10 @@ class TestRobots:
         self, next_client
     ) -> None:
         assert next_client.get("/sitemap.xml").status_code == 404
+
+
+class TestOpenActions:
+    """Nobody signs in here, so every page with an action declares itself public."""
+
+    def test_no_action_is_left_without_an_access_rule(self) -> None:
+        assert "next.W134" not in {message.id for message in run_checks()}

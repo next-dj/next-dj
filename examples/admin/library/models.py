@@ -1,6 +1,8 @@
-from typing import ClassVar
+from typing import ClassVar, Self
 
+from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 from django.db import models
+from django.db.models import Max
 
 
 class Tag(models.Model):
@@ -27,6 +29,12 @@ class Author(models.Model):
         return self.full_name
 
 
+class BookQuerySet(models.QuerySet):
+    def visible_to(self, user: AbstractBaseUser | AnonymousUser) -> Self:
+        """Return every book to staff and none to others, `change_book` judges a row."""
+        return self.all() if user.is_staff else self.none()
+
+
 class Book(models.Model):
     DRAFT = "draft"
     PUBLISHED = "published"
@@ -46,6 +54,8 @@ class Book(models.Model):
     price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     is_featured = models.BooleanField(default=False)
 
+    objects = BookQuerySet.as_manager()
+
     class Meta:
         ordering: ClassVar = ["-published_at", "title"]
 
@@ -53,11 +63,19 @@ class Book(models.Model):
         return self.title
 
 
+class ChapterQuerySet(models.QuerySet):
+    def next_number(self) -> int:
+        """Return the number one past the highest of these chapters, 1 for none."""
+        return (self.aggregate(Max("number"))["number__max"] or 0) + 1
+
+
 class Chapter(models.Model):
     book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name="chapters")
     number = models.PositiveIntegerField()
     title = models.CharField(max_length=200)
     word_count = models.PositiveIntegerField(default=0)
+
+    objects = ChapterQuerySet.as_manager()
 
     class Meta:
         ordering: ClassVar = ["book", "number"]

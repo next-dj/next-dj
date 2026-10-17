@@ -38,5 +38,12 @@ def test_the_app_tree_mounts_where_its_config_says() -> None:
     out = StringIO()
     call_command("next", "routes", stdout=out)
     _header, row = out.getvalue().splitlines()
-    assert row.split() == ["/", "next:page_", "myapp", "myapp/pages/page.py", "mounts"]
+    assert row.split() == [
+        "/",
+        "next:page_",
+        "myapp",
+        "myapp/pages/page.py",
+        "mounts",
+        "-",
+    ]
     assert reverse("next:page_") == "/"

@@ -87,6 +87,31 @@ def _resolve_and_call(
     return hook(**resolved)
 
 
+def _call_on_request_cache(
+    hook: "Callable[..., Any]",
+    request: "HttpRequest",
+    url_kwargs: dict[str, Any],
+    *,
+    deps: _DepsState,
+) -> object:
+    """Call `hook` as `_resolve_and_call` does, its cache hung on `request` meanwhile.
+
+    A request already carrying that cache keeps it, so dispatch hangs nothing twice.
+    """
+    cache = deps[0]
+    previous = getattr(request, REQUEST_DEP_CACHE_ATTR, UNSET)
+    if previous is cache:
+        return _resolve_and_call(hook, request, url_kwargs, deps=deps)
+    setattr(request, REQUEST_DEP_CACHE_ATTR, cache)
+    try:
+        return _resolve_and_call(hook, request, url_kwargs, deps=deps)
+    finally:
+        if previous is UNSET:
+            delattr(request, REQUEST_DEP_CACHE_ATTR)
+        else:
+            setattr(request, REQUEST_DEP_CACHE_ATTR, previous)
+
+
 def _call_get_initial(
     form_class: "type[django_forms.Form]",
     request: "HttpRequest",
@@ -95,7 +120,10 @@ def _call_get_initial(
     deps: _DepsState,
     action_name: str | None = None,
 ) -> object:
-    """Resolve `get_initial` dependencies and call it, feeding url_kwargs to kwargs."""
+    """Resolve `get_initial` dependencies and call it, feeding url_kwargs to kwargs.
+
+    The caller's cache rides on the request, so `instance_from_url` shares its rows.
+    """
     if not hasattr(form_class, "get_initial"):
         msg = (
             f"{_action_prefix(action_name)}{form_class.__name__} has no get_initial "
@@ -103,7 +131,9 @@ def _call_get_initial(
             "get_initial classmethod."
         )
         raise TypeError(msg)
-    return _resolve_and_call(form_class.get_initial, request, url_kwargs, deps=deps)
+    return _call_on_request_cache(
+        form_class.get_initial, request, url_kwargs, deps=deps
+    )
 
 
 def _call_get_form_kwargs(
@@ -119,15 +149,7 @@ def _call_get_form_kwargs(
     The caller's cache rides on the request for the call alone, so `super()` shares it.
     """
     hook = cast("type[_FormKwargsHook]", form_class).get_form_kwargs
-    previous = getattr(request, REQUEST_DEP_CACHE_ATTR, UNSET)
-    setattr(request, REQUEST_DEP_CACHE_ATTR, deps[0])
-    try:
-        raw = _resolve_and_call(hook, request, url_kwargs, deps=deps)
-    finally:
-        if previous is UNSET:
-            delattr(request, REQUEST_DEP_CACHE_ATTR)
-        else:
-            setattr(request, REQUEST_DEP_CACHE_ATTR, previous)
+    raw = _call_on_request_cache(hook, request, url_kwargs, deps=deps)
     prefix = _action_prefix(action_name)
     if not isinstance(raw, dict):
         msg = (
@@ -216,12 +238,17 @@ def _resolve_form_class(
 
 def _form_action_context_callable(
     form_class: "type[django_forms.Form] | Callable[..., Any]",
-) -> "Callable[[HttpRequest], types.SimpleNamespace]":
-    """Return a callable building the unbound form namespace for page rendering."""
+) -> "Callable[..., types.SimpleNamespace]":
+    """Return a callable building the unbound form namespace for page rendering.
 
-    def context_func(request: "HttpRequest") -> types.SimpleNamespace:
+    Given the cache of the page render, it reuses every row the page contexts loaded.
+    """
+
+    def context_func(
+        request: "HttpRequest", dep_cache: dict[str, Any] | None = None
+    ) -> types.SimpleNamespace:
         url_kwargs = url_kwargs_for_request(request)
-        dep_cache: dict[str, Any] = {}
+        dep_cache = {} if dep_cache is None else dep_cache
         dep_stack: list[str] = []
         resolved_form_class, init_kwargs = _resolve_form_class(
             form_class, request, url_kwargs, (dep_cache, dep_stack)

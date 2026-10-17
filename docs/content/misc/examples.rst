@@ -70,10 +70,11 @@ The table runs roughly in order of how much it assumes.
        Keeps the whole dashboard ``noindex`` from one root ``metadata`` dict and titles each stats page.
      - :doc:`/content/topics/signals`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/index`
    * - :repo:`admin <tree/main/examples/admin>`
-     - Rebuilds the Django admin on next.dj over the stock ``ModelAdmin`` hooks, with request-aware form factories, guards on every mutating action, server-opened modal layers, keyed inline row forms, two page roots, and a middleware guard over the whole tree.
+     - Rebuilds the Django admin on next.dj over the stock ``ModelAdmin`` hooks, with request-aware form factories, guards on every mutating action, server-opened modal layers, keyed inline row forms, several page trees, and Django's ``LoginRequiredMiddleware`` beside a ``proxy.py`` login and permission requirement on every guarded page tree, with ``page.public()`` on the login page in a separate ``auth_pages`` tree.
+       Its ``library`` application mounts a book tree under ``library/book/<int:book>/``, whose ``proxy.py`` checks ``library.change_book`` on the book itself through ``obj=DObject[Book]``.
        Titles every model page, the changelist, the add, change, and delete forms, and the history, after its model through ``@page.metadata(inherit=True)``, and keeps the whole site out of search through ``SITE["INDEXABLE"] = False``, publishing no sitemap or robots file.
        Its ``admin_audit`` application mounts its activity page and the per-object history page through ``mounts`` on its ``AppConfig``.
-     - :doc:`/content/howto/integrate-django-admin`, :doc:`/content/topics/multi-project`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/file-router`
+     - :doc:`/content/howto/integrate-django-admin`, :doc:`/content/topics/multi-project`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/file-router`, :doc:`/content/topics/proxy`, :doc:`/content/topics/permissions`
 
 Shared assets
 -------------

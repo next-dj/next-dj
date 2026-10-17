@@ -1,7 +1,8 @@
 import pytest
 from django.contrib.auth.models import AnonymousUser
 from library.models import Book
-from library.permissions import in_draft_book, is_draft, is_staff, no_row
+from library.permissions import in_draft_book, is_draft, no_row
+from shadcn_admin.permissions import is_staff
 
 from next.permissions import has_perm
 
@@ -34,7 +35,26 @@ class TestPredicates:
         assert in_draft_book(editor, None) is False
 
 
+class TestBookScope:
+    def test_staff_see_every_book_and_nobody_else_any(
+        self, editor, book, django_user_model
+    ) -> None:
+        reader = django_user_model.objects.create_user("reader")
+        assert list(Book.objects.visible_to(editor)) == [book]
+        assert not Book.objects.visible_to(reader).exists()
+        assert not Book.objects.visible_to(AnonymousUser()).exists()
+
+
 class TestRegisteredRules:
+    def test_the_admin_opens_to_staff_and_the_superuser(
+        self, editor, admin_user, django_user_model
+    ) -> None:
+        assert has_perm(editor, "shadcn_admin.use_admin") is True
+        assert has_perm(admin_user, "shadcn_admin.use_admin") is True
+        reader = django_user_model.objects.create_user("reader")
+        assert has_perm(reader, "shadcn_admin.use_admin") is False
+        assert has_perm(AnonymousUser(), "shadcn_admin.use_admin") is False
+
     def test_an_editor_changes_and_deletes_only_draft_books(
         self, editor, make_book
     ) -> None:

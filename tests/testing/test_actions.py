@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from django.http import HttpRequest, HttpResponse
@@ -14,6 +15,7 @@ from next.forms.backends import ActionMeta
 from next.forms.manager import form_action_manager
 from next.testing import build_form_for, resolve_action_url
 from tests.forms.actions import SimpleForm
+from tests.support import isolated_form_registries, routed, write_page
 
 
 class TestResolveActionUrl:
@@ -26,6 +28,19 @@ class TestResolveActionUrl:
     def test_raises_for_unknown_action(self) -> None:
         with pytest.raises(FormActionNotFoundError, match="Unknown form action"):
             resolve_action_url("nonexistent_zz")
+
+    def test_an_action_of_a_page_no_request_imported(self, tmp_path: Path) -> None:
+        root = tmp_path / "pages"
+        write_page(
+            root,
+            "unvisited",
+            "from next.forms import action\n\n\n"
+            '@action("unvisited_ping")\n'
+            "def unvisited_ping():\n"
+            "    return None\n",
+        )
+        with isolated_form_registries(), routed(root):
+            assert "_next/form/" in resolve_action_url("unvisited_ping")
 
 
 class _NamelessMetaBackend(FormActionBackend):

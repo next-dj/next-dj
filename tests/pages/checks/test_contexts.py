@@ -1,8 +1,17 @@
+from pathlib import Path
 from typing import Literal
 
 import pytest
 
-from next.pages.checks.contexts import annotation_mismatch
+from next.pages.checks.contexts import (
+    annotation_mismatch,
+    check_context_registration_files,
+)
+from tests.support import routed, write_page
+from tests.support.access import page_source, write_proxy
+
+
+_ORG = 'from next.pages import context\n\n@context("org")\ndef org():\n    return 1\n'
 
 
 def _returns_dict() -> dict:
@@ -41,3 +50,18 @@ class TestReturnAnnotationHelpers:
     )
     def test_the_mismatch_is_read_off_the_resolved_hint(self, func, expected) -> None:
         assert annotation_mismatch(func) == expected
+
+
+class TestProxyContexts:
+    """next.E074 flags a `@context` in a `proxy.py`, which no page render collects."""
+
+    def test_a_proxy_context_is_flagged(self, tmp_path: Path) -> None:
+        root = tmp_path / "pages"
+        declaring = write_proxy(root, _ORG)
+        write_page(root, "a", page_source())
+
+        with routed(root):
+            messages = check_context_registration_files()
+
+        assert [(m.id, m.obj) for m in messages] == [("next.E074", str(declaring))]
+        assert "is not a page.py" in messages[0].msg

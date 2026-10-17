@@ -12,6 +12,7 @@ from .actions import (
     check_instance_from_url_on_non_model_form,
     check_instance_from_url_unknown_field,
     check_invalid_form_meta_scope,
+    check_public_actions,
     check_shared_action_name_collisions,
     check_success_message_framework,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "check_instance_from_url_on_non_model_form",
     "check_instance_from_url_unknown_field",
     "check_invalid_form_meta_scope",
+    "check_public_actions",
     "check_shared_action_name_collisions",
     "check_shared_page_forms",
     "check_success_message_framework",

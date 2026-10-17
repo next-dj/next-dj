@@ -7,6 +7,7 @@ import pytest
 from django.contrib.auth.models import AbstractUser, Group, Permission, User
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.sessions.models import Session
+from django.core.exceptions import ImproperlyConfigured
 from django.db.models import Model
 from django.http import Http404, HttpRequest
 from django.test import Client
@@ -19,9 +20,16 @@ from next.deps import (
     UnknownDependencyError,
 )
 from next.deps.introspect import cached_type_hints
-from next.deps.objects import SCOPE_DEPENDENCY, ObjectProvider, object_target
+from next.deps.objects import (
+    SCOPE_DEPENDENCY,
+    ObjectProvider,
+    UnservedObjectProvider,
+    object_target,
+)
+from next.pages.context import ContextByNameProvider
 from next.pages.loaders import _load_python_module
 from next.testing import make_resolution_context
+from next.urls import UrlKwargsProvider
 from tests.support import (
     bound_dependency,
     inspect_parameter,
@@ -740,3 +748,73 @@ class TestScopeOverride:
             response = Client().get(f"/{editors.pk}/")
         assert response.content.decode() == "auth:editors|AUTH:EDITORS"
         assert tenant_scope.calls == 1
+
+
+_RAW = "1"
+
+
+@pytest.mark.parametrize(
+    "provider", [UrlKwargsProvider(), ContextByNameProvider()], ids=["url", "context"]
+)
+class TestNameProvidersRefuseObjects:
+    """A same-named URL kwarg or context value never fills a `DObject` parameter."""
+
+    @pytest.mark.parametrize(
+        ("annotation", "claimed"),
+        [
+            pytest.param(DObject[Group], False, id="model"),
+            pytest.param(DObject[Group, "permissions"], False, id="parent"),
+            pytest.param(Annotated[DObject[Group], "doc"], False, id="annotated"),
+            pytest.param(DObject[Group] | None, False, id="union"),
+            pytest.param("DObject[Group]", False, id="unresolved"),
+            pytest.param(int, True, id="plain"),
+        ],
+    )
+    def test_the_claim(self, provider, annotation, claimed) -> None:
+        param = inspect_parameter("group", annotation)
+        context = make_resolution_context(
+            url_kwargs={"group": _RAW}, context_data={"group": _RAW}
+        )
+        assert provider.static_can_handle(param) is (None if claimed else False)
+        assert provider.can_handle(param, context) is claimed
+
+    def test_an_explicit_resolver_leaves_the_parameter_unfilled(self, provider) -> None:
+        resolved = DependencyResolver(provider).resolve_dependencies(
+            _group, group=_RAW, _context_data={"group": _RAW}
+        )
+        assert resolved["group"] is None
+
+
+def _without_object_provider(resolver: DependencyResolver) -> DependencyResolver:
+    resolver._sync_providers()
+    loader = next(p for p in resolver._providers if isinstance(p, ObjectProvider))
+    resolver.remove_provider(loader)
+    return resolver
+
+
+class TestUnservedObject:
+    """A `DObject` every provider passes over is refused, never filled raw."""
+
+    def test_it_runs_after_every_shipped_provider(self) -> None:
+        providers = DependencyResolver()
+        providers._sync_providers()
+        assert type(providers._providers[-1]) is UnservedObjectProvider
+
+    def test_it_claims_what_the_object_provider_claims(self) -> None:
+        provider = UnservedObjectProvider()
+        context = make_resolution_context()
+        for annotation, claimed in ((DObject[Group], True), (Group, False)):
+            param = inspect_parameter("group", annotation)
+            assert provider.static_can_handle(param) is claimed
+            assert provider.can_handle(param, context) is claimed
+
+    def test_a_resolver_without_the_object_provider_refuses_on_every_resolve(
+        self, resolver_class
+    ) -> None:
+        fresh = _without_object_provider(resolver_class())
+        for _attempt in range(2):
+            with pytest.raises(
+                ImproperlyConfigured,
+                match='DObject parameter "group" reached no provider',
+            ):
+                fresh.resolve_dependencies(_group, group=_RAW)

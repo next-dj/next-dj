@@ -2,7 +2,7 @@
 
 import itertools
 import types
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, override
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -233,7 +233,7 @@ def build_form_namespace_for_action(
 
 
 def _build_form_namespace_from_meta(
-    meta: "ActionMeta", request: "HttpRequest"
+    meta: "ActionMeta", request: "HttpRequest", dep_cache: dict[str, Any] | None = None
 ) -> types.SimpleNamespace | None:
     """Build the form namespace for already-resolved action meta."""
     wizard_class = meta.get("wizard_class")
@@ -244,7 +244,7 @@ def _build_form_namespace_from_meta(
     fc = meta.get("form_class")
     if fc is None:
         return None
-    return _form_action_context_callable(fc)(request)
+    return _form_action_context_callable(fc)(request, dep_cache)
 
 
 __all__ = [

@@ -13,10 +13,10 @@ from django.template.engine import Engine
 from django.test import override_settings
 from django.utils.encoding import iri_to_uri
 
+from next import utils
 from next.checks import reset_check_caches
 from next.conf import NextFrameworkSettings, next_framework_settings
 from next.diagnostics import reset_failure_logs, watch_degraded
-from next.forms import uid
 from next.forms.wizard import SessionFormWizardBackend, wizard_backend_manager
 from next.pages import Page
 from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
@@ -33,8 +33,10 @@ from tests.support import (
     build_mock_http_request,
     install_visibility_hooks,
     restored_permissions,
+    tags,
     tick_scenario,
 )
+from tests.support.access import restored_declarations
 
 
 _REDIRECT_CAP = 16384
@@ -52,8 +54,8 @@ class _CappedRedirect(HttpResponseRedirect):
 
 @pytest.fixture()
 def cap_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give the shared redirect helper Django's Location cap on every version."""
-    monkeypatch.setattr(uid, "HttpResponseRedirect", _CappedRedirect)
+    """Give the shared redirect helpers Django's Location cap on every version."""
+    monkeypatch.setattr(utils, "HttpResponseRedirect", _CappedRedirect)
 
 
 @pytest.fixture()
@@ -252,10 +254,24 @@ def isolated_permissions() -> Generator[PermissionManager, None, None]:
 
 
 @pytest.fixture()
+def isolated_declarations() -> Generator[None, None, None]:
+    """Run the test over no access declarations and restore the earlier ones after."""
+    with restored_declarations():
+        yield
+
+
+@pytest.fixture()
 def object_permission_backend() -> Generator[None, None, None]:
     """List `ObjectPermissionBackend` after `ModelBackend` for the test."""
     with override_settings(AUTHENTICATION_BACKENDS=OBJECT_PERMISSION_BACKENDS):
         yield
+
+
+@pytest.fixture()
+def guard_tags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let `{% load guard_tags %}` find the block tags of `tests.support.tags`."""
+    engine = Engine.get_default()
+    monkeypatch.setitem(engine.template_libraries, "guard_tags", tags.register)
 
 
 @pytest.fixture()

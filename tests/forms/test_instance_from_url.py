@@ -1,3 +1,4 @@
+from collections.abc import Generator
 from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
@@ -6,7 +7,10 @@ import pytest
 from django import forms as django_forms
 from django.contrib.auth.models import Group
 from django.http import Http404, HttpRequest, QueryDict
+from django.test import Client
 
+from next.deps import REQUEST_DEP_CACHE_ATTR
+from next.deps.objects import SCOPE_DEPENDENCY
 from next.forms import ActionRegistration, Form, ModelForm, RegistryFormActionBackend
 from next.forms.base import _instance_from_url_db_fields, _instance_lookup_from_spec
 from next.forms.checks import (
@@ -20,6 +24,7 @@ from next.forms.dispatch.build import (
     _form_action_context_callable,
 )
 from next.forms.registration import registration_diagnostics
+from tests.support import bound_dependency, routed, write_page
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
@@ -506,3 +511,147 @@ class TestGetRenderInstanceFromUrl:
         namespace = _form_action_context_callable(GroupNoSpecForm)(request)
 
         assert namespace.form.instance.pk is None
+
+
+@pytest.fixture()
+def auth_scope(scoped_models) -> Generator[None, None, None]:
+    with bound_dependency(SCOPE_DEPENDENCY, lambda: "auth"):
+        yield
+
+
+@pytest.mark.django_db()
+@pytest.mark.usefixtures("auth_scope")
+class TestScopedGetInitial:
+    """A model with `visible_to` and a `scope` loads its row the way `DObject` does."""
+
+    def test_a_visible_row_by_a_field(self) -> None:
+        group = Group.objects.create(name="auth:editors")
+        assert GroupByNameForm.get_initial(HttpRequest(), name="auth:editors") == group
+
+    @pytest.mark.parametrize(
+        ("form", "kwargs"),
+        [
+            pytest.param(GroupByNameForm, {"name": "other:outsiders"}, id="field"),
+            pytest.param(GroupByPkForm, {"id": "outsiders"}, id="pk"),
+            pytest.param(GroupByPkForm, {"id": "not-a-pk"}, id="malformed-pk"),
+        ],
+    )
+    def test_a_hidden_row_answers_404(self, form, kwargs) -> None:
+        outsiders = Group.objects.create(name="other:outsiders")
+        if kwargs.get("id") == "outsiders":
+            kwargs = {"id": outsiders.pk}
+        with pytest.raises(Http404):
+            form.get_initial(HttpRequest(), **kwargs)
+
+    def test_a_call_without_the_request_names_the_fix(self) -> None:
+        Group.objects.create(name="auth:editors")
+        with pytest.raises(TypeError, match=r"super\(\)\.get_initial\(request"):
+            GroupByNameForm.get_initial(name="auth:editors")
+
+    def test_the_row_is_shared_with_the_request_cache(
+        self, django_assert_num_queries
+    ) -> None:
+        group = Group.objects.create(name="auth:staff")
+        request = HttpRequest()
+        setattr(request, REQUEST_DEP_CACHE_ATTR, {})
+        with django_assert_num_queries(1):
+            first = GroupByPkForm.get_initial(request, id=str(group.pk))
+            second = GroupByPkForm.get_initial(request, id=group.pk)
+        assert first is second
+        assert set(getattr(request, REQUEST_DEP_CACHE_ATTR)) >= {
+            f"DObject[auth.group]({group.pk!r})"
+        }
+
+
+@pytest.mark.django_db()
+def test_without_a_scope_the_row_loads_unscoped(scoped_models) -> None:
+    outsiders = Group.objects.create(name="other:outsiders")
+    assert GroupByNameForm.get_initial(name="other:outsiders") == outsiders
+
+
+_SHARED_PAGE = """
+from typing import ClassVar
+
+from django.contrib.auth.models import Group
+from django.http import HttpResponse
+
+from next.deps import DObject
+from next.forms import ModelForm, action
+from next.pages import context
+
+
+@context("group")
+def group(group: DObject[Group]) -> Group:
+    return group
+
+
+class SharedGroupForm(ModelForm):
+    class Meta:
+        model = Group
+        fields: ClassVar[list[str]] = ["name"]
+
+    @classmethod
+    def get_initial(cls, group: DObject[Group]) -> Group:
+        return group
+
+
+@action("shared_group", form_class=SharedGroupForm)
+def save(form: SharedGroupForm) -> HttpResponse:
+    return HttpResponse("saved")
+"""
+
+
+_URL_PAGE = """
+from typing import ClassVar
+
+from django.contrib.auth.models import Group
+from django.http import HttpResponse
+
+from next.deps import DObject
+from next.forms import ModelForm, action
+from next.pages import context
+
+
+@context("group")
+def group(group: DObject[Group]) -> Group:
+    return group
+
+
+class UrlGroupForm(ModelForm):
+    class Meta:
+        model = Group
+        fields: ClassVar[list[str]] = ["name"]
+        instance_from_url: ClassVar[dict[str, str]] = {"group": "pk"}
+
+
+@action("shared_group", form_class=UrlGroupForm)
+def save(form: UrlGroupForm) -> HttpResponse:
+    return HttpResponse("saved")
+"""
+
+
+@pytest.mark.django_db()
+@pytest.mark.usefixtures("auth_scope")
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param(_SHARED_PAGE, id="get-initial"),
+        pytest.param(_URL_PAGE, id="instance-from-url"),
+    ],
+)
+def test_the_page_and_its_form_load_the_row_once(
+    tmp_path: Path, django_assert_num_queries, source: str
+) -> None:
+    group = Group.objects.create(name="auth:staff")
+    root = tmp_path / "pages"
+    write_page(
+        root,
+        "[int:group]",
+        source,
+        body='{{ group.name }}|{% form "shared_group" %}{{ form.name.value }}'
+        "{% endform %}",
+    )
+    with routed(root), django_assert_num_queries(1):
+        response = Client().get(f"/{group.pk}/")
+    assert response.status_code == 200
+    assert response.content.decode().count("auth:staff") == 2

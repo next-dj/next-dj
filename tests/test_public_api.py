@@ -54,6 +54,7 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "context",
             "ld",
             "page",
+            "proxy",
             "signals",
         }
     ),
@@ -138,11 +139,16 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
     ),
     "next.permissions": frozenset(
         {
+            "AccessRule",
+            "Denial",
             "ObjectPermissionBackend",
             "PermissionAlreadyRegisteredError",
             "Predicate",
+            "Requirement",
+            "UnknownAccessObjectError",
             "add_perm",
-            "checks",
+            "check",
+            "declared",
             "has_perm",
             "perms_for",
             "predicate",

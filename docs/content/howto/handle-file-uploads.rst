@@ -117,7 +117,7 @@ The walkthrough above is the wiring, not the policy.
 An upload accepts bytes from a visitor, keeps them, and later hands them to another visitor, so it needs limits and validation before it goes to production.
 Four rules cover most of the exposure.
 
-- Guard the action with ``Meta.login_required`` at a minimum, because the dispatch endpoint accepts a POST from any visitor.
+- Guard the action with ``Meta.login_required`` or a ``proxy.login_required()`` in a ``proxy.py`` over its page at a minimum, because the dispatch endpoint accepts a POST from any visitor.
 - Cap the request at the web server and cap the field with a validator, because ``DATA_UPLOAD_MAX_MEMORY_SIZE`` bounds only the non-file part of a multipart body.
 - Check the extension against an allow list and read the media type from the leading bytes, because the client writes the ``Content-Type`` of every part it sends.
 - Generate the stored name on the server with a callable ``upload_to`` and never let the uploaded filename reach a path.

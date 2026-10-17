@@ -10,6 +10,7 @@ import logging
 from typing import TYPE_CHECKING, Final, Literal
 
 from next.caches import BoundedCache, LruCache
+from next.permissions.access import declarations
 from next.utils import exec_module_file
 
 
@@ -46,7 +47,7 @@ def _detached(exc: Exception) -> Exception:
 def last_load_error(file_path: Path) -> Exception | None:
     """Return what the last import of `file_path` raised, while one stands.
 
-    A failed import degrades the render to the bare template, so a check names it.
+    A failed import renders the component as nothing, so a check names it.
     """
     return _load_errors.get(file_path)
 
@@ -105,11 +106,11 @@ class ModuleLoader:
     def _load_from_disk(self, path: Path) -> ModuleType | None:
         """Execute `path` as a module, recording whatever its body raised.
 
-        A module body runs arbitrary user code, so every failure degrades the
-        render to the bare template instead of reaching the browser as a 500.
+        A failure is recorded for the render to refuse, and declarations swap in after.
         """
         try:
-            module = exec_module_file(path, f"component_module_{path.stem}")
+            with declarations.collecting(path):
+                module = exec_module_file(path, f"component_module_{path.stem}")
         except Exception as exc:
             logger.exception("Could not import component module %s", path)
             _load_errors[path] = _detached(exc)

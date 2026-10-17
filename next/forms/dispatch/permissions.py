@@ -1,20 +1,35 @@
 """Guard and permission-hook enforcement for the form action dispatch pipeline."""
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
-from urllib.parse import urlsplit, urlunsplit
 
-from django.conf import settings
-from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.core.exceptions import PermissionDenied
 from django.forms import BaseModelForm
-from django.http import HttpResponse, HttpResponseRedirect, QueryDict
-from django.shortcuts import resolve_url
+from django.http import HttpResponse, HttpResponseRedirect
 
+from next.caches import PageCache
 from next.forms.signals import form_access_denied
-from next.forms.uid import posted_origin_path, redirect_or_fallback
+from next.forms.uid import posted_origin_path
 from next.pages import page
+from next.pages.access import (
+    AccessStamp,
+    access_stamp,
+    left_to_middleware,
+    owner_access,
+    page_access,
+    refuse_broken,
+    url_lookup,
+)
+from next.permissions.access import (
+    answer,
+    check,
+    login_middleware_active,
+    login_redirect,
+    signed_in,
+)
 from next.permissions.manager import permission_manager
+from next.permissions.markers import OPEN, AccessRule, joined
 
 from .build import _resolve_and_call
 
@@ -49,18 +64,7 @@ if TYPE_CHECKING:
 
         def has_perm(self, perm: str, obj: "Model | None" = None) -> bool: ...
 
-
-def _redirect_to_login(next_url: str) -> HttpResponseRedirect:
-    """Build the LOGIN_URL redirect with `next_url`, dropped past the redirect cap.
-
-    Mirrors Django's `redirect_to_login`, whose module needs `contrib.auth` installed.
-    """
-    login_url = resolve_url(settings.LOGIN_URL)
-    scheme, netloc, path, query, fragment = urlsplit(login_url)
-    querystring = QueryDict(query, mutable=True)
-    querystring[REDIRECT_FIELD_NAME] = next_url
-    target = (scheme, netloc, path, querystring.urlencode(safe="/"), fragment)
-    return redirect_or_fallback(urlunsplit(target), login_url)
+        def has_perms(self, perms: tuple[str, ...]) -> bool: ...
 
 
 _NO_PERMISSIONS: tuple[str, ...] = ()
@@ -113,15 +117,104 @@ def _check_access(
 
     Anonymous users are sent to log in, and `object_stage` defers registered perms.
     """
-    user = getattr(request, "user", None)
-    if user is None or not user.is_authenticated:
-        return _redirect_to_login(posted_origin_path(request) or "/")
+    if not signed_in(getattr(request, "user", None)):
+        return login_redirect(posted_origin_path(request) or "/")
     permissions = guard.permissions
     if permissions and object_stage:
         permissions = _split_permissions(permissions).static
+    user = cast("_PermissionHolder", request.user)
     if permissions and not user.has_perms(permissions):
         raise PermissionDenied
     return None
+
+
+@dataclass(frozen=True, slots=True)
+class _Tree:
+    """The rules over one action and its origin page, joined once per change.
+
+    An open rule defers to `LoginRequiredMiddleware`, and a posted origin opens nothing.
+    """
+
+    stamp: AccessStamp | None
+    rule: AccessRule
+    broken: Path | None
+    deferred: bool
+
+
+_trees: PageCache[tuple[str | None, Path | None], _Tree] = PageCache()
+
+
+def _build_tree(
+    file_path: str | None, origin_path: Path | None, stamp: AccessStamp | None
+) -> _Tree:
+    """Read the rules of the action owner and of the origin page and join them.
+
+    A file of a tree answers to the page of its directory.
+    """
+    owner = None if file_path is None else owner_access(Path(file_path))
+    origin = None if origin_path is None else page_access(origin_path)
+    accesses = [held for held in (owner, origin) if held is not None]
+    broken = next((held.broken for held in accesses if held.broken is not None), None)
+    owned = OPEN if owner is None else owner.rule
+    deferred = left_to_middleware(owned) or (
+        origin is not None and left_to_middleware(origin.rule)
+    )
+    rule = joined(held.rule for held in accesses)
+    return _Tree(None if broken is not None else stamp, rule, broken, deferred)
+
+
+def _tree(file_path: str | None, origin_path: Path | None) -> _Tree:
+    """Return the joined rules over an action, one memo read while no rule changed.
+
+    Past any load, or under watched edits, the rules are read and joined again.
+    """
+    key = (file_path, origin_path)
+    held = _trees.get(key)
+    stamp = access_stamp()
+    if held is None or held.stamp is None or held.stamp != stamp:
+        held = _trees[key] = _build_tree(file_path, origin_path, stamp)
+    return held
+
+
+def _check_tree_access(
+    request: "HttpRequest",
+    file_path: object,
+    origin_match: "OriginMatch | None",
+    dep_cache: dict[str, Any],
+    *,
+    action_name: str,
+    uid: str | None,
+    sender: type,
+) -> HttpResponseRedirect | None:
+    """Enforce the rule of the action owner and of the origin page before its guard.
+
+    A forged origin adds its rule to the owner's and lifts none of it.
+    """
+    origin_path = origin_match.page_path if origin_match is not None else None
+    tree = _tree(file_path if isinstance(file_path, str) else None, origin_path)
+    if tree.broken is not None:
+        refuse_broken(tree.broken)
+    rule = tree.rule
+    if not rule.requirements:
+        if (
+            tree.deferred
+            and login_middleware_active()
+            and not signed_in(getattr(request, "user", None))
+        ):
+            return login_redirect(posted_origin_path(request) or "/")
+        return None
+    url_kwargs = dict(origin_match.url_kwargs) if origin_match is not None else {}
+    lookup = url_lookup(request, url_kwargs, dep_cache)
+    denial = check(getattr(request, "user", None), rule, lookup)
+    if denial is None:
+        return None
+    try:
+        return answer(denial, posted_origin_path(request) or "/")
+    except PermissionDenied:
+        _emit_form_access_denied(
+            request, action_name, uid, layer="page", reason="denied", sender=sender
+        )
+        raise
 
 
 def _check_page_access(

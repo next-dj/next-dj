@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 from django import forms
-from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.contrib.auth.models import Group
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, QueryDict
 
+from next.deps.objects import SCOPE_DEPENDENCY
 from next.forms import Form
 from next.forms.backends import ActionRegistration, RegistryFormActionBackend
 from next.forms.dispatch import FormActionDispatch
@@ -16,8 +19,18 @@ from next.forms.origin import (
     filter_reserved_url_kwargs,
     resolve_origin,
 )
-from next.forms.uid import validated_origin_path
+from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
+from tests.benchmarks.factories import StandInRows
+from tests.support import PermissionHolder, bound_dependency, routed
+from tests.support.access import write_proxy
 from tests.support.helpers import build_mock_http_request
+
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from pathlib import Path
+
+    from next.forms.backends import ActionMeta
 
 
 class _RedirectDuck:
@@ -247,3 +260,88 @@ class TestBenchFormBuild:
         assert _BenchForm._has_get_form_kwargs is False
         namespace = benchmark(build, request)
         assert namespace.form.initial == {}
+
+
+_TREE_PROXY = "proxy.login_required()\n"
+_TREE_GROUP_PK = 7
+_TREE_PAGES = {
+    "open": "x = 1\n",
+    "guarded": (
+        'from next.pages import page\n\npage.permission_required("auth.change_user")\n'
+    ),
+    "guarded-object": (
+        "from django.contrib.auth.models import Group\n\n"
+        "from next.deps import DObject\n"
+        "from next.pages import page\n\n"
+        'page.permission_required("auth.change_user", obj=DObject[Group])\n'
+    ),
+}
+
+
+@pytest.fixture()
+def stand_in_scope(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
+    """Answer every `Group` lookup from memory and bind the `scope` dependency."""
+    rows = StandInRows(Group(pk=_TREE_GROUP_PK, name="bench"))
+    monkeypatch.setattr(
+        Group._default_manager, "visible_to", rows.visible_to, raising=False
+    )
+    with bound_dependency(SCOPE_DEPENDENCY, lambda: "tenant"):
+        yield
+
+
+def _tree_action(
+    root: Path, shape: str
+) -> tuple[RegistryFormActionBackend, ActionMeta]:
+    """Register the bench action as declared by a `page.py` of a routed tree.
+
+    Every shape but `open` adds a `proxy.py` requiring a login above the page.
+    """
+    directory = root / "guarded" / "[int:group]"
+    directory.mkdir(parents=True)
+    if shape != "open":
+        write_proxy(root, _TREE_PROXY)
+    page_file = directory / "page.py"
+    page_file.write_text(_TREE_PAGES[shape])
+    backend = RegistryFormActionBackend()
+    backend.register_action(
+        ActionRegistration(
+            name="bench_action",
+            file_path=str(page_file),
+            scope="shared",
+            handler=_ok_handler,
+            form_class=_BenchForm,
+        )
+    )
+    meta = backend.get_meta("bench_action")
+    assert meta is not None
+    return backend, meta
+
+
+@pytest.mark.usefixtures("stand_in_scope")
+class TestBenchDispatchUnderTreeAccess:
+    """A valid dispatch of an action whose `page.py` sits under a page tree rule."""
+
+    @pytest.mark.parametrize("shape", list(_TREE_PAGES))
+    @pytest.mark.benchmark(group="forms.dispatch.access")
+    def test_dispatch_under_the_owner_rule(
+        self, tmp_path: Path, shape: str, benchmark
+    ) -> None:
+        root = tmp_path / "pages"
+        backend, meta = _tree_action(root, shape)
+        origin = f"/guarded/{_TREE_GROUP_PK}/"
+        request = build_mock_http_request(
+            method="POST",
+            POST=QueryDict(f"name=bench&{ORIGIN_FIELD_NAME}={origin}"),
+            FILES=None,
+        )
+        request.user = PermissionHolder("auth.change_user")
+        with routed(root):
+            response = FormActionDispatch.dispatch(
+                backend, request, "bench_action", meta
+            )
+            assert isinstance(response, HttpResponseRedirect)
+            assert response.url == "/"
+            assert bool(request.user.asked) is (shape != "open")
+            benchmark(
+                FormActionDispatch.dispatch, backend, request, "bench_action", meta
+            )

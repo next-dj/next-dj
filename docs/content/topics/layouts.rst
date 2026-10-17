@@ -5,6 +5,7 @@ Layouts
 
 A layout is a ``layout.djx`` file in any directory under a page root.
 The framework wraps every page below it through string substitution into a ``{% template %}`` placeholder.
+A layout carries markup alone, the logic of a segment lives in its ``page.py`` and its access in a ``proxy.py``.
 
 .. contents::
    :local:
@@ -105,11 +106,21 @@ The paired form ``{% #template %}...{% /template %}`` marks the same hole and ca
 A layout rendered on its own, outside the chain that would fill its hole, shows that body instead of an empty gap.
 Write the fallback where a layout doubles as a standalone template, such as a shell a plain Django view renders, and keep the single form everywhere else.
 
-Publishing context from a layout segment
+.. _topics-layouts-segment-files:
+
+layout.djx beside page.py and proxy.py
+--------------------------------------
+
+A ``layout.djx`` carries markup alone.
+The logic of a segment lives in the ``page.py`` of its directory, and the access of the directory and every page below it lives in a ``proxy.py``, see :doc:`proxy`.
+A layout markup reads every value of the page context, because the whole chain renders from one context.
+
+.. _topics-layouts-inherited-context:
+
+Inherited context from a segment page.py
 ----------------------------------------
 
-A segment directory that contains a ``layout.djx`` can also have a sibling ``page.py``.
-Use it to publish values that the layout markup needs and, with ``inherit_context=True``, to make those values available to every descendant page.
+A segment directory that holds a ``page.py`` publishes context to every page below it through ``inherit_context=True``.
 
 .. code-block:: python
    :caption: notes/pages/page.py
@@ -127,9 +138,38 @@ Use it to publish values that the layout markup needs and, with ``inherit_contex
        return Note.objects.count()
 
 The ``inherit_context=True`` flag publishes the value to every descendant page, whereas without the flag the value is available only when ``notes/pages/page.py`` itself handles the request.
+The chain follows the ancestor directories on disk, not the URL, so a tree mounted under a prefix of another tree inherits no context from the ``page.py`` files of the host.
 
 Context functions in a segment ``page.py`` take dependencies the same way any page does.
-The resolver shares its cache across the entire layout chain and the leaf page, so a value resolved at an ancestor segment is not recomputed further down.
+The resolver shares its cache across the entire chain and the leaf page, so a value resolved at an ancestor segment is not recomputed further down.
+
+A render runs the inherited callables root first, directory by directory, and the callables of the page itself last.
+A nested ``DObject`` relies on that order.
+A ``DObject[Comment, "post"]`` in a page reads the ``post`` value an ancestor ``page.py`` loaded, so a comment URL under another post answers 404, see :ref:`topics-di-dobject`.
+
+.. code-block:: python
+   :caption: blog/pages/posts/[int:post]/page.py
+
+   from blog.models import Post
+
+   from next import context
+   from next.deps import DObject
+
+   @context("post", inherit_context=True)
+   def post(post: DObject[Post]) -> Post:
+       return post
+
+.. code-block:: python
+   :caption: blog/pages/posts/[int:post]/comments/[int:comment]/page.py
+
+   from blog.models import Comment
+
+   from next import context
+   from next.deps import DObject
+
+   @context("comment")
+   def comment(comment: DObject[Comment, "post"]) -> Comment:
+       return comment
 
 The same segment ``page.py`` is where a section declares its metadata.
 A module-level ``metadata`` dict reaches every page under the directory without a flag, and a ``@page.metadata(inherit=True)`` callable does the same with the request in hand.
@@ -259,6 +299,10 @@ Inherited context not visible to a sub-page.
    The ``inherit_context=True`` flag is required on the ancestor ``page.py`` that declares the value.
    Without it the value is not injected into descendant routes.
 
+A mounted tree misses a requirement.
+   A tree mounted under a prefix inherits no ``proxy.py`` of the tree that hosts it.
+   Declare the requirement in a ``proxy.py`` at the root of the mounted tree, see :doc:`proxy`.
+
 Two roots produce one composed page.
    A page composes its layout chain from its own ancestor directories.
    The chain follows the directory the file sits in, so a file routed by two backends composes the same layouts under both mounts.
@@ -271,6 +315,7 @@ See also
 
    :doc:`pages` for the page body sources and the layout placeholder.
    :doc:`context` for context inheritance rules.
+   :doc:`proxy` for the access a ``proxy.py`` declares over a subtree.
    :doc:`seo/metadata` for the ``{% metadata %}`` tag and the metadata a segment ``page.py`` declares.
    :doc:`multi-project` for project-level layout roots.
    :doc:`/content/internals/page-discovery` for the composition pipeline.

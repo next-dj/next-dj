@@ -635,8 +635,8 @@ class TestRenderComponent:
         out = load_component_template(info)
         assert out == "<div>{{ x }}</div>"
 
-    def test_render_composite_module_load_fallback(self, tmp_path: Path) -> None:
-        """When composite module fails to load, fall back to template string."""
+    def test_render_composite_module_load_failure(self, tmp_path: Path) -> None:
+        """A composite module that fails to load renders nothing, not its template."""
         (tmp_path / "bad").mkdir()
         (tmp_path / "bad" / "component.djx").write_text("<p>fallback</p>")
         (tmp_path / "bad" / "component.py").write_text("syntax error (")
@@ -649,7 +649,7 @@ class TestRenderComponent:
             is_simple=False,
         )
         html = render_component(info, {})
-        assert "fallback" in html
+        assert html == ""
 
     def test_render_composite_with_custom_render(self, tmp_path: Path) -> None:
         """Composite with render() in component.py uses it and returns string."""

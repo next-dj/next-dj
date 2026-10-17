@@ -110,7 +110,7 @@ Page module body source.
 
 Layout chain.
    Every ancestor ``layout.djx`` renders again.
-   Layout level context functions still run, with the cached values where the cache hit, with fresh evaluation where it did not.
+   The inherited context functions of ancestor ``page.py`` files still run, with the cached values where the cache hit, with fresh evaluation where it did not.
 
 Static collector.
    The collector restarts so the rendered HTML contains the right set of asset links.

@@ -35,6 +35,7 @@ A page at any depth reaches the domain through the same absolute import, such as
      tests/
      pages/
        layout.djx
+       proxy.py
        page.py
        template.djx
        _components/
@@ -103,7 +104,7 @@ The last column names what another application of the same project may use.
      - Tests of other applications.
      - No.
    * - ``pages/``
-     - Delivery, which means ``page.py`` with its context, actions, and metadata, ``layout.djx``, ``template.djx``, and co-located assets.
+     - Delivery, which means ``page.py`` with its context, actions, access, and metadata, ``layout.djx`` with the markup of a section, ``proxy.py`` with the access of a section, ``template.djx``, and co-located assets.
      - Domain rules, model writes outside a form or a service, and every other Python module.
      - No, a page tree has no import path.
    * - ``pages/_components/``
@@ -140,7 +141,7 @@ Delivery stays in pages
 -----------------------
 
 The page tree holds delivery files and nothing else.
-These are ``page.py``, ``layout.djx``, ``template.djx``, ``component.py``, ``component.djx``, their co-located assets, and the ``sitemap.py``, ``robots.py``, and ``scripts.py`` sources the framework reads at the top of a page root.
+These are ``page.py``, ``proxy.py``, ``layout.djx``, ``template.djx``, ``component.py``, ``component.djx``, their co-located assets, and the ``sitemap.py``, ``robots.py``, and ``scripts.py`` sources the framework reads at the top of a page root.
 
 The reason is how the tree loads.
 The loader executes each ``page.py`` by its file path under one fixed module name, outside any package, and treats ``component.py`` the same way.

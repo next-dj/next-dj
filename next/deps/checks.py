@@ -21,11 +21,19 @@ from next.components.sources import get_components_manager
 from next.conf import next_framework_settings
 from next.forms.checks.sources import iter_registered_actions
 from next.introspect import describe_callable
+from next.pages.access import page_access
+from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.manager import page
 from next.urls.routes import page_route
 
 from .introspect import HINT_ERRORS, cached_signature, cached_type_hints
-from .objects import HINT_ADVICE, SCOPE_DEPENDENCY, object_target, unresolved_object
+from .objects import (
+    HINT_ADVICE,
+    SCOPE_DEPENDENCY,
+    object_kwarg,
+    object_target,
+    unresolved_object,
+)
 from .resolver import current_resolver
 
 
@@ -36,6 +44,7 @@ if TYPE_CHECKING:
     from django.db.models import Model
 
     from next.pages.registry import PageContextEntry
+    from next.permissions.markers import Requirement
     from next.urls import RouterManager
     from next.utils import PageRoot
 
@@ -60,16 +69,25 @@ class _ObjectParam(NamedTuple):
     parent: str | None
 
 
+class _ObjectDeclaration(NamedTuple):
+    """One `permission_required(obj=DObject[...])` a page answers to."""
+
+    requirement: Requirement
+    model: type[Model]
+
+
 class _PageRun(NamedTuple):
     """A routed `page.py`, the kwargs its full route hands it, and its context order.
 
-    A refused route keeps its tree trail and no kwargs, and ancestors lead `steps`.
+    A refused route has no kwargs, and `metadata` runs after `steps`, ancestors first.
     """
 
     route: str
     page_path: Path
     route_kwargs: frozenset[str] | None
     steps: tuple[tuple[str | None, PageContextEntry], ...]
+    metadata: tuple[Callable[..., Any], ...]
+    objects: tuple[_ObjectDeclaration, ...]
 
 
 class _ObjectSites(NamedTuple):
@@ -122,17 +140,36 @@ def _params_of(funcs: Iterable[Callable[..., Any]]) -> tuple[_ObjectParam, ...]:
     return tuple(param for func in funcs for param in _object_params(func))
 
 
+def _metadata_callables(page_path: Path) -> tuple[Callable[..., Any], ...]:
+    """Return the `@page.metadata` callables a render of `page_path` folds, root first.
+
+    A refused chain runs none of them, and `next.E102` and its neighbours report it.
+    """
+    try:
+        chain = page.metadata_chain(page_path)
+    except (PageMetadataShapeError, PageMetadataConflictError):
+        return ()
+    return tuple(source.func for source in chain.sources if source.func is not None)
+
+
+def _object_declarations(page_path: Path) -> tuple[_ObjectDeclaration, ...]:
+    """Return the `obj=DObject[...]` requirements the rule of `page_path` holds."""
+    return tuple(
+        _ObjectDeclaration(requirement, requirement.obj)
+        for requirement in page_access(page_path).rule.requirements
+        if isinstance(requirement.obj, type)
+    )
+
+
 def _page_run(root: PageRoot, url_path: str, page_path: Path) -> _PageRun:
     """Return the run order of every context callable a render of `page_path` calls."""
-    registry = page._context_manager
-    inherited = [
-        step for group in registry._inheritable_groups(page_path) for step in group
-    ]
-    steps = (*inherited, *registry._page_order(page_path).entries)
+    steps = page.contexts.run_order(page_path)
+    metadata = _metadata_callables(page_path)
+    objects = _object_declarations(page_path)
     route = page_route(root, url_path)
     if route is None:
-        return _PageRun(url_path, page_path, None, steps)
-    return _PageRun(route.url, page_path, route.kwargs, steps)
+        return _PageRun(url_path, page_path, None, steps, metadata, objects)
+    return _PageRun(route.url, page_path, route.kwargs, steps, metadata, objects)
 
 
 def _loaded_pages(
@@ -154,9 +191,9 @@ def _component_callables() -> Iterator[Callable[..., Any]]:
         return
     for backend in get_components_manager().backends:
         backend.import_component_modules()
-    for entries in component._registry._registry.values():
-        for entry in entries.values():
-            yield entry.func
+    for functions in component.registry.registered().values():
+        for function in functions:
+            yield function.func
 
 
 def _hooks(owner: object, names: Iterable[str]) -> Iterator[Callable[..., Any]]:
@@ -221,8 +258,15 @@ def object_sites() -> _ObjectSites | None:
 def _all_callables(sites: _ObjectSites) -> Iterator[Callable[..., Any]]:
     """Yield every callable the sites hold, each once."""
     page_funcs = (entry.func for run in sites.pages for _key, entry in run.steps)
+    metadata_funcs = (func for run in sites.pages for func in run.metadata)
     seen: set[int] = set()
-    for func in (*page_funcs, *sites.components, *sites.forms, *sites.dependencies):
+    for func in (
+        *page_funcs,
+        *metadata_funcs,
+        *sites.components,
+        *sites.forms,
+        *sites.dependencies,
+    ):
         if id(func) not in seen:
             seen.add(id(func))
             yield func
@@ -258,6 +302,34 @@ def _marker(param: _ObjectParam) -> str:
     return f'DObject[{label}, "{param.parent}"]'
 
 
+def _declared_site(declaration: _ObjectDeclaration) -> str:
+    """Spell an `obj=` declaration and the file making it for a message."""
+    requirement = declaration.requirement
+    perms = ", ".join(requirement.perms)
+    label = declaration.model._meta.label
+    return (
+        f"permission_required({perms!r}, obj=DObject[{label}]) in {requirement.source}"
+    )
+
+
+def _declarations(sites: _ObjectSites) -> Iterator[_ObjectDeclaration]:
+    """Yield every `obj=DObject[...]` some page answers to, each once."""
+    seen: set[_ObjectDeclaration] = set()
+    for run in sites.pages:
+        for declaration in run.objects:
+            if declaration not in seen:
+                seen.add(declaration)
+                yield declaration
+
+
+def _model_sites(sites: _ObjectSites) -> Iterator[tuple[type[Model], str]]:
+    """Yield the model and the spelled site of every row a `DObject` loads."""
+    for param in _all_params(sites):
+        yield param.model, f"{_marker(param)} on {_site(param)}"
+    for declaration in _declarations(sites):
+        yield declaration.model, _declared_site(declaration)
+
+
 @register(NEXT)
 def check_object_managers(*args, **kwargs) -> list[CheckMessage]:
     """Flag a `DObject` model whose manager defines no `visible_to` (`next.E155`)."""
@@ -266,8 +338,7 @@ def check_object_managers(*args, **kwargs) -> list[CheckMessage]:
         return []
     errors: list[CheckMessage] = []
     checked: set[type[Model]] = set()
-    for param in _all_params(sites):
-        model = param.model
+    for model, site in _model_sites(sites):
         if model in checked:
             continue
         checked.add(model)
@@ -275,7 +346,7 @@ def check_object_managers(*args, **kwargs) -> list[CheckMessage]:
             continue
         errors.append(
             Error(
-                f"{_marker(param)} on {_site(param)} loads its row through "
+                f"{site} loads its row through "
                 f"{model._meta.label}._default_manager.visible_to(scope), which "
                 "that manager does not define. Add visible_to(scope) to the "
                 "default manager, returning the rows the scope may see.",
@@ -330,26 +401,43 @@ def _parent_error(run: _PageRun, param: _ObjectParam) -> Error:
     )
 
 
+def _binding_messages(
+    run: _PageRun,
+    func: Callable[..., Any],
+    provided: dict[str, frozenset[str] | None] | None,
+    zones: frozenset[str] | None,
+) -> Iterator[CheckMessage]:
+    """Yield the route and parent messages of the `DObject` parameters of `func`.
+
+    No `provided` mapping means a keyless callable ran earlier, so no parent is judged.
+    """
+    for param in _object_params(func):
+        if run.route_kwargs is not None and param.name not in run.route_kwargs:
+            yield _route_warning(run, param)
+        parent = param.parent
+        if parent is None or provided is None:
+            continue
+        if not _provides(provided, parent, zones):
+            yield _parent_error(run, param)
+
+
 def _page_run_messages(run: _PageRun) -> Iterator[CheckMessage]:
     """Yield the binding messages of every `DObject` on one page, in run order.
 
-    A keyless callable spreads unknown keys, so a parent read after one goes unjudged.
+    A parent after a keyless callable is unjudged, a metadata one holds on every render.
     """
     provided: dict[str, frozenset[str] | None] = {}
     open_keys = False
     for key, entry in run.steps:
-        for param in _object_params(entry.func):
-            if run.route_kwargs is not None and param.name not in run.route_kwargs:
-                yield _route_warning(run, param)
-            parent = param.parent
-            if parent is None or open_keys:
-                continue
-            if not _provides(provided, parent, entry.zones):
-                yield _parent_error(run, param)
+        yield from _binding_messages(
+            run, entry.func, None if open_keys else provided, entry.zones
+        )
         if key is None:
             open_keys = True
         else:
             provided.setdefault(key, entry.zones)
+    for func in run.metadata:
+        yield from _binding_messages(run, func, None if open_keys else provided, None)
 
 
 @register(NEXT)
@@ -421,19 +509,54 @@ def check_object_scope(*args, **kwargs) -> list[CheckMessage]:
         return []
     if current_resolver().get_dependency(SCOPE_DEPENDENCY) is not None:
         return []
-    first = next(_all_params(sites), None)
+    first = next(_model_sites(sites), None)
     if first is None:
         return []
     return [
         Error(
-            f"{_marker(first)} on {_site(first)} passes the "
-            f'"{SCOPE_DEPENDENCY}" dependency to visible_to, and nothing '
-            "registers it, so every DObject lookup fails. Register it in the "
-            f'deps.py of an app with @resolver.dependency("{SCOPE_DEPENDENCY}"), '
-            "returning the user, the tenant, or whatever visible_to accepts.",
+            f'{first[1]} passes the "{SCOPE_DEPENDENCY}" dependency to '
+            "visible_to, and nothing registers it, so every DObject lookup fails. "
+            "Register it in the deps.py of an app with "
+            f'@resolver.dependency("{SCOPE_DEPENDENCY}"), returning the user, the '
+            "tenant, or whatever visible_to accepts.",
             id="next.E159",
         )
     ]
+
+
+def _unbound_declaration(run: _PageRun, declaration: _ObjectDeclaration) -> Error:
+    """Report an `obj=` whose model names a kwarg the route of a page lacks."""
+    kwarg = object_kwarg(declaration.model)
+    captured = ", ".join(sorted(run.route_kwargs or ())) or "none"
+    return Error(
+        f'{_declared_site(declaration)} loads its row by the URL kwarg "{kwarg}", '
+        f'but the route "{run.route}" of {run.page_path} under it captures '
+        f"{captured}, so every request to that page raises UnboundObjectError.",
+        hint=(
+            f"Name the segment [{kwarg}] or [int:{kwarg}], or capture {kwarg} in "
+            "the include or the mount prefix over the tree."
+        ),
+        obj=str(declaration.requirement.source),
+        id="next.E164",
+    )
+
+
+@register(NEXT)
+def check_object_declarations(*args, **kwargs) -> list[CheckMessage]:
+    """Flag an `obj=DObject[...]` whose kwarg a page under it lacks (`next.E164`).
+
+    The kwarg is the `model_name` of the model, read like a `DObject` parameter's name.
+    """
+    sites = object_sites()
+    if sites is None:
+        return []
+    return _unique(
+        _unbound_declaration(run, declaration)
+        for run in sites.pages
+        if run.route_kwargs is not None
+        for declaration in run.objects
+        if object_kwarg(declaration.model) not in run.route_kwargs
+    )
 
 
 @register(NEXT)
@@ -460,6 +583,7 @@ def check_object_hints(*args, **kwargs) -> list[CheckMessage]:
 
 __all__ = [
     "check_object_component_contexts",
+    "check_object_declarations",
     "check_object_form_parents",
     "check_object_hints",
     "check_object_managers",

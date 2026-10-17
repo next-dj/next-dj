@@ -5,12 +5,14 @@ from django.http import HttpRequest, HttpResponseRedirect
 from wiki.deps import DArticle
 from wiki.models import RESERVED_SLUGS, Article
 
-from next import context
+from next import context, page
 from next.forms import ComponentWidget, ModelForm, PermissionOutcome
 from next.pages import MetadataDict
 
 
 metadata: MetadataDict = {"title": "Edit article", "robots": {"index": False}}
+
+page.public()
 
 
 class ArticleEditForm(ModelForm):

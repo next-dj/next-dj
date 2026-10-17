@@ -1,10 +1,12 @@
 import operator
 import re
 from itertools import product
+from pathlib import Path
 
 import pytest
 
-from next.permissions import Predicate, predicate
+from next.permissions import AccessRule, Predicate, Requirement, predicate
+from next.permissions.markers import OPEN, chained, joined
 
 
 _ANSWERS = list(product((True, False), repeat=2))
@@ -320,3 +322,139 @@ class TestForeignOperand:
     def test_the_operator_raises_type_error(self, join) -> None:
         with pytest.raises(TypeError):
             join(_constant("a"), True)
+
+
+_ROOT = Path("/tree/proxy.py")
+
+_LEAF = Path("/tree/a/page.py")
+
+
+class TestRequirement:
+    """A login carries nothing more, a permission names at least one."""
+
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            {"kind": "login", "perms": ("auth.view_group",)},
+            {"kind": "login", "obj": "note"},
+        ],
+        ids=["perms", "obj"],
+    )
+    def test_a_login_with_more_raises(self, fields) -> None:
+        with pytest.raises(ValueError, match="login requirement carries"):
+            Requirement(source=_ROOT, **fields)
+
+    def test_a_permission_without_a_name_raises(self) -> None:
+        with pytest.raises(ValueError, match="at least one permission"):
+            Requirement("permission", _ROOT)
+
+
+class TestJoined:
+    """The joined rule keeps every requirement once, in the order of the chain."""
+
+    def test_nothing_declared_is_the_open_rule(self) -> None:
+        assert joined([AccessRule(), AccessRule()]) is OPEN
+
+    def test_requirements_and_sources_keep_their_first_place(self) -> None:
+        login = Requirement("login", _ROOT)
+        view = Requirement("permission", _LEAF, ("auth.view_group",))
+        rules = [
+            AccessRule((login,), sources=(_ROOT,)),
+            AccessRule((view, login), sources=(_LEAF, _ROOT)),
+        ]
+
+        assert joined(rules) == AccessRule((login, view), False, (_ROOT, _LEAF))
+
+    def test_public_alone_makes_a_rule(self) -> None:
+        rule = joined([AccessRule(public=True, sources=(_LEAF,))], public=True)
+
+        assert rule == AccessRule((), True, (_LEAF,))
+
+
+_MIDDLE = Path("/tree/a/proxy.py")
+
+_LOGIN = Requirement("login", _ROOT)
+
+
+def _declared(path: Path, *requirements: Requirement, public: bool = False):
+    return AccessRule(requirements, public, (path,))
+
+
+class TestChained:
+    """A chain joins root first, and a public file lifts what the chain above asked."""
+
+    def test_nothing_declared_is_the_open_rule(self) -> None:
+        assert chained([AccessRule(), AccessRule()]) is OPEN
+
+    def test_requirements_join_root_first(self) -> None:
+        view = Requirement("permission", _LEAF, ("auth.view_group",))
+        rule = chained([_declared(_ROOT, _LOGIN), _declared(_LEAF, view, _LOGIN)])
+
+        assert rule == AccessRule((_LOGIN, view), False, (_ROOT, _LEAF))
+
+    def test_a_public_file_lifts_the_chain_above(self) -> None:
+        rule = chained([_declared(_ROOT, _LOGIN), _declared(_MIDDLE, public=True)])
+
+        assert rule == AccessRule((), True, (_MIDDLE,), (_ROOT,))
+
+    def test_a_requirement_below_the_lift_binds_again(self) -> None:
+        login = Requirement("login", _LEAF)
+        rule = chained(
+            [
+                _declared(_ROOT, _LOGIN),
+                _declared(_MIDDLE, public=True),
+                _declared(_LEAF, login),
+            ]
+        )
+
+        assert rule == AccessRule((login,), False, (_LEAF,))
+
+    def test_a_second_public_keeps_the_first(self) -> None:
+        rule = chained(
+            [
+                _declared(_ROOT, _LOGIN),
+                _declared(_MIDDLE, public=True),
+                _declared(_LEAF, public=True),
+            ]
+        )
+
+        assert rule == AccessRule((), True, (_MIDDLE,), (_ROOT,))
+
+    def test_a_requirement_beside_public_binds(self) -> None:
+        login = Requirement("login", _MIDDLE)
+        rule = chained([_declared(_MIDDLE, login, public=True)])
+
+        assert rule == AccessRule((login,), False, (_MIDDLE,))
+
+    def test_a_public_with_a_requirement_lifts_nothing_above(self) -> None:
+        secret = Requirement("permission", _ROOT, ("app.secret",))
+        login = Requirement("login", _MIDDLE)
+        rule = chained(
+            [_declared(_ROOT, secret), _declared(_MIDDLE, login, public=True)]
+        )
+
+        assert rule == AccessRule((secret, login), False, (_ROOT, _MIDDLE))
+
+    def test_a_public_after_a_bound_lift_names_the_middle_guard(self) -> None:
+        login = Requirement("login", _MIDDLE)
+        rule = chained(
+            [
+                _declared(_ROOT, public=True),
+                _declared(_MIDDLE, login),
+                _declared(_LEAF, public=True),
+            ]
+        )
+
+        assert rule == AccessRule((), True, (_LEAF,), (_MIDDLE,))
+
+    def test_joined_rules_lift_nothing_of_one_another(self) -> None:
+        lifted = AccessRule((), True, (_MIDDLE,), (_ROOT,))
+
+        rule = joined([_declared(_LEAF, _LOGIN), lifted])
+
+        assert rule == AccessRule((_LOGIN,), False, (_LEAF, _MIDDLE))
+
+    def test_a_public_join_keeps_what_was_lifted(self) -> None:
+        lifted = AccessRule((), True, (_MIDDLE,), (_ROOT,))
+
+        assert joined([lifted], public=True) == lifted

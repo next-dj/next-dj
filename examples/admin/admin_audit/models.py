@@ -4,6 +4,12 @@ from django.conf import settings
 from django.db import models
 
 
+class AdminActivityLogQuerySet(models.QuerySet):
+    def recent(self, limit: int) -> "AdminActivityLogQuerySet":
+        """Return the newest `limit` entries with their users, newest first."""
+        return self.select_related("user")[:limit]
+
+
 class AdminActivityLog(models.Model):
     """One row per `action_dispatched` for any `admin:*` action."""
 
@@ -25,6 +31,8 @@ class AdminActivityLog(models.Model):
     model_name = models.CharField(max_length=64, blank=True)
     object_repr = models.CharField(max_length=200, blank=True)
     response_status = models.PositiveSmallIntegerField()
+
+    objects = AdminActivityLogQuerySet.as_manager()
 
     class Meta:
         ordering: ClassVar = ["-timestamp"]

@@ -5,7 +5,14 @@ from typing import TYPE_CHECKING, cast
 from weakref import WeakKeyDictionary
 
 from next.components.manager import components_manager
-from next.partial.guards import Components, Stamps, bound_zones, fresh
+from next.partial.guards import (
+    Components,
+    Recheck,
+    Stamps,
+    bound_zones,
+    fresh,
+    rechecks,
+)
 from next.partial.headers import partial_intent
 from next.partial.signals import zone_registered
 from next.partial.zone import ZoneNode
@@ -26,7 +33,7 @@ if TYPE_CHECKING:
 class ZoneInfo:
     """One compiled zone of a composed page template.
 
-    `nested` and `standalone`, false under a check or a condition, are computed once.
+    `nested`, `standalone` and the `{% has_perm %}` blocks above it are computed once.
     """
 
     name: str
@@ -34,6 +41,7 @@ class ZoneInfo:
     options: "ZoneOptions"
     nested: frozenset[str]
     standalone: bool = True
+    recheck: Recheck | None = None
 
     @property
     def lazy(self) -> str | None:
@@ -71,6 +79,7 @@ def _zones_from_template(template: "Template", page_path: "Path") -> _Entry:
     zones: dict[str, ZoneInfo] = {}
     nodes = cast("list[ZoneNode]", template.nodelist.get_nodes_by_type(ZoneNode))
     bound, stamps = _bound(template, page_path) if nodes else (frozenset(), frozenset())
+    checks = rechecks(template.nodelist) if nodes else {}
     for node in nodes:
         zones[node.name] = ZoneInfo(
             name=node.name,
@@ -78,6 +87,7 @@ def _zones_from_template(template: "Template", page_path: "Path") -> _Entry:
             options=node.options,
             nested=_nested_names(node.partial),
             standalone=node.name not in bound,
+            recheck=checks.get(node.name),
         )
     return _Entry(zones, stamps)
 

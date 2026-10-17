@@ -5,7 +5,9 @@ from unittest.mock import patch
 
 import pytest
 from django.template import Engine, Template
+from django.template.base import TextNode
 
+from next.components import ComponentInfo, sources
 from next.components.renderers import TemplateSource
 from next.partial import guards
 from next.partial.guards import Components, bound_zones, fresh, guarded_zones
@@ -32,18 +34,19 @@ class _Loader:
     def __init__(self, sources: dict[str, TemplateSource | None]) -> None:
         self.sources = sources
 
-    def load_source(self, info: str) -> TemplateSource | None:
-        return self.sources[info]
+    def load_source(self, info: ComponentInfo) -> TemplateSource | None:
+        return self.sources[info.name]
 
 
 class _Manager:
-    """A components manager over named template texts, `None` for a Python-only one."""
+    """A components manager over named template texts, `None` for an unreadable one."""
 
     def __init__(self, root: Path, **components: str | None) -> None:
         self.root = root
         self.sources: dict[str, TemplateSource | None] = {}
         self.template_loader = _Loader(self.sources)
         self.asked: list[str] = []
+        self.modules: set[str] = set()
         for name, text in components.items():
             self.write(name, text)
 
@@ -56,9 +59,19 @@ class _Manager:
             self.sources[name] = TemplateSource(text, path)
         return path
 
-    def get_component(self, name: str, anchor: Path) -> str | None:
+    def get_component(self, name: str, anchor: Path) -> ComponentInfo | None:
         self.asked.append(name)
-        return name if name in self.sources else None
+        if name not in self.sources:
+            return None
+        module = self.root / name / "component.py" if name in self.modules else None
+        return ComponentInfo(
+            name=name,
+            scope_root=self.root,
+            scope_relative="",
+            template_path=self.root / f"{name}.djx",
+            module_path=module,
+            is_simple=module is None,
+        )
 
 
 @pytest.fixture()
@@ -90,7 +103,7 @@ class TestComponentGuarding:
             ),
             pytest.param(PLAIN_COMPONENT, False, id="plain"),
             pytest.param("{% has_perm %}", True, id="does-not-compile"),
-            pytest.param(None, False, id="python-only"),
+            pytest.param(None, True, id="no-template"),
         ],
     )
     def test_its_own_template(self, page_file: Path, text, guarding) -> None:
@@ -104,7 +117,7 @@ class TestComponentGuarding:
         [
             pytest.param(GUARDED_CHILDREN, True, id="guarding"),
             pytest.param(PLAIN_COMPONENT, False, id="plain"),
-            pytest.param(None, False, id="python-only"),
+            pytest.param(None, True, id="no-template"),
         ],
     )
     def test_a_nested_component_is_followed(
@@ -213,28 +226,6 @@ class TestFollowedTemplates:
 class TestTemplateNames:
     """Only a template named by a plain string literal is followed."""
 
-    @pytest.mark.parametrize(
-        ("expression", "name"),
-        [
-            pytest.param(
-                Template('{% include "a.html" %}').nodelist[0].template,
-                "a.html",
-                id="literal",
-            ),
-            pytest.param(
-                Template("{% include a %}").nodelist[0].template, None, id="variable"
-            ),
-            pytest.param(
-                Template('{% include "a.html"|lower %}').nodelist[0].template,
-                None,
-                id="filtered",
-            ),
-            pytest.param(Template("x"), None, id="a-compiled-template"),
-        ],
-    )
-    def test_literal(self, expression, name) -> None:
-        assert guards._literal(expression) == name
-
     def test_a_template_with_no_file_is_followed_without_a_stamp(
         self, page_file: Path, monkeypatch
     ) -> None:
@@ -251,7 +242,7 @@ class TestMemoAndStamps:
     """A verdict is kept per anchor and text, with the files it read and when."""
 
     def test_the_same_anchor_and_text_is_read_once(self, page_file: Path) -> None:
-        with patch.object(guards, "Template", wraps=Template) as compiled:
+        with patch.object(sources, "Template", wraps=Template) as compiled:
             assert _components(page_file, card=GUARDED_CHILDREN).guarding("card")
             assert _components(page_file, card=GUARDED_CHILDREN).guarding("card")
         assert compiled.call_count == 1
@@ -261,7 +252,7 @@ class TestMemoAndStamps:
         for path in (first, second):
             path.parent.mkdir()
             path.write_text("x = 1\n")
-        with patch.object(guards, "Template", wraps=Template) as compiled:
+        with patch.object(sources, "Template", wraps=Template) as compiled:
             for path in (first, second):
                 assert _components(path, card=GUARDED_CHILDREN).guarding("card")
         assert compiled.call_count == 2
@@ -305,15 +296,15 @@ class TestMemoAndStamps:
 
 
 class TestGuardedZones:
-    """`guarded_zones` names each zone a page block or a guarding component holds."""
+    """`guarded_zones` names each zone a guarding component holds, no page block."""
 
     def _zones(self, page_file: Path, body: str, **sources) -> list:
         components = _components(page_file, **sources)
         return list(guarded_zones(Template(body).nodelist, components))
 
-    def test_a_page_block_names_no_component(self, page_file: Path) -> None:
+    def test_a_page_block_is_left_out(self, page_file: Path) -> None:
         body = f"{_GUARD}{SECRET_ZONE}{_END}"
-        assert self._zones(page_file, body) == [("cz", None)]
+        assert self._zones(page_file, body) == []
 
     @pytest.mark.parametrize(
         "body",
@@ -337,7 +328,7 @@ class TestGuardedZones:
         page_block = f"{_GUARD}{SECRET_ZONE}{_END}"
         body = page_block + page_block + CHILDREN_BODY + CHILDREN_BODY
         zones = self._zones(page_file, body, guarded=GUARDED_CHILDREN)
-        assert zones == [("cz", None)]
+        assert zones == [("cz", "guarded")]
 
 
 class TestBoundZones:
@@ -353,5 +344,110 @@ class TestBoundZones:
         )
         components = _components(page_file, guarded=GUARDED_CHILDREN)
         assert bound_zones(Template(body).nodelist, components) == frozenset(
-            {"a", "b", "c", "d"}
+            {"b", "c", "d"}
         )
+
+
+_HOLDS_SLOT = "{% if c %}{{ slot_content }}{% endif %}"
+
+
+def _into_slot(inner: str) -> str:
+    slot = f'{{% #slot "content" %}}{inner}{{% /slot %}}'
+    return f'{{% #component "inner" %}}{slot}{{% /component %}}'
+
+
+class TestBodyFlow:
+    """The body counts as decided through every name a template binds it to."""
+
+    @pytest.mark.parametrize(
+        ("text", "guarding"),
+        [
+            pytest.param(
+                "{% with x=children %}{{ x }}{% endwith %}", False, id="alias"
+            ),
+            pytest.param(
+                "{% with x=children %}{{ x|upper }}{% endwith %}",
+                True,
+                id="alias-filtered",
+            ),
+            pytest.param(
+                '{% with x=children %}{{ x|default:"" }}{% endwith %}',
+                False,
+                id="alias-passing-filter",
+            ),
+            pytest.param(
+                "{% with x=children %}{% if c %}{{ x }}{% endif %}{% endwith %}",
+                True,
+                id="alias-under-if",
+            ),
+            pytest.param(
+                "{% with x=title %}{% if c %}{{ x }}{% endif %}{% endwith %}"
+                "{{ children }}",
+                False,
+                id="unrelated-alias",
+            ),
+            pytest.param(
+                "{% for c in children %}{{ c }}{% endfor %}", True, id="loop-variable"
+            ),
+            pytest.param(
+                "{% for a, b in children %}{{ b }}{% endfor %}",
+                True,
+                id="unpacked-loop-variables",
+            ),
+            pytest.param('{{ "x"|default:children }}', True, id="filter-argument"),
+            pytest.param(
+                '{{ children|default:"x" }}', False, id="literal-filter-argument"
+            ),
+            pytest.param("{% regroup items by g as children %}", True, id="raw-name"),
+            pytest.param('{% now "Y" %}{{ children }}', False, id="unrelated-tag"),
+            pytest.param('{% firstof children "x" %}', True, id="tag-reads-body"),
+            pytest.param(
+                '{% load next_static %}{% use_style "a.css" %}{{ children }}',
+                True,
+                id="context-tag",
+            ),
+        ],
+    )
+    def test_children_of_one_template(self, page_file: Path, text, guarding) -> None:
+        assert _components(page_file, card=text).guarding("card") is guarding
+
+    @pytest.mark.parametrize(
+        ("slot", "guarding"),
+        [
+            pytest.param("{{ children }}", True, id="variable"),
+            pytest.param('{% component "leaf" %}', True, id="component"),
+            pytest.param(
+                "{% with y=children %}{{ y }}{% endwith %}", True, id="other-tag"
+            ),
+            pytest.param("x", False, id="text"),
+        ],
+    )
+    def test_children_handed_into_a_slot(self, page_file: Path, slot, guarding) -> None:
+        components = _components(
+            page_file, outer=_into_slot(slot), inner=_HOLDS_SLOT, leaf="{{ children }}"
+        )
+        assert components.guarding("outer") is guarding
+
+    def test_a_slot_shown_plainly_is_not_decided(self, page_file: Path) -> None:
+        components = _components(
+            page_file, outer=_into_slot("{{ children }}"), inner="{{ slot_content }}"
+        )
+        assert components.guarding("outer") is False
+
+    @pytest.mark.parametrize(
+        ("slot", "guarding"),
+        [
+            pytest.param('{% set_slot "aside" %}', True, id="own-slot"),
+            pytest.param('{% set_slot "footer" %}', False, id="other-slot"),
+        ],
+    )
+    def test_a_slot_handed_on_into_a_slot(
+        self, page_file: Path, slot, guarding
+    ) -> None:
+        components = _components(page_file, outer=_into_slot(slot), inner=_HOLDS_SLOT)
+        assert components.guarding("outer", "slot_aside") is guarding
+
+    def test_a_mapping_keyed_by_no_name_binds_nothing(self) -> None:
+        node = TextNode("x")
+        node.held = {1: Template("{{ children }}").nodelist[0].filter_expression}
+        assert list(guards._bindings(node)) == []

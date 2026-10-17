@@ -244,7 +244,7 @@ Partial rendering
    It is valid only between a ``{% zone %}`` and its ``{% endzone %}``, and a lazy zone without it is reported as ``next.E064``.
    The branch belongs to lazy zones only, so a zone without ``lazy=`` rejects it with ``TemplateSyntaxError`` when the template compiles.
 
-A zone belongs to a page or layout, not a component, and may not sit inside a ``{% for %}``, an ``{% if %}``, or a ``{% has_perm %}``.
+A zone belongs to a page or layout, not a component, and may not sit inside a ``{% for %}`` or an ``{% if %}``, while a zone inside a ``{% has_perm %}`` is asked again on each standalone render.
 A zone directly inside a ``{% with %}`` draws the ``next.W067`` warning because the bindings are invisible to a standalone zone render.
 The :doc:`zone placement checks </content/ref/system-checks>` enforce each rule at ``manage.py check`` time.
 
@@ -260,7 +260,8 @@ Permissions
    The permission is a quoted name or a variable, and one that resolves to nothing or to an empty string renders the ``else`` branch.
    Any argument count other than one or two raises ``TemplateSyntaxError`` at parse time.
    A literal name nothing grants is ``next.W130``.
-   A ``{% zone %}`` inside the block, or in the body of a component whose template reaches one, is ``next.E163``, and a standalone render of such a zone is refused as an unknown zone.
+   A ``{% zone %}`` inside the block renders on its own, and the zone render asks the block again and answers 403 to a user it refuses.
+   A ``{% zone %}`` in the body of a component whose template reaches the tag is ``next.E163``, and a standalone render of such a zone is refused as an unknown zone.
    A template that runs ``{% load rules %}`` gets django-rules' own ``has_perm`` tag in its place, see :doc:`/content/topics/permissions`.
 
 Layouts

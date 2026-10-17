@@ -18,6 +18,8 @@ from next.checks.common import (
 from next.deps.introspect import HINT_ERRORS, cached_type_hints
 from next.pages.manager import page
 
+from .access import tree_pages
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -153,11 +155,11 @@ def check_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
     """
     if load_routed_pages() is None:
         return []
-
+    tree_pages()
     return registration_file_errors(
         _PAGE_CONTEXT_SUBJECT,
-        registrations=page._context_manager.registered_names(),
-        misattributed=page._context_manager.misattributed(),
+        registrations=page.contexts.registered_names(),
+        misattributed=page.contexts.misattributed(),
     )
 
 
@@ -169,7 +171,7 @@ def check_single_keyless_context(*args, **kwargs) -> list[CheckMessage]:
     """
     errors: list[CheckMessage] = []
     pages = loaded_page_contexts()
-    conflicts = page._context_manager.keyless_conflicts()
+    conflicts = page.contexts.keyless_conflicts()
     for entry in pages:
         names = conflicts.get(entry.page_path)
         if not names:

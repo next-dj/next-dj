@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from django.middleware.locale import LocaleMiddleware
+from django.template import Template
 from django.test import override_settings
 
 from next.errors import InvalidDirsError
@@ -14,6 +15,7 @@ from next.urls.dispatcher import scan_pages_tree
 from next.utils import (
     PageRoot,
     TreeSource,
+    child_nodelists,
     classify_dirs_entries,
     exec_module_file,
     is_dynamic_trail,
@@ -23,12 +25,16 @@ from next.utils import (
     load_tree_source,
     middleware_listed,
     prefix_trail,
+    redirect_or_fallback,
     resolve_base_dir,
     stat_mtime_ns,
     template_edits_watched,
     walk_page_tree,
 )
 from tests.support import write_page
+
+
+_OVERSIZE_TARGET = "/search/?q=" + "\u044f" * 3000
 
 
 class TestStatMtimeNs:
@@ -447,3 +453,33 @@ class TestMiddlewareDetection:
         assert middleware_listed(["a.B", f"{__name__}._Locale"], self.LOCALE)
         assert not middleware_listed(["a.B"], self.LOCALE)
         assert not middleware_listed([], self.LOCALE)
+
+
+class TestRedirectOrFallback:
+    """`redirect_or_fallback` answers the target unless Django refuses the Location."""
+
+    def test_accepted_target_carries_the_status(self) -> None:
+        response = redirect_or_fallback("/items/", "/", status=303)
+        assert response.status_code == 303
+        assert response.url == "/items/"
+
+    def test_default_status_is_found(self) -> None:
+        assert redirect_or_fallback("/items/", "/").status_code == 302
+
+    @pytest.mark.usefixtures("cap_redirects")
+    def test_refused_target_redirects_to_the_fallback(self) -> None:
+        response = redirect_or_fallback(_OVERSIZE_TARGET, "/safe/", status=303)
+        assert response.status_code == 303
+        assert response.url == "/safe/"
+
+    def test_disallowed_scheme_redirects_to_the_fallback(self) -> None:
+        assert redirect_or_fallback("javascript:alert(1)", "/safe/").url == "/safe/"
+
+
+class TestChildNodelists:
+    """A node list on `child_nodelists` is yielded only when the node holds it."""
+
+    def test_a_missing_list_is_skipped(self) -> None:
+        (node,) = Template('{% has_perm "a.b" %}x{% endhas_perm %}').nodelist
+        node.nodelist_false = None
+        assert list(child_nodelists(node)) == [node.nodelist_true]

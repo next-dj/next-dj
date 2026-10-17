@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 from next.components.info import ComponentInfo
 
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from django.contrib.auth.models import Group
 
 
 _DEFAULT_LEAF_BODY = "def render(request):\n    return 'x'\n"
@@ -80,3 +82,27 @@ def build_layout_page(
     if template is not None:
         (directory / "template.djx").write_text(template)
     return directory / "page.py"
+
+
+class StandInRows:
+    """Rows answering every lookup with one unsaved row, so no query is ever made."""
+
+    def __init__(self, row: Group) -> None:
+        """Answer every lookup with `row`."""
+        self._row = row
+
+    def visible_to(self, scope: object) -> Self:
+        """Return the rows themselves, whatever the scope."""
+        return self
+
+    def filter(self, **lookups: object) -> Self:
+        """Return the rows themselves, whatever the lookups."""
+        return self
+
+    def order_by(self) -> Self:
+        """Return the rows themselves, unordered."""
+        return self
+
+    def __getitem__(self, window: slice) -> list[Group]:
+        """Return the one row, whatever the window."""
+        return [self._row]

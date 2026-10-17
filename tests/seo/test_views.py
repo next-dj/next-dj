@@ -35,6 +35,7 @@ from tests.support import (
     write_page,
     write_tree,
 )
+from tests.support.access import login_required_middleware, page_source, write_proxy
 
 
 I18N_ROOT_URLCONFS = [SEO_I18N_URLCONF, SEO_I18N_AFTER_URLCONF]
@@ -924,3 +925,55 @@ class TestHostRootMount:
         )
         assert _locs(top) == ["http://testserver/about/"]
         assert [copy.status_code for copy in copies] == [404, 404, 404]
+
+
+@pytest.mark.parametrize(
+    "view", [views.robots_view, views.sitemap_view], ids=["robots", "sitemap"]
+)
+def test_an_seo_view_is_exempt_from_the_login_middleware(view) -> None:
+    assert view.login_required is False
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize("path", ["/robots.txt", "/sitemap.xml"])
+def test_an_anonymous_visitor_reads_it_under_the_login_middleware(
+    tmp_path, path: str
+) -> None:
+    root = write_tree(tmp_path / "pages", sitemap="", robots="")
+    with login_required_middleware(), routed(root, urlconf=USER_URLCONF):
+        response = Client().get(path)
+    assert response.status_code == 200
+
+
+def _closed_tree(root: Path) -> Path:
+    write_tree(root, pages=("", "open"), sitemap="")
+    write_page(root, "public", page_source("page.public()\n"))
+    write_page(root, "login", page_source("page.login_required()\n"))
+    write_proxy(root / "staff", 'proxy.permission_required("auth.view_user")\n')
+    write_page(root, "staff", page_source())
+    return root
+
+
+@pytest.mark.django_db()
+class TestClosedPagesInTheSitemap:
+    """The sitemap lists only the static pages an anonymous request may open."""
+
+    def test_a_declared_requirement_keeps_a_page_out(self, tmp_path) -> None:
+        root = _closed_tree(tmp_path / "pages")
+        with routed(root, urlconf=USER_URLCONF):
+            response = Client().get("/sitemap.xml")
+        assert _locs(response) == [
+            "http://testserver/",
+            "http://testserver/open/",
+            "http://testserver/public/",
+        ]
+
+    def test_the_login_middleware_leaves_only_public_pages(self, tmp_path) -> None:
+        root = _closed_tree(tmp_path / "pages")
+        client = Client()
+        with routed(root, urlconf=USER_URLCONF):
+            before = client.get("/sitemap.xml")
+            with login_required_middleware():
+                closed = client.get("/sitemap.xml")
+        assert len(_locs(before)) == 3
+        assert _locs(closed) == ["http://testserver/public/"]

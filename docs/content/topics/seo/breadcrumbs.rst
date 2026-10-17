@@ -51,6 +51,17 @@ The URL of a crumb reverses the page of its directory through the ``page_reverse
 A crumb whose page does not reverse, or a render without a resolved request, gets no URL and renders as plain text.
 The crumb whose URL is the request path is the current one.
 
+Crumbs cross the boundary of a tree mounted under a prefix.
+The deepest page of the host tree that the prefix passes through, such as the ``/dashboard/`` page for an application mounted under ``dashboard/books/``, leads the crumbs of the mounted page with its own, and that host page reaches further up the same way.
+The host page is found by URL rather than by tree.
+Each trail of the prefix first reverses the page of that name, and when no page carries the name, such as a trail a generic ``[str:model_name]`` page of another tree serves, the trail builds its URL from the include prefix and the matched route, each kwarg through the ``to_url`` of its converter, and :func:`~django.urls.resolve` names the page that serves it.
+An application mounted under ``admin/library/book/<int:book>/`` therefore gets the crumbs of the generic changelist that serves ``/admin/library/book/``, so ``/admin/library/book/1/outline/`` reads ``Dashboard``, ``Books``, and ``Outline``.
+A prefix included through :func:`~django.urls.re_path` has no route to build from, so a host page that only resolving would find gives no crumbs there.
+Its crumbs fold from its metadata chain under its own URL kwargs, and its contexts never run, so a host label whose ``@page.metadata`` callable needs a context value of the host page is left out.
+A host page whose access rule the request does not pass gives no crumbs at all, and a rule that names an object counts as not passed, since only the render of that page may load the object.
+The host crumbs are read once something reads them, the ``{% breadcrumbs %}`` tag or the ``BreadcrumbList`` of the JSON-LD graph.
+The crumbs of the mounted tree follow from its root, so ``/dashboard/books/1/history/`` reads ``Dashboard``, ``Books``, and ``History``.
+
 The tag
 -------
 

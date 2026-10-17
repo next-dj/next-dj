@@ -415,60 +415,16 @@ class TestCallerContextOwnership:
         assert html == "<b>Hi</b>"
         assert context_data == {"title": "Hi"}
 
-    def test_fallback_to_template_leaves_the_caller_dict_untouched(
-        self, tmp_path: Path
-    ) -> None:
-        """The unloadable-module fallback stamps the anchor on its own copy."""
+    def test_an_unloadable_module_renders_nothing(self, tmp_path: Path) -> None:
+        """Its access declarations are unknown, so the template stays out."""
         mgr, info, _module_path = build_composite_component(
-            tmp_path,
-            template="<div>{{ title }}|{{ current_component_module_path }}</div>",
+            tmp_path, template="<div>{{ title }}</div>"
         )
-        context_data = {"title": "Hi"}
 
         with (
             patch("next.components.renderers.component", mgr),
             patch.object(ModuleLoader, "load", return_value=None),
         ):
-            html = render_component(info, context_data)
+            html = render_component(info, {"title": "Hi"})
 
-        assert "Hi" in html
-        assert context_data == {"title": "Hi"}
-
-    def test_an_unloadable_module_keeps_its_registrations_out_of_the_render(
-        self, tmp_path: Path
-    ) -> None:
-        """A decorator may have registered before the import raised further down."""
-        mgr, info, module_path = build_composite_component(
-            tmp_path, template="<div>brand={{ brand }}</div>"
-        )
-
-        def brand() -> str:
-            raise NameError(name="BRAND")
-
-        mgr._registry.register(module_path, "brand", brand)
-
-        with (
-            patch("next.components.renderers.component", mgr),
-            patch.object(ModuleLoader, "load", return_value=None),
-        ):
-            html = render_component(info, {})
-
-        assert html == "<div>brand=</div>"
-
-    def test_an_unloadable_module_still_hands_over_the_request(
-        self, tmp_path: Path
-    ) -> None:
-        """A body reaching for the request must not go dark on a failed import."""
-        mgr, info, _module_path = build_composite_component(
-            tmp_path, template="<div>{{ request.path }}|{% csrf_token %}</div>"
-        )
-        request = RequestFactory().get("/board/")
-
-        with (
-            patch("next.components.renderers.component", mgr),
-            patch.object(ModuleLoader, "load", return_value=None),
-        ):
-            html = render_component(info, {}, request=request)
-
-        assert "/board/" in html
-        assert 'name="csrfmiddlewaretoken"' in html
+        assert html == ""

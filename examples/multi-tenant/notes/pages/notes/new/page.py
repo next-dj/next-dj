@@ -2,13 +2,15 @@ from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 from notes.models import Note, Tenant
 
-from next import Depends
+from next import Depends, page
 from next.forms import ComponentWidget, Form
 from next.pages import MetadataDict
 from next.urls import page_reverse
 
 
 metadata: MetadataDict = {"title": "New note"}
+
+page.public()
 
 
 class NoteCreateForm(Form):

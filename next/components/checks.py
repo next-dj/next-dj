@@ -359,9 +359,9 @@ def check_component_module_imports(*args, **kwargs) -> list[CheckMessage]:
             errors.append(
                 Error(
                     f"component.py at {module_path} failed to import "
-                    f"({type(error).__name__}: {error}). The render falls back "
-                    "to the template alone, so every @component.context of that "
-                    "module stays out of the body.",
+                    f"({type(error).__name__}: {error}). Its access declarations "
+                    "are unknown, so the component renders as nothing, or raises "
+                    "the error under DEBUG or STRICT_LOADING.",
                     obj=str(module_path),
                     id="next.E084",
                 )
@@ -387,8 +387,8 @@ def check_component_context_registration_files(*args, **kwargs) -> list[CheckMes
 
     return registration_file_errors(
         _COMPONENT_CONTEXT_SUBJECT,
-        registrations=component._registry.registered_names(),
-        misattributed=component._registry.misattributed(),
+        registrations=component.registry.registered_names(),
+        misattributed=component.registry.misattributed(),
     )
 
 

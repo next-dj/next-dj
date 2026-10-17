@@ -38,6 +38,7 @@ Static routes
 
 Every route of the tree without a bracket segment is listed automatically, reversed through ``page_reverse`` at render time.
 A route whose static metadata is ``noindex`` is left out, because a sitemap invites the crawler to a page the tag then turns away.
+A route an anonymous visitor cannot reach is left out too, one whose access rule has a requirement and one that ``LoginRequiredMiddleware`` closes because it declares nothing and no ``page.public()``, see :ref:`topics-permissions-tree`.
 A route matching a glob in ``exclude`` is left out as well, and a glob matches the whole route, ``drafts/*`` for a subtree and ``admin`` for one page.
 Only ``*`` and ``?`` are wildcards, and brackets are literal because routes spell parameters with them, so ``posts/[slug]`` names that one dynamic route.
 
@@ -93,6 +94,7 @@ The decorator run anywhere else registers nothing, and two callables on one rout
 
 A route with an ``@sitemap.items`` callable is listed by that callable alone, so a static route named by one loses its automatic entry and takes the callable's ``lastmod``, ``changefreq``, and ``priority``.
 An ``exclude`` glob drops a callable's route as well, which the checks flag as a contradiction.
+The access rule does not filter the rows a callable answers, so a callable on a closed dynamic route lists what the project returns, and the project keeps such rows out itself.
 ``lastmod`` is never read off a file mtime, because the mtime of a deployed checkout says nothing about the content, and a date or a naive datetime reads in the current ``TIME_ZONE``.
 ``manage.py check`` reports a dynamic route the file neither lists nor excludes, and a route whose static metadata is ``noindex`` needs neither.
 

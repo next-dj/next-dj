@@ -244,6 +244,8 @@ The return contract mirrors a Django permission check. `None` or `True` allows. 
 
 A denial emits `next.signals.form_access_denied` with `action_name`, `uid`, `request`, `layer` (`"view"` here), and `reason` (`"raised"` for the `PermissionDenied` path). The `_count_access_denied` receiver in [`flags/signals.py`](flags/signals.py) bumps a counter, and the `/admin/metrics/` page surfaces it as a stat card next to the render counters.
 
+The flag is the one rule on the action. The example signs nobody in, so [`flags/pages/admin/page.py`](flags/pages/admin/page.py) declares `page.public()`, which tells `manage.py check` the action is open to every visitor on purpose instead of reporting it as `next.W134`.
+
 ### 8. Receivers: `post_save`, `post_delete`, `page_rendered`, `component_rendered`
 
 [`flags/signals.py`](flags/signals.py) wires its database and render receivers at app ready time:

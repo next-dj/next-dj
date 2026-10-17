@@ -92,7 +92,7 @@ Every read of a router here is guarded, and the guard drops a value of the wrong
 The failure costs that backend its trees and nothing else.
 It is logged per backend and subject at the FailureLog rate rather than per tick, see :ref:`topics-failure-containment`.
 
-- Each page root contributes a ``**/page.py`` spec.
+- Each page root contributes a ``**/page.py`` and a ``**/proxy.py`` spec, since the page view reads the ``login_required`` flag of its rule when the URLs are built.
 - Each page root paired with the name its router returns from ``components_folder_name`` contributes a ``**/<components-folder>/**/component.py`` spec, ``_components`` by default.
   A router that returns ``None`` there contributes no component spec.
 - Each extra component root from ``COMPONENT_BACKENDS`` contributes a ``**/component.py`` spec.

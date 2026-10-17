@@ -398,8 +398,9 @@ Access guards
 -------------
 
 The dispatch endpoint of an action lives at ``/_next/form/<uid>/``, outside the page URL space, so a middleware scoped to a URL prefix does not cover it.
-The page the submission names does authorize it, through its own ``render()``, so a page that refuses a visitor refuses that visitor's submissions as well, see :doc:`/content/topics/pages`.
-Declare the access requirements on the action itself for a check that stands on its own.
+An action declared in a page tree answers to the access its ``page.py`` and the ``proxy.py`` files above it declare, checked before anything below, see :doc:`/content/security/actions`.
+The page the submission names authorizes it too, through its access rule and its own ``render()``, so a page that refuses a visitor refuses that visitor's submissions as well, see :doc:`/content/topics/pages`.
+Declare the access requirements on the action itself for a check that stands on its own, such as a shared form outside any page tree.
 ``Meta.login_required`` and ``Meta.permission_required`` guard a class-bound form, and the same names are keyword arguments on ``@action``.
 
 .. code-block:: python

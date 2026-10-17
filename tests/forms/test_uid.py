@@ -10,7 +10,6 @@ from next.forms.uid import (
     ORIGIN_FIELD_NAME,
     current_origin_path,
     posted_origin_path,
-    redirect_or_fallback,
     validated_origin_path,
 )
 
@@ -95,27 +94,6 @@ class TestRedirectToOrigin:
         request = RequestFactory().post("/", {ORIGIN_FIELD_NAME: _OVERSIZE_ORIGIN})
         response = redirect_to_origin(request, fallback="/safe/")
         assert response.url == "/safe/"
-
-
-class TestRedirectOrFallback:
-    """`redirect_or_fallback` answers the target unless Django refuses the Location."""
-
-    def test_accepted_target_carries_the_status(self) -> None:
-        response = redirect_or_fallback("/items/", "/", status=303)
-        assert response.status_code == 303
-        assert response.url == "/items/"
-
-    def test_default_status_is_found(self) -> None:
-        assert redirect_or_fallback("/items/", "/").status_code == 302
-
-    @pytest.mark.usefixtures("cap_redirects")
-    def test_refused_target_redirects_to_the_fallback(self) -> None:
-        response = redirect_or_fallback(_OVERSIZE_ORIGIN, "/safe/", status=303)
-        assert response.status_code == 303
-        assert response.url == "/safe/"
-
-    def test_disallowed_scheme_redirects_to_the_fallback(self) -> None:
-        assert redirect_or_fallback("javascript:alert(1)", "/safe/").url == "/safe/"
 
 
 class TestPostedOriginPath:

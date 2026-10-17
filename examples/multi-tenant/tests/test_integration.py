@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import re
+from io import StringIO
 from typing import TYPE_CHECKING
 
 import pytest
 from django.conf import settings
+from django.core.management import call_command
+from django.db import connection
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from notes.models import Note, Tenant
 from notes.themes import DEFAULT_ACCENT
 
@@ -478,6 +482,40 @@ class TestNoteEditPage:
     ) -> None:
         response = next_client.get("/notes/999999/edit/", HTTP_X_TENANT="acme")
         assert response.status_code == 404
+
+    def test_the_editor_loads_the_note_once_per_render(
+        self, next_client: NextClient, acme_note: Note
+    ) -> None:
+        with CaptureQueriesContext(connection) as queries:
+            response = next_client.get(
+                f"/notes/{acme_note.pk}/edit/", HTTP_X_TENANT="acme"
+            )
+        assert response.status_code == 200
+        note_reads = [
+            query
+            for query in queries.captured_queries
+            if 'FROM "notes_note"' in query["sql"]
+        ]
+        assert len(note_reads) == 1
+
+
+class TestAccess:
+    """Tenants scope every note, so no page asks who the visitor is."""
+
+    def test_the_pages_with_actions_declare_themselves_public(self) -> None:
+        out = StringIO()
+        call_command("next", "permissions", stdout=out)
+        _header, *lines = out.getvalue().splitlines()
+        rows = {
+            name: access
+            for _kind, name, access, _sources in (
+                re.split(r"\s{2,}", line.strip()) for line in lines
+            )
+        }
+        assert rows["/notes/new/"] == "public"
+        assert rows["/notes/<int:note>/edit/"] == "public"
+        assert rows["note_create_form"] == "public"
+        assert rows["note_edit_form"] == "public"
 
 
 class TestDebugAffordance:

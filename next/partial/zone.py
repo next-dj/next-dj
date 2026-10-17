@@ -10,6 +10,8 @@ from django.template.engine import Engine
 from django.utils.safestring import SafeString
 from django.utils.text import unescape_string_literal
 
+from next.utils import child_nodelists
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -198,14 +200,6 @@ type Ancestor = type[Node] | tuple[type[Node], ...]
 """A node class, or several, whose subtree a walk tells apart."""
 
 
-def child_nodelists(node: Node) -> "Iterator[NodeList]":
-    """Yield each child node list a node declares on `child_nodelists`."""
-    for attr in node.child_nodelists:
-        nodelist = getattr(node, attr, None)
-        if isinstance(nodelist, NodeList):
-            yield nodelist
-
-
 def nodes_under(
     nodelist: NodeList, ancestor: "Ancestor", *, inside: bool = False
 ) -> "Iterator[Node]":
@@ -337,7 +331,6 @@ __all__ = [
     "ZoneNode",
     "ZoneOptions",
     "ZonePartial",
-    "child_nodelists",
     "do_zone",
     "nodes_under",
     "register",

@@ -20,6 +20,7 @@ from django.shortcuts import get_object_or_404
 from next.caches import BoundedCache
 from next.conf import next_framework_settings
 from next.deps import render_dep_cache
+from next.deps.objects import scoped_model, scoped_row
 from next.introspect import defining_file
 
 from .backends import (
@@ -416,8 +417,13 @@ class BaseModelForm(_FormKwargsHook, _PermissionHooks, DjangoBaseModelForm):
         _validate_instance_from_url(cls, is_model_form=True)
 
     @classmethod
-    def get_initial(cls, **url_kwargs) -> dict[str, Any] | Model:
-        """Return a model instance loaded from the URL, or an empty dict."""
+    def get_initial(
+        cls, request: HttpRequest | None = None, **url_kwargs
+    ) -> dict[str, Any] | Model:
+        """Return a model instance loaded from the URL, or an empty dict.
+
+        A `visible_to` manager and a `scope` make it load as `DObject` does.
+        """
         spec = getattr(getattr(cls, "Meta", None), "instance_from_url", None)
         if not spec:
             return {}
@@ -425,6 +431,8 @@ class BaseModelForm(_FormKwargsHook, _PermissionHooks, DjangoBaseModelForm):
         if lookup is None:
             return {}
         model: type[Model] = cls._meta.model
+        if scoped_model(model):
+            return scoped_row(model, lookup, request)
         return get_object_or_404(model, **lookup)
 
     def get_success_message(self, cleaned_data: dict[str, Any]) -> str:

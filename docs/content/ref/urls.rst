@@ -202,6 +202,7 @@ They are exported from ``next.urls`` for introspection and for authors writing c
    * - ``UrlKwargsProvider``
      - Supplies a URL kwarg value by parameter name, coercing the raw string to the parameter annotation when one is present.
        ``DUrl``-annotated parameters are claimed by ``UrlByAnnotationProvider`` first.
+       A parameter whose annotation names ``DObject`` is never claimed, since its raw kwarg is the unscoped primary key, and a ``DObject`` no ``ObjectProvider`` loads raises :exc:`~django.core.exceptions.ImproperlyConfigured`, see :ref:`topics-di-dobject`.
    * - ``QueryParamProvider``
      - Supplies ``request.GET`` values for parameters annotated with ``DQuery[...]``.
 

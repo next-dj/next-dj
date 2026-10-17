@@ -11,6 +11,7 @@ from next.components.context import component
 from next.deps import DObject
 from next.deps.checks import (
     check_object_component_contexts,
+    check_object_declarations,
     check_object_form_parents,
     check_object_hints,
     check_object_managers,
@@ -32,6 +33,7 @@ from tests.support import (
     write_page,
     write_urlconf,
 )
+from tests.support.access import write_proxy
 
 
 HEADER = """
@@ -626,3 +628,214 @@ class TestScope:
 
     def test_a_project_without_markers_needs_no_scope(self, tmp_path: Path) -> None:
         assert _run(tmp_path / "pages", check_object_scope, ("", "")) == []
+
+
+METADATA_GROUP = """
+from next.pages import page
+
+
+@page.metadata
+def meta(group: DObject[Group]) -> dict:
+    return {"title": group.name}
+"""
+
+METADATA_MEMBER = """
+from next.pages import page
+
+
+@page.metadata
+def meta(group: DObject[Group, "permissions"]) -> dict:
+    return {"title": group.name}
+"""
+
+INHERITED_METADATA = """
+from next.pages import page
+
+
+@page.metadata(inherit=True)
+def meta(group: DObject[Group]) -> dict:
+    return {"title": group.name}
+"""
+
+
+class TestMetadataCallables:
+    """A `DObject` on `@page.metadata` answers the same checks a context does."""
+
+    @pytest.mark.parametrize(
+        ("trail", "expected"),
+        [(GROUP_ROUTE, []), ("", ["next.W128"])],
+        ids=["captured", "uncaptured"],
+    )
+    def test_route_kwargs(self, tmp_path: Path, trail: str, expected) -> None:
+        messages = _run(
+            tmp_path / "pages", check_object_page_bindings, (trail, METADATA_GROUP)
+        )
+        assert check_ids(messages) == expected
+
+    @pytest.mark.parametrize(
+        ("before", "expected"),
+        [
+            pytest.param("", ["next.E156"], id="no-parent"),
+            pytest.param(PERMISSION_LOCAL, [], id="parent-context"),
+            pytest.param(
+                PERMISSION_LOCAL.replace('"permissions"', '"permissions", zone="side"'),
+                ["next.E156"],
+                id="zone-bound-parent",
+            ),
+            pytest.param(
+                "\n@context\ndef extra() -> dict:\n    return {}\n",
+                [],
+                id="after-keyless",
+            ),
+        ],
+    )
+    def test_parents(self, tmp_path: Path, before: str, expected) -> None:
+        messages = _run(
+            tmp_path / "pages",
+            check_object_page_bindings,
+            (CHAIN_ROUTE, before + METADATA_MEMBER),
+        )
+        assert check_ids(messages) == expected
+
+    def test_an_inherited_ancestor_context_binds_the_parent(
+        self, tmp_path: Path
+    ) -> None:
+        messages = _run(
+            tmp_path / "pages",
+            check_object_page_bindings,
+            ("[int:permission]", PERMISSION_ANCESTOR),
+            (CHAIN_ROUTE, METADATA_MEMBER),
+        )
+        assert messages == []
+
+    def test_an_inherited_callable_is_judged_on_every_route(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "pages"
+        messages = _run(
+            root,
+            check_object_page_bindings,
+            ("[int:permission]", INHERITED_METADATA),
+            (CHAIN_ROUTE, ""),
+        )
+        assert check_ids(messages) == ["next.W128"]
+        assert messages[0].obj == str(root / "[int:permission]" / "page.py")
+
+    def test_a_refused_chain_is_not_judged(self, tmp_path: Path) -> None:
+        body = METADATA_GROUP + '\nmetadata = {"title": "x"}\n'
+        messages = _run(tmp_path / "pages", check_object_page_bindings, ("", body))
+        assert messages == []
+
+    @pytest.mark.parametrize(
+        ("check", "expected"),
+        [
+            pytest.param(check_object_managers, ["next.E155"], id="managers"),
+            pytest.param(check_object_scope, ["next.E159"], id="scope"),
+        ],
+    )
+    def test_the_project_checks(self, tmp_path: Path, check, expected) -> None:
+        messages = _run(tmp_path / "pages", check, (GROUP_ROUTE, METADATA_GROUP))
+        assert check_ids(messages) == expected
+
+    def test_an_unresolved_hint(self, tmp_path: Path) -> None:
+        body = (
+            "\nfrom next.pages import page\n\n\n@page.metadata\n"
+            'def meta(group: "DObject[Missing]") -> dict:\n    return {}\n'
+        )
+        messages = _run(tmp_path / "pages", check_object_hints, ("", body))
+        assert check_ids(messages) == ["next.E160"]
+
+    def test_a_page_that_failed_to_load_is_not_judged(self, tmp_path: Path) -> None:
+        broken = METADATA_GROUP + '\nraise RuntimeError("broken page")\n'
+        messages = _run(
+            tmp_path / "pages",
+            check_object_page_bindings,
+            ("", broken),
+            ("[int:team]", METADATA_GROUP),
+        )
+        assert check_ids(messages) == ["next.W128"]
+        assert messages[0].obj == str(tmp_path / "pages" / "[int:team]" / "page.py")
+
+
+DECLARES_GROUP = """
+from next.pages import page
+
+page.permission_required("auth.view_group", obj=DObject[Group])
+"""
+
+
+class TestObjectDeclarations:
+    """An `obj=DObject[...]` reads the URL kwarg named after its model (`next.E164`)."""
+
+    @pytest.mark.parametrize(
+        ("trail", "expected"),
+        [(GROUP_ROUTE, []), ("[int:team]", ["next.E164"])],
+        ids=["captured", "uncaptured"],
+    )
+    def test_the_page_route(self, tmp_path: Path, trail: str, expected) -> None:
+        messages = _run(
+            tmp_path / "pages", check_object_declarations, (trail, DECLARES_GROUP)
+        )
+        assert check_ids(messages) == expected
+
+    def test_a_proxy_is_judged_on_every_page_below_it(self, tmp_path: Path) -> None:
+        root = tmp_path / "pages"
+        declaring = write_proxy(
+            root,
+            "from django.contrib.auth.models import Group\n\n"
+            "from next.deps import DObject\n\n"
+            'proxy.permission_required("auth.view_group", obj=DObject[Group])\n',
+        )
+        messages = _run(
+            root, check_object_declarations, (GROUP_ROUTE, ""), ("[int:team]", "")
+        )
+        assert check_ids(messages) == ["next.E164"]
+        assert messages[0].obj == str(declaring)
+        assert (
+            "permission_required('auth.view_group', obj=DObject[auth.Group]) in "
+            f'{declaring} loads its row by the URL kwarg "group"'
+        ) in messages[0].msg
+        assert 'route "/<int:team>/"' in messages[0].msg
+        assert "[int:group]" in messages[0].hint
+
+    def test_a_lifted_page_is_not_judged(self, tmp_path: Path) -> None:
+        root = tmp_path / "pages"
+        write_proxy(
+            root,
+            "from django.contrib.auth.models import Group\n\n"
+            "from next.deps import DObject\n\n"
+            'proxy.permission_required("auth.view_group", obj=DObject[Group])\n',
+        )
+        messages = _run(
+            root,
+            check_object_declarations,
+            ("[int:team]", "\nfrom next.pages import page\n\npage.public()\n"),
+        )
+        assert messages == []
+
+    @pytest.mark.parametrize(
+        ("check", "expected"),
+        [
+            pytest.param(check_object_managers, ["next.E155"], id="managers"),
+            pytest.param(check_object_scope, ["next.E159"], id="scope"),
+        ],
+    )
+    def test_the_project_checks(self, tmp_path: Path, check, expected) -> None:
+        messages = _run(tmp_path / "pages", check, (GROUP_ROUTE, DECLARES_GROUP))
+        assert check_ids(messages) == expected
+        assert (
+            "permission_required('auth.view_group', obj=DObject[auth.Group]) in "
+        ) in messages[0].msg
+
+    def test_a_declaration_on_two_pages_is_judged_once(self, tmp_path: Path) -> None:
+        root = tmp_path / "pages"
+        write_proxy(
+            root,
+            "from django.contrib.auth.models import Group\n\n"
+            "from next.deps import DObject\n\n"
+            'proxy.permission_required("auth.view_group", obj=DObject[Group])\n',
+        )
+        messages = _run(
+            root, check_object_managers, (GROUP_ROUTE, ""), (f"{GROUP_ROUTE}/more", "")
+        )
+        assert check_ids(messages) == ["next.E155"]

@@ -8,6 +8,7 @@ from django.http import HttpRequest
 from shadcn_admin.admin import ParentRowPermissions, RowPermissionAdmin, may
 
 from library.models import Author, Book, Chapter, Tag
+from next.urls import page_reverse
 
 
 class ChapterInline(ParentRowPermissions, admin.TabularInline):
@@ -51,6 +52,16 @@ class BookAdmin(RowPermissionAdmin):
         allowed = [b.pk for b in queryset if self._may_publish(request, b)]
         updated = queryset.filter(pk__in=allowed).update(status=Book.PUBLISHED)
         self.message_user(request, f"{updated} book(s) marked as published.")
+
+    def get_object_links(
+        self, request: HttpRequest, obj: Book
+    ) -> list[tuple[str, str]]:
+        """Link the outline of a book the user may change, the right that page asks."""
+        if not self.has_change_permission(request, obj):
+            return []
+        return [
+            ("Outline", page_reverse("library/book/[int:book]/outline", book=obj.pk))
+        ]
 
     def _may_publish(self, request: HttpRequest, book: Book) -> bool:
         published = copy.copy(book)

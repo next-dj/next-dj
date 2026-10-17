@@ -19,7 +19,10 @@ Read the topic that matches the part you are touching, then jump to the referenc
    Page modules, body sources, render functions, template loaders.
 
 :doc:`layouts`
-   Layout discovery, composition, layout level context.
+   Layout discovery and composition of the ``layout.djx`` chain.
+
+:doc:`proxy`
+   ``proxy.py``, the access of a directory and its subtree, inheritance, and ``public()``.
 
 :doc:`context`
    ``@context`` and ``@component.context`` patterns and inheritance.
@@ -83,6 +86,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
    url-reversing
    pages
    layouts
+   proxy
    context
    components
    seo/index

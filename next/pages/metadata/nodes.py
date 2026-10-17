@@ -55,7 +55,7 @@ def context_metadata(context: Context) -> ResolvedMetadata | None:
     if meta is None:
         meta = thunk.fold(cast("dict[str, object]", context.flatten()))
     request = thunk.request
-    resolved = resolve_metadata(meta, request=request)
+    resolved = resolve_metadata(meta, request=request, crumbs_of=thunk.crumbs_of)
     state[METADATA_KEY] = _Resolved(thunk, resolved)
     if request is not None:
         publish_metadata(request, resolved)

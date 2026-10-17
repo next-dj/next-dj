@@ -246,6 +246,8 @@ class LaunchCodeForm(Form):
 
 The cached HTML carries no CSRF token, so a browser without JavaScript that submits the form gets a 403 from the CSRF middleware, and a `<noscript>` note says so. With the runtime the submit fetches the token first and posts as usual. `Meta.requires_runtime = True` states that contract, and it keeps quiet the system check that warns about a form on a shared page posting without a token. `on_valid` stores a `Lead` row and morphs the `lead-form` zone into a thank-you, and without the partial switch the same envelope falls back to a 303 back to the landing. The category comes from the same `get_object_or_404` lookup the category listing of section 5 runs.
 
+A visitor signs up without an account, so the page declares `page.public()`, which tells `manage.py check` the form is open to everyone on purpose instead of reporting `next.W134`.
+
 The landing answers its questions in the head too, a plain schema.org dict under `jsonld`:
 
 ```python

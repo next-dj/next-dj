@@ -111,6 +111,8 @@ The gate is the retention-policy acknowledgement. Every step form inherits it fr
 
 One kind of POST passes ahead of the gate. A blur-validation probe (`validate="blur"` on the `{% form %}` tag, section 10) asks only whether one named field is well formed and saves no step data, so the hook returns early when `partial_intent(request).validate_fields` is set. Denying it would break inline validation on the very first field, long before the user has scrolled to the acknowledgement.
 
+The portal has no accounts, so the wizard page declares `page.public()`. It tells `manage.py check` that anyone may post the steps on purpose instead of reporting `next.W134`, and leaves the acknowledgement as the rule on every step.
+
 The framework fires `next.forms.signals.form_access_denied` **only** on a dynamic-hook denial, never on the static `ActionGuard` fast-path. The sender is `FormActionDispatch` and the kwargs are `action_name`, `uid`, `request`, `layer` (`"view"` for `check_permissions`, `"object"` for `has_object_permission`), and `reason` (`"denied"` when the hook returned `False`, `"raised"` on `PermissionDenied`, `"response"` on an `HttpResponse` short-circuit). The receiver in [`access/signals.py`](access/signals.py) records one signal-sourced `AuditEntry` per denial with `kind="access_denied"`, storing `layer` and `reason` in the dedicated `access_layer` / `access_reason` columns:
 
 ```python

@@ -586,7 +586,7 @@ class TestBranch:
         request.user = _GuardUser(allowed=False)
         meta = {**meta, "guard": ActionGuard(permissions=(_MODEL_PERM, _EDIT))}
         with pytest.raises(PermissionDenied):
-            FormActionDispatch._refuse_access(request, meta, None, "x")
+            FormActionDispatch._refuse_access(request, meta, None, "x", {})
         expected = (_MODEL_PERM,) if deferred else (_MODEL_PERM, _EDIT)
         assert request.user.received == [expected]
 

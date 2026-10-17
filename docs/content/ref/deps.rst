@@ -146,13 +146,14 @@ Checks
 
 ``next.deps.checks`` registers the ``DObject`` checks, which read annotations, routes, and registries without running a query.
 
-- ``next.E155`` reports a ``DObject`` model whose default manager has no ``visible_to``.
+- ``next.E155`` reports a ``DObject`` model, a parameter or an ``obj=DObject[Model]`` of an access declaration, whose default manager has no ``visible_to``.
 - ``next.E156`` reports a page ``DObject`` whose parent no earlier context callable provides.
 - ``next.E157`` reports a ``DObject`` with a parent on a form handler, a form factory, or a form hook, ``has_object_permission`` included.
 - ``next.E158`` reports a ``DObject`` on a ``@component.context`` callable.
 - ``next.E159`` reports a project that declares a ``DObject`` and registers no ``scope`` dependency.
 - ``next.E160`` reports a ``DObject`` on a callable whose type hints do not resolve, which raises ``TypeError`` on every resolve.
 - ``next.W128`` reports a page ``DObject`` whose full route, with every prefix and include around the tree, hands it no kwarg of its name.
+- ``next.E164`` reports an ``obj=DObject[Model]`` of a ``page.py`` or a ``proxy.py`` whose kwarg, the ``model_name`` of the model, the route of a page under it does not capture.
 
 A ``Depends`` name nothing registered raises ``UnknownDependencyError`` at resolve time, with a ``Did you mean`` hint naming the closest registered dependency.
 See :doc:`system-checks` for the exact conditions.

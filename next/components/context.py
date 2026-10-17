@@ -18,6 +18,7 @@ from next.introspect import (
     defining_file,
     registering_file,
 )
+from next.permissions.access import Declarations, require_permission
 from next.utils import resolved_tree
 
 
@@ -84,6 +85,13 @@ class ComponentContextRegistry:
         """Return the callable names registered per file, for the diagnostics."""
         return {
             file_path: tuple(callable_name(entry.func) for entry in entries.values())
+            for file_path, entries in self._registry.items()
+        }
+
+    def registered(self) -> dict[Path, tuple[ContextFunction, ...]]:
+        """Return the context functions registered per `component.py`, in order."""
+        return {
+            file_path: tuple(entries.values())
             for file_path, entries in self._registry.items()
         }
 
@@ -169,12 +177,28 @@ class ComponentContextRegistry:
         return sum(len(funcs) for funcs in self._registry.values())
 
 
-class ComponentContextManager:
-    """Registers and looks up context helpers used from `component.py`."""
+def _context_name(obj: object) -> str | None:
+    """Return the context name `obj=` gives, refusing anything but a non-empty str."""
+    if obj is None or (isinstance(obj, str) and obj):
+        return obj
+    msg = "component.permission_required(obj=) names a context of the component."
+    raise TypeError(msg)
+
+
+class ComponentContextManager(Declarations):
+    """Registers and looks up context helpers used from `component.py`.
+
+    Its access declarations bind the `component.py` that makes them.
+    """
 
     def __init__(self) -> None:
         """Create an empty registry for context callables."""
         self._registry = ComponentContextRegistry()
+
+    @property
+    def registry(self) -> ComponentContextRegistry:
+        """Return the registry of every `@component.context`, read by the checks."""
+        return self._registry
 
     @overload
     def context[C: Callable[..., Any]](self, func_or_key: C, /) -> C: ...
@@ -211,6 +235,12 @@ class ComponentContextManager:
             return func
 
         return decorator(func_or_key) if callable(func_or_key) else decorator
+
+    def permission_required(
+        self, perm: str | tuple[str, ...], *, obj: str | None = None
+    ) -> None:
+        """Require every permission in `perm`, checked on the context `obj` names."""
+        require_permission(registering_file(), perm, _context_name(obj))
 
     def get_functions(self, component_path: Path) -> Sequence[ContextFunction]:
         """Return context callables registered for this `component.py` path."""

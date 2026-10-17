@@ -9,6 +9,7 @@ import logging
 from typing import Final
 
 from django.conf import settings
+from django.contrib.auth.decorators import login_not_required
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -182,6 +183,7 @@ def _refusal(request: HttpRequest) -> HttpResponse | None:
     return None
 
 
+@login_not_required
 def csrf_view(request: HttpRequest) -> HttpResponse:
     """Return a new token to the runtime of a page whose HTML carries none.
 

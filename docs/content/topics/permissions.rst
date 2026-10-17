@@ -7,6 +7,7 @@ next.dj checks object permissions in Django's own vocabulary.
 A permission is a string ``app_label.codename``, code asks ``user.has_perm(perm, obj)``, and the backends listed in ``AUTHENTICATION_BACKENDS`` answer.
 An application declares a predicate per permission in its ``permissions.py``, and ``ObjectPermissionBackend`` answers ``has_perm`` from those predicates.
 The ``Meta.permission_required`` guard of a form and the ``{% has_perm %}`` tag ask the same question, so one predicate decides a submission, a link, and a button.
+A ``proxy.py``, a page, and a component declare the login and the permissions they require in the same words, and the framework checks them on the page, its actions, and its zones, see `Access on the page tree`_.
 
 .. contents::
    :local:
@@ -142,6 +143,122 @@ The hint of the message names the ``backend`` argument ``login()`` needs once th
 ``next.permissions.has_perm(user, perm, obj)`` and ``next.permissions.perms_for(user, obj)`` answer from the registered predicates alone.
 They ask no other backend and grant a superuser nothing a predicate refuses, so they fit a test of the predicates themselves, while application code asks ``user.has_perm()``.
 
+.. _topics-permissions-tree:
+
+Access on the page tree
+-----------------------
+
+A ``proxy.py``, a page, and a component declare who may reach them in the words of :func:`~django.contrib.auth.decorators.login_required` and :class:`~django.contrib.auth.mixins.PermissionRequiredMixin`.
+The framework checks the declaration on every request that reaches the endpoint, the page view, an action posted from the page, and a zone request of the page alike.
+
+The declarations
+~~~~~~~~~~~~~~~~
+
+Three calls form the whole vocabulary, and each binds to the file that makes it at module level.
+
+- ``login_required()`` requires a logged-in user.
+- ``permission_required(perm, obj=None)`` requires every permission in ``perm``, a name or a tuple of names, and with ``obj`` checks them on one row.
+- ``public()`` lifts the requirements of every ``proxy.py`` above the file and lets :class:`~django.contrib.auth.middleware.LoginRequiredMiddleware` pass.
+
+``proxy`` from ``next.pages`` declares in a ``proxy.py`` for its directory and every page below it, ``page`` in a ``page.py`` for that page alone, and ``component`` in a ``component.py``, which has no ``public()``.
+
+.. code-block:: python
+   :caption: notes/pages/notes/proxy.py
+
+   from next.pages import proxy
+
+   proxy.login_required()
+
+.. code-block:: python
+   :caption: notes/pages/notes/[int:note]/edit/page.py
+
+   from notes.models import Note
+
+   from next import context, page
+   from next.deps import DObject
+
+   page.permission_required("notes.edit_note", obj=DObject[Note])
+
+   @context("note")
+   def note(note: DObject[Note]) -> Note:
+       return note
+
+The ``proxy.py`` binds every page under ``notes/``, and the ``page.py`` adds a permission on the note the URL names.
+``obj=DObject[Note]`` loads the row by the URL kwarg ``note``, the ``model_name`` of the model, through ``visible_to(scope)``, and the ``note`` context reads the same row from the cache, so the page runs one query, see :ref:`topics-proxy`.
+A ``perm`` that is no non-empty name or tuple of names raises ``TypeError`` where the call is written, and so does an ``obj`` of a page or a ``proxy.py`` that is no ``DObject[Model]`` without a parent.
+The ``obj`` of a component names a prop or a ``@component.context`` value as a string, since a component has no URL of its own.
+
+How the check runs
+~~~~~~~~~~~~~~~~~~
+
+The rule of a page joins the ``proxy.py`` files from the tree root down to the directory of the page and the ``page.py`` itself, each requirement once, in that order, and a ``public()`` on the way lifts what came before it, see :ref:`topics-proxy`.
+A rule without requirements passes without reading the user, so an open page costs one memo read.
+The check follows the order of ``AccessMixin`` and ``PermissionRequiredMixin``.
+
+1. An anonymous user is redirected to ``LOGIN_URL`` with the full path of the request as ``next``.
+2. Every permission without an object is asked as ``user.has_perm(perm)``, and a refusal answers HTTP 403.
+3. Every permission with an object loads its row by the URL kwarg and asks ``user.has_perm(perm, row)``, and a refusal answers HTTP 403.
+
+The check runs before ``render()``, the zone branch, and the page context, so a refused request runs no application code but the ``scope`` dependency the third step needs.
+A row the scope does not see answers 404 before any permission is asked, so a refused user never tells a hidden row from a missing one, see :ref:`topics-di-dobject`.
+A route that does not capture the kwarg of the model is a configuration mistake rather than a refusal, so it raises ``UnboundObjectError``, which ``next.E164`` reports ahead of any request.
+
+Where a rule applies
+~~~~~~~~~~~~~~~~~~~~
+
+A rule reaches six places, and each answers a refusal in its own form.
+
+Page.
+   The view of a ``page.py`` checks the rule of its chain, as described above.
+
+``proxy.py``.
+   A ``proxy.py`` adds its requirements to every page in its directory and below, and through them to the actions and the zone requests of those pages.
+
+Action.
+   An action declared in a file of a page tree answers to the rule of the page in the directory of that file, joined with the rule of the posted origin page.
+   The tree rule runs before the ``Meta`` guard and the ``render()`` of the origin, an anonymous POST is redirected to ``LOGIN_URL`` with the origin path as ``next``, and a refusal answers 403 and sends ``form_access_denied`` with ``layer="page"``, see :doc:`/content/security/actions`.
+
+Zone request.
+   A zone GET travels the URL of its page through the same view, so the rule answers it with the same redirect, 403, or 404 before any zone renders.
+   The client runtime reports a 403 or a 404 as ``partial:error`` and then navigates to the page, and it follows a login redirect with a full navigation.
+
+Component.
+   A ``component.py`` that declares access renders nothing for a refused request, the way a ``{% has_perm %}`` block without ``else`` does, with no redirect and no 403.
+   Its ``obj`` names a prop or a ``@component.context`` value, and the component runs none of its contexts past the one the check reads.
+
+``{% has_perm %}`` block.
+   A block in a template guards markup rather than an endpoint, see `The has_perm tag`_.
+
+Rules the core keeps
+~~~~~~~~~~~~~~~~~~~~
+
+Inheritance adds until a public() lifts.
+   A page joins every requirement of the ``proxy.py`` files above it.
+   Only an explicit ``public()`` in a deeper ``proxy.py`` or in the ``page.py`` removes them, ``next.W135`` lists every such lift, and a requirement declared below the lift binds again.
+   ``public()`` beside a requirement of the same file is ``next.E165``, since the requirement still binds.
+
+Actions and zones pass the access of their page.
+   Neither has a rule of its own to forget, so a closed page stays closed for every action declared beside it and for every zone inside it, and an action under a lift is as public as its page.
+   A forged origin adds the rule of the page it names and lifts none of the owner's rule.
+
+``{% has_perm %}`` stays a boundary for partial rendering.
+   A zone inside a block of the page template asks the block again when it renders alone, and a zone in the body of a component that decides what it shows is refused, see `The has_perm tag`_.
+
+``LoginRequiredMiddleware`` works unchanged.
+   The view of every page carries the ``login_required`` attribute the middleware reads, ``False`` for a page whose rule is public, whether its own ``page.public()`` or a ``proxy.py`` above made it so.
+   The action endpoint, the CSRF endpoint, ``sitemap.xml``, and ``robots.txt`` are marked with :func:`~django.contrib.auth.decorators.login_not_required`, and the dispatcher itself requires a login for an action whose owner or origin declares nothing and is not public, an action outside any page tree included.
+   A ``Patches.morph`` onto a foreign page applies the same middleware default to that page.
+
+Mistakes surface at ``manage.py check``.
+   ``next.E164`` reports an ``obj=DObject[Model]`` whose kwarg the route of a page under it does not capture, ``next.E165`` a ``public()`` beside a requirement of the same file, and ``next.E166`` a declaration made from a module that is no ``page.py``, ``proxy.py``, or ``component.py``.
+   ``next.W131`` warns about a permission nothing defines, ``next.W132`` about a ``proxy.py`` with no page below it, ``next.W133`` about a declaring component on a page anyone reaches, ``next.W134`` about an action nothing guards, and ``next.W135`` about a ``public()`` that lifts a guarded parent, see :doc:`/content/ref/system-checks`.
+
+Listing the rules
+~~~~~~~~~~~~~~~~~
+
+``manage.py next permissions`` prints the rule of every page, every action, and every component that declares one, with the files each requirement comes from, and ``public (file)`` for a public rule, naming the file whose ``public()`` opened it.
+``manage.py next permissions /notes/1/edit/`` narrows the table to one page, the actions of its directory, and the declaring components its template renders, and ``manage.py next routes`` shows the same rule in its ``Access`` column, see :doc:`/content/ref/management`.
+
 The has_perm tag
 ----------------
 
@@ -165,25 +282,34 @@ Without an object it asks ``user.has_perm(perm)``, which model permissions answe
 The permission is a quoted name or a variable that resolves to one, and a variable that resolves to nothing renders the ``else`` branch.
 ``manage.py check`` warns with ``next.W130`` about a literal name that no installed model defines and no ``add_perm()`` registers, in a page template or a component template, since such a block renders its ``else`` branch for every user but a superuser.
 
-A ``{% zone %}`` inside a ``{% has_perm %}`` block fails ``manage.py check`` with ``next.E163``.
-A standalone zone render does not check the enclosing block again, so the zone would render for users the block refuses.
-The check reports a zone at any depth under the block in the composed page, one nested in another zone included.
-It also reports a zone anywhere in the body of a component, any slot or the children, whose template reaches a ``{% has_perm %}``.
-The analysis follows the template through nested components, a literal ``{% extends %}``, and a literal ``{% include %}``.
-A reference it cannot follow counts as a ``{% has_perm %}``, such as a component that does not resolve, a template name held in a variable, a template that does not exist, or one that does not compile.
-The rule refuses more than it has to on purpose, so a zone in a component that never guards that slot is still reported, and the message names the component.
+Zones under the tag
+~~~~~~~~~~~~~~~~~~~
 
-The runtime refuses every zone the check reports as it refuses a zone the page does not declare, since both read the same analysis, computed once per composed page template.
-A standalone zone request for it answers 400 ``unknown zone``, a form re-render that names it falls back to an extract-morph of a full render, and ``Patches.morph_zone`` or any other server-side render of it raises ``UnknownZoneError``.
+A ``{% zone %}`` inside a ``{% has_perm %}`` block of the composed page, a layout or the page template, renders on its own, and the zone render asks every block above the zone again for the user it renders for.
+A block that names a quoted permission without an object is asked before the page context runs, and any other block is asked once the context is built, with the ``{% with %}`` bindings above it pushed as a full render pushes them.
+A zone in the ``else`` branch is refused to a user who holds the permission, as the full render would leave it out for that user.
+A refusal from a block above any zone of the request answers HTTP 403 for the whole request, and a server-side render of such a zone through ``Patches`` raises :exc:`~django.core.exceptions.PermissionDenied`, which Django answers with 403 as well.
+
+.. code-block:: jinja
+   :caption: notes/pages/notes/[int:note]/template.djx
+
+   {% has_perm "notes.edit_note" note %}
+     {% zone "editor" %}
+       {% include "notes/editor.html" %}
+     {% endzone %}
+   {% endhas_perm %}
+
+A zone in the body of a component, any slot or the children, is a different case, because the decision lives in the component rather than in the page.
+A component guards the part a zone fills when it has a ``component.py``, whose ``render()``, contexts, or access declarations may decide in code, or when its template, followed through nested components, a literal ``{% extends %}``, and a literal ``{% include %}``, reaches a ``{% has_perm %}``, a reference the analysis cannot follow, or a condition around that part.
+A reference it cannot follow is a component that does not resolve, a template name held in a variable, a template that does not exist, or one that does not compile.
+Such a zone fails ``manage.py check`` with ``next.E163``, and its standalone request answers 400 ``unknown zone``, a form re-render that names it falls back to an extract-morph of a full render, and ``Patches.morph_zone`` raises ``UnknownZoneError``.
 The runtime refuses a zone under an ``{% if %}`` or a ``{% for %}`` of the composed page the same way, which ``next.E063`` and ``next.E062`` report.
 With ``DEBUG`` on, an edit to a component template, an extended template, or an included template makes the next request analyse the zones again.
 
-A component whose Python ``render()`` decides what it shows is not analysed, because a condition written in Python is like an ``{% if %}`` the analysis cannot read.
-An ``{% if %}`` or a ``{% for %}`` that a component's own template wraps around its slot or children is not analysed either, since the component analysis looks only for ``{% has_perm %}`` and unfollowable references and ``next.E062`` and ``next.E063`` read the composed page alone, so a zone in such a body renders on its own without that condition.
-Keep the permission decision for zone content in a ``{% has_perm %}`` inside the zone, and every render of the zone checks the permission for the user it renders for.
+A ``{% has_perm %}`` inside the zone needs none of this, since every render of the zone checks the permission for the user it renders for.
 
 .. code-block:: jinja
-   :caption: notes/pages/notes/[slug]/template.djx
+   :caption: notes/pages/notes/[int:note]/template.djx
 
    {% zone "toolbar" %}
      {% has_perm "notes.edit_note" note %}
@@ -216,13 +342,14 @@ Forms
        def get_form_kwargs(cls, note: DObject[Note]) -> dict[str, Any]:
            return {"instance": note}
 
-The static guard runs first, so an anonymous visitor is redirected to ``LOGIN_URL`` and an unregistered permission is checked before the form binds, as it is for every model permission.
+The rule of the page tree the action belongs to runs first, see `Where a rule applies`_, and the static guard follows, so an anonymous visitor is redirected to ``LOGIN_URL`` and an unregistered permission is checked before the form binds, as it is for every model permission.
 A registered permission waits for the bound form and is checked once, as ``user.has_perm(perm, form.instance)`` for a ``ModelForm`` that edits a saved row.
 A ``ModelForm`` that creates a record and a plain ``Form`` pass ``None``, the model-level question.
 
 The permission runs only once the row has loaded, so the way the form loads it decides what a refused user learns.
 ``DObject`` in ``get_form_kwargs`` reads the row through ``visible_to(scope)``, so a row outside the scope answers 404 before any permission runs, exactly like a missing one, see :ref:`topics-di-dobject`.
-``Meta.instance_from_url`` loads through an unscoped :func:`~django.shortcuts.get_object_or_404` on the model instead, so a refused user gets 403 for an id that exists and 404 for one that does not, which lets them probe which ids exist.
+``Meta.instance_from_url`` reads through ``visible_to(scope)`` the same way once the model manager defines ``visible_to`` and the project registers ``scope``.
+Without both it loads through an unscoped :func:`~django.shortcuts.get_object_or_404`, so a refused user gets 403 for an id that exists and 404 for one that does not, which lets them probe which ids exist.
 An overridden ``has_object_permission`` runs afterwards in addition, so it stays the place for a check that reads the request, the tenant, or a URL kwarg, see :ref:`topics-forms-actions-dynamic-guards`.
 
 A ``FormWizard`` and a handler-only ``@action`` bind no form at the guard, so they check every listed permission before anything binds, registered ones included, with ``obj`` set to ``None``.
@@ -255,4 +382,6 @@ See also
    :doc:`/content/howto/enforce-object-level-permissions` for an owner-only edit form end to end.
    :doc:`/content/ref/permissions` for the public names.
    :ref:`topics-forms-actions-guards` for the static guard and the dynamic hooks.
-   :doc:`/content/ref/system-checks` for ``next.E161``, ``next.E162``, ``next.E163``, ``next.W129``, and ``next.W130``.
+   :doc:`proxy` for the access a ``proxy.py`` declares over a subtree and the lift of ``public()``.
+   :doc:`/content/security/actions` for the access an action owes to the tree it is declared in.
+   :doc:`/content/ref/system-checks` for ``next.E161`` to ``next.E166`` and ``next.W129`` to ``next.W135``.

@@ -26,7 +26,7 @@ from next.pages.loaders import (
     last_load_error,
     load_python_module_memo,
 )
-from next.pages.scan import iter_existing_scanned_pages
+from next.pages.scan import iter_existing_scanned_pages, iter_proxy_modules
 from next.utils import walk_page_tree
 
 
@@ -197,12 +197,12 @@ def _page_import_error_message(page_path: Path) -> str:
     error = last_load_error(page_path)
     if error is None:
         return (
-            f"page.py at {page_path} could not be imported. Fix the syntax or "
-            "import error so the framework stops skipping the module silently."
+            f"{page_path.name} at {page_path} could not be imported. Fix the syntax "
+            "or import error so the framework stops skipping the module silently."
         )
     cause = error.__cause__
     return (
-        f"page.py at {page_path} failed to import "
+        f"{page_path.name} at {page_path} failed to import "
         f"({type(cause).__name__}: {cause}). A raising import in the module "
         "body counts the same as a syntax error. Fix it so the framework "
         "stops skipping the module silently."
@@ -211,18 +211,21 @@ def _page_import_error_message(page_path: Path) -> str:
 
 @register(Tags.templates, NEXT, deploy=True)
 def check_page_module_imports(*args, **kwargs) -> list[CheckMessage]:
-    """Report `page.py` files that raise while importing (`next.E017`).
+    """Report `page.py` and `proxy.py` files that raise while importing (`next.E017`).
 
-    Importing every user module costs a full tree walk, so the check is a deployment
-    one and runs under `manage.py check --deploy` instead of on every command.
+    Importing every user module walks the whole tree, so it runs under `check --deploy`.
     """
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
         return []
+    modules = (
+        *iter_existing_scanned_pages(router_manager, set()),
+        *iter_proxy_modules(router_manager),
+    )
     return [
-        Error(_page_import_error_message(page_path), obj=str(page_path), id="next.E017")
-        for page_path in iter_existing_scanned_pages(router_manager, set())
-        if load_python_module_memo(page_path) is None
+        Error(_page_import_error_message(path), obj=str(path), id="next.E017")
+        for path in modules
+        if load_python_module_memo(path) is None
     ]
 
 

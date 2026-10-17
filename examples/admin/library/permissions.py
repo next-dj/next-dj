@@ -1,16 +1,7 @@
-from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
+from shadcn_admin.permissions import Visitor, is_staff
 
 from library.models import Book, Chapter, Tag
 from next.permissions import add_perm, predicate
-
-
-type Visitor = AbstractBaseUser | AnonymousUser
-
-
-@predicate
-def is_staff(user: Visitor) -> bool:
-    """Return whether `user` works the admin, all the catalog asks of anyone."""
-    return user.is_staff
 
 
 @predicate

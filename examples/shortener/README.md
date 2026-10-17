@@ -186,6 +186,8 @@ The admin list edits each link inline. The same form renders once per row, so ea
 
 [`EditLinkForm`](shortener/pages/admin/page.py) is a `ModelForm` over `Link` and resolves the edited row from the posted `slug` in `get_initial`, so one registered form serves every row. A looped `{% form %}` without `key=` or `zone=` raises `next.W070`.
 
+The example signs nobody in, the `/admin/` panel included, so the three pages that declare actions, the home page, [`pages/admin/page.py`](shortener/pages/admin/page.py) and the link detail page, call `page.public()`. That tells `manage.py check` the actions are open on purpose instead of reporting them as `next.W134`. A deployment with accounts drops the two calls under `pages/admin/` for a `proxy.py` there with `proxy.login_required()`, since a `page.public()` below it would lift that requirement again and `manage.py check` would list the lift as `next.W135`.
+
 ### 6. Patch envelopes: `prepend`, `remove`, and an out-of-band foreign morph
 
 Three actions author their own patch envelopes through `Patches(request)` and fall back to a redirect when no runtime is present, so each works the same with or without JS.

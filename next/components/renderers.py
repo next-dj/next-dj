@@ -18,9 +18,12 @@ from django.template import Context as DjangoTemplateContext, Template
 from django.utils.functional import SimpleLazyObject
 
 from next.caches import DEFAULT_CACHE_SIZE, LruCache
+from next.conf import fail_loudly
 from next.deps import render_dep_cache
 from next.deps.cache import DependencyCache
 from next.deps.resolver import current_resolver
+from next.permissions.access import check, declared
+from next.permissions.errors import UnknownAccessObjectError
 from next.seeding import (
     ACTION_ANCHOR_KEY,
     COLLECTOR_KEY,
@@ -32,15 +35,20 @@ from next.seeding import (
 from next.utils import template_edits_watched
 
 from .context import component
+from .errors import ComponentModuleImportError
+from .loading import last_load_error
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
+    from django.db.models import Model
     from django.http import HttpRequest
 
+    from next.permissions.markers import AccessObject
     from next.static import StaticCollector
 
+    from .context import ContextFunction
     from .info import ComponentInfo
     from .loading import ModuleLoader
 
@@ -278,36 +286,74 @@ def _reject_collisions(
     raise ValueError(msg)
 
 
-def _inject_component_context(
-    info: ComponentInfo, context_data: dict[str, Any], request: HttpRequest | None
-) -> None:
-    if info.module_path is None:
-        return
+class _ContextRun:
+    """The context functions of one component render, run in order on demand.
 
-    ctx_funcs = component.get_functions(info.module_path)
-    if not ctx_funcs:
-        return
+    An access check runs the functions up to the one it reads, and the render the rest.
+    """
 
-    collector: StaticCollector | None = context_data.get(COLLECTOR_KEY)
-    guarded = _guarded_keys(context_data)
+    __slots__ = (
+        "cache",
+        "collector",
+        "context_data",
+        "functions",
+        "guarded",
+        "info",
+        "position",
+        "request",
+        "stack",
+    )
 
-    # A copy, so a value one instance resolves from its props never reaches the next.
-    cache = DependencyCache(backing_dict=dict(render_dep_cache(request)))
-    stack: list[str] = []
+    def __init__(
+        self,
+        info: ComponentInfo,
+        context_data: dict[str, Any],
+        request: HttpRequest | None,
+        functions: Sequence[ContextFunction],
+    ) -> None:
+        """Start before the first of `functions`, writing into `context_data`.
 
-    for ctx_func in ctx_funcs:
+        The cache is a copy, so what one instance resolves from its props stays its own.
+        """
+        self.info = info
+        self.context_data = context_data
+        self.request = request
+        self.functions = functions
+        self.position = 0
+        self.collector: StaticCollector | None = context_data.get(COLLECTOR_KEY)
+        self.guarded = _guarded_keys(context_data)
+        self.cache = DependencyCache(backing_dict=dict(render_dep_cache(request)))
+        self.stack: list[str] = []
+
+    def pending(self, key: str) -> bool:
+        """Return whether a function not run yet registers under `key`."""
+        return any(func.key == key for func in self.functions[self.position :])
+
+    def run_to(self, key: str | None = None) -> None:
+        """Run the functions in order until the one under `key`, or all of them."""
+        functions = self.functions
+        while self.position < len(functions):
+            ctx_func = functions[self.position]
+            self.position += 1
+            self._run(ctx_func)
+            if key is not None and ctx_func.key == key:
+                return
+
+    def _run(self, ctx_func: ContextFunction) -> None:
+        """Run one context function and merge or store what it returns."""
+        context_data = self.context_data
+        collector = self.collector
         resolved = current_resolver().resolve_with_template_context(
             ctx_func.func,
-            request=request,
+            request=self.request,
             template_context=context_data,
-            _cache=cache,
-            _stack=stack,
+            _cache=self.cache,
+            _stack=self.stack,
         )
-
         if ctx_func.key is None:
             data = ctx_func.func(**resolved)
             if isinstance(data, dict):
-                _reject_collisions(info, data, guarded)
+                _reject_collisions(self.info, data, self.guarded)
                 context_data.update(data)
                 if ctx_func.serialize and collector is not None:
                     for k, v in data.items():
@@ -319,6 +365,78 @@ def _inject_component_context(
                 collector.add_js_context(
                     ctx_func.key, result, serializer=ctx_func.serializer
                 )
+
+
+def _context_run(
+    info: ComponentInfo, context_data: dict[str, Any], request: HttpRequest | None
+) -> _ContextRun | None:
+    """Return a run over the context functions of `info`, `None` when it has none."""
+    if info.module_path is None:
+        return None
+    functions = component.get_functions(info.module_path)
+    if not functions:
+        return None
+    return _ContextRun(info, context_data, request, functions)
+
+
+def _inject_component_context(
+    info: ComponentInfo, context_data: dict[str, Any], request: HttpRequest | None
+) -> None:
+    """Run every context function of `info` into `context_data`."""
+    run = _context_run(info, context_data, request)
+    if run is not None:
+        run.run_to()
+
+
+def _url_object_error(model: type[Model], module_path: Path) -> TypeError:
+    """Return the error an `obj=DObject[...]` bound to a `component.py` raises."""
+    return TypeError(
+        f"The access of {module_path} checks a permission on a "
+        f"{model._meta.label} row a URL names, and a component has no URL. Name a "
+        "context with component.permission_required(perm, obj='name') instead."
+    )
+
+
+def _granted(
+    info: ComponentInfo,
+    context_data: Mapping[str, Any],
+    request: HttpRequest | None,
+    run: _ContextRun | None = None,
+) -> bool:
+    """Return whether `request` may see `info`, reading an `obj=` from its context.
+
+    A name no keyed context gives runs them all, since a keyless one may spread it.
+    """
+    module_path = info.module_path
+    if module_path is None:
+        return True
+    rule = declared(module_path)
+    if not rule.requirements:
+        return True
+
+    def lookup(name: AccessObject) -> object:
+        if not isinstance(name, str):
+            raise _url_object_error(name, module_path)
+        if run is not None and run.pending(name):
+            run.run_to(name)
+        elif run is not None and name not in context_data:
+            run.run_to()
+        if name in context_data:
+            return context_data[name]
+        raise UnknownAccessObjectError(name, module_path)
+
+    return check(getattr(request, "user", None), rule, lookup) is None
+
+
+def _unloaded(module_path: Path) -> str:
+    """Render nothing for a `component.py` that did not load, raising it when loud.
+
+    Its access declarations are unknown, so its template would show to anyone.
+    """
+    error = last_load_error(module_path)
+    if error is not None and fail_loudly():
+        raise ComponentModuleImportError(module_path) from error
+    return ""
 
 
 class ComponentRenderStrategy(Protocol):
@@ -396,10 +514,12 @@ class CompositeComponentRenderer:
 
         module = self._module_loader.load(info.module_path)
         if module is None:
-            return self._fallback_to_template(info, context_data, request)
+            return _unloaded(info.module_path)
 
         render_func = getattr(module, "render", None)
         if callable(render_func):
+            if not _granted(info, context_data, request):
+                return ""
             return self._render_with_function(render_func, context_data, request)
 
         return self._render_with_template(info, context_data, request)
@@ -454,26 +574,11 @@ class CompositeComponentRenderer:
             return ""
 
         context_dict = self._template_context(info, context_data, request)
-        _inject_component_context(info, context_dict, request)
-
-        return template.render(DjangoTemplateContext(context_dict))
-
-    def _fallback_to_template(
-        self,
-        info: ComponentInfo,
-        context_data: Mapping[str, Any],
-        request: HttpRequest | None,
-    ) -> str:
-        """Render the template of a `component.py` that failed to import.
-
-        A decorator of that module may have registered before the import raised, so
-        running the registrations would call into half-executed globals.
-        """
-        template = self._template_loader.load_template(info)
-        if template is None:
+        run = _context_run(info, context_dict, request)
+        if not _granted(info, context_dict, request, run):
             return ""
-
-        context_dict = self._template_context(info, context_data, request)
+        if run is not None:
+            run.run_to()
 
         return template.render(DjangoTemplateContext(context_dict))
 

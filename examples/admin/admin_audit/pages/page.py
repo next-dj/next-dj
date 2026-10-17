@@ -1,23 +1,21 @@
 from typing import Any
 
 from admin_audit.models import AdminActivityLog
-from django.core.exceptions import PermissionDenied
-from django.http import HttpRequest
 
-from next import context
+from next import context, page
 
 
 _LIMIT = 50
 
 metadata = {"breadcrumb": "Activity"}
 
+page.permission_required("admin_audit.view_adminactivitylog")
+
 
 @context("activity_state")
-def activity_state(request: HttpRequest) -> dict[str, Any]:
-    """Return the latest activity entries, refusing staff without the view right."""
-    if not request.user.has_perm("admin_audit.view_adminactivitylog"):
-        raise PermissionDenied
-    entries = AdminActivityLog.objects.select_related("user").all()[:_LIMIT]
+def activity_state() -> dict[str, Any]:
+    """Return the latest activity entries as table rows."""
+    entries = AdminActivityLog.objects.recent(_LIMIT)
     rows = [
         {
             "timestamp": entry.timestamp,

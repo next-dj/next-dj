@@ -8,7 +8,7 @@ from fragments import render_fragment
 from shortener.cache import pending_clicks
 from shortener.models import Link
 
-from next import context
+from next import context, page
 from next.forms import ComponentWidget, Form
 from next.partial import Patches, is_partial_request
 from next.urls import page_reverse_lazy
@@ -21,6 +21,8 @@ SLUG_MAX_LENGTH = 12
 LATEST_LINKS_ZONE = "latest-links"
 BADGE_ZONE = "links-badge"
 _TEMPLATE_PATH = Path(__file__).resolve().parent / "template.djx"
+
+page.public()
 
 
 class CreateLinkForm(Form):

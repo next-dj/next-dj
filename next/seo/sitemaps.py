@@ -23,6 +23,7 @@ from next.caches import DEFAULT_CACHE_SIZE
 from next.deps.resolver import current_resolver
 from next.introspect import describe_callable
 from next.pages import page
+from next.pages.access import anonymous_admitted, page_access
 from next.pages.metadata.hreflang import x_default_url
 from next.pages.metadata.normalize import X_DEFAULT
 from next.urls.reverse import page_reverse
@@ -181,7 +182,7 @@ def listed_trails(
     *,
     noindex: Callable[[Path], bool] = static_noindex,
 ) -> list[str]:
-    """Return the static trails a sitemap lists, without excluded and noindex pages.
+    """Return the static trails a sitemap lists, past exclusions, noindex and login.
 
     `noindex` reads a page's noindex, and a system check passes one that never raises.
     """
@@ -190,6 +191,7 @@ def listed_trails(
         for trail, page_path in trails.items()
         if not is_dynamic_trail(trail)
         and not is_excluded(trail, exclude)
+        and anonymous_admitted(page_access(page_path))
         and not noindex(page_path)
     ]
 
