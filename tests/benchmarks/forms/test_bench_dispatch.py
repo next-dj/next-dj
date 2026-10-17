@@ -302,6 +302,7 @@ def _tree_action(
         write_proxy(root, _TREE_PROXY)
     page_file = directory / "page.py"
     page_file.write_text(_TREE_PAGES[shape])
+    (directory / "template.djx").write_text("<p>bench</p>\n")
     backend = RegistryFormActionBackend()
     backend.register_action(
         ActionRegistration(
@@ -339,6 +340,7 @@ class TestBenchDispatchUnderTreeAccess:
             response = FormActionDispatch.dispatch(
                 backend, request, "bench_action", meta
             )
+            assert resolve_origin(request) is not None
             assert isinstance(response, HttpResponseRedirect)
             assert response.url == "/"
             assert bool(request.user.asked) is (shape != "open")
