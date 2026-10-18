@@ -6,7 +6,7 @@ from next.boundaries.graph import Graph
 from next.boundaries.manager import Scan, boundaries_manager
 from tests.support import isolated_form_registries, write_urlconf
 from tests.support.access import login_required_middleware
-from tests.support.boundaries import CANVAS_APPS, boundary_project
+from tests.support.boundaries import CANVAS_APPS, app_config, boundary_project
 
 
 @pytest.fixture()
@@ -93,10 +93,43 @@ class TestCanvas:
             canvas(scan, "nope")
 
         assert str(raised.value).endswith("Its applications: crm, shop.")
-        assert raised.value.label == "nope"
+        assert raised.value.key == "nope"
 
     def test_an_empty_scan_knows_no_app(self) -> None:
         empty = Scan(None, Graph((), ()), (), ())
 
         with pytest.raises(UnknownAppError, match=r"Its applications: none\."):
             canvas(empty, "shop")
+
+
+_DECLARED = {
+    "proj.shop": {
+        "apps.py": app_config("proj.shop", depends_on=("proj.crm",), isolated=True),
+        "views.py": (
+            "from proj.crm.services import notify\nfrom proj.billing.services import pay\n"
+        ),
+    },
+    "proj.crm": {"services.py": "def notify():\n    pass\n"},
+    "proj.billing": {"services.py": "def pay():\n    pass\n"},
+}
+
+
+class TestDeclaredCanvas:
+    """The canvas finds an app by label or name and carries what it declares."""
+
+    @pytest.mark.parametrize("key", ["shop", "proj.shop"])
+    def test_by_label_or_name(self, tmp_path, key) -> None:
+        with boundary_project(tmp_path, _DECLARED):
+            found = canvas(boundaries_manager.scan(), key)
+
+        assert (found.app.label, found.isolated, found.undeclared) == (
+            "shop",
+            True,
+            ("billing",),
+        )
+
+    def test_an_app_that_declares_nothing(self, tmp_path) -> None:
+        with boundary_project(tmp_path, _DECLARED):
+            found = canvas(boundaries_manager.scan(), "proj.crm")
+
+        assert (found.app.label, found.isolated, found.undeclared) == ("crm", False, ())

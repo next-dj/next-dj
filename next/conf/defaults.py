@@ -15,7 +15,7 @@ AUTO: Final = "auto"
 """The value of every setting whose mode the framework picks per request."""
 
 WARN: Final = "warn"
-"""The default mode of `BOUNDARIES`, which reports what the ratchet does not cover."""
+"""The mode of `BOUNDARIES` that reports what the ratchet does not cover."""
 
 STRICT: Final = "strict"
 """The mode of `BOUNDARIES` that also fails on every finding the ratchet misses."""
@@ -101,5 +101,6 @@ DEFAULTS: dict[str, Any] = {
         "BACKEND": "next.forms.SessionFormWizardBackend",
         "OPTIONS": {},
     },
-    "BOUNDARIES": WARN,
+    "BOUNDARIES": None,
+    "BOUNDARIES_IMPORT_GRAPH": None,
 }

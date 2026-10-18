@@ -25,7 +25,11 @@ if TYPE_CHECKING:
         check_builtin_tag_libraries_complete,
         check_django_templates_backend_present,
     )
-    from next.boundaries.checks import check_boundaries
+    from next.boundaries.checks import (
+        check_boundaries,
+        check_boundaries_mode,
+        check_declarations,
+    )
     from next.components.checks import (
         check_component_context_registration_files,
         check_component_module_imports,
@@ -207,7 +211,11 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_builtin_tag_libraries_complete",
         "check_django_templates_backend_present",
     ),
-    "next.boundaries.checks": ("check_boundaries",),
+    "next.boundaries.checks": (
+        "check_boundaries",
+        "check_boundaries_mode",
+        "check_declarations",
+    ),
     "next.components.checks": (
         "check_component_context_registration_files",
         "check_component_module_imports",
@@ -402,6 +410,7 @@ __all__ = [
     "check_asset_renderers",
     "check_asset_version_moves_between_deploys",
     "check_boundaries",
+    "check_boundaries_mode",
     "check_builtin_tag_libraries_complete",
     "check_component_context_registration_files",
     "check_component_module_imports",
@@ -426,6 +435,7 @@ __all__ = [
     "check_csrf_endpoint_reversible",
     "check_csrf_in_session",
     "check_custom_patch_ops_well_formed",
+    "check_declarations",
     "check_declared_permissions_known",
     "check_declaring_modules",
     "check_django_templates_backend_present",
@@ -552,13 +562,18 @@ __all__ = [
 ]
 
 
+_OPT_IN: frozenset[str] = frozenset({"next.boundaries.checks"})
+"""The `checks` modules whose hooks only `manage.py check --tag boundaries` lends."""
+
+
 def register_all() -> None:
     """Import each subpackage's `checks` module to register its hooks.
 
-    The map already lists every area, so an entry there registers its checks.
+    The map lists every area, and an opt-in module is left for its own command to load.
     """
     for module_name in _LAZY_SOURCES_BY_MODULE:
-        importlib.import_module(module_name)
+        if module_name not in _OPT_IN:
+            importlib.import_module(module_name)
 
 
 def reset_check_caches() -> None:

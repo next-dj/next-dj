@@ -1,4 +1,4 @@
-"""Boundaries between the applications of a project, checked by `manage.py check`.
+"""Boundaries between the applications of a project, under `check --tag boundaries`.
 
 The names resolve lazily, so `next.signals` loads no scan engine and no grimp.
 """
@@ -9,22 +9,36 @@ from typing import TYPE_CHECKING
 from . import signals
 from .errors import (
     BaselineError,
-    BoundariesUnavailableError,
+    ImportGraphError,
     ImportScanError,
+    SyncError,
     UnknownAppError,
 )
 
 
 if TYPE_CHECKING:
+    from .backends import AstImportGraph, GrimpImportGraph, ImportGraphBackend
     from .baseline import Debt
+    from .checks import boundary_checks
+    from .declared import Declaration, Declarations, Unused
     from .graph import App, Edge, EdgeKind, Graph, Tangle
+    from .kernel import Kernel
     from .manager import BoundariesManager, Refrozen, Report, Scan, boundaries_manager
     from .rules import RULES, Finding, Rule
+    from .sync import Change, Plan
 
 
 _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
+    "next.boundaries.backends": (
+        "AstImportGraph",
+        "GrimpImportGraph",
+        "ImportGraphBackend",
+    ),
     "next.boundaries.baseline": ("Debt",),
+    "next.boundaries.checks": ("boundary_checks",),
+    "next.boundaries.declared": ("Declaration", "Declarations", "Unused"),
     "next.boundaries.graph": ("App", "Edge", "EdgeKind", "Graph", "Tangle"),
+    "next.boundaries.kernel": ("Kernel",),
     "next.boundaries.manager": (
         "BoundariesManager",
         "Refrozen",
@@ -33,6 +47,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "boundaries_manager",
     ),
     "next.boundaries.rules": ("RULES", "Finding", "Rule"),
+    "next.boundaries.sync": ("Change", "Plan"),
 }
 
 _LAZY_ATTRIBUTES: dict[str, str] = {
@@ -43,22 +58,33 @@ _LAZY_ATTRIBUTES: dict[str, str] = {
 __all__ = [
     "RULES",
     "App",
+    "AstImportGraph",
     "BaselineError",
     "BoundariesManager",
-    "BoundariesUnavailableError",
+    "Change",
     "Debt",
+    "Declaration",
+    "Declarations",
     "Edge",
     "EdgeKind",
     "Finding",
     "Graph",
+    "GrimpImportGraph",
+    "ImportGraphBackend",
+    "ImportGraphError",
     "ImportScanError",
+    "Kernel",
+    "Plan",
     "Refrozen",
     "Report",
     "Rule",
     "Scan",
+    "SyncError",
     "Tangle",
     "UnknownAppError",
+    "Unused",
     "boundaries_manager",
+    "boundary_checks",
     "signals",
 ]
 

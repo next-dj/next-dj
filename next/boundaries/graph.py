@@ -63,6 +63,18 @@ class Graph:
         """Return the application of `label`, `None` for no project application."""
         return next((app for app in self.apps if app.label == label), None)
 
+    @property
+    def names(self) -> dict[str, str]:
+        """Return the name of every application by its label."""
+        return {app.label: app.name for app in self.apps}
+
+    def lookup(self, key: str) -> App | None:
+        """Return the application whose label is `key`, or else whose name is."""
+        found = self.app(key)
+        if found is not None:
+            return found
+        return next((app for app in self.apps if app.name == key), None)
+
     def outgoing(self, label: str) -> tuple[Edge, ...]:
         """Return the edges from the application `label` to another one."""
         return tuple(edge for edge in self.edges if edge.source == label)

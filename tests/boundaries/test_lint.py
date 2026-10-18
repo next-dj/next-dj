@@ -10,7 +10,7 @@ from next.boundaries.rules import (
     TREE_WRITE,
     UNSCOPED_QUERY,
 )
-from tests.support.boundaries import finding_rows, scanned
+from tests.support.boundaries import UNREADABLE, finding_rows, scanned
 
 
 _TREE_PAGE = """from shop.models import Order
@@ -140,9 +140,9 @@ _LINT_PROJECT = {
         "orders/__init__.py": "class Model:\n    pass\n\n\nclass Order(Model):\n    pass\n",
         "orders/providers.py": "",
         "pages/page.py": _TREE_PAGE,
-        "pages/broken.py": b"name = '\xff'\n",
+        "pages/broken.py": UNREADABLE,
         "pages/beyond.py": "from ...... import *\n",
-        "signals/broken.py": b"name = '\xff'\n",
+        "signals/broken.py": UNREADABLE,
         **dict.fromkeys(FOREIGN_FILES, ""),
     },
     "crm": {

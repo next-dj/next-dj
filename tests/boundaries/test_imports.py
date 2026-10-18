@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from next.boundaries import imports
-from next.boundaries.errors import BoundariesUnavailableError, ImportScanError
+from next.boundaries.errors import ImportScanError
 from next.boundaries.imports import Import, ImportScan, package_imports
 from tests.support import importable_dir
 
@@ -100,17 +100,9 @@ class TestPackageImports:
         with pytest.raises(KeyboardInterrupt):
             package_imports(["pkg"])
 
-    def test_without_grimp_the_scan_is_unavailable(self, monkeypatch) -> None:
-        monkeypatch.setattr(imports, "AVAILABLE", False)
-
-        with pytest.raises(
-            BoundariesUnavailableError, match="next\\.dj\\[boundaries\\]"
-        ):
-            package_imports(["pkg"])
-
 
 class TestOptionalGrimp:
-    """Without grimp the module still loads, with the boundaries switched off."""
+    """Without grimp the module still loads, and says so for the ast reader to step in."""
 
     def test_the_module_loads_without_grimp(self, monkeypatch) -> None:
         monkeypatch.setitem(sys.modules, "grimp", None)
@@ -124,5 +116,3 @@ class TestOptionalGrimp:
         spec.loader.exec_module(fresh)
 
         assert fresh.AVAILABLE is False
-        with pytest.raises(BoundariesUnavailableError):
-            fresh.package_imports(["pkg"])

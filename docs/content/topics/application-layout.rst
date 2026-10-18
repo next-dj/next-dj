@@ -205,7 +205,7 @@ Signals
 -------
 
 An application talks to a neighbour by importing a function from the neighbour's ``services``, ``models``, or ``signals`` module, the three modules :ref:`topics-boundaries-public-modules` names.
-A signal replaces that import only where the import would create a cycle, which happens when the neighbour already imports this application, and ``manage.py check`` reports such a cycle as ``next.E167``.
+A signal replaces that import only where the import would create a cycle, which happens when the neighbour already imports this application, and ``manage.py check --tag boundaries`` reports such a cycle as ``next.E167``.
 In the example an ``activity`` application imports ``notes`` to record what happens to notes, so ``notes`` cannot import ``activity`` back and announces the archive through ``note_archived`` instead.
 
 .. code-block:: python

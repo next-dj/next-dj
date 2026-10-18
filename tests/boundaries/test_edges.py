@@ -1,12 +1,9 @@
 import ast
-from pathlib import Path
-from types import ModuleType
-from unittest.mock import patch
 
 import pytest
 
 from next.boundaries import edges
-from next.boundaries.edges import class_line, model_file
+from next.boundaries.edges import class_line
 from tests.support import file_router_config_entry, write_page
 from tests.support.boundaries import edge_rows, scanned
 
@@ -267,7 +264,8 @@ class TestClassLine:
     """The line of a field is where the class body assigns it."""
 
     _SYNTAX = ast.parse(
-        "class Order:\n    pass\n    title: str = ''\n    buyer = None\n"
+        "class Order:\n    pass\n    title: str = ''\n    buyer = None\n\n\n"
+        "class Shadow:\n    class Order:\n        buyer = 1\n"
     )
 
     @pytest.mark.parametrize(
@@ -285,21 +283,6 @@ class TestClassLine:
 
     def test_no_syntax_is_line_zero(self) -> None:
         assert class_line(None, "Order", "buyer") == 0
-
-
-class TestModelFile:
-    """The file of a model is the file of its module, when the module has one."""
-
-    def test_a_module_without_a_file(self) -> None:
-        model = type("Ghost", (), {"__module__": "ghost_models"})
-
-        with patch.dict("sys.modules", {"ghost_models": ModuleType("ghost_models")}):
-            assert model_file(model) is None
-
-    def test_a_module_with_a_file(self) -> None:
-        model = type("Here", (), {"__module__": __name__})
-
-        assert model_file(model) == Path(__file__).resolve()
 
 
 _REACH = """from django.apps import apps

@@ -5,10 +5,12 @@ from io import StringIO
 
 import pytest
 from admin_audit.models import AdminActivityLog
+from django.apps import apps
 from django.contrib import admin
 from django.contrib.auth.models import Group, Permission
 from django.core.checks import run_checks
 from django.core.management import call_command
+from django.core.management.base import SystemCheckError
 from django.db import connection
 from django.db.models import UniqueConstraint
 from django.test.utils import CaptureQueriesContext
@@ -17,6 +19,7 @@ from library.demo import DEMO_BOOKS, seed_demo
 from library.models import Book, Chapter, Tag
 from shadcn_admin.forms import AdminFormSpec, AdminInlineSpec, InlineRights
 
+from next.boundaries import boundaries_manager
 from next.testing import (
     NextClient,
     assert_metadata,
@@ -2357,3 +2360,42 @@ class TestObjectPermissions:
     def test_the_permission_checks_find_nothing(self, db):
         found = {message.id for message in run_checks()}
         assert found.isdisjoint(PERMISSION_CHECKS)
+
+
+@pytest.fixture()
+def fresh_scan():
+    boundaries_manager.reset()
+    yield
+    boundaries_manager.reset()
+
+
+class TestBoundaries:
+    def test_every_declared_dependency_is_used(self) -> None:
+        out = StringIO()
+        call_command("next", "boundaries", "--exact", stdout=out)
+        assert "Every depends_on entry is used." in out.getvalue()
+
+    def test_the_boundary_checks_find_nothing(self) -> None:
+        out = StringIO()
+        call_command(
+            "check", "--tag", "boundaries", "--fail-level", "WARNING", stdout=out
+        )
+        assert "no issues" in out.getvalue()
+
+    def test_only_the_boundaries_tag_runs_the_boundary_checks(
+        self, monkeypatch: pytest.MonkeyPatch, fresh_scan
+    ) -> None:
+        monkeypatch.setattr(apps.get_app_config("admin_audit"), "depends_on", ())
+        out, err = StringIO(), StringIO()
+        call_command("check", "--fail-level", "CRITICAL", stdout=out, stderr=err)
+        assert "next.W150" not in out.getvalue() + err.getvalue()
+        with pytest.raises(SystemCheckError, match=r"next\.W150"):
+            call_command(
+                "check",
+                "--tag",
+                "boundaries",
+                "--fail-level",
+                "WARNING",
+                stdout=StringIO(),
+                stderr=StringIO(),
+            )

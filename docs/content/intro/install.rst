@@ -242,6 +242,30 @@ Three framework checks carry Django's ``deploy`` flag and stay silent until the 
 ``next.E017`` reports a ``page.py`` that raises while importing, ``next.E084`` reports the same for a ``component.py``, and ``next.E072`` reports a composed page template that fails to compile.
 A typo in a page module is invisible to a plain ``manage.py check`` and named by ``next.E017`` here, so run the deploy variant whenever a page stops responding for no visible reason.
 
+.. _intro-install-boundaries:
+
+Turn on the boundary checks
+---------------------------
+
+The checks that hold the applications of a project to their roles are off until ``NEXT_FRAMEWORK["BOUNDARIES"]`` names a mode, so a project turns them on as a step of its own.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "BOUNDARIES": "strict",
+   }
+
+They run under their own tag and never with a plain ``manage.py check`` or ``runserver``.
+
+.. code-block:: bash
+   :caption: shell
+
+   uv run python manage.py check --tag boundaries --fail-level WARNING
+
+next.dj reads the import graph with a reader of its own, so the checks need no extra dependency.
+The ``boundaries`` extra, ``uv add "next.dj[boundaries]"``, installs grimp, which reads the graph of a large project faster, see :doc:`/content/topics/boundaries`.
+
 .. _intro-install-project-template:
 
 Start from the project template
@@ -254,13 +278,12 @@ Both are directories of the installed package, and the commands below ask Python
 .. code-block:: bash
    :caption: shell
 
-   uv add "next.dj[boundaries]"
    uv run django-admin startproject --template="$(uv run python -c 'import next.conf; print(next.conf.__path__[0])')/project_template" config .
    uv run python manage.py startapp --template="$(uv run python -c 'import next.conf; print(next.conf.__path__[0])')/app_template" shop
 
 The project template writes ``manage.py``, the ``config`` package, a ``chrome/`` page root with a ``layout.djx`` that renders the head through ``{% metadata %}``, and a ``home`` application whose welcome page at ``/`` declares ``page.public()``.
 Its settings list ``django.contrib.admin``, ``next``, and ``home``, place ``LoginRequiredMiddleware`` right after ``AuthenticationMiddleware`` so every other page asks for a login, add ``ObjectPermissionBackend`` to ``AUTHENTICATION_BACKENDS``, and set ``LOGIN_URL = "admin:login"``.
-``NEXT_FRAMEWORK`` turns the boundary checks to ``"strict"``, see :doc:`/content/topics/boundaries`.
+``NEXT_FRAMEWORK`` turns the boundary checks on in ``"strict"``, and ``home/tests/test_boundaries.py`` runs ``manage.py check --tag boundaries --fail-level WARNING`` under ``manage.py test``, so a new edge that breaks a boundary fails the test suite of the project, see :ref:`intro-install-boundaries`.
 
 The application template writes one application in the composition the layout prescribes.
 It holds an ``Item`` model with ``visible_to`` on its ``QuerySet`` and its first migration, ``create_item`` and ``rename_item`` in ``services.py``, an ``item_created`` signal, object permissions in ``permissions.py``, an abstract ``ItemForm`` in ``forms.py``, an ``ItemAdmin`` that writes through the services, a page tree mounted at ``/shop/``, and tests.

@@ -10,6 +10,7 @@ That component renders the head through ``{% metadata %}``, and every example na
 ``manage.py check --deploy --tag seo`` passes clean in every example.
 Every example sets ``NEXT_FRAMEWORK["BOUNDARIES"]`` to ``"strict"`` and passes ``manage.py check --tag boundaries --fail-level WARNING`` clean, see :doc:`/content/topics/boundaries`.
 Only ``admin`` keeps a ``boundaries.toml``, with one recorded finding shown on purpose as debt the ratchet lets shrink and never grow.
+``admin`` and ``multi-tenant`` declare ``depends_on`` on every application and pass ``manage.py next boundaries --exact``, and ``admin`` isolates its audit application, see :doc:`/content/howto/scale-to-contexts`.
 The ``kanban`` and ``live-polls`` folders add a Vite toolchain on top of that and need Node installed.
 Every application keeps its pages in ``pages/`` and its page-tree components in ``pages/_components/``, and every example registers a project-level ``DIRS`` root in ``PAGE_BACKENDS``.
 The ``admin`` example also serves the components at the root of its ``shadcn_admin`` application through ``COMPONENT_BACKENDS`` ``DIRS``.
@@ -77,7 +78,8 @@ The table runs roughly in order of how much it assumes.
        Titles every model page, the changelist, the add, change, and delete forms, and the history, after its model through ``@page.metadata(inherit=True)``, and keeps the whole site out of search through ``SITE["INDEXABLE"] = False``, publishing no sitemap or robots file.
        Its ``admin_audit`` application mounts its activity page and the per-object history page through ``mounts`` on its ``AppConfig``, and plugs its sidebar link and dashboard panel into ``shadcn_admin`` through the ``nav_requested`` and ``panels_requested`` signals, an extension point that keeps the base from depending on the plugin and the two applications out of a cycle.
        Its ``boundaries.toml`` records one finding, ``library/admin.py`` importing the admin base classes of ``shadcn_admin``, as debt the ratchet lets shrink and never grow.
-     - :doc:`/content/howto/integrate-django-admin`, :doc:`/content/topics/multi-project`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/file-router`, :doc:`/content/topics/proxy`, :doc:`/content/topics/permissions`
+       Every application declares ``depends_on``, and ``admin_audit`` is isolated and returns a frozen ``HistoryEntry`` dataclass from its services.
+     - :doc:`/content/howto/integrate-django-admin`, :doc:`/content/howto/scale-to-contexts`, :doc:`/content/topics/multi-project`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/file-router`, :doc:`/content/topics/proxy`, :doc:`/content/topics/permissions`
 
 Shared assets
 -------------

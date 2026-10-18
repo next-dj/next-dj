@@ -164,14 +164,66 @@ def _stale(key: Key, app: str, found: int, recorded: int) -> Finding:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class Purview:
+    """What of the recorded debt the installed apps can judge.
+
+    `away` holds each recorded file on disk that no installed app of the project holds.
+    """
+
+    base_dir: Path | None = None
+    away: frozenset[str] = frozenset()
+    reduced: bool = False
+
+    def may_shrink(self, file: str) -> bool:
+        """Return whether a file on disk may hold fewer findings for the apps left out.
+
+        A finding can vanish with the app its edge reached, so only growth is judged.
+        """
+        return (
+            self.reduced
+            and self.base_dir is not None
+            and (self.base_dir / file).is_file()
+        )
+
+    def set_aside(self, file: str) -> bool:
+        """Return whether a recorded file belongs to an app the settings leave out."""
+        return file in self.away
+
+
+WHOLE: Final = Purview()
+
+
+def judged(
+    base_dir: Path | None,
+    recorded: Mapping[Key, int] | None,
+    app_of: Callable[[str], str],
+    *,
+    dropping: bool,
+) -> Purview:
+    """Return what the ratchet may judge under the settings of this run.
+
+    A record of a file no installed app holds, or `dropping`, shows apps left out.
+    """
+    if base_dir is None or not recorded:
+        return WHOLE
+    away = frozenset(
+        file
+        for file, _code in recorded
+        if (base_dir / file).is_file() and not app_of(file)
+    )
+    return Purview(base_dir, away, reduced=bool(away) or dropping)
+
+
 def compare(
     findings: Iterable[Finding],
     recorded: Mapping[Key, int] | None,
     app_of: Callable[[str], str],
+    purview: Purview = WHOLE,
 ) -> Ratchet:
     """Split the findings into those no record covers and the records that broke.
 
-    A record covers exactly its count, so more findings and fewer are both errors.
+    A deploy that leaves apps out judges only growth and sets aside their records.
     """
     grouped: dict[Key, list[Finding]] = defaultdict(list)
     shown: list[Finding] = []
@@ -185,6 +237,8 @@ def compare(
     debts: list[Debt] = []
     for key in sorted(grouped.keys() | records.keys()):
         found = grouped.get(key, [])
+        if not found and purview.set_aside(key[0]):
+            continue
         count = records.get(key, 0)
         app = found[0].app if found else app_of(key[0])
         debts.append(Debt(app, key[1], key[0], len(found), count))
@@ -192,17 +246,29 @@ def compare(
             shown.extend(found)
         elif len(found) > count:
             problems.append(_grown(key, app, found, count))
-        elif len(found) < count:
+        elif len(found) < count and not purview.may_shrink(key[0]):
             problems.append(_stale(key, app, len(found), count))
     return Ratchet(tuple(sorted(shown)), tuple(problems), tuple(debts))
 
 
+def _kept(key: Key, count: int, found: Mapping[Key, int], purview: Purview) -> int:
+    """Return what a refreeze keeps of one record, all of it where it cannot tell.
+
+    A deploy that leaves apps out keeps its records, so the next full refreeze judges.
+    """
+    if purview.may_shrink(key[0]):
+        return count
+    return min(count, found.get(key, 0))
+
+
 def shrink(
-    findings: Iterable[Finding], recorded: Mapping[Key, int] | None
+    findings: Iterable[Finding],
+    recorded: Mapping[Key, int] | None,
+    purview: Purview = WHOLE,
 ) -> tuple[dict[Key, int], int]:
     """Return the counts a refreeze writes and how many findings stay unrecorded.
 
-    With no file every finding is recorded, and with one each record only shrinks.
+    With no file every finding is recorded, and with one a record only shrinks.
     """
     found = tally(findings)
     if recorded is None:
@@ -210,7 +276,7 @@ def shrink(
     counts = {
         key: kept
         for key, count in recorded.items()
-        if (kept := min(count, found.get(key, 0))) > 0
+        if (kept := _kept(key, count, found, purview)) > 0
     }
     unrecorded = sum(
         max(count - recorded.get(key, 0), 0) for key, count in found.items()
@@ -221,12 +287,15 @@ def shrink(
 __all__ = [
     "FILENAME",
     "VERSION",
+    "WHOLE",
     "Debt",
     "Key",
+    "Purview",
     "Ratchet",
     "baseline_path",
     "compare",
     "dump",
+    "judged",
     "read",
     "shrink",
     "tally",

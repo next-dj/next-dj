@@ -256,6 +256,14 @@ def workspace_meta(tenant: Tenant = Depends("scope")) -> MetadataDict:
 
 `inherit=True` runs the callable for every page below the root, the way `inherit_context=True` shares the `tenant` context of section 5. `site_name` feeds the `{title} · {site_name}` template of the settings tier, so `/notes/` reads `Notes · Acme Industries` under `X-Tenant: acme` and `Notes · Globex Corporation` under `globex`. `title.default` is what a page without a title of its own renders, which makes the landing tab the bare tenant name. The settings tier keeps its own `default`, which `manage.py check` requires beside a template, but no workspace page renders it any more. The pages below add titles in the two usual forms, a one-line dict on `/notes/` and `/notes/new/`, and on the editor a `@page.metadata` callable that declares `note: DObject[Note]` and gets the row the `note` context of the same page already loaded through `visible_to`. A workspace is private to its tenant, so the root callable says `noindex` once for all of them. One parametrized integration test walks both tenants through the landing, the list, the create form and the editor.
 
+### 9. Boundaries
+
+Boundaries are off until the project sets the key, and [`config/settings.py`](config/settings.py) does with `NEXT_FRAMEWORK["BOUNDARIES"] = "strict"`. From then on `uv run python manage.py check --tag boundaries --fail-level WARNING` and `next boundaries` read the project, while a plain `check` and `runserver` leave them out.
+
+`notes` is the only app of the project, and [`notes/apps.py`](notes/apps.py) says so with `depends_on = ()`. `uv run python manage.py next boundaries sync --add` wrote that empty tuple from the import graph, and a second `sync` prints `Nothing to add.` `uv run python manage.py next boundaries` prints `No boundary findings. Mode: strict.`, and `next boundaries --exact` adds `Every depends_on entry is used.` With one app there is no edge to declare, so what the tuple guards here is the closure. A name in `depends_on` that `INSTALLED_APPS` leaves out is `next.E174`, and a second app that `notes` starts to import would turn up as `next.W150` until the tuple names it.
+
+The integration suite reads the declaration and the empty list of outgoing edges of `notes` through `boundaries_manager.scan()`, runs `next boundaries --exact` and `check --tag boundaries --fail-level WARNING` and expects both clean, and swaps in `depends_on = ("billing",)` to see `next.E174` come back.
+
 ## Gotchas
 
 ### The asset-version guard reads the same build id

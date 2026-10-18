@@ -2,10 +2,10 @@ from io import StringIO
 
 import pytest
 from django.core.management import CommandError, call_command
-from django.core.management.base import SystemCheckError
 
+from next.checks import BOUNDARIES, NEXT
 from tests.support import installed_apps, write_app, write_urlconf
-from tests.support.boundaries import boundary_project
+from tests.support.boundaries import Probes, boundary_project, held_checks
 
 
 _CYCLE = {
@@ -47,7 +47,7 @@ class TestNextCommand:
 
 
 class TestSystemChecks:
-    """`next boundaries` reports the checks itself, every other subcommand runs them."""
+    """`next boundaries` reports its findings, and no subcommand runs those checks."""
 
     def test_boundaries_starts_while_a_boundary_check_fails(self, tmp_path) -> None:
         out = StringIO()
@@ -62,9 +62,15 @@ class TestSystemChecks:
             "0",
         ]
 
-    def test_routes_stops_on_the_same_failure(self, tmp_path) -> None:
+    def test_routes_runs_the_checks_without_the_boundary_ones(self, tmp_path) -> None:
+        probes = Probes()
+        regular = probes.check("next", NEXT)
+        area = [probes.check("boundaries", BOUNDARIES)]
+
         with (
-            boundary_project(tmp_path, _CYCLE),
-            pytest.raises(SystemCheckError, match=r"next\.E167"),
+            boundary_project(tmp_path, _CYCLE, framework={"BOUNDARIES": "strict"}),
+            held_checks([regular], area=area),
         ):
             call_command("next", "routes", skip_checks=False, stdout=StringIO())
+
+        assert probes.calls == ["next"]

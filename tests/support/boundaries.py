@@ -1,26 +1,63 @@
 from __future__ import annotations
 
 import importlib
+import json
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Final
 
 from django.apps import apps as django_apps
+from django.core.checks.registry import CheckRegistry, registry
 
+from next.boundaries.checks import boundary_checks
 from next.boundaries.manager import boundaries_manager
 from next.deps import resolver
 from tests.support.mounts import installed_apps, write_app
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterable, Mapping
+    from collections.abc import Callable, Generator, Iterable, Mapping
     from pathlib import Path
+
+    from django.core.checks import CheckMessage
 
     from next.boundaries.manager import Scan
 
 
-type AppFiles = Mapping[str, str | bytes]
+@dataclass(frozen=True, slots=True)
+class Unreadable:
+    """A file the scan lists but cannot read, written as a link that leads nowhere."""
+
+
+UNREADABLE: Final = Unreadable()
+
+type AppFiles = Mapping[str, str | bytes | Unreadable]
 type EdgeRow = tuple[str, str, str, str, int, str]
 type FindingRow = tuple[str, int, str]
+
+
+def literal(value: object) -> str:
+    """Return the source of a value as `ruff format` spells it."""
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, tuple):
+        items = [literal(item) for item in value]
+        return f"({items[0]},)" if len(items) == 1 else f"({', '.join(items)})"
+    if isinstance(value, list):
+        return f"[{', '.join(literal(item) for item in value)}]"
+    return repr(value)
+
+
+def app_config(name: str, *lines: str, **attributes: object) -> str:
+    """Return an `apps.py` whose class `Config` sets `name`, `attributes`, `lines`."""
+    body = "".join(
+        f"    {key} = {literal(value)}\n" for key, value in attributes.items()
+    )
+    extra = "".join(f"    {line}\n" for line in lines)
+    return (
+        "from django.apps import AppConfig\n\n\n"
+        f"class Config(AppConfig):\n    name = {literal(name)}\n{body}{extra}"
+    )
 
 
 def write_boundary_apps(root: Path, apps: Mapping[str, AppFiles]) -> None:
@@ -30,7 +67,9 @@ def write_boundary_apps(root: Path, apps: Mapping[str, AppFiles]) -> None:
         for name, text in files.items():
             path = app / name
             path.parent.mkdir(parents=True, exist_ok=True)
-            if isinstance(text, bytes):
+            if isinstance(text, Unreadable):
+                path.symlink_to(path.with_name(f"{path.name}.missing"))
+            elif isinstance(text, bytes):
                 path.write_bytes(text)
             else:
                 path.write_text(text)
@@ -48,10 +87,11 @@ def boundary_project(
 ) -> Generator[Path, None, None]:
     """Install the apps written under `root` with `BASE_DIR` at `root` for the block.
 
-    The modules of `load` run first, so their DI keys are held until the block ends.
+    The boundaries are on in the warn mode unless `framework` says otherwise.
     """
     write_boundary_apps(root, apps)
     settings = {"BASE_DIR": root, **overrides}
+    framework = {"BOUNDARIES": "warn", **(framework or {})}
     keys = set(resolver.dependencies())
     try:
         with installed_apps(
@@ -155,7 +195,54 @@ CANVAS_APPS: dict[str, dict[str, str]] = {
         ),
         "signals.py": "from django.dispatch import Signal\n\nchanged = Signal()\n",
         "services/billing.py": "def bill():\n    pass\n",
-        "services/broken.py": b"name = '\xff'\n",
+        "services/broken.py": UNREADABLE,
         "views.py": "from shop.services import place_order\n",
     },
 }
+
+
+type Check = Callable[..., list[CheckMessage]]
+
+
+@dataclass(slots=True)
+class Probes:
+    """Checks that record their name when a run calls them, and answer `messages`."""
+
+    calls: list[str] = field(default_factory=list)
+
+    def check(
+        self, name: str, *tags: str, messages: Iterable[CheckMessage] = ()
+    ) -> Check:
+        """Return a check tagged `tags` that records `name` on each call."""
+        answer = list(messages)
+
+        def probe(*args: object, **kwargs: object) -> list[CheckMessage]:
+            self.calls.append(name)
+            return answer
+
+        CheckRegistry().register(probe, *tags)
+        return probe
+
+
+@contextmanager
+def held_checks(
+    regular: Iterable[Check] = (),
+    *,
+    deployment: Iterable[Check] = (),
+    area: Iterable[Check] | None = None,
+) -> Generator[None, None, None]:
+    """Hold the global check registry to the checks given, and the boundary one too.
+
+    Django reads one registry object everywhere, so its sets swap, `area=None` stays.
+    """
+    saved = registry.registered_checks, registry.deployment_checks
+    saved_area = boundary_checks.registered_checks
+    registry.registered_checks = set(regular)
+    registry.deployment_checks = set(deployment)
+    if area is not None:
+        boundary_checks.registered_checks = set(area)
+    try:
+        yield
+    finally:
+        registry.registered_checks, registry.deployment_checks = saved
+        boundary_checks.registered_checks = saved_area

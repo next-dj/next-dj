@@ -5,6 +5,7 @@ from io import StringIO
 from typing import TYPE_CHECKING
 
 import pytest
+from django.apps import apps
 from django.conf import settings
 from django.core.management import call_command
 from django.db import connection
@@ -13,6 +14,8 @@ from django.test.utils import CaptureQueriesContext
 from notes.models import Note, Tenant
 from notes.themes import DEFAULT_ACCENT
 
+from next.boundaries import boundaries_manager
+from next.checks import check_declarations
 from next.testing import assert_metadata
 
 
@@ -582,3 +585,34 @@ class TestPageMetadata:
     ) -> None:
         response = next_client.get(path.format(pk=acme_note.pk), HTTP_X_TENANT=slug)
         assert_metadata(response, title=title, robots="noindex")
+
+
+class TestBoundaries:
+    def test_notes_declares_no_dependency_and_has_no_outgoing_edge(self) -> None:
+        scan = boundaries_manager.scan()
+        assert scan.declarations.of("notes").depends_on == ()
+        assert scan.graph.outgoing("notes") == ()
+
+    def test_every_declared_dependency_is_used(self) -> None:
+        out = StringIO()
+        call_command("next", "boundaries", "--exact", stdout=out)
+        assert "Every depends_on entry is used." in out.getvalue()
+
+    def test_a_dependency_the_settings_do_not_install_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(apps.get_app_config("notes"), "depends_on", ("billing",))
+        found = [(message.id, message.msg) for message in check_declarations()]
+        assert found == [
+            (
+                "next.E174",
+                "notes depends on billing, which config.settings does not install.",
+            )
+        ]
+
+    def test_the_boundary_checks_find_nothing(self) -> None:
+        out = StringIO()
+        call_command(
+            "check", "--tag", "boundaries", "--fail-level", "WARNING", stdout=out
+        )
+        assert "no issues" in out.getvalue()

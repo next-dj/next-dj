@@ -7,4 +7,5 @@ class LibraryConfig(AppConfig):
     name = "library"
     label = "library"
     verbose_name = "Library"
+    depends_on = ("shadcn_admin",)
     mounts: ClassVar[dict[str, str]] = {"book_pages": "library/book/<int:book>/"}

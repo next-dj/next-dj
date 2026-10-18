@@ -8,8 +8,9 @@ from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Final, Literal
 
+from next.conf.defaults import STRICT
+
 from .edges import Registration
-from .errors import INSTALL_HINT, OFF_MESSAGE
 from .graph import Edge, Graph, Tangle
 from .sources import Project, within
 
@@ -22,6 +23,9 @@ STALE: Final = "next.E169"
 BASELINE: Final = "next.E170"
 UNRECORDED: Final = "next.E171"
 SCAN: Final = "next.E173"
+CLOSURE: Final = "next.E174"
+DECLARATIONS: Final = "next.E175"
+IMPORT_GRAPH: Final = "next.E176"
 PRIVATE_IMPORT: Final = "next.W136"
 TREE_IMPORT: Final = "next.W137"
 UNSCOPED_QUERY: Final = "next.W138"
@@ -36,12 +40,16 @@ AGGREGATOR: Final = "next.W146"
 FOREIGN_FILE: Final = "next.W147"
 STRICT_OFF: Final = "next.W148"
 FOREIGN_PERMISSION: Final = "next.W149"
-DISABLED: Final = "next.I001"
+UNDECLARED: Final = "next.W150"
+ISOLATED_FOREIGN_KEY: Final = "next.W151"
+ISOLATED_SERVICE: Final = "next.W152"
+UNANNOTATED_SERVICE: Final = "next.W153"
 
 DOCTRINE: Final = (
     "https://next-dj.readthedocs.io/en/latest/content/topics/boundaries.html"
 )
 PUBLIC_MODULES: Final = frozenset({"models", "services", "signals"})
+ISOLATED_MODULES: Final = frozenset({"services", "signals"})
 CORE_KEYS: Final = frozenset({"scope"})
 REFREEZE_HINT: Final = "Run manage.py next boundaries --refreeze."
 
@@ -50,12 +58,22 @@ _KEY_PREFIX = re.compile(r"[_.]")
 
 @dataclass(frozen=True, slots=True)
 class Rule:
-    """One boundary check id, its level, its hint and its section of the doctrine."""
+    """One boundary check id, its level, its hint and its section of the doctrine.
+
+    A rule with a `strict_level` takes that level in the strict mode, under the same id.
+    """
 
     code: str
     level: Level
     hint: str
     anchor: str
+    strict_level: Level | None = None
+
+    def level_in(self, mode: str) -> Level:
+        """Return the level of the rule in the mode `BOUNDARIES` names."""
+        if mode == STRICT and self.strict_level is not None:
+            return self.strict_level
+        return self.level
 
     @property
     def doc(self) -> str:
@@ -73,9 +91,11 @@ RULES: Final[Mapping[str, Rule]] = {
     for rule in (
         Rule(
             CYCLE,
-            "error",
-            "Cut one edge of the cycle, usually by moving the shared code down.",
+            "warning",
+            "Cut one edge of the cycle, usually by moving the shared code down. The "
+            "strict mode fails the check on it.",
             "no-cycles",
+            strict_level="error",
         ),
         Rule(
             GROWN,
@@ -99,6 +119,26 @@ RULES: Final[Mapping[str, Rule]] = {
             "strict-mode",
         ),
         Rule(SCAN, "error", "Fix the file the message names.", "import-graph"),
+        Rule(
+            CLOSURE,
+            "error",
+            "Make each entry of depends_on the name of an app these settings install, "
+            "as the message says.",
+            "closure",
+        ),
+        Rule(
+            DECLARATIONS,
+            "error",
+            "Fix the attribute on the AppConfig as the message says.",
+            "declarations",
+        ),
+        Rule(
+            IMPORT_GRAPH,
+            "error",
+            "Name a subclass of next.boundaries.ImportGraphBackend, or leave the key "
+            "unset for grimp when installed and the ast reader otherwise.",
+            "import-graph",
+        ),
         Rule(
             PRIVATE_IMPORT,
             "warning",
@@ -173,7 +213,7 @@ RULES: Final[Mapping[str, Rule]] = {
         Rule(
             STRICT_OFF,
             "warning",
-            "Install the next.dj[boundaries] extra and point BASE_DIR at the project.",
+            "Point BASE_DIR at the folder that holds the project apps.",
             "installing",
         ),
         Rule(
@@ -182,14 +222,40 @@ RULES: Final[Mapping[str, Rule]] = {
             "Register a permission in the permissions.py of the app its label names.",
             "foreign-permissions",
         ),
-        Rule(DISABLED, "info", INSTALL_HINT, "installing"),
+        Rule(
+            UNDECLARED,
+            "warning",
+            "Add the app to depends_on of the AppConfig, or run manage.py next "
+            "boundaries sync --add.",
+            "undeclared",
+        ),
+        Rule(
+            ISOLATED_FOREIGN_KEY,
+            "warning",
+            "Keep the id of the record, and ask the services of the isolated app for "
+            "the rest.",
+            "isolated-foreign-keys",
+        ),
+        Rule(
+            ISOLATED_SERVICE,
+            "warning",
+            "Return a frozen slots dataclass, an enum or a builtin type, never a model "
+            "or a queryset.",
+            "isolated-services",
+        ),
+        Rule(
+            UNANNOTATED_SERVICE,
+            "warning",
+            "Annotate the return type of the function, so the check can read it.",
+            "annotate-services",
+        ),
     )
 }
 
 RECORDABLE: Final = frozenset(
     code
     for code, rule in RULES.items()
-    if (rule.level == "warning" and code != STRICT_OFF) or code == CYCLE
+    if rule.level == "warning" and code != STRICT_OFF
 )
 
 
@@ -203,14 +269,25 @@ class Finding:
     app: str
     message: str
 
+    @property
+    def where(self) -> str:
+        """Return the file and the line, or the file alone when there is no line."""
+        return f"{self.file}:{self.line}" if self.line else self.file
 
-def public(project: Project, module: str) -> bool:
-    """Return whether another app may import the dotted `module`."""
+
+def public(
+    project: Project, module: str, isolated: frozenset[str] = frozenset()
+) -> bool:
+    """Return whether another app may import the dotted `module`.
+
+    An app whose label `isolated` holds publishes only its services and signals.
+    """
     app = project.app_of_module(module)
     if app is None:
         return True
     head = app.submodule(module).partition(".")[0]
-    return head in PUBLIC_MODULES
+    allowed = ISOLATED_MODULES if app.label in isolated else PUBLIC_MODULES
+    return head in allowed
 
 
 def _finding(project: Project, code: str, edge: Edge, message: str) -> Finding:
@@ -218,17 +295,25 @@ def _finding(project: Project, code: str, edge: Edge, message: str) -> Finding:
     return Finding(project.relative(edge.file), edge.line, code, edge.source, message)
 
 
-def _import_finding(project: Project, edge: Edge) -> Finding | None:
+def _import_finding(
+    project: Project, edge: Edge, isolated: frozenset[str]
+) -> Finding | None:
     """Return the import rule an edge breaks, the page tree rule first."""
     module = edge.detail
     if project.in_tree(module):
         message = f"{edge.source} imports {module} from a page tree of {edge.target}."
         return _finding(project, TREE_IMPORT, edge, message)
-    if public(project, module):
+    if public(project, module, isolated):
         return None
+    reason = (
+        f"{edge.target} is isolated, it publishes only its services and signals "
+        "modules."
+        if edge.target in isolated
+        else "Only its models, services and signals modules are public."
+    )
     message = (
         f"{edge.source} imports {module}, which {edge.target} does not publish. "
-        "Only its models, services and signals modules are public."
+        f"{reason}"
     )
     return _finding(project, PRIVATE_IMPORT, edge, message)
 
@@ -239,10 +324,18 @@ def _in_signals(edge: Edge, project: Project) -> bool:
     return app is not None and within(app, edge.file, "signals")
 
 
-def _edge_finding(project: Project, edge: Edge) -> Finding | None:
+def _edge_finding(
+    project: Project, edge: Edge, isolated: frozenset[str]
+) -> Finding | None:
     """Return the rule one edge breaks, `None` for an edge no rule forbids."""
     if edge.kind == "import":
-        return _import_finding(project, edge)
+        return _import_finding(project, edge, isolated)
+    if edge.kind == "fk" and edge.target in isolated:
+        message = (
+            f"{edge.source} relates {edge.detail} to a model of the isolated app "
+            f"{edge.target}."
+        )
+        return _finding(project, ISOLATED_FOREIGN_KEY, edge, message)
     if edge.kind == "get_model":
         message = (
             f"{edge.source} loads the model {edge.detail} of {edge.target} "
@@ -300,11 +393,14 @@ def _key_findings(
 
 
 def graph_findings(
-    project: Project, graph: Graph, registrations: Iterable[Registration]
+    project: Project,
+    graph: Graph,
+    registrations: Iterable[Registration],
+    isolated: frozenset[str] = frozenset(),
 ) -> Iterator[Finding]:
     """Yield the findings of the edges, the tangles and the DI key names."""
     for edge in graph.edges:
-        found = _edge_finding(project, edge)
+        found = _edge_finding(project, edge, isolated)
         if found is not None:
             yield found
     for tangle in graph.tangles():
@@ -315,8 +411,9 @@ def graph_findings(
 __all__ = [
     "AGGREGATOR",
     "BASELINE",
+    "CLOSURE",
     "CYCLE",
-    "DISABLED",
+    "DECLARATIONS",
     "DOCTRINE",
     "FOREIGN_FILE",
     "FOREIGN_KEY_NAME",
@@ -324,8 +421,10 @@ __all__ = [
     "FOREIGN_PERMISSION",
     "FOREIGN_ZONE",
     "GROWN",
-    "INSTALL_HINT",
-    "OFF_MESSAGE",
+    "IMPORT_GRAPH",
+    "ISOLATED_FOREIGN_KEY",
+    "ISOLATED_MODULES",
+    "ISOLATED_SERVICE",
     "PACKAGE_MODEL",
     "PRIVATE_IMPORT",
     "PUBLIC_MODULES",
@@ -339,6 +438,8 @@ __all__ = [
     "STRICT_OFF",
     "TREE_IMPORT",
     "TREE_WRITE",
+    "UNANNOTATED_SERVICE",
+    "UNDECLARED",
     "UNRECORDED",
     "UNSCOPED_QUERY",
     "Finding",

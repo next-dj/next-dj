@@ -1,19 +1,17 @@
 """The public exceptions of the boundaries area."""
 
 from pathlib import Path
-from typing import Final
+
+from django.core.exceptions import ImproperlyConfigured
 
 
-OFF_MESSAGE: Final = "Boundaries are off, because grimp is not installed."
-INSTALL_HINT: Final = "Install the next.dj[boundaries] extra to turn them on."
+class ImportGraphError(ImproperlyConfigured):
+    """`BOUNDARIES_IMPORT_GRAPH` names a backend that cannot read the import graph."""
 
-
-class BoundariesUnavailableError(RuntimeError):
-    """The import graph needs grimp, which the environment does not install."""
-
-    def __init__(self) -> None:
-        """Say how to turn the boundaries on."""
-        super().__init__(f"{OFF_MESSAGE} {INSTALL_HINT}")
+    def __init__(self, reason: str) -> None:
+        """Keep the reason the backend is refused."""
+        super().__init__(f"NEXT_FRAMEWORK['BOUNDARIES_IMPORT_GRAPH'] {reason}")
+        self.reason = reason
 
 
 class ImportScanError(RuntimeError):
@@ -42,22 +40,39 @@ class BaselineError(ValueError):
 
 
 class UnknownAppError(LookupError):
-    """A label names no application of the project."""
+    """A label or a name that names no application of the project."""
 
-    def __init__(self, label: str, labels: tuple[str, ...]) -> None:
-        """Name the label and the applications there are."""
+    def __init__(self, key: str, labels: tuple[str, ...]) -> None:
+        """Name the key and the applications there are."""
         known = ", ".join(labels) or "none"
         super().__init__(
-            f"{label!r} is no application of the project. Its applications: {known}."
+            f"{key!r} is no application of the project. Its applications: {known}."
         )
-        self.label = label
+        self.key = key
+
+
+class SyncError(ValueError):
+    """A `depends_on` that `next boundaries sync` cannot rewrite by itself."""
+
+    def __init__(
+        self,
+        file: str,
+        line: int,
+        reason: str,
+        remedy: str = "Edit depends_on there by hand.",
+    ) -> None:
+        """Name the file and line, the reason sync leaves it and what to do instead."""
+        where = f"{file}, line {line}: " if line else f"{file}: "
+        super().__init__(f"{where}{reason} {remedy}")
+        self.file = file
+        self.line = line
+        self.reason = reason
 
 
 __all__ = [
-    "INSTALL_HINT",
-    "OFF_MESSAGE",
     "BaselineError",
-    "BoundariesUnavailableError",
+    "ImportGraphError",
     "ImportScanError",
+    "SyncError",
     "UnknownAppError",
 ]

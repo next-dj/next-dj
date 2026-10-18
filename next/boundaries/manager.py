@@ -9,19 +9,38 @@ from typing import Final
 
 from next.checks.common import RunMemo
 from next.conf import next_framework_settings
-from next.conf.defaults import STRICT, WARN
+from next.conf.defaults import BOUNDARIES_MODES, STRICT, WARN
 from next.discovery import get_router_manager
 from next.utils import resolve_base_dir
 
-from . import imports
-from .baseline import FILENAME, Debt, baseline_path, compare, read, shrink, write
+from .backends import import_graph
+from .baseline import (
+    FILENAME,
+    Debt,
+    Key,
+    Purview,
+    baseline_path,
+    compare,
+    judged,
+    read,
+    shrink,
+    write,
+)
+from .declared import (
+    NO_DECLARATIONS,
+    Declarations,
+    dropped,
+    read_declarations,
+    undeclared_findings,
+)
 from .edges import Registration, collect_edges, escaping_import, registrations
-from .errors import OFF_MESSAGE, BaselineError, ImportScanError
+from .errors import BaselineError, ImportGraphError, ImportScanError
 from .graph import Graph, project_apps
+from .isolation import service_findings
 from .lint import source_findings
 from .rules import (
     BASELINE,
-    DISABLED,
+    IMPORT_GRAPH,
     RULES,
     SCAN,
     STRICT_OFF,
@@ -35,12 +54,16 @@ from .sources import Project, load_project
 
 @dataclass(frozen=True, slots=True)
 class Scan:
-    """One scan of the project, its graph, its DI keys and the findings of both."""
+    """One scan of the project, its graph, its DI keys and the findings of both.
+
+    `declarations` holds what each app declares on its `AppConfig` when it was read.
+    """
 
     project: Project | None
     graph: Graph
     registrations: tuple[Registration, ...]
     findings: tuple[Finding, ...]
+    declarations: Declarations = NO_DECLARATIONS
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +104,7 @@ def _build() -> Scan:
     if escaping is not None:
         source, line = escaping
         raise ImportScanError(_ESCAPING, project.relative(source.path), line)
-    scan = imports.package_imports(app.name.partition(".")[0] for app in apps)
+    scan = import_graph().scan(project)
     for source in project.files:
         error = project.syntax_error(source.path)
         if error is not None and source.module not in scan.modules:
@@ -89,19 +112,29 @@ def _build() -> Scan:
             raise ImportScanError(reason, project.relative(source.path), line)
     graph = Graph(apps, collect_edges(project, scan))
     held = registrations(project)
+    declared = read_declarations()
+    isolated = declared.isolated
     findings = sorted(
-        [*graph_findings(project, graph, held), *source_findings(project)]
+        [
+            *graph_findings(project, graph, held, isolated),
+            *undeclared_findings(project, graph, declared),
+            *source_findings(project),
+            *service_findings(project, isolated),
+        ]
     )
-    return Scan(project, graph, held, tuple(findings))
+    return Scan(project, graph, held, tuple(findings), declared)
 
 
 class BoundariesManager:
     """Builds the boundary graph lazily and judges its findings against the ratchet."""
 
     @property
-    def available(self) -> bool:
-        """Return whether grimp is installed, without which the boundaries are off."""
-        return imports.AVAILABLE
+    def enabled(self) -> bool:
+        """Return whether `NEXT_FRAMEWORK["BOUNDARIES"]` names a mode, turning them on.
+
+        Any other value leaves them off, and `next.E172` says so under both tags.
+        """
+        return next_framework_settings.BOUNDARIES in BOUNDARIES_MODES
 
     @property
     def mode(self) -> str:
@@ -115,23 +148,19 @@ class BoundariesManager:
         return self.mode == STRICT
 
     def disabled(self) -> Finding | None:
-        """Return why the boundaries go unchecked, `None` when they are checked.
+        """Return why the strict mode goes unchecked, `None` when nothing stops it.
 
-        The strict mode says so as a warning, so a CI failing on warnings notices.
+        It says so as a warning, so a CI failing on warnings notices.
         """
-        available = imports.AVAILABLE
-        if available and not (self.strict and resolve_base_dir() is None):
+        if not self.strict or resolve_base_dir() is not None:
             return None
-        if not self.strict:
-            return Finding("", 0, DISABLED, "", OFF_MESSAGE)
-        reason = "BASE_DIR is not set" if available else "grimp is not installed"
         return Finding(
             "",
             0,
             STRICT_OFF,
             "",
             f"NEXT_FRAMEWORK['BOUNDARIES'] is {STRICT!r}, but the boundaries go "
-            f"unchecked, because {reason}.",
+            "unchecked, because BASE_DIR is not set.",
         )
 
     def reset(self) -> None:
@@ -141,7 +170,7 @@ class BoundariesManager:
     def scan(self) -> Scan:
         """Return the scan of this check run, building it on first use.
 
-        Without grimp the import scan raises `BoundariesUnavailableError`.
+        A refused import graph backend raises `ImportGraphError`.
         """
         router_manager, _errors = get_router_manager()
         return _scans.get(router_manager, _build)
@@ -162,6 +191,13 @@ class BoundariesManager:
         app = project.app_of((project.base_dir / file).resolve())
         return "" if app is None else app.label
 
+    def _judged(
+        self, base_dir: Path | None, recorded: dict[Key, int] | None
+    ) -> Purview:
+        """Return what the ratchet may judge, given the records and the dropped apps."""
+        dropping = bool(dropped(self.scan().declarations))
+        return judged(base_dir, recorded, self._app_of, dropping=dropping)
+
     def report(self) -> Report:
         """Return the findings a check shows and the debt of every file and code.
 
@@ -173,6 +209,9 @@ class BoundariesManager:
         except ImportScanError as exc:
             found = Finding(exc.file, exc.line, SCAN, "", str(exc))
             return Report(mode, (found,), ())
+        except ImportGraphError as exc:
+            refused = Finding("", 0, IMPORT_GRAPH, "", str(exc))
+            return Report(mode, (refused,), ())
         base_dir = resolve_base_dir()
         problems: list[Finding] = []
         recorded = None
@@ -181,10 +220,13 @@ class BoundariesManager:
                 recorded = read(baseline_path(base_dir))
             except BaselineError as exc:
                 problems.append(Finding(FILENAME, 0, BASELINE, "", str(exc)))
-        ratchet = compare(findings, recorded, self._app_of)
+        purview = self._judged(base_dir, recorded)
+        ratchet = compare(findings, recorded, self._app_of, purview)
         problems.extend(ratchet.problems)
         unrecorded = sum(
-            1 for finding in ratchet.shown if RULES[finding.code].level == "warning"
+            1
+            for finding in ratchet.shown
+            if RULES[finding.code].level_in(mode) == "warning"
         )
         if mode == STRICT and unrecorded:
             problems.append(
@@ -207,7 +249,8 @@ class BoundariesManager:
         findings = self.findings()
         path = baseline_path(base_dir)
         recorded = read(path)
-        counts, unrecorded = shrink(findings, recorded)
+        purview = self._judged(base_dir, recorded)
+        counts, unrecorded = shrink(findings, recorded, purview)
         write(path, counts)
         refrozen = Refrozen(
             path=path,

@@ -1,6 +1,12 @@
+from io import StringIO
+
 import pytest
 from admin_audit.models import AdminActivityLog
+from admin_audit.services import HistoryEntry, object_history
+from django.contrib.admin.models import CHANGE, LogEntry
 from django.contrib.auth.models import AnonymousUser
+from django.contrib.contenttypes.models import ContentType
+from django.core.management import call_command
 from library.models import Book
 from library.permissions import in_draft_book, is_draft, no_row, uses_admin
 from shadcn_admin.permissions import is_staff
@@ -103,3 +109,26 @@ class TestRegisteredRules:
         for user in (reader, AnonymousUser()):
             assert has_perm(user, "library.change_book", None) is False
             assert has_perm(user, "library.add_tag") is False
+
+
+class TestAuditIsolation:
+    def test_the_canvas_marks_the_audit_app_isolated(self) -> None:
+        out = StringIO()
+        call_command("next", "boundaries", "admin_audit", stdout=out)
+        assert out.getvalue().splitlines()[:2] == [
+            "admin_audit (admin_audit)",
+            "Isolated: yes",
+        ]
+
+    def test_object_history_hands_out_history_entries(self, admin_user, book) -> None:
+        logged = LogEntry.objects.create(
+            user=admin_user,
+            content_type=ContentType.objects.get_for_model(book),
+            object_id=str(book.pk),
+            object_repr=str(book),
+            action_flag=CHANGE,
+            change_message="Changed title.",
+        )
+        assert object_history(book) == [
+            HistoryEntry(logged.action_time, "admin", "Changed", "Changed title.")
+        ]

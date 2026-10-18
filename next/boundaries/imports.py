@@ -1,4 +1,4 @@
-"""The imports between the modules of the project packages, read by grimp.
+"""The imports between the modules of the project packages, and the grimp reader.
 
 grimp is optional, so the module records whether it loaded rather than requiring it.
 """
@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final
 
-from .errors import BoundariesUnavailableError, ImportScanError
+from .errors import ImportScanError
 
 
 try:
@@ -19,9 +19,10 @@ else:
     AVAILABLE = True
 
 _PANIC_MODULE: Final = "pyo3_runtime"
+PANIC: Final = "grimp panicked: "
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, order=True)
 class Import:
     """One import statement of `importer`, which reads the module `imported`."""
 
@@ -32,19 +33,17 @@ class Import:
 
 @dataclass(frozen=True, slots=True)
 class ImportScan:
-    """The modules grimp found in the packages and the imports between them."""
+    """The modules found in the packages and the imports between them."""
 
     modules: frozenset[str]
     imports: tuple[Import, ...]
 
 
 def package_imports(packages: Iterable[str]) -> ImportScan:
-    """Return the modules of `packages` and every import between them.
+    """Return the modules of `packages` and every import between them, read by grimp.
 
     It writes no cache to disk, and a panic of grimp stops the scan, not the check run.
     """
-    if not AVAILABLE:
-        raise BoundariesUnavailableError
     names = sorted(set(packages))
     if not names:
         return ImportScan(frozenset(), ())
@@ -55,7 +54,7 @@ def package_imports(packages: Iterable[str]) -> ImportScan:
     except BaseException as exc:
         if type(exc).__module__ != _PANIC_MODULE:
             raise
-        reason = f"grimp panicked: {exc}"
+        reason = f"{PANIC}{exc}"
         raise ImportScanError(reason) from exc
     found: list[Import] = []
     for importer in sorted(graph.modules):
@@ -66,4 +65,4 @@ def package_imports(packages: Iterable[str]) -> ImportScan:
     return ImportScan(frozenset(graph.modules), tuple(found))
 
 
-__all__ = ["AVAILABLE", "Import", "ImportScan", "package_imports"]
+__all__ = ["AVAILABLE", "PANIC", "Import", "ImportScan", "package_imports"]

@@ -15,6 +15,9 @@ They walk through the checklist, the static file pipeline, the server choice, an
 :doc:`settings`
    Production-tuned values for ``NEXT_FRAMEWORK``.
 
+:doc:`split-deployments`
+   Several deployments over one code base, each closed under its own settings.
+
 .. rubric:: Pipeline and server
 
 :doc:`static-files`
@@ -29,5 +32,6 @@ They walk through the checklist, the static file pipeline, the server choice, an
 
    checklist
    settings
+   split-deployments
    static-files
    wsgi-asgi

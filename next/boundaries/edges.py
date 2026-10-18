@@ -6,7 +6,6 @@ Models, DI keys, zones and components come from the registries Django start fill
 import ast
 import inspect
 import re
-import sys
 from collections import defaultdict
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
@@ -31,6 +30,8 @@ from .sources import (
     argument,
     assigns,
     call_name,
+    class_file,
+    class_node,
     dotted,
     string,
 )
@@ -125,25 +126,15 @@ def import_edges(project: Project, scan: ImportScan) -> Iterator[Edge]:
                 yield edge
 
 
-def model_file(model: type[models.Model]) -> Path | None:
-    """Return the source file of a model class, `None` when it has none."""
-    module = sys.modules.get(model.__module__)
-    file = getattr(module, "__file__", None)
-    return Path(file).resolve() if isinstance(file, str) else None
-
-
 def class_line(syntax: ast.Module | None, name: str, attribute: str = "") -> int:
     """Return the line of `attribute` in the class `name`, or of the class, or 0."""
-    if syntax is None:
+    node = class_node(syntax, name)
+    if node is None:
         return 0
-    for node in ast.walk(syntax):
-        if not isinstance(node, ast.ClassDef) or node.name != name:
-            continue
-        for statement in node.body:
-            if attribute and assigns(statement, attribute):
-                return statement.lineno
-        return node.lineno
-    return 0
+    for statement in node.body:
+        if attribute and assigns(statement, attribute):
+            return statement.lineno
+    return node.lineno
 
 
 def fk_edges(project: Project) -> Iterator[Edge]:
@@ -151,7 +142,7 @@ def fk_edges(project: Project) -> Iterator[Edge]:
     labels = project.labels
     for app in project.apps:
         for model in django_apps.get_app_config(app.label).get_models():
-            file = model_file(model)
+            file = class_file(model)
             syntax = None if file is None else project.syntax(file)
             meta = model._meta
             for field in (*meta.local_fields, *meta.local_many_to_many):
@@ -501,7 +492,6 @@ __all__ = [
     "escaping_import",
     "fk_edges",
     "import_edges",
-    "model_file",
     "registrations",
     "source_edges",
     "template_edges",

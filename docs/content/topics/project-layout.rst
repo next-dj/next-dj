@@ -437,6 +437,9 @@ A context that wants to own its URL space instead keeps a ``urls.py`` of its own
 The router finds these ``pages()`` calls through the nested include, takes the two trees out of ``include("next.urls")``, and names their pages in the ``wallets`` and ``operations`` namespaces, so ``page_reverse("", namespace="wallets")`` answers ``/money/wallets/``.
 A ``pages()`` include wins over a ``mount`` or ``mounts`` declaration of the same tree, and ``manage.py next routes`` lists where each tree ended up.
 
+A project of this size declares on each ``AppConfig`` what the application depends on, and isolates the application that grows towards a deployment of its own, as :doc:`/content/howto/scale-to-contexts` shows, with recipes for linters of the import graph beside the boundary checks.
+Contexts that ship as separate deployments over one code base keep a settings module each, see :doc:`/content/deployment/split-deployments`.
+
 Tests
 -----
 
@@ -491,5 +494,6 @@ See also
    :doc:`boundaries` for the checks that hold applications to their roles.
    :doc:`file-router` for the route shapes and the mounting of application trees.
    :doc:`/content/howto/mount-an-application-under-a-prefix` for a prefix recipe.
+   :doc:`/content/howto/scale-to-contexts` for declared dependencies and isolation in a project of contexts.
    :doc:`multi-project` for layouts that span several Django projects.
    :doc:`/content/howto/share-components-across-projects` for shared component patterns.

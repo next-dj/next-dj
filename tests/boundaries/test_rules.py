@@ -5,23 +5,24 @@ import pytest
 from next.boundaries.graph import App
 from next.boundaries.rules import (
     CYCLE,
-    DISABLED,
     DOCTRINE,
     FOREIGN_KEY_NAME,
     FOREIGN_MODEL,
     FOREIGN_ZONE,
     GROWN,
+    ISOLATED_FOREIGN_KEY,
     PRIVATE_IMPORT,
     RECORDABLE,
     RULES,
     STRAY_RECEIVER,
     STRICT_OFF,
     TREE_IMPORT,
+    UNDECLARED,
     Rule,
     public,
 )
 from next.boundaries.sources import Project
-from tests.support.boundaries import finding_rows, scanned
+from tests.support.boundaries import app_config, finding_rows, scanned
 
 
 _RECEIVER = """from django.dispatch import receiver
@@ -230,15 +231,21 @@ class TestRuleTable:
     def test_the_codes(self) -> None:
         assert sorted(RULES) == sorted(
             [
-                *(f"next.E{number}" for number in (167, 168, 169, 170, 171, 173)),
-                *(f"next.W{number}" for number in range(136, 150)),
-                DISABLED,
+                *(
+                    f"next.E{number}"
+                    for number in (167, 168, 169, 170, 171, 173, 174, 175, 176)
+                ),
+                *(f"next.W{number}" for number in range(136, 154)),
             ]
         )
 
     def test_only_warnings_and_the_cycle_are_recorded(self) -> None:
         assert sorted(RECORDABLE) == sorted(
-            [CYCLE, *(f"next.W{number}" for number in range(136, 148)), "next.W149"]
+            [
+                CYCLE,
+                *(f"next.W{number}" for number in range(136, 148)),
+                *(f"next.W{number}" for number in range(149, 154)),
+            ]
         )
         assert GROWN not in RECORDABLE
         assert STRICT_OFF not in RECORDABLE
@@ -254,3 +261,135 @@ class TestRuleTable:
 
         assert public(project, "crm.utils") is True
         assert App("crm", "crm", Path("/p/crm")).owns_module("crm.utils")
+
+
+_ISO_PROJECT = {
+    "iso": {
+        "apps.py": app_config("iso", isolated=True),
+        "models.py": (
+            "from django.db import models\n\n\n"
+            "class Record(models.Model):\n"
+            '    client = models.ForeignKey("crm.Client", on_delete=models.CASCADE)\n'
+        ),
+        "services.py": "def fetch() -> int:\n    pass\n",
+        "signals.py": "from django.dispatch import Signal\n\nchanged = Signal()\n",
+        "utils.py": "helper = 1\n",
+    },
+    "shop": {
+        "views.py": (
+            "from iso.models import Record\n"
+            "from iso.services import fetch\n"
+            "from iso.signals import changed\n"
+            "from iso.utils import helper\n"
+        ),
+        "models.py": (
+            "from django.db import models\n\n\n"
+            "class Order(models.Model):\n"
+            '    record = models.ForeignKey("iso.Record", on_delete=models.CASCADE)\n'
+            '    main = models.OneToOneField("iso.Record", on_delete=models.CASCADE, '
+            'related_name="+")\n'
+            '    records = models.ManyToManyField("iso.Record", related_name="+")\n'
+        ),
+    },
+    "crm": {
+        "models.py": (
+            "from django.db import models\n\n\nclass Client(models.Model):\n    pass\n"
+        )
+    },
+}
+
+_ISO_REASON = "iso is isolated, it publishes only its services and signals modules."
+
+
+@pytest.fixture()
+def iso_scan(tmp_path):
+    return scanned(tmp_path, _ISO_PROJECT)
+
+
+class TestIsolated:
+    """An isolated app publishes only services and signals and takes no foreign key."""
+
+    def test_its_models_are_private(self, iso_scan) -> None:
+        assert finding_rows(iso_scan, PRIVATE_IMPORT) == [
+            ("shop/views.py", 1, PRIVATE_IMPORT),
+            ("shop/views.py", 4, PRIVATE_IMPORT),
+        ]
+        assert _messages(iso_scan, PRIVATE_IMPORT) == [
+            f"shop imports iso.models, which iso does not publish. {_ISO_REASON}",
+            f"shop imports iso.utils, which iso does not publish. {_ISO_REASON}",
+        ]
+
+    def test_public_takes_the_isolated_apps(self, iso_scan) -> None:
+        isolated = frozenset({"iso"})
+
+        assert public(iso_scan.project, "iso.models") is True
+        assert public(iso_scan.project, "iso.models", isolated) is False
+        assert public(iso_scan.project, "iso.services", isolated) is True
+        assert public(iso_scan.project, "iso.signals.changed", isolated) is True
+
+    def test_every_relation_into_it(self, iso_scan) -> None:
+        assert finding_rows(iso_scan, ISOLATED_FOREIGN_KEY) == [
+            ("shop/models.py", 5, ISOLATED_FOREIGN_KEY),
+            ("shop/models.py", 6, ISOLATED_FOREIGN_KEY),
+            ("shop/models.py", 7, ISOLATED_FOREIGN_KEY),
+        ]
+        assert _messages(iso_scan, ISOLATED_FOREIGN_KEY) == [
+            (
+                "shop relates Order.record -> iso.Record to a model of the isolated app "
+                "iso."
+            ),
+            "shop relates Order.main -> iso.Record to a model of the isolated app iso.",
+            (
+                "shop relates Order.records -> iso.Record to a model of the isolated app "
+                "iso."
+            ),
+        ]
+
+    def test_its_own_relations_out_are_free(self, iso_scan) -> None:
+        assert [
+            finding.app
+            for finding in iso_scan.findings
+            if finding.code == ISOLATED_FOREIGN_KEY
+        ] == ["shop", "shop", "shop"]
+        assert ("fk", "iso", "crm") in {
+            (edge.kind, edge.source, edge.target) for edge in iso_scan.graph.edges
+        }
+
+    def test_an_app_that_is_not_isolated(self, tmp_path) -> None:
+        open_iso = {**_ISO_PROJECT, "iso": {**_ISO_PROJECT["iso"]}}
+        open_iso["iso"]["apps.py"] = app_config("iso")
+        open_iso["iso"]["services.py"] = "def fetch():\n    pass\n"
+
+        scan = scanned(tmp_path, open_iso)
+
+        assert finding_rows(scan) == [("shop/views.py", 4, PRIVATE_IMPORT)]
+
+
+_COMPONENT_PROJECT = {
+    "shop": {"pages/template.djx": "{% component 'badge' %}"},
+    "iso": {
+        "apps.py": app_config("iso", isolated=True),
+        "pages/page.py": "",
+        "pages/_components/badge/component.djx": "badge",
+    },
+}
+
+
+class TestIsolatedComponent:
+    """A component of an isolated app is no finding, only an undeclared edge."""
+
+    def test_without_depends_on(self, tmp_path) -> None:
+        scan = scanned(tmp_path, _COMPONENT_PROJECT)
+
+        assert [edge.kind for edge in scan.graph.edges] == ["component"]
+        assert scan.findings == ()
+
+    def test_with_depends_on(self, tmp_path) -> None:
+        shop = {
+            **_COMPONENT_PROJECT["shop"],
+            "apps.py": app_config("shop", depends_on=()),
+        }
+
+        scan = scanned(tmp_path, {**_COMPONENT_PROJECT, "shop": shop})
+
+        assert finding_rows(scan) == [("shop/pages/template.djx", 1, UNDECLARED)]

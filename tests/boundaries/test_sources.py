@@ -1,5 +1,7 @@
 import ast
 from pathlib import Path
+from types import ModuleType
+from unittest.mock import patch
 
 import pytest
 
@@ -10,9 +12,12 @@ from next.boundaries.sources import (
     SourceFile,
     absolute_module,
     call_name,
+    class_file,
+    class_node,
     dotted,
     imported_names,
     page_trees,
+    posix_relative,
     string,
     within,
 )
@@ -239,6 +244,22 @@ class TestSyntax:
 
         assert project.syntax(path) is None
 
+    @pytest.mark.parametrize(
+        "content",
+        [b"\xef\xbb\xbfname = 1\n", b"# -*- coding: latin-1 -*-\nname = '\xe9'\n"],
+        ids=["bom", "coding_cookie"],
+    )
+    def test_a_file_python_reads_parses(self, tmp_path, content: bytes) -> None:
+        project = scanned(tmp_path, {"shop": {}}).project
+        path = project.apps[0].path / "encoded.py"
+        path.write_bytes(content)
+
+        syntax = project.syntax(path)
+
+        assert syntax is not None
+        assert project.syntax_error(path) is None
+        assert [type(node).__name__ for node in syntax.body][-1] == "Assign"
+
     def test_a_missing_file(self, tmp_path) -> None:
         project = scanned(tmp_path, {"shop": {}}).project
 
@@ -352,3 +373,56 @@ class TestWithin:
         app = App("shop", "shop", Path("/p/shop"))
 
         assert within(app, Path(path), "signals") is expected
+
+
+class TestClassFile:
+    """The file of a class is the file of its module, when the module has one."""
+
+    def test_a_module_without_a_file(self) -> None:
+        cls = type("Ghost", (), {"__module__": "ghost_models"})
+
+        with patch.dict("sys.modules", {"ghost_models": ModuleType("ghost_models")}):
+            assert class_file(cls) is None
+
+    def test_a_module_with_a_file(self) -> None:
+        cls = type("Here", (), {"__module__": __name__})
+
+        assert class_file(cls) == Path(__file__).resolve()
+
+
+class TestClassNode:
+    """A class is the last one of its name at the top of the module, as Python binds."""
+
+    _SYNTAX = ast.parse(
+        "class Config:\n    first = 1\n\n\nclass Config:\n    second = 2\n\n\n"
+        "class Outer:\n    class Inner:\n        pass\n"
+    )
+
+    @pytest.mark.parametrize(
+        ("name", "line"), [("Config", 5), ("Outer", 9), ("Inner", None)]
+    )
+    def test_the_class(self, name: str, line: int | None) -> None:
+        node = class_node(self._SYNTAX, name)
+
+        assert (None if node is None else node.lineno) == line
+
+    def test_no_syntax_is_no_class(self) -> None:
+        assert class_node(None, "Config") is None
+
+
+class TestPosixRelative:
+    """A path below `BASE_DIR` shows relative to it, any other path whole."""
+
+    @pytest.mark.parametrize(
+        ("path", "base_dir", "shown"),
+        [
+            (Path("/p/shop/apps.py"), Path("/p"), "shop/apps.py"),
+            (Path("/elsewhere/apps.py"), Path("/p"), "/elsewhere/apps.py"),
+            (Path("/p/shop/apps.py"), None, "/p/shop/apps.py"),
+        ],
+        ids=["below", "outside", "no_base_dir"],
+    )
+    def test_posix_relative(
+        self, path: Path, base_dir: Path | None, shown: str
+    ) -> None:
+        assert posix_relative(path, base_dir) == shown

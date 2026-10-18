@@ -9,6 +9,7 @@ from django.apps import apps as django_apps
 
 from next.permissions.endpoints import Endpoint, endpoints
 
+from .declared import undeclared
 from .edges import Registration
 from .errors import UnknownAppError
 from .graph import App, Edge, EdgeKind
@@ -47,6 +48,8 @@ class Canvas:
     risks: tuple[Endpoint, ...]
     depends_on: tuple[Dependency, ...]
     used_by: tuple[Dependency, ...]
+    isolated: bool = False
+    undeclared: tuple[str, ...] = ()
 
 
 def _models(app: App, outgoing: tuple[Edge, ...]) -> tuple[ModelEntry, ...]:
@@ -115,13 +118,15 @@ def _risky(endpoint: Endpoint) -> bool:
     )
 
 
-def canvas(scan: Scan, label: str) -> Canvas:
-    """Return the Module Canvas of the application `label`."""
+def canvas(scan: Scan, key: str) -> Canvas:
+    """Return the Module Canvas of the application whose label or name is `key`."""
     graph = scan.graph
-    app = graph.app(label)
+    app = graph.lookup(key)
     project = scan.project
     if app is None or project is None:
-        raise UnknownAppError(label, tuple(item.label for item in graph.apps))
+        raise UnknownAppError(key, tuple(item.label for item in graph.apps))
+    label = app.label
+    declared = scan.declarations.of(label)
     outgoing = graph.outgoing(label)
     pages = tuple(
         endpoint
@@ -139,6 +144,8 @@ def canvas(scan: Scan, label: str) -> Canvas:
         risks=tuple(endpoint for endpoint in pages if _risky(endpoint)),
         depends_on=_grouped(outgoing, by_target=True),
         used_by=_grouped(graph.incoming(label), by_target=False),
+        isolated=declared is not None and declared.isolated,
+        undeclared=tuple(undeclared(graph, declared)),
     )
 
 

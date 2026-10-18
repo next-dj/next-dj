@@ -122,14 +122,16 @@ test-examples: # run Python, JS tests for examples with coverage
 	for example_dir in examples/*/; do \
 		if [ -d "$$example_dir" ] && [ -f "$$example_dir/manage.py" ]; then \
 			if [ -d "$$example_dir/tests" ]; then \
-				cd "$$example_dir" && $(PYTEST) tests/ --ignore=tests/e2e -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=100; \
+				cd "$$example_dir" && $(PYTEST) --ignore=tests/e2e -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=100; \
 				$(EXAMPLE_PYTHON) manage.py check --deploy --tag seo --fail-level WARNING; \
 				$(EXAMPLE_PYTHON) manage.py check --tag boundaries --fail-level WARNING; \
+				$(EXAMPLE_PYTHON) manage.py next boundaries --exact; \
 				cd - > /dev/null; \
 			elif [ -f "$$example_dir/tests.py" ]; then \
 				cd "$$example_dir" && $(PYTEST) tests.py -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=100; \
 				$(EXAMPLE_PYTHON) manage.py check --deploy --tag seo --fail-level WARNING; \
 				$(EXAMPLE_PYTHON) manage.py check --tag boundaries --fail-level WARNING; \
+				$(EXAMPLE_PYTHON) manage.py next boundaries --exact; \
 				cd - > /dev/null; \
 			fi; \
 		fi; \

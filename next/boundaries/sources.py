@@ -4,6 +4,7 @@ Files are parsed as text, and only the zone owners load the page modules of a tr
 """
 
 import ast
+import sys
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,6 +56,9 @@ class Project:
     _names: dict[Path, dict[str, str]] = field(
         default_factory=dict, compare=False, repr=False
     )
+    _forms: dict[Path, tuple[ast.ImportFrom, ...]] = field(
+        default_factory=dict, compare=False, repr=False
+    )
 
     def app_of(self, path: Path) -> App | None:
         """Return the application whose directory holds `path`."""
@@ -86,14 +90,12 @@ class Project:
 
     def relative(self, path: Path) -> str:
         """Return `path` relative to `BASE_DIR` with forward slashes."""
-        if path.is_relative_to(self.base_dir):
-            return path.relative_to(self.base_dir).as_posix()
-        return path.as_posix()
+        return posix_relative(path, self.base_dir)
 
     def syntax(self, path: Path) -> ast.Module | None:
         """Return the parsed source of `path`, `None` when it does not parse."""
         if path not in self._syntax:
-            self._syntax[path], error = _parse(path)
+            self._syntax[path], error = parse(path)
             if error is not None:
                 self._errors[path] = error
         return self._syntax[path]
@@ -105,23 +107,39 @@ class Project:
 
     def names(self, source: SourceFile, syntax: ast.Module) -> dict[str, str]:
         """Return the names the imports of a parsed file bind, read once per file."""
-        if source.path not in self._names:
-            self._names[source.path] = imported_names(syntax, source)
+        self._read_imports(source, syntax)
         return self._names[source.path]
+
+    def imports_from(
+        self, source: SourceFile, syntax: ast.Module
+    ) -> tuple[ast.ImportFrom, ...]:
+        """Return every `from` import of a parsed file, read in one pass with names."""
+        self._read_imports(source, syntax)
+        return self._forms[source.path]
+
+    def _read_imports(self, source: SourceFile, syntax: ast.Module) -> None:
+        """Read the imports of a parsed file once, its names and `from` statements."""
+        if source.path not in self._names:
+            names, forms = _bindings(syntax, source)
+            self._names[source.path] = names
+            self._forms[source.path] = forms
 
     def files_of(self, label: str) -> tuple[SourceFile, ...]:
         """Return the files of the application `label`."""
         return tuple(source for source in self.files if source.app.label == label)
 
 
-def _parse(path: Path) -> tuple[ast.Module | None, tuple[int, str] | None]:
-    """Parse one file, keeping the reason a broken one does not parse."""
+def parse(path: Path) -> tuple[ast.Module | None, tuple[int, str] | None]:
+    """Parse one file from its bytes, keeping the reason a broken one does not parse.
+
+    The bytes go to `ast` whole, so a BOM and a coding cookie read as Python reads them.
+    """
     try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+        source = path.read_bytes()
+    except OSError:
         return None, None
     try:
-        return ast.parse(text, filename=str(path)), None
+        return ast.parse(source, filename=str(path)), None
     except SyntaxError as exc:
         return None, (exc.lineno or 0, exc.msg)
 
@@ -229,9 +247,39 @@ def load_project(base_dir: Path, apps: tuple[App, ...]) -> Project:
     )
 
 
+def posix_relative(path: Path, base_dir: Path | None) -> str:
+    """Return `path` relative to `base_dir` with forward slashes, else whole."""
+    if base_dir is not None and path.is_relative_to(base_dir):
+        return path.relative_to(base_dir).as_posix()
+    return path.as_posix()
+
+
+def class_file(cls: type) -> Path | None:
+    """Return the source file of the module defining `cls`, `None` when it has none."""
+    file = getattr(sys.modules.get(cls.__module__), "__file__", None)
+    return Path(file).resolve() if isinstance(file, str) else None
+
+
+def class_node(syntax: ast.Module | None, name: str) -> ast.ClassDef | None:
+    """Return the class `name` at the top of a module, the last one as Python binds."""
+    found = None
+    for node in () if syntax is None else syntax.body:
+        if isinstance(node, ast.ClassDef) and node.name == name:
+            found = node
+    return found
+
+
 def imported_names(syntax: ast.Module, source: SourceFile) -> dict[str, str]:
     """Map each name a module binds by an import to the dotted path it stands for."""
+    return _bindings(syntax, source)[0]
+
+
+def _bindings(
+    syntax: ast.Module, source: SourceFile
+) -> tuple[dict[str, str], tuple[ast.ImportFrom, ...]]:
+    """Return the names the imports of a module bind and its `from` statements."""
     names: dict[str, str] = {}
+    forms: list[ast.ImportFrom] = []
     for node in ast.walk(syntax):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -241,18 +289,24 @@ def imported_names(syntax: ast.Module, source: SourceFile) -> dict[str, str]:
                     head = alias.name.partition(".")[0]
                     names[head] = head
         elif isinstance(node, ast.ImportFrom):
+            forms.append(node)
             base = absolute_module(node, source)
             for alias in node.names:
                 if base is not None and alias.name != "*":
                     names[alias.asname or alias.name] = f"{base}.{alias.name}"
-    return names
+    return names, tuple(forms)
 
 
 def absolute_module(node: ast.ImportFrom, source: SourceFile) -> str | None:
     """Return the module a `from` import reads, a relative one resolved, or `None`."""
+    return absolute_from(node, source.package)
+
+
+def absolute_from(node: ast.ImportFrom, package: str) -> str | None:
+    """Return the module a `from` import of `package` reads, `None` above its root."""
     if node.level == 0:
         return node.module
-    parts = source.package.split(".")
+    parts = package.split(".")
     if node.level - 1 >= len(parts):
         return None
     base = ".".join(parts[: len(parts) - (node.level - 1)])
@@ -320,17 +374,22 @@ def string(node: ast.expr | None) -> str | None:
 __all__ = [
     "Project",
     "SourceFile",
+    "absolute_from",
     "absolute_module",
     "argument",
     "assign_targets",
     "assigns",
     "call_name",
+    "class_file",
+    "class_node",
     "dotted",
     "excluded",
     "imported_names",
     "last_name",
     "load_project",
     "page_trees",
+    "parse",
+    "posix_relative",
     "string",
     "within",
 ]

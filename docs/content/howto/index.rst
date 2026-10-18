@@ -17,6 +17,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`mount-an-application-under-a-prefix`
    Serve the page trees of an application under a URL prefix.
 
+:doc:`scale-to-contexts`
+   Group applications into contexts with declared dependencies, isolation, and import contracts.
+
 :doc:`reload-routes-from-code`
    Trigger router reload at runtime.
 
@@ -142,6 +145,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`observe-framework-signals`
    Receive framework signals in production receivers.
 
+:doc:`publish-events-reliably`
+   Send a signal between applications that waits for the commit, and an outbox where no event may be lost.
+
 :doc:`write-a-vendor-adapter`
    Load Plausible or GA4 under consent and count every partial navigation as a page view.
 
@@ -158,6 +164,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    add-a-page
    reverse-urls
    mount-an-application-under-a-prefix
+   scale-to-contexts
    reload-routes-from-code
    write-a-router-backend
    read-query-parameters
@@ -195,6 +202,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    integrate-django-admin
    scope-requests-per-tenant
    observe-framework-signals
+   publish-events-reliably
    write-a-vendor-adapter
    stream-live-updates-with-sse
    split-settings-per-environment

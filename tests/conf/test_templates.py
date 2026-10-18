@@ -10,7 +10,13 @@ import next.conf
 
 _TEMPLATES = Path(next.conf.__file__).parent
 
+_PROJECT_TEMPLATE = _TEMPLATES / "project_template"
+
+_APP_TEMPLATE = _TEMPLATES / "app_template"
+
 _INSTALLED = '    "home",\n]'
+
+_BOUNDARY_TEST = "test_the_apps_keep_their_boundaries"
 
 
 def _expected(template: Path, prefix: str, name: str = "") -> set[str]:
@@ -37,26 +43,29 @@ def _options(project: Path) -> dict[str, object]:
         for key, value in os.environ.items()
         if key != "DJANGO_SETTINGS_MODULE"
     }
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     return {"cwd": project, "env": env, "capture_output": True, "text": True}
+
+
+def _new_project(tmp_path: Path) -> Path:
+    project = tmp_path / "boundsite"
+    (project / "shop").mkdir(parents=True)
+    call_command(
+        "startproject", "boundsite", str(project), template=str(_PROJECT_TEMPLATE)
+    )
+    call_command("startapp", "shop", str(project / "shop"), template=str(_APP_TEMPLATE))
+    settings = project / "boundsite" / "settings.py"
+    text = settings.read_text()
+    settings.write_text(text.replace(_INSTALLED, '    "home",\n    "shop",\n]'))
+    return project
 
 
 class TestProjectTemplates:
     """A project and an app made from the shipped templates start clean and strict."""
 
     def test_a_new_project_with_a_new_app(self, tmp_path) -> None:
-        project = tmp_path / "boundsite"
-        (project / "shop").mkdir(parents=True)
-        project_template = _TEMPLATES / "project_template"
-        app_template = _TEMPLATES / "app_template"
-        call_command(
-            "startproject", "boundsite", str(project), template=str(project_template)
-        )
-        call_command(
-            "startapp", "shop", str(project / "shop"), template=str(app_template)
-        )
-        settings = project / "boundsite" / "settings.py"
-        text = settings.read_text()
-        settings.write_text(text.replace(_INSTALLED, '    "home",\n    "shop",\n]'))
+        project = _new_project(tmp_path)
+        text = (_PROJECT_TEMPLATE / "project_name" / "settings.py-tpl").read_text()
         generated = _generated(project)
 
         checked = subprocess.run(
@@ -69,10 +78,13 @@ class TestProjectTemplates:
             check=False,
             **_options(project),
         )
+        tested = subprocess.run(
+            [sys.executable, "manage.py", "test"], check=False, **_options(project)
+        )
 
         assert generated == (
-            _expected(project_template, "", "boundsite")
-            | _expected(app_template, "shop/")
+            _expected(_PROJECT_TEMPLATE, "", "boundsite")
+            | _expected(_APP_TEMPLATE, "shop/")
         )
         assert [
             path.name
@@ -88,3 +100,35 @@ class TestProjectTemplates:
             "No changes detected\n",
             "",
         )
+        assert tested.returncode == 0, tested.stderr
+        assert tested.stderr.splitlines()[-2:] == [
+            "OK",
+            "Destroying test database for alias 'default'...",
+        ]
+
+
+class TestStrictBoundaries:
+    """The test the project template ships fails the run on a boundary finding."""
+
+    def test_a_private_import_fails_the_home_test(self, tmp_path) -> None:
+        project = _new_project(tmp_path)
+        (project / "home" / "helpers.py").write_text(
+            "from shop.forms import ItemForm\n"
+        )
+
+        tested = subprocess.run(
+            [sys.executable, "manage.py", "test", "home"],
+            check=False,
+            **_options(project),
+        )
+        checked = subprocess.run(
+            [sys.executable, "manage.py", "check", "--fail-level", "WARNING"],
+            check=False,
+            **_options(project),
+        )
+
+        assert tested.returncode == 1
+        assert f"ERROR: {_BOUNDARY_TEST} (home.tests.test_boundaries." in tested.stderr
+        assert "home/helpers.py:1: (next.W136) home imports shop.forms" in tested.stderr
+        assert "(next.E171)" in tested.stderr
+        assert (checked.returncode, checked.stderr) == (0, "")

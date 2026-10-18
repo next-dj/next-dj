@@ -1,18 +1,15 @@
 import pytest
+from django.conf import settings as django_settings
 from django.test import override_settings
 
 from next.boundaries import imports as imports_module
 from next.boundaries.baseline import Debt
-from next.boundaries.errors import (
-    BaselineError,
-    BoundariesUnavailableError,
-    ImportScanError,
-)
+from next.boundaries.declared import NO_DECLARATIONS, Declaration
+from next.boundaries.errors import BaselineError, ImportScanError
 from next.boundaries.manager import BoundariesManager, Refrozen, boundaries_manager
 from next.boundaries.rules import (
     BASELINE,
     CYCLE,
-    DISABLED,
     GROWN,
     SCAN,
     STALE,
@@ -21,7 +18,7 @@ from next.boundaries.rules import (
 )
 from next.boundaries.signals import baseline_refrozen
 from next.testing import capture_signals
-from tests.support.boundaries import boundary_project
+from tests.support.boundaries import app_config, boundary_project
 
 
 _W = "next.W136"
@@ -40,9 +37,30 @@ _CYCLE = {
 
 _STRICT = {"BOUNDARIES": "strict"}
 
+_SHOP_NEEDS_CRM = app_config("shop", depends_on=("crm",))
+
+_SPLIT = {
+    "shop": {"views.py": "from crm.utils import first\n"},
+    "crm": {"utils.py": "first = 1\n", "views.py": "from blog.helpers import x\n"},
+    "blog": {"helpers.py": "x = 1\n"},
+}
+
+_DECLARED = {**_SPLIT, "shop": {**_SPLIT["shop"], "apps.py": _SHOP_NEEDS_CRM}}
+
+_QUIET_CRM = {**_SPLIT, "crm": {"utils.py": "first = 1\n"}}
+
 
 def _rows(report) -> list[tuple[str, int, str]]:
     return [(finding.file, finding.line, finding.code) for finding in report.findings]
+
+
+def _without_crm() -> override_settings:
+    boundaries_manager.reset()
+    return override_settings(
+        INSTALLED_APPS=[
+            name for name in django_settings.INSTALLED_APPS if name != "crm"
+        ]
+    )
 
 
 def _rescan_with(root, text: str) -> None:
@@ -274,22 +292,20 @@ class TestScan:
         assert [app.label for app in graph.apps] == ["crm", "shop"]
         assert [finding.code for finding in findings] == [_W, _W]
 
-    def test_without_grimp_it_is_unavailable(self, tmp_path, monkeypatch) -> None:
+    def test_without_grimp_the_ast_reader_scans(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setattr(imports_module, "AVAILABLE", False)
 
-        assert boundaries_manager.available is False
-        with (
-            boundary_project(tmp_path, _PROJECT),
-            pytest.raises(BoundariesUnavailableError),
-        ):
-            boundaries_manager.scan()
+        with boundary_project(tmp_path, _PROJECT):
+            findings = boundaries_manager.findings()
 
-    def test_the_flag_of_the_import_scan_is_the_one_it_answers(
-        self, monkeypatch
-    ) -> None:
-        monkeypatch.setattr(imports_module, "AVAILABLE", True)
+        assert [finding.code for finding in findings] == [_W, _W]
 
-        assert boundaries_manager.available is True
+    @pytest.mark.parametrize(
+        ("mode", "enabled"), [(None, False), ("warn", True), ("strict", True)]
+    )
+    def test_enabled_by_the_mode(self, mode, enabled) -> None:
+        with override_settings(NEXT_FRAMEWORK={"BOUNDARIES": mode}):
+            assert boundaries_manager.enabled is enabled
 
 
 class TestDisabled:
@@ -303,32 +319,8 @@ class TestDisabled:
         with boundary_project(tmp_path, _PROJECT, BASE_DIR=None):
             assert boundaries_manager.disabled() is None
 
-    def test_without_grimp_the_warn_mode_is_an_info(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        monkeypatch.setattr(imports_module, "AVAILABLE", False)
-
-        with boundary_project(tmp_path, _PROJECT):
-            off = boundaries_manager.disabled()
-
-        assert off is not None
-        assert (off.code, off.message) == (
-            DISABLED,
-            "Boundaries are off, because grimp is not installed.",
-        )
-
-    @pytest.mark.parametrize(
-        ("available", "base_dir", "reason"),
-        [(False, True, "grimp is not installed"), (True, False, "BASE_DIR is not set")],
-        ids=["no_grimp", "no_base_dir"],
-    )
-    def test_the_strict_mode_warns(
-        self, tmp_path, monkeypatch, available, base_dir, reason
-    ) -> None:
-        monkeypatch.setattr(imports_module, "AVAILABLE", available)
-        settings = {} if base_dir else {"BASE_DIR": None}
-
-        with boundary_project(tmp_path, _PROJECT, framework=_STRICT, **settings):
+    def test_the_strict_mode_warns_without_base_dir(self, tmp_path) -> None:
+        with boundary_project(tmp_path, _PROJECT, framework=_STRICT, BASE_DIR=None):
             off = boundaries_manager.disabled()
 
         assert off is not None
@@ -336,7 +328,7 @@ class TestDisabled:
             STRICT_OFF,
             (
                 "NEXT_FRAMEWORK['BOUNDARIES'] is 'strict', but the boundaries go "
-                f"unchecked, because {reason}."
+                "unchecked, because BASE_DIR is not set."
             ),
         )
 
@@ -381,3 +373,106 @@ class TestEscapingImport:
             report = boundaries_manager.report()
 
         assert report.findings == ()
+
+
+class TestDeclarations:
+    """A scan keeps what each app declares, read once with the scan."""
+
+    def test_the_scan_holds_them(self, tmp_path) -> None:
+        apps = {
+            "shop": {"apps.py": app_config("shop", depends_on=("crm",), isolated=True)},
+            "crm": {},
+        }
+
+        with boundary_project(tmp_path, apps):
+            scan = boundaries_manager.scan()
+
+        assert scan.declarations.of("shop") == Declaration(
+            "shop", "shop", ("crm",), True
+        )
+        assert scan.declarations.isolated == frozenset({"shop"})
+
+    def test_an_empty_scan_declares_nothing(self, tmp_path) -> None:
+        with boundary_project(tmp_path, {"shop": {}}, BASE_DIR=None):
+            assert boundaries_manager.scan().declarations == NO_DECLARATIONS
+
+
+class TestReducedDeploy:
+    """Settings that leave an app out judge only growth and set its records aside."""
+
+    def test_no_stale_record_and_no_debt_of_the_dropped_app(self, tmp_path) -> None:
+        with boundary_project(tmp_path, _SPLIT, framework=_STRICT):
+            boundaries_manager.refreeze()
+            with _without_crm():
+                report = boundaries_manager.report()
+
+        assert report.findings == ()
+        assert report.debts == (Debt("shop", _W, "shop/views.py", 0, 1),)
+
+    def test_a_refreeze_keeps_what_it_cannot_judge(self, tmp_path) -> None:
+        with boundary_project(tmp_path, _SPLIT):
+            boundaries_manager.refreeze()
+            before = (tmp_path / "boundaries.toml").read_text()
+            with _without_crm():
+                refrozen = boundaries_manager.refreeze()
+
+        assert (refrozen.entries, refrozen.recorded) == (2, 2)
+        assert (tmp_path / "boundaries.toml").read_text() == before
+
+    def test_a_deleted_file_is_still_stale(self, tmp_path) -> None:
+        with boundary_project(tmp_path, _DECLARED):
+            boundaries_manager.refreeze()
+            (tmp_path / "crm" / "views.py").unlink()
+            with _without_crm():
+                report = boundaries_manager.report()
+
+        assert _rows(report) == [("crm/views.py", 0, STALE)]
+
+    @pytest.mark.parametrize(
+        ("apps", "rows"),
+        [
+            (_QUIET_CRM, [("shop/views.py", 0, STALE)]),
+            (
+                {
+                    **_QUIET_CRM,
+                    "shop": {**_QUIET_CRM["shop"], "apps.py": _SHOP_NEEDS_CRM},
+                },
+                [],
+            ),
+        ],
+        ids=["undeclared", "declared"],
+    )
+    def test_a_dropped_app_without_records_shows_by_depends_on(
+        self, tmp_path, apps, rows
+    ) -> None:
+        with boundary_project(tmp_path, apps):
+            boundaries_manager.refreeze()
+            with _without_crm():
+                report = boundaries_manager.report()
+
+        assert _rows(report) == rows
+
+    def test_a_stray_app_package_leaves_the_whole_project_judged(
+        self, tmp_path
+    ) -> None:
+        with boundary_project(tmp_path, _SPLIT):
+            boundaries_manager.refreeze()
+            copy = tmp_path / "build" / "lib" / "crm"
+            copy.mkdir(parents=True)
+            for name in ("__init__.py", "apps.py"):
+                (copy / name).write_text("")
+            _rescan_with(tmp_path, "")
+            report = boundaries_manager.report()
+
+        assert _rows(report) == [("shop/views.py", 0, STALE)]
+
+    def test_growth_is_still_judged(self, tmp_path) -> None:
+        with boundary_project(tmp_path, _SPLIT):
+            boundaries_manager.refreeze()
+            (tmp_path / "shop" / "views.py").write_text(
+                "from blog.helpers import x\nfrom blog import helpers\n"
+            )
+            with _without_crm():
+                report = boundaries_manager.report()
+
+        assert _rows(report) == [("shop/views.py", 0, GROWN)]

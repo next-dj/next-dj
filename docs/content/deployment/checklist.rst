@@ -164,11 +164,14 @@ Hold the boundaries between applications in CI, so a new edge across them fails 
 
    uv run python manage.py check --tag boundaries --fail-level WARNING
 
-- The CI environment installs the ``boundaries`` extra, because without grimp the strict mode answers with ``next.W148`` and the ``"warn"`` mode only with the info message ``next.I001``, which fails no run.
-- ``NEXT_FRAMEWORK["BOUNDARIES"]`` is ``"strict"``, so a finding that ``boundaries.toml`` does not record fails even a plain ``manage.py check``.
+- ``NEXT_FRAMEWORK["BOUNDARIES"]`` names a mode, since without it the checks report nothing, and ``"strict"`` fails the step on every finding that ``boundaries.toml`` does not record.
+- The step runs ``--tag boundaries``, because a plain ``manage.py check`` and ``--deploy`` leave the boundary checks out.
+- The ``boundaries`` extra is optional and only speeds the scan up with grimp, since next.dj reads the import graph without it.
 - ``boundaries.toml`` is committed with the project, since it is the record of the debt the build accepts.
 - CI never writes ``boundaries.toml``, because only ``manage.py next boundaries --refreeze`` does, and a checkout without the file counts every finding in full.
 - A change to ``boundaries.toml`` goes through review like code, since a smaller record pays debt off and a larger one accepts new debt.
+- A project whose applications declare ``depends_on`` runs ``manage.py next boundaries --exact`` beside the check, so an entry no code uses fails the build too.
+- A project that ships several deployments from one code base runs ``manage.py check --tag boundaries --fail-level WARNING --settings=...`` and ``manage.py check --deploy --settings=...`` for each of them, so ``next.E174`` and Django's own relation checks prove every deployment closed, see :doc:`split-deployments`.
 
 See :doc:`/content/topics/boundaries` for the rules, the ratchet, and the modes.
 
@@ -199,4 +202,5 @@ See also
 
    :doc:`static-files` for static file handling.
    :doc:`settings` for production settings.
+   :doc:`split-deployments` for several deployments over one code base.
    :doc:`/content/security/index` for the security checklist.

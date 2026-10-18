@@ -15,7 +15,8 @@ Check registration
 
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
-The imported modules are ``next.apps.checks``, ``next.boundaries.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
+The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
+``next.boundaries.checks`` stays out of the list, since its checks live in a registry of their own, see `Boundaries`_.
 
 Each of these modules registers checks.
 ``next.pages.checks``, ``next.forms.checks``, ``next.partial.checks``, and ``next.seo.checks`` are packages rather than single modules, and importing the package imports every submodule that carries a check.
@@ -37,7 +38,7 @@ A tagged run reports what a full run reports, and ``--tag next --deploy`` adds t
 The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check, every page metadata check, and the site checks.
 ``manage.py check --tag seo`` runs the metadata, crawler-document, and site checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.
 Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
-The boundary checks carry the ``boundaries`` tag alone, the importable constant ``next.checks.BOUNDARIES``, so ``manage.py check --tag next`` leaves them out, ``manage.py check --tag boundaries`` runs them alone, and a run without a tag runs them with the rest, see `Boundaries`_.
+The boundary checks carry the ``boundaries`` tag alone, the importable constant ``next.checks.BOUNDARIES``, and only ``manage.py check --tag boundaries`` runs them, so a run without a tag, ``--tag next``, ``--deploy``, and the checks that ``runserver``, ``migrate``, and ``test`` run leave them out, see `Boundaries`_.
 
 ``next.checks.reset_check_caches`` drops every per-run check cache so the next run rebuilds from the current sources.
 The cached state covers the router manager with the ``page.py`` pass memoised on it, the components manager, the collected URL patterns, the page module memo, the context and metadata registries with the settings tier, and the seo sources with their items registry.
@@ -191,8 +192,12 @@ Permissions
 Boundaries
 ~~~~~~~~~~
 
-``next.boundaries.checks`` registers one check, ``check_boundaries``, which turns every finding of ``boundaries_manager.report()`` into a message whose hint closes with the address of its section in :doc:`/content/topics/boundaries`.
-Its codes are ``next.E167`` through ``next.E171``, ``next.E173``, ``next.W136`` through ``next.W149``, and ``next.I001``, and ``next.E172`` for the ``BOUNDARIES`` setting lives in ``next.conf.checks``.
+``next.boundaries.checks`` registers three checks in ``boundary_checks``, a ``CheckRegistry`` of its own, and the ``check`` command of the ``next`` application lends them to Django's registry for a run with ``--tag boundaries`` or ``--list-tags``.
+``check_boundaries_mode`` reports ``next.E172`` under ``--tag boundaries`` by calling the check of ``next.conf.checks``, and the command does not lend it to a run that also asks for ``--tag next``, so the error shows once.
+A direct ``django.core.checks.run_checks(tags=["boundaries"])`` goes past the command and returns an empty list, so code that runs the boundary checks itself calls ``boundary_checks.run_checks()``.
+``check_boundaries`` turns every finding of ``boundaries_manager.report()`` into a message whose hint closes with the address of its section in :doc:`/content/topics/boundaries`, and ``check_declarations`` reports the attributes of the ``AppConfig`` of each application under ``BASE_DIR`` without the scan, and stays silent without ``BASE_DIR``.
+Both report nothing while ``NEXT_FRAMEWORK['BOUNDARIES']`` is ``None``, its default.
+Their codes are ``next.E167`` through ``next.E171``, ``next.E173`` through ``next.E176``, and ``next.W136`` through ``next.W153``, and ``next.E172`` for the ``BOUNDARIES`` setting lives in ``next.conf.checks`` under the ``next`` tag.
 :doc:`boundaries` lists the level of each code and whether ``boundaries.toml`` may record it.
 
 .. automodule:: next.boundaries.checks
@@ -827,7 +832,8 @@ Errors
        The message names the file, and the hint asks for the call at the top level of the segment module.
      - ``next.pages.checks.access``
    * - ``next.E167``
-     - Two or more apps depend on each other in a cycle, one error per ordered pair of apps of the group that an edge joins, at the first edge of the pair, with the shortest cycle through the first app as its witness.
+     - Two or more apps depend on each other in a cycle, one message per ordered pair of apps of the group that an edge joins, at the first edge of the pair, with the shortest cycle through the first app as its witness.
+       It is a warning under ``'warn'`` and an error under ``'strict'``, under the same id.
      - ``next.boundaries.checks``
    * - ``next.E168``
      - A file holds more findings of one code than ``boundaries.toml`` records for it.
@@ -842,10 +848,21 @@ Errors
      - ``NEXT_FRAMEWORK['BOUNDARIES']`` is ``'strict'`` and some boundary warnings are not recorded in ``boundaries.toml``.
      - ``next.boundaries.checks``
    * - ``next.E172``
-     - ``NEXT_FRAMEWORK['BOUNDARIES']`` names no mode, so the boundary checks run as under ``'warn'``.
+     - ``NEXT_FRAMEWORK['BOUNDARIES']`` is neither ``'warn'``, ``'strict'``, nor ``None``, so the boundary checks do not run.
+       It carries the ``next`` tag, and ``check_boundaries_mode`` reports it under ``--tag boundaries`` as well, once per run whichever tags ask.
      - ``next.conf.checks``
    * - ``next.E173``
-     - grimp cannot build the import graph of the project packages, and no other boundary check runs.
+     - The import graph backend cannot build the graph of the project packages, for a syntax error, a file that is no valid UTF-8 and declares no other encoding, a source grimp cannot read because it is not UTF-8, an unreadable file, or a relative import above its package, and no other boundary check runs.
+     - ``next.boundaries.checks``
+   * - ``next.E174``
+     - The ``AppConfig`` of an app of the project lists in ``depends_on`` an app that the ``INSTALLED_APPS`` of the current settings leave out, or an installed app by its label rather than its name.
+       The message says which, and the hint asks for each entry to be the name of an app these settings install.
+     - ``next.boundaries.checks``
+   * - ``next.E175``
+     - The ``AppConfig`` of an app of the project declares ``depends_on`` or ``isolated`` in a shape next.dj refuses, and the attribute counts as never declared.
+     - ``next.boundaries.checks``
+   * - ``next.E176``
+     - ``BOUNDARIES_IMPORT_GRAPH`` is no string, names a class that does not import or is no ``ImportGraphBackend``, or names ``GrimpImportGraph`` where grimp is not installed, and no other boundary check runs.
      - ``next.boundaries.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
@@ -1181,7 +1198,7 @@ Warnings
        The lift is allowed, and the warning names the file that lifts and the files it lifts, one message per lifting file, so the opening is never silent.
      - ``next.pages.checks.access``
    * - ``next.W136``
-     - An app imports a module of another app other than its ``models``, ``services`` or ``signals``.
+     - An app imports a module of another app other than its ``models``, ``services``, or ``signals``, and other than its ``services`` or ``signals`` when that app is isolated, or imports a model or a queryset that the ``services`` of an isolated app re-exports.
      - ``next.boundaries.checks``
    * - ``next.W137``
      - An app imports a file of a page tree or a component folder of another app.
@@ -1217,24 +1234,22 @@ Warnings
      - A module at the root of an app is named for a role next.dj reads from another module, such as ``providers.py`` for ``deps.py``.
      - ``next.boundaries.checks``
    * - ``next.W148``
-     - ``BOUNDARIES`` is ``'strict'``, but the boundaries go unchecked, because grimp is not installed or ``BASE_DIR`` is not set.
+     - ``BOUNDARIES`` is ``'strict'``, but the boundaries go unchecked, because ``BASE_DIR`` is not set.
      - ``next.boundaries.checks``
    * - ``next.W149``
      - ``add_perm`` registers a permission whose label names another app of the project.
      - ``next.boundaries.checks``
-
-Info
-~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 12 58 30
-
-   * - Code
-     - Condition
-     - Emitted by
-   * - ``next.I001``
-     - grimp is not installed and ``BOUNDARIES`` is ``'warn'``, so the boundary checks are off.
+   * - ``next.W150``
+     - An app that declares ``depends_on`` has edges to a project app the tuple leaves out, one warning per pair at its first edge.
+     - ``next.boundaries.checks``
+   * - ``next.W151``
+     - A model relates by a ``ForeignKey``, a ``OneToOneField``, or a ``ManyToManyField`` to a model of another app that declares itself isolated.
+     - ``next.boundaries.checks``
+   * - ``next.W152``
+     - A public function of the services of an isolated app returns a model, a queryset, ``Any``, a class that is no frozen slots dataclass or enum, a bare container, or a name the check cannot tell, directly or through a field of a returned dataclass.
+     - ``next.boundaries.checks``
+   * - ``next.W153``
+     - A public function of the services of an isolated app has no return annotation.
      - ``next.boundaries.checks``
 
 Codes are assigned per check and are not contiguous.

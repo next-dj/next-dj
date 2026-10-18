@@ -3,10 +3,13 @@ from pathlib import Path
 import pytest
 
 from next.boundaries.baseline import (
+    WHOLE,
     Debt,
+    Purview,
     baseline_path,
     compare,
     dump,
+    judged,
     read,
     shrink,
     tally,
@@ -26,6 +29,17 @@ def _finding(file: str, line: int, code: str = _W, app: str = "shop") -> Finding
 
 def _owner(file: str) -> str:
     return f"owner of {file}"
+
+
+def _on_disk(root: Path, *files: str) -> None:
+    for file in files:
+        path = root / file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+
+
+def _installed(file: str) -> str:
+    return "" if file.startswith("crm/") else "shop"
 
 
 class TestRead:
@@ -275,3 +289,108 @@ class TestShrink:
         found = [_finding("a.py", 1), _finding("a.py", 2), _finding("a.py", 0, GROWN)]
 
         assert tally(found) == {("a.py", _W): 2}
+
+
+class TestScope:
+    """Settings that leave apps out judge growth only, on files still on disk."""
+
+    @pytest.mark.parametrize(
+        ("files", "flags", "expected"),
+        [
+            (("crm/views.py",), {"dropping": False}, (("crm/views.py",), True)),
+            ((), {"dropping": True}, ((), True)),
+            ((), {"dropping": False}, ((), False)),
+        ],
+        ids=["a_record_of_a_dropped_app", "depends_on_drops", "whole"],
+    )
+    def test_judged(
+        self,
+        tmp_path,
+        files: tuple[str, ...],
+        flags: dict[str, bool],
+        expected: tuple[tuple[str, ...], bool],
+    ) -> None:
+        _on_disk(tmp_path, "shop/views.py", *files)
+        recorded = {("shop/views.py", _W): 1, ("crm/gone.py", _W): 1}
+        recorded.update({(file, _W): 1 for file in files})
+
+        scope = judged(tmp_path, recorded, _installed, **flags)
+
+        assert (tuple(sorted(scope.away)), scope.reduced) == expected
+
+    @pytest.mark.parametrize(
+        ("base_dir", "recorded"),
+        [(None, {("a.py", _W): 1}), (Path("/p"), None), (Path("/p"), {})],
+        ids=["no_base_dir", "no_file", "no_record"],
+    )
+    def test_nothing_to_judge_is_the_whole(self, base_dir, recorded) -> None:
+        assert judged(base_dir, recorded, _owner, dropping=True) is WHOLE
+
+    @pytest.mark.parametrize(
+        ("file", "expected"),
+        [
+            ("shop/views.py", (True, False)),
+            ("crm/views.py", (True, True)),
+            ("gone/views.py", (False, False)),
+        ],
+        ids=["remaining", "dropped_app", "deleted"],
+    )
+    def test_a_reduced_deploy(
+        self, tmp_path, file: str, expected: tuple[bool, bool]
+    ) -> None:
+        _on_disk(tmp_path, "shop/views.py", "crm/views.py")
+        scope = Purview(tmp_path, frozenset({"crm/views.py"}), reduced=True)
+
+        assert (scope.may_shrink(file), scope.set_aside(file)) == expected
+
+    def test_the_whole_project_is_sure_of_everything(self, tmp_path) -> None:
+        _on_disk(tmp_path, "a.py")
+
+        assert (WHOLE.may_shrink("a.py"), WHOLE.set_aside("a.py")) == (False, False)
+        assert Purview(tmp_path).may_shrink("a.py") is False
+
+    def test_compare_sets_the_records_of_a_dropped_app_aside(self, tmp_path) -> None:
+        _on_disk(tmp_path, "shop/views.py", "crm/views.py")
+        recorded = {("shop/views.py", _W): 2, ("crm/views.py", _W): 1}
+        scope = judged(tmp_path, recorded, _installed, dropping=False)
+
+        ratchet = compare([_finding("shop/views.py", 1)], recorded, _owner, scope)
+
+        assert ratchet.problems == ()
+        assert ratchet.shown == ()
+        assert ratchet.debts == (Debt("shop", _W, "shop/views.py", 1, 2),)
+
+    def test_compare_judges_growth_and_deleted_files(self, tmp_path) -> None:
+        _on_disk(tmp_path, "shop/views.py")
+        found = [_finding("shop/views.py", 1), _finding("shop/views.py", 2)]
+        recorded = {("shop/views.py", _W): 1, ("crm/gone.py", _W): 1}
+        scope = judged(tmp_path, recorded, _installed, dropping=True)
+
+        ratchet = compare(found, recorded, _owner, scope)
+
+        assert [(item.file, item.code) for item in ratchet.problems] == [
+            ("crm/gone.py", STALE),
+            ("shop/views.py", GROWN),
+        ]
+
+    def test_a_finding_in_a_file_set_aside_is_judged(self, tmp_path) -> None:
+        _on_disk(tmp_path, "crm/views.py")
+        scope = Purview(tmp_path, frozenset({"crm/views.py"}), reduced=True)
+
+        ratchet = compare([_finding("crm/views.py", 1)], {}, _owner, scope)
+
+        assert ratchet.shown == (_finding("crm/views.py", 1),)
+
+    def test_shrink_keeps_what_it_cannot_judge(self, tmp_path) -> None:
+        _on_disk(tmp_path, "shop/views.py", "crm/views.py")
+        recorded = {
+            ("shop/views.py", _W): 2,
+            ("crm/views.py", _W): 1,
+            ("crm/gone.py", _W): 1,
+        }
+        scope = judged(tmp_path, recorded, _installed, dropping=False)
+
+        assert shrink([], recorded, scope) == (
+            {("shop/views.py", _W): 2, ("crm/views.py", _W): 1},
+            0,
+        )

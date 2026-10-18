@@ -32,7 +32,6 @@ DICT_KEYS: Final[frozenset[str]] = frozenset(
 )
 STR_KEYS: Final[frozenset[str]] = frozenset(
     {
-        "BOUNDARIES",
         "COMPONENT_TEMPLATE_LOADER",
         "CSRF_DELIVERY",
         "DEPENDENCY_RESOLVER",
@@ -41,7 +40,7 @@ STR_KEYS: Final[frozenset[str]] = frozenset(
     }
 )
 OPTIONAL_STR_KEYS: Final[frozenset[str]] = frozenset(
-    {"JS_CONTEXT_SERIALIZER", "STATIC_VERSION"}
+    {"BOUNDARIES", "BOUNDARIES_IMPORT_GRAPH", "JS_CONTEXT_SERIALIZER", "STATIC_VERSION"}
 )
 BOOL_KEYS: Final[frozenset[str]] = frozenset(
     {
