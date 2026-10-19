@@ -433,8 +433,7 @@ Packaging an extension
 ----------------------
 
 A reusable extension ships as an ordinary Django application.
-The framework imports its ``deps.py`` and ``signals.py`` at startup like those of any installed app, so the providers, named dependencies, and receivers declared there need no code of their own.
-An adopter that turns ``DEPS_AUTODISCOVER`` or ``SIGNALS_AUTODISCOVER`` off imports those modules from ``AppConfig.ready``, see :doc:`/content/ref/settings`.
+The framework imports its ``deps.py``, ``permissions.py``, and ``signals.py`` at startup like those of any installed app, so the providers, named dependencies, predicates, and receivers declared there need no code of their own, see :doc:`/content/ref/settings`.
 
 .. code-block:: python
    :caption: next_audit/apps.py

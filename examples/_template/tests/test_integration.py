@@ -41,17 +41,15 @@ def test_static_names_resolve_to_urls(next_client) -> None:
     ) in body
 
 
-def test_the_trees_mount_where_their_configs_say() -> None:
+def test_the_route_map_names_each_page_and_its_access() -> None:
     out = StringIO()
-    call_command("next", "routes", stdout=out)
+    call_command("routes", stdout=out)
     _header, *lines = out.getvalue().splitlines()
     rows = {line.split()[0]: line.split()[1:] for line in lines}
-    assert rows["/"] == ["next:page_", "home", "home/pages/page.py", "mounts", "public"]
+    assert rows["/"] == ["next:page_", "home/pages/page.py", "public"]
     assert rows[PAGE] == [
         "next:page_myapp",
-        "myapp",
-        "myapp/pages/page.py",
-        "mounts",
+        "myapp/pages/myapp/page.py",
         "login",
         "(middleware)",
     ]

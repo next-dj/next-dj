@@ -101,7 +101,7 @@ class TestLinks:
             )
         ]
 
-    def test_an_unknown_rel_is_w110(self, tmp_path: Path) -> None:
+    def test_an_unknown_rel_is_w105(self, tmp_path: Path) -> None:
         messages = _messages(
             tmp_path, '{"links": [{"rel": "prefetchh", "href": "/f"}]}'
         )
@@ -142,7 +142,7 @@ class TestIcons:
         assert [code for code, _msg in messages] == ["next.E124"]
         assert "without a color" in messages[0][1]
 
-    def test_a_repeated_icon_is_w111(self, tmp_path: Path) -> None:
+    def test_a_repeated_icon_is_w106(self, tmp_path: Path) -> None:
         messages = _messages(tmp_path, '{"icons": {"icon": ["/a.png", "/b.png"]}}')
         assert [code for code, _msg in messages] == ["next.W106"]
 
@@ -209,7 +209,7 @@ class TestViewport:
         ['{"user_scalable": False}', '"maximum-scale=1"', '"user-scalable=0"'],
         ids=["mapping", "maximum", "zero"],
     )
-    def test_a_viewport_without_zoom_is_w112(
+    def test_a_viewport_without_zoom_is_w107(
         self, tmp_path: Path, viewport: str
     ) -> None:
         messages = _messages(tmp_path, f'{{"viewport": {viewport}}}')
@@ -240,7 +240,7 @@ class TestSocialFolds:
         with patch_checks_router_manager(pages_directory=tmp_path):
             assert check_metadata_social_folds() == []
 
-    def test_a_declared_locale_of_another_form_is_w113(self, tmp_path: Path) -> None:
+    def test_a_declared_locale_of_another_form_is_w108(self, tmp_path: Path) -> None:
         metadata_page(
             tmp_path,
             '{"og": {"locale": "en-US", "locale_alternates": ["de_DE", "fr"]}}',
@@ -251,7 +251,7 @@ class TestSocialFolds:
         assert "'en-US'" in messages[0].msg
         assert "'fr'" in messages[1].msg
 
-    def test_a_locale_facebook_spells_otherwise_is_w113(self, tmp_path: Path) -> None:
+    def test_a_locale_facebook_spells_otherwise_is_w108(self, tmp_path: Path) -> None:
         metadata_page(
             tmp_path, '{"og": {"locale": "ar_AA", "locale_alternates": ["no_NO"]}}'
         )
@@ -265,7 +265,7 @@ class TestSocialFolds:
         LANGUAGE_CODE="kab",
         LANGUAGES=[("kab", "Kabyle"), ("en", "English"), ("ast", "Asturian")],
     )
-    def test_an_underived_language_is_one_w113(self, tmp_path: Path) -> None:
+    def test_an_underived_language_is_one_w108(self, tmp_path: Path) -> None:
         metadata_page(tmp_path / "a", '{"og": {"locale_alternates": True}}')
         metadata_page(tmp_path / "b", '{"og": {"type": "website"}}')
         with patch_checks_router_manager(pages_directory=tmp_path):
@@ -290,7 +290,7 @@ class TestLiterals:
         metadata_page(pages / "hello", metadata)
         return pages
 
-    def test_a_literal_in_a_component_is_w118(self, tmp_path: Path) -> None:
+    def test_a_literal_in_a_component_is_w109(self, tmp_path: Path) -> None:
         pages = self._project(
             tmp_path,
             '<html>{% component "head" %}{% template %}</html>',
@@ -306,7 +306,7 @@ class TestLiterals:
         assert check_ids(messages) == ["next.W109"]
         assert '<meta name="viewport">' in messages[0].msg
 
-    def test_a_theme_color_literal_is_w118(self, tmp_path: Path) -> None:
+    def test_a_theme_color_literal_is_w109(self, tmp_path: Path) -> None:
         pages = self._project(
             tmp_path,
             '<html><meta name="theme-color" content="#000">{% template %}</html>',

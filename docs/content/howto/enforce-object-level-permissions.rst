@@ -30,9 +30,8 @@ The ``next`` application imports it at startup, so it needs no import of its own
 .. code-block:: python
    :caption: notes/permissions.py
 
-   from next.permissions import add_perm, predicate
+   from next.permissions import add_perm
 
-   @predicate
    def is_owner(user, note):
        return note is not None and note.owner_id == user.pk
 
@@ -41,7 +40,7 @@ The ``next`` application imports it at startup, so it needs no import of its own
 ``edit_note`` is a codename no model defines, so the predicate alone answers it.
 ``note`` is ``None`` on the model-level question, and ``is_owner`` refuses it, since no row has an owner yet.
 A predicate that never looks at the row takes the user alone, ``def is_editor(user)``, and one that looks at neither takes no parameter, ``def notes_open()``.
-See :ref:`topics-permissions` for composing predicates with ``&``, ``|``, and ``~``.
+See :ref:`topics-permissions` for a predicate that combines several conditions with ``and`` and ``or``.
 
 List the backend
 ~~~~~~~~~~~~~~~~
@@ -56,7 +55,7 @@ List the backend
        "next.permissions.ObjectPermissionBackend",
    ]
 
-A project that registers a permission without the backend fails ``manage.py check`` with ``next.E162``.
+A project that registers a permission without the backend fails ``manage.py check`` with ``next.E160``.
 With two backends listed, a view that logs in a user :func:`~django.contrib.auth.authenticate` did not return, such as a fresh signup, passes ``backend="django.contrib.auth.backends.ModelBackend"`` to :func:`~django.contrib.auth.login`, which raises ``ValueError`` without it.
 
 Guard the form

@@ -1,5 +1,4 @@
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -7,20 +6,12 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import Client
 from django.urls import URLResolver, reverse
 
-from next.checks import reset_check_caches
 from next.urls import page_reverse, pages, router_manager
-from next.urls.backends import (
-    MountDeclaration,
-    _installed_app_directories,
-    read_mount_declaration,
-)
-from next.urls.checks import check_app_mounts
+from next.urls.backends import _installed_app_directories
 from next.urls.manager import _RoutedPages, routed_pages
 from next.urls.mount import MountedTree
 from next.utils import PageRoot
 from tests.support import (
-    NAMESPACED_URLCONF,
-    check_ids,
     file_router,
     file_router_config_entry,
     installed_apps,
@@ -54,135 +45,26 @@ def _status(*urls: str) -> list[int]:
     return [client.get(url).status_code for url in urls]
 
 
-class TestMountedAppTrees:
-    """An app declares the prefix of its page trees on its own config class."""
+class TestAutoAssembledAppTrees:
+    """An app tree no `pages()` claims routes at the root, ahead of the root trees."""
 
-    def test_mount_routes_the_pages_tree_under_its_prefix(self, tmp_path) -> None:
-        write_app(tmp_path, "shop", {"pages": ("", "cart")}, mount="shop/")
-
-        with installed_apps(tmp_path, "shop"):
-            routed = _routed()
-            statuses = _status("/shop/cart/", "/cart/")
-
-        assert routed == [("shop/", "page_shop"), ("shop/cart/", "page_shop_cart")]
-        assert statuses == [200, 404]
-
-    def test_mounts_routes_each_subdirectory_under_its_prefix(self, tmp_path) -> None:
-        write_app(
-            tmp_path,
-            "wallets",
-            {"pages": ("", "ops"), "staff_pages": ("team",)},
-            mounts={"pages": "w/<int:wallet>/", "staff_pages": "staff/"},
-        )
-
-        with installed_apps(tmp_path, "wallets"):
-            routed = _routed()
-            roots = _roots()
-            statuses = _status("/w/3/ops/", "/staff/team/", "/team/")
-
-        assert routed == [
-            ("w/<int:wallet>/", "page_w_int_wallet"),
-            ("w/<int:wallet>/ops/", "page_w_int_wallet_ops"),
-            ("staff/team/", "page_staff_team"),
-        ]
-        assert [
-            (root.label, root.prefix, root.subdir, root.source) for root in roots
-        ] == [
-            ("App 'wallets'", "w/<int:wallet>/", "pages", "mounts"),
-            ("App 'wallets' (staff_pages)", "staff/", "staff_pages", "mounts"),
-        ]
-        assert statuses == [200, 200, 404]
-
-    @pytest.mark.parametrize(
-        ("declared", "prefix", "subdir"),
-        [
-            ({"mount": "/shop"}, "shop/", "pages"),
-            ({"mount": "shop///"}, "shop/", "pages"),
-        ],
-        ids=["leading_slash", "trailing_slashes"],
-    )
-    def test_a_declaration_is_normalised(self, tmp_path, declared, prefix, subdir):
-        write_app(tmp_path, "shop", {"pages": ("cart",)}, **declared)
-
-        with installed_apps(tmp_path, "shop"):
-            routed = _routed()
-            (root,) = _roots()
-
-        assert routed == [("shop/cart/", "page_shop_cart")]
-        assert (root.prefix, root.subdir) == (prefix, subdir)
-
-    def test_a_mounts_key_naming_no_directory_routes_nothing(self, tmp_path) -> None:
-        write_app(
-            tmp_path, "shop", {"pages": ("cart",)}, mounts={"pages": "", "gone": "x/"}
-        )
-
-        with installed_apps(tmp_path, "shop"):
-            routed = _routed()
-            roots = _roots()
-
-        assert routed == [("cart/", "page_cart")]
-        assert [root.subdir for root in roots] == ["pages"]
-
-    def test_prefixed_trees_lead_then_plain_app_trees_then_root_trees(
-        self, tmp_path
-    ) -> None:
+    def test_app_trees_lead_then_root_trees(self, tmp_path) -> None:
         write_app(tmp_path, "blog", {"pages": ("about",)})
-        write_app(tmp_path, "shop", {"pages": ("cart",)}, mount="shop/")
-        write_app(tmp_path, "docs", {"pages": ("guide",)}, mounts={"pages": ""})
+        write_app(tmp_path, "corp.billing", {"pages": ("pay",)})
         write_page(tmp_path / "site", "contact")
 
-        with installed_apps(tmp_path, "blog", "shop", "docs", dirs=[tmp_path / "site"]):
+        with installed_apps(tmp_path, "blog", "corp.billing", dirs=[tmp_path / "site"]):
             routed = _routed()
             roots = _roots()
 
-        assert [route for route, _name in routed] == [
-            "shop/cart/",
-            "about/",
-            "guide/",
-            "contact/",
-        ]
-        assert [(root.app, root.source) for root in roots] == [
-            ("shop", "mounts"),
-            ("blog", "root"),
-            ("docs", "mounts"),
-            ("", "root"),
+        assert [route for route, _name in routed] == ["about/", "pay/", "contact/"]
+        assert [(root.label, root.prefix, root.namespace) for root in roots] == [
+            ("App 'blog'", None, "next"),
+            ("App 'corp.billing'", None, "next"),
+            ("Root", None, "next"),
         ]
 
-    def test_a_dotted_app_is_reported_by_its_label(self, tmp_path) -> None:
-        write_app(tmp_path, "corp.billing", {"pages": ("pay",)}, mount="bill/")
-
-        with installed_apps(tmp_path, "corp.billing"):
-            (root,) = _roots()
-
-        assert (root.app, root.label) == ("billing", "App 'corp.billing'")
-
-    def test_a_subdirectory_resolves_against_the_app_path_of_the_snapshot(
-        self, tmp_path
-    ) -> None:
-        (tmp_path / "old" / "staff_pages").mkdir(parents=True)
-        (tmp_path / "new" / "staff_pages").mkdir(parents=True)
-        router = file_router(app_dirs=True)
-
-        paths = [
-            router._get_app_tree_path("shop", directories, "staff_pages")
-            for directories in (
-                {"shop": tmp_path / "old"},
-                {"shop": tmp_path / "old"},
-                {"shop": tmp_path / "new"},
-                {},
-            )
-        ]
-
-        assert paths == [
-            tmp_path / "old" / "staff_pages",
-            tmp_path / "old" / "staff_pages",
-            tmp_path / "new" / "staff_pages",
-            None,
-        ]
-
-    def test_a_snapshot_without_labels_names_the_app_by_its_last_part(
-        self, tmp_path
-    ) -> None:
+    def test_a_plain_directory_map_routes_the_app_tree(self, tmp_path) -> None:
         write_page(tmp_path / "pages", "pay")
         router = file_router(app_dirs=True)
 
@@ -193,7 +75,7 @@ class TestMountedAppTrees:
             (root,) = router.page_roots()
             routed = [str(pattern.pattern) for pattern in router.generate_urls()]
 
-        assert (root.app, root.source, root.prefix) == ("billing", "root", "")
+        assert (root.label, root.prefix) == ("App 'corp.billing'", None)
         assert routed == ["pay/"]
 
 
@@ -221,141 +103,37 @@ class TestUnprefixedProjects:
             ("cart/", "page_cart"),
             ("contact/", "page_contact"),
         ]
-        assert [(root.prefix, root.source, root.namespace) for root in roots] == [
-            ("", "root", "next"),
-            ("", "root", "next"),
-            ("", "root", "next"),
+        assert [(root.prefix, root.namespace) for root in roots] == [
+            (None, "next"),
+            (None, "next"),
+            (None, "next"),
         ]
 
-    def test_an_empty_mount_routes_like_no_declaration(self, tmp_path) -> None:
-        names = self._project(tmp_path)
-        with installed_apps(tmp_path, *names, dirs=[tmp_path / "site"]):
-            undeclared = _routed()
-        write_app(tmp_path / "declared", "blog", {"pages": ("", "about")}, mount="")
-        write_page(tmp_path / "declared" / "blog" / "pages", "posts/[slug]")
-
-        with installed_apps(tmp_path / "declared", "blog"):
-            declared = _routed()
-
-        assert declared == undeclared[:3]
-
-    def test_an_unprefixed_view_carries_no_mount(self, tmp_path) -> None:
+    def test_an_auto_assembled_view_carries_its_trail(self, tmp_path) -> None:
         names = self._project(tmp_path)
 
         with installed_apps(tmp_path, *names):
             views = [pattern.callback for pattern in router_manager]
 
-        assert not any(hasattr(view, "next_route_prefix") for view in views)
+        assert all(isinstance(view.next_route_trail, str) for view in views)
 
 
-class TestInvalidDeclarations:
-    """A declaration the router refuses routes the app as if it declared nothing."""
-
-    @pytest.mark.parametrize(
-        "declared",
-        [
-            {"mount": 3},
-            {"mounts": ["shop/"]},
-            {"mounts": {"pages": 3}},
-            {"mounts": {3: "shop/"}},
-            {"mount": "shop/", "mounts": {"pages": "shop/"}},
-            {"mount": "[slug]/"},
-            {"mounts": {"pages": "w/[int:wallet]/"}},
-        ],
-        ids=[
-            "mount_not_str",
-            "mounts_not_dict",
-            "mounts_value_not_str",
-            "mounts_key_not_str",
-            "both",
-            "bracketed_mount",
-            "bracketed_mounts",
-        ],
-    )
-    def test_the_app_routes_at_the_root(self, tmp_path, declared) -> None:
-        write_app(tmp_path, "shop", {"pages": ("", "cart")}, **declared)
-
-        with installed_apps(tmp_path, "shop"):
-            routed = _routed()
-            (root,) = _roots()
-
-        assert routed == [("", "page_"), ("cart/", "page_cart")]
-        assert (root.prefix, root.source) == ("", "root")
-
-    @pytest.mark.parametrize(
-        ("declared", "expected"),
-        [
-            ({}, MountDeclaration()),
-            ({"mount": "shop"}, MountDeclaration(trees=((None, "shop/"),))),
-            (
-                {"mounts": {"pages": "", "staff_pages": "/staff"}},
-                MountDeclaration(trees=(("pages", ""), ("staff_pages", "staff/"))),
-            ),
-            (
-                {"mount": 3},
-                MountDeclaration(refusal="declares mount as int instead of a str"),
-            ),
-            (
-                {"mounts": ("pages",)},
-                MountDeclaration(
-                    refusal="declares mounts as something other than a dict of "
-                    "str to str"
-                ),
-            ),
-            (
-                {"mount": "a/", "mounts": {}},
-                MountDeclaration(refusal="declares both mount and mounts"),
-            ),
-            (
-                {"mounts": {"pages": "[a]/", "more": "b/", "odd": "c]/"}},
-                MountDeclaration(bracketed=("[a]/", "c]/")),
-            ),
-            (
-                {"mounts": {"pages": "", "/pages/": "a/", "a/b": "", "..": ""}},
-                MountDeclaration(
-                    refusal="declares mounts keys ['/pages/', 'a/b', '..'], which "
-                    "are no plain directory names"
-                ),
-            ),
-        ],
-        ids=[
-            "undeclared",
-            "mount",
-            "mounts",
-            "mount_type",
-            "mounts_type",
-            "both",
-            "brackets",
-            "unplain_keys",
-        ],
-    )
-    def test_what_a_declaration_reads_as(self, declared, expected) -> None:
-        assert read_mount_declaration(SimpleNamespace(**declared)) == expected
-
-
-class TestDeclarationSnapshot:
-    """The declarations are read once per app registry snapshot, not per call."""
+class TestInstalledAppsSnapshot:
+    """The app directories are read once per app registry snapshot, not per call."""
 
     def test_one_snapshot_serves_every_read(self, tmp_path) -> None:
-        write_app(tmp_path, "shop", mount="shop/")
+        write_app(tmp_path, "shop")
 
-        with (
-            installed_apps(tmp_path, "shop"),
-            patch(
-                "next.urls.backends.read_mount_declaration",
-                wraps=read_mount_declaration,
-            ) as reads,
-        ):
+        with installed_apps(tmp_path, "shop"):
             first = _installed_app_directories()
-            second = _installed_app_directories()
             _roots()
             _routed()
+            second = _installed_app_directories()
 
         assert first is second
-        assert reads.call_count == 1
 
     def test_installing_an_app_takes_a_new_snapshot(self, tmp_path) -> None:
-        write_app(tmp_path, "shop", mount="shop/")
+        write_app(tmp_path, "shop")
         before = _installed_app_directories()
 
         with installed_apps(tmp_path, "shop"):
@@ -368,20 +146,6 @@ class TestDeclarationSnapshot:
 
 class TestPrefixKwargsReachThePage:
     """A kwarg the prefix captures reaches `DUrl` on a page deep inside the tree."""
-
-    def test_a_mounts_prefix(self, tmp_path) -> None:
-        write_app(
-            tmp_path, "wallets", {"pages": ()}, mounts={"pages": "w/<int:wallet>/"}
-        )
-        write_page(
-            tmp_path / "wallets" / "pages", "ops/[int:pk]", _ids_page("wallet", "pk")
-        )
-
-        with installed_apps(tmp_path, "wallets"):
-            response = Client().get("/w/3/ops/4/")
-
-        assert response.status_code == 200
-        assert response.content.decode().strip() == "3-4"
 
     def test_a_pages_include_prefix(self, tmp_path) -> None:
         write_app(tmp_path, "audit", {"pages": ()})
@@ -400,23 +164,7 @@ class TestPrefixKwargsReachThePage:
 
 
 class TestReverse:
-    """A prefixed page reverses by its full trail, a `pages()` one in its namespace."""
-
-    def test_a_mounted_page_by_trail_and_by_name(self, tmp_path) -> None:
-        write_app(
-            tmp_path,
-            "wallets",
-            {"pages": ("ops/[int:pk]",)},
-            mounts={"pages": "w/<int:wallet>/"},
-        )
-
-        with installed_apps(tmp_path, "wallets", urlconf=NAMESPACED_URLCONF):
-            by_trail = page_reverse("w/[int:wallet]/ops/[int:pk]", wallet=3, pk=4)
-            by_name = reverse(
-                "next:page_w_int_wallet_ops_int_pk", kwargs={"wallet": 3, "pk": 4}
-            )
-
-        assert by_trail == by_name == "/w/3/ops/4/"
+    """A `pages()` tree reverses by its own trails in its namespace."""
 
     def test_a_pages_tree_in_its_namespace(self, tmp_path) -> None:
         write_app(
@@ -441,18 +189,15 @@ class TestReverse:
 
 
 class TestPagesInTheUrlconf:
-    """`pages()` mounts a tree where a URLconf includes it and outranks `mounts`."""
+    """`pages()` mounts a tree where a URLconf includes it, out of the auto-assembly."""
 
-    def test_the_urlconf_wins_over_the_declared_prefix(self, tmp_path) -> None:
-        write_app(
-            tmp_path,
-            "wallets",
-            {"pages": ("ops",), "staff_pages": ("team",)},
-            mounts={"pages": "w/", "staff_pages": "staff/"},
-        )
+    def test_a_claimed_subdirectory_leaves_the_pages_tree_routed(
+        self, tmp_path
+    ) -> None:
+        write_app(tmp_path, "wallets", {"pages": ("ops",), "staff_pages": ("team",)})
         urlconf = write_urlconf(
             tmp_path,
-            "priority_urls",
+            "claim_urls",
             'path("", include("next.urls"))',
             'path("crew/", pages("wallets", "staff_pages", namespace="crew"))',
         )
@@ -460,14 +205,13 @@ class TestPagesInTheUrlconf:
         with installed_apps(tmp_path, "wallets", urlconf=urlconf):
             routed = _routed()
             roots = _roots()
-            statuses = _status("/crew/team/", "/staff/team/", "/w/ops/")
+            statuses = _status("/crew/team/", "/team/", "/ops/")
 
-        assert routed == [("w/ops/", "page_w_ops")]
-        assert [(root.subdir, root.prefix, root.source) for root in roots] == [
-            ("pages", "w/", "mounts"),
-            ("staff_pages", "crew/", "urls"),
+        assert routed == [("ops/", "page_ops")]
+        assert [(root.label, root.prefix, root.namespace) for root in roots] == [
+            ("App 'wallets'", None, "next"),
+            ("App 'wallets' (staff_pages)", "crew/", "crew"),
         ]
-        assert roots[1].namespace == "crew"
         assert statuses == [200, 404, 200]
 
     def test_an_undeclared_tree_leaves_the_auto_assembly(self, tmp_path) -> None:
@@ -660,31 +404,6 @@ class TestPlainSubdirectories:
         ):
             pages("audit", subdir)
 
-    def test_an_unplain_mounts_key_routes_the_app_at_the_root(self, tmp_path) -> None:
-        write_app(tmp_path, "shop", {"pages": ("cart",)}, mounts={"./pages": "x/"})
-
-        with installed_apps(tmp_path, "shop"):
-            routed = _routed()
-            (root,) = _roots()
-
-        assert routed == [("cart/", "page_cart")]
-        assert (root.prefix, root.source) == ("", "root")
-
-
-class TestMountFollowsPagesDir:
-    """`mount` moves the tree the router would mount by default, its `PAGES_DIR`."""
-
-    def test_mount_moves_the_pages_dir_tree_of_the_router(self, tmp_path) -> None:
-        write_app(tmp_path, "shop", {"routes": ("cart",)}, mount="shop/")
-        entry = file_router_config_entry(app_dirs=True, pages_dir_name="routes")
-
-        with installed_apps(tmp_path, "shop", framework={"PAGE_BACKENDS": [entry]}):
-            routed = _routed()
-            (root,) = _roots()
-
-        assert routed == [("shop/cart/", "page_shop_cart")]
-        assert (root.subdir, root.prefix, root.source) == ("routes", "shop/", "mounts")
-
 
 class TestPagesFollowsPagesDir:
     """`pages()` mounts the tree router's `PAGES_DIR` tree unless told otherwise."""
@@ -716,24 +435,6 @@ class TestPagesFollowsPagesDir:
         assert tree.mount.subdir == "routes"
         assert routed == [("about/", "page_about")]
         assert statuses == [200, 200, 404, 200]
-
-    def test_the_default_claims_a_declared_pages_dir_tree(self, tmp_path) -> None:
-        write_app(tmp_path, "audit", {"routes": ("log",)}, mount="a/")
-        urlconf = write_urlconf(tmp_path, "claim_urls", 'path("b/", pages("audit"))')
-
-        with installed_apps(
-            tmp_path,
-            "audit",
-            urlconf=urlconf,
-            framework={"PAGE_BACKENDS": [self.ROUTES]},
-        ):
-            reset_check_caches()
-            messages = check_app_mounts(None)
-            statuses = _status("/b/log/", "/a/log/")
-
-        assert check_ids(messages) == ["next.W127"]
-        assert "'routes'" in messages[0].msg
-        assert statuses == [200, 404]
 
     def test_a_missing_pages_dir_tree_is_improperly_configured(self, tmp_path) -> None:
         write_app(tmp_path, "audit", {"pages": ("log",)})

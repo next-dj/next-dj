@@ -40,17 +40,14 @@ STR_KEYS: Final[frozenset[str]] = frozenset(
     }
 )
 OPTIONAL_STR_KEYS: Final[frozenset[str]] = frozenset(
-    {"BOUNDARIES", "BOUNDARIES_IMPORT_GRAPH", "JS_CONTEXT_SERIALIZER", "STATIC_VERSION"}
+    {"JS_CONTEXT_SERIALIZER", "STATIC_VERSION"}
 )
 BOOL_KEYS: Final[frozenset[str]] = frozenset(
     {
         "STRICT_CONTEXT",
         "STRICT_LOADING",
         "LAZY_COMPONENT_MODULES",
-        "DEPS_AUTODISCOVER",
-        "PERMISSIONS_AUTODISCOVER",
         "FORM_AUTODISCOVER",
-        "SIGNALS_AUTODISCOVER",
         "STATIC_DISCOVERY_CACHE",
         "CSP_NONCE",
     }

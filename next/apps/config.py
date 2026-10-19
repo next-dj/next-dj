@@ -138,6 +138,7 @@ _SETTINGS_RELOADED: Final[tuple[Callable[..., None], ...]] = (
 # derived from the old routers is dropped with them.
 _ROUTER_RELOADED: Final[tuple[Callable[..., None], ...]] = (
     forget_watch_state,
+    forget_crumb_routes,
     forget_page_roots,
     forget_manager_page_roots,
     forget_dep_caches,

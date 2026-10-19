@@ -7,8 +7,8 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 
 from next.checks import NEXT
 from next.pages.access import owner_access
+from next.pages.checks.access import access_in_use
 from next.permissions.access import login_middleware_active
-from next.permissions.manager import permission_manager
 from next.utils import middleware_listed
 
 from .sources import diagnostics, iter_registered_actions
@@ -149,30 +149,6 @@ def check_action_guard_permissions(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
-@register(NEXT)
-def check_action_guard_permissions_known(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when permission_required names a permission nothing grants (`next.W129`).
-
-    Without `django.contrib.auth` no permission resolves, which `next.W060` reports.
-    """
-    if "django.contrib.auth" not in settings.INSTALLED_APPS:
-        return []
-    return [
-        DjangoWarning(
-            f"Form action {meta.get('name')!r} declares permission_required "
-            f"{perm!r}, which no installed model defines and no add_perm() "
-            "registers, so the guard refuses every user but a superuser. Fix the "
-            "name, or register the permission with next.permissions.add_perm().",
-            obj=settings,
-            id="next.W129",
-        )
-        for meta in iter_registered_actions()
-        if (guard := meta.get("guard")) is not None
-        for perm in guard.permissions
-        if not permission_manager.known(perm)
-    ]
-
-
 def _open_actions() -> dict[Path, list[str]]:
     """Return the actions of each page tree file that nothing guards, by file.
 
@@ -194,11 +170,11 @@ def _open_actions() -> dict[Path, list[str]]:
 
 @register(NEXT)
 def check_public_actions(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about an action of a page tree that nothing guards (`next.W134`).
+    """Warn about an action of a page tree that nothing guards (`next.W129`).
 
-    A guarding `proxy.py`, a page declaration, a `Meta` guard or the middleware counts.
+    It waits for the project to declare access, and the middleware or a guard counts.
     """
-    if login_middleware_active():
+    if login_middleware_active() or not access_in_use():
         return []
     return [
         DjangoWarning(
@@ -212,7 +188,7 @@ def check_public_actions(*args, **kwargs) -> list[CheckMessage]:
                 "or declare page.public() if the actions are meant for everyone."
             ),
             obj=str(source),
-            id="next.W134",
+            id="next.W129",
         )
         for source, names in _open_actions().items()
     ]
@@ -248,7 +224,6 @@ def check_success_message_framework(*args, **kwargs) -> list[CheckMessage]:
 __all__ = [
     "check_action_applied_to_class",
     "check_action_guard_permissions",
-    "check_action_guard_permissions_known",
     "check_form_action_collisions",
     "check_forms_outside_base_dir",
     "check_instance_from_url_on_non_model_form",

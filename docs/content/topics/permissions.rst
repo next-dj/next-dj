@@ -22,7 +22,7 @@ Django creates the ``add``, ``change``, ``delete``, and ``view`` permissions of 
 A question about one row therefore needs another backend, and ``ObjectPermissionBackend`` is that backend.
 
 :meth:`~django.contrib.auth.models.User.has_perm` asks every listed backend in turn and grants the permission once one of them does.
-An active superuser holds every permission before any backend is asked, so a superuser passes every predicate and a ``~`` rule cannot deny one.
+An active superuser holds every permission before any backend is asked, so a superuser passes every predicate and no predicate can deny one.
 An inactive user and an anonymous user hold nothing, the rule ``ModelBackend`` follows, so a predicate never sees either of them.
 See :ref:`django:topic-authorization` and :ref:`django:authorization_methods` for the Django side.
 
@@ -34,38 +34,33 @@ The ``permissions.py`` of an application binds each permission name to a predica
 .. code-block:: python
    :caption: notes/permissions.py
 
-   from next.permissions import add_perm, predicate
+   from next.permissions import add_perm
 
-   @predicate
    def is_owner(user, note):
        return note is not None and note.owner_id == user.pk
 
-   @predicate
    def is_editor(user):
        return user.groups.filter(name="editors").exists()
 
-   add_perm("notes.edit_note", is_owner | is_editor)
+   def can_edit(user, note):
+       return is_editor(user) or is_owner(user, note)
+
+   add_perm("notes.edit_note", can_edit)
    add_perm("notes.delete_note", is_owner)
 
-``@predicate`` turns a callable into a ``Predicate``.
-The callable declares one of three signatures, and the predicate passes it exactly the arguments it declares.
+A predicate is a plain function with one of three signatures, and a check passes it exactly the arguments it declares.
 
 .. code-block:: python
    :caption: notes/permissions.py
 
    from django.conf import settings
 
-   from next.permissions import predicate
-
-   @predicate
    def notes_open():
        return settings.NOTES_OPEN
 
-   @predicate
    def is_staff(user):
        return user.is_staff
 
-   @predicate
    def is_author(user, note):
        return note is not None and note.author_id == user.pk
 
@@ -74,8 +69,7 @@ The callable declares one of three signatures, and the predicate passes it exact
 ``(user, obj)`` receives the user and the row the question names, ``None`` on the model-level question that ``user.has_perm(perm)`` and ``{% if perms.notes.edit_note %}`` ask.
 A callable takes at most two positional parameters, and a parameter with a default counts toward the two, so ``(user, obj=None)`` is the two-argument form.
 ``**kwargs`` is allowed, while ``*args`` and a keyword-only parameter without a default are not.
-``@predicate`` counts the parameters once, when it wraps the callable, so a call costs no signature inspection.
-``Predicate`` checks its own shape when it is built and raises ``ValueError`` for a leaf or a composite it cannot evaluate.
+``add_perm`` counts the parameters once, when it registers the function, so a check costs no signature inspection.
 
 ``is_owner`` answers ``False`` on the model-level question, since no row has an owner yet, while ``is_editor`` answers it from the user alone.
 
@@ -84,25 +78,22 @@ Every predicate that takes ``obj`` accepts ``None`` for it and answers the model
 ``user.has_module_perms(app_label)`` does too, and the admin index calls it for every application.
 A predicate that reads an attribute of ``obj`` without the ``None`` check raises there, which turns the admin index into a server error for every staff user.
 
-Predicates compose with ``&``, ``|``, and ``~``, whatever the signature of each operand.
-A composite passes each operand the arguments that operand declares and evaluates its operands left to right and stops once the answer is known, so ``is_owner | is_editor`` runs no group query for the owner of the note.
-Both operands of ``&`` and ``|`` are predicates, so a plain function joins a composition through ``@predicate`` first.
+A rule over several conditions combines them with ``and``, ``or``, and ``not`` in the body of one predicate, as ``can_edit`` does above by calling the two others as the plain functions they are.
+Python stops once the answer is known, so the order of the operands decides which query runs first.
 
 A predicate that raises :exc:`~django.core.exceptions.PermissionDenied` makes ``user.has_perm()`` and ``user.has_module_perms()`` answer ``False`` and stops the backends listed after it, which is Django's rule for every backend.
 ``user.get_all_permissions()`` catches nothing, so the exception leaves that call.
 
-``add_perm(name, predicate)`` registers the predicate under the permission name and returns it as a ``Predicate``, and it accepts a plain callable, which it wraps the way ``@predicate`` does.
+``add_perm(name, predicate)`` registers the function under the permission name.
 A name outside the ``app_label.codename`` form raises ``ValueError``, since ``user.has_perm()`` looks permissions up by that form.
-Registering an equal predicate under a name it already holds changes nothing, and a different predicate under that name raises ``PermissionAlreadyRegisteredError``.
-Each new registration sends ``permission_registered`` with ``name`` and ``predicate``, see :doc:`/content/ref/signals`.
+Registering the same function under a name it already holds changes nothing, and a different predicate under that name raises ``PermissionAlreadyRegisteredError``.
 
 A codename no model defines, such as ``edit_note`` beside the model's ``change_note``, leaves the answer to the predicate alone.
 A registered name that is also a model permission, such as ``notes.change_note``, is answered by both backends.
 ``ModelBackend`` answers nothing once an object is given, so on a row the predicate is the only authority, and a grant through a group or a user permission counts only on the model-level question, where its holder passes whatever the predicate says.
 
-The ``next`` application imports the ``permissions.py`` of every installed application at startup, after every ``deps.py`` and before any ``forms.py``.
-``PERMISSIONS_AUTODISCOVER`` turns that sweep off, and a project that turns it off imports the modules from ``AppConfig.ready``, see :doc:`/content/ref/settings`.
-A callable outside the three signatures still imports, and ``manage.py check`` reports it as ``next.E161`` with the permission it guards and the reason.
+The ``next`` application imports the ``permissions.py`` of every installed application at startup, after every ``deps.py`` and before any ``forms.py``, the way Django's admin imports every ``admin.py``.
+A callable outside the three signatures still imports, and ``manage.py check`` reports it as ``next.E159`` with the permission it guards and the reason.
 
 A predicate is synchronous and may query the database.
 It reads nothing but the user and the object, so a decision that needs the request, the tenant, or a captured URL kwarg belongs to a form hook, see `Forms`_.
@@ -137,11 +128,11 @@ With two entries listed, Django no longer picks the backend for a user that :fun
 ``has_module_perms(user, app_label)`` answers whether the user holds any registered permission of the application on the model-level question, which ``{% if perms.notes %}`` asks.
 ``ahas_perm``, ``aget_all_permissions``, and ``ahas_module_perms`` are the async twins Django's async user methods reach, and they run the predicates in a thread, since a predicate may query.
 
-A project that registers a permission while no listed backend is ``ObjectPermissionBackend`` or a subclass of it fails ``manage.py check`` with ``next.E162``, because ``user.has_perm()`` would never consult a predicate.
+A project that registers a permission while no listed backend is ``ObjectPermissionBackend`` or a subclass of it fails ``manage.py check`` with ``next.E160``, because ``user.has_perm()`` would never consult a predicate.
 The hint of the message names the ``backend`` argument ``login()`` needs once the second entry is in.
 
-``next.permissions.has_perm(user, perm, obj)`` and ``next.permissions.perms_for(user, obj)`` answer from the registered predicates alone.
-They ask no other backend and grant a superuser nothing a predicate refuses, so they fit a test of the predicates themselves, while application code asks ``user.has_perm()``.
+``next.permissions.has_perm(user, perm, obj)`` answers from the registered predicates alone.
+It asks no other backend and grants a superuser nothing a predicate refuses, so it fits a test of the predicates themselves, while application code asks ``user.has_perm()``.
 
 .. _topics-permissions-tree:
 
@@ -201,7 +192,7 @@ The check follows the order of ``AccessMixin`` and ``PermissionRequiredMixin``.
 
 The check runs before ``render()``, the zone branch, and the page context, so a refused request runs no application code but the ``scope`` dependency the third step needs.
 A row the scope does not see answers 404 before any permission is asked, so a refused user never tells a hidden row from a missing one, see :ref:`topics-di-dobject`.
-A route that does not capture the kwarg of the model is a configuration mistake rather than a refusal, so it raises ``UnboundObjectError``, which ``next.E164`` reports ahead of any request.
+A route that does not capture the kwarg of the model is a configuration mistake rather than a refusal, so it raises ``UnboundObjectError``, which ``next.E162`` reports ahead of any request.
 
 Where a rule applies
 ~~~~~~~~~~~~~~~~~~~~
@@ -234,15 +225,15 @@ Rules the core keeps
 
 Inheritance adds until a public() lifts.
    A page joins every requirement of the ``proxy.py`` files above it.
-   Only an explicit ``public()`` in a deeper ``proxy.py`` or in the ``page.py`` removes them, ``next.W135`` lists every such lift, and a requirement declared below the lift binds again.
-   ``public()`` beside a requirement of the same file is ``next.E165``, since the requirement still binds.
+   Only an explicit ``public()`` in a deeper ``proxy.py`` or in the ``page.py`` removes them, ``manage.py permissions`` names the file of every such lift, and a requirement declared below the lift binds again.
+   ``public()`` beside a requirement of the same file is ``next.E163``, since the requirement still binds.
 
 Actions and zones pass the access of their page.
    Neither has a rule of its own to forget, so a closed page stays closed for every action declared beside it and for every zone inside it, and an action under a lift is as public as its page.
    A forged origin adds the rule of the page it names and lifts none of the owner's rule.
 
-``{% has_perm %}`` stays a boundary for partial rendering.
-   A zone inside a block of the page template asks the block again when it renders alone, and a zone in the body of a component that decides what it shows is refused, see `The has_perm tag`_.
+The decision lives inside the zone.
+   A zone under a ``{% has_perm %}`` block or in the body of a component that decides what it shows is refused to a partial request, see `Zones and the decision`_.
 
 ``LoginRequiredMiddleware`` works unchanged.
    The view of every page carries the ``login_required`` attribute the middleware reads, ``False`` for a page whose rule is public, whether its own ``page.public()`` or a ``proxy.py`` above made it so.
@@ -250,14 +241,14 @@ Actions and zones pass the access of their page.
    A ``Patches.morph`` onto a foreign page applies the same middleware default to that page.
 
 Mistakes surface at ``manage.py check``.
-   ``next.E164`` reports an ``obj=DObject[Model]`` whose kwarg the route of a page under it does not capture, ``next.E165`` a ``public()`` beside a requirement of the same file, and ``next.E166`` a declaration made from a module that is no ``page.py``, ``proxy.py``, or ``component.py``.
-   ``next.W131`` warns about a permission nothing defines, ``next.W132`` about a ``proxy.py`` with no page below it, ``next.W133`` about a declaring component on a page anyone reaches, ``next.W134`` about an action nothing guards, and ``next.W135`` about a ``public()`` that lifts a guarded parent, see :doc:`/content/ref/system-checks`.
+   ``next.E162`` reports an ``obj=DObject[Model]`` whose kwarg the route of a page under it does not capture, ``next.E163`` a ``public()`` beside a requirement of the same file, and ``next.E164`` a declaration made from a module that is no ``page.py``, ``proxy.py``, or ``component.py``.
+   ``next.W127`` warns about a permission nothing defines, ``next.W128`` about a ``proxy.py`` with no page below it, and ``next.W129`` about an action nothing guards, see :doc:`/content/ref/system-checks`.
 
 Listing the rules
 ~~~~~~~~~~~~~~~~~
 
-``manage.py next permissions`` prints the rule of every page, every action, and every component that declares one, with the files each requirement comes from, and ``public (file)`` for a public rule, naming the file whose ``public()`` opened it.
-``manage.py next permissions /notes/1/edit/`` narrows the table to one page, the actions of its directory, and the declaring components its template renders, and ``manage.py next routes`` shows the same rule in its ``Access`` column, see :doc:`/content/ref/management`.
+``manage.py permissions`` prints the rule of every page, every action, and every component that declares one, with the files each requirement comes from, and ``public (file)`` for a public rule, naming the file whose ``public()`` opened it.
+``manage.py permissions /notes/1/edit/`` narrows the table to one page, the actions of its directory, and the declaring components its template renders, and ``manage.py routes`` shows the same rule in its ``Access`` column, see :doc:`/content/ref/management`.
 
 The has_perm tag
 ----------------
@@ -280,33 +271,15 @@ With an object it asks ``user.has_perm(perm, obj)``.
 An object that resolves to ``None`` or to nothing renders the ``else`` branch without asking, so a missing row never turns into the model-level question.
 Without an object it asks ``user.has_perm(perm)``, which model permissions answer as well as predicates.
 The permission is a quoted name or a variable that resolves to one, and a variable that resolves to nothing renders the ``else`` branch.
-``manage.py check`` warns with ``next.W130`` about a literal name that no installed model defines and no ``add_perm()`` registers, in a page template or a component template, since such a block renders its ``else`` branch for every user but a superuser.
+``manage.py check`` warns with ``next.W127`` about a literal name that no installed model defines and no ``add_perm()`` registers, in a page template or a component template, since such a block renders its ``else`` branch for every user but a superuser.
 
-Zones under the tag
-~~~~~~~~~~~~~~~~~~~
+.. _topics-permissions-zones:
 
-A ``{% zone %}`` inside a ``{% has_perm %}`` block of the composed page, a layout or the page template, renders on its own, and the zone render asks every block above the zone again for the user it renders for.
-A block that names a quoted permission without an object is asked before the page context runs, and any other block is asked once the context is built, with the ``{% with %}`` bindings above it pushed as a full render pushes them.
-A zone in the ``else`` branch is refused to a user who holds the permission, as the full render would leave it out for that user.
-A refusal from a block above any zone of the request answers HTTP 403 for the whole request, and a server-side render of such a zone through ``Patches`` raises :exc:`~django.core.exceptions.PermissionDenied`, which Django answers with 403 as well.
+Zones and the decision
+~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: jinja
-   :caption: notes/pages/notes/[int:note]/template.djx
-
-   {% has_perm "notes.edit_note" note %}
-     {% zone "editor" %}
-       {% include "notes/editor.html" %}
-     {% endzone %}
-   {% endhas_perm %}
-
-A zone in the body of a component, any slot or the children, is a different case, because the decision lives in the component rather than in the page.
-A component guards the part a zone fills when it has a ``component.py``, whose ``render()``, contexts, or access declarations may decide in code, or when its template, followed through nested components, a literal ``{% extends %}``, and a literal ``{% include %}``, reaches a ``{% has_perm %}``, a reference the analysis cannot follow, or a condition around that part.
-A reference it cannot follow is a component that does not resolve, a template name held in a variable, a template that does not exist, or one that does not compile.
-Such a zone fails ``manage.py check`` with ``next.E163``, and its standalone request answers 400 ``unknown zone``, a form re-render that names it falls back to an extract-morph of a full render, and ``Patches.morph_zone`` raises ``UnknownZoneError``.
-The runtime refuses a zone under an ``{% if %}`` or a ``{% for %}`` of the composed page the same way, which ``next.E063`` and ``next.E062`` report.
-With ``DEBUG`` on, an edit to a component template, an extended template, or an included template makes the next request analyse the zones again.
-
-A ``{% has_perm %}`` inside the zone needs none of this, since every render of the zone checks the permission for the user it renders for.
+A partial request renders one zone on its own, without the markup around it, so a decision taken outside the zone is not taken again.
+The rule for a page with zones is that the decision about a permission lives inside the zone.
 
 .. code-block:: jinja
    :caption: notes/pages/notes/[int:note]/template.djx
@@ -316,6 +289,36 @@ A ``{% has_perm %}`` inside the zone needs none of this, since every render of t
        <a href="edit/">Edit</a>
      {% endhas_perm %}
    {% endzone %}
+
+Every render of this zone, the full page and a partial request alike, asks the permission for the user it renders for.
+
+The framework reads the composed template of every page when it registers the zones of that page and marks every zone that sits behind a decision.
+
+- A zone under a ``{% has_perm %}`` block of the composed page, a layout or the page template, the ``else`` branch included.
+- A zone under an ``{% if %}`` or a ``{% for %}`` of the composed page.
+- A zone under a block tag from a module outside ``django.`` and ``next.``, since such a tag may decide in code what its body shows.
+- A zone in the body of a component, any slot or the children, when the component decides whether that part shows.
+
+A component decides when it has a ``component.py``, whose ``render()``, contexts, or access declarations may decide in Python the analysis does not read, or when its template, followed through nested components, a literal ``{% extends %}``, and a literal ``{% include %}``, reaches a ``{% has_perm %}``, a condition around that part, or a reference the analysis cannot follow.
+A reference it cannot follow is a component that does not resolve, a template name held in a variable, a template that does not exist, or one that does not compile.
+
+A marked zone counts as undeclared for every user, so its partial request answers 400 ``unknown zone`` in production and in development alike, and ``Patches.morph_zone`` raises ``UnknownZoneError``.
+A form whose zone is marked still posts, and its re-render answers with a morph of the form extracted from a full render of the page, which runs every decision.
+``manage.py check`` reports such a zone as ``next.E161`` under a ``{% has_perm %}`` or in a deciding component, as ``next.E063`` under an ``{% if %}`` or an unread tag, and as ``next.E062`` under a ``{% for %}``.
+
+.. code-block:: jinja
+   :caption: a zone the framework refuses
+
+   {% has_perm "notes.edit_note" note %}
+     {% zone "editor" %}
+       {% include "notes/editor.html" %}
+     {% endzone %}
+   {% endhas_perm %}
+
+The analysis is static and reads templates only.
+It cannot tell a ``component.py`` that decides from one that does not, so it treats every component with a ``component.py`` as deciding and refuses the zones in its body, which keeps the zone closed at the price of a partial render.
+With ``DEBUG`` off the analysis of a page is kept for the life of the process, so an edit to a component, an extended, or an included template takes effect at the next start, while with ``DEBUG`` on the next request analyses the zones again.
+A decision taken anywhere else in Python, such as a context value the zone prints, runs again in every render of the zone for the user it renders for, as any code inside the zone does.
 
 Forms
 -----
@@ -355,9 +358,9 @@ An overridden ``has_object_permission`` runs afterwards in addition, so it stays
 A ``FormWizard`` and a handler-only ``@action`` bind no form at the guard, so they check every listed permission before anything binds, registered ones included, with ``obj`` set to ``None``.
 
 A denial on the bound row answers HTTP 403 and sends ``form_access_denied`` with ``layer="object"`` and ``reason="denied"``, see :ref:`topics-forms-signals-form-access-denied`.
-``manage.py check`` warns with ``next.W129`` about a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, since such a guard refuses every user but a superuser.
+``manage.py check`` warns with ``next.W127`` about a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, since such a guard refuses every user but a superuser, in a project that declares access, see :doc:`/content/ref/system-checks`.
 
-``next.W129`` and ``next.W130`` read the model permissions off the model classes, the ``default_permissions`` and the ``Meta.permissions`` of every installed model, beside the registered names.
+``next.W127`` reads the model permissions off the model classes, the ``default_permissions`` and the ``Meta.permissions`` of every installed model, beside the registered names.
 A ``Permission`` row that exists only in the database, created by a data migration or through the admin, is unknown to them and draws the warning.
 Declare such a permission in ``Meta.permissions`` of its model, or list the code in ``SILENCED_SYSTEM_CHECKS``.
 
@@ -368,7 +371,7 @@ next.dj does not depend on django-rules, and the two sit side by side.
 Both backends can be listed in ``AUTHENTICATION_BACKENDS``, and ``user.has_perm()`` asks each of them, so a permission declared in either one answers the same call.
 ``rules.py`` belongs to django-rules and ``permissions.py`` to next.dj, and a project can keep both.
 Only a name registered with ``next.permissions`` waits for the bound form, so a django-rules permission named in ``Meta.permission_required`` is checked by the static guard before the form binds, with ``obj`` set to ``None``.
-When ``rules.permissions.ObjectPermissionBackend`` is listed, ``next.W129`` and ``next.W130`` count a permission django-rules registers as known.
+When ``rules.permissions.ObjectPermissionBackend`` is listed, ``next.W127`` counts a permission django-rules registers as known.
 A template that runs ``{% load rules %}`` gets django-rules' own ``has_perm`` tag in that template, which replaces the builtin there.
 
 The tag library of ``{% has_perm %}`` is the module ``next.templatetags.permissions``, so its library name is ``permissions``.
@@ -384,4 +387,4 @@ See also
    :ref:`topics-forms-actions-guards` for the static guard and the dynamic hooks.
    :doc:`proxy` for the access a ``proxy.py`` declares over a subtree and the lift of ``public()``.
    :doc:`/content/security/actions` for the access an action owes to the tree it is declared in.
-   :doc:`/content/ref/system-checks` for ``next.E161`` to ``next.E166`` and ``next.W129`` to ``next.W135``.
+   :doc:`/content/ref/system-checks` for ``next.E159`` to ``next.E164`` and ``next.W127`` to ``next.W129``.

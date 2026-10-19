@@ -60,7 +60,7 @@ The default namespace is ``next``, the ``app_name`` that ``next.urls`` declares 
 It is a fixed constant rather than a setting, so a call that targets another namespace passes the ``namespace`` keyword.
 ``page_reverse`` joins ``namespace`` to the computed URL name with a colon and hands the single view name to ``django.urls.reverse``, so the value must name a Django URL namespace that already exists.
 The ``next`` namespace exists because ``next.urls`` sets ``app_name = "next"``.
-A second namespace exists when a ``pages()`` include mounts one application tree, as *Names of mounted trees* below describes, or when ``next.urls`` is mounted again under an explicit ``namespace`` argument.
+A second namespace exists when a ``pages()`` include places one application tree, as `Names of placed trees`_ below describes, or when ``next.urls`` is included again under an explicit ``namespace`` argument.
 
 .. code-block:: python
    :caption: config/urls.py
@@ -73,49 +73,46 @@ A second namespace exists when a ``pages()`` include mounts one application tree
    ]
 
 The second ``include`` republishes the whole page tree and the form action endpoint under the new prefix.
-``next.urls`` exposes one pattern list that holds every routed page plus the dispatch endpoint, and both mounts read that same list.
+``next.urls`` exposes one pattern list that holds every routed page plus the dispatch endpoint, and both includes read that same list.
 Every page therefore answers on ``/<route>/`` and on ``/staff/<route>/``, and requests to ``/staff/_next/form/`` reach the dispatcher as well.
 
 .. warning::
 
    Duplicating the public surface is rarely wanted, because every page then answers at two addresses and an access rule written against one path leaves the other reachable.
-   To place a page under a second prefix, add the directory to the page tree so the route becomes ``staff/dashboard`` under a single mount, or redirect the second path to the existing route with a plain Django view.
+   To place a page under a second prefix, add the directory to the page tree so the route becomes ``staff/dashboard`` under a single include, or redirect the second path to the existing route with a plain Django view.
 
-With that second mount in place, ``page_reverse`` can target it.
+With that second include in place, ``page_reverse`` can target it.
 
 .. code-block:: python
    :caption: secondary namespace
 
    page_reverse("dashboard", namespace="staff")  # "/staff/dashboard/"
 
-The ``/staff/`` prefix comes from the ``path("staff/", ...)`` mount, not from the ``namespace`` argument.
+The ``/staff/`` prefix comes from the ``path("staff/", ...)`` include, not from the ``namespace`` argument.
 The ``namespace`` argument selects which copy of the tree ``reverse`` resolves against.
-It does not narrow the set of routes a mount publishes, because both mounts publish the same set.
+It does not narrow the set of routes an include publishes, because both includes publish the same set.
 
-Passing a ``namespace`` that no Django mount registers raises ``NoReverseMatch``.
+Passing a ``namespace`` that no Django include registers raises ``NoReverseMatch``.
 
-Names of mounted trees
-~~~~~~~~~~~~~~~~~~~~~~
+Names of placed trees
+~~~~~~~~~~~~~~~~~~~~~
 
-A tree an ``AppConfig`` mounts under a prefix through ``mount`` or ``mounts`` stays in the ``next`` namespace, and its names include the prefix.
-The template spells each converter of the prefix in bracket syntax, so ``<int:wallet>`` becomes ``[int:wallet]`` and its value travels as a keyword argument like any captured segment.
-
-A tree a URLconf mounts through ``pages()`` registers in a namespace named after the application label, or the ``namespace`` the call passes, and its names leave the prefix out.
+A tree a URLconf places through ``pages()`` registers in a namespace named after the application label, or the ``namespace`` the call passes, and its names leave the prefix out.
 A converter in the route above the include is a keyword argument all the same.
 
 .. code-block:: python
-   :caption: mounted trees
+   :caption: placed trees
 
    from next.urls import page_reverse
 
-   # mounts = {"operations": "wallets/<int:wallet>/operations/"} on WalletsConfig
-   page_reverse("wallets/[int:wallet]/operations", wallet=1)  # "/wallets/1/operations/"
+   # path("wallets/<int:wallet>/operations/", pages("wallets", "operations")) in config/urls.py
+   page_reverse("", namespace="wallets", wallet=1)  # "/wallets/1/operations/"
 
    # path("staff/", pages("audit")) in config/urls.py
    page_reverse("", namespace="audit")     # "/staff/"
    page_reverse("log", namespace="audit")  # "/staff/log/"
 
-See :ref:`topics-file-router-mounting` for the three levels a tree mounts at.
+See :ref:`topics-file-router-trees` for where each tree routes.
 
 When to use page_reverse instead of reverse
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

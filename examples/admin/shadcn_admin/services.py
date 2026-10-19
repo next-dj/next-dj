@@ -1,9 +1,12 @@
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from datetime import datetime
 
-from django.dispatch import Signal
+from django.contrib.admin.models import LogEntry
+from django.contrib.contenttypes.models import ContentType
+from django.db.models import Model
 
 from shadcn_admin.permissions import Visitor
-from shadcn_admin.signals import nav_requested, panels_requested
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,20 +38,63 @@ class Panel:
     link_url: str = ""
 
 
-def _collected[T](signal: Signal, sender: type[T], user: Visitor) -> tuple[T, ...]:
-    """Return every `sender` the receivers of `signal` answer for `user`, in order."""
-    return tuple(
-        item
-        for _receiver, items in signal.send(sender=sender, user=user)
-        for item in items
-    )
+type NavSource = Callable[[Visitor], Iterable[NavLink]]
+type PanelSource = Callable[[Visitor], Iterable[Panel]]
+
+_nav_sources: list[NavSource] = []
+_panel_sources: list[PanelSource] = []
+
+
+def register_nav(source: NavSource) -> NavSource:
+    """Add `source` to the functions that fill the sidebar, like `admin.register`."""
+    _nav_sources.append(source)
+    return source
+
+
+def register_panel(source: PanelSource) -> PanelSource:
+    """Add `source` to the functions that fill the dashboard, like `admin.register`."""
+    _panel_sources.append(source)
+    return source
 
 
 def admin_nav(user: Visitor) -> tuple[NavLink, ...]:
-    """Return the sidebar links the installed apps add for `user`."""
-    return _collected(nav_requested, NavLink, user)
+    """Return the sidebar links the installed apps add for `user`, in order."""
+    return tuple(link for source in _nav_sources for link in source(user))
 
 
 def dashboard_panels(user: Visitor) -> tuple[Panel, ...]:
-    """Return the dashboard panels the installed apps fill for `user`."""
-    return _collected(panels_requested, Panel, user)
+    """Return the dashboard panels the installed apps fill for `user`, in order."""
+    return tuple(panel for source in _panel_sources for panel in source(user))
+
+
+_ACTION_LABELS = {1: "Added", 2: "Changed", 3: "Deleted"}
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryEntry:
+    """One `LogEntry` row of an object, flattened for the history page."""
+
+    time: datetime
+    user: str
+    action: str
+    message: str
+
+
+def object_history(obj: Model) -> list[HistoryEntry]:
+    """Return the `LogEntry` rows Django admin wrote for `obj`, newest first."""
+    entries = (
+        LogEntry.objects.filter(
+            content_type=ContentType.objects.get_for_model(obj), object_id=obj.pk
+        )
+        .select_related("user")
+        .order_by("-action_time")
+    )
+    return [
+        HistoryEntry(
+            time=entry.action_time,
+            user=entry.user.get_username() if entry.user else "",
+            action=_ACTION_LABELS.get(entry.action_flag, "?"),
+            message=entry.get_change_message() or entry.change_message or "",
+        )
+        for entry in entries
+    ]

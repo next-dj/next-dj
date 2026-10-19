@@ -87,7 +87,6 @@ SILENCED_SYSTEM_CHECKS = ["next.W074"]
 # The custom components backend counts every name resolution, the dedup policy counts
 # every filtered duplicate, and the serializer encodes `window.Next.context`.
 NEXT_FRAMEWORK = {
-    "BOUNDARIES": "strict",
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",

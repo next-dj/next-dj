@@ -314,7 +314,7 @@ Status codes
    * - 303
      - A mutation succeeded with no runtime on the page, the plain ``POST`` then ``303`` then ``GET`` cycle.
    * - 403 without an envelope
-     - A guard denial, an access rule of the page, a ``{% has_perm %}`` block above a requested zone, or a CSRF failure served outside the shaping path.
+     - A guard denial, an access rule of the page, or a CSRF failure served outside the shaping path.
        On a mutation the runtime stays in place and fires ``partial:error`` with the status and body.
        On a safe method it fires the same ``partial:error`` and then navigates fully.
    * - 400

@@ -7,8 +7,14 @@ from dataclasses import replace
 from pathlib import Path
 
 from .errors import PermissionAlreadyRegisteredError
-from .markers import OPEN, AccessRule, Predicate, Requirement, Test, predicate as leaf
-from .signals import permission_registered
+from .markers import (
+    OPEN,
+    AccessRule,
+    Predicate,
+    Requirement,
+    Test,
+    predicate as as_predicate,
+)
 
 
 _NAME_PARTS = 2
@@ -45,7 +51,7 @@ class PermissionRegistry:
         An equal predicate under the same name is a repeated import and changes nothing.
         """
         _check_name(name)
-        rule = predicate if isinstance(predicate, Predicate) else leaf(predicate)
+        rule = as_predicate(predicate)
         held = self._index.get(name)
         if held is not None:
             if held == rule:
@@ -54,7 +60,6 @@ class PermissionRegistry:
         self._names.append(name)
         self._index[name] = rule
         self._version += 1
-        permission_registered.send(sender=PermissionRegistry, name=name, predicate=rule)
         return rule
 
     def get(self, name: str) -> Predicate | None:

@@ -15,7 +15,7 @@ Import surface
 --------------
 
 Every signal lives in the subpackage that emits it.
-The aggregator ``next.signals`` re-exports every name so handlers can pull from a single import, and it also holds ``receiver``, the decorator described under `Receiver patterns`_.
+The aggregator ``next.signals`` re-exports every name so handlers can pull from a single import.
 
 .. code-block:: python
    :caption: through the aggregator
@@ -71,12 +71,6 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``provider_registered``
      - Dependencies
      - When a ``RegisteredParameterProvider`` subclass joins the registry.
-   * - ``permission_registered``
-     - Permissions
-     - After ``add_perm`` binds a predicate to a new permission name.
-   * - ``baseline_refrozen``
-     - Boundaries
-     - After ``manage.py next boundaries --refreeze`` writes ``boundaries.toml``.
    * - ``route_registered``
      - URLs
      - After a URL pattern is created for a discovered page.
@@ -171,18 +165,17 @@ Receivers live in the ``signals.py`` of an application.
 At startup the ``next`` application imports that module from every installed application, after every ``deps.py`` and ``forms.py``, so the receivers connect once with no ``AppConfig.ready`` code.
 :doc:`application-layout` covers when an application declares a signal of its own.
 
-The sweep covers third-party applications as well.
-A package whose ``signals.py`` is meant to load only behind a switch of its own gets imported anyway, so such a project sets ``SIGNALS_AUTODISCOVER`` to ``False`` and imports the ``signals`` modules it wants from ``AppConfig.ready``, see :doc:`/content/ref/settings`.
+The sweep covers third-party applications as well, the way Django's admin imports every ``admin.py``, so a package whose ``signals.py`` should load only behind a switch of its own keeps its receivers in a module of another name and connects them from its ``AppConfig.ready``.
 
-``receiver`` from ``next``, also importable from ``next.signals``, connects a callable to a signal.
-Without ``on_commit`` it is ``django.dispatch.receiver`` with the same arguments, so either import works.
+Django's :func:`~django.dispatch.receiver` connects a callable to a signal.
 
 .. code-block:: python
    :caption: notes/signals.py
 
    import logging
 
-   from next import receiver
+   from django.dispatch import receiver
+
    from next.signals import action_dispatched
 
    logger = logging.getLogger(__name__)
@@ -197,35 +190,32 @@ Waiting for the commit
 ~~~~~~~~~~~~~~~~~~~~~~
 
 A receiver runs inside whatever transaction the sender has open.
-A receiver that writes to the database, sends mail, or queues a task connects with ``on_commit=True``, so its work never outlives a rolled-back change.
+A receiver that sends mail, queues a task, or calls another service schedules that work with :func:`~django.db.transaction.on_commit`, so it never outlives a rolled-back change.
 
 .. code-block:: python
    :caption: notes/signals.py
 
+   from functools import partial
+
+   from django.db import transaction
    from django.db.models.signals import post_save
+   from django.dispatch import receiver
    from notes.models import Note
    from notes.services import reindex_note
 
-   from next import receiver
-
-   @receiver(post_save, sender=Note, on_commit=True)
-   def reindex(sender, instance, **kwargs) -> None:
-       reindex_note(instance)
+   @receiver(post_save, sender=Note)
+   def reindex(sender, instance, using, **kwargs) -> None:
+       transaction.on_commit(partial(reindex_note, instance), using=using)
 
 The call waits for the commit of the outermost transaction and never runs when the transaction rolls back, and a rolled-back savepoint drops only the calls scheduled inside it.
 Outside a transaction, in autocommit, it runs at once.
-The receiver waits on the database named by the ``using`` keyword of the signal, which the save, delete, and many-to-many model signals send, and on the default database for a signal that sends none.
-An ``async def`` receiver runs at the commit through ``asgiref.sync.async_to_sync``.
+The save, delete, and many-to-many model signals send the database alias as ``using``, and passing it on makes the hook wait on that database rather than on the default one.
+The hook runs after ``send`` has returned, so its return value never reaches the caller, and an exception it raises surfaces at the commit rather than out of ``send``.
 
-A deferred receiver differs from a plain one in a few ways.
-
-- Its return value never reaches the list ``send`` returns.
-- An exception it raises inside a transaction surfaces at the commit, out of the outermost ``atomic`` block, and not out of ``send``, so ``send_robust`` does not catch it and the commit hooks queued after it never run.
-- It is connected strongly, so a ``weak=True`` beside ``on_commit=True`` raises ``ValueError``.
-- Decorating the same function twice connects it once, and a function already connected as a plain receiver of the same signal and sender is not connected again, as Django treats one function connected twice.
-- ``signal.disconnect(func)`` removes it like any receiver, and a ``dispatch_uid`` passed to the decorator works with ``disconnect`` the same way.
-
-See :func:`~django.db.transaction.on_commit` for the Django side.
+:func:`~django.db.transaction.on_commit` keeps the hook in the memory of the process until the commit.
+A process that dies between the commit and the hook, or a hook that raises, leaves the change stored and the reaction undone, and nothing retries it.
+That is an acceptable trade for a reaction that can be rebuilt, such as a cache entry or a search index.
+Where the reaction may not be lost, the change writes an event row into an outbox table inside the same transaction, and a separate process delivers the rows and marks them delivered, at least once, so every receiver tolerates the same event twice.
 
 Failure contract
 ~~~~~~~~~~~~~~~~

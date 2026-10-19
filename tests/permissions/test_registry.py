@@ -2,17 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from next.permissions import (
-    AccessRule,
-    PermissionAlreadyRegisteredError,
-    Predicate,
-    Requirement,
-    predicate,
-)
-from next.permissions.markers import OPEN
+from next.permissions import PermissionAlreadyRegisteredError
+from next.permissions.markers import OPEN, AccessRule, Predicate, Requirement, predicate
 from next.permissions.registry import DeclarationRegistry, PermissionRegistry
-from next.permissions.signals import permission_registered
-from next.testing import capture_signals
 from tests.support import is_owner, is_staff
 
 
@@ -29,7 +21,7 @@ class TestAdd:
         assert registry.add("blog.change_post", rule) is rule
         assert registry.get("blog.change_post") is rule
 
-    def test_a_plain_callable_is_wrapped_into_a_leaf(self, registry) -> None:
+    def test_a_plain_callable_is_wrapped_into_a_predicate(self, registry) -> None:
         rule = registry.add("blog.change_post", is_owner)
         assert isinstance(rule, Predicate)
         assert rule.test is is_owner
@@ -90,7 +82,9 @@ class TestRepeatedAdd:
         assert registry.version == version
         assert len(registry) == 1
 
-    def test_an_equal_leaf_over_the_same_callable_is_a_no_op(self, registry) -> None:
+    def test_an_equal_predicate_over_the_same_callable_is_a_no_op(
+        self, registry
+    ) -> None:
         held = registry.add("blog.change_post", is_owner)
         version = registry.version
         assert registry.add("blog.change_post", predicate(is_owner)) is held
@@ -123,33 +117,6 @@ class TestReset:
         registry.reset()
         rule = registry.add("blog.change_post", is_staff)
         assert registry.get("blog.change_post") is rule
-
-
-class TestPermissionRegisteredSignal:
-    """`permission_registered` announces a new name once, a no-op stays silent."""
-
-    def test_sent_once_for_a_new_name(self, registry) -> None:
-        with capture_signals(permission_registered) as recorder:
-            rule = registry.add("blog.change_post", is_owner)
-        assert len(recorder) == 1
-        event = recorder.first_for(permission_registered)
-        assert event.sender is PermissionRegistry
-        assert event.kwargs == {"name": "blog.change_post", "predicate": rule}
-
-    def test_silent_for_a_repeated_add(self, registry) -> None:
-        registry.add("blog.change_post", is_owner)
-        with capture_signals(permission_registered) as recorder:
-            registry.add("blog.change_post", is_owner)
-        assert len(recorder) == 0
-
-    def test_silent_for_a_refused_add(self, registry) -> None:
-        registry.add("blog.change_post", is_owner)
-        with capture_signals(permission_registered) as recorder:
-            with pytest.raises(PermissionAlreadyRegisteredError):
-                registry.add("blog.change_post", is_staff)
-            with pytest.raises(ValueError, match=r"app_label\.codename"):
-                registry.add("nodot", is_owner)
-        assert len(recorder) == 0
 
 
 _PAGE = Path("/tree/page.py")

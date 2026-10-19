@@ -332,7 +332,7 @@ def _model_sites(sites: _ObjectSites) -> Iterator[tuple[type[Model], str]]:
 
 @register(NEXT)
 def check_object_managers(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a `DObject` model whose manager defines no `visible_to` (`next.E155`)."""
+    """Flag a `DObject` model whose manager defines no `visible_to` (`next.E153`)."""
     sites = object_sites()
     if sites is None:
         return []
@@ -351,7 +351,7 @@ def check_object_managers(*args, **kwargs) -> list[CheckMessage]:
                 "that manager does not define. Add visible_to(scope) to the "
                 "default manager, returning the rows the scope may see.",
                 obj=model,
-                id="next.E155",
+                id="next.E153",
             )
         )
     return errors
@@ -385,7 +385,7 @@ def _route_warning(run: _PageRun, param: _ObjectParam) -> DjangoWarning:
         f"a [{param.name}] directory to the page path, or capture it in the "
         "include that mounts the tree.",
         obj=str(run.page_path),
-        id="next.W128",
+        id="next.W126",
     )
 
 
@@ -397,7 +397,7 @@ def _parent_error(run: _PageRun, param: _ObjectParam) -> Error:
         f'"{run.route}" route provides. Declare it with '
         f'@context("{param.parent}", inherit_context=True) in an ancestor page.py.',
         obj=str(run.page_path),
-        id="next.E156",
+        id="next.E154",
     )
 
 
@@ -442,7 +442,7 @@ def _page_run_messages(run: _PageRun) -> Iterator[CheckMessage]:
 
 @register(NEXT)
 def check_object_page_bindings(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a page `DObject` with no route kwarg (`next.W128`) or parent (`next.E156`).
+    """Flag a page `DObject` with no route kwarg (`next.W126`) or parent (`next.E154`).
 
     Each page is walked in its own render order, inherited ancestor callables first.
     """
@@ -456,7 +456,7 @@ def check_object_page_bindings(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_object_form_parents(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a parent `DObject` on a form handler or hook (`next.E157`).
+    """Flag a parent `DObject` on a form handler or hook (`next.E155`).
 
     Form dispatch resolves with no page context, so the parent is never there.
     """
@@ -470,7 +470,7 @@ def check_object_form_parents(*args, **kwargs) -> list[CheckMessage]:
             "context. Drop the parent and look the row up by its own URL kwarg, "
             "or load it in a page context and read it there.",
             obj=describe_callable(param.func),
-            id="next.E157",
+            id="next.E155",
         )
         for param in _params_of(sites.forms)
         if param.parent is not None
@@ -479,7 +479,7 @@ def check_object_form_parents(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_object_component_contexts(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a `DObject` on a `@component.context` callable (`next.E158`).
+    """Flag a `DObject` on a `@component.context` callable (`next.E156`).
 
     A component resolves with no URL kwargs, so the lookup never finds its pk.
     """
@@ -492,7 +492,7 @@ def check_object_component_contexts(*args, **kwargs) -> list[CheckMessage]:
             "kwarg, which a component context never receives. Load the row in "
             "a page context and read it from the template context by name.",
             obj=describe_callable(param.func),
-            id="next.E158",
+            id="next.E156",
         )
         for param in _params_of(sites.components)
     )
@@ -500,7 +500,7 @@ def check_object_component_contexts(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_object_scope(*args, **kwargs) -> list[CheckMessage]:
-    """Flag `DObject` parameters with no `scope` dependency registered (`next.E159`).
+    """Flag `DObject` parameters with no `scope` dependency registered (`next.E157`).
 
     A project that declares no `DObject` needs no scope, so the check stays silent.
     """
@@ -519,7 +519,7 @@ def check_object_scope(*args, **kwargs) -> list[CheckMessage]:
             "Register it in the deps.py of an app with "
             f'@resolver.dependency("{SCOPE_DEPENDENCY}"), returning the user, the '
             "tenant, or whatever visible_to accepts.",
-            id="next.E159",
+            id="next.E157",
         )
     ]
 
@@ -534,16 +534,16 @@ def _unbound_declaration(run: _PageRun, declaration: _ObjectDeclaration) -> Erro
         f"{captured}, so every request to that page raises UnboundObjectError.",
         hint=(
             f"Name the segment [{kwarg}] or [int:{kwarg}], or capture {kwarg} in "
-            "the include or the mount prefix over the tree."
+            "the URLconf include over the tree."
         ),
         obj=str(declaration.requirement.source),
-        id="next.E164",
+        id="next.E162",
     )
 
 
 @register(NEXT)
 def check_object_declarations(*args, **kwargs) -> list[CheckMessage]:
-    """Flag an `obj=DObject[...]` whose kwarg a page under it lacks (`next.E164`).
+    """Flag an `obj=DObject[...]` whose kwarg a page under it lacks (`next.E162`).
 
     The kwarg is the `model_name` of the model, read like a `DObject` parameter's name.
     """
@@ -561,7 +561,7 @@ def check_object_declarations(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_object_hints(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a `DObject` whose callable's type hints do not resolve (`next.E160`).
+    """Flag a `DObject` whose callable's type hints do not resolve (`next.E158`).
 
     The resolver refuses such a parameter on every call, so the check names it first.
     """
@@ -574,7 +574,7 @@ def check_object_hints(*args, **kwargs) -> list[CheckMessage]:
             "the type hints of that callable do not resolve, so every resolve "
             f"raises TypeError. {HINT_ADVICE}",
             obj=describe_callable(func),
-            id="next.E160",
+            id="next.E158",
         )
         for func in _all_callables(sites)
         for name in _unresolved_params(func)

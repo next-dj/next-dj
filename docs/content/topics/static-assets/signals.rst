@@ -19,7 +19,7 @@ asset_registered
 ~~~~~~~~~~~~~~~~
 
 Fires after a co-located file the backend registered lands in the collector, once per asset per collector.
-An asset the collector deduplicates away, such as the second mount of the same component on one page, emits no signal.
+An asset the collector deduplicates away, such as the second use of the same component on one page, emits no signal.
 The sender is the asset instance.
 The payload carries ``collector`` and ``backend``.
 

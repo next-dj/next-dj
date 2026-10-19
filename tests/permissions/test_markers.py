@@ -1,15 +1,17 @@
 import operator
-import re
-from itertools import product
 from pathlib import Path
 
 import pytest
 
-from next.permissions import AccessRule, Predicate, Requirement, predicate
-from next.permissions.markers import OPEN, chained, joined
-
-
-_ANSWERS = list(product((True, False), repeat=2))
+from next.permissions.markers import (
+    OPEN,
+    AccessRule,
+    Predicate,
+    Requirement,
+    chained,
+    joined,
+    predicate,
+)
 
 
 def _constant(name: str, *, answer: bool = True) -> Predicate:
@@ -21,7 +23,7 @@ def _constant(name: str, *, answer: bool = True) -> Predicate:
 
 
 class _Recorder:
-    """A leaf test that answers fixed and records every call it receives."""
+    """A test that answers fixed and records every call it receives."""
 
     def __init__(self, answer: object) -> None:
         self.answer = answer
@@ -32,8 +34,8 @@ class _Recorder:
         return self.answer
 
 
-class TestLeaf:
-    """A leaf predicate calls its test with the user and the object."""
+class TestPredicate:
+    """A predicate calls its test with the user and the object."""
 
     def test_the_test_receives_user_and_obj(self) -> None:
         recorder = _Recorder(answer=True)
@@ -67,9 +69,14 @@ class TestLeaf:
         rule = _constant("always")
         assert predicate(rule) is rule
 
-    def test_a_leaf_yields_its_own_test(self) -> None:
-        rule = _constant("always")
-        assert list(rule.tests()) == [("always", rule.test)]
+    @pytest.mark.parametrize("join", [operator.and_, operator.or_])
+    def test_predicates_do_not_combine_with_operators(self, join) -> None:
+        with pytest.raises(TypeError):
+            join(_constant("a"), _constant("b"))
+
+    def test_a_predicate_does_not_invert(self) -> None:
+        with pytest.raises(TypeError):
+            operator.invert(_constant("a"))
 
 
 def no_params():
@@ -97,7 +104,7 @@ def var_keyword(**kwargs):
 
 
 class _Calls:
-    """Leaf tests of every arity, each logging the arguments it was given."""
+    """Tests of every arity, each logging the arguments it was given."""
 
     def __init__(self) -> None:
         self.log: list[tuple[str, tuple[object, ...]]] = []
@@ -116,7 +123,7 @@ class _Calls:
 
 
 class TestArity:
-    """A leaf counts its positional parameters once and passes that many arguments."""
+    """A predicate counts positional parameters once and passes that many arguments."""
 
     @pytest.mark.parametrize(
         ("test", "arity"),
@@ -141,187 +148,10 @@ class TestArity:
             pytest.param("two", ("user", "obj"), id="user-and-obj"),
         ],
     )
-    def test_a_leaf_passes_exactly_its_arity(self, method: str, expected) -> None:
+    def test_a_predicate_passes_exactly_its_arity(self, method: str, expected) -> None:
         calls = _Calls()
         assert predicate(getattr(calls, method))("user", "obj") is True
         assert calls.log == [(method, expected)]
-
-    def test_mixed_arities_compose(self) -> None:
-        calls = _Calls()
-        rule = (predicate(calls.none) & predicate(calls.one)) | ~predicate(calls.two)
-        assert rule("user", "obj") is True
-        assert calls.log == [("none", ()), ("one", ("user",))]
-
-    def test_mixed_arities_reach_every_operand_when_open(self) -> None:
-        calls = _Calls()
-        rule = ~predicate(calls.none) | (predicate(calls.one) & predicate(calls.two))
-        assert rule("user") is True
-        assert calls.log == [("none", ()), ("one", ("user",)), ("two", ("user", None))]
-
-    def test_tests_yields_every_leaf_callable_in_order(self) -> None:
-        calls = _Calls()
-        rule = predicate(calls.two) & ~(predicate(calls.none) | predicate(calls.one))
-        assert list(rule.tests()) == [
-            ("two", calls.two),
-            ("none", calls.none),
-            ("one", calls.one),
-        ]
-
-
-class TestShape:
-    """A predicate is either a leaf or a composite its operator can evaluate."""
-
-    @pytest.mark.parametrize(
-        ("fields", "problem"),
-        [
-            pytest.param({}, "holds neither a test nor an operator", id="empty"),
-            pytest.param(
-                {"test": no_params, "operator": "&"},
-                "holds a test and an operator or operands at once",
-                id="test-and-operator",
-            ),
-            pytest.param(
-                {"test": no_params, "operands": (predicate(no_params),)},
-                "holds a test and an operator or operands at once",
-                id="test-and-operands",
-            ),
-            pytest.param(
-                {"test": no_params, "arity": 3},
-                "passes 3 arguments to its test, not 0 to 2",
-                id="arity-above",
-            ),
-            pytest.param(
-                {"test": no_params, "arity": -1},
-                "passes -1 arguments to its test, not 0 to 2",
-                id="arity-below",
-            ),
-            pytest.param(
-                {"operator": "~"}, "inverts other than one operand", id="invert-none"
-            ),
-            pytest.param(
-                {"operator": "~", "operands": (predicate(no_params),) * 2},
-                "inverts other than one operand",
-                id="invert-two",
-            ),
-            pytest.param(
-                {"operator": "&", "operands": (predicate(no_params),)},
-                "joins fewer than two operands with '&'",
-                id="and-one",
-            ),
-            pytest.param(
-                {"operator": "|"},
-                "joins fewer than two operands with '|'",
-                id="or-none",
-            ),
-        ],
-    )
-    def test_a_malformed_shape_raises(self, fields, problem: str) -> None:
-        with pytest.raises(ValueError, match=re.escape(f"'odd' {problem}.")):
-            Predicate(name="odd", **fields)
-
-    @pytest.mark.parametrize(
-        ("fields", "expected"),
-        [
-            pytest.param({"test": no_params, "arity": 0}, True, id="leaf"),
-            pytest.param(
-                {"operator": "&", "operands": (predicate(no_params),) * 3},
-                True,
-                id="three-way-and",
-            ),
-            pytest.param(
-                {"operator": "~", "operands": (predicate(no_params),)},
-                False,
-                id="invert-one",
-            ),
-        ],
-    )
-    def test_a_well_formed_shape_builds(self, fields, expected) -> None:
-        assert Predicate(name="fine", **fields)(None) is expected
-
-
-class TestComposition:
-    """`&`, `|` and `~` follow the boolean truth tables."""
-
-    @pytest.mark.parametrize(("left", "right"), _ANSWERS)
-    def test_and(self, left, right) -> None:
-        rule = _constant("a", answer=left) & _constant("b", answer=right)
-        assert rule(None) is (left and right)
-
-    @pytest.mark.parametrize(("left", "right"), _ANSWERS)
-    def test_or(self, left, right) -> None:
-        rule = _constant("a", answer=left) | _constant("b", answer=right)
-        assert rule(None) is (left or right)
-
-    @pytest.mark.parametrize("answer", [True, False])
-    def test_invert(self, answer) -> None:
-        assert (~_constant("a", answer=answer))(None) is (not answer)
-
-    def test_operands_receive_user_and_obj(self) -> None:
-        left, right = _Recorder(answer=True), _Recorder(answer=True)
-        user, obj = object(), object()
-        (predicate(left) & ~~predicate(right))(user, obj)
-        assert left.calls == [(user, obj)]
-        assert right.calls == [(user, obj)]
-
-
-class TestShortCircuit:
-    """A composite stops at the operand that settles the answer."""
-
-    @pytest.mark.parametrize(
-        ("join", "settling"),
-        [
-            pytest.param(operator.and_, False, id="and-stops-on-false"),
-            pytest.param(operator.or_, True, id="or-stops-on-true"),
-        ],
-    )
-    def test_the_right_operand_is_not_called(self, join, settling) -> None:
-        right = _Recorder(answer=not settling)
-        rule = join(_constant("a", answer=settling), predicate(right))
-        assert rule(None) is settling
-        assert right.calls == []
-
-    @pytest.mark.parametrize(
-        ("join", "open_answer"),
-        [
-            pytest.param(operator.and_, True, id="and-goes-on-after-true"),
-            pytest.param(operator.or_, False, id="or-goes-on-after-false"),
-        ],
-    )
-    def test_an_open_answer_reaches_the_right_operand(self, join, open_answer) -> None:
-        right = _Recorder(answer=open_answer)
-        join(_constant("a", answer=open_answer), predicate(right))(None)
-        assert len(right.calls) == 1
-
-
-class TestNames:
-    """A composite is named by the expression it was built from."""
-
-    def test_and_name(self) -> None:
-        assert (_constant("a") & _constant("b")).name == "(a & b)"
-
-    def test_or_name(self) -> None:
-        assert (_constant("a") | _constant("b")).name == "(a | b)"
-
-    def test_invert_name(self) -> None:
-        assert (~_constant("a")).name == "~a"
-
-    def test_nested_name(self) -> None:
-        a, b, c = (_constant(name) for name in "abc")
-        assert ((a & ~b) | c).name == "((a & ~b) | c)"
-
-
-class TestForeignOperand:
-    """A non-Predicate operand leaves the operator to the other side."""
-
-    @pytest.mark.parametrize("method", ["__and__", "__or__"])
-    def test_returns_not_implemented(self, method: str) -> None:
-        rule = _constant("a")
-        assert getattr(rule, method)(lambda: True) is NotImplemented
-
-    @pytest.mark.parametrize("join", [operator.and_, operator.or_])
-    def test_the_operator_raises_type_error(self, join) -> None:
-        with pytest.raises(TypeError):
-            join(_constant("a"), True)
 
 
 _ROOT = Path("/tree/proxy.py")
@@ -395,7 +225,7 @@ class TestChained:
     def test_a_public_file_lifts_the_chain_above(self) -> None:
         rule = chained([_declared(_ROOT, _LOGIN), _declared(_MIDDLE, public=True)])
 
-        assert rule == AccessRule((), True, (_MIDDLE,), (_ROOT,))
+        assert rule == AccessRule((), True, (_MIDDLE,))
 
     def test_a_requirement_below_the_lift_binds_again(self) -> None:
         login = Requirement("login", _LEAF)
@@ -418,7 +248,7 @@ class TestChained:
             ]
         )
 
-        assert rule == AccessRule((), True, (_MIDDLE,), (_ROOT,))
+        assert rule == AccessRule((), True, (_MIDDLE,))
 
     def test_a_requirement_beside_public_binds(self) -> None:
         login = Requirement("login", _MIDDLE)
@@ -435,7 +265,7 @@ class TestChained:
 
         assert rule == AccessRule((secret, login), False, (_ROOT, _MIDDLE))
 
-    def test_a_public_after_a_bound_lift_names_the_middle_guard(self) -> None:
+    def test_a_public_after_a_bound_lift_opens_again(self) -> None:
         login = Requirement("login", _MIDDLE)
         rule = chained(
             [
@@ -445,16 +275,16 @@ class TestChained:
             ]
         )
 
-        assert rule == AccessRule((), True, (_LEAF,), (_MIDDLE,))
+        assert rule == AccessRule((), True, (_LEAF,))
 
-    def test_joined_rules_lift_nothing_of_one_another(self) -> None:
-        lifted = AccessRule((), True, (_MIDDLE,), (_ROOT,))
+    def test_joined_rules_open_nothing_of_one_another(self) -> None:
+        opened = AccessRule((), True, (_MIDDLE,))
 
-        rule = joined([_declared(_LEAF, _LOGIN), lifted])
+        rule = joined([_declared(_LEAF, _LOGIN), opened])
 
         assert rule == AccessRule((_LOGIN,), False, (_LEAF, _MIDDLE))
 
-    def test_a_public_join_keeps_what_was_lifted(self) -> None:
-        lifted = AccessRule((), True, (_MIDDLE,), (_ROOT,))
+    def test_a_public_join_keeps_the_opening_file(self) -> None:
+        opened = AccessRule((), True, (_MIDDLE,))
 
-        assert joined([lifted], public=True) == lifted
+        assert joined([opened], public=True) == opened

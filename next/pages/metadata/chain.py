@@ -481,14 +481,12 @@ class MetadataThunk:
     ) -> tuple[Crumb, ...] | None:
         """Return the crumbs the page at `file_path` folds under its own route kwargs.
 
-        Its context never runs, and a page the request may not reach answers `None`.
+        Its dependencies resolve afresh, and a page the request may not reach is `None`.
         """
         request = self.request
         if request is not None and not admits(file_path, request):
             return None
-        host = MetadataThunk(
-            self.registry, file_path, self.request, url_kwargs, self.dep_cache
-        )
+        host = MetadataThunk(self.registry, file_path, self.request, url_kwargs, {})
         meta = host.folded()
         return (host.fold({}) if meta is None else meta).breadcrumbs
 

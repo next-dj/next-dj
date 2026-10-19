@@ -171,7 +171,7 @@ class TestPageShape:
         with patch_checks_router_manager(pages_directory=tmp_path):
             assert check_ids(check_page_metadata_shape()) == ["next.E100"]
 
-    def test_two_jsonld_objects_with_one_id_is_w108(self, tmp_path: Path) -> None:
+    def test_two_jsonld_objects_with_one_id_is_w103(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"jsonld": [{"@id": "#p"}, {"@id": "#p"}]}')
         with patch_checks_router_manager(pages_directory=tmp_path):
             messages = check_page_metadata_shape()

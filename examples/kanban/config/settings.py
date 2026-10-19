@@ -80,7 +80,6 @@ VITE_MANIFEST = BASE_DIR / "kanban/static/kanban/dist/.vite/manifest.json"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 NEXT_FRAMEWORK = {
-    "BOUNDARIES": "strict",
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",

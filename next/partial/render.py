@@ -4,7 +4,6 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from django.core.exceptions import PermissionDenied
 from django.template import Context as DjangoTemplateContext
 
 from next.pages.manager import page
@@ -25,7 +24,6 @@ if TYPE_CHECKING:
 
     from next.static import StaticCollector
 
-    from .guards import Recheck
     from .registry import ZoneInfo
 
 
@@ -72,18 +70,15 @@ def render_zone(
     *,
     context_data: dict[str, object] | None = None,
 ) -> ZoneRenderResult:
-    """Render the named zones of a page and the zones nested in them, with full context.
+    """Render the named zones of a page with the full page context.
 
-    An unknown name is skipped, an all-unknown batch raises, refusing `has_perm` denies.
+    A nested zone runs its `@context(zone=)` too, and a batch of unknown names raises.
     """
     start = time.perf_counter()
     kwargs = url_kwargs or {}
     template = page.composed_template_for(page_path)
     zones = zones_of(template, page_path)
-    declared, rechecks = _declared_zone_names(zone_names, zones)
-    if rechecks and any(recheck.refuses_user(request) for recheck in rechecks):
-        raise PermissionDenied
-    rendered_names = _uncovered_zone_names(declared, zones)
+    rendered_names = _renderable_zone_names(zone_names, zones)
 
     if context_data is None:
         context_data = page.build_render_context(
@@ -97,10 +92,6 @@ def render_zone(
 
     collector = seed_collector(page_path, context_data)
     django_context = DjangoTemplateContext(context_data)
-    if rechecks and any(
-        recheck.refuses(django_context, request) for recheck in rechecks
-    ):
-        raise PermissionDenied
 
     html: dict[str, str] = {}
     bodies: dict[str, str] = {}
@@ -117,32 +108,21 @@ def render_zone(
     return ZoneRenderResult(html=html, bodies=bodies, collector=collector)
 
 
-def _declared_zone_names(
+def _renderable_zone_names(
     zone_names: tuple[str, ...], zones: "Mapping[str, ZoneInfo]"
-) -> "tuple[tuple[str, ...], list[Recheck]]":
-    """Return the declared names of a batch in request order, with their rechecks.
+) -> tuple[str, ...]:
+    """Return the declared names of a batch, deduplicated in request order.
 
-    An undeclared or bound name is dropped, and an empty result raises.
+    An undeclared, bound or nested name drops out, and a batch left empty raises.
     """
-    declared: list[str] = []
-    rechecks: list[Recheck] = []
-    for name in dict.fromkeys(zone_names):
-        info = zones.get(name)
-        if info is None or not info.standalone:
-            continue
-        declared.append(name)
-        if info.recheck is not None:
-            rechecks.append(info.recheck)
+    declared = tuple(
+        name
+        for name in dict.fromkeys(zone_names)
+        if (info := zones.get(name)) is not None and info.standalone
+    )
     if zone_names and not declared:
         open_names = sorted(name for name, info in zones.items() if info.standalone)
         raise UnknownZoneError(zone_names[0], tuple(open_names))
-    return tuple(declared), rechecks
-
-
-def _uncovered_zone_names(
-    declared: tuple[str, ...], zones: "Mapping[str, ZoneInfo]"
-) -> tuple[str, ...]:
-    """Return the declared names no other name of the batch renders in its body."""
     if len(declared) < _NESTABLE_BATCH:
         return declared
     covered = frozenset[str]().union(*(zones[name].nested for name in declared))

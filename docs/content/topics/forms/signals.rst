@@ -19,8 +19,7 @@ Read what you need from it inside the receiver and do not retain the object past
 Connecting receivers
 --------------------
 
-Receivers live in ``signals.py``, which the ``next`` application imports from every installed app at startup, so every receiver is connected before the first request.
-A project that sets ``SIGNALS_AUTODISCOVER`` to ``False`` imports the module from ``AppConfig.ready`` instead, see :doc:`/content/ref/settings`.
+Receivers live in ``signals.py``, which the ``next`` application imports from every installed app at startup, so every receiver is connected before the first request, see :doc:`/content/ref/settings`.
 
 .. _topics-forms-signals-action-registered:
 

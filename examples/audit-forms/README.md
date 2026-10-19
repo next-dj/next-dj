@@ -43,7 +43,7 @@ Tailwind loads via the Play CDN in [`portal/layout.djx`](portal/layout.djx). No 
 `AuditEntry.source` distinguishes them.
 
 - `source="backend"`: written by `AuditedFormActionBackend.dispatch` in [`access/backends.py`](access/backends.py). It runs synchronously inside the dispatch path so it has direct access to `request.POST` and the resolved `HttpResponse`. It writes two rows per dispatch: `request_started` (with the captured POST payload) and `dispatched` (with `response_status` and the redirect target).
-- `source="signal"`: written by the receivers in [`access/signals.py`](access/signals.py). They subscribe to `next.forms.signals.action_dispatched`, `form_validation_failed`, and `form_access_denied`, using only the kwargs the framework ships in those signals. They never see the raw request, which is the whole point: the signal channel is decoupled from the backend class. Each receiver connects through `next.signals.receiver(..., on_commit=True)`, so its row lands once the transaction the dispatch ran in commits and never for a dispatch that rolled back. Under the default `ATOMIC_REQUESTS = False` there is no open transaction and the row lands at once. The framework imports `signals.py` at startup, so `AccessConfig` has no `ready()` at all.
+- `source="signal"`: written by the receivers in [`access/signals.py`](access/signals.py). They subscribe to `next.forms.signals.action_dispatched`, `form_validation_failed`, and `form_access_denied`, using only the kwargs the framework ships in those signals. They never see the raw request, which is the whole point: the signal channel is decoupled from the backend class. Each receiver is a plain Django `@receiver` that hands the write to `transaction.on_commit`, so its row lands once the transaction the dispatch ran in commits and never for a dispatch that rolled back. Under the default `ATOMIC_REQUESTS = False` there is no open transaction and the row lands at once. The framework imports `signals.py` at startup, so `AccessConfig` has no `ready()` at all.
 
 The two channels intentionally overlap on `kind="dispatched"` so the admin page can show them side by side. Pick whichever fits your project, or run both, like this example does.
 
@@ -111,20 +111,23 @@ The gate is the retention-policy acknowledgement. Every step form inherits it fr
 
 One kind of POST passes ahead of the gate. A blur-validation probe (`validate="blur"` on the `{% form %}` tag, section 10) asks only whether one named field is well formed and saves no step data, so the hook returns early when `partial_intent(request).validate_fields` is set. Denying it would break inline validation on the very first field, long before the user has scrolled to the acknowledgement.
 
-The portal has no accounts, so the wizard page declares `page.public()`. It tells `manage.py check` that anyone may post the steps on purpose instead of reporting `next.W134`, and leaves the acknowledgement as the rule on every step.
+The portal has no accounts, so the wizard page declares `page.public()`, which says anyone may post the steps on purpose and leaves the acknowledgement as the rule on every step. `manage.py check` reports `next.W129` for an action nothing guards only in a project that declares access, and the declaration itself is that guard.
 
 The framework fires `next.forms.signals.form_access_denied` **only** on a dynamic-hook denial, never on the static `ActionGuard` fast-path. The sender is `FormActionDispatch` and the kwargs are `action_name`, `uid`, `request`, `layer` (`"view"` for `check_permissions`, `"object"` for `has_object_permission`), and `reason` (`"denied"` when the hook returned `False`, `"raised"` on `PermissionDenied`, `"response"` on an `HttpResponse` short-circuit). The receiver in [`access/signals.py`](access/signals.py) records one signal-sourced `AuditEntry` per denial with `kind="access_denied"`, storing `layer` and `reason` in the dedicated `access_layer` / `access_reason` columns:
 
 ```python
 # access/signals.py
-@receiver(form_access_denied, on_commit=True)
+@receiver(form_access_denied)
 def _on_form_access_denied(action_name, layer, reason, **kwargs):
-    AuditEntry.objects.create(
-        action_name=action_name,
-        kind=AuditEntry.KIND_ACCESS_DENIED,
-        source=AuditEntry.SOURCE_SIGNAL,
-        access_layer=layer,
-        access_reason=reason,
+    transaction.on_commit(
+        partial(
+            AuditEntry.objects.create,
+            action_name=action_name,
+            kind=AuditEntry.KIND_ACCESS_DENIED,
+            source=AuditEntry.SOURCE_SIGNAL,
+            access_layer=layer,
+            access_reason=reason,
+        )
     )
 ```
 
@@ -210,7 +213,7 @@ def entries(request: HttpRequest) -> list[AuditEntry] | None:
     return audit_entries(kind=kind, limit=100)
 ```
 
-The query itself lives in `audit_entries` in [`access/services.py`](access/services.py), next to `audit_totals` and `recent_audit`, because a page tree reads rows only through `visible_to(...)` or a function of `services.py`. `NEXT_FRAMEWORK["BOUNDARIES"] = "strict"` makes `manage.py check --tag boundaries` hold every page to that rule.
+The query itself lives in `audit_entries` in [`access/services.py`](access/services.py), next to `audit_totals` and `recent_audit`, because a page tree reads rows only through `visible_to(...)` or a function of `services.py`.
 
 On the full render the provider returns `None` and the query never runs. On the zone GET, where `X-Next-Zone: audit-table` is set, `zone_requested` is true and the rows load. The `?kind=` filter still reads `request.GET`, so it works on the zone request the same way it worked on the old full page. Without the runtime the placeholder simply stays, so the critical, always-needed content lives outside the lazy zone by design.
 
@@ -220,7 +223,7 @@ The two filters stack rather than compete. `zone="audit-table"` on the decorator
 
 |  | Backend channel | Signal channel |
 | --- | --- | --- |
-| Where written | inside `AuditedFormActionBackend.dispatch` | `@receiver(action_dispatched / form_validation_failed / form_access_denied, on_commit=True)` |
+| Where written | inside `AuditedFormActionBackend.dispatch` | `@receiver(action_dispatched / form_validation_failed / form_access_denied)` with `transaction.on_commit` |
 | When written | at once, inside any transaction the dispatch runs in, so a rollback takes the row with it | after that transaction commits, never on rollback |
 | Sees raw POST? | yes | no, only the signal kwargs |
 | Sees response status? | yes | yes (via signal kwarg) |
@@ -331,7 +334,6 @@ The row carries the requester's name and email, and the title uses the primary k
 - [`next/forms/checks/config.py`](../../next/forms/checks/config.py): `next.E044` (`FORM_ACTION_BACKENDS` is no list), `next.E068` (backend path cannot be imported), `next.E045` (wrong backend type).
 - [`next/forms/checks/wizards.py`](../../next/forms/checks/wizards.py): `next.W057` (a step form registered as an action) and `next.W059` (a field two steps both declare).
 - [`next/pages/metadata/`](../../next/pages/metadata/): the metadata chain behind the dicts and the `@page.metadata` callable of section 11.
-- [`next/signals.py`](../../next/signals.py): the `receiver` decorator and its `on_commit=True` mode.
 - [`next/deps/objects.py`](../../next/deps/objects.py): `DObject` and the provider that loads its row through `visible_to(scope)`.
 - [`next/testing/capture.py`](../../next/testing/capture.py): `SignalRecorder` and `capture_signals` helpers used in the tests.
 - [`next/testing/plugin.py`](../../next/testing/plugin.py): the pytest plugin behind the `next_pages`, `next_clear_cache`, and `next_client` entries this example's `pytest.ini` uses.

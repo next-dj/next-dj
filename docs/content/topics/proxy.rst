@@ -3,7 +3,7 @@
 proxy.py
 ========
 
-A ``proxy.py`` declares who may reach a directory of a page tree and every page below it.
+A ``proxy.py`` is no :ref:`proxy model <django:proxy-models>` of Django, it is a file of a page tree that declares who may reach a directory and every page below it.
 It holds access declarations and nothing else, no context and no data, and the framework checks them on the pages, the actions, and the zone requests of that part of the tree.
 
 .. contents::
@@ -56,7 +56,7 @@ The object of a permission
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``obj=DObject[Model]`` names the row the permission is checked on.
-The row loads by the URL kwarg named after the ``model_name`` of the model, so ``DObject[Book]`` reads ``book`` and the tree captures it as ``[int:book]`` or through the prefix it is mounted under.
+The row loads by the URL kwarg named after the ``model_name`` of the model, so ``DObject[Book]`` reads ``book`` and the tree captures it as ``[int:book]`` or through the route a ``pages()`` include sits under.
 The kwarg belongs to one model, so ``library.Book`` and ``shop.Book`` both read ``book``, and a route that captures it serves only the model the declaration names.
 It loads through ``visible_to(scope)`` of the default manager, as a ``DObject`` parameter does, see :ref:`topics-di-dobject`.
 
@@ -64,7 +64,7 @@ A row the scope does not see answers 404 before any permission is asked, so a re
 The row shares its cache entry with a ``DObject`` parameter of the same model and primary key, so a page that also shows the book reads it with one query.
 ``obj`` takes ``DObject[Model]`` alone, and a string, a ``DObject`` with a parent, or a bare model raises ``TypeError`` where the call is written, since the check runs before any context exists.
 
-``manage.py check`` reports a page under the declaration whose route does not capture the kwarg as ``next.E164``, because every request to that page would raise ``UnboundObjectError``.
+``manage.py check`` reports a page under the declaration whose route does not capture the kwarg as ``next.E162``, because every request to that page would raise ``UnboundObjectError``.
 
 Inheritance
 -----------
@@ -110,13 +110,46 @@ A booking receipt that opens from a direct link under a tree that requires a log
 
 A requirement declared below the lift binds again, so ``receipt/admin/`` requires a login and a permission.
 The requirements lifted above stay lifted there, so the page answers to what ``receipt/admin/proxy.py`` declares and to nothing of ``bookings/pages/proxy.py``.
-``public()`` beside a ``login_required()`` or a ``permission_required()`` of the same file opens nothing and lifts nothing, so the requirements of the file and of every parent still bind, and ``manage.py check`` reports it as ``next.E165``.
+``public()`` beside a ``login_required()`` or a ``permission_required()`` of the same file opens nothing and lifts nothing, so the requirements of the file and of every parent still bind, and ``manage.py check`` reports it as ``next.E163``.
 
-A lift is allowed and never silent.
-``manage.py check`` warns with ``next.W135`` once per file whose ``public()`` lifts the requirements of a guarded parent, naming the files it lifts.
-``manage.py next permissions`` shows ``public`` in the ``Access`` column of every page under the lift and names the lifting file as ``public (bookings/pages/booking/[int:booking]/receipt/proxy.py)`` in the ``Sources`` column, see :doc:`/content/ref/management`.
+A lift is allowed and stays visible.
+``manage.py permissions`` shows ``public`` in the ``Access`` column of every page under the lift and names the lifting file as ``public (bookings/pages/booking/[int:booking]/receipt/proxy.py)`` in the ``Sources`` column, see :doc:`/content/ref/management`.
 
 A public rule also sets the ``login_required`` attribute of the page view to ``False``, so :class:`~django.contrib.auth.middleware.LoginRequiredMiddleware` lets the receipt through, see :doc:`/content/howto/require-login-on-pages`.
+
+public() and login_not_required
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Django's :func:`~django.contrib.auth.decorators.login_not_required` marks one view that ``LoginRequiredMiddleware`` lets through, and ``public()`` does that and more.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 35 35
+
+   * - Concern
+     - ``login_not_required``
+     - ``public()``
+   * - What it covers
+     - The one view it decorates.
+     - The page of its ``page.py``, or every page in the directory of its ``proxy.py`` and below.
+   * - ``LoginRequiredMiddleware``
+     - Lets the view through.
+     - Lets every covered page view through.
+   * - Requirements of a ``proxy.py`` above
+     - Not applicable, a view has no tree.
+     - Lifted, so neither the login nor the permissions of a parent bind.
+   * - Actions declared beside the page
+     - Not covered, each needs a decorator of its own.
+     - As public as the page, so the dispatcher asks no login for them under ``LoginRequiredMiddleware``.
+   * - Zone requests of the page
+     - Not applicable.
+     - Covered, since a zone request travels the page view.
+   * - ``manage.py permissions``
+     - Not listed.
+     - ``public`` with the file that opened the rule.
+   * - ``next.W129``
+     - Not applicable.
+     - Counts as an access declaration that opens its actions on purpose, so they draw no warning.
 
 Actions, zones, and components
 ------------------------------
@@ -134,16 +167,16 @@ Loading
 
 The router reads the access of every page while it builds the URL patterns, so each ``proxy.py`` over a routed page runs once before the first request.
 In a process that watches template edits an edited ``proxy.py`` runs again on the next request, and its old declarations are dropped before the new ones register.
-``manage.py check`` warns with ``next.W132`` about a ``proxy.py`` that has no page in its directory or below it.
+``manage.py check`` warns with ``next.W128`` about a ``proxy.py`` that has no page in its directory or below it.
 
 A declaration binds to the module that calls it.
-A call made from a helper module guards nothing, and ``manage.py check`` reports it as ``next.E166``.
+A call made from a helper module guards nothing, and ``manage.py check`` reports it as ``next.E164``.
 
 The tree boundary
 ~~~~~~~~~~~~~~~~~
 
 The ``proxy.py`` chain of a page stops at the root of its page tree.
-An application tree mounted under a prefix of another tree inherits no ``proxy.py`` of the host, so each tree declares its own access in a ``proxy.py`` at its root.
+An application tree a ``pages()`` include places under a prefix of another tree inherits no ``proxy.py`` of the host, so each tree declares its own access in a ``proxy.py`` at its root.
 A shell that every application shares lives in a project-level ``layout.djx``, see :doc:`layouts`.
 
 A broken proxy.py
@@ -174,4 +207,4 @@ See also
    :doc:`layouts` for the ``layout.djx`` chain.
    :doc:`context` for ``inherit_context=True``.
    :doc:`/content/ref/pages` for the ``proxy`` object.
-   :doc:`/content/ref/system-checks` for ``next.E164`` to ``next.E166`` and ``next.W131`` to ``next.W135``.
+   :doc:`/content/ref/system-checks` for ``next.E162`` to ``next.E164``, ``next.W128``, and ``next.W129``.

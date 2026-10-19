@@ -6,21 +6,15 @@ from next.urls.routes import Route, collect_routes
 from tests.support import installed_apps, write_app, write_page, write_urlconf
 
 
-def _rows(root: Path) -> list[tuple[str, str, str, str, str]]:
+def _rows(root: Path) -> list[tuple[str, str, str]]:
     return [
-        (
-            route.url,
-            route.name,
-            route.app,
-            str(route.file.relative_to(root)),
-            route.source,
-        )
+        (route.url, route.name, str(route.file.relative_to(root)))
         for route in collect_routes()
     ]
 
 
 def _project(root: Path, *entries: str) -> str:
-    write_app(root, "wallets", {"pages": ("ops/[int:pk]",)}, mount="w/<int:wallet>/")
+    write_app(root, "wallets", {"pages": ("ops/[int:pk]",)})
     write_app(root, "blog", {"pages": ("", "about")})
     write_app(root, "audit", {"pages": ("log",)})
     return write_urlconf(root, "rows_urls", *entries)
@@ -29,7 +23,7 @@ def _project(root: Path, *entries: str) -> str:
 class TestCollectRoutes:
     """One row per page in resolution order, from the URLconf root."""
 
-    def test_every_source_around_the_framework_include(self, tmp_path) -> None:
+    def test_every_tree_around_the_framework_include(self, tmp_path) -> None:
         urlconf = _project(
             tmp_path,
             'path("org/<int:org>/audit/", pages("audit"))',
@@ -41,28 +35,14 @@ class TestCollectRoutes:
             rows = _rows(tmp_path)
 
         assert rows == [
+            ("/org/<int:org>/audit/log/", "audit:page_log", "audit/pages/log/page.py"),
             (
-                "/org/<int:org>/audit/log/",
-                "audit:page_log",
-                "audit",
-                "audit/pages/log/page.py",
-                "urls",
-            ),
-            (
-                "/app/w/<int:wallet>/ops/<int:pk>/",
-                "next:page_w_int_wallet_ops_int_pk",
-                "wallets",
+                "/app/ops/<int:pk>/",
+                "next:page_ops_int_pk",
                 "wallets/pages/ops/[int:pk]/page.py",
-                "mounts",
             ),
-            ("/crew/", "crew:page_", "blog", "blog/pages/page.py", "urls"),
-            (
-                "/crew/about/",
-                "crew:page_about",
-                "blog",
-                "blog/pages/about/page.py",
-                "urls",
-            ),
+            ("/crew/", "crew:page_", "blog/pages/page.py"),
+            ("/crew/about/", "crew:page_about", "blog/pages/about/page.py"),
         ]
 
     def test_auto_trees_are_listed_only_where_the_framework_is_included(
@@ -73,9 +53,7 @@ class TestCollectRoutes:
         with installed_apps(tmp_path, "wallets", "blog", "audit", urlconf=urlconf):
             rows = _rows(tmp_path)
 
-        assert [(url, source) for url, _name, _app, _file, source in rows] == [
-            ("/audit/log/", "urls")
-        ]
+        assert [url for url, _name, _file in rows] == ["/audit/log/"]
 
     def test_a_project_root_tree_and_a_virtual_page(self, tmp_path) -> None:
         site = tmp_path / "site"
@@ -90,16 +68,12 @@ class TestCollectRoutes:
             Route(
                 url="/contact/",
                 name="next:page_contact",
-                app="",
                 file=site.resolve() / "contact" / "page.py",
-                source="root",
             ),
             Route(
                 url="/about/",
                 name="next:page_about",
-                app="",
                 file=site.resolve() / "about" / "template.djx",
-                source="root",
             ),
         ]
 

@@ -118,7 +118,7 @@ class PermissionManager:
 def _class_paths(path: str) -> frozenset[str]:
     """Return the dotted path of the backend at `path` and of every class it inherits.
 
-    A backend that fails to import inherits nothing, which `next.E162` reports.
+    A backend that fails to import inherits nothing, which `next.E160` reports.
     """
     try:
         backend = import_string(path)
@@ -165,16 +165,10 @@ def has_perm(user: object, perm: str, obj: object = None) -> bool:
     return permission_manager.has_perm(user, perm, obj)
 
 
-def perms_for(user: object, obj: object = None) -> frozenset[str]:
-    """Return every registered permission an active `user` holds on `obj`."""
-    return permission_manager.perms_for(user, obj)
-
-
 __all__ = [
     "PermissionManager",
     "add_perm",
     "has_perm",
     "listed_backends",
     "permission_manager",
-    "perms_for",
 ]

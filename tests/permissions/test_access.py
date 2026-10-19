@@ -8,11 +8,12 @@ from django.core.exceptions import PermissionDenied
 from django.test import override_settings
 
 from next.components import component
-from next.permissions import AccessRule, Denial, Requirement, check, declared
 from next.permissions.access import (
     Declarations,
     answer,
+    check,
     declarations,
+    declared,
     declared_files,
     forget_login_middleware,
     login_middleware_active,
@@ -20,7 +21,7 @@ from next.permissions.access import (
     require_permission,
     signed_in,
 )
-from next.permissions.markers import OPEN
+from next.permissions.markers import OPEN, AccessRule, Denial, Requirement
 from tests.support import PermissionHolder
 from tests.support.access import LOGIN_REQUIRED_MIDDLEWARE
 

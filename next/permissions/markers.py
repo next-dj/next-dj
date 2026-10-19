@@ -1,15 +1,13 @@
 """The predicates a permission is checked by and the access an endpoint declares."""
 
 import inspect
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal
 
 from django.db.models import Model
 
-
-type Operator = Literal["&", "|", "~"]
 
 type Test = Callable[..., object]
 
@@ -23,97 +21,31 @@ _POSITIONAL: Final = frozenset(
     {inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD}
 )
 
-_MIN_JOINED: Final = 2
-
 
 @dataclass(frozen=True, slots=True)
 class Predicate:
-    """A rule about a user and an optional object, a leaf callable or a composite.
+    """A rule about a user and an optional object, which gets the first `arity` of them.
 
-    A leaf gets the first `arity` of `(user, obj)`, and a composite short-circuits.
+    A rule over several conditions combines them with `and` and `or` in one function.
     """
 
     name: str
-    test: Test | None = None
+    test: Test
     arity: int = _MAX_ARITY
-    operator: Operator | None = None
-    operands: tuple["Predicate", ...] = ()
-
-    def __post_init__(self) -> None:
-        """Refuse a shape that is neither a leaf nor a composite of its operator."""
-        problem = _shape_problem(self)
-        if problem is not None:
-            msg = f"The predicate {self.name!r} {problem}."
-            raise ValueError(msg)
 
     def __call__(self, user: object, obj: object = None) -> bool:
         """Return whether `user` passes the rule on `obj`."""
-        if self.test is not None:
-            if self.arity == _MAX_ARITY:
-                return bool(self.test(user, obj))
-            if self.arity:
-                return bool(self.test(user))
-            return bool(self.test())
-        if self.operator == "&":
-            return all(operand(user, obj) for operand in self.operands)
-        if self.operator == "|":
-            return any(operand(user, obj) for operand in self.operands)
-        return not self.operands[0](user, obj)
-
-    def __and__(self, other: object) -> "Predicate":
-        """Return the rule both predicates must pass."""
-        if not isinstance(other, Predicate):
-            return NotImplemented
-        return _joined("&", self, other)
-
-    def __or__(self, other: object) -> "Predicate":
-        """Return the rule either predicate may pass."""
-        if not isinstance(other, Predicate):
-            return NotImplemented
-        return _joined("|", self, other)
-
-    def __invert__(self) -> "Predicate":
-        """Return the rule this predicate must fail."""
-        return Predicate(name=f"~{self.name}", operator="~", operands=(self,))
-
-    def tests(self) -> Iterator[tuple[str, Test]]:
-        """Yield the name and the callable of every leaf, left to right."""
-        if self.test is not None:
-            yield self.name, self.test
-            return
-        for operand in self.operands:
-            yield from operand.tests()
-
-
-def _shape_problem(rule: Predicate) -> str | None:
-    """Return why `rule` is neither a leaf nor a composite, `None` when it is one."""
-    if rule.test is not None:
-        return _leaf_problem(rule)
-    if rule.operator is None:
-        return "holds neither a test nor an operator"
-    return _composite_problem(rule)
-
-
-def _leaf_problem(rule: Predicate) -> str | None:
-    if rule.operator is not None or rule.operands:
-        return "holds a test and an operator or operands at once"
-    if not 0 <= rule.arity <= _MAX_ARITY:
-        return f"passes {rule.arity} arguments to its test, not 0 to {_MAX_ARITY}"
-    return None
-
-
-def _composite_problem(rule: Predicate) -> str | None:
-    if rule.operator == "~":
-        return None if len(rule.operands) == 1 else "inverts other than one operand"
-    if len(rule.operands) < _MIN_JOINED:
-        return f"joins fewer than two operands with {rule.operator!r}"
-    return None
+        if self.arity == _MAX_ARITY:
+            return bool(self.test(user, obj))
+        if self.arity:
+            return bool(self.test(user))
+        return bool(self.test())
 
 
 def signature_problem(test: Test) -> str | None:
-    """Return why `test` cannot be a leaf, `None` when it takes zero to two arguments.
+    """Return why a predicate cannot call `test`, `None` when it takes up to two.
 
-    A leaf takes `()`, `(user)` or `(user, obj)`, and `**kwargs` is harmless.
+    A test takes `()`, `(user)` or `(user, obj)`, and `**kwargs` is harmless.
     """
     try:
         parameters = inspect.signature(test).parameters.values()
@@ -135,7 +67,7 @@ def signature_problem(test: Test) -> str | None:
 
 
 def _arity(test: Test) -> int:
-    """Return how many of `(user, obj)` a leaf passes `test`, two when unreadable."""
+    """Return how many of `(user, obj)` a predicate passes `test`, two if unreadable."""
     try:
         parameters = inspect.signature(test).parameters.values()
     except (TypeError, ValueError):
@@ -144,18 +76,10 @@ def _arity(test: Test) -> int:
     return min(positional, _MAX_ARITY)
 
 
-def _joined(operator: Operator, left: Predicate, right: Predicate) -> Predicate:
-    return Predicate(
-        name=f"({left.name} {operator} {right.name})",
-        operator=operator,
-        operands=(left, right),
-    )
-
-
 def predicate(test: Test) -> Predicate:
-    """Return a leaf predicate over `test`, which takes `()`, `(user)` or `(user, obj)`.
+    """Return a predicate over `test`, which takes `()`, `(user)` or `(user, obj)`.
 
-    The arity is counted here once, and a signature outside the rule is `next.E161`.
+    The arity is counted here once, and a signature outside the rule is `next.E159`.
     """
     if isinstance(test, Predicate):
         return test
@@ -190,13 +114,12 @@ class Requirement:
 class AccessRule:
     """The requirements of one endpoint in the order its chain declared them.
 
-    A public rule names the file that opened it in `sources` and those it lifted.
+    A public rule names the file that opened it in `sources`.
     """
 
     requirements: tuple[Requirement, ...] = ()
     public: bool = False
     sources: tuple[Path, ...] = ()
-    lifted: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,15 +140,12 @@ def joined(rules: Iterable[AccessRule], *, public: bool = False) -> AccessRule:
     """
     requirements: dict[Requirement, None] = {}
     sources: dict[Path, None] = {}
-    lifted: dict[Path, None] = {}
     for rule in rules:
         requirements.update(dict.fromkeys(rule.requirements))
         sources.update(dict.fromkeys(rule.sources))
-        lifted.update(dict.fromkeys(rule.lifted))
     if not requirements and not public:
         return OPEN
-    kept = tuple(lifted) if public else ()
-    return AccessRule(tuple(requirements), public, tuple(sources), kept)
+    return AccessRule(tuple(requirements), public, tuple(sources))
 
 
 def chained(rules: Iterable[AccessRule]) -> AccessRule:
@@ -235,10 +155,8 @@ def chained(rules: Iterable[AccessRule]) -> AccessRule:
     """
     requirements: dict[Requirement, None] = {}
     opened: AccessRule | None = None
-    lifted: tuple[Path, ...] = ()
     for rule in rules:
         if rule.public and not rule.requirements and (requirements or opened is None):
-            lifted = tuple(dict.fromkeys(item.source for item in requirements))
             requirements.clear()
             opened = rule
         if rule.requirements:
@@ -249,7 +167,7 @@ def chained(rules: Iterable[AccessRule]) -> AccessRule:
         return AccessRule(tuple(requirements), sources=sources)
     if opened is None:
         return OPEN
-    return AccessRule(public=True, sources=opened.sources, lifted=lifted)
+    return AccessRule(public=True, sources=opened.sources)
 
 
 __all__ = [
@@ -257,7 +175,6 @@ __all__ = [
     "AccessObject",
     "AccessRule",
     "Denial",
-    "Operator",
     "Predicate",
     "Requirement",
     "Test",

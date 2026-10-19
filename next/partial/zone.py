@@ -200,7 +200,7 @@ type Ancestor = type[Node] | tuple[type[Node], ...]
 """A node class, or several, whose subtree a walk tells apart."""
 
 
-def nodes_under(
+def _nodes_under(
     nodelist: NodeList, ancestor: "Ancestor", *, inside: bool = False
 ) -> "Iterator[Node]":
     """Yield every node below an `ancestor` node, at any depth."""
@@ -209,12 +209,12 @@ def nodes_under(
             yield node
         now_inside = inside or isinstance(node, ancestor)
         for child in child_nodelists(node):
-            yield from nodes_under(child, ancestor, inside=now_inside)
+            yield from _nodes_under(child, ancestor, inside=now_inside)
 
 
 def zones_under(nodelist: NodeList, ancestor: "Ancestor") -> "Iterator[str]":
     """Yield the name of every zone below an `ancestor` node, zone bodies included."""
-    for node in nodes_under(nodelist, ancestor):
+    for node in _nodes_under(nodelist, ancestor):
         if isinstance(node, ZoneNode):
             yield node.name
 
@@ -332,7 +332,6 @@ __all__ = [
     "ZoneOptions",
     "ZonePartial",
     "do_zone",
-    "nodes_under",
     "register",
     "render_zone_body",
     "render_zone_standalone",

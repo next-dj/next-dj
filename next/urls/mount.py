@@ -134,7 +134,7 @@ def pages(
 ) -> tuple[Sequence[URLPattern | URLResolver], str, str]:
     """Mount the page tree `subdir` of `app` where a URLconf includes the result.
 
-    The `include()` triple it returns overrides the app's own declaration of that tree.
+    The tree it names leaves the auto-assembly, so only this include routes it.
     """
     config = _app_config(app)
     directory = _tree_subdir(app, subdir)

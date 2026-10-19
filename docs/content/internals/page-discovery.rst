@@ -51,7 +51,7 @@ Modules
    See `Composed-template cache`_ below for the layers and their staleness rule.
 
 ``next.pages.manager.views``.
-   Builds the two routed views, the static one that serves a compiled composed template and the resolving one that runs ``render()`` per request, and the ``URLPattern`` the file router mounts either under.
+   Builds the two routed views, the static one that serves a compiled composed template and the resolving one that runs ``render()`` per request, and the ``URLPattern`` the file router routes either through.
    Both carry ``next_page_path`` and both stamp the partial ``Vary`` set on the full-page branch.
 
 ``next.pages.placeholder``.

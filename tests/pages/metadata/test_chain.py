@@ -1023,3 +1023,14 @@ class TestThunk:
         (leaf,) = write_page_chain(tmp_path, [("leaf", LEAF)])
         thunk = MetadataThunk(registry, leaf, None, {}, {})
         assert thunk.folded() is thunk.fold({})
+
+    def test_host_crumbs_resolve_their_dependencies_afresh(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        host, guest = write_page_chain(tmp_path, [("host", PLAIN), ("guest", PLAIN)])
+        registry.register(host, lambda wallet=Depends("wallet"): {"breadcrumb": wallet})
+        thunk = MetadataThunk(registry, guest, None, {}, {"wallet": "guest"})
+        with bound_dependency("wallet", lambda: "host"):
+            crumbs = thunk.crumbs_of(host, {})
+        assert [crumb.label for crumb in crumbs or ()] == ["host"]
+        assert thunk.dep_cache == {"wallet": "guest"}

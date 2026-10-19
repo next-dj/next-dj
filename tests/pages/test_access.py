@@ -157,20 +157,21 @@ class TestInheritedAccess:
 
 
 class TestMountedTrees:
-    """A mounted tree starts its chain at its own root, never at the host."""
+    """A `pages()` tree starts its chain at its own root, never at the host."""
 
     @pytest.fixture()
     def mounted(self, tmp_path) -> Path:
-        app = write_app(
-            tmp_path, "wallets", {"pages": ()}, mounts={"pages": "w/<int:wallet>/"}
-        )
+        app = write_app(tmp_path, "wallets", {"pages": ()})
         write_proxy(app, "proxy.login_required()\n")
         write_proxy(app / "pages")
         write_page(app / "pages", "ops", page_source(template="w"))
         write_proxy(tmp_path / "site", "proxy.login_required()\n")
         write_page(tmp_path / "site", "contact", page_source())
         urlconf = write_urlconf(
-            tmp_path, "mounted_urls", 'path("", include("next.urls"))'
+            tmp_path,
+            "mounted_urls",
+            'path("w/<int:wallet>/", pages("wallets"))',
+            'path("", include("next.urls"))',
         )
         with installed_apps(
             tmp_path, "wallets", urlconf=urlconf, dirs=[tmp_path / "site"]
@@ -215,7 +216,7 @@ class TestLiftedRequirements:
 
         assert response.status_code == status
 
-    def test_the_lifted_rule_names_both_files(self, booking) -> None:
+    def test_the_lifted_rule_names_the_opening_file(self, booking) -> None:
         receipt = booking / "[int:booking]" / "receipt"
 
         with routed(booking.parent):
@@ -223,11 +224,8 @@ class TestLiftedRequirements:
             again = page_access(receipt / "admin" / "page.py").rule
 
         assert (lifted.public, lifted.requirements) == (True, ())
-        assert (lifted.sources, lifted.lifted) == (
-            (receipt / "proxy.py",),
-            (booking / "proxy.py",),
-        )
-        assert (again.public, again.lifted) == (False, ())
+        assert lifted.sources == (receipt / "proxy.py",)
+        assert again.public is False
         assert [item.source for item in again.requirements] == [
             receipt / "admin" / "proxy.py"
         ]
@@ -248,11 +246,10 @@ class TestLiftedRequirements:
         with routed(root):
             rule = page_access(page_path).rule
 
-        assert (rule.public, rule.requirements, rule.sources, rule.lifted) == (
+        assert (rule.public, rule.requirements, rule.sources) == (
             True,
             (),
             (page_path,),
-            (),
         )
 
     def test_a_public_page_lifts_for_itself_alone(self, root, client) -> None:
@@ -266,7 +263,7 @@ class TestLiftedRequirements:
             rule = page_access(page_path).rule
 
         assert (opened.status_code, below.status_code) == (200, 302)
-        assert rule.lifted == (root / "proxy.py",)
+        assert rule.sources == (page_path,)
 
     def test_a_requirement_beside_public_still_binds(self, root, client) -> None:
         write_proxy(root, "proxy.public()\nproxy.login_required()\n")
@@ -287,10 +284,7 @@ class TestLiftedRequirements:
         with routed(root):
             rule = page_access(page_path).rule
 
-        assert (rule.sources, rule.lifted) == (
-            (root / "a" / "proxy.py",),
-            (root / "proxy.py",),
-        )
+        assert rule.sources == (root / "a" / "proxy.py",)
 
     def test_the_view_carries_the_public_flag(self, root) -> None:
         write_page(root, "open", page_source("page.public()\n"))
@@ -517,7 +511,7 @@ class TestAccessMemo:
     def test_a_reload_reads_the_earlier_rule_while_it_runs(self, root) -> None:
         source = page_source(
             "from pathlib import Path\n"
-            "from next.permissions import declared\n\n"
+            "from next.permissions.access import declared\n\n"
             "SEEN = declared(Path(__file__)).requirements\n"
             "page.login_required()\n"
         )

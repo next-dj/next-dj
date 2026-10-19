@@ -11,29 +11,27 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 
 from next.checks import NEXT
 from next.checks.common import RunMemo
-from next.components.sources import reached_components
+from next.components.sources import get_components_manager
+from next.conf import next_framework_settings
 from next.discovery import (
     discover_page_registrations,
     first_visit,
     get_router_manager,
     iter_scanned_page_pairs,
 )
-from next.pages.access import anonymous_admitted, page_access
+from next.pages.access import page_access
 from next.pages.loaders import (
     PAGE_MODULE,
     PROXY_MODULE,
     in_page_tree,
     load_python_module_memo,
 )
-from next.pages.paths import page_template_path
 from next.pages.scan import iter_proxy_modules
 from next.permissions.access import declared, declared_files
-
-from .composed import iter_composed_pages
+from next.permissions.manager import permission_manager
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
     from pathlib import Path
 
     from next.pages.access import PageAccess
@@ -86,6 +84,26 @@ def tree_pages() -> tuple[TreePage, ...]:
     return _tree_access().pages
 
 
+def load_declarations() -> None:
+    """Run every page, `proxy.py` and `component.py`, so each declaration is in."""
+    tree_pages()
+    if not isinstance(next_framework_settings.COMPONENT_BACKENDS, list):
+        return
+    for backend in get_components_manager().backends:
+        backend.import_component_modules()
+
+
+def access_in_use() -> bool:
+    """Return whether the project declares access, by a proxy, a declaration or a perm.
+
+    The access checks of a page and its actions stay silent for a project without one.
+    """
+    load_declarations()
+    return bool(
+        _tree_access().proxies or declared_files() or permission_manager.registry
+    )
+
+
 def _tree_files() -> tuple[Path, ...]:
     """Return every `page.py` and `proxy.py` of the routed trees, sorted."""
     trees = _tree_access()
@@ -96,7 +114,7 @@ def _tree_files() -> tuple[Path, ...]:
 
 @register(NEXT)
 def check_public_beside_requirements(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a `public()` beside a requirement of the same file (`next.E165`).
+    """Flag a `public()` beside a requirement of the same file (`next.E163`).
 
     The requirement still binds the file, so the `public()` opens nothing.
     """
@@ -107,56 +125,11 @@ def check_public_beside_requirements(*args, **kwargs) -> list[CheckMessage]:
             "public.",
             hint="Keep public() or the requirements, not both.",
             obj=str(file_path),
-            id="next.E165",
+            id="next.E163",
         )
         for file_path in _tree_files()
         if (rule := declared(file_path)).public and rule.requirements
     ]
-
-
-def _lifts() -> dict[Path, dict[Path, None]]:
-    """Return each file whose `public()` lifts a guarded parent, with what it lifts."""
-    lifts: dict[Path, dict[Path, None]] = {}
-    for entry in tree_pages():
-        rule = entry.access.rule
-        if entry.access.broken is not None or not rule.public or not rule.lifted:
-            continue
-        for lifter in rule.sources:
-            lifts.setdefault(lifter, {}).update(dict.fromkeys(rule.lifted))
-    return lifts
-
-
-def _named(paths: Iterable[Path]) -> str:
-    """Spell `paths` for a message, in the order given."""
-    return ", ".join(map(str, paths))
-
-
-@register(NEXT)
-def check_lifted_requirements(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about a `public()` that lifts the rule of a guarded parent (`next.W135`).
-
-    The lift is allowed, and the warning keeps it from going unnoticed.
-    """
-    warnings: list[CheckMessage] = []
-    for lifter, lifted in sorted(_lifts().items()):
-        reach = (
-            "its directory and every page below it"
-            if lifter.name == PROXY_MODULE
-            else "its page"
-        )
-        warnings.append(
-            DjangoWarning(
-                f"public() in {lifter} lifts the requirements of {_named(lifted)} "
-                f"for {reach}, so a guarded parent has a public part.",
-                hint=(
-                    "Drop public() if the parent's rule should bind there, or keep "
-                    "it and silence next.W135 once every lift it lists is meant."
-                ),
-                obj=str(lifter),
-                id="next.W135",
-            )
-        )
-    return warnings
 
 
 def _covers(proxy: Path, page_path: Path) -> bool:
@@ -166,7 +139,7 @@ def _covers(proxy: Path, page_path: Path) -> bool:
 
 @register(NEXT)
 def check_proxies_over_pages(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about a `proxy.py` with no page in its directory or below (`next.W132`)."""
+    """Warn about a `proxy.py` with no page in its directory or below (`next.W128`)."""
     trees = _tree_access()
     pages = [entry.page_path for entry in trees.pages]
     return [
@@ -175,7 +148,7 @@ def check_proxies_over_pages(*args, **kwargs) -> list[CheckMessage]:
             "declarations bind no page.",
             hint="Move it to a directory over the pages it is meant for, or delete it.",
             obj=str(proxy),
-            id="next.W132",
+            id="next.W128",
         )
         for proxy in trees.proxies
         if not any(_covers(proxy, page_path) for page_path in pages)
@@ -196,7 +169,7 @@ def _segment_module(file_path: Path) -> bool:
 
 @register(NEXT)
 def check_declaring_modules(*args, **kwargs) -> list[CheckMessage]:
-    """Flag an access declaration bound to a file no endpoint reads (`next.E166`).
+    """Flag an access declaration bound to a file no endpoint reads (`next.E164`).
 
     A declaration binds to the file calling it, so one made in a helper guards nothing.
     """
@@ -211,58 +184,18 @@ def check_declaring_modules(*args, **kwargs) -> list[CheckMessage]:
                 "not from a helper in another module."
             ),
             obj=str(file_path),
-            id="next.E166",
+            id="next.E164",
         )
         for file_path in declared_files()
         if not _segment_module(file_path)
     ]
 
 
-def _open_to_anyone(access: PageAccess) -> bool:
-    """Return whether an anonymous request reaches the page."""
-    return access.broken is None and anonymous_admitted(access)
-
-
-@register(NEXT)
-def check_guarded_components_on_public_pages(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about a component declaring access on a page anyone reaches (`next.W133`).
-
-    The component renders nothing for a requester it refuses, the page around it all.
-    """
-    access = {entry.page_path: entry.access for entry in tree_pages()}
-    warnings: list[CheckMessage] = []
-    for page_path, template in iter_composed_pages():
-        held = access.get(page_path)
-        if held is None or not _open_to_anyone(held):
-            continue
-        anchor = page_template_path(page_path)
-        for info in reached_components(template.nodelist, anchor):
-            module_path = info.module_path
-            if module_path is None or not declared(module_path).requirements:
-                continue
-            warnings.append(
-                DjangoWarning(
-                    f"The component {info.name!r} declares access in {module_path} "
-                    f"and renders on {page_path}, which anyone reaches, so a "
-                    "requester it refuses gets the page with the component "
-                    "missing.",
-                    hint=(
-                        "Guard the page too, or wrap the tag in {% has_perm %} with "
-                        "an else branch, if a gap is not what a refused user should "
-                        "see."
-                    ),
-                    obj=str(page_path),
-                    id="next.W133",
-                )
-            )
-    return warnings
-
-
 __all__ = [
+    "access_in_use",
     "check_declaring_modules",
-    "check_guarded_components_on_public_pages",
-    "check_lifted_requirements",
     "check_proxies_over_pages",
     "check_public_beside_requirements",
+    "load_declarations",
     "tree_pages",
 ]

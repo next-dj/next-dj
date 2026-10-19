@@ -3,7 +3,14 @@ import pytest
 from next.ports import RouterAccess
 from next.urls import FileRouterBackend, RouterManager, URLPatternParser
 from next.urls.ports import RouterAccessImpl
-from tests.support import call_shape, file_router_config_entry, port_methods
+from tests.support import (
+    NAMESPACED_URLCONF,
+    call_shape,
+    file_router_config_entry,
+    installed_apps,
+    port_methods,
+    write_app,
+)
 
 
 class TestRouterAccessPort:
@@ -13,10 +20,13 @@ class TestRouterAccessPort:
         assert port_methods(RouterAccess) == [
             "create_backend",
             "create_manager",
+            "page_routes",
             "url_parser",
         ]
 
-    @pytest.mark.parametrize("name", ["create_backend", "create_manager", "url_parser"])
+    @pytest.mark.parametrize(
+        "name", ["create_backend", "create_manager", "page_routes", "url_parser"]
+    )
     def test_implementation_parameters_match_the_port(self, name) -> None:
         assert call_shape(RouterAccessImpl, name) == call_shape(RouterAccess, name)
 
@@ -39,3 +49,12 @@ class TestRouterAccessPort:
 
         assert isinstance(parser, URLPatternParser)
         assert access.url_parser() is parser
+
+    def test_page_routes_name_each_page_with_its_tree(self, tmp_path) -> None:
+        write_app(tmp_path, "shop", {"pages": ("", "cart")})
+
+        with installed_apps(tmp_path, "shop", urlconf=NAMESPACED_URLCONF):
+            routes = RouterAccessImpl().page_routes()
+
+        tree = (tmp_path / "shop" / "pages").resolve()
+        assert sorted(routes) == [(tree, "/"), (tree, "/cart/")]

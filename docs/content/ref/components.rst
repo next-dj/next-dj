@@ -37,7 +37,7 @@ Access declarations
 ``perm`` takes a name or a tuple of names as on ``page``, while ``obj`` is a string that names a prop or a ``@component.context`` value rather than a ``DObject``, since a component has no URL of its own.
 A name neither provides raises ``UnknownAccessObjectError`` at render, which no check catches ahead of time since props are known only at the tag.
 A refused request renders the component as an empty string, the way a ``{% has_perm %}`` block without ``else`` renders, with no redirect and no 403, and the component runs none of its contexts past the one the check reads.
-Any component with a ``component.py`` counts as one that decides what it shows, so a zone in its body is ``next.E163``, and ``next.W133`` warns about a declaring component that renders on a page anyone reaches, see :ref:`topics-permissions-tree`.
+Any component with a ``component.py`` counts as one that decides what it shows, so a zone in its body is ``next.E161`` and a partial request for it is refused, see :ref:`topics-permissions-zones`.
 
 ``ComponentModuleImportError`` is raised under ``next.conf.fail_loudly`` for a ``component.py`` that failed to import, with the original exception as ``__cause__`` and the path as ``file_path``, and without it the component renders as an empty string, see ``next.E084``.
 

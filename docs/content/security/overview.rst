@@ -125,7 +125,7 @@ Access control
 
 Every form action answers at ``/_next/form/<uid>/``, an endpoint any visitor can POST to.
 An action declared in a page tree answers to the access its page and the ``proxy.py`` files above it declare, and a forged origin lifts none of it, see :doc:`actions`.
-An action nothing guards, declared under no requirement, with no ``Meta`` guard, and without ``LoginRequiredMiddleware``, runs for anonymous visitors, which ``next.W134`` reports.
+An action nothing guards, declared under no requirement, with no ``Meta`` guard, and without ``LoginRequiredMiddleware``, runs for anonymous visitors, which ``next.W129`` reports in a project that declares access, see :doc:`actions`.
 
 Enforce access at one of these layers.
 
@@ -146,9 +146,9 @@ Rate limiting.
 
 A zone GET carries no endpoint of its own.
 It travels the page's own URL through the same routed view, so the page's access rule, its middleware, and its ``render`` function all apply exactly as they do on a full visit, and a page that is closed to a visitor stays closed for every zone inside it.
-A zone inside a ``{% has_perm %}`` block of the page asks that block again and answers 403 to a user it refuses, and a zone in the body of a component that decides what it shows is refused as an unknown zone, see :doc:`/content/topics/permissions`.
+A zone inside a ``{% has_perm %}`` block of the page, or in the body of a component that decides what it shows, is refused to every partial request as an unknown zone, so the decision about a permission lives inside the zone, see :ref:`topics-permissions-zones`.
 
-An SSE stream is a response the project returns from one of its own pages, not an endpoint the framework mounts.
+An SSE stream is a response the project returns from one of its own pages, not an endpoint the framework adds.
 The authorization of that page is therefore the only gate on the stream, and a stream that fans out rows a visitor may not read needs the filter in the generator that produces them, see :doc:`/content/topics/partial-rendering/sse`.
 
 Every zone morph enforces page-level access on its own.

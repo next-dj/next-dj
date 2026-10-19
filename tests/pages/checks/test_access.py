@@ -6,8 +6,6 @@ from django.test import Client
 from next.forms.checks.actions import check_public_actions
 from next.pages.checks.access import (
     check_declaring_modules,
-    check_guarded_components_on_public_pages,
-    check_lifted_requirements,
     check_proxies_over_pages,
     check_public_beside_requirements,
 )
@@ -43,17 +41,17 @@ def _ids(messages) -> list[tuple[str, str]]:
 
 
 class TestPublicBesideRequirements:
-    """next.E165 flags a `public()` beside a requirement of the same file."""
+    """next.E163 flags a `public()` beside a requirement of the same file."""
 
     @pytest.mark.parametrize(
         ("proxy", "page", "expected"),
         [
             ("", "page.public()\n", []),
-            ("", "page.public()\npage.login_required()\n", [("next.E165", "page.py")]),
+            ("", "page.public()\npage.login_required()\n", [("next.E163", "page.py")]),
             (
                 'proxy.public()\nproxy.permission_required("auth.view_group")\n',
                 "",
-                [("next.E165", "proxy.py")],
+                [("next.E163", "proxy.py")],
             ),
             ("proxy.login_required()\n", "page.public()\n", []),
         ],
@@ -67,57 +65,8 @@ class TestPublicBesideRequirements:
             assert _ids(check_public_beside_requirements()) == expected
 
 
-class TestLiftedRequirements:
-    """next.W135 names each `public()` that lifts the rule of a guarded parent."""
-
-    def test_a_lifting_proxy_and_page_each_warn(self, root) -> None:
-        guard = write_proxy(root, "proxy.login_required()\n")
-        lifter = write_proxy(root / "a", "proxy.public()\n")
-        write_page(root, "a", page_source())
-        write_page(root, "a/b", page_source())
-        page_path = write_page(root, "c", page_source("page.public()\n"))
-
-        with routed(root):
-            warnings = check_lifted_requirements()
-
-        assert [(w.id, w.obj) for w in warnings] == [
-            ("next.W135", str(lifter)),
-            ("next.W135", str(page_path)),
-        ]
-        assert f"public() in {lifter} lifts the requirements of {guard}" in (
-            warnings[0].msg
-        )
-        assert "its directory and every page below it" in warnings[0].msg
-        assert "for its page" in warnings[1].msg
-
-    @pytest.mark.parametrize(
-        ("proxy", "page"),
-        [
-            ("", "page.public()\n"),
-            ("proxy.login_required()\n", ""),
-            ("raise RuntimeError('boom')\n", "page.public()\n"),
-        ],
-        ids=["nothing-above", "no-public", "broken"],
-    )
-    def test_nothing_lifted_is_silent(self, root, proxy, page) -> None:
-        write_proxy(root, proxy)
-        write_page(root, "a", page_source(page))
-
-        with routed(root):
-            assert check_lifted_requirements() == []
-
-    def test_a_guard_below_the_lift_is_silent_for_its_pages(self, root) -> None:
-        write_proxy(root, "proxy.login_required()\n")
-        write_proxy(root / "a", "proxy.public()\n")
-        write_proxy(root / "a" / "b", "proxy.login_required()\n")
-        write_page(root, "a/b", page_source())
-
-        with routed(root):
-            assert check_lifted_requirements() == []
-
-
 class TestDeclaringModules:
-    """next.E166 flags a declaration bound to a file no endpoint reads."""
+    """next.E164 flags a declaration bound to a file no endpoint reads."""
 
     def test_a_declaration_through_a_helper(self, root) -> None:
         write_page(
@@ -131,7 +80,7 @@ class TestDeclaringModules:
         with routed(root):
             [error] = check_declaring_modules()
 
-        assert (error.id, Path(error.obj).name) == ("next.E166", "access.py")
+        assert (error.id, Path(error.obj).name) == ("next.E164", "access.py")
         assert "helper" in error.hint
 
     @pytest.mark.parametrize(
@@ -174,7 +123,7 @@ class TestDeclaringModules:
 
 
 class TestProxiesOverPages:
-    """next.W132 warns about a `proxy.py` that reaches no page."""
+    """next.W128 warns about a `proxy.py` that reaches no page."""
 
     def test_a_proxy_over_a_page_is_silent(self, root) -> None:
         write_proxy(root / "a", "proxy.login_required()\n")
@@ -188,14 +137,14 @@ class TestProxiesOverPages:
         write_page(root, "a", page_source())
 
         with routed(root):
-            assert _ids(check_proxies_over_pages()) == [("next.W132", "proxy.py")]
+            assert _ids(check_proxies_over_pages()) == [("next.W128", "proxy.py")]
 
     def test_a_proxy_in_a_skipped_folder_is_walked(self, root) -> None:
         write_proxy(root / "_private", "proxy.login_required()\n")
         write_page(root, "a", page_source())
 
         with routed(root):
-            assert _ids(check_proxies_over_pages()) == [("next.W132", "proxy.py")]
+            assert _ids(check_proxies_over_pages()) == [("next.W128", "proxy.py")]
 
     def test_a_proxy_in_a_skipped_folder_is_checked(self, root) -> None:
         write_proxy(root / "_private", "proxy.public()\nproxy.login_required()\n")
@@ -203,101 +152,33 @@ class TestProxiesOverPages:
 
         with routed(root):
             assert _ids(check_public_beside_requirements()) == [
-                ("next.E165", "proxy.py")
+                ("next.E163", "proxy.py")
             ]
 
 
-class TestGuardedComponentsOnPublicPages:
-    """next.W133 warns about a declaring component on a page anyone reaches."""
-
-    @pytest.fixture()
-    def card(self, root) -> Path:
-        folder = root / "_components" / "card"
-        folder.mkdir(parents=True)
-        (folder / "component.djx").write_text("card")
-        plain = root / "_components" / "plain"
-        plain.mkdir()
-        (plain / "component.djx").write_text("plain")
-        bare = root / "_components" / "bare"
-        bare.mkdir()
-        (bare / "component.djx").write_text("bare")
-        (bare / "component.py").write_text("x = 1\n")
-        module = folder / "component.py"
-        module.write_text(_CARD)
-        return module
-
-    @pytest.mark.parametrize(
-        ("page", "expected"),
-        [
-            ("page.public()\n", ["next.W133"]),
-            ("", ["next.W133"]),
-            ("page.login_required()\n", []),
-        ],
-        ids=["public", "open", "guarded"],
+def _open_actions(declared: str = "", guard: str = "") -> str:
+    return (
+        "from next.forms import action\n"
+        f"{page_source(declared)}\n"
+        '@action("first_open")\n'
+        "def first_open():\n"
+        "    return None\n\n"
+        f'@action("second_open"{guard})\n'
+        "def second_open():\n"
+        "    return None\n"
     )
-    def test_the_page_rule_decides(self, root, card, page, expected) -> None:
-        tags = '{% component "card" %}{% component "plain" %}{% component "bare" %}'
-        write_page(root, "a", page_source(page, tags))
-
-        with routed(root, COMPONENT_BACKENDS=COMPONENTS):
-            assert [
-                w.id for w in check_guarded_components_on_public_pages()
-            ] == expected
-
-    @pytest.mark.parametrize(
-        ("holder", "via"),
-        [("page", "include"), ("component", "include"), ("component", "extends")],
-        ids=["page-include", "component-include", "component-extends"],
-    )
-    def test_a_component_reached_through_a_template_warns(
-        self, root, card, findable_templates, holder, via
-    ) -> None:
-        part = findable_templates("part.html", '{% component "card" %}')
-        tag = f'{{% {via} "{part}" %}}'
-        if holder == "component":
-            (root / "_components" / "plain" / "component.djx").write_text(tag)
-            tag = '{% component "plain" %}'
-        write_page(root, "a", page_source("", tag))
-
-        with routed(root, COMPONENT_BACKENDS=COMPONENTS):
-            assert [w.id for w in check_guarded_components_on_public_pages()] == [
-                "next.W133"
-            ]
-
-    def test_the_middleware_closes_an_open_page(self, root, card) -> None:
-        write_page(root, "a", page_source("", '{% component "card" %}'))
-
-        with routed(root, COMPONENT_BACKENDS=COMPONENTS), login_required_middleware():
-            assert check_guarded_components_on_public_pages() == []
-
-    def test_a_broken_chain_is_left_to_its_error(self, root, card) -> None:
-        write_proxy(root, "raise RuntimeError('boom')\n")
-        write_page(root, "a", page_source("", '{% component "card" %}'))
-
-        with routed(root, COMPONENT_BACKENDS=COMPONENTS):
-            assert check_guarded_components_on_public_pages() == []
 
 
 class TestPublicActions:
-    """next.W134 warns once per file about the actions nothing guards."""
+    """next.W129 warns once per file about the actions nothing guards."""
 
     @pytest.fixture(autouse=True)
-    def _form_registries(self):
+    def _form_registries(self, root):
+        write_proxy(root / "elsewhere", "proxy.login_required()\n")
         with isolated_form_registries():
             yield
 
-    @staticmethod
-    def _actions(declared: str = "", guard: str = "") -> str:
-        return (
-            "from next.forms import action\n"
-            f"{page_source(declared)}\n"
-            '@action("first_open")\n'
-            "def first_open():\n"
-            "    return None\n\n"
-            f'@action("second_open"{guard})\n'
-            "def second_open():\n"
-            "    return None\n"
-        )
+    _actions = staticmethod(_open_actions)
 
     def test_open_actions_warn_once_per_file(self, root) -> None:
         page_path = write_page(root, "a", self._actions())
@@ -305,7 +186,7 @@ class TestPublicActions:
         with routed(root):
             [warning] = check_public_actions()
 
-        assert (warning.id, warning.obj) == ("next.W134", str(page_path))
+        assert (warning.id, warning.obj) == ("next.W129", str(page_path))
         assert "'first_open', 'second_open'" in warning.msg
 
     def test_a_meta_guard_leaves_the_other_action(self, root) -> None:
@@ -363,6 +244,27 @@ class TestPublicActions:
 
         with routed(root), login_required_middleware():
             assert check_public_actions() == []
+
+
+class TestPublicActionsBeforeAccess:
+    """next.W129 waits for the project to declare access somewhere."""
+
+    def test_open_actions_are_silent(self, root) -> None:
+        with isolated_form_registries():
+            write_page(root, "a", _open_actions())
+            with routed(root):
+                assert check_public_actions() == []
+
+    def test_a_component_declaration_alone_turns_it_on(self, root) -> None:
+        card = root / "_components" / "card"
+        card.mkdir(parents=True)
+        (card / "component.py").write_text(_CARD)
+        (card / "component.djx").write_text("card")
+        with isolated_form_registries():
+            write_page(root, "a", _open_actions())
+            with routed(root, COMPONENT_BACKENDS=COMPONENTS):
+                [warning] = check_public_actions()
+        assert warning.id == "next.W129"
 
 
 class TestProxyImports:

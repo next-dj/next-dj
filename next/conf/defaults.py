@@ -14,15 +14,6 @@ USER_SETTING: str = "NEXT_FRAMEWORK"
 AUTO: Final = "auto"
 """The value of every setting whose mode the framework picks per request."""
 
-WARN: Final = "warn"
-"""The mode of `BOUNDARIES` that reports what the ratchet does not cover."""
-
-STRICT: Final = "strict"
-"""The mode of `BOUNDARIES` that also fails on every finding the ratchet misses."""
-
-BOUNDARIES_MODES: Final = (WARN, STRICT)
-"""The modes `BOUNDARIES` accepts."""
-
 DEFAULTS: dict[str, Any] = {
     "PAGE_BACKENDS": [
         {
@@ -91,16 +82,11 @@ DEFAULTS: dict[str, Any] = {
     "STRICT_CONTEXT": False,
     "STRICT_LOADING": False,
     "LAZY_COMPONENT_MODULES": False,
-    "DEPS_AUTODISCOVER": True,
-    "PERMISSIONS_AUTODISCOVER": True,
     "FORM_AUTODISCOVER": True,
-    "SIGNALS_AUTODISCOVER": True,
     "FORM_ANCHOR_FILES": None,
     "JS_CONTEXT_SERIALIZER": None,
     "FORM_WIZARD_BACKEND": {
         "BACKEND": "next.forms.SessionFormWizardBackend",
         "OPTIONS": {},
     },
-    "BOUNDARIES": None,
-    "BOUNDARIES_IMPORT_GRAPH": None,
 }

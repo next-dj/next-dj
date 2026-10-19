@@ -50,22 +50,22 @@ Reverse a captured page
 The path template uses the same bracket syntax that the file router uses.
 The parameter name in the template matches the keyword argument.
 
-Reverse a mounted page
-~~~~~~~~~~~~~~~~~~~~~~
+Reverse a page under a prefix
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
-   :caption: mounted trees
+   :caption: a pages() tree
 
    from next.urls import page_reverse
-
-   url = page_reverse("wallets/[int:wallet]/operations", wallet=1)
-   # "/wallets/1/operations/" for mounts = {"operations": "wallets/<int:wallet>/operations/"}
 
    url = page_reverse("log", namespace="audit")
    # "/staff/log/" for path("staff/", pages("audit"))
 
-A tree mounted through ``mount`` or ``mounts`` keeps the ``next`` namespace and spells its prefix in the template, with ``<int:wallet>`` written as ``[int:wallet]``.
-A tree mounted through ``pages()`` lives in the namespace of its application label, and its template starts below the prefix.
+   url = page_reverse("", namespace="wallets", wallet=1)
+   # "/wallets/1/operations/" for path("wallets/<int:wallet>/operations/", pages("wallets", "operations"))
+
+A tree placed through ``pages()`` lives in the namespace of its application label, or the ``namespace`` the call passes, and its template starts below the prefix.
+A converter in the route above the include travels as a keyword argument like any captured segment.
 
 Add query parameters
 ~~~~~~~~~~~~~~~~~~~~

@@ -291,8 +291,9 @@ Partial rendering
 Zone GET returns HTTP 400
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A response body of ``unknown zone`` means the requested name matches no ``{% zone %}`` in the composed page, or names one that may not render on its own, under an ``{% if %}`` or a ``{% for %}`` of the page, or in the body of a component that decides what that part shows, or under a block tag from a module outside ``django.`` and ``next.``, which ``next.E063``, ``next.E062``, and ``next.E163`` report at ``manage.py check``.
-A zone GET that answers 403 hit a ``{% has_perm %}`` block above one of the requested zones that refuses the user, or the access rule of the page itself, see :ref:`topics-permissions-tree`.
+A response body of ``unknown zone`` means the requested name matches no ``{% zone %}`` in the composed page, or names one that may not render on its own, under a ``{% has_perm %}``, an ``{% if %}``, or a ``{% for %}`` of the page, or in the body of a component that decides what that part shows, or under a block tag from a module outside ``django.`` and ``next.``, which ``next.E161``, ``next.E063``, and ``next.E062`` report at ``manage.py check``.
+Such a zone is refused to every user, so move the decision inside the zone, see :ref:`topics-permissions-zones`.
+A zone GET that answers 403 hit the access rule of the page itself, see :ref:`topics-permissions-tree`.
 Check that ``data-next-target`` names the same string as the zone tag on the page that serves the request.
 A response body of ``zone in dynamic body`` means the page body comes from a ``render`` function returning a string, so there is no compiled template source to render the slice standalone.
 Move the zone to a page whose body comes from a template source.
@@ -380,7 +381,7 @@ Use ``make_resolution_context`` from the same module when you need finer control
 Custom marker not handled
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Confirm that the provider class lives in the ``deps.py`` of an installed app, or in a module imported from it or from ``AppConfig.ready``, and that ``DEPS_AUTODISCOVER`` is not ``False``.
+Confirm that the provider class lives in the ``deps.py`` of an installed app, or in a module imported from it or from ``AppConfig.ready``.
 ``RegisteredParameterProvider`` registers at class creation, so a marker stays unhandled for exactly as long as the module defining its provider goes unimported.
 A class that registers after the first resolve joins the provider list by priority and the affected plans recompile, so a late import costs order predictability rather than correctness.
 

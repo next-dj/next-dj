@@ -22,8 +22,7 @@ Partial rendering uses a single protocol backend, so only the first entry runs.
 A singular ``*_BACKEND`` key holds the one engine for a concern.
 A subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``, ``URL_``, ``TEMPLATE_``, ``JS_``, ``PARTIAL_``) groups related keys.
 ``NEXT_JS_OPTIONS`` stands outside the prefix scheme and configures the bundled client runtime.
-``METADATA``, ``SITE``, ``SEO``, and ``CONSENT`` stand outside it as the scopes of one concern each, and ``CSRF_DELIVERY``, ``CSP_NONCE``, ``BOUNDARIES``, and ``BOUNDARIES_IMPORT_GRAPH`` as single values.
-The ``*_AUTODISCOVER`` keys share a suffix instead, one per application module the framework imports at startup.
+``METADATA``, ``SITE``, ``SEO``, and ``CONSENT`` stand outside it as the scopes of one concern each, and ``CSRF_DELIVERY`` and ``CSP_NONCE`` as single values.
 
 .. _ref-settings-merge:
 
@@ -51,11 +50,10 @@ Each key accepts one shape, and a value of any other type is dropped in favour o
 - The list keys (``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``PARTIAL_BACKENDS``, ``TEMPLATE_LOADERS``, ``FORM_ANCHOR_FILES``) accept a list.
 - The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``, ``METADATA``, ``SITE``, ``SEO``, ``CONSENT``) accept a dict.
 - The dotted-path keys (``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string naming an importable class, and ``JS_CONTEXT_SERIALIZER`` accepts such a dotted path or ``None``.
-- ``CSRF_DELIVERY`` accepts a string naming a mode, and ``BOUNDARIES`` such a string or ``None``.
-- ``BOUNDARIES_IMPORT_GRAPH`` accepts a dotted path naming an importable class or ``None``.
+- ``CSRF_DELIVERY`` accepts a string naming a mode.
 - ``STATIC_VERSION`` accepts a string or ``None``.
 - ``URL_NAME_TEMPLATE`` also accepts a string, but a format template such as ``page_{name}`` rather than a dotted path.
-- The bool flags (``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``DEPS_AUTODISCOVER``, ``PERMISSIONS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, ``SIGNALS_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, ``CSP_NONCE``) accept any value and pass through ``bool()``.
+- The bool flags (``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, ``CSP_NONCE``) accept any value and pass through ``bool()``.
 
 A dropped value is reported at ``manage.py check`` as ``next.E076``, or under the code the key owns where it carries one, and a bool flag holding a non-bool is reported as ``next.W072``.
 A top-level key that is not in this catalog is reported as ``next.E035``, and the merged view raises ``AttributeError`` for it, so a typo never reaches a read site as a default.
@@ -229,28 +227,10 @@ See :doc:`/content/topics/partial-rendering/reference` for the wire protocol and
 Application modules
 -------------------
 
-``NextFrameworkConfig.ready`` imports four conventional modules from every installed app, the third-party ones included.
+``NextFrameworkConfig.ready`` imports four conventional modules from every installed app, the third-party ones included, the way Django's admin imports every ``admin.py``.
 All ``deps`` modules load first, then all ``permissions`` modules, then all ``forms`` modules, then all ``signals`` modules, so a form finds the providers, named dependencies, and object permissions of every app already registered.
 An app without the module is skipped, and a module that fails to import raises its own error out of ``ready``.
-A key set to ``False`` turns off that one sweep, and the project imports the modules it wants from ``AppConfig.ready`` instead.
-
-DEPS_AUTODISCOVER
-~~~~~~~~~~~~~~~~~
-
-Boolean that controls whether the ``deps`` submodule of every installed app is imported on startup.
-
-Default value ``True``.
-
-When ``True``, the named dependencies and parameter providers declared in ``app/deps.py`` register before any form, component, or page module loads.
-
-PERMISSIONS_AUTODISCOVER
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-Boolean that controls whether the ``permissions`` submodule of every installed app is imported on startup.
-
-Default value ``True``.
-
-When ``True``, the predicates that ``app/permissions.py`` registers through ``add_perm`` are in place before any ``forms.py`` loads, see :doc:`/content/topics/permissions`.
+The ``deps``, ``permissions``, and ``signals`` sweeps always run, and ``FORM_AUTODISCOVER`` turns off the ``forms`` one.
 
 FORM_AUTODISCOVER
 ~~~~~~~~~~~~~~~~~
@@ -261,16 +241,7 @@ Default value ``True``.
 
 When ``True``, shared forms declared in ``app/forms.py`` register before the first request arrives.
 ``next.forms.autodiscover_forms`` runs the same sweep on a manual call and honours the key as well.
-
-SIGNALS_AUTODISCOVER
-~~~~~~~~~~~~~~~~~~~~
-
-Boolean that controls whether the ``signals`` submodule of every installed app is imported on startup.
-
-Default value ``True``.
-
-When ``True``, the receivers declared in ``app/signals.py`` connect before the first request arrives.
-Set it to ``False`` when an installed package keeps a ``signals.py`` that must load only behind a switch of its own, since the sweep imports that module as well.
+A project that sets it to ``False`` imports the ``forms`` modules it wants from ``AppConfig.ready``.
 
 Routing
 -------
@@ -293,7 +264,7 @@ Dotted path to the resolver class that wraps the framework urlpatterns.
 
 Default value ``"next.urls.TrieURLResolver"``.
 
-The class is instantiated with a root route pattern and the lazy sequence of router and form-action patterns, so it owns every resolution under the ``include("next.urls")`` mount.
+The class is instantiated with a root route pattern and the lazy sequence of router and form-action patterns, so it owns every resolution under the ``include("next.urls")`` point.
 The default ``TrieURLResolver`` resolves a static route through a dictionary lookup and a parameterised route through a walk over a segment trie, with the final match delegated to standard Django pattern resolution.
 Set the key to ``"django.urls.resolvers.URLResolver"`` to opt out of the trie and run every resolution through Django's plain linear scan.
 A custom value must name a :class:`~django.urls.URLResolver` subclass whose constructor accepts the same pattern and pattern-sequence pair.
@@ -664,35 +635,6 @@ Without it, only a page whose tree declares scripts or whose render meets a ``{%
 ``manage.py check`` reports a value the scope cannot use, see :ref:`ref-system-checks`.
 See :doc:`/content/topics/scripts/consent`.
 
-Boundaries
-----------
-
-BOUNDARIES
-~~~~~~~~~~
-
-String naming the mode of the boundary checks, or ``None`` to leave them off.
-
-Default value ``None``.
-
-Without the key the boundaries are off, both boundary checks report nothing even under ``manage.py check --tag boundaries``, and ``manage.py next boundaries`` stops with one line that names the key.
-``"warn"`` turns them on and reports a boundary finding that ``boundaries.toml`` does not record as a warning, which leaves the exit status of ``manage.py check --tag boundaries`` at zero.
-``"strict"`` adds ``next.E171`` while such a finding remains, so the run fails until each one is fixed or recorded.
-The project template of next.dj sets ``"strict"``.
-Any other value, a string outside the two or a value of another type such as ``True``, leaves the boundaries off and is ``next.E172``, which a plain ``manage.py check`` and ``--tag boundaries`` both report once.
-The checks run only under ``manage.py check --tag boundaries`` in either mode.
-See :doc:`/content/topics/boundaries`.
-
-BOUNDARIES_IMPORT_GRAPH
-~~~~~~~~~~~~~~~~~~~~~~~
-
-Dotted path to the ``next.boundaries.ImportGraphBackend`` subclass that reads the import graph of the project.
-
-Default value ``None``.
-
-``None`` picks ``next.boundaries.GrimpImportGraph`` when grimp is installed, which the ``boundaries`` extra does, and ``next.boundaries.AstImportGraph`` otherwise.
-A path that does not import, names no concrete subclass of ``ImportGraphBackend``, or names ``GrimpImportGraph`` without grimp is ``next.E176``, and so is a value that is neither a string nor ``None``.
-See :ref:`topics-boundaries-import-graph`.
-
 Patching defaults
 -----------------
 
@@ -736,5 +678,4 @@ See also
    :doc:`/content/topics/static-assets/js-context` for ``NEXT_JS_OPTIONS``.
    :doc:`/content/topics/seo/metadata` for ``METADATA`` and :doc:`/content/topics/seo/site` for ``SITE``.
    :doc:`/content/topics/scripts/index` for ``CONSENT`` and :doc:`/content/security/csp-and-nonce` for ``CSP_NONCE``.
-   :doc:`/content/topics/boundaries` for ``BOUNDARIES`` and ``BOUNDARIES_IMPORT_GRAPH``.
    :class:`next.static.runtime.ScriptInjectionPolicy` for the policy enum.

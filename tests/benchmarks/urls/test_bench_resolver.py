@@ -41,7 +41,7 @@ _MOUNT_PREFIX = "wallets/<int:wallet>/"
 
 
 def _build_mounted_patterns() -> list[URLPattern]:
-    """Return a mounted tree with its prefix in each route, then an unprefixed one."""
+    """Return a tree under a parametrised segment in each route, then one beside it."""
     mounted = [
         path(
             f"{_MOUNT_PREFIX}sec{i}/page{j}/",
@@ -56,7 +56,7 @@ def _build_mounted_patterns() -> list[URLPattern]:
 
 @pytest.fixture(scope="module")
 def mounted_resolver() -> URLResolver:
-    """Return a trie over a prefixed tree and an unprefixed one, as `mounts` builds."""
+    """Return one trie over a tree under a parametrised segment and one beside it."""
     built = TrieURLResolver(RoutePattern(""), _build_mounted_patterns())
     with contextlib.suppress(Resolver404):
         built.resolve("warmup/miss/")
@@ -117,7 +117,7 @@ class TestBenchResolverModes:
 
 
 class TestBenchMountedResolve:
-    """A route under a mount prefix against one beside it, through the trie."""
+    """A route under a parametrised segment against one beside it, through the trie."""
 
     @pytest.mark.benchmark(group="urls.resolver")
     def test_mounted_prefix_hit(self, mounted_resolver: URLResolver, benchmark) -> None:

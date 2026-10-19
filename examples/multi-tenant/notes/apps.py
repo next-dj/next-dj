@@ -5,4 +5,3 @@ class NotesConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "notes"
     label = "notes"
-    depends_on = ()

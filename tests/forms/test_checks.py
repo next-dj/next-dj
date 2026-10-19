@@ -5,11 +5,10 @@ import pytest
 from django import forms as django_forms
 from django.test import override_settings
 
-from next.forms import ActionRegistration, Form, FormWizard, RegistryFormActionBackend
+from next.forms import ActionRegistration, FormWizard, RegistryFormActionBackend
 from next.forms.backends import _handler_fingerprint, record_possible_collision
 from next.forms.checks import (
     check_action_applied_to_class,
-    check_action_guard_permissions_known,
     check_form_action_backends_configuration,
     check_form_action_collisions,
     check_form_anchor_files,
@@ -28,7 +27,6 @@ from next.forms.decorators import action
 from next.forms.manager import form_action_manager
 from next.forms.registration import registration_diagnostics
 from next.forms.signals import action_registered
-from next.permissions import add_perm
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
@@ -975,71 +973,3 @@ class TestCheckFormAnchorFiles:
         assert len(errors) == 1
         assert errors[0].id == "next.E086"
         assert "only strings" in errors[0].msg
-
-
-def _w129_naming(action_name: str) -> list[str]:
-    return [
-        message.id
-        for message in check_action_guard_permissions_known()
-        if repr(action_name) in message.msg
-    ]
-
-
-@pytest.mark.usefixtures("isolated_permissions")
-class TestCheckActionGuardPermissionsKnown:
-    """W129 warns when permission_required names a permission nothing grants."""
-
-    def test_an_unknown_permission_in_a_form_meta_warns(self) -> None:
-        class W129UnknownForm(Form):
-            class Meta:
-                permission_required = ("auth.add_user", "blog.publish_post")
-
-        messages = [
-            message
-            for message in check_action_guard_permissions_known()
-            if "'w129_unknown_form'" in message.msg
-        ]
-        assert [m.id for m in messages] == ["next.W129"]
-        assert "'blog.publish_post'" in messages[0].msg
-        assert "'auth.add_user'" not in messages[0].msg
-
-    def test_an_unknown_permission_in_an_action_kwarg_warns(self) -> None:
-        @action("w129_handler", permission_required="blog.publish_post")
-        def w129_handler(request):
-            return None
-
-        assert _w129_naming("w129_handler") == ["next.W129"]
-
-    @pytest.mark.parametrize(
-        "perm",
-        [
-            pytest.param("auth.add_user", id="model-permission"),
-            pytest.param("blog.publish_post", id="registered"),
-        ],
-    )
-    def test_a_permission_something_grants_is_silent(self, perm: str) -> None:
-        add_perm("blog.publish_post", lambda: True)
-
-        class W129KnownForm(Form):
-            class Meta:
-                permission_required = perm
-
-        assert _w129_naming("w129_known_form") == []
-
-    def test_a_login_only_guard_is_silent(self) -> None:
-        class W129LoginForm(Form):
-            class Meta:
-                login_required = True
-
-        assert _w129_naming("w129_login_form") == []
-
-    def test_silent_without_the_auth_app(self, settings) -> None:
-        class W129NoAuthForm(Form):
-            class Meta:
-                permission_required = "blog.publish_post"
-
-        assert _w129_naming("w129_no_auth_form") == ["next.W129"]
-        settings.INSTALLED_APPS = [
-            app for app in settings.INSTALLED_APPS if app != "django.contrib.auth"
-        ]
-        assert check_action_guard_permissions_known() == []

@@ -1056,7 +1056,7 @@ class TestBreadcrumbUrls:
 
 
 class TestMountedTreeBreadcrumbs:
-    """A crumb inside a mounted tree reverses under its prefix and the prefix kwargs."""
+    """A crumb inside a `pages()` tree reverses under its prefix and its kwargs."""
 
     CRUMBS = (Crumb("Home", ""), Crumb("Ops", "ops"), Crumb("Op", "ops/[int:pk]"))
 
@@ -1066,47 +1066,36 @@ class TestMountedTreeBreadcrumbs:
         meta = Metadata(breadcrumbs=self.CRUMBS)
         return resolve_metadata(meta, request=request).breadcrumbs
 
-    def _app(self, root, **declared: object) -> None:
-        write_app(root, "wallets", {"pages": ("", "ops", "ops/[int:pk]")}, **declared)
+    def _app(self, root) -> None:
+        write_app(root, "wallets", {"pages": ("", "ops", "ops/[int:pk]")})
 
-    @pytest.mark.parametrize(
-        ("declared", "path", "urls"),
-        [
-            ({}, "/ops/4/", ["/", "/ops/", "/ops/4/"]),
-            ({"mount": "w/"}, "/w/ops/4/", ["/w/", "/w/ops/", "/w/ops/4/"]),
-            (
-                {"mounts": {"pages": "w/<int:wallet>/"}},
-                "/w/3/ops/4/",
-                ["/w/3/", "/w/3/ops/", "/w/3/ops/4/"],
-            ),
-        ],
-        ids=["unprefixed", "mount", "prefix_kwarg"],
-    )
-    def test_a_declared_prefix(self, tmp_path, declared, path, urls) -> None:
-        self._app(tmp_path, **declared)
+    def test_an_auto_assembled_tree(self, tmp_path) -> None:
+        self._app(tmp_path)
 
         with installed_apps(tmp_path, "wallets", urlconf=NAMESPACED_URLCONF):
-            crumbs = self._crumbs(path)
+            crumbs = self._crumbs("/ops/4/")
 
-        assert [crumb.url for crumb in crumbs] == urls
+        assert [crumb.url for crumb in crumbs] == ["/", "/ops/", "/ops/4/"]
         assert [crumb.current for crumb in crumbs] == [False, False, True]
 
-    def test_a_pages_include_in_its_namespace(self, tmp_path) -> None:
+    @pytest.mark.parametrize(
+        ("prefix", "head"),
+        [("w/", "/w/"), ("org/<int:org>/w/", "/org/1/w/")],
+        ids=["plain", "prefix_kwarg"],
+    )
+    def test_a_pages_include_in_its_namespace(self, tmp_path, prefix, head) -> None:
         self._app(tmp_path)
         urlconf = write_urlconf(
             tmp_path,
             "crumb_urls",
-            'path("org/<int:org>/w/", pages("wallets", namespace="money"))',
+            f'path("{prefix}", pages("wallets", namespace="money"))',
         )
 
         with installed_apps(tmp_path, "wallets", urlconf=urlconf):
-            crumbs = self._crumbs("/org/1/w/ops/4/")
+            crumbs = self._crumbs(f"{head}ops/4/")
 
-        assert [crumb.url for crumb in crumbs] == [
-            "/org/1/w/",
-            "/org/1/w/ops/",
-            "/org/1/w/ops/4/",
-        ]
+        assert [crumb.url for crumb in crumbs] == [head, f"{head}ops/", f"{head}ops/4/"]
+        assert [crumb.current for crumb in crumbs] == [False, False, True]
 
 
 class TestLazyBreadcrumbs:

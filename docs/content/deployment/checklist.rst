@@ -132,7 +132,7 @@ Monitoring
 
 - Forward ``page_rendered`` and ``action_dispatched`` to your metrics pipeline.
 - Forward ``form_validation_failed`` to alerting when failure rate exceeds the baseline.
-- Track ``router_reloaded`` if the project mounts a dynamic router.
+- Track ``router_reloaded`` if the project routes through a dynamic router.
 - Forward ``sse_stream_opened``, ``sse_stream_closed``, and ``zone_rendered`` when the project uses partial rendering.
 
 System checks
@@ -154,26 +154,13 @@ Each one costs a full walk of the page tree, which is why it is paid once per de
 
 See :ref:`ref-system-checks` for the full catalog.
 
-Boundaries
-----------
+Several deployments
+-------------------
 
-Hold the boundaries between applications in CI, so a new edge across them fails the build rather than the next refactor.
-
-.. code-block:: bash
-   :caption: shell
-
-   uv run python manage.py check --tag boundaries --fail-level WARNING
-
-- ``NEXT_FRAMEWORK["BOUNDARIES"]`` names a mode, since without it the checks report nothing, and ``"strict"`` fails the step on every finding that ``boundaries.toml`` does not record.
-- The step runs ``--tag boundaries``, because a plain ``manage.py check`` and ``--deploy`` leave the boundary checks out.
-- The ``boundaries`` extra is optional and only speeds the scan up with grimp, since next.dj reads the import graph without it.
-- ``boundaries.toml`` is committed with the project, since it is the record of the debt the build accepts.
-- CI never writes ``boundaries.toml``, because only ``manage.py next boundaries --refreeze`` does, and a checkout without the file counts every finding in full.
-- A change to ``boundaries.toml`` goes through review like code, since a smaller record pays debt off and a larger one accepts new debt.
-- A project whose applications declare ``depends_on`` runs ``manage.py next boundaries --exact`` beside the check, so an entry no code uses fails the build too.
-- A project that ships several deployments from one code base runs ``manage.py check --tag boundaries --fail-level WARNING --settings=...`` and ``manage.py check --deploy --settings=...`` for each of them, so ``next.E174`` and Django's own relation checks prove every deployment closed, see :doc:`split-deployments`.
-
-See :doc:`/content/topics/boundaries` for the rules, the ratchet, and the modes.
+One code base can ship as several deployments, such as a public site and a back office, each with a settings module of its own over a shared base, its own ``INSTALLED_APPS``, and its own ``ROOT_URLCONF``.
+The file router walks the page trees of the installed applications alone, so ``manage.py routes --settings=config.settings.backoffice`` lists exactly what that deployment serves.
+CI runs ``manage.py check --deploy --settings=...`` once per deployment, where Django reports a relation declared by a string into an application the settings leave out as ``fields.E300`` and ``fields.E307``, see :doc:`django:ref/checks`.
+A deployment that no CI step checks is the one whose missing application reaches production first, and :doc:`/content/howto/split-settings-per-environment` covers the settings package the deployments build on.
 
 Access control tests
 --------------------
@@ -193,7 +180,7 @@ Hit at least three URLs after the deploy.
 - One captured URL such as ``/notes/<existing-id>/``.
 - One action endpoint through a simulated POST.
 
-The smoke tests confirm that the file router is mounted, the database is reachable, and the dispatcher resolves URLs.
+The smoke tests confirm that the file router is included, the database is reachable, and the dispatcher resolves URLs.
 
 See also
 --------
@@ -202,5 +189,4 @@ See also
 
    :doc:`static-files` for static file handling.
    :doc:`settings` for production settings.
-   :doc:`split-deployments` for several deployments over one code base.
    :doc:`/content/security/index` for the security checklist.

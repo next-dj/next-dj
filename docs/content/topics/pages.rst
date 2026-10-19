@@ -211,7 +211,7 @@ A requirement a section shares lives in a ``proxy.py`` of the section directory,
 
    page.permission_required("notes.edit_note", obj=DObject[Note])
 
-``page.public()`` lifts the requirements of every ``proxy.py`` above the page for that page alone, and ``manage.py check`` lists the lift as ``next.W135``.
+``page.public()`` lifts the requirements of every ``proxy.py`` above the page for that page alone, and ``manage.py permissions`` names the file of the lift.
 See :ref:`topics-permissions-tree` for the order of the checks and the answer to a refusal.
 
 Custom template loaders
@@ -330,7 +330,7 @@ Adopting next.dj in an existing codebase does not require porting the views alre
 Resolution order
 ~~~~~~~~~~~~~~~~
 
-The file router mounts as a single ``include("next.urls")`` in the root URLconf, and the root URLconf stays an ordinary Django list resolved from top to bottom.
+The file router sits behind a single ``include("next.urls")`` in the root URLconf, and the root URLconf stays an ordinary Django list resolved from top to bottom.
 Every pattern written above the include is matched first, and a page whose directory produces the same URL never sees the request.
 The router registers no catch-all pattern, so a path that matches no page directory falls through to whatever follows the include.
 

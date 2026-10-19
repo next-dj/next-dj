@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from django.urls import URLPattern
 
 from next.conf import next_framework_settings
-from next.utils import PageRoot, PageSource, walk_page_tree
+from next.utils import PageRoot, walk_page_tree
 
 from .backends import FileRouterBackend
 from .errors import URLParameterError
@@ -23,18 +23,13 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-type Source = PageSource
-
-
 @dataclass(frozen=True, slots=True)
 class Route:
-    """One routed page, with its absolute route, its namespaced name and its origin."""
+    """One routed page, with its absolute route, its namespaced name and its file."""
 
     url: str
     name: str
-    app: str
     file: Path
-    source: Source
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +45,7 @@ def _route_url(root: PageRoot, trail: str, base: str) -> tuple[str, dict[str, st
 
     `base` is where the URLconf includes `next.urls`, and a refused trail raises.
     """
-    pattern, parameters = default_url_parser.parse_url_pattern(root.name_trail(trail))
+    pattern, parameters = default_url_parser.parse_url_pattern(trail)
     return f"/{tree_route(root, base)}{pattern}", parameters
 
 
@@ -81,13 +76,11 @@ def _tree_routes(
         if file_path not in routed:
             continue
         url, _parameters = _route_url(root, url_path, base)
-        name = default_url_parser.prepare_url_name(root.name_trail(url_path))
+        name = default_url_parser.prepare_url_name(url_path)
         yield Route(
             url=url,
             name=f"{root.namespace}:{template.format(name=name)}",
-            app=root.app,
             file=_page_file(file_path),
-            source=root.source,
         )
 
 
@@ -121,7 +114,7 @@ def collect_routes() -> list[Route]:
     if first is None:
         return []
     mounts = urlconf_mounts()
-    mounted = [root for root in first.page_roots() if root.source == "urls"]
+    mounted = [root for root in first.page_roots() if root.prefix is not None]
     routed = _routed_pages(first, mounted)
     base = mounts.include_point
     auto = (
@@ -132,7 +125,7 @@ def collect_routes() -> list[Route]:
             for router in router_manager.backends
             if isinstance(router, FileRouterBackend)
             for root in router.page_roots()
-            if root.source != "urls"
+            if root.prefix is None
             for route in _tree_routes(root, base, router.skip_dir_names(), routed)
         ]
     )
@@ -153,4 +146,4 @@ def collect_routes() -> list[Route]:
     ]
 
 
-__all__ = ["PageRoute", "Route", "Source", "collect_routes", "page_route"]
+__all__ = ["PageRoute", "Route", "collect_routes", "page_route"]

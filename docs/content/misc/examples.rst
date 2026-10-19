@@ -8,9 +8,6 @@ Each runs on SQLite and in-process ``LocMemCache``, with no Docker and no extern
 Tailwind loads from the Play CDN through a shared ``page_head`` component every root layout calls, so a machine with no network renders the pages unstyled.
 That component renders the head through ``{% metadata %}``, and every example names itself in ``SITE["NAME"]``, declares its viewport and title template in ``METADATA["DEFAULTS"]``, and names its tab icon, a static ``icon.svg``, in the ``icons`` metadata key.
 ``manage.py check --deploy --tag seo`` passes clean in every example.
-Every example sets ``NEXT_FRAMEWORK["BOUNDARIES"]`` to ``"strict"`` and passes ``manage.py check --tag boundaries --fail-level WARNING`` clean, see :doc:`/content/topics/boundaries`.
-Only ``admin`` keeps a ``boundaries.toml``, with one recorded finding shown on purpose as debt the ratchet lets shrink and never grow.
-``admin`` and ``multi-tenant`` declare ``depends_on`` on every application and pass ``manage.py next boundaries --exact``, and ``admin`` isolates its audit application, see :doc:`/content/howto/scale-to-contexts`.
 The ``kanban`` and ``live-polls`` folders add a Vite toolchain on top of that and need Node installed.
 Every application keeps its pages in ``pages/`` and its page-tree components in ``pages/_components/``, and every example registers a project-level ``DIRS`` root in ``PAGE_BACKENDS``.
 The ``admin`` example also serves the components at the root of its ``shadcn_admin`` application through ``COMPONENT_BACKENDS`` ``DIRS``.
@@ -74,12 +71,12 @@ The table runs roughly in order of how much it assumes.
      - :doc:`/content/topics/signals`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/index`
    * - :repo:`admin <tree/main/examples/admin>`
      - Rebuilds the Django admin on next.dj over the stock ``ModelAdmin`` hooks, with request-aware form factories, guards on every mutating action, server-opened modal layers, keyed inline row forms, several page trees, and Django's ``LoginRequiredMiddleware`` beside a ``proxy.py`` login and permission requirement on every guarded page tree, with ``page.public()`` on the login page in a separate ``auth_pages`` tree.
-       Its ``library`` application mounts a book tree under ``library/book/<int:book>/``, whose ``proxy.py`` checks ``library.change_book`` on the book itself through ``obj=DObject[Book]``.
+       Each application keeps one ``pages/`` tree under the shared ``include("next.urls")``, so the ``library`` outline answers under ``library/book/<int:book>/``, whose ``proxy.py`` checks ``library.change_book`` on the book itself through ``obj=DObject[Book]``.
+       Breadcrumbs cross the trees by URL, so the activity feed reads ``Dashboard › Activity`` and the outline ``Dashboard › Books › Outline``.
        Titles every model page, the changelist, the add, change, and delete forms, and the history, after its model through ``@page.metadata(inherit=True)``, and keeps the whole site out of search through ``SITE["INDEXABLE"] = False``, publishing no sitemap or robots file.
-       Its ``admin_audit`` application mounts its activity page and the per-object history page through ``mounts`` on its ``AppConfig``, and plugs its sidebar link and dashboard panel into ``shadcn_admin`` through the ``nav_requested`` and ``panels_requested`` signals, an extension point that keeps the base from depending on the plugin and the two applications out of a cycle.
-       Its ``boundaries.toml`` records one finding, ``library/admin.py`` importing the admin base classes of ``shadcn_admin``, as debt the ratchet lets shrink and never grow.
-       Every application declares ``depends_on``, and ``admin_audit`` is isolated and returns a frozen ``HistoryEntry`` dataclass from its services.
-     - :doc:`/content/howto/integrate-django-admin`, :doc:`/content/howto/scale-to-contexts`, :doc:`/content/topics/multi-project`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/file-router`, :doc:`/content/topics/proxy`, :doc:`/content/topics/permissions`
+       Its ``admin_audit`` application serves its activity feed from its own ``pages/activity/`` and plugs its sidebar link and dashboard panel into ``shadcn_admin`` from its ``admin.py`` through ``register_nav`` and ``register_panel``, a registry in ``shadcn_admin/services.py`` that works the way ``admin.register`` does, so the base never imports the plugin.
+       Its object permissions in ``permissions.py`` are plain functions that combine their conditions with ``and`` and ``or``, and the seeded ``editor`` account shows them narrowing a staff user.
+     - :doc:`/content/howto/integrate-django-admin`, :doc:`/content/topics/multi-project`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/file-router`, :doc:`/content/topics/proxy`, :doc:`/content/topics/permissions`
 
 Shared assets
 -------------
@@ -87,8 +84,8 @@ Shared assets
 * :repo:`_shared <tree/main/examples/_shared>`.
   A shadcn-inspired component palette every example consumes through ``COMPONENT_BACKENDS`` ``DIRS``, with its design tokens in one stylesheet.
 * :repo:`_template <tree/main/examples/_template>`.
-  The skeleton every example is copied from, the output of the ``startproject`` and ``startapp`` templates of next.dj plus the shared UI kit and the test scaffold.
-  It runs and passes its tests while demonstrating nothing beyond the starter, and its README names the two commands that produce it, see :ref:`intro-install-project-template`.
+  The skeleton every example is copied from, Django's own ``startproject`` and ``startapp`` output with the canonical next.dj files, the shared UI kit, and the test scaffold.
+  It runs and passes its tests while demonstrating nothing beyond the starter, and its README names the commands that produce it, see :ref:`intro-install-project`.
 
 See also
 --------

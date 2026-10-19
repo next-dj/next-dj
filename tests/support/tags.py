@@ -27,3 +27,10 @@ def staffonly(parser: Parser, token: Token) -> StaffOnlyNode:
     nodelist = parser.parse(("endstaffonly",))
     parser.delete_first_token()
     return StaffOnlyNode(nodelist)
+
+
+@register.simple_tag(takes_context=True)
+def peek(context: Context) -> str:
+    """Read the render context as a third-party tag may, writing nothing."""
+    del context
+    return ""

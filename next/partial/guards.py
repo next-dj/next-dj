@@ -1,15 +1,13 @@
-"""The zones a standalone render of a page refuses, and the blocks it asks again.
+"""The zones a standalone render of a page refuses, read once from its templates.
 
-The `next.E163` check, the zone registry and the zone render read this one analysis.
+The `next.E161` and `next.E063` checks and the zone registry read this one analysis.
 """
 
 from collections.abc import Iterator
-from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, override
 
-from django.template import Context
 from django.template.base import (
     FilterExpression,
     Node,
@@ -35,15 +33,12 @@ from next.components.renderers import SLOT_KEY_PREFIX
 from next.components.sources import Position, TemplateWalk
 from next.pages.paths import page_template_path
 from next.permissions.nodes import HasPermNode
-from next.seeding import REQUEST_KEY
 from next.utils import child_nodelists, template_edits_watched
 
 from .zone import ZoneNode, zones_under
 
 
 if TYPE_CHECKING:
-    from django.http import HttpRequest
-
     from next.components.manager import ComponentsManager
     from next.components.renderers import TemplateSource
 
@@ -54,7 +49,7 @@ type Stamps = frozenset[tuple[Path, float]]
 type _Read = set[tuple[Path, float]]
 type _Placed = list[tuple[Node, bool]]
 
-_CONDITIONS: Final = (IfNode, ForNode)
+_CONDITIONS: Final = (IfNode, ForNode, HasPermNode)
 _BODY: Final = "children"
 _KNOWN_MODULES: Final = ("django.", "next.")
 _PASSING_FILTERS: Final = (safe, default, default_if_none)
@@ -220,9 +215,13 @@ class _Body:
 
 
 def _opaque(node: Node) -> bool:
-    """Return whether a node runs code the analysis cannot read."""
-    if isinstance(node, TagHelperNode) and node.takes_context:
-        return True
+    """Return whether a node runs code the analysis cannot read.
+
+    A tag helper is told apart by its function, since every helper node is Django's.
+    """
+    if isinstance(node, TagHelperNode):
+        module = getattr(node.func, "__module__", None) or ""
+        return node.takes_context and not module.startswith(_KNOWN_MODULES)
     return not type(node).__module__.startswith(_KNOWN_MODULES)
 
 
@@ -384,127 +383,18 @@ def opaque_zones(
 def bound_zones(nodelist: NodeList, components: Components) -> frozenset[str]:
     """Return the zones a standalone render must refuse, in a guard or a condition.
 
-    A condition or a tag the analysis cannot read above a zone decides like a component.
+    A `{% has_perm %}`, a condition or an unread tag above a zone decides like one.
     """
     guarded = {name for name, _ in guarded_zones(nodelist, components)}
     guarded.update(name for name, _ in opaque_zones(nodelist))
     return frozenset(guarded.union(zones_under(nodelist, _CONDITIONS)))
 
 
-@dataclass(frozen=True, slots=True)
-class _Branch:
-    """One `{% has_perm %}` above a zone and whether the zone is in its first branch."""
-
-    node: HasPermNode
-    granted: bool
-
-    def holds(self, context: Context) -> bool:
-        """Return whether the render takes the branch the zone sits in."""
-        return self.node.granted(context) is self.granted
-
-
-type _Step = _Branch | WithNode
-
-
-def _user_only(step: _Step) -> bool:
-    """Return whether a step asks the user for a permission named by a string."""
-    if not isinstance(step, _Branch):
-        return False
-    return step.node.obj is None and step.node.literal_perm() is not None
-
-
-def _has_user(request: "HttpRequest") -> bool:
-    return getattr(request, "user", None) is not None
-
-
-@dataclass(frozen=True, slots=True)
-class Recheck:
-    """The `{% has_perm %}` blocks above one zone, asked again before it renders alone.
-
-    A block asking the user a permission named by a string runs before the page context.
-    """
-
-    steps: tuple[_Step, ...]
-    early: tuple[_Branch, ...]
-    late: tuple[_Step, ...]
-
-    def refuses_user(self, request: "HttpRequest") -> bool:
-        """Return whether a block that asks only the user refuses the request."""
-        if not self.early or not _has_user(request):
-            return False
-        context = Context({REQUEST_KEY: request})
-        return not all(branch.holds(context) for branch in self.early)
-
-    def refuses(self, context: Context, request: "HttpRequest") -> bool:
-        """Return whether a block above the zone refuses the render context.
-
-        The `{% with %}` bindings above a block are pushed for it as a full render does.
-        """
-        steps = self.late if _has_user(request) else self.steps
-        with ExitStack() as stack:
-            for step in steps:
-                if isinstance(step, WithNode):
-                    values = {
-                        key: value.resolve(context)
-                        for key, value in step.extra_context.items()
-                    }
-                    stack.enter_context(context.push(values))
-                elif not step.holds(context):
-                    return True
-        return False
-
-
-def _trimmed(steps: tuple[_Step, ...]) -> tuple[_Step, ...]:
-    """Return the steps up to the last block, a binding below it changes nothing."""
-    last = max(
-        (at for at, step in enumerate(steps) if isinstance(step, _Branch)), default=-1
-    )
-    return steps[: last + 1]
-
-
-def _recheck(chain: tuple[_Step, ...]) -> Recheck | None:
-    steps = _trimmed(chain)
-    if not steps:
-        return None
-    early = tuple(
-        step for step in steps if isinstance(step, _Branch) and _user_only(step)
-    )
-    late = _trimmed(tuple(step for step in steps if not _user_only(step)))
-    return Recheck(steps, early, late)
-
-
-def rechecks(nodelist: NodeList) -> dict[str, Recheck]:
-    """Return the blocks to ask again for each zone a `{% has_perm %}` holds.
-
-    The last zone of a repeated name wins, as it does in the zone registry.
-    """
-    found: dict[str, Recheck | None] = {}
-    _collect(nodelist, (), found)
-    return {name: recheck for name, recheck in found.items() if recheck is not None}
-
-
-def _collect(
-    nodelist: NodeList, chain: tuple[_Step, ...], found: dict[str, Recheck | None]
-) -> None:
-    for node in nodelist:
-        if isinstance(node, ZoneNode):
-            found[node.name] = _recheck(chain)
-        if isinstance(node, HasPermNode):
-            _collect(node.nodelist_true, (*chain, _Branch(node, granted=True)), found)
-            _collect(node.nodelist_false, (*chain, _Branch(node, granted=False)), found)
-            continue
-        inner = (*chain, node) if isinstance(node, WithNode) else chain
-        for child in child_nodelists(node):
-            _collect(child, inner, found)
-
-
 __all__ = [
     "Components",
-    "Recheck",
     "Stamps",
     "bound_zones",
     "fresh",
     "guarded_zones",
     "opaque_zones",
-    "rechecks",
 ]

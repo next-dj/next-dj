@@ -9,7 +9,7 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 
 from next.checks import NEXT
 
-from .defaults import BOUNDARIES_MODES, USER_SETTING
+from .defaults import USER_SETTING
 from .merge import OPTIONAL_STR_KEYS, UNSET, accepted_value
 from .settings import NextFrameworkSettings
 
@@ -48,11 +48,7 @@ _TYPED_LIST_KEYS: frozenset[str] = NextFrameworkSettings.LIST_KEYS - {
     "FORM_ANCHOR_FILES",
     "PARTIAL_BACKENDS",
 }
-_TYPED_OPTIONAL_KEYS: frozenset[str] = OPTIONAL_STR_KEYS - {
-    "BOUNDARIES",
-    "BOUNDARIES_IMPORT_GRAPH",
-    "JS_CONTEXT_SERIALIZER",
-}
+_TYPED_OPTIONAL_KEYS: frozenset[str] = OPTIONAL_STR_KEYS - {"JS_CONTEXT_SERIALIZER"}
 _KEY_TYPES: dict[str, type] = (
     dict.fromkeys(sorted(_TYPED_LIST_KEYS), list)
     | dict.fromkeys(sorted(NextFrameworkSettings.STR_KEYS), str)
@@ -133,30 +129,7 @@ def _non_bool_warnings(raw: dict[str, Any]) -> list[CheckMessage]:
     ]
 
 
-@register(NEXT)
-def check_next_framework_boundaries_mode(*args, **kwargs) -> list[CheckMessage]:
-    """Require `BOUNDARIES` to name a mode of the boundary checks (`next.E172`).
-
-    The boundary registry lends it to `check --tag boundaries` when `next` is not run.
-    """
-    raw = getattr(settings, USER_SETTING, None)
-    value = raw.get("BOUNDARIES") if isinstance(raw, dict) else None
-    if value is None or value in BOUNDARIES_MODES:
-        return []
-    modes = ", ".join(repr(mode) for mode in BOUNDARIES_MODES)
-    return [
-        Error(
-            f"NEXT_FRAMEWORK['BOUNDARIES'] is {value!r}, which names no mode, so the "
-            f"boundary checks do not run. Write one of {modes}, or leave it unset.",
-            hint=_SILENCE_HINT,
-            obj=settings,
-            id="next.E172",
-        )
-    ]
-
-
 __all__ = [
-    "check_next_framework_boundaries_mode",
     "check_next_framework_unknown_top_level_keys",
     "check_next_framework_value_types",
     "errors_for_unknown_keys",

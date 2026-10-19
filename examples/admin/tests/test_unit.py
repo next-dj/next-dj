@@ -1,15 +1,12 @@
-from io import StringIO
-
 import pytest
 from admin_audit.models import AdminActivityLog
-from admin_audit.services import HistoryEntry, object_history
 from django.contrib.admin.models import CHANGE, LogEntry
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.contenttypes.models import ContentType
-from django.core.management import call_command
 from library.models import Book
-from library.permissions import in_draft_book, is_draft, no_row, uses_admin
+from library.permissions import deletes_tag, edits_book, edits_chapter, uses_admin
 from shadcn_admin.permissions import is_staff
+from shadcn_admin.services import HistoryEntry, object_history
 
 from next.permissions import has_perm
 
@@ -31,23 +28,37 @@ class TestPredicates:
         assert uses_admin(django_user_model.objects.create_user("reader")) is False
         assert uses_admin(AnonymousUser()) is False
 
-    def test_no_row(self, editor, book) -> None:
-        assert no_row(editor, None) is True
-        assert no_row(editor, book) is False
-        assert no_row(AnonymousUser(), None) is True
+    def test_edits_book_lets_admin_users_touch_drafts_only(
+        self, editor, make_book, django_user_model
+    ) -> None:
+        assert edits_book(editor, None) is True
+        assert edits_book(editor, make_book(status=Book.DRAFT)) is True
+        assert edits_book(editor, make_book(status=Book.PUBLISHED)) is False
+        reader = django_user_model.objects.create_user("reader")
+        assert edits_book(reader, make_book(status=Book.DRAFT)) is False
+        assert edits_book(AnonymousUser(), None) is False
 
-    def test_is_draft(self, editor, make_book) -> None:
-        assert is_draft(editor, make_book(status=Book.DRAFT)) is True
-        assert is_draft(editor, make_book(status=Book.PUBLISHED)) is False
-        assert is_draft(editor, None) is False
-        assert is_draft(AnonymousUser(), make_book(status=Book.DRAFT)) is True
-
-    def test_in_draft_book(self, editor, make_book, make_chapter) -> None:
+    def test_edits_chapter_follows_the_book(
+        self, editor, make_book, make_chapter
+    ) -> None:
         draft = make_chapter(make_book(status=Book.DRAFT))
         archived = make_chapter(make_book(status=Book.ARCHIVED))
-        assert in_draft_book(editor, draft) is True
-        assert in_draft_book(editor, archived) is False
-        assert in_draft_book(editor, None) is False
+        assert edits_chapter(editor, draft) is True
+        assert edits_chapter(editor, archived) is False
+        assert edits_chapter(editor, None) is True
+        assert edits_chapter(AnonymousUser(), draft) is False
+
+    def test_deletes_tag_spares_tags_on_books_past_draft(
+        self, editor, make_book, make_tag
+    ) -> None:
+        loose = make_tag("Loose")
+        carried = make_tag("Carried")
+        make_book(status=Book.PUBLISHED).tags.add(carried)
+        make_book(status=Book.DRAFT).tags.add(loose)
+        assert deletes_tag(editor, loose) is True
+        assert deletes_tag(editor, carried) is False
+        assert deletes_tag(editor, None) is True
+        assert deletes_tag(AnonymousUser(), None) is False
 
 
 class TestBookScope:
@@ -111,15 +122,7 @@ class TestRegisteredRules:
             assert has_perm(user, "library.add_tag") is False
 
 
-class TestAuditIsolation:
-    def test_the_canvas_marks_the_audit_app_isolated(self) -> None:
-        out = StringIO()
-        call_command("next", "boundaries", "admin_audit", stdout=out)
-        assert out.getvalue().splitlines()[:2] == [
-            "admin_audit (admin_audit)",
-            "Isolated: yes",
-        ]
-
+class TestAuditHistory:
     def test_object_history_hands_out_history_entries(self, admin_user, book) -> None:
         logged = LogEntry.objects.create(
             user=admin_user,

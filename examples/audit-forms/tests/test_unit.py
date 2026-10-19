@@ -284,10 +284,13 @@ class TestWizardPermissionHook:
 class TestAccessDeniedReceiver:
     """`_on_form_access_denied` records the denial layer and reason."""
 
-    def test_receiver_stores_layer_and_reason(self) -> None:
-        _on_form_access_denied(
-            action_name="access_request_wizard", layer="view", reason="denied"
-        )
+    def test_receiver_stores_layer_and_reason(
+        self, django_capture_on_commit_callbacks
+    ) -> None:
+        with django_capture_on_commit_callbacks(execute=True):
+            _on_form_access_denied(
+                action_name="access_request_wizard", layer="view", reason="denied"
+            )
         row = AuditEntry.objects.get(kind=AuditEntry.KIND_ACCESS_DENIED)
         assert row.source == AuditEntry.SOURCE_SIGNAL
         assert row.access_layer == "view"

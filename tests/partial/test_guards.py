@@ -332,7 +332,7 @@ class TestGuardedZones:
 
 
 class TestBoundZones:
-    """`bound_zones` adds the zones a condition decides to the guarded ones."""
+    """`bound_zones` adds the zones a condition or a `{% has_perm %}` decides."""
 
     def test_checks_and_conditions(self, page_file: Path) -> None:
         body = (
@@ -344,7 +344,7 @@ class TestBoundZones:
         )
         components = _components(page_file, guarded=GUARDED_CHILDREN)
         assert bound_zones(Template(body).nodelist, components) == frozenset(
-            {"b", "c", "d"}
+            {"a", "b", "c", "d"}
         )
 
 
@@ -403,13 +403,18 @@ class TestBodyFlow:
             pytest.param('{% firstof children "x" %}', True, id="tag-reads-body"),
             pytest.param(
                 '{% load next_static %}{% use_style "a.css" %}{{ children }}',
-                True,
-                id="context-tag",
+                False,
+                id="next-context-tag",
             ),
         ],
     )
     def test_children_of_one_template(self, page_file: Path, text, guarding) -> None:
         assert _components(page_file, card=text).guarding("card") is guarding
+
+    @pytest.mark.usefixtures("guard_tags")
+    def test_a_third_party_context_tag_decides(self, page_file: Path) -> None:
+        text = "{% load guard_tags %}{% peek %}{{ children }}"
+        assert _components(page_file, card=text).guarding("card") is True
 
     @pytest.mark.parametrize(
         ("slot", "guarding"),

@@ -452,7 +452,7 @@ class TestScannedPageTrees:
     ) -> None:
         tree = tmp_path / "w"
         write_page(tree, "ops")
-        root = PageRoot(path=tree, label="App", prefix="w/<int:wallet>/", source="urls")
+        root = PageRoot(path=tree, label="App", prefix="w/<int:wallet>/")
         router = _RootTreeRouter([])
 
         with patch.object(router, "page_roots", return_value=[root, root]):
@@ -469,12 +469,7 @@ class TestScannedPageTrees:
         with patch("next.discovery.get_pages_directories", return_value=[tmp_path]):
             ((root, url_path, _page),) = iter_scanned_pages(router)
 
-        assert (root.path, root.prefix, root.source, url_path) == (
-            tmp_path,
-            "",
-            "root",
-            "ops",
-        )
+        assert (root.path, root.prefix, url_path) == (tmp_path, None, "ops")
 
 
 class TestEveryPagesRootIsScanned:

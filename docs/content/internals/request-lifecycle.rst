@@ -59,7 +59,7 @@ Authentication, sessions, CSRF, common middleware, and any project specific midd
 URL resolver
 ~~~~~~~~~~~~
 
-The framework registers its URL patterns through ``include("next.urls")`` in ``config/urls.py``, which mounts the framework's ``TrieURLResolver``.
+The framework registers its URL patterns through ``include("next.urls")`` in ``config/urls.py``, which hands Django the framework's ``TrieURLResolver``.
 The resolver narrows the request path to a few candidate patterns and matches them with standard Django pattern resolution, as :doc:`url-router` describes.
 A file routed match dispatches to the page view.
 A match on ``/_next/form/<str:uid>/`` dispatches to the form dispatcher instead.

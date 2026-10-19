@@ -91,7 +91,6 @@ AUTHENTICATION_BACKENDS = [
 LOGIN_URL = "/admin/login/"
 
 NEXT_FRAMEWORK = {
-    "BOUNDARIES": "strict",
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",

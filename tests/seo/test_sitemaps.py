@@ -552,23 +552,24 @@ class TestLatestLastmod:
 
 
 class TestMountedTreeSitemaps:
-    """A section of a mounted tree reverses its entries under the prefix of the tree."""
+    """A section of a `pages()` tree reverses its entries under the include prefix."""
 
     def _sections(self, root, *entries: str) -> dict[str, list[str]]:
-        write_app(root, "shop", {"pages": ("", "about")}, mount="shop/")
-        write_app(
-            root,
-            "wallets",
-            {"pages": ("", "about", "ops")},
-            mounts={"pages": "w/<int:wallet>/"},
-        )
+        write_app(root, "shop", {"pages": ("", "about")})
+        write_app(root, "wallets", {"pages": ("", "about", "ops")})
         write_app(root, "audit", {"pages": ("", "log")})
         for app in ("shop", "wallets", "audit"):
             (root / app / "pages" / "sitemap.py").write_text("")
         (root / "wallets" / "pages" / "sitemap.py").write_text(
             _items("@sitemap.items('ops')\ndef ops():\n    return [{'wallet': 3}]\n")
         )
-        urlconf = write_urlconf(root, "sitemap_urls", *entries)
+        urlconf = write_urlconf(
+            root,
+            "sitemap_urls",
+            'path("shop/", pages("shop"))',
+            'path("w/<int:wallet>/", pages("wallets"))',
+            *entries,
+        )
         with installed_apps(
             root, "shop", "wallets", "audit", urlconf=urlconf, framework=WITH_BASE
         ):
@@ -596,10 +597,10 @@ class TestMountedTreeSitemaps:
 
     @pytest.mark.parametrize(
         ("prefix", "kept"),
-        [("", True), ("shop/", True), ("w/<int:wallet>/", False)],
+        [(None, True), ("shop/", True), ("w/<int:wallet>/", False)],
         ids=["unprefixed", "static_prefix", "parameter_prefix"],
     )
     def test_static_trails_need_a_prefix_without_parameters(self, prefix, kept) -> None:
-        root = PageRoot(path=Path(), label="x", prefix=prefix, source="mounts")
+        root = PageRoot(path=Path(), label="x", prefix=prefix)
 
         assert static_trails(root, ["", "about"]) == (("", "about") if kept else ())

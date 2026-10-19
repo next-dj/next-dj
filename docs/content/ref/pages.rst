@@ -52,10 +52,10 @@ A view answers a refusal with a redirect to ``LOGIN_URL`` for an anonymous user,
 
 ``next.pages.access`` reads the rule of each page once per reload of a file in its chain.
 ``page_access(file_path)`` returns a ``PageAccess`` with the joined ``rule`` and the first ``broken`` file, and ``owner_access(file_path)`` the rule of the page in the directory of any file of a tree, which an action answers to.
-The joined ``rule`` is an ``AccessRule`` whose ``sources`` name the files of the requirements, or the file that opened a public rule, and whose ``lifted`` names the files a ``public()`` lifted.
+The joined ``rule`` holds the requirements in the order the chain declared them and ``sources`` naming the files of the requirements, or the file that opened a public rule.
 ``refusal(file_path, request, url_kwargs, dep_cache, *, middleware=False)`` is the check a page view and a foreign zone morph run, and ``middleware=True`` adds the login ``LoginRequiredMiddleware`` would ask, for a path the middleware never sees.
 ``url_lookup(request, url_kwargs, dep_cache)`` returns the lookup that loads the row an ``obj=DObject[Model]`` names, from the same cache a ``DObject`` parameter reads.
-``middleware_login(rule)`` tells whether the middleware asks a login of a rule, true only for a rule without requirements that is not public, and ``admits(file_path, request)`` tells whether a request passes the rule of a page without loading any object, which the breadcrumbs of a host page read.
+``middleware_login(rule)`` tells whether the middleware asks a login of a rule, true only for a rule without requirements that is not public, ``admits(file_path, request)`` tells whether a request passes the rule of a page without loading any object, which the breadcrumbs of a host page in another tree read, and ``anonymous_admitted(access)`` tells whether an anonymous request passes the rule of a page, which the sitemap reads to leave closed pages out.
 
 .. automodule:: next.pages.access
    :exclude-members: refusal
@@ -76,7 +76,7 @@ Manager
 ~~~~~~~
 
 ``next.pages.manager`` is a package.
-Its ``__init__`` holds ``Page`` and the ``page`` singleton, ``templates`` holds the per-page template cache, and ``views`` holds the routed views and the ``URLPattern`` factory the file router mounts them under.
+Its ``__init__`` holds ``Page`` and the ``page`` singleton, ``templates`` holds the per-page template cache, and ``views`` holds the routed views and the ``URLPattern`` factory the file router routes them through.
 
 .. automodule:: next.pages.manager
    :members:
@@ -247,7 +247,7 @@ System checks
 They run through ``uv run python manage.py check``, except ``check_page_module_imports``, which is a deployment check and runs under ``manage.py check --deploy``.
 The package splits by subject into ``access``, ``contexts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, and ``zones``, and importing the package registers every one of them.
 ``metadata`` is a package of its own, ``scope``, ``titles``, ``shape``, ``head``, ``ld``, ``links``, ``pages``, and ``templates``, and ``responses`` owns the ``cache``, ``headers``, ``CSRF_DELIVERY``, and ``CSRF_USE_SESSIONS`` checks, see :doc:`system-checks` for the codes each one owns.
-``access`` owns the checks of the access declarations, ``next.E165``, ``next.E166``, ``next.W132``, ``next.W133``, and ``next.W135``, while ``next.E164`` for an ``obj=DObject[Model]`` lives with the ``DObject`` checks in ``next.deps.checks``.
+``access`` owns the checks of the access declarations, ``next.E163``, ``next.E164``, and ``next.W128``, while ``next.E162`` for an ``obj=DObject[Model]`` lives with the ``DObject`` checks in ``next.deps.checks``.
 
 The package exports thirty-seven check callables.
 

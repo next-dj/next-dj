@@ -188,7 +188,7 @@ Creating a card has the same shape plus one extra problem. The action answers wi
 
 ### 9. Every board through one scope
 
-Every board a page or a settings form loads by URL arrives as `DObject[Board]` from `next.deps`. The parameter is named after the `[int:board]` segment, so `board: DObject[Board]` reads the pk out of the `board` URL kwarg and loads the row through `Board.objects.visible_to(scope)`, and a pk that query does not return answers `404`. That is why the directory is `[int:board]` rather than `[int:id]`, because the kwarg name is the parameter name and a parameter called `id` would shadow the builtin. `manage.py check` reports a `DObject` whose route captures no kwarg of its name as `next.W128`.
+Every board a page or a settings form loads by URL arrives as `DObject[Board]` from `next.deps`. The parameter is named after the `[int:board]` segment, so `board: DObject[Board]` reads the pk out of the `board` URL kwarg and loads the row through `Board.objects.visible_to(scope)`, and a pk that query does not return answers `404`. That is why the directory is `[int:board]` rather than `[int:id]`, because the kwarg name is the parameter name and a parameter called `id` would shadow the builtin. `manage.py check` reports a `DObject` whose route captures no kwarg of its name as `next.W126`.
 
 `scope` is a named dependency the project registers itself, in [`kanban/deps.py`](kanban/deps.py):
 
@@ -198,7 +198,7 @@ def scope(request: HttpRequest) -> AbstractBaseUser | AnonymousUser:
     return request.user
 ```
 
-The demo has no accounts, so `BoardQuerySet.visible_to` in [`kanban/models.py`](kanban/models.py) ignores the visitor and returns every board, archived ones included. That method is the one place a project with accounts narrows boards by membership, and every board page, settings form and card action follows it without another edit. The index and its counts read through it as well, `Board.objects.visible_to(user).active()` and `.archived()` with the visitor taken as `Depends("scope")`, because `NEXT_FRAMEWORK["BOUNDARIES"] = "strict"` holds every read of a page tree to `visible_to(...)` or a function of `services.py`. A project that declares a `DObject` and registers no `scope` fails `manage.py check` with `next.E159`, and a model whose default manager has no `visible_to` with `next.E155`.
+The demo has no accounts, so `BoardQuerySet.visible_to` in [`kanban/models.py`](kanban/models.py) ignores the visitor and returns every board, archived ones included. That method is the one place a project with accounts narrows boards by membership, and every board page, settings form and card action follows it without another edit. The index and its counts read through it as well, `Board.objects.visible_to(user).active()` and `.archived()` with the visitor taken as `Depends("scope")`, because every read of a page tree goes through `visible_to(...)` or a function of `services.py`. A project that declares a `DObject` and registers no `scope` fails `manage.py check` with `next.E157`, and a model whose default manager has no `visible_to` with `next.E153`.
 
 `RenameBoardForm` and `ArchiveBoardForm` are `ModelForm`s over the board the operator is already looking at. Both inherit `get_initial` from `BoardSettingsForm`, a base marked `Meta.abstract = True` so it registers no action of its own, and that `get_initial` takes `board: DObject[Board]` and returns it, so the dispatcher binds the instance from the `board` kwarg of the posted origin URL and neither form carries a hidden id. `Meta.instance_from_url` would load the same row with a plain `get_object_or_404`, past `visible_to`, which is why both forms ask the resolver instead. `CreateColumnForm` creates a row under the board rather than editing one, so its `on_valid` takes `board: DObject[Board]` directly and the form carries no board field at all.
 
@@ -263,4 +263,4 @@ The settings page hosts three independent `<form>` blocks. Each one posts to its
 - [`next/deps/providers.py`](../../next/deps/providers.py): `RegisteredParameterProvider` ABC used by `CardProvider`.
 - [`next/deps/objects.py`](../../next/deps/objects.py): `DObject` and the provider that loads its row through `visible_to(scope)`.
 - [`next/pages/metadata/`](../../next/pages/metadata/): the metadata chain behind `@page.metadata(inherit=True)` in section 10.
-- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst): `next.E155` to `next.E160` and `next.W128` for `DObject` and the `scope` dependency.
+- [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst): `next.E153` to `next.E158` and `next.W126` for `DObject` and the `scope` dependency.

@@ -34,7 +34,6 @@ Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_componen
 
 ```python
 NEXT_FRAMEWORK = {
-    "BOUNDARIES": "strict",
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
@@ -58,7 +57,7 @@ The router walks two roots. `DIRS` names the project-level page root [`host/`](h
 
 The app keeps the canonical next.dj layout. The page tree sits in `pages/` with its components in `pages/_components/`, the DI provider in [`deps.py`](shortener/deps.py) and the signal receiver in [`signals.py`](shortener/signals.py), both imported from [`apps.py`](shortener/apps.py). The two directory names stay settings, so a project that already has its own keeps them.
 
-Every read and write of a `Link` lives in [`services.py`](shortener/services.py), `latest_links`, `top_links`, `find_link`, `link_totals`, `create_link` and `delete_link`, and the pages call them. `"BOUNDARIES": "strict"` turns that habit into a check: `manage.py check --tag boundaries` fails when a page tree reads `.objects` without `.visible_to(...)` or saves past a form, and a link has no owner to narrow it by, so the pages ask the services.
+Every read and write of a `Link` lives in [`services.py`](shortener/services.py), `latest_links`, `top_links`, `find_link`, `link_totals`, `create_link` and `delete_link`, and the pages call them. A link has no owner to narrow it by, so the pages ask the services instead of reaching for `.objects` themselves.
 
 ### 2. Page, template, layout: how a URL is rendered
 
@@ -189,7 +188,7 @@ The admin list edits each link inline. The same form renders once per row, so ea
 
 [`EditLinkForm`](shortener/pages/admin/page.py) is a `ModelForm` over `Link` and resolves the edited row from the posted `slug` in `get_initial`, so one registered form serves every row. A looped `{% form %}` without `key=` or `zone=` raises `next.W070`.
 
-The example signs nobody in, the `/admin/` panel included, so the three pages that declare actions, the home page, [`pages/admin/page.py`](shortener/pages/admin/page.py) and the link detail page, call `page.public()`. That tells `manage.py check` the actions are open on purpose instead of reporting them as `next.W134`. A deployment with accounts drops the two calls under `pages/admin/` for a `proxy.py` there with `proxy.login_required()`, since a `page.public()` below it would lift that requirement again and `manage.py check` would list the lift as `next.W135`.
+The example signs nobody in, the `/admin/` panel included, so the three pages that declare actions, the home page, [`pages/admin/page.py`](shortener/pages/admin/page.py) and the link detail page, call `page.public()`, which declares the actions open on purpose, and `manage.py permissions` lists all four as `public`. `manage.py check` reports `next.W129` for an action nothing guards only in a project that declares access, and the declaration itself is that guard. A deployment with accounts drops the two calls under `pages/admin/` for a `proxy.py` there with `proxy.login_required()`, since a `page.public()` below it would lift that requirement again.
 
 ### 6. Patch envelopes: `prepend`, `remove`, and an out-of-band foreign morph
 

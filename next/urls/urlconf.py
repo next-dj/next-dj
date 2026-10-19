@@ -106,12 +106,12 @@ def tree_route(root: PageRoot, include_point: str) -> str:
 
     A `pages()` tree carries it as its prefix, and any other starts at `include_point`.
     """
-    return root.prefix if root.source == "urls" else include_point
+    return include_point if root.prefix is None else root.prefix
 
 
 def outer_kwargs(root: PageRoot, mounts: UrlconfMounts) -> frozenset[str]:
     """Return the kwargs the URLconf captures around `root`, ahead of its own routes."""
-    if root.source != "urls":
+    if root.prefix is None:
         return mounts.include_kwargs
     return next(
         (

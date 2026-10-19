@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 from django.contrib.auth.models import AnonymousUser
-from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest
 from django.test import override_settings
 
@@ -60,10 +59,7 @@ _GUARDED = (
 
 @dataclass(frozen=True, slots=True)
 class _Leak:
-    """A page whose zone renders only behind a check, and the zone to ask for.
-
-    A block in the page itself is `asked_again`, and `granted` names its branch.
-    """
+    """A page whose zone renders only behind a check, and the zone to ask for."""
 
     id: str
     body: str
@@ -72,8 +68,6 @@ class _Leak:
     templates: dict[str, str] = field(default_factory=dict)
     layout: bool = False
     holder_only: bool = True
-    asked_again: bool = False
-    granted: bool = True
 
 
 _LEAKS = (
@@ -81,22 +75,14 @@ _LEAKS = (
         "direct",
         f'<p>public</p>{_GUARD}{{% zone "secret" %}}SECRET{{% endzone %}}{_END}',
         "secret",
-        asked_again=True,
     ),
     _Leak(
         "nested",
         f'{{% zone "outer" %}}<b>outer</b>{_GUARD}{{% zone "inner" %}}SECRET'
         f"{{% endzone %}}{_END}{{% endzone %}}",
         "inner",
-        asked_again=True,
     ),
-    _Leak(
-        "layout",
-        '{% zone "lz" %}SECRET{% endzone %}',
-        "lz",
-        layout=True,
-        asked_again=True,
-    ),
+    _Leak("layout", '{% zone "lz" %}SECRET{% endzone %}', "lz", layout=True),
     _Leak("set-slot", fill_slot("content"), components={"guarded": GUARDED_SET_SLOT}),
     _Leak(
         "slot-variable",
@@ -165,15 +151,18 @@ _LEAKS = (
         f'{_GUARD}granted{{% else %}}{{% zone "ez" %}}SECRET{{% endzone %}}{_END}',
         "ez",
         holder_only=False,
-        asked_again=True,
-        granted=False,
     ),
     _Leak(
         "variable-perm",
         f'{{% with p="{PERM}" %}}{{% has_perm p %}}{{% zone "vz" %}}SECRET'
         f"{{% endzone %}}{_END}{{% endwith %}}",
         "vz",
-        asked_again=True,
+    ),
+    _Leak(
+        "nested-blocks",
+        f'{_GUARD}{{% has_perm "auth.change_user" %}}inner{{% else %}}'
+        f'{{% zone "nz" %}}SECRET{{% endzone %}}{_END}{_END}',
+        "nz",
     ),
     _Leak(
         "if-perms",
@@ -215,11 +204,7 @@ _HOLDERS = frozenset({"holder", "superuser"})
 class TestNoGuardedZoneLeaks:
     """A partial request serves a zone a check decides only to the user it admits."""
 
-    @pytest.mark.parametrize(
-        "leak",
-        [leak for leak in _LEAKS if not leak.asked_again],
-        ids=lambda leak: leak.id,
-    )
+    @pytest.mark.parametrize("leak", _LEAKS, ids=lambda leak: leak.id)
     @pytest.mark.parametrize("kind", _KINDS)
     def test_the_zone_is_unknown(
         self, tmp_path: Path, findable_templates, leak: _Leak, kind: str
@@ -230,21 +215,6 @@ class TestNoGuardedZoneLeaks:
             response = client.get_zones("/leak/", leak.zone)
         assert response.status_code == 400
         assert response.content == b"unknown zone"
-
-    @pytest.mark.parametrize(
-        "leak", [leak for leak in _LEAKS if leak.asked_again], ids=lambda leak: leak.id
-    )
-    @pytest.mark.parametrize("kind", _KINDS)
-    def test_the_block_is_asked_again(
-        self, tmp_path: Path, findable_templates, leak: _Leak, kind: str
-    ) -> None:
-        pages = _leak_tree(tmp_path, leak, findable_templates)
-        client = client_as(kind)
-        with routed(pages, COMPONENT_BACKENDS=COMPONENTS):
-            response = client.get_zones("/leak/", leak.zone)
-        shown = (kind in _HOLDERS) is leak.granted
-        assert response.status_code == (200 if shown else 403)
-        assert (b"SECRET" in response.content) is shown
 
     @pytest.mark.parametrize(
         "leak", [leak for leak in _LEAKS if leak.holder_only], ids=lambda leak: leak.id
@@ -304,7 +274,7 @@ _FORM_BODY = (
 
 @pytest.mark.django_db()
 class TestFormReRender:
-    """An invalid form naming a zone in a block re-renders it for the holder only."""
+    """An invalid form naming a zone a block holds morphs the form from the page."""
 
     def _response(self, tmp_path: Path, kind: str):
         pages = layout_root(tmp_path)
@@ -320,16 +290,14 @@ class TestFormReRender:
                 zones="secret",
             )
 
-    def test_the_holder_gets_the_zone(self, tmp_path: Path) -> None:
-        response = self._response(tmp_path, "holder")
+    @pytest.mark.parametrize("kind", ["holder", "visitor"])
+    def test_the_form_morphs_from_the_full_page(self, tmp_path: Path, kind) -> None:
+        response = self._response(tmp_path, kind)
+        envelope = envelope_of(response)
         assert response.status_code == 200
-        assert envelope_of(response).zone_targets() == ["secret"]
-        assert b"SECRET" in response.content
-
-    def test_a_visitor_is_denied(self, tmp_path: Path) -> None:
-        response = self._response(tmp_path, "visitor")
-        assert response.status_code == 403
-        assert b"SECRET" not in response.content
+        assert envelope.zone_targets() == []
+        assert len(envelope.form_targets()) == 1
+        assert (b"SECRET" in response.content) is (kind == "holder")
 
 
 def _page(tmp_path: Path, body: str) -> Path:
@@ -349,11 +317,10 @@ class TestZoneInfoStandalone:
         zones = zones_of(page.composed_template_for(leaf), leaf)
         assert {name: info.standalone for name, info in zones.items()} == {
             "pub": True,
-            "secret": True,
+            "secret": False,
             "cond": False,
             "holds": True,
         }
-        assert {name for name, info in zones.items() if info.recheck} == {"secret"}
 
     def test_a_page_without_zones_reads_no_component(self, tmp_path: Path) -> None:
         leaf = _page(tmp_path, wrap("ghost", "x"))
@@ -361,45 +328,50 @@ class TestZoneInfoStandalone:
 
 
 class TestRenderZone:
-    """`render_zone` asks the block again and denies the whole batch on a refusal."""
+    """`render_zone` drops a bound name from a batch and refuses one asked alone."""
 
-    @pytest.mark.parametrize(("held", "denied"), [((PERM,), False), ((), True)])
-    def test_a_batch(self, tmp_path: Path, held, denied) -> None:
+    @pytest.mark.parametrize("held", [(PERM,), ()], ids=["holder", "visitor"])
+    def test_a_bound_name_drops_out_of_a_batch(self, tmp_path: Path, held) -> None:
         leaf = _page(tmp_path, _GUARDED)
         request = build_zone_request("secret,pub")
         request.user = PermissionHolder(*held)
-        if denied:
-            with pytest.raises(PermissionDenied):
-                render_zone(leaf, ("secret", "pub"), request)
-        else:
-            result = render_zone(leaf, ("secret", "pub"), request)
-            assert list(result.html) == ["secret", "pub"]
+        result = render_zone(leaf, ("secret", "pub"), request)
+        assert list(result.html) == ["pub"]
+        assert "SECRET" not in result.html["pub"]
 
-    def test_a_request_without_a_user_is_denied(self, tmp_path: Path) -> None:
-        leaf = _page(tmp_path, _GUARDED)
-        with pytest.raises(PermissionDenied):
-            render_zone(leaf, ("secret",), HttpRequest())
-
-    def test_a_bound_name_alone_raises(self, tmp_path: Path) -> None:
-        leaf = _page(tmp_path, '{% if c %}{% zone "cond" %}x{% endzone %}{% endif %}')
+    @pytest.mark.parametrize(
+        ("body", "name"),
+        [
+            pytest.param(
+                '{% if c %}{% zone "cond" %}x{% endzone %}{% endif %}', "cond", id="if"
+            ),
+            pytest.param(
+                f'{_GUARD}{{% zone "cond" %}}x{{% endzone %}}{_END}',
+                "cond",
+                id="has-perm",
+            ),
+        ],
+    )
+    def test_a_bound_name_alone_raises(self, tmp_path: Path, body: str, name) -> None:
+        leaf = _page(tmp_path, body)
         with pytest.raises(UnknownZoneError) as caught:
-            render_zone(leaf, ("cond",), HttpRequest())
-        assert caught.value.zone_name == "cond"
+            render_zone(leaf, (name,), HttpRequest())
+        assert caught.value.zone_name == name
         assert caught.value.declared == ()
 
 
 class TestFormReRenderTarget:
-    """A form re-render targets a zone a block holds, the render asks the block."""
+    """A form re-render never targets a zone a block holds."""
 
-    def test_declared_zones_hold_the_block(self, tmp_path: Path) -> None:
+    def test_declared_zones_leave_the_block_out(self, tmp_path: Path) -> None:
         declared = _declared_zones(_page(tmp_path, _GUARDED))
-        assert declared == frozenset({"pub", "secret"})
+        assert declared == frozenset({"pub"})
 
     @pytest.mark.parametrize(
         ("zones", "expected"),
         [
-            pytest.param("secret", "secret", id="held-by-a-block"),
-            pytest.param("secret,pub", "secret", id="first-named"),
+            pytest.param("secret", None, id="held-by-a-block"),
+            pytest.param("secret,pub", "pub", id="first-open"),
             pytest.param("pub", "pub", id="open"),
         ],
     )
@@ -409,7 +381,7 @@ class TestFormReRenderTarget:
 
 
 class TestMorphZone:
-    """`Patches.morph_zone` asks the block above a zone again."""
+    """`Patches.morph_zone` refuses a zone a block holds, whoever asks."""
 
     @pytest.fixture()
     def patches_for(self, tmp_path: Path, monkeypatch):
@@ -428,14 +400,10 @@ class TestMorphZone:
     def patches(self, patches_for) -> Patches:
         return patches_for(PERM)
 
-    def test_a_held_block_morphs(self, patches: Patches) -> None:
-        op = patches.morph_zone("secret").envelope().ops[0].as_dict()
-        assert op["target"] == {"zone": "secret"}
-        assert "SECRET" in op["html"]
-
-    def test_a_refused_block_raises(self, patches_for) -> None:
-        patches = patches_for()
-        with pytest.raises(PermissionDenied):
+    @pytest.mark.parametrize("held", [(PERM,), ()], ids=["holder", "visitor"])
+    def test_a_held_block_raises(self, patches_for, held) -> None:
+        patches = patches_for(*held)
+        with pytest.raises(UnknownZoneError):
             patches.morph_zone("secret")
         assert patches.envelope().ops == ()
 
@@ -482,6 +450,36 @@ class TestFailClosed:
             response = client_as("visitor").get_zones("/leak/", "cz")
         assert response.status_code == case.status
         assert (b"SECRET" in response.content) is (case.status == 200)
+
+
+@pytest.mark.django_db()
+@pytest.mark.usefixtures("guard_tags")
+class TestContextTagsInAComponent:
+    """A context tag of `next.` reads as transparent, a third-party one fails closed."""
+
+    @pytest.mark.parametrize(
+        ("component", "status"),
+        [
+            pytest.param(
+                '{% use_style "card.css" %}<div>{{ children }}</div>', 200, id="next"
+            ),
+            pytest.param(
+                "{% load guard_tags %}{% peek %}<div>{{ children }}</div>",
+                400,
+                id="third-party",
+            ),
+        ],
+    )
+    def test_the_zone_in_its_children(
+        self, tmp_path: Path, component: str, status: int
+    ) -> None:
+        pages = layout_root(tmp_path)
+        component_template(pages, "card", component)
+        templated_page(pages / "leak", "x = 1\n", wrap("card"))
+        with routed(pages, COMPONENT_BACKENDS=COMPONENTS):
+            response = client_as("visitor").get_zones("/leak/", "cz")
+        assert response.status_code == status
+        assert (b"SECRET" in response.content) is (status == 200)
 
 
 _ZONE = '{% zone "tz" %}SECRET{% endzone %}'
@@ -711,11 +709,10 @@ _RENDER_MODULE = (
 
 @dataclass(frozen=True, slots=True)
 class _Probe:
-    """A page shape and the status its zone answers, refused and granted."""
+    """A page shape and the status its zone answers to every user."""
 
     leak: _Leak
-    refused: int
-    granted: int | None = None
+    status: int
     module: str | None = None
 
 
@@ -801,8 +798,7 @@ _PROBES = (
             f"{{% endzone %}}{_END}",
             "lzz",
         ),
-        403,
-        200,
+        400,
     ),
     _Probe(
         _Leak("shell-content", fill_slot("content"), components={"guarded": _SHELL}),
@@ -836,66 +832,7 @@ class TestProbeShapes:
             (pages / "_components" / "guarded" / "component.py").write_text(
                 probe.module
             )
-        granted = probe.refused if probe.granted is None else probe.granted
-        status = granted if kind in _HOLDERS else probe.refused
         with routed(pages, COMPONENT_BACKENDS=COMPONENTS):
             response = client_as(kind).get_zones("/leak/", probe.leak.zone)
-        assert response.status_code == status
-        assert (b"SECRET" in response.content) is (status == 200)
-
-
-_OTHER = "auth.change_user"
-_NESTED_BLOCKS = (
-    f'{_GUARD}{{% has_perm "{_OTHER}" %}}inner{{% else %}}'
-    f'{{% zone "nz" %}}SECRET{{% endzone %}}{_END}{_END}'
-)
-_ACCOUNT_PAGE = """
-from next.pages import context
-
-
-@context("account")
-def account():
-    return "acme"
-"""
-_OBJECT_BLOCK = (
-    '{% with p="notes.read" %}{% has_perm p account %}'
-    '{% zone "oz" %}SECRET {{ account }}{% endzone %}{% endhas_perm %}{% endwith %}'
-)
-
-
-class TestBlocksAboveAZone:
-    """Every `{% has_perm %}` above a zone is asked again, its own branch decides."""
-
-    @pytest.mark.parametrize(
-        ("held", "denied"),
-        [
-            pytest.param((PERM,), False, id="outer-only"),
-            pytest.param((PERM, _OTHER), True, id="both"),
-            pytest.param((_OTHER,), True, id="inner-only"),
-            pytest.param((), True, id="neither"),
-        ],
-    )
-    def test_nested_blocks(self, tmp_path: Path, held, denied) -> None:
-        leaf = _page(tmp_path, _NESTED_BLOCKS)
-        request = build_zone_request("nz")
-        request.user = PermissionHolder(*held)
-        if denied:
-            with pytest.raises(PermissionDenied):
-                render_zone(leaf, ("nz",), request)
-        else:
-            assert "SECRET" in render_zone(leaf, ("nz",), request).html["nz"]
-
-    @pytest.mark.parametrize(("held", "denied"), [(("notes.read",), False), ((), True)])
-    def test_a_block_on_a_context_object(self, tmp_path: Path, held, denied) -> None:
-        leaf = templated_page(
-            layout_root(tmp_path) / "guarded", _ACCOUNT_PAGE, _OBJECT_BLOCK
-        )
-        request = build_zone_request("oz")
-        user = PermissionHolder(*held)
-        request.user = user
-        if denied:
-            with pytest.raises(PermissionDenied):
-                render_zone(leaf, ("oz",), request)
-        else:
-            assert "SECRET acme" in render_zone(leaf, ("oz",), request).html["oz"]
-        assert user.asked == [("notes.read", "acme")]
+        assert response.status_code == probe.status
+        assert (b"SECRET" in response.content) is (probe.status == 200)

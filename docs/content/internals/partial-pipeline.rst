@@ -147,8 +147,8 @@ The two registries in ``next.partial.registry`` have nothing in common but their
 
 ``zones`` is a read-through index rather than a registration point.
 ``zones_of`` walks a compiled template once for its ``ZoneNode`` instances, builds a ``ZoneInfo`` per name, and memoises the mapping in a ``WeakKeyDictionary`` keyed on the template object.
-The page path anchors the component lookups of ``next.partial.guards``, the analysis ``next.E163`` reads as well, which sets ``standalone`` on each ``ZoneInfo``.
-The same pass stores a ``Recheck`` on each zone a ``{% has_perm %}`` of the page holds, the blocks above it in order with the ``{% with %}`` bindings between them, and ``render_zone`` asks a block that names a quoted permission without an object before the page context runs and every other block once the context is built, raising ``PermissionDenied`` on a refusal.
+The page path anchors the component lookups of ``next.partial.guards``, the analysis ``next.E161`` and ``next.E063`` read as well, which sets ``standalone`` on each ``ZoneInfo``.
+A zone under a ``{% has_perm %}``, an ``{% if %}``, a ``{% for %}``, or a block tag the analysis cannot read, or in the body of a component that decides what it shows, gets ``standalone=False``, and ``render_zone`` treats it as undeclared for every request.
 The entry keeps the files that analysis read with their modification times, so with ``DEBUG`` on an edit to one of them recomputes ``standalone`` on the next read.
 A recompiled page is a different object, so it gets a fresh entry and the old one is collected with the template it belonged to.
 The first read of a template announces each zone through ``zone_registered``, which is why the signal fires on a render rather than at startup.

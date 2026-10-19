@@ -26,13 +26,7 @@ _PERMISSIONS_PROBE_BODY = (
     "from next.permissions.manager import permission_manager\n\n"
     "SEEN = tuple(name for name, _rule in permission_manager.registry.items())\n"
 )
-_SWITCHES = (
-    ("deps", "DEPS_AUTODISCOVER"),
-    ("permissions", "PERMISSIONS_AUTODISCOVER"),
-    ("forms", "FORM_AUTODISCOVER"),
-    ("signals", "SIGNALS_AUTODISCOVER"),
-)
-_MODULE_NAMES = tuple(module for module, _key in _SWITCHES)
+_MODULE_NAMES = ("deps", "permissions", "forms", "signals")
 
 
 @pytest.fixture()
@@ -91,26 +85,14 @@ class TestImportOrder:
         assert (f"{later}.probe",) == sys.modules[f"{earlier}.forms"].SEEN
 
 
-class TestSwitches:
-    """Every module name has its own bool setting, each one silencing only itself."""
+class TestFormSwitch:
+    """`FORM_AUTODISCOVER` silences the forms modules, the other names always load."""
 
-    @pytest.mark.parametrize(("module", "key"), _SWITCHES, ids=_MODULE_NAMES)
-    def test_a_disabled_key_skips_its_module_only(
-        self, make_app, module: str, key: str
-    ) -> None:
+    def test_a_disabled_form_switch_skips_the_forms_module_only(self, make_app) -> None:
         app = _full_app(make_app)
-        with override_settings(NEXT_FRAMEWORK={key: False}):
+        with override_settings(NEXT_FRAMEWORK={"FORM_AUTODISCOVER": False}):
             autodiscover.install()
-        assert _loads(app) == [
-            f"{app}.{name}" for name in _MODULE_NAMES if name != module
-        ]
-
-    def test_every_key_off_imports_nothing(self, make_app) -> None:
-        app = _full_app(make_app)
-        switches = {key: False for _module, key in _SWITCHES}
-        with override_settings(NEXT_FRAMEWORK=switches):
-            autodiscover.install()
-        assert _loads(app) == []
+        assert _loads(app) == [f"{app}.deps", f"{app}.permissions", f"{app}.signals"]
 
 
 class TestModuleFailures:

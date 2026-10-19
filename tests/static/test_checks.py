@@ -672,7 +672,7 @@ class TestNonceOnSharedPagesCheck:
         write_page(root, "own", "template = 'x'\n")
         return root
 
-    def test_an_active_nonce_is_w130(self, tmp_path) -> None:
+    def test_an_active_nonce_is_w120(self, tmp_path) -> None:
         with (
             routed(self._root(tmp_path)),
             override_settings(MIDDLEWARE=_CSP_MIDDLEWARE),

@@ -15,7 +15,7 @@ import re
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, Literal, TypeGuard, override
+from typing import TYPE_CHECKING, Any, Final, TypeGuard, override
 from urllib.parse import unquote_to_bytes
 
 from django.conf import settings
@@ -199,35 +199,21 @@ def load_tree_source[E: Exception](
     return TreeSource(path, module, stamp=stamp)
 
 
-type PageSource = Literal["root", "mounts", "urls"]
-"""How a tree reaches the URLconf, by default, through `mounts` or through `pages()`."""
-
-
 @dataclass(frozen=True, slots=True)
 class PageRoot:
     """A page tree a router routes, with the label a report names it by.
 
-    `prefix` is its mount route in `path()` syntax, absolute only for a `pages()` tree.
+    A `pages()` tree carries the route the URLconf includes it under and its namespace.
     """
 
     path: Path
     label: str
-    prefix: str = ""
-    subdir: str = ""
-    app: str = ""
-    source: PageSource = "root"
+    prefix: str | None = None
     namespace: str = "next"
 
     def route_trail(self, trail: str = "") -> str:
         """Return the trail of the route a page at the tree-relative `trail` answers."""
-        return join_trail(prefix_trail(self.prefix), trail)
-
-    def name_trail(self, trail: str = "") -> str:
-        """Return the trail a page at the tree-relative `trail` is routed and named by.
-
-        A `pages()` tree names its pages in a namespace of its own, without the prefix.
-        """
-        return trail if self.source == "urls" else self.route_trail(trail)
+        return join_trail(prefix_trail(self.prefix or ""), trail)
 
 
 def page_roots_shape_error(source: str, roots: list[Any]) -> str | None:

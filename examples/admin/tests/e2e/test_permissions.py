@@ -82,7 +82,7 @@ def test_the_superuser_keeps_save_on_a_published_book(
     expect(page.locator("[data-read-only]")).to_have_count(0)
 
 
-def test_an_anonymous_visit_to_a_mounted_tree_lands_on_the_login_form(
+def test_an_anonymous_visit_to_the_history_lands_on_the_login_form(
     page: Page, base_url: str, book: Book
 ) -> None:
     history = f"/admin/library/book/{book.pk}/history/"
@@ -161,7 +161,7 @@ def test_the_superuser_watches_the_activity_zone_refresh(
 
 
 @pytest.mark.usefixtures("signed_in")
-def test_the_history_crumbs_climb_through_the_host_tree(
+def test_the_history_crumbs_climb_to_the_changelist(
     page: Page, base_url: str, book: Book
 ) -> None:
     page.goto(f"{base_url}/admin/library/book/{book.pk}/history/")

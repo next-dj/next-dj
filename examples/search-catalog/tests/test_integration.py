@@ -1,6 +1,7 @@
 import json
 import re
 from decimal import Decimal
+from io import StringIO
 
 import pytest
 from catalog import services as catalog_services
@@ -10,6 +11,7 @@ from catalog.models import Category, Lead, Product
 from catalog.zones import CATEGORY_ZONES, LISTING_ZONES, zone_target
 from django.core.cache import cache
 from django.core.checks import run_checks
+from django.core.management import call_command
 
 from next.testing import (
     NextClient,
@@ -934,8 +936,21 @@ class TestLandingSignup:
         assert not Lead.objects.exists()
 
 
+OPEN_ACTIONS = frozenset({"launch_code_form"})
+
+
 class TestOpenActions:
     """Nobody signs in here, so every page with an action declares itself public."""
 
-    def test_no_action_is_left_without_an_access_rule(self) -> None:
-        assert "next.W134" not in {message.id for message in run_checks()}
+    def test_the_permission_table_lists_the_actions_as_public(self) -> None:
+        out = StringIO()
+        call_command("permissions", stdout=out)
+        _header, *lines = out.getvalue().splitlines()
+        rows = (re.split(r"\s{2,}", line.strip()) for line in lines)
+        access = {name: rule for kind, name, rule, _sources in rows if kind == "action"}
+        assert {name: access[name] for name in OPEN_ACTIONS} == dict.fromkeys(
+            OPEN_ACTIONS, "public"
+        )
+
+    def test_the_declared_access_leaves_no_action_unguarded(self) -> None:
+        assert "next.W129" not in {message.id for message in run_checks()}

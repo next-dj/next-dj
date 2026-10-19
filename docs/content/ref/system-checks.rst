@@ -16,7 +16,6 @@ Check registration
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
 The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
-``next.boundaries.checks`` stays out of the list, since its checks live in a registry of their own, see `Boundaries`_.
 
 Each of these modules registers checks.
 ``next.pages.checks``, ``next.forms.checks``, ``next.partial.checks``, and ``next.seo.checks`` are packages rather than single modules, and importing the package imports every submodule that carries a check.
@@ -30,7 +29,7 @@ The fourth describes a configuration every development checkout has, so reportin
 ``check_runtime_bundles_deployed`` (``next.W090``) asks the static files a deployment serves for the client runtime, which a source checkout builds only on demand.
 The other four read the settings a deployment runs on, ``check_site_url_for_deploy`` (``next.W110``, ``next.W122``) and ``check_seo_sources_on_closed_site`` (``next.W111``) with the ``seo`` tag, ``check_script_deploy`` (``next.W118``), and ``check_consent_cookie_secure`` (``next.W119``).
 
-Every next.dj check but the boundary ones carries the ``next`` tag.
+Every next.dj check carries the ``next`` tag.
 That tag is the importable string constant ``next.checks.NEXT``, so a project check joins the framework ones by decorating itself with ``@register(NEXT)`` rather than by repeating the literal.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
@@ -38,7 +37,6 @@ A tagged run reports what a full run reports, and ``--tag next --deploy`` adds t
 The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check, every page metadata check, and the site checks.
 ``manage.py check --tag seo`` runs the metadata, crawler-document, and site checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.
 Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
-The boundary checks carry the ``boundaries`` tag alone, the importable constant ``next.checks.BOUNDARIES``, and only ``manage.py check --tag boundaries`` runs them, so a run without a tag, ``--tag next``, ``--deploy``, and the checks that ``runserver``, ``migrate``, and ``test`` run leave them out, see `Boundaries`_.
 
 ``next.checks.reset_check_caches`` drops every per-run check cache so the next run rebuilds from the current sources.
 The cached state covers the router manager with the ``page.py`` pass memoised on it, the components manager, the collected URL patterns, the page module memo, the context and metadata registries with the settings tier, and the seo sources with their items registry.
@@ -182,25 +180,10 @@ The package splits into ``backends`` for the ``PARTIAL_BACKENDS`` entries, ``for
 Permissions
 ~~~~~~~~~~~
 
-``next.permissions.checks`` reads the registered predicates, ``AUTHENTICATION_BACKENDS``, and every literal permission name a ``{% has_perm %}`` tag carries in a composed page or a component template.
-``next.W131`` reads the ``permission_required()`` declarations of every ``page.py``, ``proxy.py``, and ``component.py`` beside them.
-``next.W129`` for a ``permission_required`` name and ``next.W134`` for an action nothing guards live in ``next.forms.checks.actions``, and ``next.E163`` for a zone in the body of a component that decides what it shows lives in ``next.partial.checks.zones``, beside the other zone placement checks.
+``next.permissions.checks`` reads the registered predicates, ``AUTHENTICATION_BACKENDS``, and every permission name the project writes, the literal name of a ``{% has_perm %}`` tag in a composed page or a component template, the ``permission_required()`` declarations of every ``page.py``, ``proxy.py``, and ``component.py``, and the guard of every form action.
+``next.W129`` for an action nothing guards lives in ``next.forms.checks.actions``, and ``next.E161`` for a zone under a ``{% has_perm %}`` or in the body of a component that decides what it shows lives in ``next.partial.checks.zones``, beside the other zone placement checks.
 
 .. automodule:: next.permissions.checks
-   :members:
-
-Boundaries
-~~~~~~~~~~
-
-``next.boundaries.checks`` registers three checks in ``boundary_checks``, a ``CheckRegistry`` of its own, and the ``check`` command of the ``next`` application lends them to Django's registry for a run with ``--tag boundaries`` or ``--list-tags``.
-``check_boundaries_mode`` reports ``next.E172`` under ``--tag boundaries`` by calling the check of ``next.conf.checks``, and the command does not lend it to a run that also asks for ``--tag next``, so the error shows once.
-A direct ``django.core.checks.run_checks(tags=["boundaries"])`` goes past the command and returns an empty list, so code that runs the boundary checks itself calls ``boundary_checks.run_checks()``.
-``check_boundaries`` turns every finding of ``boundaries_manager.report()`` into a message whose hint closes with the address of its section in :doc:`/content/topics/boundaries`, and ``check_declarations`` reports the attributes of the ``AppConfig`` of each application under ``BASE_DIR`` without the scan, and stays silent without ``BASE_DIR``.
-Both report nothing while ``NEXT_FRAMEWORK['BOUNDARIES']`` is ``None``, its default.
-Their codes are ``next.E167`` through ``next.E171``, ``next.E173`` through ``next.E176``, and ``next.W136`` through ``next.W153``, and ``next.E172`` for the ``BOUNDARIES`` setting lives in ``next.conf.checks`` under the ``next`` tag.
-:doc:`boundaries` lists the level of each code and whether ``boundaries.toml`` may record it.
-
-.. automodule:: next.boundaries.checks
    :members:
 
 Apps
@@ -773,97 +756,55 @@ Errors
        A value that is not an int is replaced by the default age, and zero or less makes the browser drop the cookie at once, so the choice is not kept.
      - ``next.consent.checks``
    * - ``next.E152``
-     - An installed app declares ``mount`` as something other than a str, ``mounts`` as something other than a dict of str to str, a ``mounts`` key that is no plain directory name, such as a path with a separator, ``""``, ``"."``, or ``".."``, or both of them.
-       The router ignores the declaration and routes the app's ``PAGES_DIR`` tree at the root, as if the app declared nothing.
+     - A page captures a URL parameter that the route a URLconf includes its ``pages()`` tree under captures already, so one value would overwrite the other.
+       The message names the page and the prefix.
      - ``next.urls.checks``
    * - ``next.E153``
-     - A ``mount`` or ``mounts`` prefix of an installed app holds ``[`` or ``]``, the bracket syntax of page directories, where a prefix takes Django ``path()`` syntax.
-       The router ignores the declaration as it does for ``next.E152``.
-     - ``next.urls.checks``
-   * - ``next.E154``
-     - A page captures a URL parameter that the mount prefix of its tree captures already, so one value would overwrite the other.
-       The message names the prefix and the app, for a ``mounts`` prefix and for the route a URLconf includes ``pages()`` under alike.
-     - ``next.urls.checks``
-   * - ``next.E155``
      - A model under ``DObject``, in a parameter or in an ``obj=DObject[Model]`` of an access declaration, has a default manager that defines no callable ``visible_to``, so every lookup of that model fails.
      - ``next.deps.checks``
-   * - ``next.E156``
+   * - ``next.E154``
      - A ``DObject`` with a parent sits on a page context callable that runs before any context callable provides a value under the parent name, such as ``@context("post", inherit_context=True)`` in an ancestor ``page.py``.
        A parent read after a keyless callable is not judged, since its keys are known only at render time.
-       The message quotes the full route of the page, every prefix included, as ``next.W128`` does.
+       The message quotes the full route of the page, every prefix included, as ``next.W126`` does.
      - ``next.deps.checks``
-   * - ``next.E157``
+   * - ``next.E155``
      - A ``DObject`` with a parent sits on a form handler, a form factory, or one of the form hooks ``get_initial``, ``get_form_kwargs``, ``check_permissions``, ``has_object_permission``, and ``on_valid``, which resolve with no page context, so the parent is never there.
      - ``next.deps.checks``
-   * - ``next.E158``
+   * - ``next.E156``
      - A ``DObject`` parameter sits on a ``@component.context`` callable, which resolves with no URL kwargs, so the lookup never finds its pk.
      - ``next.deps.checks``
-   * - ``next.E159``
+   * - ``next.E157``
      - The project declares a ``DObject`` parameter or an ``obj=DObject[Model]`` and no ``scope`` dependency is registered, so no lookup can call ``visible_to``.
        Register it with ``@resolver.dependency("scope")`` in the ``deps.py`` of an app.
      - ``next.deps.checks``
-   * - ``next.E160``
+   * - ``next.E158``
      - A ``DObject`` parameter sits on a callable whose type hints do not resolve, such as a module under ``from __future__ import annotations`` that imports a name of the signature under ``TYPE_CHECKING``, so the annotation stays a string and every resolve raises ``TypeError``.
      - ``next.deps.checks``
-   * - ``next.E161``
-     - A registered permission is checked by a leaf callable whose signature the predicate cannot call, one that takes ``*args``, requires a keyword-only parameter, takes more than two positional parameters, or has no signature Python can read.
-       A composite is judged leaf by leaf, the message names the permission, the leaf, and the reason, and the hint restates the rule, ``()``, ``(user)``, or ``(user, obj)`` with ``**kwargs`` allowed.
+   * - ``next.E159``
+     - A registered permission is checked by a callable whose signature the predicate cannot call, one that takes ``*args``, requires a keyword-only parameter, takes more than two positional parameters, or has no signature Python can read.
+       The message names the permission, the callable, and the reason, and the hint restates the rule, ``()``, ``(user)``, or ``(user, obj)`` with ``**kwargs`` allowed.
      - ``next.permissions.checks``
-   * - ``next.E162``
+   * - ``next.E160``
      - Object permissions are registered while ``AUTHENTICATION_BACKENDS`` lists no ``ObjectPermissionBackend`` or subclass of it, so ``user.has_perm()`` never consults their predicates.
        The message names ``"next.permissions.ObjectPermissionBackend"`` to add next to ``ModelBackend``, and the hint names the ``backend`` argument ``login()`` needs once two backends are listed.
      - ``next.permissions.checks``
-   * - ``next.E163``
-     - A ``{% zone %}`` renders in the body of a component, any slot or the children, that decides whether that part shows, so a standalone zone render would skip the decision.
+   * - ``next.E161``
+     - A ``{% zone %}`` sits inside a ``{% has_perm %}`` block of the composed page at any depth, or renders in the body of a component, any slot or the children, that decides whether that part shows, so a standalone zone render would skip the decision.
        A component decides when it has a ``component.py``, whose ``render()``, contexts, or access declarations may decide in code, or when its template, followed through nested components, a literal ``{% extends %}``, and a literal ``{% include %}``, reaches a ``{% has_perm %}``, a condition around that part, or a reference the check cannot follow, such as an unresolved component, a template name in a variable, a missing template, or one that does not compile.
-       The message names the component, and the runtime refuses the same zones as an unknown zone, from the same analysis.
-       A zone inside a ``{% has_perm %}`` block of the composed page itself is not reported, since its zone render asks the block again and answers 403 to a user the block refuses.
-       Move the zone out of the component body or put the decision inside the zone.
+       The message names the block or the component, and the runtime refuses the same zones as an unknown zone for every user, from the same analysis.
+       Put the decision inside the zone, or the zone outside the block or the component.
      - ``next.partial.checks.zones``
-   * - ``next.E164``
+   * - ``next.E162``
      - A ``permission_required(..., obj=DObject[Model])`` in a ``page.py`` or a ``proxy.py`` loads its row by the URL kwarg named after the ``model_name`` of the model, and the route of a page under the declaration does not capture it, so every request to that page raises ``UnboundObjectError``.
        The message names the declaring file, the page, and the kwargs its route captures, and a page whose ``public()`` lifts the declaration is not judged.
      - ``next.deps.checks``
-   * - ``next.E165``
+   * - ``next.E163``
      - A ``page.py`` or a ``proxy.py`` declares ``public()`` beside its own ``login_required()`` or ``permission_required()``, which still bind, so nothing below it is public.
      - ``next.pages.checks.access``
-   * - ``next.E166``
+   * - ``next.E164``
      - An access declaration binds to a file that is neither a ``page.py`` or ``proxy.py`` of a page tree nor a ``component.py``, such as a helper module that calls ``page.login_required()`` for the page, so it guards nothing.
        The message names the file, and the hint asks for the call at the top level of the segment module.
      - ``next.pages.checks.access``
-   * - ``next.E167``
-     - Two or more apps depend on each other in a cycle, one message per ordered pair of apps of the group that an edge joins, at the first edge of the pair, with the shortest cycle through the first app as its witness.
-       It is a warning under ``'warn'`` and an error under ``'strict'``, under the same id.
-     - ``next.boundaries.checks``
-   * - ``next.E168``
-     - A file holds more findings of one code than ``boundaries.toml`` records for it.
-     - ``next.boundaries.checks``
-   * - ``next.E169``
-     - ``boundaries.toml`` records more findings of one code in a file than the file still holds.
-     - ``next.boundaries.checks``
-   * - ``next.E170``
-     - ``boundaries.toml`` is no valid TOML or breaks its schema.
-     - ``next.boundaries.checks``
-   * - ``next.E171``
-     - ``NEXT_FRAMEWORK['BOUNDARIES']`` is ``'strict'`` and some boundary warnings are not recorded in ``boundaries.toml``.
-     - ``next.boundaries.checks``
-   * - ``next.E172``
-     - ``NEXT_FRAMEWORK['BOUNDARIES']`` is neither ``'warn'``, ``'strict'``, nor ``None``, so the boundary checks do not run.
-       It carries the ``next`` tag, and ``check_boundaries_mode`` reports it under ``--tag boundaries`` as well, once per run whichever tags ask.
-     - ``next.conf.checks``
-   * - ``next.E173``
-     - The import graph backend cannot build the graph of the project packages, for a syntax error, a file that is no valid UTF-8 and declares no other encoding, a source grimp cannot read because it is not UTF-8, an unreadable file, or a relative import above its package, and no other boundary check runs.
-     - ``next.boundaries.checks``
-   * - ``next.E174``
-     - The ``AppConfig`` of an app of the project lists in ``depends_on`` an app that the ``INSTALLED_APPS`` of the current settings leave out, or an installed app by its label rather than its name.
-       The message says which, and the hint asks for each entry to be the name of an app these settings install.
-     - ``next.boundaries.checks``
-   * - ``next.E175``
-     - The ``AppConfig`` of an app of the project declares ``depends_on`` or ``isolated`` in a shape next.dj refuses, and the attribute counts as never declared.
-     - ``next.boundaries.checks``
-   * - ``next.E176``
-     - ``BOUNDARIES_IMPORT_GRAPH`` is no string, names a class that does not import or is no ``ImportGraphBackend``, or names ``GrimpImportGraph`` where grimp is not installed, and no other boundary check runs.
-     - ``next.boundaries.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -952,7 +893,7 @@ Warnings
        Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.
      - ``next.partial.checks.backends``
    * - ``next.W072``
-     - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``DEPS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, ``SIGNALS_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, or ``CSP_NONCE``, holds a non-bool value.
+     - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, or ``CSP_NONCE``, holds a non-bool value.
        The ``bool()`` coercion turns a falsy-looking string such as ``'False'`` into ``True``, so the written value can mean the opposite of the intent.
      - ``next.conf.checks``
    * - ``next.W074``
@@ -1064,7 +1005,7 @@ Warnings
        Each problem names its own fix, setting the option it needs or dropping the one not read.
      - ``next.seo.checks.sitemaps``
    * - ``next.W101``
-     - A ``sitemap.py`` sets ``i18n = True`` while ``ROOT_URLCONF`` mounts no ``i18n_patterns()``, so every language lists the same URL.
+     - A ``sitemap.py`` sets ``i18n = True`` while ``ROOT_URLCONF`` holds no ``i18n_patterns()``, so every language lists the same URL.
      - ``next.seo.checks.sitemaps``
    * - ``next.W102``
      - An ``@sitemap.items`` trail matches an ``exclude`` glob of the same file, so its URLs are dropped.
@@ -1154,103 +1095,30 @@ Warnings
      - The consent cookie's ``samesite`` option is ``"None"`` while ``secure`` is not ``True``, so a browser rejects the cookie on a page that is not served over https.
      - ``next.consent.checks``
    * - ``next.W126``
-     - A ``mounts`` key of an installed app, or the ``PAGES_DIR`` tree its ``mount`` moves, names no directory under the app, so nothing is routed from it.
-     - ``next.urls.checks``
-   * - ``next.W127``
-     - A tree an installed app declares in ``mount`` or ``mounts`` is also mounted through ``pages()`` in ``ROOT_URLCONF``.
-       The URLconf wins, so the declaration has no effect.
-     - ``next.urls.checks``
-   * - ``next.W128``
      - A ``DObject`` parameter on a context callable that a routed ``page.py`` runs, an inherited one included, is named after no kwarg the full route of that page hands it, so the lookup finds no URL kwarg.
-       The full route counts the bracket segments of the page, a ``mount`` or ``mounts`` prefix, and every kwarg the includes around the tree capture or pass as extra kwargs, the ``path()`` that includes a ``pages()`` tree and the one that includes ``next.urls`` alike.
-       A ``DObject`` named ``wallet`` under ``mounts = {"pages": "wallets/<int:wallet>/"}`` or ``path("w/<int:wallet>/", pages("wallets"))`` therefore draws no warning, and the message quotes the full route, such as ``/wallets/<int:wallet>/ops/``.
-       A tree that ``pages()`` mounts twice is judged by the include the URLconf lists first.
+       The full route counts the bracket segments of the page and every kwarg the includes around the tree capture or pass as extra kwargs, the ``path()`` that includes a ``pages()`` tree and the one that includes ``next.urls`` alike.
+       A ``DObject`` named ``wallet`` under ``path("w/<int:wallet>/", pages("wallets"))`` therefore draws no warning, and the message quotes the full route, such as ``/w/<int:wallet>/ops/``.
+       A tree that ``pages()`` includes twice is judged by the include the URLconf lists first.
        A warning rather than an error, because the walk cannot read an include hidden behind a lazy pattern sequence, while a kwarg missing at runtime raises ``UnboundObjectError``.
      - ``next.deps.checks``
-   * - ``next.W129``
-     - A form action declares a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, so the guard refuses every user but a superuser.
+   * - ``next.W127``
+     - A permission name that no installed model defines and no ``add_perm()`` registers is written in the guard of a form action, as a literal of a ``{% has_perm %}`` in a composed page or a component template, or in a ``permission_required()`` of a ``page.py``, a ``proxy.py``, or a ``component.py``, so every user but a superuser is refused it.
+       One message per name and place, which the message names, the first page reaching a ``{% has_perm %}`` name or else its component template, and a name a variable carries is not read.
+       A ``{% has_perm %}`` name and a declared name are judged in every project, while the guard of a form or an ``@action`` is judged only in a project that declares access, as for ``next.W129``.
        A permission django-rules registers counts as known while ``rules.permissions.ObjectPermissionBackend`` is listed in ``AUTHENTICATION_BACKENDS``.
-       Silent while ``django.contrib.auth`` is not installed, which ``next.W060`` reports.
+       Silent while ``django.contrib.auth`` is not installed, which ``next.W060`` reports for a form action.
        A model permission counts as known when a model class declares it, through ``default_permissions`` or ``Meta.permissions``, so a ``Permission`` row created only by a data migration or through the admin draws the warning, and declaring it in ``Meta.permissions`` or listing the code in ``SILENCED_SYSTEM_CHECKS`` quiets it.
-     - ``next.forms.checks.actions``
-   * - ``next.W130``
-     - A ``{% has_perm %}`` in a composed page or a component template names, as a literal, a permission no installed model defines and no ``add_perm()`` registers, so the tag renders its ``else`` branch for every user but a superuser.
-       The message names the first template holding each such name, and a name a variable carries is not read.
-       A permission django-rules registers counts as known, and a ``Permission`` row that only the database holds does not, as for ``next.W129``.
      - ``next.permissions.checks``
-   * - ``next.W131``
-     - A ``permission_required()`` in a ``proxy.py``, a ``page.py`` or a ``component.py`` names a permission no installed model defines and no ``add_perm()`` registers, so every user but a superuser is refused.
-       Known names follow ``next.W129``, and the check is silent while ``django.contrib.auth`` is not installed.
-     - ``next.permissions.checks``
-   * - ``next.W132``
+   * - ``next.W128``
      - A ``proxy.py`` has no page in its directory or below it, so its access declarations bind no page.
      - ``next.pages.checks.access``
-   * - ``next.W133``
-     - A component whose ``component.py`` declares access renders on a page anyone reaches, one without a requirement that is ``page.public()`` or served without ``LoginRequiredMiddleware``, so a refused requester gets the page with the component missing.
-       The components a page renders are read from the tags of its composed template, followed through nested component templates, a literal ``{% include %}``, and a literal ``{% extends %}``.
-     - ``next.pages.checks.access``
-   * - ``next.W134``
+   * - ``next.W129``
      - A ``page.py`` or another file of a page tree declares actions that no requirement from a ``proxy.py`` above it, no declaration of its page, no ``Meta`` guard and no ``LoginRequiredMiddleware`` guard, so anyone may post to them.
        An action declared outside a page tree answers to the rule of its origin page alone and is not judged.
+       Silent until the project declares access.
+       A project declares access once it holds a ``proxy.py``, a ``login_required()``, ``permission_required()``, or ``public()`` on a page, a ``proxy.py``, or a component, or a permission registered through ``add_perm``.
+       A ``public()`` is such a declaration and states that the actions under it are open on purpose, so they draw no warning.
      - ``next.forms.checks.actions``
-   * - ``next.W135``
-     - A ``public()`` in a ``proxy.py`` or a ``page.py`` lifts the requirements of a ``proxy.py`` above it, so a guarded parent has a public part.
-       The lift is allowed, and the warning names the file that lifts and the files it lifts, one message per lifting file, so the opening is never silent.
-     - ``next.pages.checks.access``
-   * - ``next.W136``
-     - An app imports a module of another app other than its ``models``, ``services``, or ``signals``, and other than its ``services`` or ``signals`` when that app is isolated, or imports a model or a queryset that the ``services`` of an isolated app re-exports.
-     - ``next.boundaries.checks``
-   * - ``next.W137``
-     - An app imports a file of a page tree or a component folder of another app.
-     - ``next.boundaries.checks``
-   * - ``next.W138``
-     - A file of a page tree reads ``.objects`` without ``.visible_to(...)``.
-     - ``next.boundaries.checks``
-   * - ``next.W139``
-     - A file of a page tree saves a model past a form, or sets a field on an object it saves.
-     - ``next.boundaries.checks``
-   * - ``next.W140``
-     - An app loads a model of another app with ``apps.get_model``.
-     - ``next.boundaries.checks``
-   * - ``next.W141``
-     - An app provides a DI key named after another app.
-     - ``next.boundaries.checks``
-   * - ``next.W142``
-     - An app receives a signal or a sender of another app outside its ``signals.py``.
-     - ``next.boundaries.checks``
-   * - ``next.W143``
-     - A signal a ``signals.py`` of the project declares is sent outside a ``services.py``.
-     - ``next.boundaries.checks``
-   * - ``next.W144``
-     - An app refreshes a zone that only pages of another app declare.
-     - ``next.boundaries.checks``
-   * - ``next.W145``
-     - The root ``__init__.py`` of an app defines a model.
-     - ``next.boundaries.checks``
-   * - ``next.W146``
-     - A module re-exports names of another app, by ``import *`` or by ``__all__``.
-     - ``next.boundaries.checks``
-   * - ``next.W147``
-     - A module at the root of an app is named for a role next.dj reads from another module, such as ``providers.py`` for ``deps.py``.
-     - ``next.boundaries.checks``
-   * - ``next.W148``
-     - ``BOUNDARIES`` is ``'strict'``, but the boundaries go unchecked, because ``BASE_DIR`` is not set.
-     - ``next.boundaries.checks``
-   * - ``next.W149``
-     - ``add_perm`` registers a permission whose label names another app of the project.
-     - ``next.boundaries.checks``
-   * - ``next.W150``
-     - An app that declares ``depends_on`` has edges to a project app the tuple leaves out, one warning per pair at its first edge.
-     - ``next.boundaries.checks``
-   * - ``next.W151``
-     - A model relates by a ``ForeignKey``, a ``OneToOneField``, or a ``ManyToManyField`` to a model of another app that declares itself isolated.
-     - ``next.boundaries.checks``
-   * - ``next.W152``
-     - A public function of the services of an isolated app returns a model, a queryset, ``Any``, a class that is no frozen slots dataclass or enum, a bare container, or a name the check cannot tell, directly or through a field of a returned dataclass.
-     - ``next.boundaries.checks``
-   * - ``next.W153``
-     - A public function of the services of an isolated app has no return annotation.
-     - ``next.boundaries.checks``
 
 Codes are assigned per check and are not contiguous.
 
@@ -1261,4 +1129,3 @@ See also
 
    :doc:`/content/intro/install` for the first ``manage.py check`` run.
    :doc:`/content/faq/troubleshooting` for symptoms that map to individual ``next.*`` codes.
-   :doc:`/content/topics/boundaries` for the boundary codes from the project side.

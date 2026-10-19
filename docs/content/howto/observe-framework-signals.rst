@@ -274,8 +274,7 @@ The first error reaches the caller that asked for the reload once the whole chai
 Connect receivers at startup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The ``next`` application imports ``obs/signals.py`` at startup, so the ``@receiver`` decorators run once with no ``AppConfig.ready`` code.
-A project that sets ``SIGNALS_AUTODISCOVER`` to ``False`` imports ``obs.signals`` from ``AppConfig.ready`` instead, see :doc:`/content/ref/settings`.
+The ``next`` application imports ``obs/signals.py`` at startup, so the ``@receiver`` decorators run once with no ``AppConfig.ready`` code, see :doc:`/content/ref/settings`.
 
 Verification
 ------------

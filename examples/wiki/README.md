@@ -84,7 +84,7 @@ The search form carries `data-next-target="search-results"`, `data-next-trigger=
 
 `Article` carries a `locked` boolean. The edit form in `wiki/pages/articles/edit/[slug]/page.py` declares `has_object_permission(self)`, an object-level hook that the framework resolves like `on_valid` and runs after the form binds, so `self.instance` is the loaded target row. The override reads only what it needs from `self.instance` and returns `not self.instance.locked`. A locked article short-circuits to a bare 403 before validation runs, so there is no form re-render. The create form has no such hook and stays open. Both forms write through [`wiki/services.py`](wiki/services.py), `create_article` and `update_article`, which run `full_clean` before they save, and ask `slug_taken` for the uniqueness message.
 
-Nobody signs in to the wiki, so both form pages declare `page.public()`. It tells `manage.py check` that anyone may post to them on purpose instead of reporting `next.W134`, and the lock stays the one rule on an edit.
+Nobody signs in to the wiki, so both form pages declare `page.public()`, which says anyone may post to them on purpose, and the lock stays the one rule on an edit. `manage.py check` reports `next.W129` for an action nothing guards only in a project that declares access, and the declaration itself is that guard.
 
 ### 9. Free children in the documentation figure
 
@@ -130,7 +130,7 @@ def articles() -> QuerySet[Article]:
     return article_index()
 ```
 
-`article_index` in [`wiki/services.py`](wiki/services.py) returns `Article.objects.only("slug", "updated_at").order_by("pk")`. The wiki has no accounts, so every read and write of its page tree goes through a function of `services.py`, the forms of section 11 included, and `NEXT_FRAMEWORK["BOUNDARIES"] = "strict"` makes `manage.py check --tag boundaries` hold the tree to that.
+`article_index` in [`wiki/services.py`](wiki/services.py) returns `Article.objects.only("slug", "updated_at").order_by("pk")`. The wiki has no accounts, so every read and write of its page tree goes through a function of `services.py`, the forms of section 11 included.
 
 The trail is the directory path of the page, `[slug]` included, and the check refuses a trail no page under the root answers to. The callable returns the queryset itself rather than a list of entries, so nothing runs until the document is requested, and then the database does the paging: one `COUNT` sizes the document, one `LIMIT`/`OFFSET` slice fills the page asked for, and the newest `updated_at` for the index comes from one ordered query. The number of queries per page does not grow with the number of articles. `kwargs` maps one row onto the URL kwargs that reverse the page, so `/wiki/<slug>/` is built by the router rather than spelled by hand, and `lastmod="updated_at"` names the column each `<lastmod>` is read from. `only()` keeps the query to the two columns those read, and `order_by("pk")` gives the pages a stable order, which the framework would add on its own for an unordered queryset. The callable runs through the same resolver as a `@context`, `request` is a parameter when it is needed and a `Depends` works, this one needs nothing. The file is loaded once and re-read when it changes.
 

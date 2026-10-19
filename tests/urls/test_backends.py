@@ -11,7 +11,7 @@ from django.urls import URLPattern, URLResolver, clear_url_caches
 from next.pages import page
 from next.testing import override_next_settings
 from next.urls import FileRouterBackend, PageRoot, RouterBackend, RouterFactory
-from next.urls.backends import _installed_app_directories, is_framework_app
+from next.urls.backends import _installed_app_directories, _is_framework_app
 from next.utils import forget_resolved_trees
 from tests.support import (
     EntryRouter,
@@ -354,7 +354,7 @@ class TestFileRouterBackend:
             "page_home",
         ]
         tree = (tmp_path / "pages").resolve()
-        assert router._tree_patterns_cache[tree, "", False] == patterns
+        assert router._tree_patterns_cache[tree] == patterns
 
     def test_a_memoised_app_answers_after_its_tree_is_gone(self, router, tmp_path):
         """The memo is what a reload drops, so it outlives the tree it was built from."""
@@ -371,7 +371,7 @@ class TestFileRouterBackend:
         assert router._tree_patterns_cache == {}
 
     def test_generate_patterns_from_directory(self) -> None:
-        """Builds URL patterns from scan results via create_url_pattern."""
+        """Builds URL patterns from scan results, each view keeping its trail."""
         router = file_router()
         mock_pages_path = Mock()
 
@@ -383,10 +383,12 @@ class TestFileRouterBackend:
             ),
             patch("next.urls.backends.page.create_url_pattern") as mock_create,
         ):
-            mock_create.side_effect = ["pattern1", "pattern2"]
+            built = [Mock(), Mock()]
+            mock_create.side_effect = built
 
             patterns = list(router._generate_patterns_from_directory(mock_pages_path))
-            assert patterns == ["pattern1", "pattern2"]
+            assert patterns == built
+            assert [p.callback.next_route_trail for p in patterns] == ["url1", "url2"]
 
     def test_scan_pages_directory_empty(self, tmp_path) -> None:
         """A directory holding nothing yields no routes."""
@@ -472,7 +474,7 @@ class TestPageRoots:
             roots = router.page_roots()
 
         assert roots == [
-            PageRoot(path=app_tree, label="App 'shop'", subdir="pages", app="shop"),
+            PageRoot(path=app_tree, label="App 'shop'"),
             PageRoot(path=root_tree.resolve(), label="Root"),
         ]
 
@@ -490,9 +492,7 @@ class TestPageRoots:
         ):
             roots = router.page_roots()
 
-        assert roots == [
-            PageRoot(path=app_tree, label="App 'shop'", subdir="pages", app="shop")
-        ]
+        assert roots == [PageRoot(path=app_tree, label="App 'shop'")]
 
     def test_app_trees_are_skipped_without_app_dirs(self, tmp_path) -> None:
         """A root-only backend never reports app trees."""
@@ -669,7 +669,7 @@ class TestInstalledAppSpellings:
     )
     def test_only_django_and_next_packages_are_skipped(self, app_name, skipped) -> None:
         """A third-party name merely starting with the same letters still counts."""
-        assert is_framework_app(app_name) is skipped
+        assert _is_framework_app(app_name) is skipped
 
 
 class TestAppDirectoryResolution:
@@ -693,9 +693,7 @@ class TestAppDirectoryResolution:
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "nsapp"]
             roots = router.page_roots()
 
-        assert roots == [
-            PageRoot(path=pages, label="App 'nsapp'", subdir="pages", app="nsapp")
-        ]
+        assert roots == [PageRoot(path=pages, label="App 'nsapp'")]
 
     def test_app_config_path_attribute_wins(self, tmp_path, settings) -> None:
         """An `AppConfig` that declares `path` points the scan at that directory."""
@@ -719,9 +717,7 @@ class TestAppDirectoryResolution:
             ]
             roots = router.page_roots()
 
-        assert roots == [
-            PageRoot(path=pages, label="App 'movedapp'", subdir="pages", app="movedapp")
-        ]
+        assert roots == [PageRoot(path=pages, label="App 'movedapp'")]
 
     def test_a_blank_registry_reports_no_roots(self, tmp_path, settings) -> None:
         """The registry is the only source of app paths, so a blank one has none."""
@@ -734,9 +730,7 @@ class TestAppDirectoryResolution:
             with patch("next.urls.backends.apps.get_app_configs", return_value=[]):
                 blank = file_router(app_dirs=True).page_roots()
 
-        assert healthy == [
-            PageRoot(path=pages, label="App 'shop'", subdir="pages", app="shop")
-        ]
+        assert healthy == [PageRoot(path=pages, label="App 'shop'")]
         assert blank == []
 
     def test_a_live_backend_sees_an_installed_apps_change(
@@ -753,11 +747,7 @@ class TestAppDirectoryResolution:
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "latecomer"]
             after = router.page_roots()
 
-        assert after == [
-            PageRoot(
-                path=pages, label="App 'latecomer'", subdir="pages", app="latecomer"
-            )
-        ]
+        assert after == [PageRoot(path=pages, label="App 'latecomer'")]
 
     def test_a_registry_that_is_not_ready_reports_no_roots(
         self, tmp_path, caplog

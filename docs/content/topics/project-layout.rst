@@ -7,18 +7,20 @@ A next.dj project is a Django project, and its unit of code is the Django applic
 Each application owns the models, migrations, pages, and components of one subject area, and its files carry fixed names, so every application opens the same way.
 This page names those files and their roles, shows the Notes project from the tutorial in that shape, and covers how a project grows from one application to many.
 :doc:`application-layout` decides which of those files a piece of logic belongs in, and :doc:`multi-project` covers several Django projects in one repository.
-:doc:`boundaries` checks on every ``manage.py check`` that the applications keep to these roles.
 
 .. contents::
    :local:
    :depth: 2
+
+.. _topics-project-layout-files:
 
 Application composition
 -----------------------
 
 Domain code sits flat at the root of the application under fixed names, and the URL tree grows only inside ``pages/``.
 A page at any depth reaches the domain through the same absolute import, such as ``from notes.services import archive_note``, because the domain code never moves when the URL tree does.
-The ``startapp`` template of next.dj writes this shape for a new application, see :ref:`intro-install-project-template`.
+An application starts from Django's own ``manage.py startapp``, which writes ``apps.py``, ``models.py``, ``admin.py``, and ``migrations/``, and gains the next.dj files one by one as it needs them, ``pages/`` with ``page.py``, ``template.djx``, ``layout.djx``, and ``proxy.py``, then ``permissions.py``, ``signals.py``, ``deps.py``, and ``forms.py``.
+The pages replace the ``views.py`` that ``startapp`` writes, and a ``tests/`` package replaces its ``tests.py``.
 
 .. code-block:: text
    :caption: one application
@@ -54,7 +56,7 @@ The ``startapp`` template of next.dj writes this shape for a new application, se
            template.djx
 
 Every file has one role.
-The last column names what another application of the same project may use, and the boundary checks hold the project to it, see :ref:`topics-boundaries-public-modules`.
+The last column names what another application of the same project uses, the recommendation of next.dj for a project of several applications, which no check enforces.
 
 .. list-table::
    :header-rows: 1
@@ -65,7 +67,7 @@ The last column names what another application of the same project may use, and 
      - Keeps out
      - Open to other applications
    * - ``apps.py``
-     - The ``AppConfig`` with ``name``, an explicit ``label``, and an optional ``mount`` or ``mounts`` prefix.
+     - The ``AppConfig`` with ``name`` and an explicit ``label``.
      - Domain code, and model imports at module level, which run before the app registry is ready.
      - No.
    * - ``models.py``
@@ -75,6 +77,7 @@ The last column names what another application of the same project may use, and 
        Foreign keys and ``QuerySet`` methods are how Django applications meet.
    * - ``services.py``
      - Functions shaped ``f(scope, *, ...)`` that span several models, open transactions, and send signals, plus public reads that take no scope.
+       The module and the shape are a recommendation of next.dj, see :doc:`application-layout`.
      - ``request``, ``HttpResponse``, and rendering.
      - Yes, it is the write surface of the application.
    * - ``forms.py``
@@ -118,8 +121,7 @@ The last column names what another application of the same project may use, and 
 :doc:`application-layout` shows the ``scope`` dependency, the ``visible_to(scope)`` read, and the ``f(scope, *, ...)`` service in full.
 
 Five of these files load with no import of their own, so ``AppConfig.ready`` stays empty.
-When the ``next`` application is ready it imports ``deps.py``, then ``permissions.py``, then ``forms.py``, then ``signals.py`` of every installed application, all before any ``component.py``, and ``django.contrib.admin`` imports ``admin.py``.
-``DEPS_AUTODISCOVER``, ``PERMISSIONS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, and ``SIGNALS_AUTODISCOVER`` turn the four sweeps off one by one, and a project that turns one off imports those modules from ``AppConfig.ready``, see :doc:`/content/ref/settings`.
+When the ``next`` application is ready it imports ``deps.py``, then ``permissions.py``, then ``forms.py``, then ``signals.py`` of every installed application, all before any ``component.py``, the way ``django.contrib.admin`` imports ``admin.py``, see :doc:`/content/ref/settings`.
 
 .. code-block:: python
    :caption: notes/apps.py
@@ -138,7 +140,6 @@ Names the layout avoids
 The reason is the same for all of them, one obvious place per role.
 Reads live on the ``QuerySet``, DI in ``deps.py``, signals and their receivers in ``signals.py``, and the operations other applications call in ``services.py``.
 A ``backends.py`` that subclasses a real next.dj backend, such as ``StaticFilesBackend`` or ``FileRouterBackend``, keeps its name.
-``next.W147`` reports the other names at the root of an application, see :ref:`topics-boundaries-file-names`.
 
 Delivery stays in pages
 -----------------------
@@ -152,7 +153,7 @@ A relative import in such a module has no parent package to resolve against, and
 Domain code therefore lives at the application root, and the page reaches it through an absolute import.
 
 A ``page.py`` reads through model and ``QuerySet`` methods and writes through a form or a function of ``services.py``.
-:doc:`application-layout` shows both sides of that call, and :ref:`topics-boundaries-visible-to` and :ref:`topics-boundaries-writes` describe the checks that report a read or a write past them.
+:doc:`application-layout` shows both sides of that call.
 
 The Notes project
 -----------------
@@ -341,29 +342,30 @@ The package ``__init__.py`` imports its submodules, which is how Django finds mo
      pages/
 
 A split into several applications moves models between migration histories, which is hard to undo.
-Split once the boundaries of the domain are known rather than up front.
+Split once the edges of the domain are known rather than up front.
 
 Several applications
 ~~~~~~~~~~~~~~~~~~~~
 
 Several subject areas become several applications in ``INSTALLED_APPS``, each with the composition above.
 With ``APP_DIRS`` on, the file router walks the ``pages/`` tree of every installed application and serves the routes of all of them through the single ``include("next.urls")`` line.
-By default the first directory inside ``pages/`` is the first URL segment, for example ``billing/pages/billing/invoices/page.py`` for ``/billing/invoices/``.
-An application that owns a prefix declares it on its ``AppConfig`` instead, and its tree loses the repeated directory.
+The first directory inside ``pages/`` is the first URL segment, for example ``billing/pages/billing/invoices/page.py`` for ``/billing/invoices/``, so the URL names of the tree stay in the ``next`` namespace.
+An application whose tree should answer under a prefix without the repeated directory is included from the root URLconf through ``pages()``.
 
 .. code-block:: python
-   :caption: billing/apps.py
+   :caption: config/urls.py
 
-   from django.apps import AppConfig
+   from django.urls import include, path
 
-   class BillingConfig(AppConfig):
-       default_auto_field = "django.db.models.BigAutoField"
-       name = "billing"
-       label = "billing"
-       mount = "billing/"
+   from next.urls import pages
 
-With that declaration ``billing/pages/invoices/page.py`` answers ``/billing/invoices/``, and its URL name ``next:page_billing_invoices`` stays the one the deeper tree had.
-An application with a second tree, such as a staff area beside its public pages, maps each subdirectory to its prefix through ``mounts``, as :ref:`topics-file-router-mounting` describes.
+   urlpatterns = [
+       path("billing/", pages("billing")),
+       path("", include("next.urls")),
+   ]
+
+With that include ``billing/pages/invoices/page.py`` answers ``/billing/invoices/`` under the name ``billing:page_invoices``.
+A second tree of one application, such as a staff area beside its public pages, sits in a subdirectory of its own and gets a ``pages()`` include of its own, as :ref:`topics-file-router-trees` describes.
 Two applications that answer the same URL path are reported by the ``next.E015`` check.
 
 A layout in a project ``DIRS`` root such as ``chrome/`` wraps the pages of every application, as *Per project page DIRS* above shows.
@@ -409,8 +411,7 @@ Its ``label`` is set explicitly, because the default label is the last component
 ``INSTALLED_APPS`` lists ``"ledger.money.wallets"``.
 The file router finds the page tree of a nested application through ``AppConfig.path``, so ``ledger/money/wallets/pages/`` is walked like any other tree and its routes join those of every other application under the same ``include("next.urls")``.
 
-Each application of a context declares its own prefix through ``mount`` or ``mounts``, such as ``mount = "money/wallets/"`` on ``WalletsConfig``.
-A context that wants to own its URL space instead keeps a ``urls.py`` of its own and mounts the trees of its applications there through ``pages()``.
+A context that wants to own its URL space keeps a ``urls.py`` of its own and places the trees of its applications there through ``pages()``.
 
 .. code-block:: python
    :caption: ledger/money/urls.py
@@ -435,10 +436,14 @@ A context that wants to own its URL space instead keeps a ``urls.py`` of its own
    ]
 
 The router finds these ``pages()`` calls through the nested include, takes the two trees out of ``include("next.urls")``, and names their pages in the ``wallets`` and ``operations`` namespaces, so ``page_reverse("", namespace="wallets")`` answers ``/money/wallets/``.
-A ``pages()`` include wins over a ``mount`` or ``mounts`` declaration of the same tree, and ``manage.py next routes`` lists where each tree ended up.
+``manage.py routes`` lists where each tree ended up.
+Contexts that ship as separate deployments over one code base keep a settings module each, see :doc:`/content/deployment/checklist`.
 
-A project of this size declares on each ``AppConfig`` what the application depends on, and isolates the application that grows towards a deployment of its own, as :doc:`/content/howto/scale-to-contexts` shows, with recipes for linters of the import graph beside the boundary checks.
-Contexts that ship as separate deployments over one code base keep a settings module each, see :doc:`/content/deployment/split-deployments`.
+Checking imports
+~~~~~~~~~~~~~~~~
+
+next.dj does not check which application imports which, since the import graph is the job of tools built for it.
+`import-linter <https://import-linter.readthedocs.io/>`__ holds a project to contracts declared in its configuration, such as layers or packages that never import one another, and `tach <https://docs.gauge.sh/>`__ declares the modules of a project with their dependencies and public interfaces, and both run as a step of CI beside ``manage.py check``.
 
 Tests
 -----
@@ -491,9 +496,7 @@ See also
 .. seealso::
 
    :doc:`application-layout` for where models, querysets, services, and signals hold the logic.
-   :doc:`boundaries` for the checks that hold applications to their roles.
-   :doc:`file-router` for the route shapes and the mounting of application trees.
-   :doc:`/content/howto/mount-an-application-under-a-prefix` for a prefix recipe.
-   :doc:`/content/howto/scale-to-contexts` for declared dependencies and isolation in a project of contexts.
+   :doc:`file-router` for the route shapes and the ``pages()`` include of application trees.
+   :doc:`/content/howto/serve-an-application-under-a-prefix` for a prefix recipe.
    :doc:`multi-project` for layouts that span several Django projects.
    :doc:`/content/howto/share-components-across-projects` for shared component patterns.

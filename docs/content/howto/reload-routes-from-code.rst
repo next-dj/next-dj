@@ -37,7 +37,7 @@ Each receiver is decorated with ``@receiver`` at module top level in ``notes/sig
    def reload_router_on_delete(**kwargs) -> None:
        router_manager.reload()
 
-The ``next`` application imports the ``signals.py`` of every installed app at startup, so the receivers need no ``AppConfig.ready`` code, see ``SIGNALS_AUTODISCOVER`` in :doc:`/content/ref/settings`.
+The ``next`` application imports the ``signals.py`` of every installed app at startup, so the receivers need no ``AppConfig.ready`` code, see :ref:`topics-signals`.
 
 Each call rebuilds the backend list from the current ``NEXT_FRAMEWORK`` configuration, clears Django's URL caches, and emits ``router_reloaded``.
 The framework listens to that signal itself, so the routers the development watcher and the staticfiles finder read are rebuilt with the ones the URL resolver serves.

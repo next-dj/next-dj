@@ -259,9 +259,8 @@ Permissions
    Without an object it asks ``user.has_perm(perm)``, the model-level question, which model permissions answer as well as registered predicates.
    The permission is a quoted name or a variable, and one that resolves to nothing or to an empty string renders the ``else`` branch.
    Any argument count other than one or two raises ``TemplateSyntaxError`` at parse time.
-   A literal name nothing grants is ``next.W130``.
-   A ``{% zone %}`` inside the block renders on its own, and the zone render asks the block again and answers 403 to a user it refuses.
-   A ``{% zone %}`` in the body of a component whose template reaches the tag is ``next.E163``, and a standalone render of such a zone is refused as an unknown zone.
+   A literal name nothing grants is ``next.W127`` in every project.
+   A ``{% zone %}`` inside the block, or in the body of a component whose template reaches the tag, is ``next.E161``, and a partial request for such a zone is refused as an unknown zone for every user, so the tag belongs inside the zone, see :ref:`topics-permissions-zones`.
    A template that runs ``{% load rules %}`` gets django-rules' own ``has_perm`` tag in its place, see :doc:`/content/topics/permissions`.
 
 Layouts

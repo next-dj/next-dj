@@ -62,7 +62,7 @@ The view of that page carries ``login_required = False``, the attribute the midd
 The actions of the same ``page.py`` posted from it stay open as well, so a login page built as a page of the tree declares ``page.public()`` and its form keeps working for anonymous visitors.
 A ``proxy.py`` that declares ``proxy.public()`` opens its directory and every page below it the same way.
 Keep ``LOGIN_URL`` on a public page or on Django's :class:`~django.contrib.auth.views.LoginView`, which Django marks public itself, since a closed login page redirects to itself forever.
-``page.public()`` also lifts the requirements of every ``proxy.py`` above the page, and ``manage.py check`` lists such a lift as ``next.W135``, so an opening under a closed section never goes unnoticed, see :ref:`topics-proxy`.
+``page.public()`` also lifts the requirements of every ``proxy.py`` above the page, and ``manage.py permissions`` names the file of such a lift, see :ref:`topics-proxy`.
 
 Close a section in code
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -150,7 +150,7 @@ List the access of every page, then request a closed page while signed out.
 .. code-block:: bash
    :caption: shell
 
-   uv run python manage.py next permissions
+   uv run python manage.py permissions
    uv run python manage.py runserver
 
 The table shows ``login (middleware)`` for a page the middleware closes, ``public`` for the login page, and the requirements of ``notes/proxy.py`` with that file as their source for every page below it.

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, override
 
@@ -14,14 +13,7 @@ from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
 from next.backends import instantiate_backend, resolve_backend_class
 from next.conf import next_framework_settings
 from next.pages import page
-from next.utils import (
-    PageRoot,
-    classify_dirs_entries,
-    join_trail,
-    prefix_trail,
-    resolve_base_dir,
-    resolved_tree,
-)
+from next.utils import PageRoot, classify_dirs_entries, resolve_base_dir, resolved_tree
 
 from .dispatcher import FilesystemTreeDispatcher
 from .parser import default_url_parser
@@ -50,7 +42,7 @@ _NON_PAGE_APP_ROOTS = ("django", "next")
 FILE_ROUTER_CONFIG_KEYS = ("PAGES_DIR", "APP_DIRS", "OPTIONS", "DIRS")
 
 
-def is_framework_app(app_name: str) -> bool:
+def _is_framework_app(app_name: str) -> bool:
     """Whether the dotted app name belongs to Django or to next itself."""
     return any(
         app_name == root or app_name.startswith(f"{root}.")
@@ -58,104 +50,23 @@ def is_framework_app(app_name: str) -> bool:
     )
 
 
-type MountedTrees = tuple[tuple[str | None, str], ...]
-"""The `(subdir, prefix)` pairs one app mounts, `None` for the router's `PAGES_DIR`."""
-
-
-@dataclass(frozen=True, slots=True)
-class MountDeclaration:
-    """What one app declares through `mount` or `mounts`, or why the router refuses it.
-
-    A refused declaration routes like no declaration at all, and the checks name it.
-    """
-
-    trees: MountedTrees | None = None
-    refusal: str | None = None
-    bracketed: tuple[str, ...] = ()
-
-
-_UNDECLARED = MountDeclaration()
-
-
-def _normalise_prefix(prefix: str) -> str:
-    """Return a prefix with one trailing slash and no leading one, or empty."""
-    stripped = prefix.strip("/")
-    return f"{stripped}/" if stripped else ""
-
-
 def is_plain_subdir(name: str) -> bool:
     """Whether `name` is one plain directory name, so a claim on it compares exactly."""
     return name not in {"", ".", ".."} and "/" not in name and "\\" not in name
 
 
-def _declared_prefixes(config: AppConfig) -> dict[str | None, str] | str | None:
-    """Return the subdirectory prefixes an app declares, the refusal, or `None`."""
-    mount: object = getattr(config, "mount", None)
-    mounts: object = getattr(config, "mounts", None)
-    if mount is None and mounts is None:
-        return None
-    if mount is not None and mounts is not None:
-        return "declares both mount and mounts"
-    if mount is not None:
-        if not isinstance(mount, str):
-            return f"declares mount as {type(mount).__name__} instead of a str"
-        return {None: mount}
-    return _mounts_refusal(mounts) or cast("dict[str | None, str]", mounts)
-
-
-def _mounts_refusal(mounts: object) -> str | None:
-    """Return why a `mounts` value is refused, `None` for a valid one."""
-    if not isinstance(mounts, dict) or not all(
-        isinstance(key, str) and isinstance(value, str) for key, value in mounts.items()
-    ):
-        return "declares mounts as something other than a dict of str to str"
-    unplain = [key for key in mounts if not is_plain_subdir(key)]
-    if unplain:
-        return f"declares mounts keys {unplain!r}, which are no plain directory names"
-    return None
-
-
-def read_mount_declaration(config: AppConfig) -> MountDeclaration:
-    """Return the page trees `config` mounts through `mount` or `mounts`.
-
-    `mount` moves the router's `PAGES_DIR` tree, and a bracket in a prefix is refused.
-    """
-    declared = _declared_prefixes(config)
-    if declared is None:
-        return _UNDECLARED
-    if isinstance(declared, str):
-        return MountDeclaration(refusal=declared)
-    bracketed = tuple(
-        prefix for prefix in declared.values() if "[" in prefix or "]" in prefix
-    )
-    if bracketed:
-        return MountDeclaration(bracketed=bracketed)
-    return MountDeclaration(
-        trees=tuple(
-            (subdir, _normalise_prefix(prefix)) for subdir, prefix in declared.items()
-        )
-    )
-
-
 class _InstalledApps(dict[str, Path]):
-    """Each installed app's directory by dotted name, with what each app declares.
+    """Each installed app's directory by dotted name, built once per registry snapshot.
 
-    Built once per app registry snapshot, since a declaration is a class attribute.
+    A stable map lets `page_roots` keep its answer until the registry changes.
     """
 
-    __slots__ = ("configs", "labels", "mounted")
+    __slots__ = ("configs",)
 
     def __init__(self, configs: tuple[AppConfig, ...]) -> None:
-        """Read the directory, the label and the mounted trees of every app."""
+        """Read the directory of every app."""
         super().__init__((config.name, Path(config.path)) for config in configs)
         self.configs = configs
-        self.labels = {config.name: config.label for config in configs}
-        self.mounted: dict[str, MountedTrees] = {
-            config.name: trees
-            for config in configs
-            if not is_framework_app(config.name)
-            and (trees := read_mount_declaration(config).trees) is not None
-        }
 
 
 class _InstalledAppsMemo:
@@ -191,26 +102,9 @@ def _installed_app_directories() -> dict[str, Path]:
     return held
 
 
-def _mounted_trees(
-    app_name: str, directories: Mapping[str, Path]
-) -> MountedTrees | None:
-    """Return the trees `app_name` declares, `None` when it declares none."""
-    if isinstance(directories, _InstalledApps):
-        return directories.mounted.get(app_name)
-    return None
+class _RoutedView(Protocol):
+    """A page view that knows the trail it was routed by inside its tree."""
 
-
-def _app_label(app_name: str, directories: Mapping[str, Path]) -> str:
-    """Return the label of `app_name`, the last part of its name when unknown."""
-    if isinstance(directories, _InstalledApps):
-        return directories.labels.get(app_name, app_name)
-    return app_name.rpartition(".")[2]
-
-
-class _MountedView(Protocol):
-    """A page view that knows the trail it was routed by and the prefix inside it."""
-
-    next_route_prefix: str
     next_route_trail: str
 
 
@@ -284,17 +178,13 @@ class FileRouterBackend(RouterBackend):
         self._components_folder_name = components_dir
 
         self._app_pages_path_cache: dict[str, tuple[Path, Path | None]] = {}
-        self._app_tree_path_cache: dict[tuple[str, str], tuple[Path, Path | None]] = {}
-        self._tree_patterns_cache: dict[
-            tuple[Path, str, bool], list[URLPattern | URLResolver]
-        ] = {}
+        self._tree_patterns_cache: dict[Path, list[URLPattern | URLResolver]] = {}
         self._root_patterns_cache: list[URLPattern | URLResolver] | None = None
         self._root_pages_paths_cache: list[Path] | None = None
         self._page_roots_cache: (
             tuple[Mapping[str, Path] | None, UrlconfMounts, list[PageRoot]] | None
         ) = None
         self._url_parser = default_url_parser
-        self._default_trees: MountedTrees = ((self.pages_dir, ""),)
 
     @classmethod
     def _require_config_keys(cls, config: Mapping[str, Any]) -> None:
@@ -356,7 +246,7 @@ class FileRouterBackend(RouterBackend):
 
         The routes stay relative to the tree, since Django joins in the outer prefix.
         """
-        return list(self._tree_urls(tree, "", mounted=True))
+        return list(self._tree_urls(tree))
 
     @override
     def page_roots(self) -> list[PageRoot]:
@@ -369,7 +259,9 @@ class FileRouterBackend(RouterBackend):
         held = self._page_roots_cache
         if held is not None and held[0] is directories and held[1] is mounts:
             return list(held[2])
-        roots = [] if directories is None else self._app_roots(directories, mounts)
+        roots = (
+            [] if directories is None else self._app_roots(directories, mounts.claimed)
+        )
         roots.extend(
             PageRoot(path=path, label="Root" if index == 0 else f"Root ({path})")
             for index, path in enumerate(self._get_root_pages_paths())
@@ -386,38 +278,26 @@ class FileRouterBackend(RouterBackend):
 
     def _app_trees(
         self, directories: Mapping[str, Path], claimed: frozenset[tuple[str, str]]
-    ) -> Generator[tuple[str, str, str, Path, bool], None, None]:
-        """Yield `(app, subdir, prefix, path, declared)` per auto-assembled app tree."""
+    ) -> Generator[tuple[str, Path], None, None]:
+        """Yield `(app, path)` per app tree the auto-assembly routes at the root.
+
+        A tree a `pages()` include claims is left to the URLconf that mounts it.
+        """
         for app_name in self._get_installed_apps(directories):
-            declared = _mounted_trees(app_name, directories)
-            for key, prefix in self._default_trees if declared is None else declared:
-                subdir = self.pages_dir if key is None else key
-                if (app_name, subdir) in claimed:
-                    continue
-                path = self._get_app_tree_path(app_name, directories, subdir)
-                if path is not None:
-                    yield app_name, subdir, prefix, path, declared is not None
+            if (app_name, self.pages_dir) in claimed:
+                continue
+            path = self._get_app_pages_path(app_name, directories)
+            if path is not None:
+                yield app_name, path
 
     def _app_roots(
-        self, directories: Mapping[str, Path], mounts: UrlconfMounts
+        self, directories: Mapping[str, Path], claimed: frozenset[tuple[str, str]]
     ) -> list[PageRoot]:
-        """Return the app trees the auto-assembly routes, the prefixed ones first."""
-        prefixed: list[PageRoot] = []
-        plain: list[PageRoot] = []
-        for app_name, subdir, prefix, path, declared in self._app_trees(
-            directories, mounts.claimed
-        ):
-            (prefixed if prefix else plain).append(
-                PageRoot(
-                    path=path,
-                    label=self._tree_label(app_name, subdir),
-                    prefix=prefix,
-                    subdir=subdir,
-                    app=_app_label(app_name, directories),
-                    source="mounts" if declared else "root",
-                )
-            )
-        return [*prefixed, *plain]
+        """Return the app trees the auto-assembly routes at the root."""
+        return [
+            PageRoot(path=path, label=self._tree_label(app_name, self.pages_dir))
+            for app_name, path in self._app_trees(directories, claimed)
+        ]
 
     def _mounted_root(self, point: MountPoint) -> PageRoot:
         """Return the page tree a `pages()` include of the URLconf mounts."""
@@ -426,41 +306,27 @@ class FileRouterBackend(RouterBackend):
             path=mount.path,
             label=self._tree_label(mount.name, mount.subdir),
             prefix=point.prefix,
-            subdir=mount.subdir,
-            app=mount.app,
-            source="urls",
             namespace=mount.namespace,
         )
 
     def _generate_app_urls(self) -> list[URLPattern | URLResolver]:
-        """Return patterns from each installed app's trees, the prefixed ones first.
+        """Return patterns from each installed app's `pages_dir` tree.
 
         One snapshot serves the pass, because reading it per app name rebuilds the map.
         """
         directories = _installed_app_directories()
         claimed = urlconf_mounts().claimed
-        prefixed: list[URLPattern | URLResolver] = []
-        plain: list[URLPattern | URLResolver] = []
-        for _app, _subdir, prefix, path, _declared in self._app_trees(
-            directories, claimed
-        ):
-            trail = prefix_trail(prefix)
-            (prefixed if prefix else plain).extend(
-                self._tree_urls(path, trail, mounted=bool(trail))
-            )
-        return [*prefixed, *plain]
+        urls: list[URLPattern | URLResolver] = []
+        for _app, path in self._app_trees(directories, claimed):
+            urls.extend(self._tree_urls(path))
+        return urls
 
-    def _tree_urls(
-        self, tree: Path, prefix: str, *, mounted: bool
-    ) -> list[URLPattern | URLResolver]:
-        """Return the cached patterns of one tree routed under the trail `prefix`."""
-        key = (tree, prefix, mounted)
-        patterns = self._tree_patterns_cache.get(key)
+    def _tree_urls(self, tree: Path) -> list[URLPattern | URLResolver]:
+        """Return the cached patterns of one tree, scanning it on first use."""
+        patterns = self._tree_patterns_cache.get(tree)
         if patterns is None:
-            patterns = self._tree_patterns_cache[key] = list(
-                self._generate_patterns_from_directory(
-                    tree, prefix=prefix, mounted=mounted
-                )
+            patterns = self._tree_patterns_cache[tree] = list(
+                self._generate_patterns_from_directory(tree)
             )
         return patterns
 
@@ -484,7 +350,7 @@ class FileRouterBackend(RouterBackend):
         The snapshot comes from the caller, so nothing below opens the registry again.
         """
         for app_name in directories:
-            if not is_framework_app(app_name):
+            if not _is_framework_app(app_name):
                 yield app_name
 
     def _get_app_pages_path(
@@ -508,24 +374,6 @@ class FileRouterBackend(RouterBackend):
         self._app_pages_path_cache[app_name] = (app_path, pages_path)
         return pages_path
 
-    def _get_app_tree_path(
-        self, app_name: str, directories: Mapping[str, Path], subdir: str
-    ) -> Path | None:
-        """Return `<app>/subdir` when that directory exists, memoised per router."""
-        if subdir == self.pages_dir:
-            return self._get_app_pages_path(app_name, directories)
-        app_path = directories.get(app_name)
-        if app_path is None:
-            return None
-        key = (app_name, subdir)
-        cached = self._app_tree_path_cache.get(key)
-        if cached is not None and cached[0] == app_path:
-            return cached[1]
-        candidate = app_path / subdir
-        tree = resolved_tree(candidate) if candidate.is_dir() else None
-        self._app_tree_path_cache[key] = (app_path, tree)
-        return tree
-
     def _get_root_pages_paths(self) -> list[Path]:
         """Return paths from `DIRS` plus optional `BASE_DIR` / `pages_dir`.
 
@@ -544,21 +392,17 @@ class FileRouterBackend(RouterBackend):
         return list(self._root_pages_paths_cache)
 
     def _generate_patterns_from_directory(
-        self, pages_path: Path, *, prefix: str = "", mounted: bool = False
+        self, pages_path: Path
     ) -> Generator[URLPattern, None, None]:
         """Yield one `URLPattern` per discovered page under `pages_path`.
 
-        A `mounted` view keeps its prefix and trail, so its crumbs reverse anywhere.
+        Each view keeps its trail, so its crumbs reverse under any outer include.
         """
         for url_path, file_path in self._scan_pages_directory(pages_path):
-            trail = join_trail(prefix, url_path)
-            if pattern := self._page_pattern(trail, file_path):
-                if mounted:
-                    view = cast("_MountedView", pattern.callback)
-                    view.next_route_prefix = prefix
-                    view.next_route_trail = trail
+            if pattern := self._page_pattern(url_path, file_path):
+                cast("_RoutedView", pattern.callback).next_route_trail = url_path
                 route_registered.send(
-                    sender=FileRouterBackend, url_path=trail, file_path=file_path
+                    sender=FileRouterBackend, url_path=url_path, file_path=file_path
                 )
                 yield pattern
 

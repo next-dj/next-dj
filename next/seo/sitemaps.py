@@ -27,7 +27,7 @@ from next.pages.access import anonymous_admitted, page_access
 from next.pages.metadata.hreflang import x_default_url
 from next.pages.metadata.normalize import X_DEFAULT
 from next.urls.reverse import page_reverse
-from next.utils import is_dynamic_trail, is_int, join_trail
+from next.utils import is_dynamic_trail, is_int
 
 from .discovery import declared_cache
 from .errors import SitemapTrailError
@@ -291,12 +291,8 @@ class PageTreeSitemap(_SitemapBase):
         items: Sequence[SitemapItemsEntry] = (),
         request: HttpRequest | None = None,
     ) -> None:
-        """Store the routes and the declarations without calling an items callable.
-
-        The mount of the tree is read once here, as every item reverses under it.
-        """
+        """Store the routes and the declarations without calling an items callable."""
         self.seo_root = seo_root
-        self._name_head = seo_root.root.name_trail()
         self._namespace = seo_root.root.namespace
         self.options = options
         self.request = request
@@ -360,11 +356,7 @@ class PageTreeSitemap(_SitemapBase):
         """Reverse the item under the active language, so its prefix is in the path."""
         kwargs: dict[str, Any] = dict(item.entry.kwargs)
         try:
-            return page_reverse(
-                join_trail(self._name_head, item.trail),
-                namespace=self._namespace,
-                **kwargs,
-            )
+            return page_reverse(item.trail, namespace=self._namespace, **kwargs)
         except NoReverseMatch as exc:
             exc.add_note(
                 f"Raised reversing the trail {item.trail!r} with the kwargs "

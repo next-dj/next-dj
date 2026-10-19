@@ -98,7 +98,7 @@ What stays the same
 next.dj adds no middleware and no model layer, so the following stay Django's.
 
 - Models, the ORM, and migrations are untouched.
-- ``django.contrib.admin`` mounts as usual, see :doc:`/content/howto/integrate-django-admin`.
+- ``django.contrib.admin`` is included as usual, see :doc:`/content/howto/integrate-django-admin`.
 - Authentication, permissions, and sessions come from ``django.contrib.auth``.
 - The ``MIDDLEWARE`` list is yours, and the framework contributes no entry to it.
 - Management commands, caching, signals, and internationalisation follow Django's documentation.

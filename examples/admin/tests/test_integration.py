@@ -5,12 +5,10 @@ from io import StringIO
 
 import pytest
 from admin_audit.models import AdminActivityLog
-from django.apps import apps
 from django.contrib import admin
 from django.contrib.auth.models import Group, Permission
 from django.core.checks import run_checks
 from django.core.management import call_command
-from django.core.management.base import SystemCheckError
 from django.db import connection
 from django.db.models import UniqueConstraint
 from django.test.utils import CaptureQueriesContext
@@ -19,7 +17,6 @@ from library.demo import DEMO_BOOKS, seed_demo
 from library.models import Book, Chapter, Tag
 from shadcn_admin.forms import AdminFormSpec, AdminInlineSpec, InlineRights
 
-from next.boundaries import boundaries_manager
 from next.testing import (
     NextClient,
     assert_metadata,
@@ -263,8 +260,8 @@ PROTECTED_PATHS = (
 DASHBOARD_PANELS = "dashboard-panels"
 
 PERMISSION_CHECKS = frozenset(
-    [f"next.E{number}" for number in range(161, 167)]
-    + [f"next.W{number}" for number in range(129, 136)]
+    [f"next.E{number}" for number in range(159, 165)]
+    + [f"next.W{number}" for number in range(127, 130)]
 )
 
 ACTIVITY_ACCESS = (
@@ -277,9 +274,9 @@ BOOK_ACCESS = (
 
 
 def permission_rows(*args: str) -> dict[str, tuple[str, str, str]]:
-    """Return the rows `manage.py next permissions` prints, keyed by endpoint."""
+    """Return the rows `manage.py permissions` prints, keyed by endpoint."""
     out = StringIO()
-    call_command("next", "permissions", *args, stdout=out)
+    call_command("permissions", *args, stdout=out)
     _header, *lines = out.getvalue().splitlines()
     rows = (re.split(r"\s{2,}", line.strip()) for line in lines)
     return {name: (kind, access, sources) for kind, name, access, sources in rows}
@@ -336,12 +333,12 @@ class TestTreeAccess:
         assert rows["/admin/activity/"] == (
             "page",
             ACTIVITY_ACCESS,
-            "admin_audit/pages/proxy.py, admin_audit/pages/page.py",
+            "admin_audit/pages/proxy.py, admin_audit/pages/activity/page.py",
         )
         assert rows["/admin/login/"] == (
             "page",
             "public",
-            "public (shadcn_admin/auth_pages/login/page.py)",
+            "public (shadcn_admin/pages/login/page.py)",
         )
         assert rows["admin:login"][1] == "public"
         assert rows["admin:logout"][1] == "login (middleware)"
@@ -351,7 +348,7 @@ class TestTreeAccess:
         assert rows["/admin/<str:app_label>/<str:model_name>/<int:pk>/history/"] == (
             "page",
             "login, perm shadcn_admin.use_admin",
-            "admin_audit/object_pages/proxy.py",
+            "shadcn_admin/pages/proxy.py",
         )
 
     def test_the_permission_table_names_the_book_rule_and_its_file(self):
@@ -359,17 +356,17 @@ class TestTreeAccess:
         assert rows["/admin/library/book/<int:book>/outline/"] == (
             "page",
             BOOK_ACCESS,
-            "library/book_pages/proxy.py",
+            "library/pages/library/book/[int:book]/proxy.py",
         )
         assert rows["add_chapter_form"] == (
             "action",
             BOOK_ACCESS,
-            "library/book_pages/proxy.py",
+            "library/pages/library/book/[int:book]/proxy.py",
         )
 
 
 class TestDashboardPanels:
-    """`admin_audit` fills a dashboard panel through `panels_requested` for its readers."""
+    """`admin_audit` registers a dashboard panel that only readers of the log see."""
 
     def test_the_superuser_sees_the_newest_entries(self, admin_client):
         log_entry("Frankenstein")
@@ -430,7 +427,7 @@ def append(client: NextClient, book: Book, title: str, **kwargs):
 
 
 class TestBookOutline:
-    """`library/book_pages/proxy.py` asks `change_book` on the book the URL names."""
+    """The `proxy.py` of the outline asks `change_book` on the book the URL names."""
 
     def test_the_editor_reads_the_outline_of_a_draft(
         self, editor_client, make_book, make_chapter
@@ -548,7 +545,7 @@ class TestBookOutline:
     def test_an_unknown_book_is_not_found(self, admin_client):
         assert admin_client.get("/admin/library/book/999/outline/").status_code == 404
 
-    def test_the_crumbs_lead_with_the_dashboard(self, admin_client, book):
+    def test_the_crumbs_climb_to_the_dashboard_by_url(self, admin_client, book):
         body = admin_client.get(outline_url(book)).content.decode()
         assert crumbs(body) == [
             ("Dashboard", "/admin/", False),
@@ -1633,22 +1630,22 @@ class TestActivityLog:
         assert "library.tag" in body
 
 
-ROUTE_COLUMNS = ("url", "name", "app", "file", "source", "access")
+ROUTE_COLUMNS = ("url", "name", "file", "access")
 
 
 def route_rows() -> dict[str, dict[str, str]]:
-    """Return the rows `manage.py next routes` prints, keyed by URL."""
+    """Return the rows `manage.py routes` prints, keyed by URL."""
     out = StringIO()
-    call_command("next", "routes", stdout=out)
+    call_command("routes", stdout=out)
     _header, *lines = out.getvalue().splitlines()
     rows = (
-        dict(zip(ROUTE_COLUMNS, line.split(maxsplit=5), strict=True)) for line in lines
+        dict(zip(ROUTE_COLUMNS, line.split(maxsplit=3), strict=True)) for line in lines
     )
     return {row["url"]: row for row in rows}
 
 
-class TestMountedAuditPages:
-    """`admin_audit` mounts its two page trees through `AdminAuditConfig.mounts`."""
+class TestAppPageTrees:
+    """Each app serves the pages of its own `pages/` tree under the one include."""
 
     HISTORY_URL = "/admin/<str:app_label>/<str:model_name>/<int:pk>/history/"
     HISTORY_NAME = "page_str_app_label_str_model_name_int_pk_history"
@@ -1675,38 +1672,38 @@ class TestMountedAuditPages:
         assert page_reverse(trail, **kwargs) == expected
         assert reverse(f"next:{self.HISTORY_NAME}", kwargs=kwargs) == expected
 
-    def test_the_route_map_lists_the_audit_trees_as_mounts(self):
+    def test_the_route_map_names_the_file_of_each_page(self):
         rows = route_rows()
         assert rows["/admin/activity/"] == {
             "url": "/admin/activity/",
             "name": "next:page_activity",
-            "app": "admin_audit",
-            "file": "admin_audit/pages/page.py",
-            "source": "mounts",
+            "file": "admin_audit/pages/activity/page.py",
             "access": ACTIVITY_ACCESS,
         }
         assert rows[self.HISTORY_URL] == {
             "url": self.HISTORY_URL,
             "name": f"next:{self.HISTORY_NAME}",
-            "app": "admin_audit",
-            "file": "admin_audit/object_pages/history/page.py",
-            "source": "mounts",
+            "file": (
+                "shadcn_admin/pages/[str:app_label]/[str:model_name]/[int:pk]/"
+                "history/page.py"
+            ),
             "access": "login, perm shadcn_admin.use_admin",
         }
 
-    def test_both_admin_trees_mount_at_the_root_of_the_include(self):
+    def test_the_admin_tree_holds_the_auth_pages(self):
         rows = route_rows()
-        admin_rows = [row for row in rows.values() if row["app"] == "shadcn_admin"]
-        assert len(admin_rows) == 7
-        assert {row["source"] for row in admin_rows} == {"mounts"}
+        admin_rows = [
+            row for row in rows.values() if row["file"].startswith("shadcn_admin/")
+        ]
+        assert len(admin_rows) == 8
         assert rows["/admin/"]["name"] == "next:page_"
-        assert rows["/admin/login/"]["file"] == "shadcn_admin/auth_pages/login/page.py"
+        assert rows["/admin/login/"]["file"] == "shadcn_admin/pages/login/page.py"
         assert rows["/admin/logout/"]["name"] == "next:page_logout"
 
     @pytest.mark.parametrize(
         "path", ["/admin/activity/", "/admin/library/book/{pk}/history/"]
     )
-    def test_a_mounted_page_keeps_the_admin_shell(self, admin_client, book, path):
+    def test_an_app_page_keeps_the_admin_shell(self, admin_client, book, path):
         body = admin_client.get(path.format(pk=book.pk)).content.decode()
         logout_url = admin_client.get_action_url("admin:logout")
         assert body.count("<!DOCTYPE html>") == 1
@@ -1754,7 +1751,7 @@ class TestBreadcrumbs:
             ("History", url, True),
         ]
 
-    def test_the_activity_crumb_reverses_under_its_prefix(self, admin_client):
+    def test_the_activity_crumb_follows_the_dashboard(self, admin_client):
         body = admin_client.get("/admin/activity/").content.decode()
         assert crumbs(body) == [
             ("Dashboard", "/admin/", False),
@@ -2360,42 +2357,3 @@ class TestObjectPermissions:
     def test_the_permission_checks_find_nothing(self, db):
         found = {message.id for message in run_checks()}
         assert found.isdisjoint(PERMISSION_CHECKS)
-
-
-@pytest.fixture()
-def fresh_scan():
-    boundaries_manager.reset()
-    yield
-    boundaries_manager.reset()
-
-
-class TestBoundaries:
-    def test_every_declared_dependency_is_used(self) -> None:
-        out = StringIO()
-        call_command("next", "boundaries", "--exact", stdout=out)
-        assert "Every depends_on entry is used." in out.getvalue()
-
-    def test_the_boundary_checks_find_nothing(self) -> None:
-        out = StringIO()
-        call_command(
-            "check", "--tag", "boundaries", "--fail-level", "WARNING", stdout=out
-        )
-        assert "no issues" in out.getvalue()
-
-    def test_only_the_boundaries_tag_runs_the_boundary_checks(
-        self, monkeypatch: pytest.MonkeyPatch, fresh_scan
-    ) -> None:
-        monkeypatch.setattr(apps.get_app_config("admin_audit"), "depends_on", ())
-        out, err = StringIO(), StringIO()
-        call_command("check", "--fail-level", "CRITICAL", stdout=out, stderr=err)
-        assert "next.W150" not in out.getvalue() + err.getvalue()
-        with pytest.raises(SystemCheckError, match=r"next\.W150"):
-            call_command(
-                "check",
-                "--tag",
-                "boundaries",
-                "--fail-level",
-                "WARNING",
-                stdout=StringIO(),
-                stderr=StringIO(),
-            )

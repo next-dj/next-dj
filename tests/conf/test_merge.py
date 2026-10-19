@@ -143,38 +143,6 @@ class TestMergeUserSettings:
         assert DEFAULTS["URL_NAME_TEMPLATE"] == settings_obj.URL_NAME_TEMPLATE
 
 
-_AUTODISCOVER_KEYS = (
-    "DEPS_AUTODISCOVER",
-    "PERMISSIONS_AUTODISCOVER",
-    "FORM_AUTODISCOVER",
-    "SIGNALS_AUTODISCOVER",
-)
-
-
-class TestAutodiscoverSwitches:
-    """Each app module autodiscovery switch is a bool that defaults to on."""
-
-    @pytest.mark.parametrize("key", _AUTODISCOVER_KEYS)
-    def test_the_switch_is_a_bool_key(self, key: str) -> None:
-        assert key in BOOL_KEYS
-
-    @pytest.mark.parametrize("key", _AUTODISCOVER_KEYS)
-    def test_the_switch_defaults_to_on(self, key: str) -> None:
-        assert merge_user_settings(DEFAULTS, None)[key] is True
-
-    @pytest.mark.parametrize("key", _AUTODISCOVER_KEYS)
-    def test_a_user_false_survives_the_merge(self, key: str) -> None:
-        with override_settings(NEXT_FRAMEWORK={key: False}):
-            assert getattr(next_framework_settings, key) is False
-
-    @pytest.mark.parametrize("key", _AUTODISCOVER_KEYS)
-    @pytest.mark.parametrize("raw", [0, "", None], ids=repr)
-    def test_a_falsy_user_value_turns_the_switch_off(
-        self, key: str, raw: object
-    ) -> None:
-        assert merge_user_settings(DEFAULTS, {key: raw})[key] is False
-
-
 class TestReplacementIsWhole:
     """A user value is never blended with the default value for its key."""
 

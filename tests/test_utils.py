@@ -248,34 +248,28 @@ class TestJoinTrail:
 
 
 class TestPageRootTrails:
-    """A tree answers routes under its prefix and names pages by its source."""
+    """A tree answers routes under the prefix of the include that mounts it."""
 
     @pytest.mark.parametrize(
-        ("source", "prefix", "trail", "route", "name"),
+        ("prefix", "trail", "route"),
         [
-            ("root", "", "ops", "ops", "ops"),
-            ("root", "", "", "", ""),
-            ("mounts", "w/<int:wallet>/", "ops", "w/[int:wallet]/ops", None),
-            ("mounts", "w/<int:wallet>/", "", "w/[int:wallet]", None),
-            ("urls", "org/<int:org>/audit/", "log", "org/[int:org]/audit/log", "log"),
-            ("urls", "staff/", "", "staff", ""),
+            (None, "ops", "ops"),
+            (None, "", ""),
+            ("org/<int:org>/audit/", "log", "org/[int:org]/audit/log"),
+            ("staff/", "", "staff"),
         ],
-        ids=["root", "root_index", "mounts", "mounts_index", "urls", "urls_index"],
+        ids=["assembled", "assembled_index", "included", "included_index"],
     )
-    def test_route_and_name_trails(
-        self, source, prefix: str, trail: str, route: str, name: str | None
-    ) -> None:
-        root = PageRoot(path=Path(), label="x", prefix=prefix, source=source)
+    def test_route_trails(self, prefix: str | None, trail: str, route: str) -> None:
+        root = PageRoot(path=Path(), label="x", prefix=prefix)
 
         assert root.route_trail(trail) == route
-        assert root.name_trail(trail) == (route if name is None else name)
 
-    def test_the_defaults_describe_an_unprefixed_root_tree(self) -> None:
+    def test_the_defaults_describe_an_auto_assembled_tree(self) -> None:
         root = PageRoot(path=Path(), label="Root")
 
-        assert (root.prefix, root.subdir, root.app) == ("", "", "")
-        assert (root.source, root.namespace) == ("root", "next")
-        assert root.route_trail() == root.name_trail() == ""
+        assert (root.prefix, root.namespace) == (None, "next")
+        assert root.route_trail() == ""
 
 
 class TestPrivateDirectories:

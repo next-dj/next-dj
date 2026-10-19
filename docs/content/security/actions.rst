@@ -72,9 +72,11 @@ An action declared outside any page tree has no public page to stand on, so it r
 The public action warning
 -------------------------
 
-``manage.py check`` warns with ``next.W134`` about a file of a page tree whose actions nothing guards, no requirement from a ``proxy.py`` above it, no declaration of its page, no ``Meta`` guard, and no ``LoginRequiredMiddleware``.
+``manage.py check`` warns with ``next.W129`` about a file of a page tree whose actions nothing guards, no requirement from a ``proxy.py`` above it, no declaration of its page, no ``Meta`` guard, and no ``LoginRequiredMiddleware``.
 One message covers every such action of the file, and its hint names the declarations that close them.
-A ``page.public()`` or a ``proxy.public()`` above silences the warning for the actions of that directory, since it states that they are meant for everyone.
+The warning runs only in a project that declares access, because a project without any access declaration keeps every action open by design.
+A project declares access once it holds a ``proxy.py``, a ``login_required()``, ``permission_required()``, or ``public()`` on a page, a ``proxy.py``, or a component, or a permission registered through ``add_perm``.
+A ``page.public()`` or a ``proxy.public()`` is itself such a declaration and states that the actions under it are open on purpose, so they draw no warning.
 An action declared outside a page tree is not judged, because its rule depends on the origin each request posts.
 
 See also

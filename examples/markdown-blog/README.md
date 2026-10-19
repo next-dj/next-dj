@@ -300,7 +300,7 @@ def posts() -> Iterator[SitemapEntry]:
 
 Every route without a `[param]` segment is listed on its own, so `/` and `/about/` are in the document because they are directories. The post route has a parameter, so `@sitemap.items` names its URLs, one `SitemapEntry` per file with the kwargs that reverse the route and the day of its last edit as `lastmod`. The module attributes are the ones Django's `Sitemap` class reads, `changefreq` here, plus `cache` for a `cache_page` wrapper. Every `<loc>` is absolute on `SITE["URL"]`. The XML comes from the templates of `django.contrib.sitemaps`, which is why that app joins `INSTALLED_APPS` in [`config/settings.py`](config/settings.py). The tests read the document back through `next.testing.parse_sitemap`.
 
-`include("next.urls")` sits at the root of [`config/urls.py`](config/urls.py), so it mounts `/sitemap.xml`, `/sitemap-<section>.xml` and `/robots.txt` at the host root with no URL of their own. `/sitemap-blog.xml` is the section of this one root, labelled after the app, and with a single root `/sitemap.xml` is the same document. An index takes its place on its own once a second root declares a `sitemap.py` or a section grows past `limit`.
+`include("next.urls")` sits at the root of [`config/urls.py`](config/urls.py), so it serves `/sitemap.xml`, `/sitemap-<section>.xml` and `/robots.txt` at the host root with no URL of their own. `/sitemap-blog.xml` is the section of this one root, labelled after the app, and with a single root `/sitemap.xml` is the same document. An index takes its place on its own once a second root declares a `sitemap.py` or a section grows past `limit`.
 
 Robots comes from [`blog/pages/robots.py`](blog/pages/robots.py), one `RobotsRule` that allows everything:
 

@@ -53,7 +53,6 @@ gate.save(update_fields=['enabled', 'updated_at'])
 
 ```python
 NEXT_FRAMEWORK = {
-    "BOUNDARIES": "strict",
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
@@ -207,7 +206,7 @@ class BulkToggleForm(Form):
 Three details worth noting:
 
 - `choices` is populated in `__init__` rather than at class-define time so the field reflects the current set of flags on every request.
-- The write and every read of the pages live in `flags/services.py`, because `NEXT_FRAMEWORK["BOUNDARIES"] = "strict"` holds a page tree to reading through `visible_to(...)` or a function of `services.py` and to writing through a form or a service. Flags have no owner to narrow them by, so the pages ask the service functions.
+- The write and every read of the pages live in `flags/services.py`, since a page tree reads through `visible_to(...)` or a function of `services.py` and writes through a form or a service. Flags have no owner to narrow them by, so the pages ask the service functions.
 - Only **changed** flags are saved. Untouched rows do not fire `post_save`, so the cache-invalidation receiver invalidates nothing unless there is a real state transition.
 - The redirect and the flash come from the declarative success contract. `Meta.success_url` and `Meta.success_message` let the overridden `on_valid` end with `super().on_valid(request)` instead of a hand-built `HttpResponseRedirect`. The base method redirects to the URL `page_reverse_lazy("admin")` resolves once the URLconf is ready, and flashes "Flag toggles saved." through Django's messages framework. The admin template calls the shared `flash_messages` component, which drains the queue and maps each level tag onto an `alert` variant.
 
@@ -241,7 +240,7 @@ The return contract mirrors a Django permission check. `None` or `True` allows. 
 
 A denial emits `next.signals.form_access_denied` with `action_name`, `uid`, `request`, `layer` (`"view"` here), and `reason` (`"raised"` for the `PermissionDenied` path). The `_count_access_denied` receiver in [`flags/signals.py`](flags/signals.py) bumps a counter, and the `/admin/metrics/` page surfaces it as a stat card next to the render counters.
 
-The flag is the one rule on the action. The example signs nobody in, so [`flags/pages/admin/page.py`](flags/pages/admin/page.py) declares `page.public()`, which tells `manage.py check` the action is open to every visitor on purpose instead of reporting it as `next.W134`.
+The flag is the one rule on the action. The example signs nobody in, so [`flags/pages/admin/page.py`](flags/pages/admin/page.py) declares `page.public()`, the statement that the action is open to every visitor on purpose, and `manage.py permissions` lists it as `public`. `manage.py check` reports `next.W129` for an action nothing guards only in a project that declares access, and the declaration itself is that guard.
 
 ### 8. Receivers: `post_save`, `post_delete`, `page_rendered`, `component_rendered`
 

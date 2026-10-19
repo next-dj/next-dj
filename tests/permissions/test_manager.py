@@ -8,8 +8,9 @@ from django.test import override_settings
 from django.utils.module_loading import import_string
 
 from next import permissions
-from next.permissions import Predicate, manager as manager_module, predicate
+from next.permissions import manager as manager_module
 from next.permissions.manager import PermissionManager, permission_manager
+from next.permissions.markers import Predicate, predicate
 from next.permissions.registry import PermissionRegistry
 from tests.support import MODEL_BACKEND, is_owner, is_staff
 
@@ -364,18 +365,16 @@ class TestModuleFunctions:
     """The module functions answer through the shared manager."""
 
     @pytest.mark.usefixtures("isolated_permissions")
-    def test_add_has_perm_and_perms_for(self) -> None:
+    def test_add_and_has_perm(self) -> None:
         rule = permissions.add_perm("blog.change_post", is_owner)
         user = _user()
         post = SimpleNamespace(owner=user)
         assert permission_manager.registry.get("blog.change_post") is rule
         assert permissions.has_perm(user, "blog.change_post", post) is True
         assert permissions.has_perm(user, "blog.change_post") is False
-        assert permissions.perms_for(user, post) == frozenset({"blog.change_post"})
-        assert permissions.perms_for(user) == frozenset()
 
     @pytest.mark.usefixtures("isolated_permissions")
-    def test_add_perm_accepts_a_composite(self) -> None:
-        rule = predicate(is_owner) | predicate(is_staff)
+    def test_add_perm_keeps_a_built_predicate(self) -> None:
+        rule = predicate(is_staff)
         assert permissions.add_perm("blog.change_post", rule) is rule
         assert permissions.has_perm(_user(staff=True), "blog.change_post") is True

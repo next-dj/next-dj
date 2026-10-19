@@ -188,9 +188,7 @@ Captured segments contribute their parameter name without the brackets.
 The trailing underscore on the root page name is intentional.
 ``reverse('next:page_')`` resolves the root page.
 
-A tree mounted under a prefix, as *Mounting application trees* below describes, carries the prefix in every name.
-Each converter of the prefix reads as a bracket segment, so ``<int:wallet>`` counts as ``[int:wallet]``, and the ``operations/page.py`` of a tree mounted under ``wallets/<int:wallet>/operations/`` registers as ``next:page_wallets_int_wallet_operations``.
-A tree a URLconf mounts through ``pages()`` names its pages in a namespace of its own and without the prefix.
+A tree a URLconf places through ``pages()`` names its pages in a namespace of its own and without the prefix, see `Placing application trees`_.
 
 A typed captured segment keeps its converter label in the URL name.
 ``[int:post_id]`` becomes ``posts_int_post_id``, not ``posts_post_id``, because the name is computed from the raw segment text.
@@ -227,8 +225,8 @@ App directories.
    The scanned directory is the one the registry reports for the application, so an ``AppConfig`` that declares its own ``path`` moves the scan with it, and an application shipped as a namespace package is scanned like any other.
    Django's own applications and ``next`` itself are never scanned, so the packages they ship cannot contribute routes.
 
-   A directory reachable both as an application tree and through ``DIRS`` is routed twice, once under each mount, which the ``next.E015`` system check reports as a URL pattern conflict.
-   The page checks report each file once, however many mounts reach it.
+   A directory reachable both as an application tree and through ``DIRS`` is routed twice, once under each root, which the ``next.E015`` system check reports as a URL pattern conflict.
+   The page checks report each file once, however many roots reach it.
 
 Project directories.
    The ``DIRS`` list adds absolute or project-relative paths to the scan.
@@ -319,88 +317,25 @@ Segment entry.
 In the example above, any directory named ``drafts`` under any application's page root is silently skipped.
 No URL is registered for it and the file walk does not descend into it.
 
-.. _topics-file-router-mounting:
+.. _topics-file-router-trees:
 
-Mounting application trees
---------------------------
+Placing application trees
+-------------------------
 
-An application page tree mounts at one of three levels.
+An application page tree routes at one of two places.
 
 Root.
-   By default the ``pages/`` tree of an application routes from the point where the root URLconf includes ``next.urls``, so the first directory of the tree is the first URL segment.
-
-Application.
-   The ``AppConfig`` declares a prefix for its trees through ``mount`` or ``mounts``, and the tree keeps routing through the same ``include("next.urls")``.
+   By default the ``PAGES_DIR`` tree of every installed application routes from the point where the root URLconf includes ``next.urls``, so the first directory of the tree is the first URL segment.
 
 URLconf.
-   The project places one tree anywhere in a ``urls.py`` through ``pages()``, which overrides what the application declares for that tree.
+   The project places one tree anywhere in a ``urls.py`` through ``pages()``, and that tree leaves ``next.urls``.
 
-``manage.py next routes`` prints the result, one row per routed page with its URL, name, application, file, and source, see :doc:`/content/ref/management`.
+``manage.py routes`` prints the result, one row per routed page with its URL, name, file, and access, see :doc:`/content/ref/management`.
 
-Prefix on the application
-~~~~~~~~~~~~~~~~~~~~~~~~~
+The pages() include
+~~~~~~~~~~~~~~~~~~~
 
-``mount`` names the prefix of the ``PAGES_DIR`` tree of an application, ``pages`` in the examples on this page.
-
-.. code-block:: python
-   :caption: wallets/apps.py
-
-   from django.apps import AppConfig
-
-   class WalletsConfig(AppConfig):
-       name = "wallets"
-       mount = "wallets/"
-
-``mount = "wallets/"`` moves the tree each file router reads from ``PAGES_DIR``, so with ``PAGES_DIR`` set to ``pages`` it equals ``mounts = {"pages": "wallets/"}``.
-``mounts`` maps subdirectories of the application to prefixes, so one application serves several trees, each under a prefix of its own.
-Each key is one plain directory name, never a path with a separator, ``""``, ``"."``, or ``".."``.
-Declare one of the two attributes, never both.
-
-.. code-block:: python
-   :caption: wallets/apps.py
-
-   from django.apps import AppConfig
-
-   class WalletsConfig(AppConfig):
-       name = "wallets"
-       mounts = {
-           "pages": "wallets/",
-           "operations": "wallets/<int:wallet>/operations/",
-       }
-
-.. code-block:: text
-   :caption: wallets application
-
-   wallets/
-     apps.py
-     pages/
-       page.py                     /wallets/
-       [int:pk]/
-         page.py                   /wallets/<int:pk>/
-     operations/
-       page.py                     /wallets/<int:wallet>/operations/
-       [int:op]/
-         page.py                   /wallets/<int:wallet>/operations/<int:op>/
-
-A prefix is written in Django :func:`~django.urls.path` syntax and is relative to the point where ``next.urls`` is included, so under ``path("app/", include("next.urls"))`` the first tree above answers ``/app/wallets/``.
-The router drops the leading slash of a prefix and keeps one trailing slash, and an empty prefix routes the tree at the include point like an undeclared one.
-A converter in the prefix captures a URL parameter the way a bracket directory does, so ``wallet`` reaches every page of the ``operations`` tree as a URL kwarg, through a plain ``wallet: int`` parameter or ``DUrl[int]``.
-
-The router refuses three shapes of declaration.
-
-- ``mount`` that is not a string, ``mounts`` that is not a dict of strings to strings, a ``mounts`` key that is no plain directory name, or both attributes at once.
-  The router ignores the declaration and routes the ``PAGES_DIR`` tree at the include point, and the checks report :ref:`next.E152 <ref-system-checks>`.
-- A prefix holding ``[`` or ``]``, since bracket syntax belongs to directories.
-  The router ignores the declaration the same way and the checks report :ref:`next.E153 <ref-system-checks>`.
-- A page directory that captures a name the prefix already captures, such as ``operations/[int:wallet]/`` under the prefix above.
-  The router leaves that page unrouted with a logged warning, and the checks report :ref:`next.E154 <ref-system-checks>`, naming the prefix and the application.
-
-A ``mounts`` key, or the ``PAGES_DIR`` tree a ``mount`` moves, that names no directory of the application routes nothing and reports :ref:`next.W126 <ref-system-checks>`, which names that directory.
-
-Mount in a URLconf
-~~~~~~~~~~~~~~~~~~
-
-``pages()`` from ``next.urls`` returns what :func:`~django.urls.include` returns, so :func:`~django.urls.path` mounts one application tree under any route of the project.
+``pages()`` from ``next.urls`` returns what :func:`~django.urls.include` returns, so :func:`~django.urls.path` places one application tree under any route of the project.
 
 .. code-block:: python
    :caption: config/urls.py
@@ -416,38 +351,44 @@ Mount in a URLconf
    ]
 
 The first argument is the label or the dotted name of an installed application, and the optional second names one of its subdirectories as one plain directory name.
-Without it ``pages()`` mounts the ``PAGES_DIR`` tree of the application, as ``mount`` does, with ``PAGES_DIR`` read from the file router that builds ``pages()`` trees.
-Both resolve while the URLconf imports, the way ``include()`` fails on a missing module.
+Without it ``pages()`` places the ``PAGES_DIR`` tree of the application, with ``PAGES_DIR`` read from the first file router of ``PAGE_BACKENDS``.
+A subdirectory other than ``PAGES_DIR``, such as ``history/`` above, routes only through a ``pages()`` include.
+Both arguments resolve while the URLconf imports, the way ``include()`` fails on a missing module.
 An unknown application raises ``LookupError``, and a subdirectory that is missing, holds a separator, or is ``""``, ``"."``, or ``".."`` raises ``ImproperlyConfigured``.
-A converter in the route above ``pages()`` reaches every page of the tree as a URL kwarg, as it does for any :func:`~django.urls.include`.
 
-The pages of a mounted tree register in a namespace named after the application label, without the outer prefix.
+.. code-block:: text
+   :caption: audit application
+
+   audit/
+     apps.py
+     pages/
+       page.py                     /staff/
+       log/
+         page.py                   /staff/log/
+     history/
+       page.py                     /staff/history/
+
+A converter in the route above ``pages()`` reaches every page of the tree as a URL kwarg, as it does for any :func:`~django.urls.include`, through a plain parameter or ``DUrl``.
+A page directory that captures a name the route already captures, such as ``history/[int:wallet]/`` under ``path("w/<int:wallet>/", pages(...))``, makes one value overwrite the other, and the checks report :ref:`next.E152 <ref-system-checks>`, naming the page and the prefix.
+
+The pages of a ``pages()`` tree register in a namespace named after the application label, without the outer prefix.
 ``page_reverse("", namespace="audit")`` answers ``/staff/`` and ``{% url "audit:page_log" %}`` answers ``/staff/log/``.
 A second tree of the same application needs a namespace of its own, which the ``namespace`` keyword sets, as ``audit_history`` does above.
+A layout or a context of one tree never reaches the pages of another, while breadcrumbs continue by URL, so a page of ``/staff/history/`` leads its crumbs with those of the nearest page above it in another tree, here the ``/staff/`` page, see :doc:`/content/topics/seo/breadcrumbs`.
 
-One tree may be mounted twice, each include under a namespace of its own, such as ``pages("audit", namespace="one")`` under ``one/`` and ``pages("audit", namespace="two")`` under ``two/``.
+One tree may be included twice, each include under a namespace of its own, such as ``pages("audit", namespace="one")`` under ``one/`` and ``pages("audit", namespace="two")`` under ``two/``.
 Its pages then answer under both prefixes, while the sitemap lists the tree as one section, built from the include the URLconf lists first, so only the URLs under ``one/`` appear in it.
-The checks ``next.W128`` and ``next.E156`` judge such a tree by that first include alone, its route and the kwargs it captures.
+The checks ``next.W126``, ``next.E154``, and ``next.E162`` judge such a tree by that first include alone, its route and the kwargs it captures.
 
-The router finds every ``pages()`` include by walking the URLconf ``ROOT_URLCONF`` names, nested ``include()`` calls included, so an include in a module that URLconf does not reach mounts nothing in its place.
-Under :func:`~django.conf.urls.i18n.i18n_patterns` the walk reads the language prefix in ``LANGUAGE_CODE``, so the routes it records, and the URLs ``next routes`` prints, carry the prefix of that language.
+The router finds every ``pages()`` include by walking the URLconf ``ROOT_URLCONF`` names, nested ``include()`` calls included, so an include in a module that URLconf does not reach takes no tree out of ``next.urls``.
+Under :func:`~django.conf.urls.i18n.i18n_patterns` the walk reads the language prefix in ``LANGUAGE_CODE``, so the routes it records, and the URLs ``manage.py routes`` prints, carry the prefix of that language.
 The routes of ``include("next.urls")`` follow a new ``ROOT_URLCONF`` only once the routers reload, which :func:`~django.test.override_settings` triggers and pytest-django's ``@pytest.mark.urls`` does not, see :ref:`topics-testing-urlconf`.
-
-Priority and exclusion
-~~~~~~~~~~~~~~~~~~~~~~
-
-Each tree is keyed by its application and subdirectory, and the strongest declaration of that key wins.
-A ``pages()`` include beats ``mount`` and ``mounts``, which beat the default root.
-A tree a URLconf mounts leaves ``next.urls``, while the other trees of the same application stay where its ``mounts`` places them.
-A ``mount`` or ``mounts`` entry that a ``pages()`` include overrides has no effect and reports :ref:`next.W127 <ref-system-checks>`.
 
 Route order across trees
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Inside ``next.urls`` the application trees with a prefix route first, then the application trees at the include point, then the ``DIRS`` roots, each group in ``INSTALLED_APPS`` order.
-A ``[slug]`` or ``[[rest]]`` page at the root of another tree therefore never shadows a prefixed tree.
-A project without ``mount``, ``mounts``, or ``pages()`` keeps the order of application trees followed by ``DIRS`` roots.
-A ``pages()`` tree routes where its URLconf lists it, under Django's first-match rule.
+Inside ``next.urls`` the application trees route first, in ``INSTALLED_APPS`` order, then the ``DIRS`` roots.
+A ``pages()`` tree routes where its URLconf lists it, under Django's first-match rule, so a ``[slug]`` or ``[[rest]]`` page at the root of ``next.urls`` never shadows a tree a ``pages()`` include placed above it.
 
 .. _topics-file-router-private-folders:
 
@@ -548,7 +489,7 @@ Each invocation then emits a ``router_reloaded`` signal with the manager class a
 A receiver of that signal that rebuilds again calls ``router_manager.reload(notify=False)``, which skips ``router_backend_loaded``, the URL-cache clear, and ``router_reloaded``, so the receiver does not re-enter itself.
 
 A reload also happens without an explicit call.
-The framework holds a :data:`~django.test.signals.setting_changed` receiver that reloads every router when ``INSTALLED_APPS`` or ``ROOT_URLCONF`` moves, because a file router caches its patterns per application name and reads its ``pages()`` mounts from the root URLconf.
+The framework holds a :data:`~django.test.signals.setting_changed` receiver that reloads every router when ``INSTALLED_APPS`` or ``ROOT_URLCONF`` moves, because a file router caches its patterns per application name and reads its ``pages()`` includes from the root URLconf.
 A test that swaps the application list or the URLconf with :func:`~django.test.override_settings` therefore gets the routes of the swapped value rather than the ones built before it.
 See :doc:`/content/internals/url-router` for the full reload order and :doc:`/content/ref/signals` for the signal payloads.
 
@@ -566,13 +507,12 @@ The router contributes Django system checks that validate the configuration at s
 - ``check_pages_structure`` validates directory naming, captured parameter syntax, and the presence of ``page.py`` or ``template.djx``.
 - ``check_page_functions`` reports :ref:`next.E012 <ref-system-checks>` when a directory has no render function, no template attribute, no loader-backed source, and no sibling ``layout.djx``.
 - ``check_url_patterns`` reports two routes that convert to exactly the same Django path string, whether they come from one tree or several (:ref:`next.E015 <ref-system-checks>`).
-  It compares full routes, mount prefixes included, so two applications mounted onto the same URL are reported too.
+  It compares full routes, the prefixes of ``pages()`` includes too, so two trees placed onto the same URL are reported as well.
   The comparison is string equality after bracket conversion, so ``posts/[int:id]`` next to ``posts/[id]`` is not reported.
   While collecting patterns it also reports a route that repeats a captured parameter name (:ref:`next.E028 <ref-system-checks>`), listing every conflicting name, so parameter duplicates surface from every scanned tree.
-  A page that repeats a name the mount prefix of its tree captures reports :ref:`next.E154 <ref-system-checks>` instead.
+  A page that repeats a name the ``pages()`` prefix of its tree captures reports :ref:`next.E152 <ref-system-checks>` instead.
 - ``check_reverse_name_collisions`` fails when two distinct routes collapse to the same reverse URL name after separator normalisation, such as ``foo-bar`` next to ``foo_bar`` (:ref:`next.E039 <ref-system-checks>`).
   Names collide only within one namespace, so the pages of a ``pages()`` tree are compared with each other and not with ``next``.
-- ``check_app_mounts`` validates the ``mount`` and ``mounts`` declarations of every installed application (:ref:`next.E152 <ref-system-checks>`, :ref:`next.E153 <ref-system-checks>`, :ref:`next.W126 <ref-system-checks>`, :ref:`next.W127 <ref-system-checks>`).
 
 Run them through ``uv run python manage.py check``.
 A clean exit confirms that every page resolves and every name is unique.
@@ -607,7 +547,7 @@ See also
 
    :doc:`url-reversing` for building URLs in Python and templates.
    :doc:`/content/howto/add-a-page` for a one page recipe.
-   :doc:`/content/howto/mount-an-application-under-a-prefix` for mounting a tree under a prefix.
+   :doc:`/content/howto/serve-an-application-under-a-prefix` for a tree under a prefix.
    :doc:`/content/howto/reload-routes-from-code` for hot reload mechanics.
    :doc:`/content/internals/url-router` for the parser, dispatcher, and signal flow.
    :doc:`/content/ref/urls` for the public API.

@@ -1,6 +1,6 @@
 """The access every page, action and component answers to, read without a request.
 
-`manage.py next permissions` and `next routes` print it, and tools read it the same way.
+`manage.py permissions` and `manage.py routes` print it, and tools read it the same way.
 """
 
 from dataclasses import dataclass, replace
@@ -49,7 +49,7 @@ class Endpoint:
 
     @property
     def access(self) -> str:
-        """Return the rule in short words, each once, as `manage.py next` tables do."""
+        """Return the rule in short words, each once, as the `manage.py` tables do."""
         if self.broken is not None:
             return "broken"
         requirements = self.rule.requirements

@@ -118,14 +118,12 @@ class TestRunMemo:
 class TestRegisterAll:
     """`register_all` keeps the registered check set stable without server checks."""
 
-    def test_it_imports_the_map_but_the_opt_in_modules(self) -> None:
+    def test_it_imports_exactly_the_modules_the_map_names(self) -> None:
         with patch("next.checks.importlib.import_module") as spy:
             register_all()
 
         imported = [call.args[0] for call in spy.call_args_list]
-        assert imported == [
-            name for name in _LAZY_SOURCES_BY_MODULE if name != "next.boundaries.checks"
-        ]
+        assert imported == list(_LAZY_SOURCES_BY_MODULE)
 
     def test_register_all_registers_same_check_set(self) -> None:
         before = {

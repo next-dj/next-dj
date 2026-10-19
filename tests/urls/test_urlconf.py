@@ -182,13 +182,13 @@ class TestIncludeKwargs:
             include_kwargs=frozenset({"tenant"}),
             points=(MountPoint(mount, "o/<int:org>/", frozenset({"org"})),),
         )
-        mounted = PageRoot(tmp_path, "x", prefix="o/<int:org>/", source="urls")
-        stray = PageRoot(tmp_path, "x", prefix="gone/", source="urls")
-        declared = PageRoot(tmp_path, "x", prefix="w/", source="mounts")
+        mounted = PageRoot(tmp_path, "x", prefix="o/<int:org>/")
+        stray = PageRoot(tmp_path, "x", prefix="gone/")
+        assembled = PageRoot(tmp_path, "x")
 
         assert outer_kwargs(mounted, mounts) == {"org"}
         assert outer_kwargs(stray, mounts) == frozenset()
-        assert outer_kwargs(declared, mounts) == {"tenant"}
+        assert outer_kwargs(assembled, mounts) == {"tenant"}
 
 
 class TestUrlconfWalkMemo:

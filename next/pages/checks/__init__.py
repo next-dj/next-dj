@@ -7,8 +7,6 @@ from __future__ import annotations
 
 from .access import (
     check_declaring_modules,
-    check_guarded_components_on_public_pages,
-    check_lifted_requirements,
     check_proxies_over_pages,
     check_public_beside_requirements,
 )
@@ -63,9 +61,7 @@ __all__ = [
     "check_csrf_endpoint_reversible",
     "check_csrf_in_session",
     "check_declaring_modules",
-    "check_guarded_components_on_public_pages",
     "check_layout_templates",
-    "check_lifted_requirements",
     "check_metadata_callable_returns_mapping",
     "check_metadata_enum_values",
     "check_metadata_head_literals",

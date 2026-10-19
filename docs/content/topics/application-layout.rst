@@ -5,6 +5,7 @@ Where logic lives
 
 Inside one application every piece of domain logic has one place, chosen by what the logic touches.
 The rule is Django's own, and next.dj adds no layer, container, or base class on top of it.
+Two parts of it are a recommendation of next.dj rather than a Django convention, ``services.py`` as the home of the writes and the ``f(scope, *, ...)`` shape of its functions, and a project that keeps its writes elsewhere loses nothing the framework does.
 :doc:`project-layout` names the files, and this page decides which of them a function belongs in.
 
 .. contents::
@@ -81,7 +82,7 @@ The scope is whatever owns the rows, a user here and a tenant in a multi-tenant 
        return request.user
 
 ``DObject[Note]`` loads the row a URL addresses through the same method, so a page never reaches a note its scope cannot see, see :ref:`topics-di-dobject`.
-A model never placed under ``DObject`` may skip ``visible_to``, while one that is placed there without it fails ``manage.py check`` with ``next.E155``.
+A model never placed under ``DObject`` may skip ``visible_to``, while one that is placed there without it fails ``manage.py check`` with ``next.E153``.
 See :doc:`django:topics/db/managers` for custom ``QuerySet`` classes and ``as_manager``.
 
 Invariants
@@ -95,7 +96,7 @@ A ``ModelForm``, the admin form included, runs the same validation on its instan
 Services
 --------
 
-A function in ``services.py`` that acts on behalf of the scope takes it as its first argument and everything else as keyword-only arguments, ``f(scope, *, ...)``.
+next.dj recommends that a function in ``services.py`` that acts on behalf of the scope takes it as its first argument and everything else as keyword-only arguments, ``f(scope, *, ...)``, the scope being the user in most projects.
 The fixed shape makes every call site easy to find and keeps the access question inside the function that writes.
 A public read that does not depend on who asks takes no scope, as ``cached_search`` in ``catalog/services.py`` of the ``examples/search-catalog`` project shows.
 A service receives plain values and returns model instances or plain values, and it never sees ``request`` or builds a response.
@@ -188,9 +189,8 @@ A rule about who may act on one row goes into ``permissions.py`` as a predicate 
 .. code-block:: python
    :caption: notes/permissions.py
 
-   from next.permissions import add_perm, predicate
+   from next.permissions import add_perm
 
-   @predicate
    def is_owner(user, note):
        return note is not None and note.owner_id == user.pk
 
@@ -204,8 +204,8 @@ See :doc:`permissions` for the backend, the tag, and the forms integration.
 Signals
 -------
 
-An application talks to a neighbour by importing a function from the neighbour's ``services``, ``models``, or ``signals`` module, the three modules :ref:`topics-boundaries-public-modules` names.
-A signal replaces that import only where the import would create a cycle, which happens when the neighbour already imports this application, and ``manage.py check --tag boundaries`` reports such a cycle as ``next.E167``.
+An application talks to a neighbour by importing a function from the neighbour's ``services``, ``models``, or ``signals`` module.
+A signal replaces that import only where the import would create a cycle, which happens when the neighbour already imports this application.
 In the example an ``activity`` application imports ``notes`` to record what happens to notes, so ``notes`` cannot import ``activity`` back and announces the archive through ``note_archived`` instead.
 
 .. code-block:: python
@@ -215,23 +215,23 @@ In the example an ``activity`` application imports ``notes`` to record what happ
 
    note_archived = Signal()
 
-A receiver runs synchronously inside the transaction the sender has open, as ``archive_note`` does, so a receiver that writes connects with ``receiver(..., on_commit=True)``.
-The receiver then runs only once the archive is committed, and a rolled-back archive leaves no trace in the neighbour.
+A receiver runs synchronously inside the transaction the sender has open, as ``archive_note`` does, so a receiver whose work must not outlive a rolled-back archive schedules it with :func:`~django.db.transaction.on_commit`.
+The work then runs only once the archive is committed, and a rolled-back archive leaves no trace in the neighbour.
 
 .. code-block:: python
    :caption: activity/signals.py
 
    from activity.services import record_event
+   from django.db import transaction
+   from django.dispatch import receiver
    from notes.signals import note_archived
 
-   from next import receiver
-
-   @receiver(note_archived, on_commit=True)
+   @receiver(note_archived)
    def record_archive(sender, note, scope, **kwargs) -> None:
-       record_event(scope, verb="archived", target=note)
+       transaction.on_commit(lambda: record_event(scope, verb="archived", target=note))
 
 The ``next`` application imports the ``signals.py`` of every installed application at startup, so the receiver connects with no ``AppConfig.ready`` code.
-An event that must survive a crash between the commit and the receiver is no job for a signal or for ``on_commit``, and it belongs to an outbox library.
+An event that must survive a crash between the commit and the receiver is no job for a signal or for ``on_commit``, and it belongs to an outbox, see :ref:`topics-signals`.
 See :doc:`django:topics/signals` for the Django side and :doc:`signals` for the signals the framework itself sends.
 
 Patterns already in the box
@@ -252,7 +252,7 @@ The table names each familiar pattern, where Django already provides it, and wha
      - Nothing beyond the convention.
    * - Observer
      - ``django.dispatch.Signal``, ``@receiver``, and the ``signals.py`` of each application.
-     - The framework signals, importable from ``next.signals``, and ``receiver(..., on_commit=True)`` for a receiver that waits for the commit.
+     - The framework signals, importable from ``next.signals``.
    * - Chain of responsibility
      - Middleware.
      - The ``layout.djx`` chain that wraps every page below a layout, the ``proxy.py`` chain whose access every page below it inherits until a ``public()`` lifts it, and ``inherit_context=True`` that passes a context value down the tree.
@@ -276,7 +276,7 @@ The table names each familiar pattern, where Django already provides it, and wha
      - Components with props and slots, and zones inside a page.
    * - Specification
      - ``Q`` objects and ``QuerySet`` methods.
-     - Predicates in ``permissions.py``, composed with ``&``, ``|``, and ``~``.
+     - Predicates in ``permissions.py``, plain functions that combine their conditions with ``and`` and ``or``.
    * - Registry
      - The ``apps`` registry and ``admin.site``.
      - Form classes and providers that register on class definition, ``deps.py``, ``permissions.py``, ``forms.py``, and ``signals.py`` imported at startup, and components registered from ``_components/`` folders.
@@ -289,7 +289,7 @@ What the layout leaves out
 
 No Repository or Unit of Work sits over the ORM, because the ``QuerySet`` and ``transaction.atomic`` already are both.
 No ``Service`` class with a ``handle`` method appears, because an operation is a function.
-No event bus mediates between applications, because signals cover reactions inside the process and an event that must never be lost belongs to an outbox library.
+No event bus mediates between applications, because signals cover reactions inside the process and an event that must never be lost belongs to an outbox.
 No singleton DI container holds services, because a Python module already is a singleton and ``deps.py`` covers the values a request carries.
 
 See also
@@ -298,7 +298,6 @@ See also
 .. seealso::
 
    :doc:`project-layout` for the files of an application and the project sizes.
-   :doc:`boundaries` for the checks that report logic outside its place.
    :doc:`dependency-injection` for the providers that live in ``deps.py``.
    :doc:`permissions` for the predicates that live in ``permissions.py``.
    :doc:`signals` for the signals the framework sends.

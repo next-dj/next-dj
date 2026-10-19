@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import re
 from dataclasses import dataclass
+from io import StringIO
 
 import pytest
 from django.core.cache import cache
@@ -430,8 +431,23 @@ class TestRobots:
         assert next_client.get("/sitemap.xml").status_code == 404
 
 
+OPEN_ACTIONS = frozenset(
+    {"create_link_form", "edit_link_form", "delete_link", "reset_clicks"}
+)
+
+
 class TestOpenActions:
     """Nobody signs in here, so every page with an action declares itself public."""
 
-    def test_no_action_is_left_without_an_access_rule(self) -> None:
-        assert "next.W134" not in {message.id for message in run_checks()}
+    def test_the_permission_table_lists_the_actions_as_public(self) -> None:
+        out = StringIO()
+        call_command("permissions", stdout=out)
+        _header, *lines = out.getvalue().splitlines()
+        rows = (re.split(r"\s{2,}", line.strip()) for line in lines)
+        access = {name: rule for kind, name, rule, _sources in rows if kind == "action"}
+        assert {name: access[name] for name in OPEN_ACTIONS} == dict.fromkeys(
+            OPEN_ACTIONS, "public"
+        )
+
+    def test_the_declared_access_leaves_no_action_unguarded(self) -> None:
+        assert "next.W129" not in {message.id for message in run_checks()}

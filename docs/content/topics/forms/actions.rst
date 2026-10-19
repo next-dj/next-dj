@@ -451,7 +451,7 @@ Hide the form in the template when the page should not show it to anonymous visi
 
 The guard is stored as an ``ActionGuard`` on the action's registry metadata, so a custom backend that delegates to the standard pipeline inherits the enforcement.
 The ``next.W060`` check warns when ``permission_required`` is declared while ``django.contrib.auth`` is not installed.
-The ``next.W129`` check warns about a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, since such a guard refuses every user but a superuser.
+The ``next.W127`` check warns about a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, since such a guard refuses every user but a superuser, once the project declares access through a ``proxy.py``, an access declaration, or ``add_perm``.
 It reads the model permissions off the model classes, so a ``Permission`` row created only by a data migration or through the admin draws it, and declaring that permission in ``Meta.permissions`` or silencing the code quiets it.
 
 .. _topics-forms-actions-dynamic-guards:
@@ -762,8 +762,10 @@ The registration and scope checks are listed here, the wizard checks on :doc:`wi
 ``next.W060`` (Warning)
    An action declares ``permission_required`` while ``django.contrib.auth`` is not in ``INSTALLED_APPS``, so the permission check cannot resolve users or permissions.
 
-``next.W129`` (Warning)
+``next.W127`` (Warning)
    An action declares a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, so the guard refuses every user but a superuser.
+   It judges a form guard only in a project that declares access, see :doc:`/content/ref/system-checks`.
+   The same check reads the names of ``{% has_perm %}`` tags and of access declarations in every project, and the message names the place.
 
 ``next.W061`` (Warning)
    An action declares ``Meta.success_message`` while the messages framework is not fully installed.

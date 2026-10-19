@@ -135,7 +135,7 @@ def test_the_activity_feed_of_another_app_opens_inside_the_admin_shell(
     expect(page.get_by_text("You have been signed out.")).to_be_visible()
 
 
-def test_the_history_page_under_a_mounted_prefix_names_its_object(
+def test_the_history_page_names_its_object(
     page: Page, base_url: str, signed_in: None, book: Book
 ) -> None:
     page.goto(f"{base_url}/admin/library/book/{book.pk}/history/")

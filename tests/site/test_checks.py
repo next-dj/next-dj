@@ -156,12 +156,12 @@ class TestSiteSettings:
 class TestDeployWarnings:
     """The deploy check warns about a missing site URL."""
 
-    def test_no_url_is_w119(self) -> None:
+    def test_no_url_is_w110(self) -> None:
         assert check_ids(check_site_url_for_deploy()) == ["next.W110"]
         with override_settings(NEXT_FRAMEWORK={}):
             assert check_ids(check_site_url_for_deploy()) == ["next.W110"]
 
-    def test_debug_does_not_silence_w119(self) -> None:
+    def test_debug_does_not_silence_w110(self) -> None:
         """A deploy run states production intent, whatever DEBUG reads."""
         with override_settings(DEBUG=True):
             assert check_ids(check_site_url_for_deploy()) == ["next.W110"]
@@ -180,7 +180,7 @@ class TestDeployWarnings:
         with override_settings(SITE_ID=1):
             assert check_ids(check_site_url_for_deploy()) == ["next.W110"]
 
-    def test_any_host_allowed_escalates_to_w132(self) -> None:
+    def test_any_host_allowed_escalates_to_w122(self) -> None:
         with override_settings(ALLOWED_HOSTS=["acme.example", "*"]):
             [warning] = check_site_url_for_deploy()
         assert warning.id == "next.W122"

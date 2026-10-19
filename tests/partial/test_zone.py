@@ -1,6 +1,6 @@
 import pytest
 from django.template import Context, Engine, TemplateSyntaxError
-from django.template.base import Template, TextNode
+from django.template.base import Template
 from django.template.defaulttags import ForNode, IfNode
 from django.test import RequestFactory
 
@@ -11,7 +11,6 @@ from next.partial.zone import (
     ZoneNode,
     ZoneOptions,
     ZonePartial,
-    nodes_under,
     render_zone_standalone,
     zones_under,
 )
@@ -296,25 +295,6 @@ class TestRequestFixture:
 
 class TestNodeWalks:
     """The walkers the guard analysis and the zone checks read node trees with."""
-
-    def test_nodes_under_yields_every_node_below_the_ancestor(self) -> None:
-        template = Template(
-            '<x>{% has_perm "x.y" %}<a>{% if c %}<b>{% endif %}{% endhas_perm %}<c>'
-        )
-        found = list(nodes_under(template.nodelist, HasPermNode))
-        assert [type(node).__name__ for node in found] == [
-            "TextNode",
-            "IfNode",
-            "TextNode",
-        ]
-        assert [node.s for node in found if isinstance(node, TextNode)] == [
-            "<a>",
-            "<b>",
-        ]
-
-    def test_nodes_under_nothing_without_the_ancestor(self) -> None:
-        template = Template("<x>{% if c %}<b>{% endif %}")
-        assert list(nodes_under(template.nodelist, HasPermNode)) == []
 
     def test_an_ancestor_tuple_counts_each_class(self) -> None:
         template = Template(

@@ -135,7 +135,7 @@ The next ``get_cached_flag`` call refetches from the database.
 Connect the receivers at app ready
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``flags.deps`` registers ``FlagProvider`` with the resolver as a side effect of import, and the ``next`` application imports the ``deps.py`` and ``signals.py`` of every installed app at startup, see ``DEPS_AUTODISCOVER`` and ``SIGNALS_AUTODISCOVER`` in :doc:`/content/ref/settings`.
+``flags.deps`` registers ``FlagProvider`` with the resolver as a side effect of import, and the ``next`` application imports the ``deps.py`` and ``signals.py`` of every installed app at startup, see :doc:`/content/ref/settings`.
 ``flags.signals`` connects through a ``connect()`` function rather than decorated receivers, so ``AppConfig.ready`` still calls it.
 ``flags.signals`` reaches ``flags.models`` through its import chain, so ``AppConfig.ready`` defers the import until the app registry is populated.
 A top-level import in ``apps.py`` would run while Django is still loading app configs, and defining the ``Flag`` model at that point raises :exc:`~django.core.exceptions.AppRegistryNotReady`.

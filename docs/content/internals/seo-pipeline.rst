@@ -213,7 +213,7 @@ Views
 
 Every view answers ``GET`` and ``HEAD`` alone, answers a miss through ``_not_found`` with a constant reason, a plain-text 404 that skips the project's 404 handler, and stamps ``X-Robots-Tag: noindex, nofollow`` on a site closed to search.
 Every view builds and renders its response inside ``FailureLog.guard`` of ``next.diagnostics``, so any other exception, from an items callable, a backend, a ``rules`` callable, a reverse, or a sitemap template, answers 503 with ``Retry-After``, see :ref:`topics-failure-containment`.
-A view reached through a mount other than ``next_seo`` while ``next.seo.urls`` serves that route at another address answers 404, so each document has one address.
+A view reached through an include other than ``next_seo`` while ``next.seo.urls`` serves that route at another address answers 404, so each document has one address.
 The sitemap and robots views sit behind a wrapper that applies the declared ``Cache-Control`` to a 200 and, for a storable cache with an age, :func:`~django.views.decorators.cache.cache_page` keyed on the fingerprint and the indexability of the request, one wrap per indexability, rebuilt when the manager version moves.
 The cache control is read once per manager version, and the indexability of the request is read only when a copy is stored.
 

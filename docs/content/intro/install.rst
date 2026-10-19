@@ -147,8 +147,8 @@ A ``FileRouterBackend`` entry must carry an ``OPTIONS`` key, and ``manage.py che
 Keep ``django.template.context_processors.request`` in the ``OPTIONS`` of your ``TEMPLATES`` setting.
 A fresh ``django-admin startproject`` already includes it, and ``manage.py check`` reports ``next.E019`` if it is missing.
 
-Mount the router
-----------------
+Include the router
+------------------
 
 Forward all unmatched URLs to next.dj by replacing ``config/urls.py`` with the file below.
 This replacement also removes the ``admin`` import that ``startproject`` generated, which pairs with dropping ``django.contrib.admin`` from ``INSTALLED_APPS`` above.
@@ -232,79 +232,97 @@ A project built exactly as this page prescribes reports a clean run.
 The command exits with status zero, and every message it does print names both the configuration key it read and the recommended fix.
 The partial asset version needs no settings of its own, because it is derived from the staticfiles manifest when the project has one and falls back to a stable string when it does not, see :doc:`/content/ref/settings`.
 
-Three framework checks carry Django's ``deploy`` flag and stay silent until the deployment run asks for them.
+Nine framework checks carry Django's ``deploy`` flag and stay silent until the deployment run asks for them.
 
 .. code-block:: bash
    :caption: shell
 
    uv run python manage.py check --deploy
 
-``next.E017`` reports a ``page.py`` that raises while importing, ``next.E084`` reports the same for a ``component.py``, and ``next.E072`` reports a composed page template that fails to compile.
+Among them ``next.E017`` reports a ``page.py`` that raises while importing, ``next.E084`` reports the same for a ``component.py``, and ``next.E072`` reports a composed page template that fails to compile.
 A typo in a page module is invisible to a plain ``manage.py check`` and named by ``next.E017`` here, so run the deploy variant whenever a page stops responding for no visible reason.
 
-.. _intro-install-boundaries:
+.. _intro-install-project:
 
-Turn on the boundary checks
----------------------------
+The project canon
+-----------------
 
-The checks that hold the applications of a project to their roles are off until ``NEXT_FRAMEWORK["BOUNDARIES"]`` names a mode, so a project turns them on as a step of its own.
+next.dj ships no project template, because a project needs nothing beyond what Django's own ``startproject`` and ``startapp`` write and the few lines below.
+The steps above already hold the two that are required.
 
-.. code-block:: python
-   :caption: config/settings.py
+- ``"next"`` in ``INSTALLED_APPS``.
+- ``path("", include("next.urls"))`` as the last entry of the root URLconf.
 
-   NEXT_FRAMEWORK = {
-       "BOUNDARIES": "strict",
-   }
+The rest is optional and follows what the project needs.
 
-They run under their own tag and never with a plain ``manage.py check`` or ``runserver``.
+Every page behind a login.
+   List Django's :class:`~django.contrib.auth.middleware.LoginRequiredMiddleware` right after ``AuthenticationMiddleware`` and set ``LOGIN_URL``.
+   A page anyone may open, the sign-in page among them, then declares ``page.public()`` in its ``page.py``, see :doc:`/content/howto/require-login-on-pages`.
 
-.. code-block:: bash
-   :caption: shell
+   .. code-block:: python
+      :caption: config/settings.py
 
-   uv run python manage.py check --tag boundaries --fail-level WARNING
+      MIDDLEWARE = [
+          "django.middleware.security.SecurityMiddleware",
+          "django.contrib.sessions.middleware.SessionMiddleware",
+          "django.middleware.common.CommonMiddleware",
+          "django.middleware.csrf.CsrfViewMiddleware",
+          "django.contrib.auth.middleware.AuthenticationMiddleware",
+          "django.contrib.auth.middleware.LoginRequiredMiddleware",
+          "django.contrib.messages.middleware.MessageMiddleware",
+          "django.middleware.clickjacking.XFrameOptionsMiddleware",
+      ]
 
-next.dj reads the import graph with a reader of its own, so the checks need no extra dependency.
-The ``boundaries`` extra, ``uv add "next.dj[boundaries]"``, installs grimp, which reads the graph of a large project faster, see :doc:`/content/topics/boundaries`.
+      LOGIN_URL = "/login/"
 
-.. _intro-install-project-template:
+Object permissions.
+   List ``ObjectPermissionBackend`` beside ``ModelBackend``, so ``user.has_perm(perm, obj)`` reaches the predicates every ``permissions.py`` registers, see :doc:`/content/topics/permissions`.
 
-Start from the project template
--------------------------------
+   .. code-block:: python
+      :caption: config/settings.py
 
-The steps above build the project by hand, the way the tutorial continues it.
-A new project that wants the layout of :doc:`/content/topics/project-layout` from the first commit starts from the two templates next.dj ships instead, in place of the plain ``startproject`` and ``startapp`` of `Create a Django project`_.
-Both are directories of the installed package, and the commands below ask Python where it lies.
+      AUTHENTICATION_BACKENDS = [
+          "django.contrib.auth.backends.ModelBackend",
+          "next.permissions.ObjectPermissionBackend",
+      ]
 
-.. code-block:: bash
-   :caption: shell
+One layout for every page.
+   Name a project-level page root in ``DIRS`` of the ``PAGE_BACKENDS`` entry and put a ``layout.djx`` in it, which wraps the pages of every application tree, see :doc:`/content/topics/layouts`.
 
-   uv run django-admin startproject --template="$(uv run python -c 'import next.conf; print(next.conf.__path__[0])')/project_template" config .
-   uv run python manage.py startapp --template="$(uv run python -c 'import next.conf; print(next.conf.__path__[0])')/app_template" shop
+   .. code-block:: python
+      :caption: config/settings.py
 
-The project template writes ``manage.py``, the ``config`` package, a ``chrome/`` page root with a ``layout.djx`` that renders the head through ``{% metadata %}``, and a ``home`` application whose welcome page at ``/`` declares ``page.public()``.
-Its settings list ``django.contrib.admin``, ``next``, and ``home``, place ``LoginRequiredMiddleware`` right after ``AuthenticationMiddleware`` so every other page asks for a login, add ``ObjectPermissionBackend`` to ``AUTHENTICATION_BACKENDS``, and set ``LOGIN_URL = "admin:login"``.
-``NEXT_FRAMEWORK`` turns the boundary checks on in ``"strict"``, and ``home/tests/test_boundaries.py`` runs ``manage.py check --tag boundaries --fail-level WARNING`` under ``manage.py test``, so a new edge that breaks a boundary fails the test suite of the project, see :ref:`intro-install-boundaries`.
+      NEXT_FRAMEWORK = {
+          "PAGE_BACKENDS": [
+              {
+                  "BACKEND": "next.urls.FileRouterBackend",
+                  "DIRS": [BASE_DIR / "chrome"],
+                  "APP_DIRS": True,
+                  "PAGES_DIR": "pages",
+                  "OPTIONS": {"context_processors": []},
+              }
+          ],
+      }
 
-The application template writes one application in the composition the layout prescribes.
-It holds an ``Item`` model with ``visible_to`` on its ``QuerySet`` and its first migration, ``create_item`` and ``rename_item`` in ``services.py``, an ``item_created`` signal, object permissions in ``permissions.py``, an abstract ``ItemForm`` in ``forms.py``, an ``ItemAdmin`` that writes through the services, a page tree mounted at ``/shop/``, and tests.
-``startapp`` adds no entry to ``INSTALLED_APPS``, so the new application joins the list by hand.
+   .. code-block:: jinja
+      :caption: chrome/layout.djx
 
-.. code-block:: python
-   :caption: config/settings.py, the installed applications
+      <!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          {% metadata %}
+          {% collect_styles %}
+        </head>
+        <body>
+          {% template %}
+          {% collect_scripts %}
+        </body>
+      </html>
 
-   INSTALLED_APPS = [
-       "django.contrib.admin",
-       "django.contrib.auth",
-       "django.contrib.contenttypes",
-       "django.contrib.sessions",
-       "django.contrib.messages",
-       "django.contrib.staticfiles",
-       "next",
-       "home",
-       "shop",
-   ]
+   ``{% metadata %}`` renders the head tags of the page, ``{% collect_styles %}`` and ``{% collect_scripts %}`` the co-located assets, and ``{% template %}`` the page itself.
 
-Then ``migrate``, ``createsuperuser``, and ``runserver`` start the site, ``/shop/`` sends an anonymous visitor to the admin sign-in, and ``manage.py check`` reports no issues.
+An application starts from a plain ``uv run python manage.py startapp shop`` and its entry in ``INSTALLED_APPS``, and gains the files of :ref:`topics-project-layout-files` as it needs them.
 
 Next steps
 ----------

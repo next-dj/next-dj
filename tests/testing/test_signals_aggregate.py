@@ -30,8 +30,6 @@ def _signal_names(module: ModuleType) -> list[str]:
 
 _AREA_MODULES = _area_signal_modules()
 
-_HELPERS = frozenset({"receiver"})
-
 _AREA_SIGNALS = [
     pytest.param(name, module_name, id=f"{module_name}.{name}")
     for module_name, module in _AREA_MODULES.items()
@@ -55,8 +53,8 @@ class TestAggregateSignalsModule:
         owned = {
             name for module in _AREA_MODULES.values() for name in _signal_names(module)
         }
-        assert set(aggregate_signals.__all__) == owned | _HELPERS
+        assert set(aggregate_signals.__all__) == owned
 
     def test_every_export_is_a_signal(self) -> None:
-        for name in set(aggregate_signals.__all__) - _HELPERS:
+        for name in aggregate_signals.__all__:
             assert isinstance(getattr(aggregate_signals, name), Signal)

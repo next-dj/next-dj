@@ -16,7 +16,8 @@ from next.forms.dispatch.permissions import (
 )
 from next.forms.manager import form_action_manager
 from next.forms.signals import form_access_denied
-from next.permissions import add_perm, predicate
+from next.permissions import add_perm
+from next.permissions.markers import predicate
 from next.testing import SignalRecorder, capture_signals
 from tests.support import owns_group
 

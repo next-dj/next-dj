@@ -305,7 +305,7 @@ A mounted tree misses a requirement.
 
 Two roots produce one composed page.
    A page composes its layout chain from its own ancestor directories.
-   The chain follows the directory the file sits in, so a file routed by two backends composes the same layouts under both mounts.
+   The chain follows the directory the file sits in, so a file routed by two backends composes the same layouts under both routes.
    The duplicate route itself is reported as ``next.E015``, see :doc:`file-router`.
 
 See also

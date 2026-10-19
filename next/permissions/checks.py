@@ -17,7 +17,8 @@ from django.template.base import NodeList
 from next.checks import NEXT
 from next.components.sources import get_components_manager
 from next.conf import next_framework_settings
-from next.pages.checks.access import tree_pages
+from next.forms.checks.sources import iter_registered_actions
+from next.pages.checks.access import access_in_use, load_declarations
 from next.pages.checks.composed import iter_composed_pages
 from next.pages.checks.metadata.templates import TemplateSearch
 from next.pages.paths import page_template_path
@@ -36,10 +37,10 @@ _BACKEND: Final = (
 
 @register(NEXT)
 def check_permission_predicates(*args, **kwargs) -> list[CheckMessage]:
-    """Report a predicate whose signature a leaf cannot call (`next.E161`)."""
+    """Report a permission whose predicate cannot call its function (`next.E159`)."""
     return [
         Error(
-            f"The permission {name!r} is checked by {leaf_name!r}, which {problem}, so "
+            f"The permission {name!r} is checked by {rule.name!r}, which {problem}, so "
             "the predicate cannot call it.",
             hint=(
                 "A predicate takes (), (user) or (user, obj), at most two positional "
@@ -47,17 +48,16 @@ def check_permission_predicates(*args, **kwargs) -> list[CheckMessage]:
                 "**kwargs is allowed."
             ),
             obj=name,
-            id="next.E161",
+            id="next.E159",
         )
         for name, rule in permission_manager.registry.items()
-        for leaf_name, test in rule.tests()
-        if (problem := signature_problem(test)) is not None
+        if (problem := signature_problem(rule.test)) is not None
     ]
 
 
 @register(NEXT)
 def check_permission_backend(*args, **kwargs) -> list[CheckMessage]:
-    """Report registered permissions no configured backend answers (`next.E162`)."""
+    """Report registered permissions no configured backend answers (`next.E160`)."""
     if not permission_manager.registry or _BACKEND in listed_backends():
         return []
     return [
@@ -73,7 +73,7 @@ def check_permission_backend(*args, **kwargs) -> list[CheckMessage]:
                 'ModelBackend"). A signup view calling login() without it raises.'
             ),
             obj=settings,
-            id="next.E162",
+            id="next.E160",
         )
     ]
 
@@ -93,21 +93,26 @@ def _component_sources() -> list[tuple[Path, str]]:
     return list(found.items())
 
 
-@register(Tags.templates, NEXT)
-def check_has_perm_names(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about `{% has_perm %}` naming a permission nothing grants (`next.W130`).
+type _Place = tuple[str, str]
+"""Where a permission name is written, as a message names it and as its `obj`."""
+
+
+def _template_places() -> dict[tuple[str, _Place], None]:
+    """Return each literal `{% has_perm %}` name with the first page or file using it.
 
     It names the first page reaching a literal name, else the component template.
     """
-    unknown: dict[str, str] = {}
+    found: dict[tuple[str, _Place], None] = {}
+    seen: set[str] = set()
     where = ""
 
     def collect(nodelist: NodeList) -> bool:
         nodes = cast("list[HasPermNode]", nodelist.get_nodes_by_type(HasPermNode))
         for node in nodes:
             perm = node.literal_perm()
-            if perm is not None and not permission_manager.known(perm):
-                unknown.setdefault(perm, where)
+            if perm is not None and perm not in seen:
+                seen.add(perm)
+                found[perm, (f"{{% has_perm %}} in {where}", where)] = None
         return False
 
     search = TemplateSearch(collect)
@@ -123,56 +128,60 @@ def check_has_perm_names(*args, **kwargs) -> list[CheckMessage]:
             continue
         where = str(path)
         search.reaches(compiled.nodelist, path)
-    return [
-        DjangoWarning(
-            f"{{% has_perm {perm!r} %}} in {first} names a permission no installed "
-            "model defines and no add_perm() registers, so the tag renders its else "
-            "branch for every user but a superuser. Fix the name, or register the "
-            "permission with next.permissions.add_perm().",
-            obj=first,
-            id="next.W130",
-        )
-        for perm, first in unknown.items()
-    ]
+    return found
 
 
-def _load_declarations() -> None:
-    """Run every page, `proxy.py` and `component.py`, so each declaration is in."""
-    tree_pages()
-    if not isinstance(next_framework_settings.COMPONENT_BACKENDS, list):
-        return
-    for backend in get_components_manager().backends:
-        backend.import_component_modules()
-
-
-@register(NEXT)
-def check_declared_permissions_known(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about a declared permission nothing grants (`next.W131`).
-
-    A proxy, a page and a component bind it the same way, so each file is named.
-    """
-    if "django.contrib.auth" not in settings.INSTALLED_APPS:
-        return []
-    _load_declarations()
-    return [
-        DjangoWarning(
-            f"permission_required({perm!r}) in {file_path} names a permission no "
-            "installed model defines and no add_perm() registers, so every user but "
-            "a superuser is refused. Fix the name, or register the permission with "
-            "next.permissions.add_perm().",
-            obj=str(file_path),
-            id="next.W131",
-        )
+def _declared_places() -> dict[tuple[str, _Place], None]:
+    """Return each permission a page, proxy or component declares, with its file."""
+    load_declarations()
+    return {
+        (perm, (f"permission_required() in {file_path}", str(file_path))): None
         for file_path in declared_files()
         for requirement in declared(file_path).requirements
         for perm in requirement.perms
+    }
+
+
+def _guard_places() -> dict[tuple[str, _Place], None]:
+    """Return each permission the guard of a form action names."""
+    return {
+        (perm, (f"The guard of the form action {meta.get('name')!r}", "")): None
+        for meta in iter_registered_actions()
+        if (guard := meta.get("guard")) is not None
+        for perm in guard.permissions
+    }
+
+
+@register(Tags.templates, NEXT)
+def check_permissions_known(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about a permission name nothing grants, wherever written (`next.W127`).
+
+    An action guard is read only once the project declares access, as it predates it.
+    """
+    if "django.contrib.auth" not in settings.INSTALLED_APPS:
+        return []
+    declared_places = _declared_places()
+    guard_places = _guard_places() if access_in_use() else {}
+    places = {**guard_places, **_template_places(), **declared_places}
+    return [
+        DjangoWarning(
+            f"{where} names the permission {perm!r}, which no installed model "
+            "defines and no add_perm() registers, so every user but a superuser "
+            "is refused it.",
+            hint=(
+                "Fix the name, or register the permission with "
+                "next.permissions.add_perm()."
+            ),
+            obj=obj or settings,
+            id="next.W127",
+        )
+        for perm, (where, obj) in places
         if not permission_manager.known(perm)
     ]
 
 
 __all__ = [
-    "check_declared_permissions_known",
-    "check_has_perm_names",
     "check_permission_backend",
     "check_permission_predicates",
+    "check_permissions_known",
 ]

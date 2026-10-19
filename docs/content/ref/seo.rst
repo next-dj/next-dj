@@ -50,7 +50,7 @@ Routes
 ~~~~~~
 
 ``include("next.urls")`` carries the routes under ``next`` as ``next:sitemap``, ``next:sitemap_section``, and ``next:robots``, each mounted only while its source exists.
-``next.seo.urls`` is the URLconf that mounts the same routes under the ``next_seo`` namespace, for a project whose ``include("next.urls")`` sits under a prefix or inside :func:`~django.conf.urls.i18n.i18n_patterns`, see :ref:`topics-seo-host-root`.
+``next.seo.urls`` is the URLconf that serves the same routes under the ``next_seo`` namespace, for a project whose ``include("next.urls")`` sits under a prefix or inside :func:`~django.conf.urls.i18n.i18n_patterns`, see :ref:`topics-seo-host-root`.
 Every route answers ``GET`` and ``HEAD`` alone and a miss as a plain-text 404 that skips the project's 404 page.
 Project code that raises inside a route answers 503 with ``Retry-After``, a broken ``robots.py`` included, while a broken ``sitemap.py`` answers 404.
 

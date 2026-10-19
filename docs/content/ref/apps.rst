@@ -42,7 +42,7 @@ It runs ahead of every install because the two discovery steps import user modul
 
 ``autodiscover.install()`` imports the ``deps``, ``permissions``, ``forms``, and ``signals`` submodules of every installed app, finishing one module name across all apps before it starts the next.
 It runs ahead of ``components.install()``, so a ``component.py`` imported in the last step finds every provider and named dependency registered.
-``DEPS_AUTODISCOVER``, ``PERMISSIONS_AUTODISCOVER``, ``FORM_AUTODISCOVER``, and ``SIGNALS_AUTODISCOVER`` turn the four sweeps off one by one, see :doc:`settings`.
+The ``deps``, ``permissions``, and ``signals`` sweeps always run, the way Django's admin imports every ``admin.py``, and ``FORM_AUTODISCOVER`` turns off the ``forms`` one, see :doc:`settings`.
 
 Steps five to twelve bind the seven :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
 They also run ahead of the discovery steps so a discovery failure leaves no process behind with a slot still empty.

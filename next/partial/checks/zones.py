@@ -20,6 +20,7 @@ from next.pages import page
 from next.pages.checks.composed import iter_composed_pages
 from next.partial.guards import Components, guarded_zones, opaque_zones
 from next.partial.zone import zones_under
+from next.permissions.nodes import HasPermNode
 
 from .codes import (
     E_CONTEXT_ZONE_UNKNOWN,
@@ -52,7 +53,11 @@ _GUARD_REASON: Final = (
 
 _ZONE_SLUG = re.compile(r"\A[A-Za-z0-9_-]+\Z")
 
-_TAG_LABELS: Final[dict[type[Node], str]] = {ForNode: "{% for %}", IfNode: "{% if %}"}
+_TAG_LABELS: Final[dict[type[Node], str]] = {
+    ForNode: "{% for %}",
+    HasPermNode: "{% has_perm %}",
+    IfNode: "{% if %}",
+}
 
 
 @register(Tags.templates, NEXT)
@@ -113,6 +118,11 @@ def check_zone_not_in_loop(*args, **kwargs) -> list[CheckMessage]:
     )
 
 
+_PERMISSION_REASON: Final = (
+    "A standalone zone render does not ask the permission, so a partial request for "
+    "the zone is refused with a 400. Ask the permission inside the zone body instead."
+)
+
 _CONDITION_REASON: Final = (
     "A standalone zone render does not evaluate the enclosing condition, so the "
     "zone's visibility cannot be honoured. Move the condition inside the zone body "
@@ -152,12 +162,14 @@ def _tag_label(node: Node) -> str:
 
 @register(Tags.templates, NEXT)
 def check_zone_not_in_has_perm(*args, **kwargs) -> list[CheckMessage]:
-    """Error when a zone renders in the body of a guarding component (`next.E163`).
+    """Error when a zone sits in `{% has_perm %}` or a guarding component (`next.E161`).
 
-    A `{% has_perm %}` in the page itself is asked again by the zone render instead.
+    The zone registry refuses such a zone, so a partial request for it is a 400.
     """
     manager = get_components_manager()
-    messages: list[CheckMessage] = []
+    messages = _ancestor_check(
+        ancestor=HasPermNode, check_id=E_ZONE_IN_HAS_PERM, reason=_PERMISSION_REASON
+    )
     for page_path, template in iter_composed_pages():
         components = Components(manager, page_path)
         messages.extend(
@@ -172,7 +184,7 @@ def check_zone_not_in_has_perm(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _guard_message(zone_name: str, component: str, page_path: "Path") -> str:
-    """Return the `next.E163` text for a zone in the body of a guarding component."""
+    """Return the `next.E161` text for a zone in the body of a guarding component."""
     return (
         f'Zone "{zone_name}" in {page_path} sits in the body of the component '
         f'"{component}", which has a component.py, or whose template reaches a '

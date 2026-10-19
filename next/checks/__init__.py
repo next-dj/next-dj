@@ -16,19 +16,11 @@ NEXT: str = "next"
 SEO: str = "seo"
 """System-check tag selecting the `next.seo` checks."""
 
-BOUNDARIES: str = "boundaries"
-"""System-check tag selecting the boundary checks, which `NEXT` leaves out."""
-
 
 if TYPE_CHECKING:
     from next.apps.checks import (
         check_builtin_tag_libraries_complete,
         check_django_templates_backend_present,
-    )
-    from next.boundaries.checks import (
-        check_boundaries,
-        check_boundaries_mode,
-        check_declarations,
     )
     from next.components.checks import (
         check_component_context_registration_files,
@@ -39,7 +31,6 @@ if TYPE_CHECKING:
         check_next_components_configuration,
     )
     from next.conf.checks import (
-        check_next_framework_boundaries_mode,
         check_next_framework_unknown_top_level_keys,
         check_next_framework_value_types,
     )
@@ -61,7 +52,6 @@ if TYPE_CHECKING:
     from next.forms.checks import (
         check_action_applied_to_class,
         check_action_guard_permissions,
-        check_action_guard_permissions_known,
         check_component_widget_components,
         check_component_widget_field_types,
         check_form_action_backends_configuration,
@@ -93,9 +83,7 @@ if TYPE_CHECKING:
         check_csrf_endpoint_reversible,
         check_csrf_in_session,
         check_declaring_modules,
-        check_guarded_components_on_public_pages,
         check_layout_templates,
-        check_lifted_requirements,
         check_metadata_callable_returns_mapping,
         check_metadata_enum_values,
         check_metadata_head_literals,
@@ -143,10 +131,9 @@ if TYPE_CHECKING:
         check_zone_not_in_loop,
     )
     from next.permissions.checks import (
-        check_declared_permissions_known,
-        check_has_perm_names,
         check_permission_backend,
         check_permission_predicates,
+        check_permissions_known,
     )
     from next.scripts.checks import (
         check_consented_categories,
@@ -197,7 +184,6 @@ if TYPE_CHECKING:
         check_tag_templates_format,
     )
     from next.urls.checks import (
-        check_app_mounts,
         check_framework_routes_reachable,
         check_next_pages_configuration,
         check_reverse_name_collisions,
@@ -211,11 +197,6 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_builtin_tag_libraries_complete",
         "check_django_templates_backend_present",
     ),
-    "next.boundaries.checks": (
-        "check_boundaries",
-        "check_boundaries_mode",
-        "check_declarations",
-    ),
     "next.components.checks": (
         "check_component_context_registration_files",
         "check_component_module_imports",
@@ -225,7 +206,6 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_next_components_configuration",
     ),
     "next.conf.checks": (
-        "check_next_framework_boundaries_mode",
         "check_next_framework_unknown_top_level_keys",
         "check_next_framework_value_types",
     ),
@@ -247,7 +227,6 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
     "next.forms.checks": (
         "check_action_applied_to_class",
         "check_action_guard_permissions",
-        "check_action_guard_permissions_known",
         "check_component_widget_components",
         "check_component_widget_field_types",
         "check_form_action_backends_configuration",
@@ -279,9 +258,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_csrf_endpoint_reversible",
         "check_csrf_in_session",
         "check_declaring_modules",
-        "check_guarded_components_on_public_pages",
         "check_layout_templates",
-        "check_lifted_requirements",
         "check_metadata_callable_returns_mapping",
         "check_metadata_enum_values",
         "check_metadata_head_literals",
@@ -329,10 +306,9 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_zone_not_in_loop",
     ),
     "next.permissions.checks": (
-        "check_declared_permissions_known",
-        "check_has_perm_names",
         "check_permission_backend",
         "check_permission_predicates",
+        "check_permissions_known",
     ),
     "next.scripts.checks": (
         "check_consented_categories",
@@ -383,7 +359,6 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_tag_templates_format",
     ),
     "next.urls.checks": (
-        "check_app_mounts",
         "check_framework_routes_reachable",
         "check_next_pages_configuration",
         "check_reverse_name_collisions",
@@ -398,19 +373,14 @@ _LAZY_ATTRIBUTES: dict[str, str] = {
 }
 
 __all__ = [
-    "BOUNDARIES",
     "NEXT",
     "SEO",
     "check_action_applied_to_class",
     "check_action_guard_permissions",
-    "check_action_guard_permissions_known",
     "check_app_directories_finder",
-    "check_app_mounts",
     "check_asset_kinds_are_loadable",
     "check_asset_renderers",
     "check_asset_version_moves_between_deploys",
-    "check_boundaries",
-    "check_boundaries_mode",
     "check_builtin_tag_libraries_complete",
     "check_component_context_registration_files",
     "check_component_module_imports",
@@ -435,8 +405,6 @@ __all__ = [
     "check_csrf_endpoint_reversible",
     "check_csrf_in_session",
     "check_custom_patch_ops_well_formed",
-    "check_declarations",
-    "check_declared_permissions_known",
     "check_declaring_modules",
     "check_django_templates_backend_present",
     "check_duplicate_component_names",
@@ -451,8 +419,6 @@ __all__ = [
     "check_forms_outside_base_dir",
     "check_framework_routes_reachable",
     "check_gated_blocking_scripts",
-    "check_guarded_components_on_public_pages",
-    "check_has_perm_names",
     "check_inline_asset_bodies_are_loadable",
     "check_instance_from_url_on_non_model_form",
     "check_instance_from_url_unknown_field",
@@ -460,7 +426,6 @@ __all__ = [
     "check_js_context_serializer",
     "check_layout_templates",
     "check_lazy_zone_has_placeholder",
-    "check_lifted_requirements",
     "check_manifest_version_has_manifest_storage",
     "check_metadata_callable_returns_mapping",
     "check_metadata_enum_values",
@@ -476,7 +441,6 @@ __all__ = [
     "check_metadata_tag_rendered",
     "check_metadata_title_templates",
     "check_next_components_configuration",
-    "check_next_framework_boundaries_mode",
     "check_next_framework_unknown_top_level_keys",
     "check_next_framework_value_types",
     "check_next_pages_configuration",
@@ -499,6 +463,7 @@ __all__ = [
     "check_partial_backends_is_a_list",
     "check_permission_backend",
     "check_permission_predicates",
+    "check_permissions_known",
     "check_proxies_over_pages",
     "check_public_actions",
     "check_public_beside_requirements",
@@ -562,18 +527,13 @@ __all__ = [
 ]
 
 
-_OPT_IN: frozenset[str] = frozenset({"next.boundaries.checks"})
-"""The `checks` modules whose hooks only `manage.py check --tag boundaries` lends."""
-
-
 def register_all() -> None:
     """Import each subpackage's `checks` module to register its hooks.
 
-    The map lists every area, and an opt-in module is left for its own command to load.
+    The map already lists every area, so an entry there registers its checks.
     """
     for module_name in _LAZY_SOURCES_BY_MODULE:
-        if module_name not in _OPT_IN:
-            importlib.import_module(module_name)
+        importlib.import_module(module_name)
 
 
 def reset_check_caches() -> None:

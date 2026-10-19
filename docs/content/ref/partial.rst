@@ -165,8 +165,8 @@ Zones
 
 ``render_zone`` renders one or more zones of a page standalone with the full page context, returning a ``ZoneRenderResult`` that carries the wrapped HTML and the collected assets.
 ``zones_of(template, page_path)`` returns the compiled zones of the composed template of a page as a mapping of ``ZoneInfo``, both reached through ``next.partial.registry``.
-``ZoneInfo.standalone`` is ``True`` when the zone may render on its own and ``False`` for a zone under an ``{% if %}`` or a ``{% for %}`` of the page, or in the body of a component that decides whether that part shows, and for a zone under a block tag from a module outside ``django.`` and ``next.``, whose body the analysis cannot read.
-``ZoneInfo.recheck`` holds the ``{% has_perm %}`` blocks of the page above the zone, ``None`` for a zone outside any, and ``render_zone`` raises :exc:`~django.core.exceptions.PermissionDenied` when one of them refuses the request, before the page context for a block that asks the user alone and after it for the rest.
+``ZoneInfo.standalone`` is ``True`` when the zone may render on its own and ``False`` for a zone under a ``{% has_perm %}``, an ``{% if %}``, or a ``{% for %}`` of the page, or in the body of a component that decides whether that part shows, and for a zone under a block tag from a module outside ``django.`` and ``next.``, whose body the analysis cannot read.
+A zone that is not standalone counts as undeclared for every request, see :ref:`topics-permissions-zones`.
 The page path anchors the component lookups, and with ``DEBUG`` on an edit to a template the analysis read makes the next read analyse it again.
 
 .. autofunction:: next.partial.render_zone

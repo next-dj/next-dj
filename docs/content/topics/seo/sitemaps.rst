@@ -180,7 +180,7 @@ See also
 
 .. seealso::
 
-   :doc:`sitemap-sections` for sections, backends, the origin, caching, and the host-root mount.
+   :doc:`sitemap-sections` for sections, backends, the origin, caching, and the host-root include.
    :doc:`robots` for the ``Sitemap:`` line.
    :doc:`quickstart` for the first sitemap of a site.
    :doc:`/content/ref/seo` for ``sitemap``, ``SitemapEntry``, and the errors.

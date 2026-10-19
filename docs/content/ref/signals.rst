@@ -8,17 +8,7 @@ Module summary
 
 ``next.signals`` is an aggregator that re-exports every framework signal.
 Importing a signal from ``next.signals`` is equivalent to importing it from its subpackage.
-The module also holds ``receiver``, which ``next`` re-exports.
-
-Receiver decorator
-------------------
-
-.. autofunction:: next.signals.receiver
-
-Without ``on_commit`` the decorator hands every argument to ``django.dispatch.receiver``.
-With ``on_commit=True`` it connects strongly, schedules the decorated function through :func:`~django.db.transaction.on_commit` on the database the ``using`` keyword of the signal names, and keys the connection on ``dispatch_uid`` or, when none is given, on the function the way Django keys it, so ``disconnect(func)`` removes it and a plain connection of the same function to the same signal and sender makes it a no-op.
-A ``weak=True`` beside ``on_commit=True`` raises ``ValueError``.
-See :ref:`topics-signals` for when to defer a receiver.
+Receivers connect through Django's :func:`~django.dispatch.receiver`, and :ref:`topics-signals` shows how a receiver waits for the commit.
 
 Signal catalog
 --------------
@@ -70,11 +60,6 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - The ``StaticAsset`` instance
      - ``collector``, ``backend``
      - After a file is registered with a backend and added to the collector.
-   * - ``baseline_refrozen``
-     - ``BoundariesManager``
-     - ``refrozen``
-     - After ``manage.py next boundaries --refreeze`` writes ``boundaries.toml``.
-       ``refrozen`` is the ``Refrozen`` value with the path, whether the file was created, the entries and findings it records, and the findings it left unrecorded.
    * - ``collector_finalized``
      - The static collector
      - ``page_path``, ``request``
@@ -156,11 +141,6 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``PatchOpRegistry``
      - ``name``
      - After a custom patch verb is registered through ``register_patch_op``.
-   * - ``permission_registered``
-     - ``PermissionRegistry``
-     - ``name``, ``predicate``
-     - After ``add_perm`` binds a predicate to a new permission name.
-       ``predicate`` is the ``Predicate`` registered, and a repeated registration of an equal predicate sends nothing.
    * - ``provider_registered``
      - The ``RegisteredParameterProvider`` subclass
      - none
@@ -305,18 +285,6 @@ Dependencies
 ~~~~~~~~~~~~
 
 .. automodule:: next.deps.signals
-   :members:
-
-Permissions
-~~~~~~~~~~~
-
-.. automodule:: next.permissions.signals
-   :members:
-
-Boundaries
-~~~~~~~~~~
-
-.. automodule:: next.boundaries.signals
    :members:
 
 Server

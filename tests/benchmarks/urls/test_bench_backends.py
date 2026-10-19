@@ -42,61 +42,28 @@ def _write_apps(
     return names
 
 
-_MOUNTED_APPS: tuple[tuple[str, str, dict[str, str]], ...] = (
-    ("bench_shop", 'mount = "shop/"', {"pages": "shop/"}),
-    (
-        "bench_wallets",
-        'mounts = {"pages": "wallets/<int:wallet>/", "staff_pages": "staff/"}',
-        {"pages": "wallets/<int:wallet>/", "staff_pages": "staff/"},
-    ),
-    ("bench_blog", 'mount = ""', {"pages": ""}),
-    ("bench_plain", "", {"pages": ""}),
-)
-
-_APP_CONFIG = """from django.apps import AppConfig
+_PRIVATE_APPS = ("bench_shop", "bench_wallets", "bench_blog", "bench_plain")
 
 
-class BenchConfig(AppConfig):
-    name = "{name}"
-    {declaration}
-"""
-
-
-def _write_mounted_apps(root: Path, *, private: bool) -> list[str]:
-    """Write apps declaring `mount` or `mounts`, with `_drafts` trees when `private`."""
-    entries: list[str] = []
-    for name, declaration, trees in _MOUNTED_APPS:
+def _write_private_apps(root: Path) -> list[str]:
+    """Write apps whose page trees each hold a private `_drafts` tree beside them."""
+    for name in _PRIVATE_APPS:
         app = root / name
         app.mkdir(parents=True)
         (app / "__init__.py").write_text("")
-        (app / "apps.py").write_text(
-            _APP_CONFIG.format(name=name, declaration=declaration)
-        )
-        for subdir in trees:
-            tree = app / subdir
-            tree.mkdir()
-            build_pages_tree(tree, depth=3, fanout=3, leaf="page.py")
-            if private:
-                drafts = tree / "_drafts"
-                drafts.mkdir()
-                build_pages_tree(drafts, depth=3, fanout=3, leaf="page.py")
-        entries.append(f"{name}.apps.BenchConfig")
-    return entries
-
-
-@pytest.fixture()
-def installed_mounted_apps(tmp_path: Path, settings) -> Iterator[None]:
-    """Install four apps, three of them declaring where their trees mount."""
-    entries = _write_mounted_apps(tmp_path, private=False)
-    with importable_dir(tmp_path):
-        settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, *entries]
-        yield
+        tree = app / "pages"
+        tree.mkdir()
+        build_pages_tree(tree, depth=3, fanout=3, leaf="page.py")
+        drafts = tree / "_drafts"
+        drafts.mkdir()
+        build_pages_tree(drafts, depth=3, fanout=3, leaf="page.py")
+    return list(_PRIVATE_APPS)
 
 
 @pytest.fixture()
 def installed_private_apps(tmp_path: Path, settings) -> Iterator[None]:
-    """Install the same apps with a private `_drafts` tree beside every route."""
-    entries = _write_mounted_apps(tmp_path, private=True)
+    """Install four apps with a private `_drafts` tree beside every route."""
+    entries = _write_private_apps(tmp_path)
     with importable_dir(tmp_path):
         settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, *entries]
         yield
@@ -176,28 +143,6 @@ class TestBenchManyInstalledApps:
         self, installed_many_apps, benchmark
     ) -> None:
         benchmark(lambda: _app_dirs_router().generate_urls())
-
-
-class TestBenchMountedApps:
-    """Apps declaring `mount` or `mounts` route several trees under their prefixes."""
-
-    @pytest.mark.benchmark(group="urls.backends")
-    def test_mounted_apps_build_and_generate(
-        self, installed_mounted_apps, benchmark
-    ) -> None:
-        benchmark(lambda: _app_dirs_router().generate_urls())
-
-    @pytest.mark.benchmark(group="urls.backends")
-    def test_mounted_apps_generate_cached(
-        self, installed_mounted_apps, benchmark
-    ) -> None:
-        backend = _app_dirs_router()
-        backend.generate_urls()
-        benchmark(backend.generate_urls)
-
-    @pytest.mark.benchmark(group="urls.backends")
-    def test_mounted_apps_page_roots(self, installed_mounted_apps, benchmark) -> None:
-        benchmark(lambda: _app_dirs_router().page_roots())
 
 
 class TestBenchPrivateFolders:

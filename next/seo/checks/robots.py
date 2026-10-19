@@ -128,7 +128,7 @@ def check_seo_text_files(*args, **kwargs) -> list[CheckMessage]:
 
 def _reverse(root: PageRoot, trail: str, kwargs: dict[str, Any]) -> str | None:
     try:
-        return page_reverse(root.name_trail(trail), namespace=root.namespace, **kwargs)
+        return page_reverse(trail, namespace=root.namespace, **kwargs)
     except NoReverseMatch:
         return None
 
@@ -158,7 +158,7 @@ def _placeholder(converter_name: str) -> tuple[object, str] | None:
 def route_path(trail: str, root: PageRoot = _UNMOUNTED) -> str | None:
     """Return the URL path of `trail` up to its first parameter, `None` if unknown.
 
-    Placeholder values fill the parameters, those of the mount prefix of `root` too.
+    Placeholder values fill the parameters, those of the include over `root` too.
     """
     route = _route(root.route_trail(trail))
     if route is None:
