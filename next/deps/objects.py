@@ -143,10 +143,8 @@ def names_object(annotation: object) -> bool:
 
 def _names_object_in_form(annotation: object) -> bool:
     """Whether a union or an `Annotated` form names `DObject` among its arguments."""
-    if isinstance(annotation, types.UnionType):
-        return any(map(names_object, annotation.__args__))
     origin = get_origin(annotation)
-    if origin is Union:
+    if isinstance(annotation, types.UnionType) or origin is Union:
         return any(map(names_object, get_args(annotation)))
     return origin is Annotated and names_object(get_args(annotation)[0])
 
