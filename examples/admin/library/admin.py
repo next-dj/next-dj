@@ -33,7 +33,15 @@ class TagAdmin(RowPermissionAdmin):
 
 @admin.register(Book)
 class BookAdmin(RowPermissionAdmin):
-    list_display = ("title", "author", "status", "is_featured", "published_at", "price")
+    list_display = (
+        "title",
+        "author",
+        "editor",
+        "status",
+        "is_featured",
+        "published_at",
+        "price",
+    )
     list_filter = ("status", "tags", "is_featured")
     search_fields = ("title", "summary", "author__full_name")
     autocomplete_fields = ("author",)
@@ -56,9 +64,7 @@ class BookAdmin(RowPermissionAdmin):
     def get_object_links(
         self, request: HttpRequest, obj: Book
     ) -> list[tuple[str, str]]:
-        """Link the outline of a book the user may change, the right that page asks."""
-        if not self.has_change_permission(request, obj):
-            return []
+        """Link the outline, which every user who reaches the change view may read."""
         return [
             ("Outline", page_reverse("library/book/[int:book]/outline", book=obj.pk))
         ]

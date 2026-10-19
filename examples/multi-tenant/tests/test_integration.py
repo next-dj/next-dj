@@ -507,7 +507,7 @@ class TestAccess:
         call_command("permissions", stdout=out)
         _header, *lines = out.getvalue().splitlines()
         rows = {
-            name: access
+            name.partition(" ")[0]: access
             for _kind, name, access, _sources in (
                 re.split(r"\s{2,}", line.strip()) for line in lines
             )

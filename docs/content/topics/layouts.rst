@@ -229,17 +229,13 @@ The separation comes from the directories, not from the backends, because layout
        "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
-               "OPTIONS": {"context_processors": []},
            },
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "admin_pages",
-               "OPTIONS": {"context_processors": []},
            }
        ]
    }

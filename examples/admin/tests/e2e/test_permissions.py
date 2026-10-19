@@ -18,7 +18,7 @@ pytestmark = pytest.mark.e2e
 
 DASHBOARD_PANELS = "dashboard-panels"
 ZONE_HEADERS = {"X-Next-Request": "1", "X-Next-Zone": DASHBOARD_PANELS}
-OUTLINE_HEADERS = {"X-Next-Request": "1", "X-Next-Zone": "outline"}
+MANUSCRIPT_HEADERS = {"X-Next-Request": "1", "X-Next-Zone": "manuscript"}
 
 
 def is_activity_poll(response: Response) -> bool:
@@ -175,48 +175,70 @@ def test_the_history_crumbs_climb_to_the_changelist(
     expect(page).to_have_url(f"{base_url}/admin/library/book/")
 
 
-def test_the_editor_is_refused_the_outline_of_a_published_book(
-    page: Page, base_url: str, editor, make_book, make_chapter
-) -> None:
-    published = make_book("Dracula", status=Book.PUBLISHED)
-    make_chapter(published, title="Secret")
-    outline = f"{base_url}/admin/library/book/{published.pk}/outline/"
-    sign_in_as_editor(page, base_url, f"/admin/library/book/{published.pk}/change/")
-
-    expect(page.get_by_role("link", name="Outline")).to_have_count(0)
-    token = page.locator("input[name='csrfmiddlewaretoken']").first.input_value()
-    assert page.request.get(outline).status == 403
-    zone = page.request.get(outline, headers=OUTLINE_HEADERS)
+def assert_manuscript_refused(page: Page, base_url: str, book: Book) -> None:
+    path = f"/admin/library/book/{book.pk}/manuscript/"
+    assert page.request.get(f"{base_url}{path}").status == 403
+    zone = page.request.get(f"{base_url}{path}", headers=MANUSCRIPT_HEADERS)
     assert zone.status == 403
     assert "Secret" not in zone.text()
+    token = page.locator("input[name='csrfmiddlewaretoken']").first.input_value()
     response = page.request.post(
         f"{base_url}{NextClient().get_action_url('add_chapter_form')}",
         form={
             "csrfmiddlewaretoken": token,
-            "_next_form_origin": f"/admin/library/book/{published.pk}/outline/",
+            "_next_form_origin": path,
             "title": "Coda",
             "word_count": "300",
         },
         max_redirects=0,
     )
     assert response.status == 403
-    assert list(published.chapters.values_list("title", flat=True)) == ["Secret"]
+    assert list(book.chapters.values_list("title", flat=True)) == ["Secret"]
 
 
-def test_the_editor_appends_a_chapter_to_a_draft_outline(
+def test_the_editor_reads_the_outline_of_a_published_book_only(
     page: Page, base_url: str, editor, make_book, make_chapter
 ) -> None:
-    draft = make_book("Mathilda", status=Book.DRAFT)
-    make_chapter(draft, 1, "Intro", 100)
-    sign_in_as_editor(page, base_url, f"/admin/library/book/{draft.pk}/change/")
+    published = make_book("Dracula", status=Book.PUBLISHED, editor=editor)
+    make_chapter(published, title="Secret")
+    sign_in_as_editor(page, base_url, f"/admin/library/book/{published.pk}/change/")
     page.get_by_role("link", name="Outline").click()
 
-    expect(page).to_have_url(f"{base_url}/admin/library/book/{draft.pk}/outline/")
+    expect(page).to_have_url(f"{base_url}/admin/library/book/{published.pk}/outline/")
+    wait_for_runtime(page)
+    outline = page.locator("[data-next-zone='outline']")
+    expect(outline.get_by_role("cell", name="Secret")).to_be_visible()
+    expect(outline.locator("[data-outline-read-only]")).to_be_visible()
+    expect(page.get_by_role("link", name="Open the manuscript")).to_have_count(0)
+    assert_manuscript_refused(page, base_url, published)
+
+
+def test_the_editor_is_refused_the_manuscript_of_a_foreign_draft(
+    page: Page, base_url: str, editor, copyeditor, make_book, make_chapter
+) -> None:
+    foreign = make_book("Emma", status=Book.DRAFT, editor=copyeditor)
+    make_chapter(foreign, title="Secret")
+    sign_in_as_editor(page, base_url, f"/admin/library/book/{foreign.pk}/outline/")
+
+    expect(page.locator("[data-outline-read-only]")).to_be_visible()
+    expect(page.get_by_role("link", name="Open the manuscript")).to_have_count(0)
+    assert_manuscript_refused(page, base_url, foreign)
+
+
+def test_the_editor_appends_a_chapter_to_an_own_draft(
+    page: Page, base_url: str, editor, make_book, make_chapter
+) -> None:
+    draft = make_book("Mathilda", status=Book.DRAFT, editor=editor)
+    make_chapter(draft, 1, "Intro", 100)
+    sign_in_as_editor(page, base_url, f"/admin/library/book/{draft.pk}/outline/")
+    page.get_by_role("link", name="Open the manuscript").click()
+
+    expect(page).to_have_url(f"{base_url}/admin/library/book/{draft.pk}/manuscript/")
     wait_for_runtime(page)
     trail = page.get_by_role("navigation", name="Breadcrumb").get_by_role("link")
-    expect(trail).to_have_text(["Dashboard", "Books", "Outline"])
-    outline = page.locator("[data-next-zone='outline']")
-    expect(outline.get_by_role("row")).to_have_count(3)
+    expect(trail).to_have_text(["Dashboard", "Books", "Manuscript"])
+    manuscript = page.locator("[data-next-zone='manuscript']")
+    expect(manuscript.get_by_role("row")).to_have_count(3)
     mark_document(page)
     seen = applied_count(page)
     page.get_by_label("Chapter title").fill("Rising")
@@ -224,8 +246,8 @@ def test_the_editor_appends_a_chapter_to_a_draft_outline(
     page.get_by_role("button", name="Append chapter").click()
 
     wait_for_apply(page, seen)
-    expect(outline.get_by_role("row", name="2 Rising 250")).to_be_visible()
-    expect(outline.locator("[data-outline-words]")).to_have_text("350")
+    expect(manuscript.get_by_role("row", name="2 Rising 250")).to_be_visible()
+    expect(manuscript.locator("[data-total-words]")).to_have_text("350")
     expect(page.get_by_label("Chapter title")).to_have_value("")
     assert_same_document(page)
     assert draft.chapters.get(number=2).title == "Rising"
@@ -238,11 +260,14 @@ def test_the_superuser_appends_a_chapter_to_a_published_book(
     published = make_book("Dracula", status=Book.PUBLISHED)
     page.goto(f"{base_url}/admin/library/book/{published.pk}/change/")
     page.get_by_role("link", name="Outline").click()
+    page.get_by_role("link", name="Open the manuscript").click()
 
-    expect(page).to_have_url(f"{base_url}/admin/library/book/{published.pk}/outline/")
+    expect(page).to_have_url(
+        f"{base_url}/admin/library/book/{published.pk}/manuscript/"
+    )
     wait_for_runtime(page)
-    outline = page.locator("[data-next-zone='outline']")
-    expect(outline.get_by_text("No chapters yet.")).to_be_visible()
+    manuscript = page.locator("[data-next-zone='manuscript']")
+    expect(manuscript.get_by_text("No chapters yet.")).to_be_visible()
     mark_document(page)
     seen = applied_count(page)
     page.get_by_label("Chapter title").fill("Epilogue")
@@ -250,6 +275,6 @@ def test_the_superuser_appends_a_chapter_to_a_published_book(
     page.get_by_role("button", name="Append chapter").click()
 
     wait_for_apply(page, seen)
-    expect(outline.get_by_role("row", name="1 Epilogue 120")).to_be_visible()
+    expect(manuscript.get_by_role("row", name="1 Epilogue 120")).to_be_visible()
     assert_same_document(page)
     assert published.chapters.get().title == "Epilogue"

@@ -6,12 +6,11 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 
 from next.components import components_manager
 from next.discovery import get_router_manager, iter_page_tree_component_folders
+from next.pages.loaders import PAGE_MODULE, load_page_module, reset_module_memo
 
 
 _loaded_dirs: set[Path] = set()
@@ -20,8 +19,8 @@ _loaded_dirs: set[Path] = set()
 def eager_load_pages(base_dir: Path | str) -> list[Path]:
     """Import every `page.py` under `base_dir` and return loaded paths.
 
-    The call is idempotent per absolute directory, and an importer error bubbles up so a
-    broken page fails in setup rather than as a confusing 404 later.
+    Each file runs through the loader a request uses, so a page never runs as two
+    modules, and a broken one raises `PageModuleImportError` in setup.
     """
     directory = Path(base_dir).resolve()
     if not directory.is_dir():
@@ -30,28 +29,13 @@ def eager_load_pages(base_dir: Path | str) -> list[Path]:
     if directory in _loaded_dirs:
         return []
     loaded: list[Path] = []
-    for page_file in sorted(directory.rglob("page.py")):
-        _load_module_from_path(page_file)
+    for page_file in sorted(directory.rglob(PAGE_MODULE)):
+        _module, error = load_page_module(page_file)
+        if error is not None:
+            raise error
         loaded.append(page_file)
     _loaded_dirs.add(directory)
     return loaded
-
-
-def _load_module_from_path(path: Path) -> None:
-    module_name = _derive_module_name(path)
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:
-        msg = f"Cannot build import spec for {path}"
-        raise ImportError(msg)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-
-
-def _derive_module_name(path: Path) -> str:
-    parts = list(path.with_suffix("").parts)
-    cleaned = [p.replace("[", "_").replace("]", "_").replace(":", "_") for p in parts]
-    return "next_testing_pages." + "_".join(cleaned[-6:])
 
 
 def clear_loaded_dirs() -> None:
@@ -61,6 +45,7 @@ def clear_loaded_dirs() -> None:
     this because each pytest session gets a fresh interpreter.
     """
     _loaded_dirs.clear()
+    reset_module_memo()
 
 
 def _register_page_tree_components() -> None:

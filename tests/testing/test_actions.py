@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from django.http import HttpRequest, HttpResponse
+from django.test import override_settings
 from django.urls import URLPattern
 
 from next.forms import (
@@ -13,7 +14,7 @@ from next.forms import (
 )
 from next.forms.backends import ActionMeta
 from next.forms.manager import form_action_manager
-from next.testing import build_form_for, resolve_action_url
+from next.testing import build_form_for, override_form_action, resolve_action_url
 from tests.forms.actions import SimpleForm
 from tests.support import isolated_form_registries, routed, write_page
 
@@ -41,6 +42,58 @@ class TestResolveActionUrl:
         )
         with isolated_form_registries(), routed(root):
             assert "_next/form/" in resolve_action_url("unvisited_ping")
+
+
+class TestResolveActionUrlByPage:
+    """`page` picks one of the same-named actions that pages scope to themselves."""
+
+    def test_a_bare_name_several_pages_declare_is_refused(self, twins: Path) -> None:
+        with pytest.raises(LookupError, match="several files") as caught:
+            resolve_action_url("twin")
+        message = str(caught.value)
+        assert str(twins / "create" / "page.py") in message
+        assert str(twins / "edit" / "page.py") in message
+        assert "page=" in message
+
+    def test_the_directory_and_the_file_name_one_page(self, twins: Path) -> None:
+        by_directory = resolve_action_url("twin", page=twins / "create")
+        by_file = resolve_action_url("twin", page=str(twins / "create" / "page.py"))
+        assert by_directory == by_file
+        assert by_directory != resolve_action_url("twin", page=twins / "edit")
+
+    def test_a_relative_page_reads_from_the_base_dir(self, twins: Path) -> None:
+        expected = resolve_action_url("twin", page=twins / "edit")
+        with override_settings(BASE_DIR=twins.parent):
+            assert resolve_action_url("twin", page="pages/edit") == expected
+        with override_settings(BASE_DIR=str(twins.parent)):
+            assert resolve_action_url("twin", page=Path("pages/edit")) == expected
+
+    def test_without_a_base_dir_a_relative_page_reads_from_the_cwd(
+        self, twins: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        expected = resolve_action_url("twin", page=twins / "edit")
+        monkeypatch.chdir(twins.parent)
+        with override_settings(BASE_DIR=None):
+            assert resolve_action_url("twin", page="pages/edit") == expected
+
+    def test_a_page_already_imported_answers_at_once(self, twins: Path) -> None:
+        first = resolve_action_url("twin", page=twins / "edit")
+        assert resolve_action_url("twin", page=twins / "edit") == first
+
+    def test_a_page_without_the_action_raises(self, twins: Path) -> None:
+        with pytest.raises(FormActionNotFoundError) as caught:
+            resolve_action_url("twin", page=twins)
+        assert caught.value.page_path == str(twins / "page.py")
+        assert caught.value.suggestions == ()
+        assert caught.value.declared_in == (
+            str(twins / "create" / "page.py"),
+            str(twins / "edit" / "page.py"),
+        )
+
+    def test_an_override_owns_the_bare_name(self, twins: Path) -> None:
+        resolve_action_url("twin", page=twins / "edit")
+        with override_form_action("twin", lambda: HttpResponse("stub")):
+            assert "_next/form/" in resolve_action_url("twin")
 
 
 class _NamelessMetaBackend(FormActionBackend):

@@ -2,12 +2,25 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AbstractBaseUser
 
 from library.models import Author, Book, Chapter, Tag
 
 
 EDITOR_USERNAME = "editor"
 EDITOR_PASSWORD = "editor"
+COPYEDITOR_USERNAME = "copyeditor"
+COPYEDITOR_PASSWORD = "copyeditor"
+
+DEMO_EDITORS = {
+    "Mary Shelley": EDITOR_USERNAME,
+    "Charlotte Bronte": EDITOR_USERNAME,
+    "Bram Stoker": EDITOR_USERNAME,
+    "Herbert George Wells": EDITOR_USERNAME,
+    "Jules Verne": COPYEDITOR_USERNAME,
+    "Jane Austen": COPYEDITOR_USERNAME,
+    "Anonymous": COPYEDITOR_USERNAME,
+}
 
 
 DEMO_TAGS = [
@@ -272,19 +285,25 @@ DEMO_CHAPTERS = {
 }
 
 
-def seed_editor() -> None:
-    """Create the staff account whose rights `library/permissions.py` narrows."""
+def seed_editor(
+    username: str = EDITOR_USERNAME, password: str = EDITOR_PASSWORD
+) -> AbstractBaseUser:
+    """Create a staff account whose rights `library/permissions.py` narrows."""
     editor, created = get_user_model().objects.get_or_create(
-        username=EDITOR_USERNAME, defaults={"is_staff": True}
+        username=username, defaults={"is_staff": True}
     )
     if created:
-        editor.set_password(EDITOR_PASSWORD)
+        editor.set_password(password)
         editor.save()
+    return editor
 
 
 def seed_demo() -> None:
     """Fill the catalog so every changelist feature has data to show."""
-    seed_editor()
+    editors = {
+        EDITOR_USERNAME: seed_editor(),
+        COPYEDITOR_USERNAME: seed_editor(COPYEDITOR_USERNAME, COPYEDITOR_PASSWORD),
+    }
     tags = {
         slug: Tag.objects.get_or_create(slug=slug, defaults={"name": name})[0]
         for slug, name in DEMO_TAGS
@@ -306,6 +325,7 @@ def seed_demo() -> None:
                 "published_at": data["published_at"],
                 "price": data["price"],
                 "is_featured": data["is_featured"],
+                "editor": editors[DEMO_EDITORS[data["author"]]],
             },
         )
         if not created:

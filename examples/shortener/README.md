@@ -40,7 +40,6 @@ NEXT_FRAMEWORK = {
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "host")],
             "PAGES_DIR": "pages",
-            "OPTIONS": {"context_processors": []},
         }
     ],
     "COMPONENT_BACKENDS": [
@@ -188,7 +187,7 @@ The admin list edits each link inline. The same form renders once per row, so ea
 
 [`EditLinkForm`](shortener/pages/admin/page.py) is a `ModelForm` over `Link` and resolves the edited row from the posted `slug` in `get_initial`, so one registered form serves every row. A looped `{% form %}` without `key=` or `zone=` raises `next.W070`.
 
-The example signs nobody in, the `/admin/` panel included, so the three pages that declare actions, the home page, [`pages/admin/page.py`](shortener/pages/admin/page.py) and the link detail page, call `page.public()`, which declares the actions open on purpose, and `manage.py permissions` lists all four as `public`. `manage.py check` reports `next.W129` for an action nothing guards only in a project that declares access, and the declaration itself is that guard. A deployment with accounts drops the two calls under `pages/admin/` for a `proxy.py` there with `proxy.login_required()`, since a `page.public()` below it would lift that requirement again.
+The example signs nobody in, the `/admin/` panel included, so the three pages that declare actions, the home page, [`pages/admin/page.py`](shortener/pages/admin/page.py) and the link detail page, call `page.public()`, which declares the actions open on purpose, and `manage.py permissions` lists the three pages and their four actions as `public`. `manage.py check` reports `next.W129` for an action nothing guards only in a project that declares access, and the declaration itself is that guard. A deployment with accounts drops the two calls under `pages/admin/` for a `proxy.py` there with `proxy.login_required()`, since a `page.public()` below it would lift that requirement again.
 
 ### 6. Patch envelopes: `prepend`, `remove`, and an out-of-band foreign morph
 
@@ -306,7 +305,7 @@ class LinkProvider(RegisteredParameterProvider):
 Three non-obvious details:
 
 1. **Python 3.12 generic syntax is required.** `class DLink[T](DDependencyBase[T])` makes `DLink[Link]` a parameterised generic whose origin is `DLink`. Writing `class DLink(DDependencyBase[Link])` instead gives you a non-generic class and `get_origin(DLink[Link])` returns `None`.
-2. **Register the provider before the resolver caches its provider list.** [`apps.py`](shortener/apps.py) imports `shortener.deps` from `AppConfig.ready()`. The `RegisteredParameterProvider.__init_subclass__` hook records the class at import time, so importing early makes the class part of the resolver snapshot.
+2. **The provider registers itself on import.** The framework imports the `deps.py` of every installed app at startup, before the first request compiles a plan, and the `RegisteredParameterProvider.__init_subclass__` hook records the class at that import, so `ShortenerConfig` carries no `ready()` and the class is part of the resolver snapshot from the start.
 3. **The verdict is static and the lookup is compiled.** `static_can_handle` answers from the annotation alone, so the plan compiler names `LinkProvider` the owner of that parameter once per callable instead of polling every provider on every request, and `compile_resolve` unpacks the model out of `DLink[Link]` once per plan so a request pays for the query alone. Both paths call the same `_by_url_slug`, so the compiled filler can never drift from `resolve`.
 
 Use it anywhere:
@@ -364,7 +363,7 @@ def _on_action_dispatched(action_name: str, **kwargs) -> None:
     _remember(action_name)
 ```
 
-`AppConfig.ready()` imports the module so the receiver connects at startup, and [`admin/stats/page.py`](shortener/pages/admin/stats/page.py) exposes `action_counts()` as the `form_actions` context. Submitting the create form, an inline edit, a delete, or a clicks reset moves a row in that card without any of those handlers knowing the counter exists.
+The framework imports `signals.py` at startup, so the receiver connects with no `ready()` code, and [`admin/stats/page.py`](shortener/pages/admin/stats/page.py) exposes `action_counts()` as the `form_actions` context. Submitting the create form, an inline edit, a delete, or a clicks reset moves a row in that card without any of those handlers knowing the counter exists.
 
 ### 14. A static `robots.txt` at the page root
 

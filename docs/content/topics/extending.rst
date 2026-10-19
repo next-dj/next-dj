@@ -139,7 +139,7 @@ Register entries in ``AppConfig.ready`` or through a settings key.
        Import ``default_kinds`` from ``next.static`` (top-level re-export).
    * - Asset stems
      - ``default_stems.register(...)`` in ``AppConfig.ready``.
-       Import ``default_stems`` from ``next.static.discovery`` (deep import).
+       Import ``default_stems`` from ``next.static`` (top-level re-export).
    * - Placeholder slots
      - ``default_placeholders.register(...)`` in ``AppConfig.ready``.
        Import ``default_placeholders`` from ``next.static`` (top-level re-export).
@@ -164,7 +164,7 @@ Call ``default_stems.register(...)`` from ``AppConfig.ready`` so the new stem is
 
    from django.apps import AppConfig
 
-   from next.static.discovery import default_stems
+   from next.static import default_stems
 
    class NotesConfig(AppConfig):
        name = "notes"
@@ -440,7 +440,7 @@ The framework imports its ``deps.py``, ``permissions.py``, and ``signals.py`` at
 
    from django.apps import AppConfig
 
-   from next.static.discovery import default_stems
+   from next.static import default_stems
 
    class NextAuditConfig(AppConfig):
        name = "next_audit"

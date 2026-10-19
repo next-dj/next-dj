@@ -36,10 +36,11 @@ logger = logging.getLogger(__name__)
 # framework ships a `next/pages` package that otherwise reads as a page tree.
 _NON_PAGE_APP_ROOTS = ("django", "next")
 
-# The keys a file router entry carries beside BACKEND, read here and validated by
-# the checks. They have no defaults, because a partial entry is a settings mistake
-# the checks name rather than a shorthand.
 FILE_ROUTER_CONFIG_KEYS = ("PAGES_DIR", "APP_DIRS", "OPTIONS", "DIRS")
+"""The keys a file router entry carries beside BACKEND, OPTIONS and DIRS optional."""
+
+_REQUIRED_CONFIG_KEYS = ("PAGES_DIR", "APP_DIRS")
+"""The keys an entry cannot leave out, since a partial entry is a settings mistake."""
 
 
 def _is_framework_app(app_name: str) -> bool:
@@ -168,11 +169,13 @@ class FileRouterBackend(RouterBackend):
         self._require_config_keys(config)
         self.pages_dir = str(config["PAGES_DIR"])
         self.app_dirs = bool(config["APP_DIRS"])
-        self.options = _narrow_file_router_options(config["OPTIONS"])
+        self.options = _narrow_file_router_options(config.get("OPTIONS"))
 
         components_dir = self._resolve_components_folder_name()
         # Already resolved, because the classification probes what it keeps.
-        roots, segment_names = classify_dirs_entries(config["DIRS"], resolve_base_dir())
+        roots, segment_names = classify_dirs_entries(
+            config.get("DIRS", []), resolve_base_dir()
+        )
         self._extra_root_paths = roots
         self._skip_dir_names = frozenset({components_dir, *segment_names})
         self._components_folder_name = components_dir
@@ -189,10 +192,10 @@ class FileRouterBackend(RouterBackend):
     @classmethod
     def _require_config_keys(cls, config: Mapping[str, Any]) -> None:
         """Refuse an entry that leaves out one of the keys a file router reads."""
-        for required in FILE_ROUTER_CONFIG_KEYS:
+        for required in _REQUIRED_CONFIG_KEYS:
             if required not in config:
                 rest = ", ".join(
-                    key for key in FILE_ROUTER_CONFIG_KEYS if key != required
+                    key for key in _REQUIRED_CONFIG_KEYS if key != required
                 )
                 msg = (
                     f"A {cls.__name__} entry needs {required!r} alongside "

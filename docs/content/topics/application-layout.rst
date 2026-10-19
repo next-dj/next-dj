@@ -300,5 +300,6 @@ See also
    :doc:`project-layout` for the files of an application and the project sizes.
    :doc:`dependency-injection` for the providers that live in ``deps.py``.
    :doc:`permissions` for the predicates that live in ``permissions.py``.
+   :doc:`proxy` for the access of a page tree, which a predicate answers through ``obj=DObject[Model]``.
    :doc:`signals` for the signals the framework sends.
    :doc:`/content/topics/forms/actions` for the ``Meta`` guards on a form.

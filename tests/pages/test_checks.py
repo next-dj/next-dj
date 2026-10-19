@@ -1714,3 +1714,55 @@ class TestBracketDirectoryNamesDjangoRefuses:
             return_value={**get_converters(), "four_digit_year": object()},
         ):
             assert self._messages(tmp_path, "[four_digit_year:year]") == []
+
+
+def _touch(root: Path, files: tuple[str, ...]) -> None:
+    for name in files:
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("")
+
+
+class TestParameterDirectoryServesAPage:
+    """A parameter directory answers for itself through a page at any routed depth."""
+
+    @pytest.mark.parametrize(
+        "files",
+        [
+            pytest.param(("[app]/[model]/deep/page.py",), id="deep-page"),
+            pytest.param(("[id]/a/b/template.djx",), id="deep-virtual-page"),
+            pytest.param(("[id]/layout.djx",), id="layout"),
+            pytest.param(("_drafts/[id]/notes.txt",), id="under-a-private-folder"),
+        ],
+    )
+    def test_no_report(self, tmp_path: Path, files: tuple[str, ...]) -> None:
+        _touch(tmp_path, files)
+
+        with patch_checks_router_manager_with_routers(
+            routers=[RootPagesRouter([tmp_path])]
+        ):
+            assert check_pages_structure(None) == []
+
+    @pytest.mark.parametrize(
+        ("files", "reported"),
+        [
+            pytest.param(("[id]/a/b/notes.txt",), "[id]", id="no-page-at-any-depth"),
+            pytest.param(
+                ("[id]/_private/page.py",), "[id]", id="page-in-a-private-folder"
+            ),
+            pytest.param(
+                ("[id]/[slug]/notes.txt", "[id]/page.py"), "[id]/[slug]", id="nested"
+            ),
+        ],
+    )
+    def test_report(
+        self, tmp_path: Path, files: tuple[str, ...], reported: str
+    ) -> None:
+        _touch(tmp_path, files)
+
+        with patch_checks_router_manager_with_routers(
+            routers=[RootPagesRouter([tmp_path])]
+        ):
+            messages = check_pages_structure(None)
+        assert [m.id for m in messages] == ["next.E010"]
+        assert f'Parameter directory "{reported}"' in messages[0].msg

@@ -109,9 +109,11 @@ from tests.support.deps import (
     plan_entries,
 )
 from tests.support.forms import (
+    TWIN_ACTION,
     GuardedTenantForm,
     build_post_request,
     isolated_form_registries,
+    write_twin_pages,
 )
 from tests.support.helpers import (
     SignalSender,
@@ -276,6 +278,7 @@ __all__ = [
     "TEMPLATE_AND_COMPONENT_SOURCES",
     "TEMPLATE_PRIORITY_CASES",
     "TITLE_TEMPLATE_CASES",
+    "TWIN_ACTION",
     "URLS_ROUTER_MANAGER_TARGETS",
     "URL_BY_ANNOTATION_RESOLVE_CASES",
     "URL_KWARGS_RESOLVE_CASES",
@@ -411,5 +414,6 @@ __all__ = [
     "write_page",
     "write_page_chain",
     "write_tree",
+    "write_twin_pages",
     "write_urlconf",
 ]

@@ -10,6 +10,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.test import RequestFactory
 
 from next.deps import DObject, UnboundObjectError
+from next.deps.objects import SCOPE_DEPENDENCY
 from next.forms import (
     ActionRegistration,
     Form,
@@ -19,7 +20,9 @@ from next.forms import (
 )
 from next.forms.dispatch import FormActionDispatch
 from next.forms.uid import ORIGIN_FIELD_NAME
-from tests.support import routed, write_page
+from next.pages.loaders import _load_python_module
+from next.testing import NextClient
+from tests.support import bound_dependency, routed, write_page
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
@@ -177,3 +180,81 @@ class TestUnboundObjectOnDispatch:
             _dispatch(_with_handler(_handler_parent), "/7/")
         assert caught.value.parent is True
         assert caught.value.key == "permissions"
+
+
+_EDIT_PAGE = """
+from django import forms
+from django.contrib.auth.models import Group
+from django.http import HttpResponse
+
+from next import context
+from next.deps import DObject
+from next.forms import ModelForm, action
+
+template = "<h1>{{ shown.name }}</h1>{{ title }}"
+
+
+@context("shown")
+def shown(group: DObject[Group]) -> Group:
+    return group
+
+
+@context("title")
+def title(group: DObject[Group]) -> str:
+    return f"<p>{group.name}</p>"
+
+
+class GroupEditForm(ModelForm):
+    confirm = forms.CharField()
+
+    class Meta:
+        model = Group
+        fields = ("name",)
+        abstract = True
+
+    @classmethod
+    def get_initial(cls, group: DObject[Group]) -> Group:
+        return group
+
+
+@action("group_edit", form_class=GroupEditForm)
+def update_group(form: GroupEditForm) -> HttpResponse:
+    form.save()
+    return HttpResponse(form.instance.name)
+"""
+
+
+@pytest.fixture()
+def edit_page(tmp_path: Path, scoped_models: None) -> Generator[None, None, None]:
+    """Route an edit page whose context and `ModelForm` load one `DObject` row."""
+    root = tmp_path / "pages"
+    _load_python_module(write_page(root, "[int:group]", _EDIT_PAGE))
+    with bound_dependency(SCOPE_DEPENDENCY, lambda: "t"), routed(root):
+        yield
+
+
+@pytest.mark.django_db()
+@pytest.mark.usefixtures("edit_page")
+class TestInvalidModelFormRerender:
+    """An invalid `ModelForm` re-renders its origin over rows it never touched."""
+
+    @pytest.mark.parametrize("partial", [False, True], ids=["full", "partial"])
+    def test_the_page_shows_the_stored_row(self, *, partial: bool) -> None:
+        group = Group.objects.create(name="t:old")
+        response = NextClient().post_action(
+            "group_edit", {"name": "t:new"}, origin=f"/{group.pk}/", partial=partial
+        )
+        assert response.status_code == 200
+        assert response["X-Next-Form"] == "invalid"
+        html = response.content.decode()
+        assert "<h1>t:old</h1>" in html
+        assert "t:new" not in html
+
+    def test_a_valid_post_saves_through_the_shared_row(self) -> None:
+        group = Group.objects.create(name="t:old")
+        response = NextClient().post_action(
+            "group_edit", {"name": "t:new", "confirm": "y"}, origin=f"/{group.pk}/"
+        )
+        assert response.content == b"t:new"
+        group.refresh_from_db()
+        assert group.name == "t:new"

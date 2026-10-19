@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
+from django.db.models import Model
 from django.http import (
     HttpResponse,
     HttpResponseBadRequest,
@@ -292,6 +293,7 @@ class FormActionDispatch:
             return validated
         if not form.is_valid():
             state.emit_form_validation_failed(request, params.action_name, form)
+            state.forget_row(getattr(form, "instance", None))
             return backend.shape_response(
                 request,
                 ActionOutcome(
@@ -421,6 +423,17 @@ class _DispatchState:
     def origin(self) -> str | None:
         """Return the validated origin URL path, if the origin resolved."""
         return self.origin_match.origin if self.origin_match else None
+
+    def forget_row(self, row: object) -> None:
+        """Drop every cache entry holding `row`, so the re-render loads it afresh.
+
+        A failed `ModelForm` still writes posted values into the row the contexts read.
+        """
+        if not isinstance(row, Model):
+            return
+        stale = [key for key, value in self.dep_cache.items() if value is row]
+        for key in stale:
+            del self.dep_cache[key]
 
     def emit_action_dispatched(
         self,

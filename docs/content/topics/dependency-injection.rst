@@ -419,6 +419,25 @@ A missing URL kwarg is a wiring mistake rather than a missing row, and on a page
 The lookup takes the first matching row, so a ``visible_to`` that joins a many-valued relation and repeats a row needs no ``distinct()``.
 A row loads once per render, so two callables that ask for the same row share one query.
 
+The segment takes the name of the model, ``[int:note]`` for ``DObject[Note]`` and ``[int:wallet]`` for ``DObject[Wallet]``.
+A ``DObject`` parameter reads the URL kwarg of its own name, and ``obj=DObject[Note]`` in an access declaration reads the kwarg named after the ``model_name`` of the model, so a segment named after the model serves both with one row and one query.
+
+``visible_to`` answers one question, which rows the scope may see, and leaves the shape of the row to the default manager.
+The manager decides the shape through its ``get_queryset``, which ``visible_to`` filters, the way :meth:`~django.views.generic.detail.SingleObjectMixin.get_queryset` shapes the row of a ``DetailView``.
+A heavy column is deferred there with :meth:`~django.db.models.query.QuerySet.defer`, and a related row the page always shows is joined there with :meth:`~django.db.models.query.QuerySet.select_related`, never inside ``visible_to``.
+
+.. code-block:: python
+   :caption: notes/models.py, a manager that shapes the row
+
+   class NoteManager(models.Manager.from_queryset(NoteQuerySet)):
+       def get_queryset(self):
+           return super().get_queryset().defer("body").select_related("owner")
+
+   class Note(models.Model):
+       ...
+
+       objects = NoteManager()
+
 The marker refuses a shape no lookup could serve.
 A model class that is abstract or not a model at all raises ``TypeError`` where the annotation is written.
 A bare ``DObject`` and a ``DObject`` inside a union such as ``DObject[Note] | None`` raise ``TypeError`` when the resolver first resolves the callable, since a missing row is a 404 rather than ``None``.

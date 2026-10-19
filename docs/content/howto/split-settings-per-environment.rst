@@ -64,10 +64,8 @@ Define ``NEXT_FRAMEWORK`` here in full so the framework configuration has one so
        "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
-               "OPTIONS": {"context_processors": []},
            },
        ],
    }

@@ -1,0 +1,25 @@
+<div class="space-y-6">
+  {% #component "page_header" eyebrow="Manuscript" title=book.title description=book.author.full_name %}
+    {% #slot "actions" %}
+      {% component "button" href=outline_url text="Back to the outline" variant="outline" %}
+    {% /slot %}
+  {% /component %}
+
+  {% zone "manuscript" %}
+    <div class="space-y-6">
+      {% component "chapter_table" chapters=manuscript.chapters words=manuscript.words %}
+
+      {% form "add_chapter_form" zone="manuscript" %}
+        <div class="grid gap-3 sm:grid-cols-[1fr_10rem_auto] sm:items-end">
+          {% #component "field" label="Chapter title" for_id="id_title" error=form.title.errors.0 %}
+            {% #slot "control" %}{{ form.title }}{% /slot %}
+          {% /component %}
+          {% #component "field" label="Words" for_id="id_word_count" error=form.word_count.errors.0 %}
+            {% #slot "control" %}{{ form.word_count }}{% /slot %}
+          {% /component %}
+          {% component "button" type="submit" text="Append chapter" %}
+        </div>
+      {% endform %}
+    </div>
+  {% endzone %}
+</div>

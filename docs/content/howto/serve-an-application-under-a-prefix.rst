@@ -36,7 +36,7 @@ Name the application in ``pages()`` and include the result under the prefix.
        path("", include("next.urls")),
    ]
 
-``wallets/pages/page.py`` now answers ``/wallets/`` and ``wallets/pages/[int:pk]/page.py`` answers ``/wallets/<int:pk>/``.
+``wallets/pages/page.py`` now answers ``/wallets/`` and ``wallets/pages/[int:wallet]/page.py`` answers ``/wallets/<int:wallet>/``.
 The tree leaves ``next.urls``, so it no longer answers at the root as well.
 Without a second argument ``pages()`` places the ``PAGES_DIR`` tree of the application, ``pages/`` with the default setting.
 
@@ -63,7 +63,7 @@ The second argument names that directory, and the ``namespace`` keyword gives it
    ]
 
 The ``wallet`` value the route captures reaches each page of that tree as a URL kwarg, as it does for any :func:`~django.urls.include`.
-The layout and the contexts of ``pages/`` do not reach the ``operations`` tree, while its breadcrumbs start with those of the nearest page above it in the URL that the user may open, such as ``wallets/pages/[int:pk]/page.py`` for ``/wallets/1/operations/``.
+The layout and the contexts of ``pages/`` do not reach the ``operations`` tree, while its breadcrumbs start with those of the nearest page above it in the URL that the user may open, such as ``wallets/pages/[int:wallet]/page.py`` for ``/wallets/1/operations/``.
 
 .. code-block:: python
    :caption: wallets/operations/page.py
@@ -71,17 +71,36 @@ The layout and the contexts of ``pages/`` do not reach the ``operations`` tree, 
    from wallets.models import Operation, Wallet
 
    from next import context
-   from next.urls import DUrl
+   from next.deps import DObject
 
    @context("wallet")
-   def current_wallet(wallet: DUrl[int]) -> Wallet:
-       return Wallet.objects.get(pk=wallet)
+   def current_wallet(wallet: DObject[Wallet]) -> Wallet:
+       return wallet
 
    @context("operations")
-   def wallet_operations(wallet: DUrl[int]) -> list[Operation]:
-       return list(Operation.objects.filter(wallet_id=wallet))
+   def wallet_operations(wallet: DObject[Wallet]) -> list[Operation]:
+       return list(Operation.objects.filter(wallet=wallet))
 
+The route names the kwarg after the model, so ``DObject[Wallet]`` loads the row through ``visible_to(scope)`` and both contexts share one query, see :ref:`topics-di-dobject`.
 A directory under ``operations/`` must not capture ``wallet`` again, which ``manage.py check`` reports as :ref:`next.E152 <ref-system-checks>`.
+
+Declare the access of each tree
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A tree under a prefix inherits no ``proxy.py`` of the tree the prefix belongs to, so the ``operations`` tree keeps a ``proxy.py`` at its root, see :ref:`topics-proxy-tree-boundary`.
+
+.. code-block:: python
+   :caption: wallets/operations/proxy.py
+
+   from wallets.models import Wallet
+
+   from next.deps import DObject
+   from next.pages import proxy
+
+   proxy.login_required()
+   proxy.permission_required("wallets.view_wallet", obj=DObject[Wallet])
+
+``manage.py permissions`` lists the rule of every page of both trees, so a tree left without access shows in the table, see :doc:`/content/ref/management`.
 
 Reverse the placed pages
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -116,4 +135,5 @@ See also
 
    :doc:`/content/topics/file-router` for the route order and the names of every tree.
    :doc:`/content/topics/project-layout` for where prefixes fit as a project grows.
+   :doc:`/content/topics/proxy` for the access each tree declares.
    :doc:`/content/ref/management` for the columns of ``manage.py routes``.

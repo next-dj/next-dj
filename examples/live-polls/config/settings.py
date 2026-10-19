@@ -98,7 +98,6 @@ NEXT_FRAMEWORK = {
             # around every poll list, detail, and stream surface.
             "DIRS": [str(BASE_DIR / "studio")],
             "PAGES_DIR": "pages",
-            "OPTIONS": {"context_processors": []},
         }
     ],
     "COMPONENT_BACKENDS": [

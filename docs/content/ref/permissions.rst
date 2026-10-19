@@ -65,7 +65,7 @@ Access declarations
 Every page view, the action dispatcher, and a zone request check the declared rule before any application code runs, a login first, then every permission without an object, then each permission on the object, the order of ``AccessMixin`` and ``PermissionRequiredMixin``.
 A refused login redirects to ``LOGIN_URL`` and a refused permission raises :exc:`~django.core.exceptions.PermissionDenied`.
 A file executed again drops what it declared before, so a reload never keeps a stale requirement.
-``manage.py permissions`` and the ``Access`` column of ``manage.py routes`` print the rule every page, action, and declaring component answers to, see :doc:`management`.
+``manage.py permissions`` and the ``Access`` column of ``manage.py routes`` print the rule every page, action, and declaring component answers to, and ``manage.py permissions`` adds a ``view`` row for every other view of the URLconf, see :doc:`management`.
 
 Backend
 -------
@@ -96,7 +96,7 @@ A zone under the tag, or in the body of a component that decides what it shows, 
 Management command
 ------------------
 
-``manage.py permissions [url]`` prints the rule of every endpoint or of one page, see :doc:`management`.
+``manage.py permissions [url]`` prints the rule of every endpoint or of one page or view, see :doc:`management`.
 
 System checks
 -------------

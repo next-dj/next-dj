@@ -248,7 +248,9 @@ Listing the rules
 ~~~~~~~~~~~~~~~~~
 
 ``manage.py permissions`` prints the rule of every page, every action, and every component that declares one, with the files each requirement comes from, and ``public (file)`` for a public rule, naming the file whose ``public()`` opened it.
-``manage.py permissions /notes/1/edit/`` narrows the table to one page, the actions of its directory, and the declaring components its template renders, and ``manage.py routes`` shows the same rule in its ``Access`` column, see :doc:`/content/ref/management`.
+An action row carries the file that declares the action beside its name, since two pages may declare actions of one name.
+Every other view of the URLconf follows as a ``view`` row, read off the ``login_required`` mark ``LoginRequiredMiddleware`` consults, so under the middleware the table answers what an anonymous user reaches.
+``manage.py permissions /notes/1/edit/`` narrows the table to one page, the actions of its directory, and the declaring components its template renders, a view URL narrows it to that view, and ``manage.py routes`` shows the same rule in its ``Access`` column, see :doc:`/content/ref/management`.
 
 The has_perm tag
 ----------------
@@ -348,6 +350,7 @@ Forms
 The rule of the page tree the action belongs to runs first, see `Where a rule applies`_, and the static guard follows, so an anonymous visitor is redirected to ``LOGIN_URL`` and an unregistered permission is checked before the form binds, as it is for every model permission.
 A registered permission waits for the bound form and is checked once, as ``user.has_perm(perm, form.instance)`` for a ``ModelForm`` that edits a saved row.
 A ``ModelForm`` that creates a record and a plain ``Form`` pass ``None``, the model-level question.
+A rule on the parent row a record is created under goes into ``has_object_permission`` or into the access of the page as ``permission_required(perm, obj=DObject[Model])``, see :ref:`topics-proxy`.
 
 The permission runs only once the row has loaded, so the way the form loads it decides what a refused user learns.
 ``DObject`` in ``get_form_kwargs`` reads the row through ``visible_to(scope)``, so a row outside the scope answers 404 before any permission runs, exactly like a missing one, see :ref:`topics-di-dobject`.
@@ -386,5 +389,7 @@ See also
    :doc:`/content/ref/permissions` for the public names.
    :ref:`topics-forms-actions-guards` for the static guard and the dynamic hooks.
    :doc:`proxy` for the access a ``proxy.py`` declares over a subtree and the lift of ``public()``.
+   :doc:`/content/howto/require-login-on-pages` for a login on every page through ``LoginRequiredMiddleware``.
+   :doc:`application-layout` for where a predicate sits beside ``visible_to(scope)`` and the services.
    :doc:`/content/security/actions` for the access an action owes to the tree it is declared in.
    :doc:`/content/ref/system-checks` for ``next.E159`` to ``next.E164`` and ``next.W127`` to ``next.W129``.

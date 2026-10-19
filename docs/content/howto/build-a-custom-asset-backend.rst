@@ -152,8 +152,7 @@ Register the ``page`` stem too so discovery picks up ``page.jsx`` alongside ``pa
 
    from django.apps import AppConfig
 
-   from next.static import default_kinds
-   from next.static.discovery import default_stems
+   from next.static import default_kinds, default_stems
 
    class KanbanConfig(AppConfig):
        default_auto_field = "django.db.models.BigAutoField"

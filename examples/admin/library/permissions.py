@@ -12,14 +12,19 @@ def uses_admin(user: Visitor) -> bool:
     return user.has_perm("shadcn_admin.use_admin")
 
 
+def holds_draft(user: Visitor, book: Book) -> bool:
+    """Return whether `book` is a draft assigned to `user` or to no editor at all."""
+    return book.status == Book.DRAFT and book.editor_id in {None, user.pk}
+
+
 def edits_book(user: Visitor, book: Book | None) -> bool:
     """Return whether `user` may edit `book`, any book at model level, else a draft."""
-    return uses_admin(user) and (book is None or book.status == Book.DRAFT)
+    return uses_admin(user) and (book is None or holds_draft(user, book))
 
 
 def edits_chapter(user: Visitor, chapter: Chapter | None) -> bool:
-    """Return whether `user` may edit `chapter`, whose book must still be a draft."""
-    return uses_admin(user) and (chapter is None or chapter.book.status == Book.DRAFT)
+    """Return whether `user` may edit `chapter`, whose book `holds_draft` must pass."""
+    return uses_admin(user) and (chapter is None or holds_draft(user, chapter.book))
 
 
 def deletes_tag(user: Visitor, tag: Tag | None) -> bool:

@@ -13,7 +13,7 @@ from .metrics import incr
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from next.components.info import ComponentInfo
+    from next.components import ComponentInfo
 
 
 class CountingComponentsBackend(FileComponentsBackend):

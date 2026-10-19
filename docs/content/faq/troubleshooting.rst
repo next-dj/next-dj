@@ -425,7 +425,7 @@ Virtual routes and bracket directories
 A plain directory that contains only a ``template.djx`` and no ``page.py`` is a virtual route.
 The router still maps it to a URL.
 
-Captured-parameter directories (names in brackets) must contain ``page.py``, ``layout.djx``, ``template.djx``, or a direct child directory that contains ``page.py``.
+Captured-parameter directories (names in brackets) must contain a ``layout.djx`` or serve a page, a ``page.py`` or a lone ``template.djx``, at any depth the router walks, which leaves out ``_name`` folders.
 Otherwise ``manage.py check`` reports :ref:`next.E010 <ref-system-checks>`.
 
 URL name not found

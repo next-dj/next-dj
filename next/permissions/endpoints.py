@@ -3,13 +3,21 @@
 `manage.py permissions` and `manage.py routes` print it, and tools read it the same way.
 """
 
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
 
 from django.template import TemplateSyntaxError
-from django.urls import Resolver404, resolve
+from django.urls import (
+    Resolver404,
+    ResolverMatch,
+    URLPattern,
+    URLResolver,
+    get_resolver,
+    resolve,
+)
 
 from next.components.sources import get_components_manager, reached_components
 from next.discovery import discover_page_registrations
@@ -20,7 +28,7 @@ from next.pages.manager import page
 from next.pages.paths import page_template_path
 from next.urls.routes import collect_routes
 
-from .access import declared
+from .access import declared, login_middleware_active
 from .markers import OPEN, AccessRule, Requirement, joined
 
 
@@ -31,6 +39,8 @@ if TYPE_CHECKING:
 
 
 type EndpointKind = Literal["page", "action", "component"]
+
+type Includes = Sequence[URLResolver]
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +100,70 @@ def _words(requirement: Requirement) -> tuple[str, ...]:
     else:
         suffix = f" on {obj._meta.label}"
     return tuple(f"perm {perm}{suffix}" for perm in requirement.perms)
+
+
+@dataclass(frozen=True, slots=True)
+class ViewEndpoint:
+    """A view of the URLconf outside the page trees, as the login middleware sees it.
+
+    `deferred` names the endpoint kind whose own rows decide a view next dispatches.
+    """
+
+    route: str
+    view: str
+    public: bool
+    closed: bool
+    deferred: str | None = None
+
+    @property
+    def access(self) -> str:
+        """Return the access in the words the `manage.py permissions` table prints."""
+        if self.deferred is not None:
+            return f"per {self.deferred}"
+        if self.public:
+            return "public"
+        if self.closed:
+            return "login (middleware)"
+        return "-"
+
+
+def _route_piece(pattern: URLResolver | URLPattern) -> str:
+    """Return the route one pattern adds, a regex stripped of its anchors."""
+    return str(pattern.pattern).removeprefix("^").removesuffix("$")
+
+
+def _view_endpoint(includes: Includes, pattern: URLPattern) -> ViewEndpoint | None:
+    """Return the view a pattern under `includes` routes to, `None` for a page."""
+    callback = pattern.callback
+    if getattr(callback, "next_page_path", None) is not None:
+        return None
+    public = not getattr(callback, "login_required", True)
+    pieces = [*map(_route_piece, includes), _route_piece(pattern)]
+    closed = not public and login_middleware_active()
+    deferred = getattr(callback, "next_access_kind", None)
+    return ViewEndpoint(
+        "/" + "".join(pieces), pattern.lookup_str, public, closed, deferred
+    )
+
+
+def _patterns(
+    patterns: Sequence[URLResolver | URLPattern], includes: Includes = ()
+) -> Iterator[tuple[Includes, URLPattern]]:
+    """Yield each view pattern with the includes leading from the URLconf root to it."""
+    for pattern in patterns:
+        if isinstance(pattern, URLResolver):
+            yield from _patterns(pattern.url_patterns, (*includes, pattern))
+        else:
+            yield includes, pattern
+
+
+def view_endpoints() -> tuple[ViewEndpoint, ...]:
+    """Return every view the URLconf routes outside the page trees, in its order."""
+    found = (
+        _view_endpoint(includes, pattern)
+        for includes, pattern in _patterns(get_resolver().url_patterns)
+    )
+    return tuple(view for view in found if view is not None)
 
 
 def _page_path(route: "Route") -> Path:
@@ -187,14 +261,31 @@ def _owned(meta: "ActionMeta", page_path: Path) -> bool:
     return Path(meta["file_path"]).parent == page_path.parent
 
 
-def resolve_page(url: str) -> Path | None:
-    """Return the `page.py` path the URL resolves to, `None` for no page."""
+def _match(url: str) -> ResolverMatch | None:
+    """Return what the URLconf resolves the path of `url` to, `None` for a 404."""
     try:
-        match = resolve(urlsplit(url).path or "/")
+        return resolve(urlsplit(url).path or "/")
     except Resolver404:
         return None
-    found = getattr(match.func, "next_page_path", None)
+
+
+def resolve_page(url: str) -> Path | None:
+    """Return the `page.py` path the URL resolves to, `None` for no page."""
+    match = _match(url)
+    found = None if match is None else getattr(match.func, "next_page_path", None)
     return found if isinstance(found, Path) else None
+
+
+def resolve_view(url: str) -> ViewEndpoint | None:
+    """Return the view the URL resolves to, `None` for a page or a 404.
+
+    The last tried chain of a match is the one that matched, the URLconf root left out.
+    """
+    match = _match(url)
+    if match is None or not match.tried:
+        return None
+    *includes, pattern = match.tried[-1]
+    return _view_endpoint(includes, pattern)
 
 
 def endpoints(page_path: Path | None = None) -> tuple[Endpoint, ...]:
@@ -232,4 +323,12 @@ def _declaring(infos: tuple["ComponentInfo", ...]) -> tuple[Endpoint, ...]:
     return tuple(endpoint for endpoint in found if endpoint is not None)
 
 
-__all__ = ["Endpoint", "endpoints", "page_endpoint", "resolve_page"]
+__all__ = [
+    "Endpoint",
+    "ViewEndpoint",
+    "endpoints",
+    "page_endpoint",
+    "resolve_page",
+    "resolve_view",
+    "view_endpoints",
+]

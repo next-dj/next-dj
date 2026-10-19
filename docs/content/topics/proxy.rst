@@ -172,11 +172,13 @@ In a process that watches template edits an edited ``proxy.py`` runs again on th
 A declaration binds to the module that calls it.
 A call made from a helper module guards nothing, and ``manage.py check`` reports it as ``next.E164``.
 
+.. _topics-proxy-tree-boundary:
+
 The tree boundary
 ~~~~~~~~~~~~~~~~~
 
 The ``proxy.py`` chain of a page stops at the root of its page tree.
-An application tree a ``pages()`` include places under a prefix of another tree inherits no ``proxy.py`` of the host, so each tree declares its own access in a ``proxy.py`` at its root.
+An application tree a ``pages()`` include places under a prefix of another tree inherits no ``proxy.py`` of the host, so each tree declares its own access in a ``proxy.py`` at its root, see :ref:`topics-file-router-trees` and :doc:`/content/howto/serve-an-application-under-a-prefix`.
 A shell that every application shares lives in a project-level ``layout.djx``, see :doc:`layouts`.
 
 A broken proxy.py
@@ -204,6 +206,7 @@ See also
 .. seealso::
 
    :doc:`permissions` for the permission vocabulary, the checks, and ``{% has_perm %}``.
+   :doc:`/content/howto/require-login-on-pages` for a login on every page and the ``manage.py permissions`` table.
    :doc:`layouts` for the ``layout.djx`` chain.
    :doc:`context` for ``inherit_context=True``.
    :doc:`/content/ref/pages` for the ``proxy`` object.

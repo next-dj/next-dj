@@ -11,7 +11,7 @@ You want discovery to pick up a file named ``page.css`` next to ``template.djx``
 Solution
 --------
 
-Register the stem through ``next.static.discovery.default_stems`` in ``AppConfig.ready``.
+Register the stem through ``next.static.default_stems`` in ``AppConfig.ready``.
 
 Walkthrough
 -----------
@@ -23,7 +23,7 @@ Register the stem under the appropriate role.
 
    from django.apps import AppConfig
 
-   from next.static.discovery import default_stems
+   from next.static import default_stems
 
    class NotesConfig(AppConfig):
        name = "notes"

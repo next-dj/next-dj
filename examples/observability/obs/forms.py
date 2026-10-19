@@ -5,12 +5,13 @@ from next.forms import Form
 from next.partial import Patches, zone_requested
 from next.urls import page_reverse, with_query
 
+from .apps import METRIC_PULSE_OP
+
 
 WINDOW_CHOICES = (("1m", "Last minute"), ("5m", "Last 5 minutes"), ("1h", "Last hour"))
 DEFAULT_WINDOW = "5m"
 LIVE_TOTALS_ZONE = "live-totals"
 WINDOW_LABEL_ZONE = "stats-window"
-METRIC_PULSE_OP = "metric-pulse"
 STATS_PAGE = "stats"
 
 

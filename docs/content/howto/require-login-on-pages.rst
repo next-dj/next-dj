@@ -80,7 +80,7 @@ A ``proxy.py`` closes its directory and every page below it, independent of ``MI
 Every page under ``notes/``, every action declared there, and every zone request of those pages now requires a logged-in user who holds ``notes.view_note``.
 An anonymous visitor is redirected to ``LOGIN_URL``, and a user without the permission gets HTTP 403.
 A branded 403 page needs a ``403.html`` template or a ``handler403`` in the root URLconf, see :doc:`/content/howto/customize-error-pages`.
-A tree mounted under a prefix of this one inherits no ``proxy.py`` of it, so it declares its own, see :doc:`/content/topics/proxy`.
+A tree that a ``pages()`` include places under a prefix of this one inherits no ``proxy.py`` of it, so it declares its own, see :ref:`topics-proxy-tree-boundary`.
 
 Wire the login route
 ~~~~~~~~~~~~~~~~~~~~
@@ -153,7 +153,8 @@ List the access of every page, then request a closed page while signed out.
    uv run python manage.py permissions
    uv run python manage.py runserver
 
-The table shows ``login (middleware)`` for a page the middleware closes, ``public`` for the login page, and the requirements of ``notes/proxy.py`` with that file as their source for every page below it.
+The table shows ``login (middleware)`` with ``LoginRequiredMiddleware`` as the source for a page the middleware closes, ``public`` for the login page, and the requirements of ``notes/proxy.py`` with that file as their source for every page below it.
+Its ``view`` rows list the Django views of the URLconf, ``public`` for each one marked :func:`~django.contrib.auth.decorators.login_not_required`, so the table also answers which views an anonymous user reaches.
 Visiting ``/notes/`` while anonymous redirects to ``/login/?next=/notes/``, and after signing in the same path renders the page and the greeting names the user.
 
 See also
@@ -162,6 +163,7 @@ See also
 .. seealso::
 
    :ref:`topics-permissions-tree` for the declarations and the order of the check.
+   :doc:`/content/topics/proxy` for the ``proxy.py`` chain and the lift of ``public()``.
    :doc:`/content/topics/dependency-injection` for reading the request in callables.
    :doc:`/content/howto/integrate-django-admin` for mounting Django views beside the router.
    :doc:`/content/howto/customize-error-pages` for a custom ``403`` template.

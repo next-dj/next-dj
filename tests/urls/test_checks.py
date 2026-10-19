@@ -28,6 +28,7 @@ from next.urls.checks import (
 from tests.support import (
     check_ids,
     file_router,
+    file_router_config_entry,
     importable_dir,
     installed_apps,
     isolated_form_registries,
@@ -422,6 +423,12 @@ class TestPagesConfigurationCodes:
         ):
             errors = check_next_pages_configuration()
         assert [e.id for e in errors] == ["next.E002"]
+
+    def test_an_entry_without_options_passes(self) -> None:
+        entry = file_router_config_entry()
+        del entry["OPTIONS"]
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
+            assert check_next_pages_configuration() == []
 
     def test_non_string_pages_dir_is_e027(self) -> None:
         with override_settings(

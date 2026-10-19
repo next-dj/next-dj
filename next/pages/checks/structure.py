@@ -223,36 +223,29 @@ def _check_missing_page_files(
     context: str,
     skip_dir_names: frozenset[str],
 ) -> list[CheckMessage]:
-    """Check for missing `page.py` files inside parameter directories."""
+    """Check that every routed parameter directory serves a page at some depth.
+
+    The router walk decides what counts, so a page under a `_name` folder or a refused
+    name does not answer for the directory, and a page deeper down does.
+    """
     errors: list[CheckMessage] = []
 
     for item in directories:
-        dir_name_str = item.name
-        if _is_bracket_segment(dir_name_str):
-            page_file = item / "page.py"
-            layout_file = item / "layout.djx"
-            template_file = item / "template.djx"
-
-            if page_file.exists() or layout_file.exists() or template_file.exists():
-                continue
-
-            has_child_routes = False
-            for child in item.iterdir():
-                if child.name in skip_dir_names:
-                    continue
-                if child.is_dir() and (child / "page.py").exists():
-                    has_child_routes = True
-                    break
-
-            if not has_child_routes:
-                errors.append(
-                    Error(
-                        f"{context} pages: Parameter directory "
-                        f'"{item.relative_to(pages_path)}" is missing page.py file.',
-                        obj=settings,
-                        id="next.E010",
-                    )
-                )
+        if not _is_bracket_segment(item.name) or (item / "layout.djx").exists():
+            continue
+        relative = item.relative_to(pages_path)
+        if any(part.startswith("_") for part in relative.parts):
+            continue
+        if next(walk_page_tree(item, skip_dir_names), None) is not None:
+            continue
+        errors.append(
+            Error(
+                f"{context} pages: Parameter directory "
+                f'"{relative}" is missing page.py file.',
+                obj=settings,
+                id="next.E010",
+            )
+        )
 
     return errors
 

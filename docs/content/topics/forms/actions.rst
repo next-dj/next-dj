@@ -220,6 +220,36 @@ The classmethod is DI-resolved exactly like ``get_initial``, and its result is t
 The default returns ``{"instance": ...}`` when ``get_initial`` answers a model instance and ``{"initial": ...}`` otherwise, so an override that starts from ``super().get_form_kwargs(request)`` keeps the ``get_initial`` behaviour and adds its own keys.
 A form that does not override the method never calls it and goes straight to ``get_initial``.
 
+``super().get_form_kwargs(request)`` is a plain Python call, and the dependency injector resolves only the parameters of the method the dispatcher calls.
+A parent override that asks for dependencies of its own, such as ``scope=Depends("scope")``, receives its defaults through ``super()`` rather than the resolved values.
+A subclass therefore declares those parameters and passes them on, or leaves ``get_form_kwargs`` alone and loads its row in ``get_initial``, which the default resolves through the injector.
+The second form is the short one, an abstract subclass of the shared form that only names its row.
+
+.. code-block:: python
+   :caption: budget/pages/wallets/[int:wallet]/edit/page.py
+
+   from budget.forms import WalletForm
+   from budget.models import Wallet
+   from django.http import HttpRequest
+
+   from next.deps import DObject
+   from next.forms import DForm, action, redirect_to_origin
+
+   class WalletEditForm(WalletForm):
+       class Meta(WalletForm.Meta):
+           abstract = True
+
+       @classmethod
+       def get_initial(cls, wallet: DObject[Wallet]) -> Wallet:
+           return wallet
+
+   @action("wallet_form", form_class=WalletEditForm)
+   def update_wallet(request: HttpRequest, form: DForm[WalletEditForm]):
+       form.save()
+       return redirect_to_origin(request)
+
+A ``get_form_kwargs`` that ``WalletForm`` overrides still runs with its own dependencies resolved, and the default it reaches through ``super()`` turns the row into the ``instance`` of the form.
+
 The dispatcher calls the hook on the GET render of the page and on the POST, where it runs after ``check_permissions`` and before ``has_object_permission``.
 The dispatcher passes ``data`` and ``files`` itself, so a result that carries either key, or a result that is not a dict, raises ``TypeError``.
 The default resolves ``get_initial`` in the dependency cache of the override, on the GET render and on the POST alike, so a dependency both ask for resolves once.
@@ -433,6 +463,7 @@ An authenticated user missing a permission gets :exc:`~django.core.exceptions.Pe
 
 A permission registered through ``add_perm`` in a ``permissions.py`` is an object permission, and a class-bound form checks it on the row it edits rather than up front.
 The static guard leaves it out, and once the form binds the dispatcher asks ``user.has_perm(perm, form.instance)`` for a ``ModelForm`` that edits a saved row, or ``user.has_perm(perm, None)`` for a new record and a plain ``Form``.
+A new record is therefore never checked against the row it is created under, and a rule on that parent row goes into ``has_object_permission`` or into the access of the page as ``permission_required(perm, obj=DObject[Model])`` in its ``page.py`` or a ``proxy.py``, see :ref:`topics-proxy`.
 The check runs once, before ``has_object_permission`` and validation, and a refusal is HTTP 403 with ``form_access_denied`` sent as ``layer="object"`` and ``reason="denied"``.
 A ``FormWizard`` and a handler-only ``@action`` bind no form at that point, so their guard checks every listed permission up front with no object, registered ones included.
 Load the row through ``DObject`` in ``get_form_kwargs`` rather than ``Meta.instance_from_url``, whose unscoped lookup answers a refused user 403 for an existing id and 404 for a missing one.

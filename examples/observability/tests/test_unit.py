@@ -9,7 +9,6 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from obs import metrics
-from obs.apps import METRIC_PULSE_OP
 from obs.backends import BabelJsxBackend, CountingComponentsBackend
 from obs.forms import WINDOW_CHOICES, WindowFilterForm
 from obs.metrics import INDEX_KEY, PREFIX
@@ -45,7 +44,6 @@ from obs.static_policies import InstrumentedDedup
 from pydantic import BaseModel
 
 from next.components import FileComponentsBackend
-from next.partial.registry import patch_op_registry
 from next.static import StaticAsset
 
 
@@ -175,13 +173,6 @@ class TestLiveZoneContext:
 
     def test_returns_the_live_totals_zone(self) -> None:
         assert live_zone() == LIVE_TOTALS_ZONE
-
-
-class TestMetricPulseRegistration:
-    """`apps.ready()` registers the custom verb so `op()` accepts it."""
-
-    def test_metric_pulse_is_registered(self) -> None:
-        assert METRIC_PULSE_OP in patch_op_registry
 
 
 class _PydanticPayload(BaseModel):

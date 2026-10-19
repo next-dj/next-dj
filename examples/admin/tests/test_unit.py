@@ -4,7 +4,13 @@ from django.contrib.admin.models import CHANGE, LogEntry
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.contenttypes.models import ContentType
 from library.models import Book
-from library.permissions import deletes_tag, edits_book, edits_chapter, uses_admin
+from library.permissions import (
+    deletes_tag,
+    edits_book,
+    edits_chapter,
+    holds_draft,
+    uses_admin,
+)
 from shadcn_admin.permissions import is_staff
 from shadcn_admin.services import HistoryEntry, object_history
 
@@ -38,13 +44,33 @@ class TestPredicates:
         assert edits_book(reader, make_book(status=Book.DRAFT)) is False
         assert edits_book(AnonymousUser(), None) is False
 
+    def test_holds_draft_reads_the_status_and_the_editor(
+        self, editor, copyeditor, make_book
+    ) -> None:
+        assert holds_draft(editor, make_book(status=Book.DRAFT, editor=editor)) is True
+        assert holds_draft(editor, make_book(status=Book.DRAFT)) is True
+        foreign = make_book(status=Book.DRAFT, editor=copyeditor)
+        assert holds_draft(editor, foreign) is False
+        assert holds_draft(copyeditor, foreign) is True
+        published = make_book(status=Book.PUBLISHED, editor=editor)
+        assert holds_draft(editor, published) is False
+
+    def test_edits_book_refuses_a_draft_of_another_editor(
+        self, editor, copyeditor, make_book
+    ) -> None:
+        foreign = make_book(status=Book.DRAFT, editor=copyeditor)
+        assert edits_book(editor, foreign) is False
+        assert edits_book(copyeditor, foreign) is True
+
     def test_edits_chapter_follows_the_book(
-        self, editor, make_book, make_chapter
+        self, editor, copyeditor, make_book, make_chapter
     ) -> None:
         draft = make_chapter(make_book(status=Book.DRAFT))
         archived = make_chapter(make_book(status=Book.ARCHIVED))
+        foreign = make_chapter(make_book(status=Book.DRAFT, editor=copyeditor))
         assert edits_chapter(editor, draft) is True
         assert edits_chapter(editor, archived) is False
+        assert edits_chapter(editor, foreign) is False
         assert edits_chapter(editor, None) is True
         assert edits_chapter(AnonymousUser(), draft) is False
 

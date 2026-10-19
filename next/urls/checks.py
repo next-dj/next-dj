@@ -156,15 +156,9 @@ def _validate_app_dirs_field(config: dict[str, Any], prefix: str) -> list[CheckM
 
 
 def _validate_options_field(config: dict[str, Any], prefix: str) -> list[CheckMessage]:
-    """Validate that `OPTIONS` is present, a dict, and only names known keys."""
+    """Validate that `OPTIONS`, when present, is a dict naming only known keys."""
     if "OPTIONS" not in config:
-        return [
-            Error(
-                f"{prefix} must specify OPTIONS when using FileRouterBackend.",
-                obj=settings,
-                id="next.E026",
-            )
-        ]
+        return []
     if not isinstance(config["OPTIONS"], dict):
         return [
             Error(

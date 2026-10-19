@@ -8,7 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 from next.backends import BackendListManager, backend_entries, load_backends
 
-from .backends import FormActionBackend
+from .backends import FormActionBackend, declaring_files
 from .dispatch.build import _form_action_context_callable
 from .errors import FormActionNotFoundError
 from .origin import url_kwargs_for_request
@@ -160,6 +160,7 @@ class FormActionManager(BackendListManager[FormActionBackend]):
                 meta["name"] for backend in backends for meta in backend.iter_actions()
             ],
             registry_empty=registry_empty,
+            declared_in=lambda: declaring_files(backends, action_name),
         )
 
     def get_action_meta(
@@ -191,6 +192,7 @@ class FormActionManager(BackendListManager[FormActionBackend]):
             page_path=page_path,
             candidates=tuple(known),
             registry_empty=not known,
+            declared_in=lambda: declaring_files(self.backends, action_name),
         )
 
     @property

@@ -5,8 +5,12 @@ from typing import get_args, get_origin
 from django.db.models import Model
 from django.http import Http404
 
-from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionContext
-from next.deps.plan import ParameterFiller
+from next.deps import (
+    DDependencyBase,
+    ParameterFiller,
+    RegisteredParameterProvider,
+    ResolutionContext,
+)
 
 
 class DPoll[T](DDependencyBase[T]):

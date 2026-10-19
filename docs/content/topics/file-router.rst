@@ -246,7 +246,6 @@ Fallback root.
                "APP_DIRS": False,
                "DIRS": [],
                "PAGES_DIR": "pages",
-               "OPTIONS": {"context_processors": []},
            }
        ]
    }
@@ -309,7 +308,6 @@ Segment entry.
                "DIRS": ["drafts"],
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
-               "OPTIONS": {"context_processors": []},
            }
        ]
    }
@@ -374,7 +372,7 @@ A page directory that captures a name the route already captures, such as ``hist
 The pages of a ``pages()`` tree register in a namespace named after the application label, without the outer prefix.
 ``page_reverse("", namespace="audit")`` answers ``/staff/`` and ``{% url "audit:page_log" %}`` answers ``/staff/log/``.
 A second tree of the same application needs a namespace of its own, which the ``namespace`` keyword sets, as ``audit_history`` does above.
-A layout or a context of one tree never reaches the pages of another, while breadcrumbs continue by URL, so a page of ``/staff/history/`` leads its crumbs with those of the nearest page above it in another tree, here the ``/staff/`` page, see :doc:`/content/topics/seo/breadcrumbs`.
+A layout, a context, or a ``proxy.py`` of one tree never reaches the pages of another, see :ref:`topics-proxy-tree-boundary`, while breadcrumbs continue by URL, so a page of ``/staff/history/`` leads its crumbs with those of the nearest page above it in another tree, here the ``/staff/`` page, see :doc:`/content/topics/seo/breadcrumbs`.
 
 One tree may be included twice, each include under a namespace of its own, such as ``pages("audit", namespace="one")`` under ``one/`` and ``pages("audit", namespace="two")`` under ``two/``.
 Its pages then answer under both prefixes, while the sitemap lists the tree as one section, built from the include the URLconf lists first, so only the URLs under ``one/`` appear in it.
@@ -419,17 +417,13 @@ Each backend can read from a different directory, register a different ``PAGES_D
        "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
-               "OPTIONS": {"context_processors": []},
            },
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "admin_pages",
-               "OPTIONS": {"context_processors": []},
            }
        ]
    }
@@ -548,6 +542,8 @@ See also
    :doc:`url-reversing` for building URLs in Python and templates.
    :doc:`/content/howto/add-a-page` for a one page recipe.
    :doc:`/content/howto/serve-an-application-under-a-prefix` for a tree under a prefix.
+   :doc:`project-layout` for the files of an application and the trees of a growing project.
+   :doc:`proxy` for the access a ``proxy.py`` declares over a directory of a tree.
    :doc:`/content/howto/reload-routes-from-code` for hot reload mechanics.
    :doc:`/content/internals/url-router` for the parser, dispatcher, and signal flow.
    :doc:`/content/ref/urls` for the public API.

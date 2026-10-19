@@ -134,11 +134,9 @@ class PollsConfig(AppConfig):
             "vue", extension=".vue", slot="scripts", renderer="render_module_tag"
         )
         default_stems.register("template", "page")
-
-        from polls import deps, signals
 ```
 
-The `vue` kind binds the `.vue` extension to the `scripts` slot and reuses the framework built-in `render_module_tag`. Reusing a built-in renderer is what earns the kind a client insertion verb: every asset in a patch envelope carries a `load` field, and the `.vue` files ride out as `load: "module"` while the co-located `component.css` rides as `load: "link"`. A kind registered with a renderer of your own carries no verb and its assets reach the browser only on a full render, which the framework reports as `next.W074`. The `deps` import registers the `DPoll` provider, and the `signals` import wires both the Vite dev-asset injector and the `action_dispatched` listener that drives the broker fan-out.
+The `vue` kind binds the `.vue` extension to the `scripts` slot and reuses the framework built-in `render_module_tag`. Reusing a built-in renderer is what earns the kind a client insertion verb: every asset in a patch envelope carries a `load` field, and the `.vue` files ride out as `load: "module"` while the co-located `component.css` rides as `load: "link"`. A kind registered with a renderer of your own carries no verb and its assets reach the browser only on a full render, which the framework reports as `next.W074`. Nothing else lives in `ready()`. The framework imports the `deps.py` and `signals.py` of every installed app at startup, so [`polls/deps.py`](polls/deps.py) registers the `DPoll` provider and [`polls/signals.py`](polls/signals.py) wires both the Vite dev-asset injector and the `action_dispatched` listener that drives the broker fan-out.
 
 ### 3. The stream through the page escape hatch
 

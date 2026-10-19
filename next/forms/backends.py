@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, override
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, cast, override
 from weakref import WeakSet
 
 from django.contrib.auth.decorators import login_not_required
@@ -314,6 +314,29 @@ def forget_action_urls(*, setting: str, **kwargs) -> None:
             backend._url_cache.clear()
 
 
+def declaring_files(
+    backends: "Iterable[FormActionBackend]", action_name: str
+) -> list[str]:
+    """Return the files whose registered action carries `action_name`."""
+    return [
+        meta["file_path"]
+        for backend in backends
+        for meta in backend.iter_actions()
+        if meta.get("name") == action_name
+    ]
+
+
+class _DispatchView(Protocol):
+    """The dispatch view, marked so `manage.py permissions` defers to the action rows.
+
+    `next_access_kind` names the endpoint kind whose own rules decide each request.
+    """
+
+    next_access_kind: str
+
+    def __call__(self, request: "HttpRequest", uid: str) -> "HttpResponseBase": ...
+
+
 class RegistryFormActionBackend(FormActionBackend):
     """In-memory actions behind one dispatcher path keyed by UID."""
 
@@ -466,6 +489,7 @@ class RegistryFormActionBackend(FormActionBackend):
             page_path=page_path,
             candidates=self._name_index.keys(),
             registry_empty=not self._registry,
+            declared_in=lambda: declaring_files((self,), action_name),
         )
 
     @override
@@ -483,7 +507,9 @@ class RegistryFormActionBackend(FormActionBackend):
 
         `LoginRequiredMiddleware` passes it, because dispatch applies the page rule.
         """
-        return login_not_required(require_http_methods(["GET", "POST"])(self.dispatch))
+        view = login_not_required(require_http_methods(["GET", "POST"])(self.dispatch))
+        cast("_DispatchView", view).next_access_kind = "action"
+        return view
 
     @override
     def dispatch(self, request: "HttpRequest", uid: str) -> "HttpResponseBase":
@@ -546,6 +572,7 @@ __all__ = [
     "RegistryBackendSnapshot",
     "RegistryFormActionBackend",
     "build_action_guard",
+    "declaring_files",
     "file_to_dotted_module",
     "record_possible_collision",
     "scope_key_for",

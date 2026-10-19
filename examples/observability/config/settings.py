@@ -94,7 +94,6 @@ NEXT_FRAMEWORK = {
             # `instrument/` owns the shared HTML envelope every dashboard renders into.
             "DIRS": [str(BASE_DIR / "instrument")],
             "PAGES_DIR": "pages",
-            "OPTIONS": {"context_processors": []},
         }
     ],
     "COMPONENT_BACKENDS": [

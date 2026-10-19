@@ -218,7 +218,7 @@ One code stands for one condition, so silencing it through ``SILENCED_SYSTEM_CHE
 The ``Emitted by`` column names the module that builds the message, which for the three check packages is the submodule rather than the package.
 
 A code that a release dropped is retired and never reused, so a silenced code keeps naming the condition it named.
-The retired errors are ``next.E001``, ``next.E066``, ``next.E091``, and ``next.E109``.
+The retired errors are ``next.E001``, ``next.E026``, ``next.E066``, ``next.E091``, and ``next.E109``.
 The retired warnings are ``next.W003`` through ``next.W029``, ``next.W032`` through ``next.W041``, ``next.W044``, ``next.W045``, ``next.W047`` through ``next.W053``, ``next.W064`` through ``next.W066``, and ``next.W073``.
 
 Errors
@@ -259,7 +259,7 @@ Errors
      - A ``[[args]]`` directory names no route, because the brackets hold nothing or hold a name that is no Python identifier once ``-`` is read as ``_``.
      - ``next.pages.checks.structure``
    * - ``next.E010``
-     - A parameter directory is missing its ``page.py`` file.
+     - A routed parameter directory serves no page at any depth and holds no ``layout.djx``.
      - ``next.pages.checks.structure``
    * - ``next.E011``
      - An error was raised while checking page functions.
@@ -312,9 +312,6 @@ Errors
      - ``next.urls.checks``
    * - ``next.E025``
      - A file router entry is missing ``APP_DIRS``.
-     - ``next.urls.checks``
-   * - ``next.E026``
-     - A file router entry is missing ``OPTIONS``.
      - ``next.urls.checks``
    * - ``next.E027``
      - A ``PAGES_DIR`` value is not a string.

@@ -714,6 +714,63 @@ class TestUnknownActionSuggestions:
         assert one.value.candidates == several.value.candidates == ("delete_note",)
 
 
+class TestNameDeclaredElsewhere:
+    """A name another page declares points at that page, not at itself."""
+
+    def test_error_drops_the_own_name_and_lists_the_files(self) -> None:
+        """The searched name never comes back as its own close match."""
+        exc = FormActionNotFoundError(
+            name="twin",
+            page_path="/app/page.py",
+            candidates=("twin", "twins"),
+            declared_in=lambda: ["/b/page.py", "/a/page.py", "/a/page.py"],
+        )
+        assert exc.suggestions == ("twins",)
+        assert exc.declared_in == ("/a/page.py", "/b/page.py")
+        assert str(exc).endswith(
+            "The name is declared only in /a/page.py, /b/page.py. "
+            "Closest matches: 'twins'."
+        )
+
+    def test_reduce_keeps_the_declaring_files(self) -> None:
+        """A revived refusal still knows where the name lives."""
+        exc = FormActionNotFoundError(name="twin", declared_in=lambda: ["/a/page.py"])
+        revived = copy.deepcopy(exc)
+        assert revived.declared_in == ("/a/page.py",)
+        assert str(revived) == str(exc)
+
+    def test_backend_names_the_declaring_page(self) -> None:
+        """A page-scoped lookup on another page lists the page that declares it."""
+        backend = RegistryFormActionBackend()
+        _register_action(backend, "twin", "/app/a/page.py", scope="page")
+        with pytest.raises(FormActionNotFoundError) as excinfo:
+            backend.get_action_url("twin", page_path="/app/b/page.py")
+        assert excinfo.value.suggestions == ()
+        assert excinfo.value.declared_in == ("/app/a/page.py",)
+
+    def test_manager_names_the_declaring_page_across_backends(self) -> None:
+        """Several backends pool the files that declare the name."""
+        first = RegistryFormActionBackend()
+        second = RegistryFormActionBackend()
+        _register_action(first, "twin", "/app/a/page.py", scope="page")
+        _register_action(second, "twin", "/app/c/page.py", scope="page")
+        manager = FormActionManager(backends=[first, second])
+        with pytest.raises(FormActionNotFoundError) as excinfo:
+            manager.get_action_url("twin", page_path="/app/b/page.py")
+        assert excinfo.value.declared_in == ("/app/a/page.py", "/app/c/page.py")
+        assert "'twin'" not in str(excinfo.value).partition("Closest")[2]
+
+    def test_require_action_meta_names_the_declaring_page(self) -> None:
+        """The meta lookup refuses with the same pointer at the declaring page."""
+        backend = RegistryFormActionBackend()
+        _register_action(backend, "twin", "/app/a/page.py", scope="page")
+        manager = FormActionManager(backends=[backend])
+        with pytest.raises(FormActionNotFoundError) as excinfo:
+            manager.require_action_meta("twin", page_path="/app/b/page.py")
+        assert excinfo.value.suggestions == ()
+        assert "declared only in /app/a/page.py" in str(excinfo.value)
+
+
 class TestEmptyRegistryDiagnosis:
     """Lookup failures on an empty registry explain the autodiscover miss."""
 

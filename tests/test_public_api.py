@@ -29,6 +29,28 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "signals",
         }
     ),
+    "next.deps": frozenset(
+        {
+            "DDependencyBase",
+            "DObject",
+            "DependencyCycleError",
+            "DependencyResolver",
+            "Depends",
+            "ParameterFiller",
+            "ParameterProvider",
+            "ProviderRegistry",
+            "REQUEST_DEP_CACHE_ATTR",
+            "RESERVED_KEYS",
+            "RegisteredParameterProvider",
+            "ResolutionContext",
+            "UnboundObjectError",
+            "UnknownDependencyError",
+            "provider_registry",
+            "render_dep_cache",
+            "resolver",
+            "signals",
+        }
+    ),
     "next.pages": frozenset(
         {
             "CacheControl",
@@ -174,6 +196,40 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
     ),
     "next.site": frozenset(
         {"SiteOriginError", "site_indexable", "site_origin", "site_url"}
+    ),
+    "next.static": frozenset(
+        {
+            "AssetDiscovery",
+            "JsContextSerializer",
+            "JsonJsContextSerializer",
+            "KindRegistry",
+            "NextAppDirectoriesFinder",
+            "NextScriptBuilder",
+            "NextStaticFilesFinder",
+            "PlaceholderRegistry",
+            "PlaceholderSlot",
+            "PydanticJsContextSerializer",
+            "ScriptInjectionPolicy",
+            "StaticAsset",
+            "StaticAssetNotFoundError",
+            "StaticAssetTraversalError",
+            "StaticBackend",
+            "StaticCollector",
+            "StaticFilesBackend",
+            "StaticManager",
+            "checks",
+            "collect_component_assets",
+            "default_kinds",
+            "default_manager",
+            "default_placeholders",
+            "default_stems",
+            "get_static_manager",
+            "register_defaults",
+            "reset_default_manager",
+            "resolve_serializer",
+            "signals",
+            "static_name",
+        }
     ),
     "next.testing": frozenset(
         {

@@ -1,8 +1,9 @@
 from typing import ClassVar, Self
 
+from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 from django.db import models
-from django.db.models import Max
+from django.db.models import Max, Sum
 
 
 class Tag(models.Model):
@@ -53,6 +54,13 @@ class Book(models.Model):
     published_at = models.DateField(null=True, blank=True)
     price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     is_featured = models.BooleanField(default=False)
+    editor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="edited_books",
+    )
 
     objects = BookQuerySet.as_manager()
 
@@ -67,6 +75,10 @@ class ChapterQuerySet(models.QuerySet):
     def next_number(self) -> int:
         """Return the number one past the highest of these chapters, 1 for none."""
         return (self.aggregate(Max("number"))["number__max"] or 0) + 1
+
+    def total_words(self) -> int:
+        """Return the summed word count of these chapters, 0 for none."""
+        return self.aggregate(Sum("word_count"))["word_count__sum"] or 0
 
 
 class Chapter(models.Model):

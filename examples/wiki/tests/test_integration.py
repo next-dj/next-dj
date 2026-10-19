@@ -719,7 +719,11 @@ class TestOpenActions:
         call_command("permissions", stdout=out)
         _header, *lines = out.getvalue().splitlines()
         rows = (re.split(r"\s{2,}", line.strip()) for line in lines)
-        access = {name: rule for kind, name, rule, _sources in rows if kind == "action"}
+        access = {
+            name.partition(" ")[0]: rule
+            for kind, name, rule, _sources in rows
+            if kind == "action"
+        }
         assert {name: access[name] for name in OPEN_ACTIONS} == dict.fromkeys(
             OPEN_ACTIONS, "public"
         )

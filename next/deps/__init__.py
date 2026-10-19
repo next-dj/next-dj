@@ -11,6 +11,7 @@ from .context import RESERVED_KEYS, ResolutionContext
 from .errors import DependencyCycleError, UnboundObjectError, UnknownDependencyError
 from .markers import DDependencyBase, Depends
 from .objects import DObject
+from .plan import ParameterFiller
 from .providers import ParameterProvider, RegisteredParameterProvider
 from .registry import ProviderRegistry, provider_registry
 from .resolver import DependencyResolver, resolver
@@ -24,6 +25,7 @@ __all__ = [
     "DependencyCycleError",
     "DependencyResolver",
     "Depends",
+    "ParameterFiller",
     "ParameterProvider",
     "ProviderRegistry",
     "RegisteredParameterProvider",

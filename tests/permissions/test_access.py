@@ -16,6 +16,7 @@ from next.permissions.access import (
     declared,
     declared_files,
     forget_login_middleware,
+    login_middleware,
     login_middleware_active,
     login_redirect,
     require_permission,
@@ -200,6 +201,28 @@ class TestLoginRedirect:
         response = login_redirect("/" + "x" * 20000)
 
         assert response["Location"] == "/accounts/login/"
+
+
+class TestLoginMiddleware:
+    """The entry that lists the login middleware, the one a table names as a source."""
+
+    def test_the_first_matching_entry(self) -> None:
+        with override_settings(
+            MIDDLEWARE=["a.B", _SUBCLASS, LOGIN_REQUIRED_MIDDLEWARE]
+        ):
+            assert login_middleware() == _SUBCLASS
+
+    def test_none_without_the_middleware(self) -> None:
+        assert login_middleware() is None
+
+    def test_none_without_contrib_auth(self) -> None:
+        installed = [
+            app for app in settings.INSTALLED_APPS if app != "django.contrib.auth"
+        ]
+        with override_settings(
+            INSTALLED_APPS=installed, MIDDLEWARE=[LOGIN_REQUIRED_MIDDLEWARE]
+        ):
+            assert login_middleware() is None
 
 
 class TestLoginMiddlewareActive:

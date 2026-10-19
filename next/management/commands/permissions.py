@@ -1,4 +1,4 @@
-"""`manage.py permissions`, the access rule of every page, action and component."""
+"""`manage.py permissions`, the access rule of every endpoint the project answers."""
 
 from argparse import ArgumentParser
 from pathlib import Path
@@ -7,42 +7,87 @@ from typing import Any, override
 from django.core.management.base import BaseCommand, CommandError
 
 from next.management.table import relative, write_table
-from next.permissions.endpoints import Endpoint, endpoints, resolve_page
+from next.permissions.access import login_middleware
+from next.permissions.endpoints import (
+    Endpoint,
+    ViewEndpoint,
+    endpoints,
+    resolve_page,
+    resolve_view,
+    view_endpoints,
+)
 from next.utils import resolve_base_dir
 
 
 class Command(BaseCommand):
-    """Print the rule of each endpoint and the files its requirements come from."""
+    """Print the rule of each endpoint and where its requirements come from."""
 
     help = (
-        "List the access rule of every page, action and component that declares one, "
-        "or of one page and what it renders."
+        "List the access rule of every page, action and component that declares one "
+        "and of every other view, or of what one URL answers with."
     )
 
     @override
     def add_arguments(self, parser: ArgumentParser) -> None:
-        """Take an optional URL that narrows the table to one page."""
+        """Take an optional URL that narrows the table to one page or view."""
         parser.add_argument(
-            "url", nargs="?", help="The path of one page, as /notes/1/."
+            "url", nargs="?", help="The path of one page or view, as /notes/1/."
         )
 
     @override
     def handle(self, *args: Any, **options: Any) -> None:
         """Write one aligned row per endpoint under a header."""
-        url = options["url"]
-        page_path = None
-        if url is not None:
-            page_path = resolve_page(url)
-            if page_path is None:
-                msg = f"No page answers the URL {url!r}."
-                raise CommandError(msg)
         base_dir = resolve_base_dir()
-        rows = [_row(endpoint, base_dir) for endpoint in endpoints(page_path)]
+        middleware = _middleware_name()
+        url = options["url"]
+        found: tuple[Endpoint, ...] = ()
+        views: tuple[ViewEndpoint, ...] = ()
+        if url is None:
+            found, views = endpoints(), view_endpoints()
+        elif (page_path := resolve_page(url)) is not None:
+            found = endpoints(page_path)
+        elif (view := resolve_view(url)) is not None:
+            views = (view,)
+        else:
+            msg = f"No page or view answers the URL {url!r}."
+            raise CommandError(msg)
+        rows = [
+            *(_row(endpoint, base_dir, middleware) for endpoint in found),
+            *(_view_row(view, middleware) for view in views),
+        ]
         write_table(self, ("Kind", "Endpoint", "Access", "Sources"), rows)
 
 
-def _row(endpoint: Endpoint, base_dir: Path | None) -> tuple[str, ...]:
+def _middleware_name() -> str:
+    """Return the class name of the listed login middleware, the source it closes by."""
+    entry = login_middleware()
+    return "-" if entry is None else entry.rpartition(".")[2]
+
+
+def _row(endpoint: Endpoint, base_dir: Path | None, middleware: str) -> tuple[str, ...]:
+    """Return the cells of a page, action or component.
+
+    An action carries its file, since one name may be declared by several pages.
+    """
+    name = endpoint.name
+    if endpoint.kind == "action":
+        name = f"{name} ({relative(endpoint.file, base_dir)})"
     sources = ", ".join(str(relative(path, base_dir)) for path in endpoint.sources)
     if sources and endpoint.access == "public":
         sources = f"public ({sources})"
-    return (endpoint.kind, endpoint.name, endpoint.access, sources or "-")
+    elif not sources and endpoint.closed:
+        sources = middleware
+    return (endpoint.kind, name, endpoint.access, sources or "-")
+
+
+def _view_row(view: ViewEndpoint, middleware: str) -> tuple[str, ...]:
+    """Return the cells of a view, the dotted view standing for the file of a page."""
+    if view.deferred is not None:
+        sources = f"see the {view.deferred} rows"
+    elif view.public:
+        sources = f"public ({view.view})"
+    elif view.closed:
+        sources = middleware
+    else:
+        sources = "-"
+    return ("view", view.route, view.access, sources)

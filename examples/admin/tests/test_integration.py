@@ -255,6 +255,7 @@ PROTECTED_PATHS = (
     "/admin/activity/",
     "/admin/library/book/{pk}/history/",
     "/admin/library/book/{pk}/outline/",
+    "/admin/library/book/{pk}/manuscript/",
 )
 
 DASHBOARD_PANELS = "dashboard-panels"
@@ -268,18 +269,23 @@ ACTIVITY_ACCESS = (
     "login, perm shadcn_admin.use_admin, perm admin_audit.view_adminactivitylog"
 )
 
-BOOK_ACCESS = (
+BOOK_PROXY = "library/pages/library/book/[int:book]/proxy.py"
+MANUSCRIPT_PROXY = "library/pages/library/book/[int:book]/manuscript/proxy.py"
+MANUSCRIPT_ACCESS = (
     "login, perm shadcn_admin.use_admin, perm library.change_book on library.Book"
 )
 
 
 def permission_rows(*args: str) -> dict[str, tuple[str, str, str]]:
-    """Return the rows `manage.py permissions` prints, keyed by endpoint."""
+    """Return the rows `manage.py permissions` prints, keyed by URL or action name."""
     out = StringIO()
     call_command("permissions", *args, stdout=out)
     _header, *lines = out.getvalue().splitlines()
     rows = (re.split(r"\s{2,}", line.strip()) for line in lines)
-    return {name: (kind, access, sources) for kind, name, access, sources in rows}
+    return {
+        name.partition(" ")[0]: (kind, access, sources)
+        for kind, name, access, sources in rows
+    }
 
 
 def log_entry(object_repr: str) -> AdminActivityLog:
@@ -351,18 +357,20 @@ class TestTreeAccess:
             "shadcn_admin/pages/proxy.py",
         )
 
-    def test_the_permission_table_names_the_book_rule_and_its_file(self):
-        rows = permission_rows("/admin/library/book/1/outline/")
-        assert rows["/admin/library/book/<int:book>/outline/"] == (
+    def test_the_permission_table_names_the_book_rules_and_their_files(self):
+        outline = permission_rows("/admin/library/book/1/outline/")
+        assert outline["/admin/library/book/<int:book>/outline/"] == (
             "page",
-            BOOK_ACCESS,
-            "library/pages/library/book/[int:book]/proxy.py",
+            "login, perm shadcn_admin.use_admin",
+            BOOK_PROXY,
         )
-        assert rows["add_chapter_form"] == (
-            "action",
-            BOOK_ACCESS,
-            "library/pages/library/book/[int:book]/proxy.py",
+        manuscript = permission_rows("/admin/library/book/1/manuscript/")
+        rule = (MANUSCRIPT_ACCESS, f"{BOOK_PROXY}, {MANUSCRIPT_PROXY}")
+        assert manuscript["/admin/library/book/<int:book>/manuscript/"] == (
+            "page",
+            *rule,
         )
+        assert manuscript["add_chapter_form"] == ("action", *rule)
 
 
 class TestDashboardPanels:
@@ -411,23 +419,36 @@ class TestDashboardPanels:
 
 
 OUTLINE = "outline"
+MANUSCRIPT = "manuscript"
+APPEND = "Append chapter"
+READ_ONLY = "data-outline-read-only"
 
 
 def outline_url(book: Book) -> str:
     return f"/admin/library/book/{book.pk}/outline/"
 
 
+def manuscript_url(book: Book) -> str:
+    return f"/admin/library/book/{book.pk}/manuscript/"
+
+
 def append(client: NextClient, book: Book, title: str, **kwargs):
     return client.post_action(
         "add_chapter_form",
         {"title": title, "word_count": "300"},
-        origin=outline_url(book),
+        origin=manuscript_url(book),
         **kwargs,
     )
 
 
+def book_reads(client: NextClient, url: str) -> int:
+    with CaptureQueriesContext(connection) as queries:
+        assert client.get(url).status_code == 200
+    return sum('FROM "library_book"' in q["sql"] for q in queries.captured_queries)
+
+
 class TestBookOutline:
-    """The `proxy.py` of the outline asks `change_book` on the book the URL names."""
+    """Every admin reads the outline, and its zone decides who sees the manuscript."""
 
     def test_the_editor_reads_the_outline_of_a_draft(
         self, editor_client, make_book, make_chapter
@@ -440,107 +461,55 @@ class TestBookOutline:
         body = r.content.decode()
         assert f'data-next-zone="{OUTLINE}"' in body
         assert body.index("Intro") < body.index("Rising")
-        assert "data-outline-words>350<" in body
+        assert "data-total-words>350<" in body
+        assert APPEND not in body
 
     def test_an_empty_draft_says_so(self, editor_client, make_book):
         body = editor_client.get(outline_url(make_book(status=Book.DRAFT))).content
         assert "No chapters yet." in body.decode()
 
-    def test_the_editor_is_refused_a_published_book(self, editor_client, make_book):
+    def test_the_editor_reads_a_published_book_without_the_link(
+        self, editor_client, make_book
+    ):
         published = make_book("Dracula", status=Book.PUBLISHED)
         r = editor_client.get(outline_url(published))
-        assert r.status_code == 403
-        assert b"Dracula" not in r.content
-
-    def test_a_zone_request_from_the_editor_on_a_published_book_is_forbidden(
-        self, editor_client, make_book, make_chapter
-    ):
-        published = make_book(status=Book.PUBLISHED)
-        make_chapter(published, title="Secret")
-        r = editor_client.get_zones(outline_url(published), OUTLINE)
-        assert r.status_code == 403
-        assert b"Secret" not in r.content
-
-    def test_the_editor_renders_the_zone_of_a_draft(
-        self, editor_client, make_book, make_chapter
-    ):
-        draft = make_book(status=Book.DRAFT)
-        make_chapter(draft, title="Opening")
-        r = editor_client.get_zones(outline_url(draft), OUTLINE)
         assert r.status_code == 200
-        assert "Opening" in envelope_of(r).html_for_zone(OUTLINE)
+        body = r.content.decode()
+        assert "Dracula" in body
+        assert manuscript_url(published) not in body
+        assert READ_ONLY in body
 
-    def test_the_editor_may_not_append_to_a_published_book(
-        self, editor_client, make_book
+    @pytest.mark.parametrize(
+        ("client_name", "status", "owner", "links"),
+        [
+            ("editor_client", Book.DRAFT, "editor", True),
+            ("editor_client", Book.DRAFT, None, True),
+            ("editor_client", Book.DRAFT, "copyeditor", False),
+            ("editor_client", Book.PUBLISHED, "editor", False),
+            ("admin_client", Book.PUBLISHED, "copyeditor", True),
+        ],
+    )
+    def test_a_zone_render_decides_who_sees_the_manuscript(
+        self, request, make_book, make_chapter, client_name, status, owner, links
     ):
-        published = make_book(status=Book.PUBLISHED)
-        assert append(editor_client, published, "Coda").status_code == 403
-        assert not published.chapters.exists()
-
-    def test_the_editor_appends_a_chapter_to_a_draft(
-        self, editor_client, make_book, make_chapter
-    ):
-        draft = make_book(status=Book.DRAFT)
-        make_chapter(draft, 1, "Intro", 100)
-        r = append(editor_client, draft, "Coda")
-        assert r.status_code == 303
-        assert r["Location"] == outline_url(draft)
-        added = draft.chapters.get(title="Coda")
-        assert (added.number, added.word_count) == (2, 300)
-
-    def test_a_partial_append_morphs_the_outline(self, editor_client, make_book):
-        draft = make_book(status=Book.DRAFT)
-        r = append(editor_client, draft, "Prologue", partial=True)
+        client = request.getfixturevalue(client_name)
+        editor = owner and request.getfixturevalue(owner)
+        target = make_book(status=status, editor=editor)
+        make_chapter(target, title="Opening")
+        r = client.get_zones(outline_url(target), OUTLINE)
         assert r.status_code == 200
-        assert envelope_of(r).zone_targets() == [OUTLINE]
-        assert "Prologue" in envelope_of(r).html_for_zone(OUTLINE)
-        assert draft.chapters.get().number == 1
-
-    def test_a_blank_title_rerenders_with_its_error(self, editor_client, make_book):
-        draft = make_book(status=Book.DRAFT)
-        r = append(editor_client, draft, "")
-        assert r.status_code == 200
-        assert "This field is required." in r.content.decode()
-        assert not draft.chapters.exists()
-
-    def test_a_partial_blank_title_reports_the_invalid_form(
-        self, editor_client, make_book
-    ):
-        draft = make_book(status=Book.DRAFT)
-        r = append(editor_client, draft, "", partial=True)
-        assert r["X-Next-Form"] == "invalid"
-        assert envelope_of(r).form_meta()["errors"]["title"] == [
-            "This field is required."
-        ]
-        assert not draft.chapters.exists()
-
-    def test_the_superuser_works_a_published_book(self, admin_client, make_book):
-        published = make_book("Dracula", status=Book.PUBLISHED)
-        url = outline_url(published)
-        assert admin_client.get(url).status_code == 200
-        assert admin_client.get_zones(url, OUTLINE).status_code == 200
-        assert append(admin_client, published, "Epilogue").status_code == 303
-        assert published.chapters.get().title == "Epilogue"
-
-    def test_an_anonymous_append_redirects_to_the_login(self, next_client, book):
-        r = append(next_client, book, "Coda")
-        assert r.status_code == 302
-        assert r["Location"].startswith("/admin/login/")
-        assert not book.chapters.exists()
+        html = envelope_of(r).html_for_zone(OUTLINE)
+        assert "Opening" in html
+        assert (manuscript_url(target) in html) is links
+        assert (READ_ONLY in html) is not links
 
     def test_an_anonymous_zone_request_redirects_to_the_login(self, next_client, book):
         r = next_client.get_zones(outline_url(book), OUTLINE)
         assert r.status_code == 302
         assert r["Location"] == f"/admin/login/?next={outline_url(book)}"
 
-    def test_the_rule_and_the_page_read_the_book_once(self, editor_client, make_book):
-        draft = make_book(status=Book.DRAFT)
-        with CaptureQueriesContext(connection) as queries:
-            assert editor_client.get(outline_url(draft)).status_code == 200
-        reads = [
-            q for q in queries.captured_queries if 'FROM "library_book"' in q["sql"]
-        ]
-        assert len(reads) == 1
+    def test_the_page_reads_the_book_once(self, editor_client, make_book):
+        assert book_reads(editor_client, outline_url(make_book())) == 1
 
     def test_an_unknown_book_is_not_found(self, admin_client):
         assert admin_client.get("/admin/library/book/999/outline/").status_code == 404
@@ -564,25 +533,149 @@ class TestBookOutline:
         assert f'href="/admin/library/book/{book.pk}/change/"' in body
 
     @pytest.mark.parametrize(
-        ("client_name", "status", "linked"),
+        ("client_name", "status"),
         [
-            ("editor_client", Book.DRAFT, True),
-            ("editor_client", Book.PUBLISHED, False),
-            ("admin_client", Book.PUBLISHED, True),
+            ("editor_client", Book.DRAFT),
+            ("editor_client", Book.PUBLISHED),
+            ("admin_client", Book.PUBLISHED),
         ],
     )
-    def test_the_change_view_links_the_outline_it_may_open(
-        self, request, make_book, client_name, status, linked
+    def test_the_change_view_links_the_outline(
+        self, request, make_book, client_name, status
     ):
         client = request.getfixturevalue(client_name)
         target = make_book(status=status)
         body = client.get(f"/admin/library/book/{target.pk}/change/").content.decode()
-        assert (f'href="{outline_url(target)}"' in body) is linked
+        assert f'href="{outline_url(target)}"' in body
 
     def test_a_model_without_object_links_offers_none(self, admin_client, make_tag):
         tag = make_tag()
         body = admin_client.get(f"/admin/library/tag/{tag.pk}/change/").content
         assert "/outline/" not in body.decode()
+
+
+class TestManuscript:
+    """`manuscript/proxy.py` asks `change_book` on the book the URL names."""
+
+    def test_the_editor_works_an_own_draft(
+        self, editor_client, editor, make_book, make_chapter
+    ):
+        draft = make_book("Mathilda", status=Book.DRAFT, editor=editor)
+        make_chapter(draft, title="Opening")
+        r = editor_client.get(manuscript_url(draft))
+        assert r.status_code == 200
+        body = r.content.decode()
+        assert f'data-next-zone="{MANUSCRIPT}"' in body
+        assert "Opening" in body
+        assert APPEND in body
+
+    def test_an_unassigned_draft_opens_for_every_editor(self, editor_client, make_book):
+        draft = make_book(status=Book.DRAFT)
+        assert editor_client.get(manuscript_url(draft)).status_code == 200
+
+    @pytest.mark.parametrize(
+        ("status", "owner"),
+        [(Book.DRAFT, "copyeditor"), (Book.PUBLISHED, "editor")],
+        ids=["foreign-draft", "own-published"],
+    )
+    def test_the_editor_is_refused_on_every_path(
+        self, request, editor_client, make_book, make_chapter, status, owner
+    ):
+        target = make_book(status=status, editor=request.getfixturevalue(owner))
+        make_chapter(target, title="Secret")
+        url = manuscript_url(target)
+        page_response = editor_client.get(url)
+        assert page_response.status_code == 403
+        assert b"Secret" not in page_response.content
+        zone_response = editor_client.get_zones(url, MANUSCRIPT)
+        assert zone_response.status_code == 403
+        assert b"Secret" not in zone_response.content
+        assert append(editor_client, target, "Coda").status_code == 403
+        assert list(target.chapters.values_list("title", flat=True)) == ["Secret"]
+
+    def test_the_change_view_of_a_foreign_draft_is_read_only(
+        self, editor_client, copyeditor, make_book
+    ):
+        draft = make_book(status=Book.DRAFT, editor=copyeditor)
+        body = editor_client.get(f"/admin/library/book/{draft.pk}/change/").content
+        assert "data-read-only" in body.decode()
+
+    def test_a_zone_render_carries_the_form(self, editor_client, editor, make_book):
+        draft = make_book(status=Book.DRAFT, editor=editor)
+        r = editor_client.get_zones(manuscript_url(draft), MANUSCRIPT)
+        assert r.status_code == 200
+        assert APPEND in envelope_of(r).html_for_zone(MANUSCRIPT)
+
+    def test_the_editor_appends_a_chapter_to_an_own_draft(
+        self, editor_client, editor, make_book, make_chapter
+    ):
+        draft = make_book(status=Book.DRAFT, editor=editor)
+        make_chapter(draft, 1, "Intro", 100)
+        r = append(editor_client, draft, "Coda")
+        assert r.status_code == 303
+        assert r["Location"] == manuscript_url(draft)
+        added = draft.chapters.get(title="Coda")
+        assert (added.number, added.word_count) == (2, 300)
+
+    def test_a_partial_append_morphs_the_manuscript(self, editor_client, make_book):
+        draft = make_book(status=Book.DRAFT)
+        r = append(editor_client, draft, "Prologue", partial=True)
+        assert r.status_code == 200
+        assert envelope_of(r).zone_targets() == [MANUSCRIPT]
+        assert "Prologue" in envelope_of(r).html_for_zone(MANUSCRIPT)
+        assert draft.chapters.get().number == 1
+
+    def test_a_blank_title_rerenders_with_its_error(self, editor_client, make_book):
+        draft = make_book(status=Book.DRAFT)
+        r = append(editor_client, draft, "")
+        assert r.status_code == 200
+        assert "This field is required." in r.content.decode()
+        assert not draft.chapters.exists()
+
+    def test_a_partial_blank_title_reports_the_invalid_form(
+        self, editor_client, make_book
+    ):
+        draft = make_book(status=Book.DRAFT)
+        r = append(editor_client, draft, "", partial=True)
+        assert r["X-Next-Form"] == "invalid"
+        assert envelope_of(r).form_meta()["errors"]["title"] == [
+            "This field is required."
+        ]
+        assert not draft.chapters.exists()
+
+    def test_the_superuser_works_a_published_book(
+        self, admin_client, editor, make_book
+    ):
+        published = make_book("Dracula", status=Book.PUBLISHED, editor=editor)
+        assert APPEND in admin_client.get(manuscript_url(published)).content.decode()
+        assert append(admin_client, published, "Epilogue").status_code == 303
+        assert published.chapters.get().title == "Epilogue"
+
+    def test_an_anonymous_append_redirects_to_the_login(self, next_client, book):
+        r = append(next_client, book, "Coda")
+        assert r.status_code == 302
+        assert r["Location"].startswith("/admin/login/")
+        assert not book.chapters.exists()
+
+    def test_the_rule_and_the_page_read_the_book_once(self, editor_client, make_book):
+        draft = make_book(status=Book.DRAFT)
+        assert book_reads(editor_client, manuscript_url(draft)) == 1
+
+    def test_an_unknown_book_is_not_found(self, admin_client):
+        r = admin_client.get("/admin/library/book/999/manuscript/")
+        assert r.status_code == 404
+
+    def test_the_crumbs_end_at_the_manuscript(self, admin_client, book):
+        body = admin_client.get(manuscript_url(book)).content.decode()
+        assert crumbs(body) == [
+            ("Dashboard", "/admin/", False),
+            ("Books", "/admin/library/book/", False),
+            ("Manuscript", manuscript_url(book), True),
+        ]
+
+    def test_the_manuscript_links_back_to_the_outline(self, admin_client, book):
+        body = admin_client.get(manuscript_url(book)).content.decode()
+        assert f'href="{outline_url(book)}"' in body
 
 
 class TestDemoSeed:
@@ -596,6 +689,15 @@ class TestDemoSeed:
     def test_seeding_twice_keeps_one_copy(self, demo_data):
         seed_demo()
         assert Book.objects.count() == len(DEMO_BOOKS)
+
+    def test_the_books_split_between_two_editors(self, demo_data):
+        assert set(Book.objects.values_list("editor__username", flat=True)) == {
+            "editor",
+            "copyeditor",
+        }
+        assert Book.objects.get(title="Mathilda").editor.username == "editor"
+        mysterious = Book.objects.get(title="The Mysterious Island")
+        assert mysterious.editor.username == "copyeditor"
 
 
 class TestSeededCatalog:
@@ -2346,13 +2448,14 @@ class TestObjectPermissions:
             "library.change_chapter", "library.add_chapter", book, row_rules=False
         )
 
-    def test_seed_demo_creates_the_editor_once(self, db, django_user_model):
+    def test_seed_demo_creates_the_editors_once(self, db, django_user_model):
         call_command("seed_demo", stdout=StringIO())
         call_command("seed_demo", stdout=StringIO())
-        editor = django_user_model.objects.get(username="editor")
-        assert editor.is_staff is True
-        assert editor.is_superuser is False
-        assert editor.check_password("editor") is True
+        for name in ("editor", "copyeditor"):
+            editor = django_user_model.objects.get(username=name)
+            assert editor.is_staff is True
+            assert editor.is_superuser is False
+            assert editor.check_password(name) is True
 
     def test_the_permission_checks_find_nothing(self, db):
         found = {message.id for message in run_checks()}

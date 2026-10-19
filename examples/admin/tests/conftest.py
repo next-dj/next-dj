@@ -1,6 +1,11 @@
 import pytest
 from django.utils.text import slugify
-from library.demo import seed_demo, seed_editor
+from library.demo import (
+    COPYEDITOR_PASSWORD,
+    COPYEDITOR_USERNAME,
+    seed_demo,
+    seed_editor,
+)
 from library.models import Author, Book, Chapter, Tag
 
 from next.testing import NextClient
@@ -89,10 +94,15 @@ def book_with_two_chapters(make_book, make_chapter):
 
 
 @pytest.fixture()
-def editor(django_user_model):
+def editor(db):
     """Return the seeded staff editor, who holds no superuser bypass."""
-    seed_editor()
-    return django_user_model.objects.get(username="editor")
+    return seed_editor()
+
+
+@pytest.fixture()
+def copyeditor(db):
+    """Return the second seeded editor, whose drafts the first one may not touch."""
+    return seed_editor(COPYEDITOR_USERNAME, COPYEDITOR_PASSWORD)
 
 
 @pytest.fixture()

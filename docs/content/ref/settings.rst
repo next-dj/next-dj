@@ -85,6 +85,7 @@ Default value.
 
 Each entry is passed to the backend constructor.
 Keys are ``BACKEND``, ``DIRS``, ``APP_DIRS``, ``PAGES_DIR``, and ``OPTIONS``.
+A ``FileRouterBackend`` entry may leave out ``OPTIONS``, which then reads as the empty mapping, and ``DIRS``, which then reads as the empty list.
 
 ``DIRS`` accepts two kinds of entry.
 An absolute or project-relative path that resolves to an existing directory is added as an extra page root.

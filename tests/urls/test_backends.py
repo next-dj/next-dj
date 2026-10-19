@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
-from django.test import RequestFactory, override_settings
+from django.test import Client, RequestFactory, override_settings
 from django.urls import URLPattern, URLResolver, clear_url_caches
 
 from next.pages import page
@@ -14,11 +14,15 @@ from next.urls import FileRouterBackend, PageRoot, RouterBackend, RouterFactory
 from next.urls.backends import _installed_app_directories, _is_framework_app
 from next.utils import forget_resolved_trees
 from tests.support import (
+    NAMESPACED_URLCONF,
     EntryRouter,
     file_router,
     file_router_config_entry,
     importable_dir,
+    installed_apps,
     record_path_calls,
+    write_app,
+    write_page,
 )
 
 
@@ -65,14 +69,42 @@ class TestFileRouterBackend:
         assert router.options == expected_options
         assert router._tree_patterns_cache == {}
 
-    @pytest.mark.parametrize("missing", ["PAGES_DIR", "APP_DIRS", "DIRS", "OPTIONS"])
+    @pytest.mark.parametrize("missing", ["PAGES_DIR", "APP_DIRS"])
     def test_entry_missing_one_key_is_refused(self, missing: str) -> None:
         """A partial entry is a settings mistake rather than a shorthand."""
         entry = file_router_config_entry()
         del entry[missing]
 
-        with pytest.raises(ImproperlyConfigured, match=missing):
+        with pytest.raises(ImproperlyConfigured, match=missing) as caught:
             FileRouterBackend(entry)
+        named = str(caught.value).partition(", got")[0]
+        assert "OPTIONS" not in named
+        assert "DIRS" not in named.replace("APP_DIRS", "")
+
+    def test_an_entry_without_options_serves_its_pages(self, tmp_path: Path) -> None:
+        """OPTIONS left out reads as the empty mapping its default is."""
+        root = tmp_path / "pages"
+        write_page(root, "about")
+        entry = file_router_config_entry(pages_dir=root)
+        del entry["OPTIONS"]
+        assert FileRouterBackend(entry).options == {}
+        with override_settings(
+            ROOT_URLCONF=NAMESPACED_URLCONF, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}
+        ):
+            response = Client().get("/about/")
+        assert response.content == b"ok"
+
+    def test_an_entry_without_dirs_serves_its_app_pages(self, tmp_path: Path) -> None:
+        """DIRS left out reads as the empty list, so the app trees alone route."""
+        write_app(tmp_path, "shop", {"pages": ("about",)})
+        entry = file_router_config_entry(app_dirs=True)
+        del entry["DIRS"]
+        with (
+            installed_apps(tmp_path, "shop", urlconf=NAMESPACED_URLCONF),
+            override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
+        ):
+            response = Client().get("/about/")
+        assert response.content == b"ok"
 
     def test_non_dict_options_are_read_as_empty(self) -> None:
         """OPTIONS naming no mapping narrows to nothing rather than refusing."""

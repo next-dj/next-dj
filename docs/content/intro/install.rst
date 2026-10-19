@@ -115,7 +115,7 @@ Configure NEXT_FRAMEWORK
 ------------------------
 
 Tell next.dj where to look for pages and components.
-With ``APP_DIRS`` set to ``True`` and ``DIRS`` left empty, each installed app carries its own ``pages/`` tree, and a ``_components/`` folder placed inside that tree holds the app's components.
+With ``APP_DIRS`` set to ``True`` and no ``DIRS``, each installed app carries its own ``pages/`` tree, and a ``_components/`` folder placed inside that tree holds the app's components.
 The file router walk registers each ``_components/`` folder it encounters while walking the page tree, so the component backend needs no separate ``APP_DIRS`` flag.
 
 .. code-block:: python
@@ -125,10 +125,8 @@ The file router walk registers each ``_components/`` folder it encounters while 
        "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
-               "OPTIONS": {"context_processors": []},
            }
        ],
        "COMPONENT_BACKENDS": [
@@ -142,7 +140,7 @@ The file router walk registers each ``_components/`` folder it encounters while 
 
 ``PAGES_DIR`` is set to ``pages``, the built-in default, so next.dj scans a ``pages/`` directory inside each app.
 ``_components`` is the per-application folder the component backend scans, placed inside the page tree and covered in :doc:`tutorial03`.
-A ``FileRouterBackend`` entry must carry an ``OPTIONS`` key, and ``manage.py check`` reports ``next.E026`` if it is missing.
+The entry leaves out ``DIRS`` and ``OPTIONS``, which then read as an empty list and an empty mapping, see :ref:`ref-settings` for both keys.
 
 Keep ``django.template.context_processors.request`` in the ``OPTIONS`` of your ``TEMPLATES`` setting.
 A fresh ``django-admin startproject`` already includes it, and ``manage.py check`` reports ``next.E019`` if it is missing.
@@ -299,7 +297,6 @@ One layout for every page.
                   "DIRS": [BASE_DIR / "chrome"],
                   "APP_DIRS": True,
                   "PAGES_DIR": "pages",
-                  "OPTIONS": {"context_processors": []},
               }
           ],
       }

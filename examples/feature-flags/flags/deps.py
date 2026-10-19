@@ -6,11 +6,11 @@ from django.db.models import Model
 
 from next.deps import (
     DDependencyBase,
+    ParameterFiller,
     RegisteredParameterProvider,
     ResolutionContext,
     resolver,
 )
-from next.deps.plan import ParameterFiller
 
 from .cache import get_cached_flag
 

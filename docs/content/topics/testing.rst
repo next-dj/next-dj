@@ -283,6 +283,7 @@ Eager page loading
 It returns the list of imported ``page.py`` paths and raises ``FileNotFoundError`` when the directory does not exist.
 A repeated call for the same directory returns an empty list, because the loader memoises per absolute directory.
 Use it when a test suite does not go through the full request cycle and must trigger ``@context`` and ``@action`` side-effects manually.
+Each file runs through the loader a request uses, so a page imported here never executes a second time as another module, and a page that fails to import raises ``PageModuleImportError`` from ``next.pages`` during setup.
 ``clear_loaded_dirs()`` drops the per-directory memoisation so a later ``eager_load_pages`` call re-imports.
 It is intended for self-tests of the loader and for the rare case of rewritten ``page.py`` files within one session.
 A normal test suite does not call it, since each pytest session starts a fresh interpreter.
@@ -358,6 +359,30 @@ A value already present in ``data`` under ``_next_form_origin`` wins over the ke
 ``NextClient.get_action_url`` returns the dispatch URL without posting, for tests that need the URL itself.
 Both methods resolve the name through ``resolve_action_url`` from ``next.testing.actions``.
 An unknown name raises ``FormActionNotFoundError`` from ``next.forms``.
+
+An action declared in a ``page.py`` belongs to that page, so a create page and an edit page may both name theirs ``wallet_form``.
+The ``page`` keyword of both methods names the ``page.py`` the test means, or the directory that holds it.
+
+.. code-block:: python
+   :caption: tests/test_wallet_edit.py
+
+   from next.testing import NextClient
+
+   EDIT = "budget/pages/wallets/[int:wallet]/edit"
+
+   def test_rename(db, wallet) -> None:
+       response = NextClient().post_action(
+           "wallet_form",
+           {"name": "Cash"},
+           origin=f"/wallets/{wallet.pk}/edit/",
+           page=EDIT,
+       )
+       assert response.status_code == 302
+
+Without ``page`` a name that several files declare raises ``LookupError`` listing each of them, rather than posting to whichever page was imported first.
+Only a page-scoped name is checked this way, since a shared name is one per project.
+A relative path resolves against ``BASE_DIR``, the root ``manage.py routes`` and ``manage.py permissions`` print their paths from, so a path copied from either table works as is.
+An absolute path is used as is, and without ``BASE_DIR`` a relative path resolves against the working directory.
 
 Partial requests
 ~~~~~~~~~~~~~~~~

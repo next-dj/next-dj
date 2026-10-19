@@ -91,7 +91,6 @@ NEXT_FRAMEWORK = {
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "chrome")],
             "PAGES_DIR": "pages",
-            "OPTIONS": {},
         }
     ],
     "COMPONENT_BACKENDS": [

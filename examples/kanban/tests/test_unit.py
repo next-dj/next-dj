@@ -20,9 +20,8 @@ from kanban.forms import CreateCardForm, MoveCardForm
 from kanban.models import Board, BoardQuerySet, Card, Column
 from kanban.signals import inject_vite_dev_assets
 
-from next.deps import ResolutionContext
-from next.deps.cache import DependencyCache
 from next.static import StaticAsset, StaticCollector
+from next.testing import make_resolution_context
 
 
 pytestmark = pytest.mark.django_db
@@ -49,16 +48,6 @@ def _load(relative: str):
 def _param(annotation: object) -> inspect.Parameter:
     return inspect.Parameter(
         "value", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=annotation
-    )
-
-
-def _context(*, request=None, url_kwargs=None) -> ResolutionContext:
-    return ResolutionContext(
-        request=request,
-        form=None,
-        url_kwargs=url_kwargs or {},
-        context_data={},
-        cache=DependencyCache(),
     )
 
 
@@ -158,7 +147,7 @@ class TestCardProvider:
     )
     def test_can_handle(self, annotation, http_request, expected) -> None:
         provider = CardProvider()
-        ctx = _context(request=http_request)
+        ctx = make_resolution_context(request=http_request)
         assert provider.can_handle(_param(annotation), ctx) is expected
 
     def test_resolve_returns_card_for_post_id(
@@ -166,13 +155,13 @@ class TestCardProvider:
     ) -> None:
         card = make_card(title="Move me")
         provider = CardProvider()
-        ctx = _context(request=_post_request(card_id=str(card.pk)))
+        ctx = make_resolution_context(request=_post_request(card_id=str(card.pk)))
         assert provider.can_handle(_param(DCard[Card]), ctx)
         assert provider.resolve(_param(DCard[Card]), ctx) == card
 
     def test_resolve_raises_404_when_missing(self) -> None:
         provider = CardProvider()
-        ctx = _context(request=_post_request(card_id="99999"))
+        ctx = make_resolution_context(request=_post_request(card_id="99999"))
         with pytest.raises(Http404):
             provider.resolve(_param(DCard[Card]), ctx)
 

@@ -163,6 +163,51 @@ class TestPrefixKwargsReachThePage:
         assert response.content.decode().strip() == "7-2"
 
 
+_HOST_PAGE = (
+    "from next.pages import context\n\n"
+    'template = "host"\n\n\n'
+    '@context("inherited", inherit_context=True)\n'
+    "def inherited():\n"
+    '    return "from-host"\n'
+)
+
+_GUEST_PAGE = "template = \"guest={{ inherited|default:'none' }}\"\n"
+
+
+class TestTreesUnderAHostPrefix:
+    """A tree `pages()` mounts under a prefix of another tree takes nothing from it."""
+
+    def _bodies(self, root: Path, *urls: str) -> list[str]:
+        write_app(root, "hub", {})
+        hub = root / "hub" / "pages"
+        for trail in ("", "staff"):
+            write_page(hub, trail, _HOST_PAGE)
+            (hub / trail / "layout.djx").write_text(
+                f"<{trail or 'root'}>{{% template %}}"
+            )
+        write_page(hub, "staff/team", _GUEST_PAGE)
+        write_app(root, "audit", {})
+        write_page(root / "audit" / "pages", "log", _GUEST_PAGE)
+        urlconf = write_urlconf(
+            root,
+            "host_prefix_urls",
+            'path("staff/audit/", pages("audit"))',
+            'path("", include("next.urls"))',
+        )
+        client = Client()
+        with installed_apps(root, "hub", "audit", urlconf=urlconf):
+            responses = [client.get(url) for url in urls]
+        assert [response.status_code for response in responses] == [200] * len(urls)
+        return [response.content.decode().strip() for response in responses]
+
+    def test_layouts_and_inherited_context_stop_at_the_tree(self, tmp_path) -> None:
+        own, mounted = self._bodies(tmp_path, "/staff/team/", "/staff/audit/log/")
+
+        assert "guest=from-host" in own
+        assert own.startswith("<root><staff>")
+        assert mounted == "guest=none"
+
+
 class TestReverse:
     """A `pages()` tree reverses by its own trails in its namespace."""
 

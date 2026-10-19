@@ -51,7 +51,7 @@ The pages replace the ``views.py`` that ``startapp`` writes, and a ``tests/`` pa
          _components/
            note_toolbar/
              component.djx
-         [int:id]/
+         [int:note]/
            page.py
            template.djx
 
@@ -67,8 +67,8 @@ The last column names what another application of the same project uses, the rec
      - Keeps out
      - Open to other applications
    * - ``apps.py``
-     - The ``AppConfig`` with ``name`` and an explicit ``label``.
-     - Domain code, and model imports at module level, which run before the app registry is ready.
+     - The ``AppConfig`` with ``name`` and an explicit ``label``, and a ``ready()`` only for the registries and system checks of the application itself.
+     - Domain code, imports of the modules next.dj discovers, and model imports at module level, which run before the app registry is ready.
      - No.
    * - ``models.py``
      - Fields, methods that act on one instance, a custom ``QuerySet`` for reads over many rows with ``visible_to(scope)`` on the default manager, and invariants in ``Meta.constraints`` and ``clean``.
@@ -120,7 +120,7 @@ The last column names what another application of the same project uses, the rec
 
 :doc:`application-layout` shows the ``scope`` dependency, the ``visible_to(scope)`` read, and the ``f(scope, *, ...)`` service in full.
 
-Five of these files load with no import of their own, so ``AppConfig.ready`` stays empty.
+Five of these files load with no import of their own, so ``AppConfig.ready`` holds no import of them.
 When the ``next`` application is ready it imports ``deps.py``, then ``permissions.py``, then ``forms.py``, then ``signals.py`` of every installed application, all before any ``component.py``, the way ``django.contrib.admin`` imports ``admin.py``, see :doc:`/content/ref/settings`.
 
 .. code-block:: python
@@ -132,6 +132,26 @@ When the ``next`` application is ready it imports ``deps.py``, then ``permission
        default_auto_field = "django.db.models.BigAutoField"
        name = "notes"
        label = "notes"
+
+The method stays empty only of what next.dj imports itself.
+The application still fills its own registries and registers its own system checks in :meth:`~django.apps.AppConfig.ready`, as any Django application does, see :doc:`django:topics/checks`.
+A module that imports models is imported inside the method, since the app registry is ready only once it runs.
+
+.. code-block:: python
+   :caption: notes/apps.py, with a check of its own
+
+   from django.apps import AppConfig
+   from django.core import checks
+
+   class NotesConfig(AppConfig):
+       default_auto_field = "django.db.models.BigAutoField"
+       name = "notes"
+       label = "notes"
+
+       def ready(self) -> None:
+           from notes.checks import check_tag_colours
+
+           checks.register(check_tag_colours)
 
 Names the layout avoids
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -161,6 +181,8 @@ The Notes project
 The tree below is the Notes project as the tutorial leaves it, and it already follows the composition above.
 The tutorial creates ``models.py``, ``forms.py``, the page tree, and the tests.
 ``services.py`` and ``signals.py`` join once the application grows a write that spans several models or a reaction to another application, and ``deps.py`` joins once a page needs a value derived from the request.
+The tutorial reads the note through ``DUrl["id", int]``, so its directory is ``[int:id]``.
+A page that loads the row through ``DObject[Note]`` names the directory after the model, ``[int:note]``, as the composition above does, see :ref:`topics-di-dobject`.
 
 .. code-block:: text
    :caption: full project tree
@@ -236,10 +258,8 @@ A project ``static/`` directory is reached through Django ``STATICFILES_DIRS`` i
        "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
-               "OPTIONS": {"context_processors": []},
            }
        ],
        "COMPONENT_BACKENDS": [
@@ -301,7 +321,6 @@ A project that hosts a global layout or a project-wide page tree adds an entry t
                "DIRS": [str(BASE_DIR / "chrome")],
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
-               "OPTIONS": {"context_processors": []},
            }
        ]
    }
@@ -497,6 +516,8 @@ See also
 
    :doc:`application-layout` for where models, querysets, services, and signals hold the logic.
    :doc:`file-router` for the route shapes and the ``pages()`` include of application trees.
+   :doc:`proxy` for the access a ``proxy.py`` declares over a section of the tree.
+   :doc:`permissions` for the predicates of ``permissions.py`` and ``{% has_perm %}``.
    :doc:`/content/howto/serve-an-application-under-a-prefix` for a prefix recipe.
    :doc:`multi-project` for layouts that span several Django projects.
    :doc:`/content/howto/share-components-across-projects` for shared component patterns.

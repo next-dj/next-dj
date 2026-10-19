@@ -89,6 +89,8 @@ Dependency cache.
    Read the per-request cache through ``next.deps.render_dep_cache(request)``.
    The dispatcher stores it on the request under the attribute named by ``REQUEST_DEP_CACHE_ATTR`` so the helper can find it.
    The re-render reuses each cached value without rerunning the provider.
+   The one exception is a cached row that a failing ``ModelForm`` holds as its instance, such as a ``DObject`` row handed over through ``get_initial`` or ``get_form_kwargs``.
+   Django validation writes the posted values into that instance, so the dispatcher drops every cache entry that holds it, and the page contexts load the row afresh and show what is stored while the form keeps the posted values and its errors.
    A custom DI provider must therefore be idempotent across a render cycle.
 
 .. tip::

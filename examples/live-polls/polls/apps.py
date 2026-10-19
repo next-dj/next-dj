@@ -1,7 +1,6 @@
 from django.apps import AppConfig
 
-from next.static import default_kinds
-from next.static.discovery import default_stems
+from next.static import default_kinds, default_stems
 
 
 class PollsConfig(AppConfig):
@@ -10,10 +9,8 @@ class PollsConfig(AppConfig):
     label = "polls"
 
     def ready(self) -> None:
-        """Register the Vue asset kind, the page stem, and signal wiring."""
+        """Register the Vue asset kind and the `page` stem for co-located templates."""
         default_kinds.register(
             "vue", extension=".vue", slot="scripts", renderer="render_module_tag"
         )
         default_stems.register("template", "page")
-
-        from polls import deps, signals

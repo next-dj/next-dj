@@ -86,7 +86,6 @@ Each project points at the shared directory through ``DIRS``.
                "DIRS": [str(BASE_DIR / "chrome")],
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
-               "OPTIONS": {"context_processors": []},
            }
        ],
        "COMPONENT_BACKENDS": [

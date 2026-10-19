@@ -16,7 +16,7 @@ from django.http import HttpResponseRedirect, QueryDict
 from django.shortcuts import resolve_url
 
 from next.introspect import registering_file
-from next.utils import middleware_listed, redirect_or_fallback
+from next.utils import is_middleware, redirect_or_fallback
 
 from .markers import AccessObject, AccessRule, Denial, Requirement
 from .registry import DeclarationRegistry
@@ -127,12 +127,20 @@ def answer(denial: Denial, next_url: str) -> HttpResponseRedirect:
     raise PermissionDenied
 
 
+def login_middleware() -> str | None:
+    """Return the `MIDDLEWARE` entry naming `LoginRequiredMiddleware` or a subclass."""
+    if not apps.is_installed(_AUTH_APP):
+        return None
+    listed = (entry for entry in settings.MIDDLEWARE if isinstance(entry, str))
+    return next(
+        (entry for entry in listed if is_middleware(entry, _LOGIN_MIDDLEWARE)), None
+    )
+
+
 @functools.cache
 def login_middleware_active() -> bool:
     """Return whether `MIDDLEWARE` lists `LoginRequiredMiddleware` or a subclass."""
-    return apps.is_installed(_AUTH_APP) and middleware_listed(
-        settings.MIDDLEWARE, _LOGIN_MIDDLEWARE
-    )
+    return login_middleware() is not None
 
 
 def forget_login_middleware(*, setting: str, **kwargs: object) -> None:
@@ -150,6 +158,7 @@ __all__ = [
     "declared",
     "declared_files",
     "forget_login_middleware",
+    "login_middleware",
     "login_middleware_active",
     "login_redirect",
     "require_permission",

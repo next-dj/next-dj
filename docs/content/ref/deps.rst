@@ -44,7 +44,7 @@ The hint keeps the extras of an ``Annotated[...]`` annotation, so a provider may
 
 ``compile_resolve`` is the optional hook that folds the work of ``resolve`` into a call the plan makes with the context alone.
 The compiler asks it once, and only about a parameter ``static_can_handle`` claimed with ``True``, so whatever the answer reads off the signature is paid per plan rather than per resolve.
-The hook returns either ``None`` or a ``next.deps.plan.ParameterFiller``, a callable that takes the ``ResolutionContext`` and returns the parameter value, and an answer that is neither raises a ``TypeError`` naming the provider while the plan compiles.
+The hook returns either ``None`` or a ``next.deps.ParameterFiller``, a callable that takes the ``ResolutionContext`` and returns the parameter value, and an answer that is neither raises a ``TypeError`` naming the provider while the plan compiles.
 Returning ``None``, which is what the base class answers, leaves the parameter on the plain ``resolve`` path, and so does leaving the hook undefined altogether.
 The hook belongs to ``CompilingParameterProvider`` rather than to ``ParameterProvider``, so a provider written against the mandatory contract alone still passes an ``isinstance`` check against it.
 A ``compile_resolve`` that is present but not callable is refused with a ``TypeError`` naming the class, the way a missing ``static_can_handle`` is.

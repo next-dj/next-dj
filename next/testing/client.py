@@ -16,6 +16,8 @@ from .actions import resolve_action_url
 
 
 if TYPE_CHECKING:
+    from os import PathLike
+
     from django.http import HttpResponse
 
 
@@ -129,6 +131,7 @@ class NextClient(Client):
         data: dict[str, Any] | None = None,
         *,
         origin: str | None = None,
+        page: str | PathLike[str] | None = None,
         partial: bool = False,
         zones: str | tuple[str, ...] | None = None,
         version: str | None = None,
@@ -138,9 +141,10 @@ class NextClient(Client):
         """Resolve `action_name` and POST `data` to the resulting URL.
 
         `origin` fills the `_next_form_origin` hidden field unless `data` carries one,
-        and `partial` stamps `X-Next-Request` with `zones` and `version`.
+        `page` picks among same-named actions as in `resolve_action_url`, and `partial`
+        stamps `X-Next-Request` with `zones` and `version`.
         """
-        url = resolve_action_url(action_name)
+        url = resolve_action_url(action_name, page=page)
         payload: dict[str, Any] = dict(data or {})
         if origin is not None:
             payload.setdefault(ORIGIN_FIELD_NAME, origin)
@@ -153,9 +157,11 @@ class NextClient(Client):
             sent[VERSION] = version
         return cast("HttpResponse", self.post(url, data=payload, headers=sent, **extra))
 
-    def get_action_url(self, action_name: str) -> str:
-        """Return the reverse URL for a registered form action."""
-        return resolve_action_url(action_name)
+    def get_action_url(
+        self, action_name: str, *, page: str | PathLike[str] | None = None
+    ) -> str:
+        """Return the reverse URL for a registered form action, `page` picking one."""
+        return resolve_action_url(action_name, page=page)
 
     def get_zones(
         self,

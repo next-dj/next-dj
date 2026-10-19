@@ -83,7 +83,6 @@ NEXT_FRAMEWORK = {
             # The project-level page root `host/` owns the shared `layout.djx` envelope.
             "DIRS": [str(BASE_DIR / "host")],
             "PAGES_DIR": "pages",
-            "OPTIONS": {"context_processors": []},
         }
     ],
     "COMPONENT_BACKENDS": [

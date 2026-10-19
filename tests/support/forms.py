@@ -1,5 +1,6 @@
 from collections.abc import Generator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, ClassVar
 
 from django import forms as django_forms
@@ -13,6 +14,28 @@ from next.forms.manager import form_action_manager
 from next.forms.registration import registration_diagnostics
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.forms.wizard import wizard_backend_manager
+from tests.support.pages import write_page
+
+
+TWIN_ACTION = "twin"
+
+_TWIN = (
+    "from django.http import HttpResponse\n"
+    "from next.forms import action\n\n\n"
+    '@action("twin")\n'
+    "def twin():\n"
+    '    return HttpResponse("{label}")\n'
+)
+
+
+def write_twin_pages(root: Path) -> Path:
+    """Write `create` and `edit` pages that each declare an action named `twin`.
+
+    Each handler answers with the name of its page, so a test sees which one ran.
+    """
+    for label in ("create", "edit"):
+        write_page(root, label, _TWIN.format(label=label))
+    return root
 
 
 def echo_form(widget: django_forms.Widget) -> type[django_forms.Form]:

@@ -295,8 +295,6 @@ Checks
         - A ``FileRouterBackend`` entry carries no ``APP_DIRS``.
       * - ``next.E005``
         - ``APP_DIRS`` is not a boolean.
-      * - ``next.E026``
-        - A ``FileRouterBackend`` entry carries no ``OPTIONS``.
       * - ``next.E006``
         - ``DIRS`` is not a list.
       * - ``next.E094``

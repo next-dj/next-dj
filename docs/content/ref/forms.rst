@@ -89,8 +89,9 @@ Exceptions
 ``FormActionNotFoundError`` is raised when no registered action matches a requested name.
 ``FormActionManager.get_action_url`` and ``FormActionManager.require_action_meta``, the ``{% form %}`` and ``{% action_url %}`` tags, and the testing helpers ``resolve_action_url`` and ``build_form_for`` all raise it.
 ``get_action_url`` composes the same refusal whether one backend is configured or several, so the shape of the failure never follows the length of the settings list.
-It subclasses ``LookupError`` and carries the failing ``name``, the ``page_path`` that was searched, the close-match ``suggestions`` tuple, and the ``registry_empty`` flag.
-Every raising surface renders the suggestions into the message as ``Closest matches: 'x', 'y'``, computed by close-match comparison against the registered names.
+It subclasses ``LookupError`` and carries the failing ``name``, the ``page_path`` that was searched, the close-match ``suggestions`` tuple, the ``declared_in`` tuple, and the ``registry_empty`` flag.
+Every raising surface renders the suggestions into the message as ``Closest matches: 'x', 'y'``, computed by close-match comparison against the other registered names.
+When the name is registered but not in the searched scope, ``declared_in`` holds the files that declare it and the message lists them.
 The comparison and the message run on first render, so probing for an action by catching the exception costs no close-match work.
 When ``registry_empty`` is true the message also explains that no actions are registered at all and points at autodiscovery.
 

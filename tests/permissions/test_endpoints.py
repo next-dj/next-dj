@@ -4,10 +4,13 @@ import pytest
 
 from next.permissions.endpoints import (
     Endpoint,
+    ViewEndpoint,
     action_endpoint,
     endpoints,
     page_endpoint,
     resolve_page,
+    resolve_view,
+    view_endpoints,
 )
 from next.permissions.markers import AccessRule, Requirement
 from next.urls.routes import collect_routes
@@ -23,6 +26,8 @@ _FILE = Path("/tree/page.py")
 
 _PROXY = Path("/tree/proxy.py")
 
+VIEWS_URLCONF = "tests.permissions.urls_views"
+
 
 @pytest.fixture(autouse=True)
 def _form_registries():
@@ -34,6 +39,13 @@ def _form_registries():
 def project(tmp_path) -> Path:
     root = write_access_project(tmp_path / "pages")
     with routed(root, COMPONENT_BACKENDS=COMPONENTS):
+        yield root
+
+
+@pytest.fixture()
+def views_project(tmp_path) -> Path:
+    root = write_access_project(tmp_path / "pages")
+    with routed(root, urlconf=VIEWS_URLCONF, COMPONENT_BACKENDS=COMPONENTS):
         yield root
 
 
@@ -190,3 +202,69 @@ class TestResolvePage:
     @pytest.mark.parametrize("url", ["/missing/", "/_next/csrf/"], ids=["404", "view"])
     def test_anything_but_a_page_is_none(self, project, url) -> None:
         assert resolve_page(url) is None
+
+
+class TestViewEndpoints:
+    """Every view of the URLconf outside the page trees, as the middleware reads it."""
+
+    @pytest.mark.parametrize(
+        ("view", "access"),
+        [
+            (ViewEndpoint("/a/", "a.b", public=True, closed=False), "public"),
+            (
+                ViewEndpoint("/a/", "a.b", public=False, closed=True),
+                "login (middleware)",
+            ),
+            (ViewEndpoint("/a/", "a.b", public=False, closed=False), "-"),
+            (
+                ViewEndpoint(
+                    "/a/", "a.b", public=True, closed=False, deferred="action"
+                ),
+                "per action",
+            ),
+        ],
+        ids=["public", "middleware", "open", "deferred"],
+    )
+    def test_access(self, view, access) -> None:
+        assert view.access == access
+
+    def test_the_urlconf_order_without_the_pages(self, views_project) -> None:
+        found = view_endpoints()
+
+        assert [(view.route, view.view, view.access) for view in found[:3]] == [
+            ("/sw.js", "tests.permissions.urls_views.worker", "-"),
+            ("/api/report/", "tests.permissions.urls_views.Report", "public"),
+            ("/robots.txt", "tests.permissions.urls_views.robots", "public"),
+        ]
+        by_route = {view.route: view for view in found}
+        assert by_route["/_next/csrf/"].access == "public"
+        assert by_route["/_next/form/<str:uid>/"].access == "per action"
+        assert not [view for view in found if view.route in {"/", "/open/"}]
+
+    def test_under_the_middleware_an_unmarked_view_is_closed(
+        self, views_project
+    ) -> None:
+        with login_required_middleware():
+            worker, report, *_ = view_endpoints()
+
+        assert (worker.closed, worker.access) == (True, "login (middleware)")
+        assert (report.closed, report.access) == (False, "public")
+
+
+class TestResolveView:
+    """A URL maps to the view its pattern routes, and to nothing for a page or a 404."""
+
+    def test_a_view_url(self, views_project) -> None:
+        assert resolve_view("/sw.js?v=1") == ViewEndpoint(
+            "/sw.js", "tests.permissions.urls_views.worker", public=False, closed=False
+        )
+
+    def test_a_view_under_an_include(self, views_project) -> None:
+        found = resolve_view("/api/report/")
+
+        assert found is not None
+        assert (found.route, found.access) == ("/api/report/", "public")
+
+    @pytest.mark.parametrize("url", ["/missing/", "/open/"], ids=["404", "page"])
+    def test_anything_but_a_view_is_none(self, views_project, url) -> None:
+        assert resolve_view(url) is None

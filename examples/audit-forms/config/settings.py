@@ -92,7 +92,6 @@ NEXT_FRAMEWORK = {
             # Project-level page root carrying the shared HTML envelope.
             "DIRS": [str(BASE_DIR / "portal")],
             "PAGES_DIR": "pages",
-            "OPTIONS": {"context_processors": []},
         }
     ],
     "COMPONENT_BACKENDS": [

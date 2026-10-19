@@ -71,7 +71,7 @@ NEXT_FRAMEWORK = {
 }
 ```
 
-The router walks the project-level root [`frame/`](frame/), whose `layout.djx` is the outer envelope, and the `pages/` tree of every installed app, so the pages themselves live in [`flags/pages/`](flags/pages/). Components resolve from the `_components/` folders inside that tree and from the shared kit. The rest of the app keeps the canonical layout as well, with the DI provider and the named dependency in [`flags/deps.py`](flags/deps.py) and every receiver in [`flags/signals.py`](flags/signals.py), both imported from [`FlagsConfig.ready()`](flags/apps.py). The two directory names stay settings, so a project that already has its own keeps them.
+The router walks the project-level root [`frame/`](frame/), whose `layout.djx` is the outer envelope, and the `pages/` tree of every installed app, so the pages themselves live in [`flags/pages/`](flags/pages/). Components resolve from the `_components/` folders inside that tree and from the shared kit. The rest of the app keeps the canonical layout as well, with the DI provider and the named dependency in [`flags/deps.py`](flags/deps.py) and every receiver in [`flags/signals.py`](flags/signals.py), both imported by the framework at startup, so [`FlagsConfig`](flags/apps.py) has no `ready()`. The two directory names stay settings, so a project that already has its own keeps them.
 
 ### 2. `Flag` model and cache-through lookup
 
@@ -330,9 +330,9 @@ A dict is inherited by every page below it, so [`admin/metrics/page.py`](flags/p
 
 A page with both `render()` and `template.djx` emits `next.W043`. If a page has none of (render / template attribute / registered loader that matches), `next.E012` fails. Every page in this example declares exactly one body source. The `page.py` modules all ship `template.djx` siblings and no `template` attribute.
 
-### `deps` and `signals` are imported in `apps.ready()`, not at module level
+### `deps` and `signals` load once the app registry is ready
 
-`FlagsConfig.ready()` imports `flags.deps` and `flags.signals`. If you move those imports to the top of `flags/__init__.py`, Django will try to load them before the app registry is populated and `@receiver(post_save, sender=Flag)` will crash looking up `Flag`.
+The framework imports `flags.deps` and `flags.signals` from its own `ready()`, after every app has loaded, so `FlagsConfig` declares none. Importing them from `flags/__init__.py` instead would run before the app registry is populated, and `@receiver(post_save, sender=Flag)` would crash looking up `Flag`.
 
 ## Further reading
 
