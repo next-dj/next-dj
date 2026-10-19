@@ -26,6 +26,7 @@ from tests.support import (
     write_page,
     write_tree,
 )
+from tests.support.access import write_guard
 
 
 def refusing_rule(request: object) -> bool:
@@ -44,6 +45,8 @@ NO_APP_DIRS = [
 
 
 UNKNOWN_KEY = "headline"
+
+SUBTREE_RULE = "page.login_required(inherit=True)\n"
 
 UNKNOWN_ITEMS = """
 from next.seo import sitemap
@@ -74,6 +77,15 @@ class TestItemsTrails:
         )
         with routed(root):
             assert check_sitemap_items_trails() == []
+
+    def test_a_trail_only_a_declarative_page_holds_is_an_error(self, tmp_path) -> None:
+        root = write_tree(
+            tmp_path / "pages", pages=("posts/[slug]/edit",), sitemap=POSTS_ITEMS
+        )
+        write_guard(root / "posts" / "[slug]", SUBTREE_RULE)
+        with routed(root):
+            messages = check_sitemap_items_trails()
+        assert check_ids(messages) == ["next.E111"]
 
 
 class TestSitemapTemplates:
@@ -170,6 +182,16 @@ class TestDynamicRoutes:
             pages=("posts/[slug]",),
             sitemap='exclude = ["posts/[slug]"]',
         )
+        with routed(root):
+            assert check_sitemap_dynamic_routes() == []
+
+    def test_a_declarative_page_routes_nothing_to_list(self, tmp_path) -> None:
+        root = write_tree(
+            tmp_path / "pages",
+            pages=("posts/[slug]/edit",),
+            sitemap='exclude = ["posts/[slug]/edit"]',
+        )
+        write_guard(root / "posts" / "[slug]", SUBTREE_RULE)
         with routed(root):
             assert check_sitemap_dynamic_routes() == []
 

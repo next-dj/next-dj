@@ -54,10 +54,19 @@ Terms used throughout the next.dj documentation.
       A Python callable decorated with ``@context("key")`` that publishes a value to the template scope.
       Also written ``@context`` callable.
 
+   DObject
+      The annotation that injects the model row whose primary key a URL kwarg holds, read through ``visible_to(scope)``, and names the row of an access declaration as ``obj=DObject[Model]``.
+      See :ref:`topics-di-dobject`.
+
+   declaring page.py
+      A ``page.py`` with no body that declares access with ``inherit=True`` for the pages below its directory and routes no URL of its own.
+      See :ref:`topics-access-declaring-page`.
+
    DI marker
       A typed annotation or default-value object that asks the resolver for a specific source of data.
       An annotation marker is written in the type position, for example ``param: DUrl[int]``, and covers ``DUrl``, ``DQuery``, and ``DForm``.
       A default-value marker is written as the parameter default, for example ``param: str = Context()``, and covers ``Context`` and ``Depends``.
+      ``DObject`` is an annotation marker as well.
 
    discovery
       The filesystem walk that builds the asset registry, the components registry, and the page registry at startup.
@@ -105,7 +114,7 @@ Terms used throughout the next.dj documentation.
    layout
       A ``layout.djx`` file in an ancestor directory.
       Wraps every descendant page.
-      It holds markup alone, and the access of its directory and every page below it lives in a :term:`proxy.py`.
+      It holds markup alone, and the access of its directory and every page below it lives in the ``page.py`` of the directory, under ``inherit=True``.
 
    JS context policy
       Algorithm class that resolves duplicate serialised keys for ``window.Next.context``.
@@ -178,9 +187,6 @@ Terms used throughout the next.dj documentation.
       A class that produces a value for a parameter.
       Implements ``can_handle`` and ``resolve``.
 
-   proxy.py
-      A module in a directory of a page tree that declares the access of that directory and every page below it, through ``proxy.login_required()``, ``proxy.permission_required()``, and ``proxy.public()``.
-      It holds no context and no data, and a ``public()`` in a deeper file lifts what it requires, see :doc:`/content/topics/proxy`.
 
    request cache
       The dependency cache a form dispatch attaches to the request, shared by its handler and by the context functions, metadata callables, and components of the re-render.
@@ -195,6 +201,10 @@ Terms used throughout the next.dj documentation.
       The Django URL name string inside the ``next`` namespace (``app_name`` on ``next.urls``).
       Values come from ``NEXT_FRAMEWORK["URL_NAME_TEMPLATE"]``, default ``"page_{name}"``, where ``{name}`` is derived from the normalized filesystem path.
       Reverse from templates as ``{% url 'next:page_notes_id' id=note.id %}`` or from Python through :doc:`/content/topics/url-reversing`.
+
+   scope dependency
+      The named dependency a project registers with ``@resolver.dependency("scope")``, which ``DObject`` passes to ``visible_to`` on the default manager of a model.
+      See :ref:`topics-di-dobject`.
 
    scope
       The keying rule for an action name, ``page`` or ``shared``.

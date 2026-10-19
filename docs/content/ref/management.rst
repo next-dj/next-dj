@@ -60,38 +60,78 @@ permissions
    * - ``Endpoint``
      - The URL of a page or a view, the name of an action followed by the file declaring it in parentheses, or the name of a component.
    * - ``Access``
-     - The requirements in the order the chain declares them, ``login`` and one ``perm <name>`` per permission with ``on <app_label.Model>`` for the row of a page or a ``proxy.py`` and ``on <name>`` for the context a component names, ``public`` for an endpoint whose rule a ``public()`` opened, in its own ``page.py`` or in a ``proxy.py`` above, ``login (middleware)`` for an endpoint without requirements whose rule is not public while ``LoginRequiredMiddleware`` is listed, ``broken`` for a chain holding a file that failed to import or, in the table of one page, for a page whose composed template does not compile, and ``-`` for an open endpoint.
-       A view reads ``public`` when :func:`~django.contrib.auth.decorators.login_not_required` marks it, ``login (middleware)`` when the middleware is listed, and ``-`` otherwise, and the action endpoint reads ``per action``.
+     - The requirements in the order the chain declares them, each once, in the words listed below.
    * - ``Sources``
-     - The files the requirements come from, root first, relative to ``BASE_DIR`` when they lie under it, ``public (file)`` naming the file whose ``public()`` opened a public rule, the broken file, the class name of the listed ``LoginRequiredMiddleware`` or its subclass for a ``login (middleware)`` row, or ``-`` when there is none.
-       A public view names its dotted path as ``public (module.view)``, and the action endpoint points at the ``action`` rows with ``see the action rows``.
+     - The files the requirements come from, root first, relative to ``BASE_DIR`` when they lie under it, or the source the list below names for the value.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 45 30
+
+   * - ``Access``
+     - Meaning
+     - ``Sources``
+   * - ``login``
+     - A ``login_required()`` of the chain, or the ``Meta`` guard of an action.
+     - The declaring files.
+   * - ``perm <name>``
+     - A permission asked without an object.
+     - The declaring files.
+   * - ``perm <name> on <app_label.Model>``
+     - A permission asked on the row an ``obj=DObject[Model]`` of a ``page.py`` loads.
+     - The declaring files.
+   * - ``perm <name> on <name>``
+     - A permission asked on the prop or the context a component names.
+     - The ``component.py``.
+   * - ``perm <name> on form``
+     - A permission ``add_perm`` registers, named in the ``Meta`` guard of an action whose ``form_class`` binds a form, and asked of the bound form.
+     - The file declaring the action.
+   * - ``public``
+     - A rule a ``public()`` opened, in the ``page.py`` of the page or with ``inherit=True`` above it, or a view :func:`~django.contrib.auth.decorators.login_not_required` marks.
+     - ``public (file)`` naming the opening ``page.py``, or ``public (module.view)`` for a view.
+   * - ``login (default)``
+     - A page or an action that declares nothing and is not public, while ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware`` turns the default login on.
+     - ``LOGIN_REQUIRED`` when the key is on, else the class name of the listed middleware or its subclass.
+   * - ``login (middleware)``
+     - A view outside the page trees that the listed middleware closes, which the key never closes.
+     - The class name of the middleware.
+   * - ``broken``
+     - A chain holding a ``page.py`` that failed to import, or, in the table of one page, a page whose composed template does not compile.
+     - The broken file.
+   * - ``per action``
+     - The action endpoint, whose rule each ``action`` row shows.
+     - ``see the action rows``.
+   * - ``-``
+     - An open endpoint, or a view that decides access in its own code.
+     - ``-``.
 
 .. code-block:: text
    :caption: manage.py permissions
 
-   Kind       Endpoint                                                    Access                                     Sources
-   page       /notes/                                                     login                                      notes/pages/notes/proxy.py
-   page       /notes/<int:note>/edit/                                     login, perm notes.edit_note on notes.Note  notes/pages/notes/proxy.py, notes/pages/notes/[int:note]/edit/page.py
-   page       /notes/<int:note>/share/                                    public                                     public (notes/pages/notes/[int:note]/share/page.py)
-   page       /login/                                                     public                                     public (notes/pages/login/page.py)
-   page       /                                                           login (middleware)                         LoginRequiredMiddleware
-   action     note_edit_form (notes/pages/notes/[int:note]/edit/page.py)  login, perm notes.edit_note on notes.Note  notes/pages/notes/proxy.py, notes/pages/notes/[int:note]/edit/page.py
-   component  admin_toolbar                                               perm notes.moderate                        notes/pages/_components/admin_toolbar/component.py
-   view       /sw.js                                                      public                                     public (config.pwa.worker)
-   view       /exports/                                                   login (middleware)                         LoginRequiredMiddleware
-   view       /_next/form/<str:uid>/                                      per action                                 see the action rows
+   Kind       Endpoint                                                    Access                                                                   Sources
+   page       /notes/                                                     login                                                                    notes/pages/notes/page.py
+   page       /notes/<int:note>/edit/                                     login, perm notes.edit_note on notes.Note                                notes/pages/notes/page.py, notes/pages/notes/[int:note]/edit/page.py
+   page       /notes/<int:note>/share/                                    public                                                                   public (notes/pages/notes/[int:note]/share/page.py)
+   page       /login/                                                     public                                                                   public (notes/pages/login/page.py)
+   page       /                                                           login (default)                                                          LoginRequiredMiddleware
+   action     note_edit_form (notes/pages/notes/[int:note]/edit/page.py)  login, perm notes.edit_note on notes.Note, perm notes.edit_note on form  notes/pages/notes/page.py, notes/pages/notes/[int:note]/edit/page.py
+   component  admin_toolbar                                               perm notes.moderate                                                      notes/pages/_components/admin_toolbar/component.py
+   view       /sw.js                                                      public                                                                   public (config.pwa.worker)
+   view       /exports/                                                   login (middleware)                                                       LoginRequiredMiddleware
+   view       /_next/form/<str:uid>/                                      per action                                                               see the action rows
 
-The share page lifts the login of ``notes/pages/notes/proxy.py`` through its own ``page.public()``, so its ``Sources`` column names that ``page.py``.
+The share page lifts the login ``notes/pages/notes/page.py`` passes down through its own ``page.public()``, so its ``Sources`` column names that ``page.py``.
+The action asks ``notes.edit_note`` twice, on the note the URL names by the rule of its page and on the bound form by its ``Meta`` guard, which is the order the dispatcher checks them in.
 An action carries the path of its file, the same path the ``File`` column of ``manage.py routes`` shows for the page declaring it, since two pages may declare actions of one name.
 
 The ``view`` rows walk the patterns of ``django.urls.get_resolver()`` through every include in URLconf order and leave out the patterns of the page trees, which already have ``page`` rows.
-They show without the middleware too, as ``-`` for a view that decides access in its own code, so the table lists everything the project answers.
+They show without the middleware too, as ``-`` for a view that decides access in its own code, a view behind Django's :func:`~django.contrib.auth.decorators.login_required` among them, so the table lists everything the project answers.
 The ``/_next/form/<str:uid>/`` endpoint is open to the middleware, yet it reads ``per action``, since the dispatcher applies the rule of each action its ``action`` row shows.
 The dispatch view carries a ``next_access_kind`` attribute naming the kind of rows that decide it, which is how the table tells it from a public view.
 
 ``manage.py permissions <url>`` narrows the table to the page the URL resolves to, the actions declared in its directory, and the declaring components its composed template renders, nested ones included.
 A URL that resolves to a view outside the page trees prints the row of that view alone, and a URL that resolves to nothing is a ``CommandError``.
-The rule of an action is its owner rule and its ``Meta`` guard, since the rule of the posted origin page joins only per request, see :doc:`/content/security/actions`.
+The rule of an action is its owner rule and its ``Meta`` guard, the same rule the dispatcher enforces, since the rule of the posted origin page joins only per request, see :doc:`/content/security/actions`.
 
 showmetadata
 ------------

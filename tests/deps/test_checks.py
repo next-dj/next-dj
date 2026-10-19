@@ -33,7 +33,7 @@ from tests.support import (
     write_page,
     write_urlconf,
 )
-from tests.support.access import write_proxy
+from tests.support.access import write_guard
 
 
 HEADER = """
@@ -562,7 +562,7 @@ class TestComponentContexts:
     ) -> None:
         component._registry.register(tmp_path / "component.py", "card", _rows)
         stand_in = next_framework_settings_stand_in(COMPONENT_BACKENDS=configs)
-        with patch("next.deps.checks.next_framework_settings", stand_in):
+        with patch("next.components.sources.next_framework_settings", stand_in):
             assert _run(tmp_path / "pages", check_object_component_contexts) == []
 
 
@@ -771,13 +771,17 @@ class TestObjectDeclarations:
         )
         assert check_ids(messages) == expected
 
-    def test_a_proxy_is_judged_on_every_page_below_it(self, tmp_path: Path) -> None:
+    def test_an_inherited_one_is_judged_on_every_page_below_it(
+        self, tmp_path: Path
+    ) -> None:
         root = tmp_path / "pages"
-        declaring = write_proxy(
+        declaring = write_guard(
             root,
             "from django.contrib.auth.models import Group\n\n"
             "from next.deps import DObject\n\n"
-            'proxy.permission_required("auth.view_group", obj=DObject[Group])\n',
+            "page.permission_required(\n"
+            '    "auth.view_group", obj=DObject[Group], inherit=True\n'
+            ")\n",
         )
         messages = _run(
             root, check_object_declarations, (GROUP_ROUTE, ""), ("[int:team]", "")
@@ -793,11 +797,13 @@ class TestObjectDeclarations:
 
     def test_a_lifted_page_is_not_judged(self, tmp_path: Path) -> None:
         root = tmp_path / "pages"
-        write_proxy(
+        write_guard(
             root,
             "from django.contrib.auth.models import Group\n\n"
             "from next.deps import DObject\n\n"
-            'proxy.permission_required("auth.view_group", obj=DObject[Group])\n',
+            "page.permission_required(\n"
+            '    "auth.view_group", obj=DObject[Group], inherit=True\n'
+            ")\n",
         )
         messages = _run(
             root,
@@ -822,11 +828,13 @@ class TestObjectDeclarations:
 
     def test_a_declaration_on_two_pages_is_judged_once(self, tmp_path: Path) -> None:
         root = tmp_path / "pages"
-        write_proxy(
+        write_guard(
             root,
             "from django.contrib.auth.models import Group\n\n"
             "from next.deps import DObject\n\n"
-            'proxy.permission_required("auth.view_group", obj=DObject[Group])\n',
+            "page.permission_required(\n"
+            '    "auth.view_group", obj=DObject[Group], inherit=True\n'
+            ")\n",
         )
         messages = _run(
             root, check_object_managers, (GROUP_ROUTE, ""), (f"{GROUP_ROUTE}/more", "")

@@ -236,7 +236,7 @@ def test_the_editor_appends_a_chapter_to_an_own_draft(
     expect(page).to_have_url(f"{base_url}/admin/library/book/{draft.pk}/manuscript/")
     wait_for_runtime(page)
     trail = page.get_by_role("navigation", name="Breadcrumb").get_by_role("link")
-    expect(trail).to_have_text(["Dashboard", "Books", "Manuscript"])
+    expect(trail).to_have_text(["Dashboard", "Manuscript"])
     manuscript = page.locator("[data-next-zone='manuscript']")
     expect(manuscript.get_by_role("row")).to_have_count(3)
     mark_document(page)

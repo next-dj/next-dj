@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, override
 
 from next.pages.loaders import module_version
-from next.permissions.access import login_middleware_active
+from next.permissions.access import login_by_default
 
 from .discovery import page_tree_roots
 from .sitemaps import PageTreeSitemap, SitemapOptions, is_excluded, listed_trails
@@ -125,9 +125,9 @@ class PageTreeSitemapBackend(SitemapBackend):
     def static_trails(self, root: SeoRoot, options: SitemapOptions) -> tuple[str, ...]:
         """Return the static trails of `root` that no items callable claims.
 
-        Memoised per module version and middleware, as noindex resolves all metadata.
+        Memoised per module version and default login, as noindex resolves all metadata.
         """
-        version = (module_version(), login_middleware_active())
+        version = (module_version(), login_by_default())
         held = self._static.get(root.path)
         if held is not None and held[0] == version:
             return held[1]

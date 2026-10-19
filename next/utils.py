@@ -24,6 +24,7 @@ from django.http import HttpResponseRedirect
 from django.template.base import NodeList
 from django.utils.encoding import repercent_broken_unicode
 from django.utils.module_loading import import_string
+from django.utils.regex_helper import normalize
 
 from next.caches import DEFAULT_CACHE_SIZE
 from next.diagnostics import Capture
@@ -60,11 +61,31 @@ ROUTE_BRACKET_PATTERN: Final[re.Pattern[str]] = re.compile(
 
 _DJANGO_PARAMETER: Final[re.Pattern[str]] = re.compile(r"<([^<>]+)>")
 
+_REGEX_PARAMETER: Final[re.Pattern[str]] = re.compile(r"%\((\w+)\)s")
+
+_UNREVERSIBLE_TRAIL: Final = "[[route]]"
+"""The trail of a `re_path()` route Django cannot reverse, a wildcard listing none."""
+
 
 @functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
 def prefix_trail(prefix: str) -> str:
     """Return a Django `path()` prefix as a trail, `<int:pk>` read as `[int:pk]`."""
     return _DJANGO_PARAMETER.sub(r"[\1]", prefix.strip("/"))
+
+
+@functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
+def regex_trail(regex: str) -> str:
+    """Return a `re_path()` route as a trail, read the way Django reverses it.
+
+    A route Django cannot reverse is a wildcard, so no page under it reads as static.
+    """
+    try:
+        route = normalize(regex)[0][0]
+    except ValueError:
+        return _UNREVERSIBLE_TRAIL
+    if not route and regex.strip("^$/"):
+        return _UNREVERSIBLE_TRAIL
+    return _REGEX_PARAMETER.sub(r"[\1]", route.strip("/"))
 
 
 def join_trail(head: str, tail: str) -> str:
@@ -203,17 +224,19 @@ def load_tree_source[E: Exception](
 class PageRoot:
     """A page tree a router routes, with the label a report names it by.
 
-    A `pages()` tree carries the route the URLconf includes it under and its namespace.
+    A `pages()` tree carries its include route, in Django's spelling and as a trail.
     """
 
     path: Path
     label: str
     prefix: str | None = None
     namespace: str = "next"
+    trail: str | None = None
 
     def route_trail(self, trail: str = "") -> str:
         """Return the trail of the route a page at the tree-relative `trail` answers."""
-        return join_trail(prefix_trail(self.prefix or ""), trail)
+        head = prefix_trail(self.prefix or "") if self.trail is None else self.trail
+        return join_trail(head, trail)
 
 
 def page_roots_shape_error(source: str, roots: list[Any]) -> str | None:

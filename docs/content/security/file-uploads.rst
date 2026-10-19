@@ -20,7 +20,7 @@ Four framework behaviours around uploads are worth knowing before writing that c
 
 An action nothing guards is open to anyone.
    The dispatch endpoint accepts a POST from any visitor, so an upload action under no access rule of its page tree and with no guard of its own lets an anonymous client write files, which ``next.W129`` reports once the project declares access anywhere.
-   Declare ``proxy.login_required()`` in a ``proxy.py`` over the page, ``Meta.login_required`` on the form, or a stricter guard, see :doc:`actions`.
+   Declare ``page.login_required(inherit=True)`` in a ``page.py`` over the page, ``Meta.login_required`` on the form, or a stricter guard, see :doc:`actions`.
 
 The inline validate pass never validates a file field.
    A field-level validate request runs the bound form and then drops every file field from the set of fields it reports on, so a file field's validators run only on the full submit.

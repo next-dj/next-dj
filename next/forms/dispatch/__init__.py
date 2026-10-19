@@ -22,9 +22,11 @@ from next.forms.signals import (
     wizard_completed,
     wizard_step_submitted,
 )
+from next.permissions.markers import OPEN
 
 from .build import _construct_form, _form_for_class, _resolve_form_class
 from .permissions import (
+    _branch,
     _check_access,
     _check_page_access,
     _check_tree_access,
@@ -32,6 +34,7 @@ from .permissions import (
     _enforce_registered_permissions,
     _enforce_view_permissions,
     _object_permissions,
+    guard_rule,
 )
 from .responses import (
     _HTTP_ERROR_FLOOR,
@@ -55,11 +58,10 @@ if TYPE_CHECKING:
     from next.forms.base import BaseForm as NextBaseForm
     from next.forms.origin import OriginMatch
     from next.forms.wizard import FormWizard
+    from next.permissions.markers import AccessRule
 
 
 logger = logging.getLogger(__name__)
-
-type _Branch = Literal["wizard", "handler", "form"]
 
 
 class FormActionDispatch:
@@ -112,8 +114,9 @@ class FormActionDispatch:
         """Route the action once the page tree, its guard and the origin admit it."""
         origin_match = resolve_origin(request)
         dep_cache: dict[str, Any] = {}
+        guard = guard_rule(meta)
         refusal = FormActionDispatch._refuse_access(
-            request, meta, origin_match, action_name, dep_cache
+            request, meta, origin_match, action_name, dep_cache, guard=guard
         )
         if refusal is not None:
             return refusal
@@ -123,6 +126,7 @@ class FormActionDispatch:
             dep_stack=[],
             uid=meta.get("uid"),
             origin_match=origin_match,
+            guard=guard,
         )
         setattr(request, REQUEST_DEP_CACHE_ATTR, state.dep_cache)
         return FormActionDispatch._route(backend, request, action_name, meta, state)
@@ -170,6 +174,8 @@ class FormActionDispatch:
         origin_match: "OriginMatch | None",
         action_name: str,
         dep_cache: dict[str, Any],
+        *,
+        guard: "AccessRule",
     ) -> "HttpResponseBase | None":
         """Return the denial of the page tree, the action guard or the origin page.
 
@@ -186,12 +192,9 @@ class FormActionDispatch:
         )
         if denial is not None:
             return denial
-        guard = meta.get("guard")
-        if guard is not None:
-            object_stage = bool(guard.permissions) and _branch(meta) == "form"
-            denial = _check_access(request, guard, object_stage=object_stage)
-            if denial is not None:
-                return denial
+        denial = _check_access(request, guard)
+        if denial is not None:
+            return denial
         return _check_page_access(
             request,
             origin_match,
@@ -226,7 +229,7 @@ class FormActionDispatch:
             handler=meta.get("handler"),
             form_class=resolved_form_class,
             init_kwargs=init_kwargs,
-            object_permissions=_object_permissions(meta.get("guard")),
+            object_permissions=_object_permissions(state.guard),
         )
         return FormActionDispatch._dispatch_with_form(backend, request, params, state)
 
@@ -387,20 +390,6 @@ class FormActionDispatch:
         )
 
 
-def _branch(meta: "ActionMeta") -> "_Branch | None":
-    """Return the branch `_route` takes for an action, `None` when it declares none.
-
-    The guard reads it too, so only the form branch defers its registered permissions.
-    """
-    if meta.get("wizard_class") is not None:
-        return "wizard"
-    if meta.get("form_class") is not None:
-        return "form"
-    if meta.get("handler") is not None:
-        return "handler"
-    return None
-
-
 @dataclass(slots=True)
 class _DispatchState:
     """Bundle of mutable dispatch state threaded through helper methods."""
@@ -413,6 +402,7 @@ class _DispatchState:
     dep_stack: list[str]
     uid: str | None = None
     origin_match: "OriginMatch | None" = None
+    guard: "AccessRule" = OPEN
 
     @property
     def page_path(self) -> "Path | None":

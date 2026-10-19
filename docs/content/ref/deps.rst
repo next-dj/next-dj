@@ -121,6 +121,7 @@ Errors
 
 ``DependencyCycleError`` carries the chain that closed the loop on ``cycle``, and ``UnknownDependencyError`` carries the missing ``name``, the ``param_name`` it was asked for, the ``suggestion`` a close registered name produced, and the ``func`` the failed resolve attributed it to.
 ``UnboundObjectError`` subclasses :exc:`~django.core.exceptions.ImproperlyConfigured` and carries the ``param_name`` of the ``DObject`` parameter, the ``key`` it found nothing under, and ``parent``, which is ``True`` when that key is a missing parent context value rather than a missing URL kwarg.
+For an ``obj=DObject[Model]`` of an access declaration, ``param_name`` holds the label of the model and ``key`` its ``model_name``, and the dispatcher answers that variant with 400 as well.
 The form dispatcher answers an ``UnboundObjectError`` for a missing URL kwarg with 400 Bad Request and a logged warning, since the origin the client sent lacks the kwarg, and lets the parent variant raise.
 All three are re-exported from ``next.deps``, so a caller never imports the module directly.
 
@@ -146,14 +147,14 @@ Checks
 
 ``next.deps.checks`` registers the ``DObject`` checks, which read annotations, routes, and registries without running a query.
 
-- ``next.E153`` reports a ``DObject`` model, a parameter or an ``obj=DObject[Model]`` of an access declaration, whose default manager has no ``visible_to``.
+- ``next.E153`` reports a model whose default manager has no ``visible_to``, named by a ``DObject`` parameter or by an ``obj=DObject[Model]`` of an access declaration.
 - ``next.E154`` reports a page ``DObject`` whose parent no earlier context callable provides.
-- ``next.E155`` reports a ``DObject`` with a parent on a form handler, a form factory, or a form hook, ``has_object_permission`` included.
+- ``next.E155`` reports a ``DObject`` with a parent on a form handler, a form factory, a form hook, ``has_object_permission`` included, or a ``FormWizard`` hook.
 - ``next.E156`` reports a ``DObject`` on a ``@component.context`` callable.
 - ``next.E157`` reports a project that declares a ``DObject`` and registers no ``scope`` dependency.
 - ``next.E158`` reports a ``DObject`` on a callable whose type hints do not resolve, which raises ``TypeError`` on every resolve.
 - ``next.W126`` reports a page ``DObject`` whose full route, with every prefix and include around the tree, hands it no kwarg of its name.
-- ``next.E162`` reports an ``obj=DObject[Model]`` of a ``page.py`` or a ``proxy.py`` whose kwarg, the ``model_name`` of the model, the route of a page under it does not capture.
+- ``next.E162`` reports an ``obj=DObject[Model]`` of a ``page.py`` when the route of a page the declaration binds captures no kwarg named after the ``model_name`` of the model.
 
 A ``Depends`` name nothing registered raises ``UnknownDependencyError`` at resolve time, with a ``Did you mean`` hint naming the closest registered dependency.
 See :doc:`system-checks` for the exact conditions.

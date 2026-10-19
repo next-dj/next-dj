@@ -58,7 +58,7 @@ The sections above are boundaries the framework does not cross.
 The model also charges for what it does deliver, and the price lands in four places.
 
 A rename is a behaviour change.
-   Moving a directory moves the URL, the URL name, the layout chain, and the ``proxy.py`` chain that decides its access at once, and no static check finds a ``{% url %}`` call left pointing at the old name.
+   Moving a directory moves the URL, the URL name, the layout chain, and the ``page.py`` chain that decides its access at once, and no static check finds a ``{% url %}`` call left pointing at the old name.
 
 A context name is a contract no tool checks.
    Renaming a published key, or the parameter that reads it, breaks the link silently, because a parameter no provider handles resolves to its default and to ``None`` when it has none.
@@ -67,6 +67,6 @@ A published context key shadows a URL segment of the same name.
    The by-name provider runs ahead of the URL and query providers, so ``Depends("name")`` and ``DUrl["segment"]`` are the forms that survive both a rename and a collision.
 
 Registration happens on import.
-   A form action is live as soon as its module is imported, and its endpoint accepts a POST from any visitor until the class, its page, or a ``proxy.py`` above it declares a guard, which reaches further than a view behind a URL entry would.
+   A form action is live as soon as its module is imported, and its endpoint accepts a POST from any visitor until the class, its page, or a ``page.py`` above it declares a guard, which reaches further than a view behind a URL entry would.
 
 :doc:`/content/misc/design-philosophy` states the rejected alternative and the cost beside every principle.

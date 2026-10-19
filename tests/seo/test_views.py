@@ -35,7 +35,12 @@ from tests.support import (
     write_page,
     write_tree,
 )
-from tests.support.access import login_required_middleware, page_source, write_proxy
+from tests.support.access import (
+    login_required_middleware,
+    login_required_setting,
+    page_source,
+    write_guard,
+)
 
 
 I18N_ROOT_URLCONFS = [SEO_I18N_URLCONF, SEO_I18N_AFTER_URLCONF]
@@ -949,8 +954,11 @@ def _closed_tree(root: Path) -> Path:
     write_tree(root, pages=("", "open"), sitemap="")
     write_page(root, "public", page_source("page.public()\n"))
     write_page(root, "login", page_source("page.login_required()\n"))
-    write_proxy(root / "staff", 'proxy.permission_required("auth.view_user")\n')
-    write_page(root, "staff", page_source())
+    write_page(
+        root,
+        "staff",
+        page_source('page.permission_required("auth.view_user", inherit=True)\n'),
+    )
     return root
 
 
@@ -968,12 +976,31 @@ class TestClosedPagesInTheSitemap:
             "http://testserver/public/",
         ]
 
-    def test_the_login_middleware_leaves_only_public_pages(self, tmp_path) -> None:
+    @pytest.mark.parametrize(
+        "framing",
+        [login_required_middleware, login_required_setting],
+        ids=["middleware", "setting"],
+    )
+    def test_the_default_login_leaves_only_public_pages(
+        self, tmp_path, framing
+    ) -> None:
         root = _closed_tree(tmp_path / "pages")
         client = Client()
         with routed(root, urlconf=USER_URLCONF):
             before = client.get("/sitemap.xml")
-            with login_required_middleware():
+            with framing():
                 closed = client.get("/sitemap.xml")
         assert len(_locs(before)) == 3
         assert _locs(closed) == ["http://testserver/public/"]
+
+    def test_a_guard_page_is_left_out(self, tmp_path) -> None:
+        root = tmp_path / "pages"
+        write_tree(root, pages=("",), sitemap="")
+        write_guard(root / "docs", "page.public(inherit=True)\n")
+        write_page(root, "docs/intro", page_source())
+        with routed(root, urlconf=USER_URLCONF):
+            response = Client().get("/sitemap.xml")
+        assert _locs(response) == [
+            "http://testserver/",
+            "http://testserver/docs/intro/",
+        ]

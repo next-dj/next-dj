@@ -26,6 +26,7 @@ from next.utils import (
     middleware_listed,
     prefix_trail,
     redirect_or_fallback,
+    regex_trail,
     resolve_base_dir,
     stat_mtime_ns,
     template_edits_watched,
@@ -247,6 +248,26 @@ class TestJoinTrail:
         assert join_trail(head, tail) == joined
 
 
+class TestRegexTrail:
+    """A `re_path()` route reads as a trail the way Django reverses it."""
+
+    @pytest.mark.parametrize(
+        ("regex", "trail"),
+        [
+            ("^shop/", "shop"),
+            (r"^blog/(?P<year>[0-9]{4})/", "blog/[year]"),
+            (r"^v1\.0/", "v1.0"),
+            (r"^x/(\d+)/", "x/[_0]"),
+            ("^", ""),
+            ("^(?:en|de)/", "[[route]]"),
+            ("^(?i)shop/", "[[route]]"),
+        ],
+        ids=["static", "named", "escaped", "positional", "empty", "either", "flags"],
+    )
+    def test_a_regex_becomes_a_trail(self, regex: str, trail: str) -> None:
+        assert regex_trail(regex) == trail
+
+
 class TestPageRootTrails:
     """A tree answers routes under the prefix of the include that mounts it."""
 
@@ -264,6 +285,13 @@ class TestPageRootTrails:
         root = PageRoot(path=Path(), label="x", prefix=prefix)
 
         assert root.route_trail(trail) == route
+
+    def test_a_walked_trail_wins_over_the_prefix(self) -> None:
+        root = PageRoot(
+            path=Path(), label="x", prefix=r"^org/(?P<org>\d+)/", trail="org/[org]"
+        )
+
+        assert root.route_trail("log") == "org/[org]/log"
 
     def test_the_defaults_describe_an_auto_assembled_tree(self) -> None:
         root = PageRoot(path=Path(), label="Root")

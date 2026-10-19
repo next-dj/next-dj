@@ -1,4 +1,4 @@
-"""The `Page` manager, its process-wide singleton and the `proxy` of `proxy.py`.
+"""The `Page` manager and its process-wide singleton.
 
 `context` is an alias of `page.context`, which user code applies as `@context`.
 """
@@ -17,7 +17,7 @@ from next.conf import next_framework_settings
 from next.deps.cache import render_dep_cache
 from next.deps.resolver import current_resolver
 from next.introspect import declared_file, registering_file
-from next.pages.access import Proxy, TreeDeclarations
+from next.pages.access import PageDeclarations
 from next.pages.loaders import (
     LayoutTemplateLoader,
     build_registered_loaders,
@@ -90,10 +90,10 @@ class _BodyResolution:
     dynamic: bool = False
 
 
-class Page(TreeDeclarations):
+class Page(PageDeclarations):
     """Coordinate template loading, context, layouts, rendering, and URL wiring.
 
-    Its access declarations bind the `page.py` that makes them and no page below it.
+    Its access declarations bind its own page, and the pages below under `inherit=True`.
     """
 
     def __init__(self) -> None:
@@ -555,7 +555,6 @@ class Page(TreeDeclarations):
 
 page: Page = Page()
 context = page.context
-proxy: Proxy = Proxy()
 
 
 def reset_context_registry() -> None:
@@ -584,7 +583,6 @@ __all__ = [
     "Page",
     "context",
     "page",
-    "proxy",
     "reset_context_registry",
     "reset_metadata_registry",
     "reset_page_registrations",

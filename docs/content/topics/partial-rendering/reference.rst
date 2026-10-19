@@ -320,7 +320,7 @@ Status codes
    * - 400
      - An intent that did not validate, such as a zone no name in the batch declares, a bad origin, or a zone named on a dynamic page body.
    * - 404
-     - The request named a form uid the action registry does not hold, or the page answered a zone GET with 404, such as a ``DObject`` row outside the scope or a broken ``proxy.py`` over the page.
+     - The request named a form uid the action registry does not hold, or the page answered a zone GET with 404, such as a ``DObject`` row outside the scope or a broken ``page.py`` over the page.
        On a safe method the runtime fires ``partial:error`` and then navigates fully, and on a mutation it stays in place after the event.
    * - 409
      - A version mismatch on a safe method, with an empty body.

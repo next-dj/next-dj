@@ -11,8 +11,10 @@ from django.test.utils import CaptureQueriesContext
 
 from next.deps import DObject, UnboundObjectError
 from next.deps.objects import SCOPE_DEPENDENCY
-from next.pages import proxy
+from next.pages import page
 from next.pages.access import (
+    Gate,
+    enforce,
     forget_page_access,
     owner_access,
     page_access,
@@ -24,6 +26,7 @@ from next.pages.errors import PageModuleImportError
 from next.pages.loaders import load_python_module_memo
 from next.permissions import add_perm
 from next.permissions.access import declarations
+from next.permissions.markers import OPEN, AccessRule, Requirement
 from tests.support import (
     PermissionHolder,
     bound_dependency,
@@ -35,45 +38,38 @@ from tests.support import (
     write_urlconf,
 )
 from tests.support.access import (
+    PAGE_HEAD,
+    client_as,
     login_required_middleware,
     page_source,
     sign_in,
-    write_proxy,
+    write_guard,
 )
 
 
 pytestmark = pytest.mark.django_db
 
-
-@pytest.fixture()
-def root(tmp_path) -> Path:
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
+_LIFT_URLS = ("/t/a/", "/t/a/kid/")
 
 
 def _three_levels(root: Path) -> Path:
-    write_proxy(root)
-    write_proxy(root / "team", "proxy.login_required()\n")
+    write_guard(root)
+    write_guard(root / "team", "page.login_required(inherit=True)\n")
     return write_page(root, "team/notes", page_source())
 
 
-class TestProxyModule:
-    """A `proxy.py` declares access and nothing else, and reloads by its mtime."""
-
-    def test_the_proxy_carries_no_context(self) -> None:
-        assert not hasattr(proxy, "context")
+class TestPageModule:
+    """A `page.py` declares access for its page, and reloads by its mtime."""
 
     @pytest.mark.usefixtures("watched_template_edits")
-    def test_a_rewritten_proxy_applies_before_the_next_request(
+    def test_a_rewritten_page_applies_before_the_next_request(
         self, root, client
     ) -> None:
-        declaring = write_proxy(root)
-        write_page(root, "", page_source())
+        declaring = write_page(root, "", page_source())
 
         with routed(root):
             first = client.get("/")
-            declaring.write_text(f"{declaring.read_text()}proxy.login_required()\n")
+            declaring.write_text(page_source("page.login_required()\n"))
             touch_later(declaring)
             second = client.get("/")
 
@@ -81,7 +77,7 @@ class TestProxyModule:
 
 
 class TestInheritedAccess:
-    """Each `proxy.py` from the tree root down binds every page below it."""
+    """What a `page.py` declares with `inherit=True` binds every page below it."""
 
     def test_a_requirement_at_the_middle_level_binds_the_leaf(self, root) -> None:
         page_path = _three_levels(root)
@@ -90,14 +86,80 @@ class TestInheritedAccess:
             rule = page_access(page_path).rule
 
         assert [(item.kind, item.source) for item in rule.requirements] == [
-            ("login", root / "team" / "proxy.py")
+            ("login", root / "team" / "page.py")
         ]
+
+    @pytest.mark.parametrize(
+        ("declaration", "statuses"),
+        [
+            pytest.param("page.login_required()\n", [302, 200, 200], id="own"),
+            pytest.param(
+                "page.login_required(inherit=True)\n", [302, 302, 302], id="inherit"
+            ),
+            pytest.param(
+                'page.permission_required("auth.view_group")\n',
+                [302, 200, 200],
+                id="own-permission",
+            ),
+            pytest.param(
+                'page.permission_required("auth.view_group", inherit=True)\n',
+                [302, 302, 302],
+                id="inherit-permission",
+            ),
+        ],
+    )
+    def test_a_declaration_reaches_the_child_and_the_grandchild_under_inherit(
+        self, root, client, declaration, statuses
+    ) -> None:
+        write_page(root, "a", page_source(declaration))
+        write_page(root, "a/b", page_source())
+        write_page(root, "a/b/[int:n]", page_source())
+
+        with routed(root):
+            answered = [
+                client.get(url).status_code for url in ("/a/", "/a/b/", "/a/b/7/")
+            ]
+
+        assert answered == statuses
+
+    def test_a_guard_page_serves_no_url_under_a_layout(self, root, client) -> None:
+        (root / "layout.djx").write_text("<main>{% template %}</main>")
+        write_guard(root / "a", "page.login_required(inherit=True)\n")
+        write_page(root, "a/b", page_source())
+
+        with routed(root):
+            guard = client.get("/a/")
+            below = client.get("/a/b/")
+
+        assert (guard.status_code, below.status_code) == (404, 302)
+
+    @pytest.mark.parametrize(
+        ("source", "body"),
+        [
+            pytest.param("def render(request):\n    return 'ok'\n", None, id="render"),
+            pytest.param("", "ok", id="template-djx"),
+        ],
+    )
+    def test_a_page_with_a_body_and_an_inherited_guard_serves_itself(
+        self, root, client, source, body
+    ) -> None:
+        guard = f"{PAGE_HEAD}page.login_required(inherit=True)\n{source}"
+        write_page(root, "a", guard, body=body)
+        write_page(root, "a/b", page_source())
+
+        with routed(root):
+            own = client.get("/a/")
+            below = client.get("/a/b/")
+
+        assert (own.status_code, below.status_code) == (302, 302)
 
     def test_three_levels_join_root_first(
         self, root, client, isolated_permissions
     ) -> None:
-        write_proxy(root, "proxy.login_required()\n")
-        write_proxy(root / "a", 'proxy.permission_required("auth.view_group")\n')
+        write_guard(root, "page.login_required(inherit=True)\n")
+        write_guard(
+            root / "a", 'page.permission_required("auth.view_group", inherit=True)\n'
+        )
         write_page(
             root, "a/b", page_source('page.permission_required("auth.change_group")\n')
         )
@@ -119,10 +181,10 @@ class TestInheritedAccess:
         [(True, 200, None), (False, 302, "/accounts/login/?next=/a/%3Fx%3D1")],
         ids=["holder", "anonymous"],
     )
-    def test_the_proxy_permission_decides(
+    def test_the_inherited_permission_decides(
         self, root, client, holder, status, location
     ) -> None:
-        write_proxy(root, 'proxy.permission_required("auth.view_group")\n')
+        write_guard(root, 'page.permission_required("auth.view_group", inherit=True)\n')
         write_page(root, "a", page_source())
         if holder:
             sign_in(client, "ada", "view_group")
@@ -133,8 +195,7 @@ class TestInheritedAccess:
         assert (response.status_code, response.get("Location")) == (status, location)
 
     def test_a_sibling_directory_stays_open(self, root, client) -> None:
-        write_proxy(root / "closed", "proxy.login_required()\n")
-        write_page(root, "closed", page_source())
+        write_page(root, "closed", page_source("page.login_required(inherit=True)\n"))
         write_page(root, "open", page_source())
 
         with routed(root):
@@ -143,8 +204,8 @@ class TestInheritedAccess:
 
         assert (closed.status_code, opened.status_code) == (302, 200)
 
-    def test_a_proxy_above_the_tree_root_binds_nothing(self, tmp_path, client) -> None:
-        write_proxy(tmp_path, "proxy.login_required()\n")
+    def test_a_guard_above_the_tree_root_binds_nothing(self, tmp_path, client) -> None:
+        write_guard(tmp_path, "page.login_required(inherit=True)\n")
         root = tmp_path / "pages"
         write_page(root, "a", page_source())
 
@@ -162,10 +223,10 @@ class TestMountedTrees:
     @pytest.fixture()
     def mounted(self, tmp_path) -> Path:
         app = write_app(tmp_path, "wallets", {"pages": ()})
-        write_proxy(app, "proxy.login_required()\n")
-        write_proxy(app / "pages")
+        write_guard(app, "page.login_required(inherit=True)\n")
+        write_guard(app / "pages")
         write_page(app / "pages", "ops", page_source(template="w"))
-        write_proxy(tmp_path / "site", "proxy.login_required()\n")
+        write_guard(tmp_path / "site", "page.login_required(inherit=True)\n")
         write_page(tmp_path / "site", "contact", page_source())
         urlconf = write_urlconf(
             tmp_path,
@@ -178,7 +239,7 @@ class TestMountedTrees:
         ):
             yield app
 
-    def test_the_mounted_page_reads_its_own_proxy_alone(self, mounted, client) -> None:
+    def test_the_mounted_page_reads_its_own_tree_alone(self, mounted, client) -> None:
         response = client.get("/w/1/ops/")
 
         assert (response.status_code, response.content) == (200, b"w")
@@ -188,18 +249,23 @@ class TestMountedTrees:
 
 
 class TestLiftedRequirements:
-    """`public()` lifts the requirements above it, and a deeper proxy binds again."""
+    """`public()` lifts the requirements above it, and a deeper page binds again."""
 
     @pytest.fixture()
     def booking(self, root) -> Path:
         booking = root / "booking"
-        write_proxy(booking, "proxy.login_required()\n")
+        write_guard(booking, "page.login_required(inherit=True)\n")
         write_page(root, "booking/[int:booking]", page_source())
-        receipt = booking / "[int:booking]" / "receipt"
-        write_proxy(receipt, "proxy.public()\n")
-        write_page(root, "booking/[int:booking]/receipt", page_source())
-        write_proxy(receipt / "admin", "proxy.login_required()\n")
-        write_page(root, "booking/[int:booking]/receipt/admin", page_source())
+        write_page(
+            root,
+            "booking/[int:booking]/receipt",
+            page_source("page.public(inherit=True)\n"),
+        )
+        write_page(
+            root,
+            "booking/[int:booking]/receipt/admin",
+            page_source("page.login_required(inherit=True)\n"),
+        )
         return booking
 
     @pytest.mark.parametrize(
@@ -224,10 +290,10 @@ class TestLiftedRequirements:
             again = page_access(receipt / "admin" / "page.py").rule
 
         assert (lifted.public, lifted.requirements) == (True, ())
-        assert lifted.sources == (receipt / "proxy.py",)
+        assert lifted.sources == (receipt / "page.py",)
         assert again.public is False
         assert [item.source for item in again.requirements] == [
-            receipt / "admin" / "proxy.py"
+            receipt / "admin" / "page.py"
         ]
 
     def test_the_view_of_a_lifted_page_skips_the_middleware(
@@ -253,7 +319,7 @@ class TestLiftedRequirements:
         )
 
     def test_a_public_page_lifts_for_itself_alone(self, root, client) -> None:
-        write_proxy(root, "proxy.login_required()\n")
+        write_guard(root, "page.login_required(inherit=True)\n")
         page_path = write_page(root, "a", page_source("page.public()\n"))
         write_page(root, "a/b", page_source())
 
@@ -265,8 +331,45 @@ class TestLiftedRequirements:
         assert (opened.status_code, below.status_code) == (200, 302)
         assert rule.sources == (page_path,)
 
+    @pytest.mark.parametrize(
+        ("declaration", "statuses"),
+        [
+            pytest.param("", [200, 200, 200], id="nothing"),
+            pytest.param("page.login_required()\n", [200, 302, 200], id="own"),
+            pytest.param(
+                "page.login_required(inherit=True)\n", [200, 302, 302], id="inherit"
+            ),
+            pytest.param(
+                'page.permission_required("auth.view_group")\n',
+                [200, 302, 200],
+                id="own-permission",
+            ),
+            pytest.param(
+                'page.permission_required("auth.view_group", inherit=True)\n',
+                [200, 302, 302],
+                id="inherit-permission",
+            ),
+        ],
+    )
+    def test_a_page_below_a_lifted_subtree_binds_again(
+        self, root, client, declaration, statuses
+    ) -> None:
+        write_guard(root, "page.login_required(inherit=True)\n")
+        write_page(root, "a", page_source("page.public(inherit=True)\n"))
+        write_page(root, "a/b", page_source(declaration))
+        write_page(root, "a/b/c", page_source())
+
+        with routed(root):
+            answered = [
+                client.get(url).status_code for url in ("/a/", "/a/b/", "/a/b/c/")
+            ]
+
+        assert answered == statuses
+
     def test_a_requirement_beside_public_still_binds(self, root, client) -> None:
-        write_proxy(root, "proxy.public()\nproxy.login_required()\n")
+        write_guard(
+            root, "page.public(inherit=True)\npage.login_required(inherit=True)\n"
+        )
         write_page(root, "a", page_source())
 
         with routed(root):
@@ -276,15 +379,46 @@ class TestLiftedRequirements:
         assert response.status_code == 302
         assert rule.public is False
 
+    @pytest.mark.parametrize(
+        "declaration",
+        [
+            "page.public(inherit=True)\npage.login_required()\n",
+            'page.public(inherit=True)\npage.permission_required("auth.view_user")\n',
+            "page.public()\npage.login_required(inherit=True)\n",
+            "page.public(inherit=True)\npage.login_required(inherit=True)\n",
+        ],
+        ids=["lift-beside-own", "lift-beside-permission", "own-beside-inherit", "both"],
+    )
+    def test_public_beside_a_requirement_lifts_nothing_below(
+        self, root, declaration
+    ) -> None:
+        write_guard(
+            root / "t", 'page.permission_required("auth.add_group", inherit=True)\n'
+        )
+        write_page(root, "t/a", page_source(declaration))
+        write_page(root, "t/a/kid", page_source())
+
+        with routed(root):
+            clients = {kind: client_as(kind) for kind in ("anonymous", "visitor")}
+            answered = {
+                kind: [each.get(url).status_code for url in _LIFT_URLS]
+                for kind, each in clients.items()
+            }
+            below = page_access(root / "t" / "a" / "kid" / "page.py").rule
+
+        assert answered == {"anonymous": [302, 302], "visitor": [403, 403]}
+        assert below.public is False
+        assert below.requirements[0].perms == ("auth.add_group",)
+
     def test_a_second_public_keeps_the_first_as_the_source(self, root) -> None:
-        write_proxy(root, "proxy.login_required()\n")
-        write_proxy(root / "a", "proxy.public()\n")
-        page_path = write_page(root, "a", page_source("page.public()\n"))
+        write_guard(root, "page.login_required(inherit=True)\n")
+        write_guard(root / "a", "page.public(inherit=True)\n")
+        page_path = write_page(root, "a/b", page_source("page.public()\n"))
 
         with routed(root):
             rule = page_access(page_path).rule
 
-        assert rule.sources == (root / "a" / "proxy.py",)
+        assert rule.sources == (root / "a" / "page.py",)
 
     def test_the_view_carries_the_public_flag(self, root) -> None:
         write_page(root, "open", page_source("page.public()\n"))
@@ -372,10 +506,34 @@ class TestObjectRequirements:
 
         assert response.status_code == 404
 
+    @pytest.mark.parametrize(
+        ("username", "status"), [("ada", 200), ("bob", 403)], ids=["owner", "other"]
+    )
+    def test_an_inherited_object_rule_binds_the_pages_under_the_kwarg(
+        self, root, client, username, status
+    ) -> None:
+        add_perm("auth.edit_group", lambda user, obj: obj.name == f"t:{user.username}")
+        write_guard(
+            root / "edit" / "[int:group]",
+            "from django.contrib.auth.models import Group\n\n"
+            "from next.deps import DObject\n\n"
+            'page.permission_required("auth.edit_group", obj=DObject[Group], '
+            "inherit=True)\n",
+        )
+        write_page(root, "edit/[int:group]/members", page_source())
+        group = Group.objects.create(name="t:ada")
+        sign_in(client, username)
+
+        with routed(root), CaptureQueriesContext(connection) as queries:
+            response = client.get(f"/edit/{group.pk}/members/")
+
+        assert response.status_code == status
+        assert len(_group_queries(queries)) == 1
+
     def test_a_permission_without_an_object_is_checked_first(
         self, root, client
     ) -> None:
-        write_proxy(root, 'proxy.permission_required("auth.view_group")\n')
+        write_guard(root, 'page.permission_required("auth.view_group", inherit=True)\n')
         write_page(root, "edit/[int:group]", _GROUP_PAGE)
         group = Group.objects.create(name="t:ada")
         sign_in(client, "ada")
@@ -434,7 +592,7 @@ class TestObjectRequirements:
 
 
 class TestObjectDeclarations:
-    """A page or a `proxy.py` names its object as `DObject[Model]`, nothing else."""
+    """A `page.py` names its object as `DObject[Model]`, nothing else."""
 
     @pytest.mark.parametrize(
         ("obj", "match"),
@@ -446,13 +604,68 @@ class TestObjectDeclarations:
     )
     def test_another_object_is_refused(self, obj, match) -> None:
         with pytest.raises(TypeError, match=match):
-            proxy.permission_required("auth.edit_group", obj=obj)
+            page.permission_required("auth.edit_group", obj=obj, inherit=True)
 
     def test_a_context_name_on_a_page_rule_is_refused_at_the_lookup(self) -> None:
         lookup = url_lookup(None, {}, {})
 
         with pytest.raises(TypeError, match="only a component names"):
             lookup("group")
+
+
+class _RecordingGate:
+    """A gate that records every lookup it builds and admits every row."""
+
+    def __init__(self) -> None:
+        self.built: list[tuple[object, ...]] = []
+        self.gate = Gate(self._build, self._back)
+
+    def _build(self, *args: object):
+        self.built.append(args)
+        return self._row
+
+    def _row(self, target: object) -> None:
+        return None
+
+    def _back(self, request: object) -> str:
+        return "/back/"
+
+
+class TestEnforce:
+    """`enforce()` builds the lookup of its gate only for a rule asking something."""
+
+    def test_an_open_rule_builds_no_lookup(self) -> None:
+        recording = _RecordingGate()
+        request = RequestFactory().get("/a/")
+        request.user = PermissionHolder()
+
+        denial = enforce(
+            OPEN, None, request, {}, {}, undeclared=True, gate=recording.gate
+        )
+
+        assert denial is None
+        assert recording.built == []
+
+    def test_a_rule_with_requirements_builds_one_lookup(self, tmp_path) -> None:
+        recording = _RecordingGate()
+        request = RequestFactory().get("/a/")
+        request.user = PermissionHolder()
+        url_kwargs = {"pk": 1}
+        dep_cache: dict[str, object] = {}
+        rule = AccessRule((Requirement("login", tmp_path / "page.py"),))
+
+        denial = enforce(
+            rule,
+            None,
+            request,
+            url_kwargs,
+            dep_cache,
+            undeclared=False,
+            gate=recording.gate,
+        )
+
+        assert denial is None
+        assert recording.built == [(request, url_kwargs, dep_cache)]
 
 
 class TestRefusal:
@@ -468,8 +681,8 @@ class TestRefusal:
         with routed(root), pytest.raises(PermissionDenied):
             refusal(page_path, request, {}, {})
 
-    def test_a_broken_proxy_is_a_404(self, root, client) -> None:
-        write_proxy(root, "raise RuntimeError('boom')\n")
+    def test_a_broken_page_above_is_a_404(self, root, client) -> None:
+        write_guard(root, "raise RuntimeError('boom')\n")
         write_page(root, "a", page_source())
 
         with routed(root):
@@ -477,21 +690,21 @@ class TestRefusal:
 
         assert response.status_code == 404
 
-    def test_a_broken_proxy_raises_when_failing_loudly(self, root) -> None:
-        write_proxy(root, "raise RuntimeError('boom')\n")
+    def test_a_broken_page_above_raises_when_failing_loudly(self, root) -> None:
+        write_guard(root, "raise RuntimeError('boom')\n")
         page_path = write_page(root, "a", page_source())
         request = RequestFactory().get("/a/")
 
         with routed(root, STRICT_LOADING=True), pytest.raises(PageModuleImportError):
             refusal(page_path, request, {}, {})
 
-    def test_a_fixed_proxy_applies_on_the_next_request(self, root, client) -> None:
-        declaring = write_proxy(root, "raise RuntimeError('boom')\n")
+    def test_a_fixed_page_above_applies_on_the_next_request(self, root, client) -> None:
+        declaring = write_guard(root, "raise RuntimeError('boom')\n")
         write_page(root, "a", page_source())
 
         with routed(root):
             broken = client.get("/a/")
-            write_proxy(root, "proxy.login_required()\n")
+            write_guard(root, "page.login_required(inherit=True)\n")
             touch_later(declaring)
             fixed = client.get("/a/")
 
@@ -502,7 +715,7 @@ class TestRefusal:
             override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
             pytest.raises(Http404),
         ):
-            refuse_broken(tmp_path / "proxy.py")
+            refuse_broken(tmp_path / "page.py")
 
 
 class TestAccessMemo:
@@ -542,7 +755,6 @@ class TestAccessMemo:
 
         assert again.rule is held.rule
         assert again.version == declarations.version
-        declarations.forget(tmp_path / "elsewhere.py")
 
     def test_a_redeclared_file_of_the_chain_drops_the_memo(self, root) -> None:
         page_path = write_page(root, "a", page_source())
@@ -577,7 +789,7 @@ class TestOwnerAccess:
         assert held.rule.public is True
 
     def test_another_file_answers_with_the_page_beside_it(self, root) -> None:
-        write_proxy(root, "proxy.login_required()\n")
+        write_guard(root, "page.login_required(inherit=True)\n")
         page_path = write_page(
             root, "a", page_source('page.permission_required("x.y")\n')
         )
@@ -592,13 +804,13 @@ class TestOwnerAccess:
         assert [item.kind for item in held.rule.requirements] == ["login", "permission"]
 
     def test_a_directory_without_a_page_answers_with_its_chain(self, root) -> None:
-        write_proxy(root, "proxy.login_required()\n")
+        write_guard(root, "page.login_required(inherit=True)\n")
         other = root / "a" / "forms.py"
         other.parent.mkdir()
         other.write_text("")
 
         with routed(root):
-            load_python_module_memo(root / "proxy.py")
+            load_python_module_memo(root / "page.py")
             held = owner_access(other)
 
         assert held is not None

@@ -96,7 +96,7 @@ Foreign-zone authorization
 A modal body and a page-addressed zone ride ``X-Next-Origin`` so the server resolves the host page that owns the zone.
 The server authorizes the page behind every zone render whose own view did not run, the one the handler names and the one the origin names alike, raising ``ForeignPageNotAuthorizedError`` when that page may not be rendered for the requester.
 This keeps a page-addressed out-of-band render from reaching a zone the requester has no claim on.
-A foreign page whose module fails to import raises ``PageModuleImportError`` from the same authorization step, rather than turning the in-flight request into a 404 and dropping the patches already queued for it.
+A foreign page whose module fails to import, or that sits under a ``page.py`` that fails to import, raises ``PageModuleImportError`` from the same authorization step in production too, rather than turning the in-flight request into a 404 and dropping the patches already queued for it.
 
 Styling layers and toasts
 -------------------------

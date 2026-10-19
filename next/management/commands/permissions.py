@@ -6,9 +6,8 @@ from typing import Any, override
 
 from django.core.management.base import BaseCommand, CommandError
 
-from next.management.table import relative, write_table
-from next.permissions.access import login_middleware
-from next.permissions.endpoints import (
+from next.conf import next_framework_settings
+from next.management.endpoints import (
     Endpoint,
     ViewEndpoint,
     endpoints,
@@ -16,6 +15,8 @@ from next.permissions.endpoints import (
     resolve_view,
     view_endpoints,
 )
+from next.management.table import relative, write_table
+from next.permissions.access import login_middleware
 from next.utils import resolve_base_dir
 
 
@@ -39,6 +40,7 @@ class Command(BaseCommand):
         """Write one aligned row per endpoint under a header."""
         base_dir = resolve_base_dir()
         middleware = _middleware_name()
+        default = _default_name(middleware)
         url = options["url"]
         found: tuple[Endpoint, ...] = ()
         views: tuple[ViewEndpoint, ...] = ()
@@ -52,7 +54,7 @@ class Command(BaseCommand):
             msg = f"No page or view answers the URL {url!r}."
             raise CommandError(msg)
         rows = [
-            *(_row(endpoint, base_dir, middleware) for endpoint in found),
+            *(_row(endpoint, base_dir, default) for endpoint in found),
             *(_view_row(view, middleware) for view in views),
         ]
         write_table(self, ("Kind", "Endpoint", "Access", "Sources"), rows)
@@ -64,7 +66,14 @@ def _middleware_name() -> str:
     return "-" if entry is None else entry.rpartition(".")[2]
 
 
-def _row(endpoint: Endpoint, base_dir: Path | None, middleware: str) -> tuple[str, ...]:
+def _default_name(middleware: str) -> str:
+    """Return what turns the default login on, the setting before the middleware."""
+    if next_framework_settings.LOGIN_REQUIRED:
+        return "LOGIN_REQUIRED"
+    return middleware
+
+
+def _row(endpoint: Endpoint, base_dir: Path | None, default: str) -> tuple[str, ...]:
     """Return the cells of a page, action or component.
 
     An action carries its file, since one name may be declared by several pages.
@@ -76,7 +85,7 @@ def _row(endpoint: Endpoint, base_dir: Path | None, middleware: str) -> tuple[st
     if sources and endpoint.access == "public":
         sources = f"public ({sources})"
     elif not sources and endpoint.closed:
-        sources = middleware
+        sources = default
     return (endpoint.kind, name, endpoint.access, sources or "-")
 
 

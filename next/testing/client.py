@@ -140,9 +140,8 @@ class NextClient(Client):
     ) -> HttpResponse:
         """Resolve `action_name` and POST `data` to the resulting URL.
 
-        `origin` fills the `_next_form_origin` hidden field unless `data` carries one,
-        `page` picks among same-named actions as in `resolve_action_url`, and `partial`
-        stamps `X-Next-Request` with `zones` and `version`.
+        `origin` fills `_next_form_origin` unless `data` has one, `page` picks among
+        same-named actions as in `resolve_action_url`, `partial` stamps the request.
         """
         url = resolve_action_url(action_name, page=page)
         payload: dict[str, Any] = dict(data or {})

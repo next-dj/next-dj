@@ -2,7 +2,8 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from django.core.exceptions import PermissionDenied
 from django.forms import BaseModelForm
@@ -14,37 +15,34 @@ from next.forms.uid import posted_origin_path
 from next.pages import page
 from next.pages.access import (
     AccessStamp,
+    Gate,
     access_stamp,
-    left_to_middleware,
+    enforce,
     owner_access,
     page_access,
-    refuse_broken,
     url_lookup,
 )
-from next.permissions.access import (
-    answer,
-    check,
-    login_middleware_active,
-    login_redirect,
-    signed_in,
-)
+from next.permissions.access import declared, login_redirect, signed_in
 from next.permissions.manager import permission_manager
-from next.permissions.markers import OPEN, AccessRule, joined
+from next.permissions.markers import OPEN, AccessRule, Requirement, joined
 
 from .build import _resolve_and_call
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from typing import Protocol
 
     from django import forms as django_forms
     from django.db.models import Model
     from django.http import HttpRequest, HttpResponseBase
 
-    from next.forms.backends import ActionGuard
+    from next.forms.backends import ActionGuard, ActionMeta
     from next.forms.base import PermissionOutcome
     from next.forms.origin import OriginMatch
+    from next.pages.access import PageAccess
+    from next.permissions.access import Lookup
+    from next.permissions.markers import AccessObject
 
     from . import _DispatchState
 
@@ -69,70 +67,165 @@ if TYPE_CHECKING:
 
 _NO_PERMISSIONS: tuple[str, ...] = ()
 
+FORM_OBJECT: Final = "form"
+"""The object of a guard permission that dispatch asks of the bound form."""
+
+COMPONENT_MODULE: Final = "component.py"
+
+type _Branch = Literal["wizard", "handler", "form"]
+
+
+def _branch(meta: "ActionMeta") -> "_Branch | None":
+    """Return the branch dispatch takes for an action, `None` when it declares none.
+
+    The guard reads it too, so only the form branch defers its registered permissions.
+    """
+    if meta.get("wizard_class") is not None:
+        return "wizard"
+    if meta.get("form_class") is not None:
+        return "form"
+    if meta.get("handler") is not None:
+        return "handler"
+    return None
+
 
 @dataclass(frozen=True, slots=True)
-class _Split:
-    """The guard permissions checked up front and the ones a predicate answers."""
+class _GuardRule:
+    """The rule of one guard and the permission registry version it was built under."""
 
     version: int
-    static: tuple[str, ...]
-    registered: tuple[str, ...]
+    rule: AccessRule
 
 
-_splits: dict[tuple[str, ...], _Split] = {}
+_guard_rules: dict[tuple["ActionGuard", str, bool], _GuardRule] = {}
 
 
-def _split_permissions(permissions: tuple[str, ...]) -> _Split:
-    """Split guard permissions into the static ones and the registered object ones.
+def _build_guard_rule(
+    guard: "ActionGuard", source: Path, *, on_form: bool
+) -> AccessRule:
+    """Return the login and the permissions a guard asks, bound to its file.
 
-    The split is kept per tuple until the permission registry changes.
+    On the form branch a permission `add_perm` registered is asked of the bound form.
     """
-    version = permission_manager.version
-    held = _splits.get(permissions)
-    if held is not None and held.version == version:
-        return held
-    registered = tuple(
-        perm for perm in permissions if permission_manager.is_registered(perm)
+    permissions = guard.permissions
+    registered = (
+        tuple(perm for perm in permissions if permission_manager.is_registered(perm))
+        if on_form
+        else ()
     )
     static = (
         tuple(perm for perm in permissions if perm not in registered)
         if registered
         else permissions
     )
-    held = _splits[permissions] = _Split(version, static, registered)
-    return held
+    requirements = [Requirement("login", source)]
+    if static:
+        requirements.append(Requirement("permission", source, static))
+    if registered:
+        requirements.append(Requirement("permission", source, registered, FORM_OBJECT))
+    return AccessRule(tuple(requirements), sources=(source,))
 
 
-def _object_permissions(guard: "ActionGuard | None") -> tuple[str, ...]:
-    """Return the guard permissions a registered predicate answers per object."""
-    if guard is None or not guard.permissions:
-        return _NO_PERMISSIONS
-    return _split_permissions(guard.permissions).registered
+def guard_rule(meta: "ActionMeta") -> AccessRule:
+    """Return the rule the `Meta` guard of an action asks, the one dispatch enforces.
+
+    The rule is kept per guard until the permission registry changes.
+    """
+    guard = meta.get("guard")
+    if guard is None:
+        return OPEN
+    file_path = meta["file_path"]
+    on_form = _branch(meta) == "form"
+    key = (guard, file_path, on_form)
+    version = permission_manager.version
+    held = _guard_rules.get(key)
+    if held is None or held.version != version:
+        rule = _build_guard_rule(guard, Path(file_path), on_form=on_form)
+        held = _guard_rules[key] = _GuardRule(version, rule)
+    return held.rule
+
+
+def _object_permissions(rule: AccessRule) -> tuple[str, ...]:
+    """Return the guard permissions dispatch asks of the bound form, in guard order."""
+    for requirement in rule.requirements:
+        if requirement.obj == FORM_OBJECT:
+            return requirement.perms
+    return _NO_PERMISSIONS
+
+
+def _origin_path(request: "HttpRequest") -> str:
+    """Return the page a login sends an action POST back to, the root without one."""
+    return posted_origin_path(request) or "/"
 
 
 def _check_access(
-    request: "HttpRequest", guard: "ActionGuard", *, object_stage: bool = False
+    request: "HttpRequest", rule: AccessRule
 ) -> HttpResponseRedirect | None:
-    """Enforce the action guard with `AccessMixin` semantics.
+    """Enforce a guard rule up to the bound form, with `AccessMixin` semantics.
 
-    Anonymous users are sent to log in, and `object_stage` defers registered perms.
+    Anonymous users are sent to log in, and a permission on the form waits for it.
     """
-    if not signed_in(getattr(request, "user", None)):
-        return login_redirect(posted_origin_path(request) or "/")
-    permissions = guard.permissions
-    if permissions and object_stage:
-        permissions = _split_permissions(permissions).static
-    user = cast("_PermissionHolder", request.user)
-    if permissions and not user.has_perms(permissions):
-        raise PermissionDenied
+    user = getattr(request, "user", None)
+    for requirement in rule.requirements:
+        if requirement.kind == "login":
+            if not signed_in(user):
+                return login_redirect(request, _origin_path(request))
+        elif requirement.obj is None and not cast("_PermissionHolder", user).has_perms(
+            requirement.perms
+        ):
+            raise PermissionDenied
     return None
+
+
+@dataclass(frozen=True, slots=True)
+class OwnerRule:
+    """The rule an action owes its file, with the broken file of its chain."""
+
+    rule: AccessRule
+    broken: Path | None
+
+
+def owner_rule(file_path: Path) -> OwnerRule | None:
+    """Return the rule an action answers to by its file, `None` when nothing owns it.
+
+    A `component.py` adds what it declares, so its actions refuse whom it hides from.
+    """
+    owner = owner_access(file_path)
+    own = declared(file_path) if file_path.name == COMPONENT_MODULE else OPEN
+    if not own.requirements:
+        return None if owner is None else OwnerRule(owner.rule, owner.broken)
+    if owner is None:
+        return OwnerRule(own, None)
+    return OwnerRule(joined((owner.rule, own)), owner.broken)
+
+
+def _action_lookup(
+    request: "HttpRequest",
+    url_kwargs: "Mapping[str, object]",
+    dep_cache: dict[str, Any],
+) -> "Lookup":
+    """Return the row lookup of an action, which finds no component context.
+
+    A POST renders no component, so a permission on its context finds no object.
+    """
+    rows = url_lookup(request, url_kwargs, dep_cache)
+
+    def lookup(target: "AccessObject") -> object:
+        return None if isinstance(target, str) else rows(target)
+
+    return lookup
+
+
+_ACTION_GATE: Final = Gate(_action_lookup, _origin_path)
+
+_NO_KWARGS: Final[MappingProxyType[str, object]] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
 class _Tree:
     """The rules over one action and its origin page, joined once per change.
 
-    An open rule defers to `LoginRequiredMiddleware`, and a posted origin opens nothing.
+    An open rule asks the default login, and a posted origin opens nothing.
     """
 
     stamp: AccessStamp | None
@@ -149,16 +242,16 @@ def _build_tree(
 ) -> _Tree:
     """Read the rules of the action owner and of the origin page and join them.
 
-    A file of a tree answers to the page of its directory.
+    A tree file answers to the page of its directory, a `component.py` to itself too.
     """
-    owner = None if file_path is None else owner_access(Path(file_path))
+    owner = None if file_path is None else owner_rule(Path(file_path))
     origin = None if origin_path is None else page_access(origin_path)
-    accesses = [held for held in (owner, origin) if held is not None]
+    accesses: list[OwnerRule | PageAccess] = [
+        held for held in (owner, origin) if held is not None
+    ]
     broken = next((held.broken for held in accesses if held.broken is not None), None)
     owned = OPEN if owner is None else owner.rule
-    deferred = left_to_middleware(owned) or (
-        origin is not None and left_to_middleware(origin.rule)
-    )
+    deferred = owned.undeclared or (origin is not None and origin.rule.undeclared)
     rule = joined(held.rule for held in accesses)
     return _Tree(None if broken is not None else stamp, rule, broken, deferred)
 
@@ -192,24 +285,17 @@ def _check_tree_access(
     """
     origin_path = origin_match.page_path if origin_match is not None else None
     tree = _tree(file_path if isinstance(file_path, str) else None, origin_path)
-    if tree.broken is not None:
-        refuse_broken(tree.broken)
-    rule = tree.rule
-    if not rule.requirements:
-        if (
-            tree.deferred
-            and login_middleware_active()
-            and not signed_in(getattr(request, "user", None))
-        ):
-            return login_redirect(posted_origin_path(request) or "/")
-        return None
-    url_kwargs = dict(origin_match.url_kwargs) if origin_match is not None else {}
-    lookup = url_lookup(request, url_kwargs, dep_cache)
-    denial = check(getattr(request, "user", None), rule, lookup)
-    if denial is None:
-        return None
+    url_kwargs = origin_match.url_kwargs if origin_match is not None else _NO_KWARGS
     try:
-        return answer(denial, posted_origin_path(request) or "/")
+        return enforce(
+            tree.rule,
+            tree.broken,
+            request,
+            url_kwargs,
+            dep_cache,
+            undeclared=tree.deferred,
+            gate=_ACTION_GATE,
+        )
     except PermissionDenied:
         _emit_form_access_denied(
             request, action_name, uid, layer="page", reason="denied", sender=sender

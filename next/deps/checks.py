@@ -17,11 +17,10 @@ from next.checks.common import (
     iter_scanned_pages,
 )
 from next.components.context import component
-from next.components.sources import get_components_manager
-from next.conf import next_framework_settings
+from next.components.sources import components_listed, import_component_modules
 from next.forms.checks.sources import iter_registered_actions
 from next.introspect import describe_callable
-from next.pages.access import page_access
+from next.pages.access import page_access, subtree_only
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.manager import page
 from next.urls.routes import page_route
@@ -32,7 +31,9 @@ from .objects import (
     SCOPE_DEPENDENCY,
     object_kwarg,
     object_target,
+    scoped_query,
     unresolved_object,
+    unscoped_reason,
 )
 from .resolver import current_resolver
 
@@ -175,22 +176,23 @@ def _page_run(root: PageRoot, url_path: str, page_path: Path) -> _PageRun:
 def _loaded_pages(
     router_manager: RouterManager,
 ) -> Iterator[tuple[PageRoot, str, Path]]:
-    """Yield each `page.py` that loaded once, with the tree the walk found it in."""
+    """Yield each page that loaded once, with the tree the walk found it in.
+
+    A `page.py` that only guards the pages below serves no route, so it is left out.
+    """
     loaded = {path for _url_path, path in discover_page_registrations(router_manager)}
     for router in router_manager.backends:
         for root, url_path, page_path in iter_scanned_pages(router):
-            if page_path in loaded:
+            if page_path in loaded and not subtree_only(page_path):
                 loaded.discard(page_path)
                 yield root, url_path, page_path
 
 
 def _component_callables() -> Iterator[Callable[..., Any]]:
     """Yield every `@component.context` callable once the component modules ran."""
-    configs = next_framework_settings.COMPONENT_BACKENDS
-    if not isinstance(configs, list) or not configs:
+    if not components_listed():
         return
-    for backend in get_components_manager().backends:
-        backend.import_component_modules()
+    import_component_modules()
     for functions in component.registry.registered().values():
         for function in functions:
             yield function.func
@@ -342,14 +344,11 @@ def check_object_managers(*args, **kwargs) -> list[CheckMessage]:
         if model in checked:
             continue
         checked.add(model)
-        if callable(getattr(model._meta.default_manager, "visible_to", None)):
+        if scoped_query(model) is not None:
             continue
         errors.append(
             Error(
-                f"{site} loads its row through "
-                f"{model._meta.label}._default_manager.visible_to(scope), which "
-                "that manager does not define. Add visible_to(scope) to the "
-                "default manager, returning the rows the scope may see.",
+                f"{site} loads its row through {unscoped_reason(model)}",
                 obj=model,
                 id="next.E153",
             )

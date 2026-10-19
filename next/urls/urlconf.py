@@ -14,7 +14,10 @@ from typing import TYPE_CHECKING, overload, override
 from django.conf import settings
 from django.core.exceptions import AppRegistryNotReady
 from django.urls import URLPattern, URLResolver, get_resolver
+from django.urls.resolvers import RegexPattern
 from django.utils import translation
+
+from next.utils import join_trail, prefix_trail, regex_trail
 
 
 if TYPE_CHECKING:
@@ -81,6 +84,7 @@ class MountPoint:
     mount: Mount
     prefix: str
     kwargs: frozenset[str] = frozenset()
+    trail: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +139,13 @@ def _join_route(head: str, tail: str) -> str:
     return tail if not head else head + tail.removeprefix("^")
 
 
+def _route_trail(pattern: object) -> str:
+    """Return the trail an include route adds, a regex one as Django reverses it."""
+    if isinstance(pattern, RegexPattern):
+        return regex_trail(str(pattern))
+    return prefix_trail(str(pattern))
+
+
 class _Walk:
     """The state of one walk over the include tree of the root URLconf.
 
@@ -150,7 +161,11 @@ class _Walk:
         self.complete = True
 
     def visit(
-        self, resolver: URLResolver, prefix: str, kwargs: frozenset[str] = frozenset()
+        self,
+        resolver: URLResolver,
+        prefix: str,
+        kwargs: frozenset[str] = frozenset(),
+        trail: str = "",
     ) -> None:
         """Record a mounted include target, or walk on into a list of patterns.
 
@@ -162,7 +177,7 @@ class _Walk:
             return
         patterns = getattr(source, "urlpatterns", source)
         if isinstance(patterns, MountedPatterns):
-            self._note(patterns.mount, prefix, kwargs)
+            self._note(patterns.mount, prefix, kwargs, trail)
             return
         if not isinstance(patterns, list | tuple):
             return
@@ -172,11 +187,14 @@ class _Walk:
                     entry,
                     _join_route(prefix, str(entry.pattern)),
                     kwargs | _captured(entry),
+                    join_trail(trail, _route_trail(entry.pattern)),
                 )
 
-    def _note(self, mount: Mount | None, prefix: str, kwargs: frozenset[str]) -> None:
+    def _note(
+        self, mount: Mount | None, prefix: str, kwargs: frozenset[str], trail: str
+    ) -> None:
         if mount is not None:
-            self.points.append(MountPoint(mount, prefix, kwargs))
+            self.points.append(MountPoint(mount, prefix, kwargs, trail))
         elif self.include_point is None:
             self.include_point = prefix
             self.include_index = len(self.points)

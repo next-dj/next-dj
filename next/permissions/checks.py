@@ -15,20 +15,24 @@ from django.template import Template, TemplateSyntaxError
 from django.template.base import NodeList
 
 from next.checks import NEXT
-from next.components.sources import get_components_manager
+from next.components.sources import components_listed, get_components_manager
 from next.conf import next_framework_settings
+from next.conf.defaults import USER_SETTING
 from next.forms.checks.sources import iter_registered_actions
 from next.pages.checks.access import access_in_use, load_declarations
 from next.pages.checks.composed import iter_composed_pages
 from next.pages.checks.metadata.templates import TemplateSearch
 from next.pages.paths import page_template_path
+from next.utils import middleware_listed
 
-from .access import declared, declared_files
+from .access import auth_installed, declared, declared_files, login_middleware
 from .backends import ObjectPermissionBackend
 from .manager import listed_backends, permission_manager
 from .markers import signature_problem
 from .nodes import HasPermNode
 
+
+_AUTH_MIDDLEWARE: Final = "django.contrib.auth.middleware.AuthenticationMiddleware"
 
 _BACKEND: Final = (
     f"{ObjectPermissionBackend.__module__}.{ObjectPermissionBackend.__qualname__}"
@@ -80,8 +84,7 @@ def check_permission_backend(*args, **kwargs) -> list[CheckMessage]:
 
 def _component_sources() -> list[tuple[Path, str]]:
     """Return the path and text of every component template, each file once."""
-    configs = next_framework_settings.COMPONENT_BACKENDS
-    if not isinstance(configs, list) or not configs:
+    if not components_listed():
         return []
     manager = get_components_manager()
     found: dict[Path, str] = {}
@@ -132,7 +135,7 @@ def _template_places() -> dict[tuple[str, _Place], None]:
 
 
 def _declared_places() -> dict[tuple[str, _Place], None]:
-    """Return each permission a page, proxy or component declares, with its file."""
+    """Return each permission a page or a component declares, with its file."""
     load_declarations()
     return {
         (perm, (f"permission_required() in {file_path}", str(file_path))): None
@@ -158,7 +161,7 @@ def check_permissions_known(*args, **kwargs) -> list[CheckMessage]:
 
     An action guard is read only once the project declares access, as it predates it.
     """
-    if "django.contrib.auth" not in settings.INSTALLED_APPS:
+    if not auth_installed():
         return []
     declared_places = _declared_places()
     guard_places = _guard_places() if access_in_use() else {}
@@ -180,7 +183,71 @@ def check_permissions_known(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
+@register(NEXT)
+def check_login_required_setting(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about `LOGIN_REQUIRED` set false beside the login middleware (`next.W130`).
+
+    The middleware asks the login anyway, so the setting turns nothing off.
+    """
+    raw = getattr(settings, USER_SETTING, None)
+    if not isinstance(raw, dict) or raw.get("LOGIN_REQUIRED", True):
+        return []
+    entry = login_middleware()
+    if entry is None:
+        return []
+    return [
+        DjangoWarning(
+            f'NEXT_FRAMEWORK["LOGIN_REQUIRED"] is False, yet MIDDLEWARE lists {entry}, '
+            "which asks a login of every page and action that declares no access, "
+            "so the setting turns nothing off.",
+            hint=(
+                "Drop the key or set it to True, or remove the middleware and declare "
+                "login_required() where a login is meant."
+            ),
+            obj=settings,
+            id="next.W130",
+        )
+    ]
+
+
+def _missing_user() -> str | None:
+    """Return what keeps a signed-in user off every request, `None` when nothing."""
+    if not auth_installed():
+        return "django.contrib.auth is not in INSTALLED_APPS"
+    if not middleware_listed(settings.MIDDLEWARE, _AUTH_MIDDLEWARE):
+        return f"MIDDLEWARE lists no {_AUTH_MIDDLEWARE}"
+    return None
+
+
+@register(NEXT)
+def check_login_required_auth(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about `LOGIN_REQUIRED` on without auth or its middleware (`next.W131`).
+
+    No request then carries a signed-in user, so the default login refuses everyone.
+    """
+    if not next_framework_settings.LOGIN_REQUIRED:
+        return []
+    missing = _missing_user()
+    if missing is None:
+        return []
+    return [
+        DjangoWarning(
+            f'NEXT_FRAMEWORK["LOGIN_REQUIRED"] is True, yet {missing}, so no request '
+            "carries a signed-in user and every page and action that declares no "
+            "access sends each visitor to the login.",
+            hint=(
+                "Install django.contrib.auth with its AuthenticationMiddleware, or "
+                "drop the key and declare login_required() where a login is meant."
+            ),
+            obj=settings,
+            id="next.W131",
+        )
+    ]
+
+
 __all__ = [
+    "check_login_required_auth",
+    "check_login_required_setting",
     "check_permission_backend",
     "check_permission_predicates",
     "check_permissions_known",

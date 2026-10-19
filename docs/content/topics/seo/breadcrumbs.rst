@@ -53,16 +53,10 @@ The crumb whose URL is the request path is the current one.
 
 The kwargs an include around the tree captures, such as the ``tenant`` of ``path("<str:tenant>/", include("next.urls"))`` or the route above a ``pages()`` include, are passed to every crumb as well.
 
-Layouts and contexts stay inside one page tree, while the crumbs of a page continue up the URL.
-The walk starts above the shallowest page of the own tree, whose crumbs the page already folds, cuts the route of the match one part at a time from the deepest, fills each shorter route with the kwargs of the match, and hands it to :func:`~django.urls.resolve`.
-The first prefix that resolves to a page ends the walk.
-A page of the own tree hosts nothing, and a page of another tree, assembled into ``next.urls`` or placed through ``pages()``, becomes the host, whose crumbs lead the crumbs of the page, and the host reaches further up the same way.
-A tree whose root page answers at the root of the URL has nothing above it, so its crumbs are its own.
-In the ``admin`` example ``/admin/activity/`` therefore reads ``Dashboard`` and ``Activity``, and ``/admin/library/book/1/outline/`` reads ``Dashboard``, ``Books``, and ``Outline``, the ``Books`` crumb coming from the generic changelist that serves ``/admin/library/book/``.
-A route included through :func:`~django.urls.re_path` has no route to cut, so its pages find no host.
-The crumbs of the host fold from its metadata chain under its own URL kwargs, and its contexts never run, so a host label whose ``@page.metadata`` callable needs a context value of the host page is left out.
-A host page whose access rule the request does not pass gives no crumbs at all, and a rule that names an object counts as not passed, since only the render of that page may load the object.
-The host crumbs are read once something reads them, the ``{% breadcrumbs %}`` tag or the ``BreadcrumbList`` of the JSON-LD graph.
+The crumbs of a page come from its own page tree, the directories above it on disk, as its layouts and its contexts do.
+A tree that a ``pages()`` include places under a prefix starts its trail at its own root, so a page of another tree above it in the URL adds no crumb.
+A ``page.py`` that serves no page and declares the access of the pages below it may still set a ``breadcrumb``, see :ref:`topics-access-declaring-page`.
+Its crumb reverses the route of its directory like any other, so it links to whatever page answers that route in the namespace of the request, and renders as plain text when none does.
 
 The tag
 -------

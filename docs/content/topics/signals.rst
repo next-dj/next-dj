@@ -97,7 +97,7 @@ Every signal the framework emits is listed below with the subsystem that emits i
      - After the wizard ``done`` method returns a response below HTTP 400 for the final step.
    * - ``form_access_denied``
      - Forms
-     - When the origin page, a dynamic permission hook, or a registered permission on the bound form denies a request, never on the static guard path.
+     - When the access rule of the page tree, the origin page, a dynamic permission hook, or a registered permission on the bound form denies a request, never on the static guard path.
    * - ``form_backend_loaded``
      - Forms
      - After a form action backend is created from its configuration entry.
@@ -210,12 +210,12 @@ A receiver that sends mail, queues a task, or calls another service schedules th
 The call waits for the commit of the outermost transaction and never runs when the transaction rolls back, and a rolled-back savepoint drops only the calls scheduled inside it.
 Outside a transaction, in autocommit, it runs at once.
 The save, delete, and many-to-many model signals send the database alias as ``using``, and passing it on makes the hook wait on that database rather than on the default one.
-The hook runs after ``send`` has returned, so its return value never reaches the caller, and an exception it raises surfaces at the commit rather than out of ``send``.
+Inside a transaction the hook runs after ``send`` has returned, so its return value never reaches the caller and an exception it raises surfaces at the commit, while in autocommit it runs and raises inside ``send``.
 
 :func:`~django.db.transaction.on_commit` keeps the hook in the memory of the process until the commit.
 A process that dies between the commit and the hook, or a hook that raises, leaves the change stored and the reaction undone, and nothing retries it.
 That is an acceptable trade for a reaction that can be rebuilt, such as a cache entry or a search index.
-Where the reaction may not be lost, the change writes an event row into an outbox table inside the same transaction, and a separate process delivers the rows and marks them delivered, at least once, so every receiver tolerates the same event twice.
+A reaction that may not be lost belongs in an outbox row written inside the same transaction, which a separate process delivers at least once.
 
 Failure contract
 ~~~~~~~~~~~~~~~~

@@ -174,6 +174,7 @@ from tests.support.permissions import (
     MODEL_BACKEND,
     OBJECT_PERMISSION_BACKENDS,
     PermissionHolder,
+    QuietHolder,
     is_owner,
     is_staff,
     owns_group,
@@ -186,6 +187,7 @@ from tests.support.ports import (
     port_methods,
 )
 from tests.support.routers import (
+    ENTRY_ROUTER,
     AppRootRouter,
     EntryRouter,
     MalformedRootsRouter,
@@ -196,6 +198,7 @@ from tests.support.routers import (
     RaisingSkipNamesRouter,
     RootPagesRouter,
     SkippingRouter,
+    routers_from,
 )
 from tests.support.scenarios import tick_scenario
 from tests.support.sites import (
@@ -238,6 +241,7 @@ __all__ = [
     "COERCE_URL_VALUE_CASES",
     "DUMMY_COMPONENTS_BACKEND",
     "EMPTY_ASSET_CASES",
+    "ENTRY_ROUTER",
     "FEED_URLCONF",
     "FINDER_INSTALL_CASES",
     "I18N",
@@ -321,6 +325,7 @@ __all__ = [
     "PlanCase",
     "PlanEntry",
     "PrefixingStaticBackend",
+    "QuietHolder",
     "RaisingComponentsRouter",
     "RaisingRootsRouter",
     "RaisingSkipNamesRouter",
@@ -398,6 +403,7 @@ __all__ = [
     "restored_resolver",
     "restored_static_registries",
     "routed",
+    "routers_from",
     "site_settings",
     "static_names_resolved_by",
     "throwaway_apps",

@@ -3,14 +3,12 @@ from typing import Any
 from admin_audit.models import AdminActivityLog
 from django.http import HttpRequest
 
-from next import context, page
+from next import context
 
 
 _LIMIT = 50
 
 metadata = {"breadcrumb": "Activity"}
-
-page.permission_required("admin_audit.view_adminactivitylog")
 
 
 @context("activity_state")

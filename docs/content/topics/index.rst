@@ -21,8 +21,8 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`layouts`
    Layout discovery and composition of the ``layout.djx`` chain.
 
-:doc:`proxy`
-   ``proxy.py``, the access of a directory and its subtree, inheritance, and ``public()``.
+:doc:`access`
+   The access a ``page.py`` declares for its page and its subtree, the default login, and ``public()``.
 
 :doc:`context`
    ``@context`` and ``@component.context`` patterns and inheritance.
@@ -86,7 +86,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
    url-reversing
    pages
    layouts
-   proxy
+   access
    context
    components
    seo/index

@@ -75,7 +75,6 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "context",
             "ld",
             "page",
-            "proxy",
             "signals",
         }
     ),

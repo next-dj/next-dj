@@ -59,10 +59,10 @@ class TestRegistryAccess:
         assert manager.registry is not PermissionManager().registry
         assert isinstance(manager.registry, PermissionRegistry)
 
-    def test_add_returns_the_predicate_and_bumps_the_version(self, manager) -> None:
+    def test_add_stores_a_predicate_and_bumps_the_version(self, manager) -> None:
         before = manager.version
-        rule = manager.add("blog.change_post", is_owner)
-        assert isinstance(rule, Predicate)
+        manager.add("blog.change_post", is_owner)
+        assert isinstance(manager.registry.get("blog.change_post"), Predicate)
         assert manager.version == before + 1
         assert manager.version == manager.registry.version
 
@@ -126,7 +126,7 @@ class TestHasPerm:
         assert manager.has_module_perms(anonymous, "blog") is False
         assert asked == []
 
-    @pytest.mark.usefixtures("isolated_permissions", "object_permission_backend")
+    @pytest.mark.usefixtures("object_permission_backend")
     def test_a_real_anonymous_user_is_refused_through_django(self) -> None:
         asked: list[object] = []
         permissions.add_perm("blog.view_post", lambda who: asked.append(who) or True)
@@ -364,17 +364,18 @@ class TestModelPermissionMemo:
 class TestModuleFunctions:
     """The module functions answer through the shared manager."""
 
-    @pytest.mark.usefixtures("isolated_permissions")
     def test_add_and_has_perm(self) -> None:
-        rule = permissions.add_perm("blog.change_post", is_owner)
+        assert permissions.add_perm("blog.change_post", is_owner) is None
         user = _user()
         post = SimpleNamespace(owner=user)
-        assert permission_manager.registry.get("blog.change_post") is rule
+        held = permission_manager.registry.get("blog.change_post")
+        assert held is not None
+        assert held.test is is_owner
         assert permissions.has_perm(user, "blog.change_post", post) is True
         assert permissions.has_perm(user, "blog.change_post") is False
 
-    @pytest.mark.usefixtures("isolated_permissions")
     def test_add_perm_keeps_a_built_predicate(self) -> None:
         rule = predicate(is_staff)
-        assert permissions.add_perm("blog.change_post", rule) is rule
+        permissions.add_perm("blog.change_post", rule)
+        assert permission_manager.registry.get("blog.change_post") is rule
         assert permissions.has_perm(_user(staff=True), "blog.change_post") is True

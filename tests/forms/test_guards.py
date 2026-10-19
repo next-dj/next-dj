@@ -35,9 +35,11 @@ from next.forms.dispatch.permissions import (
     _check_access,
     _emit_form_access_denied,
     _normalize_permission,
+    guard_rule,
 )
 from next.forms.manager import form_action_manager
 from next.forms.signals import action_dispatched, form_access_denied
+from next.permissions.markers import AccessRule
 from tests.support import GuardedTenantForm, bound_dependency, build_post_request
 from tests.support.cases.forms import (
     PERMISSION_HOOK_BAD_TYPE,
@@ -226,19 +228,23 @@ class TestGuardRegistration:
         assert meta.get("guard") == expected
 
 
+def _rule(guard: ActionGuard) -> AccessRule:
+    return guard_rule({"guard": guard, "file_path": "/x/forms.py"})
+
+
 class TestCheckAccess:
     """_check_access enforces AccessMixin semantics on the dispatch request."""
 
     def test_request_without_user_redirects_to_login(self, rf) -> None:
         request = rf.post("/_next/form/x/", {"_next_form_origin": "/boards/2/"})
-        denial = _check_access(request, ActionGuard(login_required=True))
+        denial = _check_access(request, _rule(ActionGuard(login_required=True)))
         assert denial is not None
         assert denial.url == "/accounts/login/?next=/boards/2/"
 
     def test_anonymous_user_redirects_with_root_fallback(self, rf) -> None:
         request = rf.post("/_next/form/x/")
         request.user = AnonymousUser()
-        denial = _check_access(request, ActionGuard(login_required=True))
+        denial = _check_access(request, _rule(ActionGuard(login_required=True)))
         assert denial is not None
         assert denial.url == "/accounts/login/?next=/"
 
@@ -246,14 +252,14 @@ class TestCheckAccess:
         request = rf.post(
             "/_next/form/x/", {"_next_form_origin": "https://evil.example/"}
         )
-        denial = _check_access(request, ActionGuard(login_required=True))
+        denial = _check_access(request, _rule(ActionGuard(login_required=True)))
         assert denial is not None
         assert denial.url == "/accounts/login/?next=/"
 
     def test_origin_past_the_url_length_cap_rides_along(self, rf) -> None:
         origin = "/items/?q=" + "x" * 3000
         request = rf.post("/_next/form/x/", {"_next_form_origin": origin})
-        denial = _check_access(request, ActionGuard(login_required=True))
+        denial = _check_access(request, _rule(ActionGuard(login_required=True)))
         assert denial is not None
         assert denial.url == "/accounts/login/?next=/items/%3Fq%3D" + "x" * 3000
 
@@ -261,20 +267,20 @@ class TestCheckAccess:
         request = rf.post("/_next/form/x/")
         request.user = _PermUser(allowed=False)
         with pytest.raises(PermissionDenied):
-            _check_access(request, ActionGuard(permissions=("auth.add_user",)))
+            _check_access(request, _rule(ActionGuard(permissions=("auth.add_user",))))
 
     def test_authenticated_with_permission_passes(self, rf) -> None:
         request = rf.post("/_next/form/x/")
         user = _PermUser(allowed=True)
         request.user = user
         guard = ActionGuard(permissions=("auth.add_user",))
-        assert _check_access(request, guard) is None
+        assert _check_access(request, _rule(guard)) is None
         assert user.checked == ("auth.add_user",)
 
     def test_login_only_guard_passes_authenticated_user(self) -> None:
         request = HttpRequest()
         request.user = _PermUser(allowed=False)
-        assert _check_access(request, ActionGuard(login_required=True)) is None
+        assert _check_access(request, _rule(ActionGuard(login_required=True))) is None
 
 
 @pytest.mark.django_db()
@@ -361,10 +367,20 @@ class TestGuardDispatchViaClient:
         assert client_no_csrf.get(url).status_code == 405
 
 
+_AUTH_CONFIG = "django.contrib.auth.apps.AuthConfig"
+
+
 class TestPermissionGuardCheck:
     """next.W060 warns on permission_required without django.contrib.auth."""
 
     def test_auth_installed_is_clean(self) -> None:
+        assert check_action_guard_permissions() == []
+
+    def test_auth_installed_by_its_app_config_is_clean(self, settings) -> None:
+        settings.INSTALLED_APPS = [
+            _AUTH_CONFIG if app == "django.contrib.auth" else app
+            for app in settings.INSTALLED_APPS
+        ]
         assert check_action_guard_permissions() == []
 
     def test_permission_without_auth_app_warns(self, settings) -> None:

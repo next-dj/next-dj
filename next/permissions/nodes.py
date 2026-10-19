@@ -7,6 +7,8 @@ from django.template.base import FilterExpression, Node, NodeList
 
 from next.seeding import REQUEST_KEY
 
+from .access import holds
+
 
 def _user(context: Context) -> object:
     """Return the user of the render, read off its request before the context.
@@ -50,14 +52,13 @@ class HasPermNode(Node):
 
         An object that resolves to nothing denies, so it never asks the model question.
         """
-        check = getattr(_user(context), "has_perm", None)
         perm = self.perm.resolve(context, ignore_failures=True)
-        if not callable(check) or not isinstance(perm, str) or not perm:
+        if not isinstance(perm, str) or not perm:
             return False
+        user = _user(context)
         if self.obj is None:
-            return bool(check(perm))
-        obj = self.obj.resolve(context, ignore_failures=True)
-        return obj is not None and bool(check(perm, obj))
+            return holds(user, (perm,))
+        return holds(user, (perm,), self.obj.resolve(context, ignore_failures=True))
 
     @override
     def render(self, context: Context) -> str:

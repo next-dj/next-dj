@@ -12,7 +12,7 @@ uv run python manage.py startapp home
 uv run python manage.py startapp myapp
 ```
 
-next.dj then joins in canonical file names. `config/settings.py` lists `"next"`, `home` and `myapp` in `INSTALLED_APPS` and holds `NEXT_FRAMEWORK`, `config/urls.py` includes `next.urls` at the root, and `chrome/` is the project-level page root. `home` ships the public welcome page in `home/pages/`. `myapp` ships an `Item` model with `ItemQuerySet.visible_to`, `create_item` and `rename_item` in `services.py`, an `item_created` signal in `signals.py`, object permissions in `permissions.py`, an abstract `ItemForm` in `forms.py`, an `ItemAdmin` that writes through the services, and a page tree at `/myapp/`. Pages replace the `views.py` that `startapp` writes, so it is gone, and so are the empty `models.py`, `admin.py` and `migrations/` of `home`.
+next.dj then joins in canonical file names. `config/settings.py` lists `"next"`, `home` and `myapp` in `INSTALLED_APPS` and holds `NEXT_FRAMEWORK`, `config/urls.py` mounts the `myapp` tree under `myapp/` through `pages()` and includes `next.urls` at the root for the rest, and `chrome/` is the project-level page root. `home` ships the public welcome page in `home/pages/`. `myapp` ships an `Item` model with `ItemQuerySet.visible_to`, `create_item` and `rename_item` in `services.py`, an `item_created` signal in `signals.py`, object permissions in `permissions.py`, an abstract `ItemForm` in `forms.py`, an `ItemAdmin` that writes through the services, and a page tree at `/myapp/`. Pages replace the `views.py` that `startapp` writes, so it is gone, and so are the empty `models.py`, `admin.py` and `migrations/` of `home`.
 
 On top of that the folder carries:
 
@@ -24,9 +24,19 @@ On top of that the folder carries:
 
 ## Layout
 
-Two kinds of page roots feed one file router. `chrome/` is the project-level root listed in `PAGE_BACKENDS["DIRS"]`, and its `layout.djx` is the outermost HTML envelope wrapped around every page. `home/pages/` and `myapp/pages/` are per-app roots the router finds through `APP_DIRS=True`, and their directories spell the URL, so `home/pages/page.py` answers `/` and `myapp/pages/myapp/page.py` answers `/myapp/`. `uv run python manage.py routes` prints where every page landed, with its URL name and access rule. Components resolve from `_components/` folders inside a page tree and from the shared kit.
+Two kinds of page roots feed one file router. `chrome/` is the project-level root listed in `PAGE_BACKENDS["DIRS"]`, and its `layout.djx` is the outermost HTML envelope wrapped around every page. `home/pages/` and `myapp/pages/` are per-app roots the router finds through `APP_DIRS=True`, and their directories spell the URL below the place [`config/urls.py`](config/urls.py) gives them, the way a Django project includes the URLconf of an app:
 
-`LoginRequiredMiddleware` closes every page by default. The welcome page declares `page.public()`, and `/myapp/` sends an anonymous visitor to the admin sign-in. A page tree reads rows through `.objects.visible_to(...)` or a function of `services.py` and writes through a form or a service, as `myapp` already does.
+```python
+urlpatterns = [
+    path("admin/", admin.site.urls),
+    path("myapp/", pages("myapp")),
+    path("", include("next.urls")),
+]
+```
+
+`pages("myapp")` from `next.urls` mounts the `pages/` tree of `myapp` under the prefix the project picks, so `myapp/pages/page.py` answers `/myapp/` with no `myapp/` directory repeating the prefix inside the tree. The tree leaves `include("next.urls")`, which keeps routing every other tree at the root, so `home/pages/page.py` answers `/`. The pages of a `pages()` tree are named in the namespace of their app, and `page_reverse(namespace="myapp")` and `reverse("myapp:page_")` both give `/myapp/`. `uv run python manage.py routes` prints where every page landed, with its URL name and access rule. Components resolve from `_components/` folders inside a page tree and from the shared kit.
+
+`LoginRequiredMiddleware` closes every view by default, the pages included. The welcome page declares `page.public()`, and `/myapp/` sends an anonymous visitor to the admin sign-in. `NEXT_FRAMEWORK["LOGIN_REQUIRED"] = True` closes the page trees the same way without the middleware, as the [admin example](../admin/README.md) does, and only the middleware also closes a plain Django view the project adds beside them. A page tree reads rows through `.objects.visible_to(...)` or a function of `services.py` and writes through a form or a service, as `myapp` already does.
 
 The app follows the canonical next.dj layout, the one every example in this repository shares:
 
@@ -39,10 +49,9 @@ myapp/
 ├── permissions.py   # add_perm rules
 ├── forms.py         # abstract ItemForm
 ├── admin.py         # ItemAdmin over the services
-└── pages/           # PAGES_DIR, the page tree
-    └── myapp/       # the /myapp/ URL
-        ├── page.py
-        └── template.djx
+└── pages/           # PAGES_DIR, the tree pages("myapp") mounts at /myapp/
+    ├── page.py
+    └── template.djx
 ```
 
 Add a `deps.py` for DI providers and named dependencies when the example needs one, and the framework imports it at startup with no `ready()` code, like `signals.py`, `permissions.py` and `forms.py`.
@@ -53,7 +62,7 @@ The scaffold ships deliberately generic names. Each rename touches more than one
 
 | Rename | Also update |
 | --- | --- |
-| `myapp/` | `INSTALLED_APPS` in [`config/settings.py`](config/settings.py), the `myapp/pages/myapp/` directory that spells its URL, `next_pages` in [`pytest.ini`](pytest.ini), the `myapp.*` permission names in `permissions.py` and `forms.py`, and the `related_name` and constraint name in `models.py` |
+| `myapp/` | `INSTALLED_APPS` in [`config/settings.py`](config/settings.py), the `pages("myapp")` include and its `myapp/` prefix in [`config/urls.py`](config/urls.py), `next_pages` in [`pytest.ini`](pytest.ini), the `myapp.*` permission names in `permissions.py` and `forms.py`, and the `related_name` and constraint name in `models.py` |
 | `chrome/` | `PAGE_BACKENDS["DIRS"]` |
 | `next.dj template`, `https://template.example` and `Next.dj example template` | `NAME` and `URL` under `NEXT_FRAMEWORK["SITE"]`, and the `title` default under `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in `config/settings.py`, the tab title of every page that declares none |
 | The site `description` | `description` under `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`, the search snippet of every page that declares none |
@@ -76,7 +85,7 @@ uv run python manage.py runserver
 uv run pytest
 ```
 
-`/` is public, `/myapp/` lists the items of the signed-in user and adds new ones, and `/admin/` edits them through the same services. `tests/test_integration.py` drives the welcome page, its head and asset URLs, the route map, the item page with its form, and the admin add and change views, and `tests/test_unit.py` covers the services, `visible_to` and the permissions. Every example is gated at 100% coverage by `make test-examples`.
+`/` is public, `/myapp/` lists the items of the signed-in user and adds new ones, and `/admin/` edits them through the same services. `tests/test_integration.py` drives the welcome page, its head and asset URLs, the route map, the prefix and namespace of the `myapp` tree, the item page with its form, and the admin add and change views, and `tests/test_unit.py` covers the services, `visible_to` and the permissions. Every example is gated at 100% coverage by `make test-examples`.
 
 ## Further reading
 

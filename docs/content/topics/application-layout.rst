@@ -255,7 +255,7 @@ The table names each familiar pattern, where Django already provides it, and wha
      - The framework signals, importable from ``next.signals``.
    * - Chain of responsibility
      - Middleware.
-     - The ``layout.djx`` chain that wraps every page below a layout, the ``proxy.py`` chain whose access every page below it inherits until a ``public()`` lifts it, and ``inherit_context=True`` that passes a context value down the tree.
+     - The ``layout.djx`` chain that wraps every page below a layout, the ``inherit=True`` access every page below a ``page.py`` answers to until a ``public()`` lifts it, and ``inherit_context=True`` that passes a context value down the tree.
    * - Command
      - Management commands.
      - Form actions, each an ``on_valid`` or an ``@action`` handler served at its own endpoint behind its guards, and ``FormWizard`` as a command split into steps.
@@ -300,6 +300,6 @@ See also
    :doc:`project-layout` for the files of an application and the project sizes.
    :doc:`dependency-injection` for the providers that live in ``deps.py``.
    :doc:`permissions` for the predicates that live in ``permissions.py``.
-   :doc:`proxy` for the access of a page tree, which a predicate answers through ``obj=DObject[Model]``.
+   :doc:`access` for the access of a page tree, which a predicate answers through ``obj=DObject[Model]``.
    :doc:`signals` for the signals the framework sends.
    :doc:`/content/topics/forms/actions` for the ``Meta`` guards on a form.

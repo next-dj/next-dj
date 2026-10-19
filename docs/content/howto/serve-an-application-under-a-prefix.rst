@@ -63,7 +63,7 @@ The second argument names that directory, and the ``namespace`` keyword gives it
    ]
 
 The ``wallet`` value the route captures reaches each page of that tree as a URL kwarg, as it does for any :func:`~django.urls.include`.
-The layout and the contexts of ``pages/`` do not reach the ``operations`` tree, while its breadcrumbs start with those of the nearest page above it in the URL that the user may open, such as ``wallets/pages/[int:wallet]/page.py`` for ``/wallets/1/operations/``.
+The layout, the contexts, the access declarations, and the breadcrumbs of ``pages/`` do not reach the ``operations`` tree, which starts its own at its root.
 
 .. code-block:: python
    :caption: wallets/operations/page.py
@@ -87,20 +87,24 @@ A directory under ``operations/`` must not capture ``wallet`` again, which ``man
 Declare the access of each tree
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A tree under a prefix inherits no ``proxy.py`` of the tree the prefix belongs to, so the ``operations`` tree keeps a ``proxy.py`` at its root, see :ref:`topics-proxy-tree-boundary`.
+A tree under a prefix inherits no declaration of the tree the prefix belongs to, so the root ``page.py`` of the ``operations`` tree declares the rule of the whole tree with ``inherit=True``, see :ref:`topics-access-tree-boundary`.
+Add the declarations at the top of the same ``page.py``, above the contexts.
 
 .. code-block:: python
-   :caption: wallets/operations/proxy.py
+   :caption: wallets/operations/page.py
 
    from wallets.models import Wallet
 
+   from next import page
    from next.deps import DObject
-   from next.pages import proxy
 
-   proxy.login_required()
-   proxy.permission_required("wallets.view_wallet", obj=DObject[Wallet])
+   page.login_required(inherit=True)
+   page.permission_required("wallets.view_wallet", obj=DObject[Wallet], inherit=True)
+
+Every page of the tree now requires a login and ``wallets.view_wallet`` on the wallet its route captures.
 
 ``manage.py permissions`` lists the rule of every page of both trees, so a tree left without access shows in the table, see :doc:`/content/ref/management`.
+The ``examples/_template/`` project of the repository includes its application tree the same way, as ``path("myapp/", pages("myapp"))`` beside ``include("next.urls")``.
 
 Reverse the placed pages
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -135,5 +139,5 @@ See also
 
    :doc:`/content/topics/file-router` for the route order and the names of every tree.
    :doc:`/content/topics/project-layout` for where prefixes fit as a project grows.
-   :doc:`/content/topics/proxy` for the access each tree declares.
+   :doc:`/content/topics/access` for the access each tree declares.
    :doc:`/content/ref/management` for the columns of ``manage.py routes``.

@@ -124,17 +124,17 @@ Access control
 --------------
 
 Every form action answers at ``/_next/form/<uid>/``, an endpoint any visitor can POST to.
-An action declared in a page tree answers to the access its page and the ``proxy.py`` files above it declare, and a forged origin lifts none of it, see :doc:`actions`.
-An action nothing guards, declared under no requirement, with no ``Meta`` guard, and without ``LoginRequiredMiddleware``, runs for anonymous visitors, which ``next.W129`` reports in a project that declares access, see :doc:`actions`.
+An action declared in a page tree answers to the access its page and the ``page.py`` files above it declare, and a forged origin lifts none of it, see :doc:`actions`.
+An action nothing guards, declared under no requirement, with no ``Meta`` guard, and without the default login, runs for anonymous visitors, which ``next.W129`` reports in a project that declares access, see :doc:`actions`.
 
 Enforce access at one of these layers.
 
-- Declare ``proxy.login_required()`` or ``proxy.permission_required()`` in a ``proxy.py`` for a section, or the same calls on ``page`` for one page, which also bind its actions and its zones, see :ref:`topics-permissions-tree`.
-- Declare ``Meta.login_required`` and ``Meta.permission_required`` on the form class, or the same keywords on ``@action``, for a static guard checked before any application code, see :ref:`topics-forms-actions-guards`.
+- Declare ``page.login_required()`` or ``page.permission_required()`` in a ``page.py`` for one page, or with ``inherit=True`` for a section, which also bind its actions and its zones, see :ref:`topics-access`.
+- Declare ``Meta.login_required`` and ``Meta.permission_required`` on the form class, or the same keywords on ``@action``, for a static guard checked before any application code, with a permission registered in ``permissions.py`` checked on the bound row once the form binds, see :ref:`topics-forms-actions-guards`.
 - Override ``check_permissions`` or ``has_object_permission`` on the form class for a per-request decision against the database, the tenant, or the loaded row, see :ref:`topics-forms-actions-dynamic-guards`.
 - Check ``request.user.is_authenticated`` and ownership inside ``on_valid`` before ``self.save()``.
 - Return a response from the ``render()`` of the page that carries the form, which the dispatcher runs on the submission before any handler, so one check covers the visit and every action posted from that page, see :doc:`/content/topics/pages`.
-- Apply a project-wide login requirement through Django's ``LoginRequiredMiddleware``, see :doc:`/content/howto/require-login-on-pages`.
+- Apply a project-wide login requirement through ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or Django's ``LoginRequiredMiddleware``, see :doc:`/content/howto/require-login-on-pages`.
 - Enforce a policy in a custom form action backend that wraps every dispatch.
 
 An action that mutates data and an action that loads an instance through ``instance_from_url`` both need this guard.
@@ -160,7 +160,7 @@ What a custom backend must preserve
 
 Replacing a backend replaces the code that enforces a guarantee, so each family carries an obligation the bundled implementation meets for you.
 
-- A ``FormActionBackend`` whose ``dispatch`` drives the pipeline by hand rather than delegating to ``FormActionDispatch.dispatch`` runs no page tree access rule and no ``ActionGuard`` check, so the ``proxy.py`` and page declarations, ``Meta.login_required``, and ``Meta.permission_required`` stop applying to every action it serves, and ``check_permissions`` and ``has_object_permission`` stop running with them.
+- A ``FormActionBackend`` whose ``dispatch`` drives the pipeline by hand rather than delegating to ``FormActionDispatch.dispatch`` runs no page tree access rule and no ``ActionGuard`` check, so the page declarations, ``Meta.login_required``, and ``Meta.permission_required`` stop applying to every action it serves, and ``check_permissions`` and ``has_object_permission`` stop running with them.
 - The same hand-rolled ``dispatch`` also skips the authorization of the resolved origin page, so a guard living in a page's ``render()`` stops covering the submissions that backend serves.
 - A ``FormWizardBackend`` keeps each draft reachable only by the requester that wrote it, which both bundled backends get by keying on the session, so a store keyed on anything a client supplies hands one visitor another's partially entered data.
 - A ``StaticBackend`` that overrides a tag renderer takes on the URL escaping, because the finished tag is spliced past the template engine and the bundled renderers escape ``str(url)`` through :func:`html.escape`, see :doc:`static-assets`.

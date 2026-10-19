@@ -16,6 +16,7 @@ from django.utils.encoding import iri_to_uri
 from next import utils
 from next.checks import reset_check_caches
 from next.conf import NextFrameworkSettings, next_framework_settings
+from next.deps.objects import forget_object_rows
 from next.diagnostics import reset_failure_logs, watch_degraded
 from next.forms.wizard import SessionFormWizardBackend, wizard_backend_manager
 from next.pages import Page
@@ -32,6 +33,7 @@ from tests.support import (
     IntentOnlyShaper,
     build_mock_http_request,
     install_visibility_hooks,
+    isolated_form_registries,
     restored_permissions,
     tags,
     tick_scenario,
@@ -102,6 +104,14 @@ def _reset_check_caches() -> Generator[None, None, None]:
     reset_check_caches()
     yield
     reset_check_caches()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_object_rows() -> Generator[None, None, None]:
+    """Drop the `visible_to` memo, since tests patch and lift the manager hooks."""
+    forget_object_rows()
+    yield
+    forget_object_rows()
 
 
 @pytest.fixture(autouse=True)
@@ -254,8 +264,18 @@ def isolated_permissions() -> Generator[PermissionManager, None, None]:
 
 
 @pytest.fixture()
-def isolated_declarations() -> Generator[None, None, None]:
-    """Run the test over no access declarations and restore the earlier ones after."""
+def form_registries() -> Generator[None, None, None]:
+    """Run the test over empty form action registries and restore them after."""
+    with isolated_form_registries():
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _isolated_declarations() -> Generator[None, None, None]:
+    """Run each test over no access declarations and restore the earlier ones after.
+
+    A page module a test runs declares into the shared registry, read by later checks.
+    """
     with restored_declarations():
         yield
 

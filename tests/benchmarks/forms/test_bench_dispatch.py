@@ -4,14 +4,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 from django import forms
-from django.contrib.auth.models import Group
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, QueryDict
+from django.test import RequestFactory
 
-from next.deps.objects import SCOPE_DEPENDENCY
 from next.forms import Form
 from next.forms.backends import ActionRegistration, RegistryFormActionBackend
 from next.forms.dispatch import FormActionDispatch
 from next.forms.dispatch.build import _form_action_context_callable
+from next.forms.dispatch.permissions import _trees
 from next.forms.dispatch.responses import _normalize_handler_response
 from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
@@ -19,14 +19,14 @@ from next.forms.origin import (
     resolve_origin,
 )
 from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
-from tests.benchmarks.factories import StandInRows
-from tests.support import PermissionHolder, bound_dependency, routed
-from tests.support.access import write_proxy
+from next.pages.access import forget_page_access
+from tests.benchmarks.factories import STAND_IN_PK
+from tests.support import PermissionHolder, QuietHolder, routed
+from tests.support.access import write_guard
 from tests.support.helpers import build_mock_http_request
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
     from pathlib import Path
 
     from next.forms.backends import ActionMeta
@@ -269,8 +269,7 @@ class TestBenchFormBuild:
         assert namespace.form.initial == {}
 
 
-_TREE_PROXY = "proxy.login_required()\n"
-_TREE_GROUP_PK = 7
+_TREE_GUARD = "page.login_required(inherit=True)\n"
 _TREE_PAGES = {
     "open": "x = 1\n",
     "guarded": (
@@ -285,28 +284,17 @@ _TREE_PAGES = {
 }
 
 
-@pytest.fixture()
-def stand_in_scope(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
-    """Answer every `Group` lookup from memory and bind the `scope` dependency."""
-    rows = StandInRows(Group(pk=_TREE_GROUP_PK, name="bench"))
-    monkeypatch.setattr(
-        Group._default_manager, "visible_to", rows.visible_to, raising=False
-    )
-    with bound_dependency(SCOPE_DEPENDENCY, lambda: "tenant"):
-        yield
-
-
 def _tree_action(
     root: Path, shape: str
 ) -> tuple[RegistryFormActionBackend, ActionMeta]:
     """Register the bench action as declared by a `page.py` of a routed tree.
 
-    Every shape but `open` adds a `proxy.py` requiring a login above the page.
+    Every shape but `open` adds a `page.py` requiring a login above the page.
     """
     directory = root / "guarded" / "[int:group]"
     directory.mkdir(parents=True)
     if shape != "open":
-        write_proxy(root, _TREE_PROXY)
+        write_guard(root, _TREE_GUARD)
     page_file = directory / "page.py"
     page_file.write_text(_TREE_PAGES[shape])
     (directory / "template.djx").write_text("<p>bench</p>\n")
@@ -325,6 +313,13 @@ def _tree_action(
     return backend, meta
 
 
+def _tree_post(origin: str) -> HttpRequest:
+    """Return the bench POST of a valid form submitted from `origin`."""
+    return RequestFactory().post(
+        "/_next/form/bench/", {"name": "bench", ORIGIN_FIELD_NAME: origin}
+    )
+
+
 @pytest.mark.usefixtures("stand_in_scope")
 class TestBenchDispatchUnderTreeAccess:
     """A valid dispatch of an action whose `page.py` sits under a page tree rule."""
@@ -336,12 +331,7 @@ class TestBenchDispatchUnderTreeAccess:
     ) -> None:
         root = tmp_path / "pages"
         backend, meta = _tree_action(root, shape)
-        origin = f"/guarded/{_TREE_GROUP_PK}/"
-        request = build_mock_http_request(
-            method="POST",
-            POST=QueryDict(f"name=bench&{ORIGIN_FIELD_NAME}={origin}"),
-            FILES=None,
-        )
+        request = _tree_post(f"/guarded/{STAND_IN_PK}/")
         request.user = PermissionHolder("auth.change_user")
         with routed(root):
             response = FormActionDispatch.dispatch(
@@ -351,6 +341,32 @@ class TestBenchDispatchUnderTreeAccess:
             assert isinstance(response, HttpResponseRedirect)
             assert response.url == "/"
             assert bool(request.user.asked) is (shape != "open")
+            request.user = QuietHolder("auth.change_user")
             benchmark(
                 FormActionDispatch.dispatch, backend, request, "bench_action", meta
+            )
+
+    @pytest.mark.benchmark(group="forms.dispatch.access")
+    def test_dispatch_after_the_rules_drop(self, tmp_path: Path, benchmark) -> None:
+        """The first dispatch after a reload, which joins the rules over it again."""
+        root = tmp_path / "pages"
+        backend, meta = _tree_action(root, "guarded-object")
+        request = _tree_post(f"/guarded/{STAND_IN_PK}/")
+        request.user = QuietHolder("auth.change_user")
+
+        def forget() -> None:
+            forget_page_access()
+            _trees.clear()
+
+        with routed(root):
+            response = FormActionDispatch.dispatch(
+                backend, request, "bench_action", meta
+            )
+            assert isinstance(response, HttpResponseRedirect)
+            benchmark.pedantic(
+                FormActionDispatch.dispatch,
+                args=(backend, request, "bench_action", meta),
+                setup=forget,
+                rounds=200,
+                iterations=1,
             )

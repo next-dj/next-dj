@@ -5,8 +5,6 @@ from django.contrib.auth import get_user_model
 from next.testing import NextClient
 
 
-# At import rather than in a fixture, because conftest import precedes the
-# plugin's session-scoped page load and the pages read the admin registry.
 django_admin.autodiscover()
 
 

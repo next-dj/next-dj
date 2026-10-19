@@ -38,10 +38,14 @@ Backends
    * - ``prefix``
      - The full route from the root URLconf that a ``pages()`` include places the tree under, in Django :func:`~django.urls.path` syntax, and ``None`` for a tree ``next.urls`` routes.
    * - ``namespace``
-     - The URL namespace of the tree, ``next`` unless a ``pages()`` include names another.
+     - The URL namespace of the tree, ``next`` for a tree ``next.urls`` routes, and for a ``pages()`` tree the application label or the ``namespace`` the call passes.
+   * - ``trail``
+     - The include route of a ``pages()`` tree as a trail, ``[name]`` for each named group, and ``None`` for a tree of ``next.urls``.
 
-``prefix`` and ``namespace`` default, so ``PageRoot(path=..., label=...)`` from a custom backend reports a tree of ``next.urls``.
-``route_trail(trail)`` returns the trail a page at the tree-relative ``trail`` routes by, prefix included.
+``prefix``, ``namespace``, and ``trail`` default, so ``PageRoot(path=..., label=...)`` from a custom backend reports a tree of ``next.urls``.
+``route_trail(trail)`` returns the trail a page at the tree-relative ``trail`` routes by, prefix included, read from ``trail`` when it is set and from ``prefix`` otherwise.
+The walk of the URLconf builds ``trail`` segment by segment, a :func:`~django.urls.path` segment by its converters and a :func:`~django.urls.re_path` segment the way Django reverses it, a named group becoming ``[name]`` and a pattern Django cannot reverse becoming a catch-all, so the SEO checks and the sitemap read the trail of a tree under ``re_path()`` as Django would reverse it.
+A tree under a prefix Django cannot reverse lists no static page in the sitemap.
 
 Every page view the file router generates carries a ``next_page_path`` attribute naming the page source, including the synthesised ``page.py`` location of a virtual ``template.djx`` route.
 The form dispatcher reads it when it resolves a posted origin URL back to the page that re-renders after a validation failure.
@@ -72,7 +76,7 @@ A subdirectory other than ``PAGES_DIR`` routes only through a ``pages()`` includ
 Manager
 ~~~~~~~
 
-``urlpatterns`` is a one-element sequence holding the resolver named by ``URL_RESOLVER``, which ships as ``TrieURLResolver`` and wraps a lazy sequence of router, form-action, and SEO patterns.
+``urlpatterns`` is a one-element sequence holding the resolver named by ``URL_RESOLVER``, which ships as ``TrieURLResolver`` and wraps a lazy sequence of the CSRF, form-action, page, and SEO patterns, in that order.
 :func:`~django.urls.include` therefore receives one resolver, and the pattern collection is deferred to the first URL resolution instead of running while the root URLconf imports.
 It is a ``Sequence`` rather than a ``list``, so a root URLconf hands it to ``include()`` and never concatenates or appends to it.
 Code that reads ``next.urls.urlpatterns`` directly observes that one element, not the individual page patterns.

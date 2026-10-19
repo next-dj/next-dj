@@ -18,7 +18,7 @@ from next.introspect import (
     defining_file,
     registering_file,
 )
-from next.permissions.access import Declarations, require_permission
+from next.permissions.access import require_login, require_permission
 from next.utils import resolved_tree
 
 
@@ -185,10 +185,10 @@ def _context_name(obj: object) -> str | None:
     raise TypeError(msg)
 
 
-class ComponentContextManager(Declarations):
+class ComponentContextManager:
     """Registers and looks up context helpers used from `component.py`.
 
-    Its access declarations bind the `component.py` that makes them.
+    Its access declarations bind the `component.py` that makes them and nothing else.
     """
 
     def __init__(self) -> None:
@@ -235,6 +235,10 @@ class ComponentContextManager(Declarations):
             return func
 
         return decorator(func_or_key) if callable(func_or_key) else decorator
+
+    def login_required(self) -> None:
+        """Require a logged-in user, the way Django's `login_required` does."""
+        require_login(registering_file())
 
     def permission_required(
         self, perm: str | tuple[str, ...], *, obj: str | None = None

@@ -1,9 +1,14 @@
 from pathlib import Path
-from unittest.mock import patch
 
-from next.urls import router_manager
 from next.urls.routes import Route, collect_routes
-from tests.support import installed_apps, write_app, write_page, write_urlconf
+from tests.support import (
+    ENTRY_ROUTER,
+    installed_apps,
+    routers_from,
+    write_app,
+    write_page,
+    write_urlconf,
+)
 
 
 def _rows(root: Path) -> list[tuple[str, str, str]]:
@@ -86,14 +91,8 @@ class TestCollectRoutes:
         assert [url for url, *_rest in rows] == ["/cart/"]
 
     def test_without_a_file_router_there_are_no_routes(self) -> None:
-        entry = {"BACKEND": "tests.support.routers.EntryRouter"}
-
-        with patch.object(
-            router_manager, "_get_next_pages_config", return_value=[entry]
-        ):
-            router_manager.reload()
+        with routers_from(ENTRY_ROUTER):
             routes = collect_routes()
-        router_manager.reload()
 
         assert routes == []
 

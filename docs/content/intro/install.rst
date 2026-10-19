@@ -254,7 +254,7 @@ The steps above already hold the two that are required.
 The rest is optional and follows what the project needs.
 
 Every page behind a login.
-   List Django's :class:`~django.contrib.auth.middleware.LoginRequiredMiddleware` right after ``AuthenticationMiddleware`` and set ``LOGIN_URL``.
+   Set ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` to ``True``, or list Django's :class:`~django.contrib.auth.middleware.LoginRequiredMiddleware` right after ``AuthenticationMiddleware``, which also closes the Django views of the project, and set ``LOGIN_URL``.
    A page anyone may open, the sign-in page among them, then declares ``page.public()`` in its ``page.py``, see :doc:`/content/howto/require-login-on-pages`.
 
    .. code-block:: python

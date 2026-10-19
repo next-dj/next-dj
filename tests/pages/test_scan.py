@@ -4,14 +4,9 @@ from unittest.mock import MagicMock, patch
 
 from django.core.checks import Error
 
-from next.discovery import get_router_manager
 from next.pages.loaders import module_stamps
-from next.pages.scan import (
-    iter_proxy_modules,
-    iter_serialized_page_context_keys,
-    load_scanned_page_modules,
-)
-from tests.support import MalformedRootsRouter, patch_checks_router_manager, routed
+from next.pages.scan import iter_serialized_page_context_keys, load_scanned_page_modules
+from tests.support import MalformedRootsRouter, patch_checks_router_manager
 
 
 class TestSerializedPageContextKeys:
@@ -142,31 +137,3 @@ class TestLoadScannedPageModules:
         with patch_checks_router_manager(pages_directory=routed) as (manager, _r, _d):
             load_scanned_page_modules(manager)
         assert module_stamps((stray,)) == (None,)
-
-
-class TestLayoutModules:
-    """iter_proxy_modules yields every `proxy.py` of the routed trees once."""
-
-    def test_a_tree_nested_in_another_yields_each_proxy_once(self, tmp_path) -> None:
-        inner = tmp_path / "inner"
-        inner.mkdir()
-        proxies = [tmp_path / "inner" / "proxy.py", tmp_path / "proxy.py"]
-        for proxy in proxies:
-            proxy.write_text("")
-
-        with routed(tmp_path, inner):
-            router_manager, _errors = get_router_manager()
-            found = list(iter_proxy_modules(router_manager))
-
-        assert found == proxies
-
-    def test_a_proxy_under_a_skipped_folder_is_walked(self, tmp_path) -> None:
-        (tmp_path / "_private").mkdir()
-        (tmp_path / "_private" / "proxy.py").write_text("")
-        (tmp_path / "proxy.py").write_text("")
-
-        with routed(tmp_path):
-            router_manager, _errors = get_router_manager()
-            found = list(iter_proxy_modules(router_manager))
-
-        assert found == [tmp_path / "_private" / "proxy.py", tmp_path / "proxy.py"]

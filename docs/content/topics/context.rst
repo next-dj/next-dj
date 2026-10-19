@@ -109,7 +109,7 @@ The inherit_context flag
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``inherit_context=True`` makes a keyed value visible to every descendant route, not only to the page that declares it.
-A section that shares a value declares it in the ``page.py`` of its directory, and the access of the section lives in a ``proxy.py`` that holds no context, see :doc:`proxy`.
+A section that shares a value declares it in the ``page.py`` of its directory, and the access of the section follows the same model with ``inherit=True``, see :doc:`access`.
 
 .. code-block:: python
    :caption: notes/pages/page.py
@@ -252,7 +252,7 @@ Inheritance rules
 
 Inherited context follows the filesystem route tree.
 The framework walks up from the current ``page.py`` directory and runs every ``@context`` callable marked ``inherit_context=True`` that it finds in ancestor ``page.py`` files.
-The walk follows the directories on disk, not the URL, so a tree mounted under a prefix of another tree inherits nothing from the ``page.py`` files of the host.
+The walk follows the directories on disk, not the URL, so a tree that ``pages()`` places under a prefix of another tree inherits nothing from the ``page.py`` files of the host.
 
 - A ``page.py`` at ``notes/pages/`` publishes inherited values for every page under that root.
 - A ``page.py`` at ``notes/pages/admin/`` publishes inherited values only for pages under ``/admin/``.

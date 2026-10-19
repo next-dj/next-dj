@@ -177,7 +177,7 @@ App order in ``INSTALLED_APPS``
 
 Django runs every ``AppConfig.ready`` during application population, in ``INSTALLED_APPS`` order, so an app listed above ``next`` registers before ``NextFrameworkConfig.ready`` runs and an app listed below it registers after.
 For the registries on this page that ordering does not change the outcome.
-``NextFrameworkConfig.ready`` installs the autoreload, template, and staticfiles hooks, imports the ``deps``, ``forms``, and ``signals`` modules of every app, then installs the component hooks and runs component discovery, and none of those steps read the kind, stem, placeholder, provider, named-dependency, or patch-verb registries.
+``NextFrameworkConfig.ready`` installs the autoreload, template, and staticfiles hooks, imports the ``deps``, ``permissions``, ``forms``, and ``signals`` modules of every app, then installs the component hooks and runs component discovery, and none of those steps read the kind, stem, placeholder, provider, named-dependency, or patch-verb registries.
 Each of those registries is read on the first render, the first dispatch, or the first ``manage.py check``, and the watch specs are resolved when the autoreload watcher starts, all of which happen after application population finishes.
 What matters is that the call sits in ``ready`` rather than in request-time code, not where the app sits in the list.
 

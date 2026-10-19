@@ -154,15 +154,17 @@ Page tree access
 
 ``_check_tree_access`` runs first, right after origin resolution.
 It joins the rule of the owner, the page of the directory the action is declared in, with the rule of the resolved origin page, so a forged origin adds requirements and lifts none, see :doc:`/content/security/actions`.
-A chain holding a broken file answers 404 or raises under ``fail_loudly``, an anonymous user is redirected to ``LOGIN_URL`` with the posted origin as ``next``, and a refusal raises ``PermissionDenied`` after sending ``form_access_denied`` with ``layer="page"`` and ``reason="denied"``.
+It runs through ``enforce`` of ``next.pages.access``, the check a page view runs.
+An anonymous user is redirected to the login page with the posted origin as ``next``, under the default login before a broken chain is judged, a chain holding a broken file answers 404 or raises under ``fail_loudly``, and a refusal raises ``PermissionDenied`` after sending ``form_access_denied`` with ``layer="page"`` and ``reason="denied"``.
 Each ``obj=DObject[Model]`` loads its row through ``url_lookup`` from the URL kwargs of the posted origin, the kwargs a ``DObject`` parameter of the handler reads, and through the same dependency cache, so the check and the handler see one row.
 An origin whose route does not capture the kwarg of the model raises ``UnboundObjectError``, and a row the scope does not see answers 404 before any permission is asked.
-A rule without requirements still requires a login while ``LoginRequiredMiddleware`` is listed, through the ``deferred`` flag of the joined rules, when the owner rule or the origin rule declares nothing and is not public, and an action outside any tree has an empty owner rule, so it is closed at any origin, because the endpoint itself is marked with ``login_not_required``.
+A rule without requirements still requires a login while ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware`` turns the default login on, through the ``deferred`` flag of the joined rules, when the owner rule or the origin rule declares nothing and is not public, and an action outside any tree has an empty owner rule, so it is closed at any origin, because the endpoint itself is marked with ``login_not_required``.
 
 Access guard
 ------------
 
 An action that declares ``login_required`` or ``permission_required`` carries an ``ActionGuard`` in its registry metadata under the ``guard`` key.
+``guard_rule(meta)`` turns it into the ``AccessRule`` the dispatcher enforces, the same rule ``manage.py permissions`` prints, a registered permission on the form branch as ``perm <name> on form``.
 The shared pipeline enforces this static guard right after the page tree access and ahead of the page authorization, ``get_initial``, and form binding, so no application code or database access runs for a request the static guard denies.
 An anonymous user receives a redirect to ``LOGIN_URL`` whose ``next`` is the validated posted origin, and an authenticated user missing a permission raises ``PermissionDenied``.
 

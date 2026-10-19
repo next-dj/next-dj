@@ -12,7 +12,6 @@ from next.deps import (
 )
 
 
-# The one POST key `CardProvider` and `MoveCardForm` both read.
 CARD_PARAM = "card_id"
 
 

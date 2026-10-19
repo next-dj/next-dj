@@ -6,25 +6,21 @@ from django.conf import settings
 from django.core.management import CommandError, call_command
 from django.test import override_settings
 
-from tests.support import isolated_form_registries, routed, write_page
+from tests.support import routed, write_page
 from tests.support.access import (
     COMPONENTS,
     login_required_middleware,
     page_source,
     write_access_project,
-    write_proxy,
+    write_guard,
 )
 
+
+pytestmark = pytest.mark.usefixtures("form_registries")
 
 VIEWS_URLCONF = "tests.permissions.urls_views"
 
 SUBCLASS = "tests.permissions.test_access.LoginRequiredSubclass"
-
-
-@pytest.fixture(autouse=True)
-def _form_registries():
-    with isolated_form_registries():
-        yield
 
 
 def _permissions(
@@ -32,11 +28,12 @@ def _permissions(
     *args: str,
     base_dir: Path | None,
     urlconf: str = "tests.urls.urls_namespaced",
+    **framework: object,
 ) -> list[str]:
     root = write_access_project(tmp_path / "pages")
     out = StringIO()
     with (
-        routed(root, urlconf=urlconf, COMPONENT_BACKENDS=COMPONENTS),
+        routed(root, urlconf=urlconf, COMPONENT_BACKENDS=COMPONENTS, **framework),
         override_settings(BASE_DIR=base_dir),
     ):
         call_command("permissions", *args, stdout=out)
@@ -83,14 +80,14 @@ class TestPermissionsCommand:
             ["page", "/notes/<int:group>/"],
             ["page", "/open/"],
         ]
-        assert lines[2].split()[2:] == ["broken", "pages/broken/proxy.py"]
+        assert lines[2].split()[2:] == ["broken", "pages/broken/page.py"]
         assert lines[3].split()[2:] == [
             "login,",
             "perm",
             "auth.change_group",
             "on",
             "auth.Group",
-            "pages/notes/proxy.py,",
+            "pages/notes/page.py,",
             "pages/notes/[int:group]/page.py",
         ]
         assert lines[4].split()[2:] == ["-", "-"]
@@ -125,10 +122,10 @@ class TestPermissionsCommand:
 
     def test_a_lifted_page_names_the_file_that_lifted(self, tmp_path) -> None:
         root = tmp_path / "pages"
-        write_proxy(root / "booking", "proxy.login_required()\n")
-        receipt = root / "booking" / "[int:booking]" / "receipt"
-        write_proxy(receipt, "proxy.public()\n")
-        write_page(root, "booking/[int:booking]/receipt", page_source())
+        write_guard(root / "booking", "page.login_required(inherit=True)\n")
+        write_page(
+            root, "booking/[int:booking]/receipt", page_source("page.public()\n")
+        )
         out = StringIO()
         with routed(root), override_settings(BASE_DIR=tmp_path):
             call_command("permissions", "/booking/1/receipt/", stdout=out)
@@ -137,21 +134,29 @@ class TestPermissionsCommand:
             "/booking/<int:booking>/receipt/",
             "public",
             "public",
-            "(pages/booking/[int:booking]/receipt/proxy.py)",
+            "(pages/booking/[int:booking]/receipt/page.py)",
         ]
 
 
-class TestPermissionsUnderTheMiddleware:
-    """What `LoginRequiredMiddleware` closes names the middleware as its source."""
+class TestPermissionsUnderTheDefaultLogin:
+    """What the default login closes names what turned it on as its source."""
 
     def test_a_closed_page_and_action_name_the_middleware(self, tmp_path) -> None:
         with login_required_middleware():
             lines = _permissions(tmp_path, "/open/", base_dir=tmp_path)
 
         assert [line.split()[-3:] for line in lines[1:]] == [
-            ["login", "(middleware)", "LoginRequiredMiddleware"],
-            ["login", "(middleware)", "LoginRequiredMiddleware"],
+            ["login", "(default)", "LoginRequiredMiddleware"],
+            ["login", "(default)", "LoginRequiredMiddleware"],
             ["(pages/open/page.py)", "login", "pages/open/page.py"],
+        ]
+
+    def test_a_closed_page_and_action_name_the_setting(self, tmp_path) -> None:
+        lines = _permissions(tmp_path, "/open/", base_dir=tmp_path, LOGIN_REQUIRED=True)
+
+        assert [line.split()[-3:] for line in lines[1:3]] == [
+            ["login", "(default)", "LOGIN_REQUIRED"],
+            ["login", "(default)", "LOGIN_REQUIRED"],
         ]
 
     def test_a_subclass_names_itself(self, tmp_path) -> None:

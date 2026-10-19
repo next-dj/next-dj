@@ -121,6 +121,11 @@ class AccessRule:
     public: bool = False
     sources: tuple[Path, ...] = ()
 
+    @property
+    def undeclared(self) -> bool:
+        """Whether the rule asks nothing and opens nothing, so the default decides."""
+        return not self.requirements and not self.public
+
 
 @dataclass(frozen=True, slots=True)
 class Denial:
@@ -161,7 +166,6 @@ def chained(rules: Iterable[AccessRule]) -> AccessRule:
             opened = rule
         if rule.requirements:
             requirements.update(dict.fromkeys(rule.requirements))
-            opened = None
     if requirements:
         sources = tuple(dict.fromkeys(item.source for item in requirements))
         return AccessRule(tuple(requirements), sources=sources)
@@ -175,11 +179,9 @@ __all__ = [
     "AccessObject",
     "AccessRule",
     "Denial",
-    "Predicate",
     "Requirement",
     "Test",
     "chained",
     "joined",
-    "predicate",
     "signature_problem",
 ]

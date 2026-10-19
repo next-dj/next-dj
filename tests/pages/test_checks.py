@@ -45,6 +45,7 @@ from tests.support import (
     patch_checks_router_manager_with_routers,
     restored_provider_registry,
 )
+from tests.support.access import PAGE_HEAD
 
 
 class TestPageChecks:
@@ -281,6 +282,33 @@ class TestMemoAndBrokenPages:
             messages = check_page_functions(None)
         e012 = [m for m in messages if m.id == "next.E012"]
         assert len(e012) == 1
+
+    @pytest.mark.parametrize(
+        ("declarations", "expected"),
+        [
+            pytest.param("page.login_required(inherit=True)\n", [], id="inherit"),
+            pytest.param("page.public(inherit=True)\n", [], id="public-inherit"),
+            pytest.param(
+                'page.permission_required("auth.view_group", inherit=True)\n',
+                [],
+                id="permission-inherit",
+            ),
+            pytest.param("page.login_required()\n", ["next.E012"], id="own"),
+            pytest.param("page.public()\n", ["next.E012"], id="public-own"),
+        ],
+    )
+    def test_a_page_module_declaring_for_the_pages_below_needs_no_body(
+        self, tmp_path, declarations, expected
+    ) -> None:
+        """Only a declaration with inherit=True excuses a page.py without a body."""
+        (tmp_path / "page.py").write_text(f"{PAGE_HEAD}{declarations}")
+
+        with patch_checks_router_manager_with_routers(
+            routers=[AppRootRouter(tmp_path)]
+        ):
+            messages = check_page_functions(None)
+
+        assert [m.id for m in messages] == expected
 
     def test_page_module_execed_once_across_checks(self, tmp_path, monkeypatch) -> None:
         """Two check passes over one page.py exec the module at most once per mtime."""

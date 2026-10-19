@@ -13,7 +13,7 @@ from next.deps.linear import LinearDependencyResolver
 from next.deps.resolver import DependencyResolver
 from next.pages.context import Context
 from next.urls import DUrl
-from tests.benchmarks.factories import StandInRows
+from tests.benchmarks.factories import STAND_IN_PK
 from tests.support import build_mock_http_request
 
 
@@ -110,18 +110,6 @@ def _resolve_four_markers(planned: DependencyResolver) -> dict[str, object]:
     return planned.resolve_dependencies(_handler_four_markers, **_FOUR_MARKERS_KWARGS)
 
 
-_OBJECT_PK = 7
-
-
-@pytest.fixture()
-def stand_in_rows(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give the `Group` manager a `visible_to` that never reaches the database."""
-    rows = StandInRows(Group(pk=_OBJECT_PK, name="bench"))
-    monkeypatch.setattr(
-        Group._default_manager, "visible_to", rows.visible_to, raising=False
-    )
-
-
 def _scoped_resolver() -> DependencyResolver:
     """Fresh resolver with its providers loaded and the `scope` dependency bound."""
     fresh = DependencyResolver()
@@ -133,7 +121,7 @@ def _scoped_resolver() -> DependencyResolver:
 def _resolve_object(
     fresh: DependencyResolver, cache: dict[str, object] | None = None
 ) -> dict[str, object]:
-    return fresh.resolve_dependencies(_handler_object, group=_OBJECT_PK, _cache=cache)
+    return fresh.resolve_dependencies(_handler_object, group=STAND_IN_PK, _cache=cache)
 
 
 class TestBenchDependencyResolver:

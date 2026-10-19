@@ -81,6 +81,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "STRICT_CONTEXT": False,
     "STRICT_LOADING": False,
+    "LOGIN_REQUIRED": False,
     "LAZY_COMPONENT_MODULES": False,
     "FORM_AUTODISCOVER": True,
     "FORM_ANCHOR_FILES": None,

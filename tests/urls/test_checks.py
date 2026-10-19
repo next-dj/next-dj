@@ -38,6 +38,7 @@ from tests.support import (
     write_page,
     write_urlconf,
 )
+from tests.support.access import PAGE_HEAD, page_source
 
 
 def _write_virtual_page(tree: Path, route: str) -> Path:
@@ -646,17 +647,33 @@ class TestPagesTreeUrlChecks:
     """The URL checks key each route from the URLconf root, prefix and all."""
 
     @pytest.mark.parametrize(
-        ("prefix", "trail"),
-        [("w/<int:wallet>/", "ops/[int:wallet]"), ("<slug:wallet>/", "[wallet]")],
-        ids=["deep", "top"],
+        ("entry", "head", "trail"),
+        [
+            (
+                'path("w/<int:wallet>/", pages("wallets"))',
+                "w/<int:wallet>/",
+                "ops/[int:wallet]",
+            ),
+            ('path("<slug:wallet>/", pages("wallets"))', "<slug:wallet>/", "[wallet]"),
+            ('path("w/", pages("wallets"), {"wallet": 1})', "w/", "[wallet]"),
+            (
+                r're_path(r"^w/(?P<wallet>\d+)/", pages("wallets"))',
+                r"^w/(?P<wallet>\d+)/",
+                "[wallet]",
+            ),
+            (
+                'path("o/<int:wallet>/", include([path("w/", pages("wallets"))]))',
+                "o/<int:wallet>/w/",
+                "[wallet]",
+            ),
+        ],
+        ids=["deep", "top", "extra-kwargs", "regex", "nested"],
     )
-    def test_e152_for_a_segment_repeating_a_prefix_kwarg(
-        self, tmp_path, prefix, trail
+    def test_e152_for_a_segment_repeating_an_include_kwarg(
+        self, tmp_path, entry, head, trail
     ) -> None:
         write_app(tmp_path, "wallets", {"pages": ("", trail)})
-        urlconf = write_urlconf(
-            tmp_path, "e152_urls", f'path("{prefix}", pages("wallets"))'
-        )
+        urlconf = write_urlconf(tmp_path, "e152_urls", entry)
 
         messages = _url_messages(tmp_path, "wallets", urlconf=urlconf)
 
@@ -664,10 +681,23 @@ class TestPagesTreeUrlChecks:
         assert check_ids(messages) == ["next.E152"]
         assert messages[0].obj == str(page_file)
         assert messages[0].msg == (
-            f"The page {page_file} captures ['wallet'], which the prefix {prefix!r} "
-            "its tree is included under captures already, so one value would "
-            "overwrite the other."
+            f"The page {page_file} captures ['wallet'], which the include {head!r} "
+            "of its tree passes already, as a captured or an extra kwarg, so one "
+            "value would overwrite the other."
         )
+
+    def test_e152_for_a_segment_repeating_a_kwarg_of_the_next_urls_include(
+        self, tmp_path
+    ) -> None:
+        write_app(tmp_path, "wallets", {"pages": ("", "[wallet]")})
+        urlconf = write_urlconf(
+            tmp_path, "e152_auto_urls", 'path("<int:wallet>/", include("next.urls"))'
+        )
+
+        messages = _url_messages(tmp_path, "wallets", urlconf=urlconf)
+
+        assert check_ids(messages) == ["next.E152"]
+        assert "the include '<int:wallet>/' of its tree" in messages[0].msg
 
     def test_e028_inside_a_prefixed_tree(self, tmp_path) -> None:
         write_app(tmp_path, "shop", {"pages": ("", "item/[id]/[id]")})
@@ -691,6 +721,24 @@ class TestPagesTreeUrlChecks:
 
         assert check_ids(messages) == ["next.E015"]
         assert '"audit/log/"' in messages[0].msg
+
+    def test_a_tree_two_routers_report_is_no_conflict(self, tmp_path) -> None:
+        write_app(tmp_path, "audit", {"pages": ("log",)})
+        urlconf = write_urlconf(
+            tmp_path, "two_routers_urls", 'path("a/", pages("audit"))'
+        )
+        routers = [
+            file_router_config_entry(app_dirs=True),
+            file_router_config_entry(app_dirs=True, pages_dir_name="staff_pages"),
+        ]
+
+        with installed_apps(
+            tmp_path, "audit", urlconf=urlconf, framework={"PAGE_BACKENDS": routers}
+        ):
+            reset_check_caches()
+            messages = check_url_patterns(None)
+
+        assert check_ids(messages) == []
 
     def test_one_page_under_two_prefixes_is_no_conflict(self, tmp_path) -> None:
         write_app(tmp_path, "shop", {"pages": ("cart",)})
@@ -738,3 +786,30 @@ class TestPagesTreeUrlChecks:
 
         assert roots == ["a/", "a/"]
         assert messages == []
+
+
+_SUBTREE_RULE = "page.login_required(inherit=True)\n"
+
+
+class TestDeclarativePageUrlChecks:
+    """A `page.py` that only declares access for the pages below routes no URL."""
+
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            (f"{PAGE_HEAD}{_SUBTREE_RULE}", []),
+            (page_source(_SUBTREE_RULE), ["next.E015"]),
+        ],
+        ids=["declarative", "page"],
+    )
+    def test_a_url_another_tree_routes(self, tmp_path, source, expected) -> None:
+        write_app(tmp_path, "shop")
+        write_app(tmp_path, "audit", {"pages": ("activity",)})
+        write_page(tmp_path / "audit" / "pages", source=source)
+        urlconf = write_urlconf(
+            tmp_path, "declarative_urls", 'path("", include("next.urls"))'
+        )
+
+        messages = _url_messages(tmp_path, "shop", "audit", urlconf=urlconf)
+
+        assert check_ids(messages) == expected

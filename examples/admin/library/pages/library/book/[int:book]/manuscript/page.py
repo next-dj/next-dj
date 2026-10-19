@@ -14,6 +14,8 @@ from next.urls import page_reverse
 
 MANUSCRIPT_ZONE = "manuscript"
 
+page.permission_required("library.change_book", obj=DObject[Book])
+
 
 class AddChapterForm(ModelForm):
     class Meta:
@@ -37,7 +39,7 @@ class AddChapterForm(ModelForm):
 
 @context("book")
 def book(book: DObject[Book]) -> Book:
-    """Return the book the URL names, the row the `proxy.py` rule already loaded."""
+    """Return the book the URL names, the row the access rule already loaded."""
     return book
 
 

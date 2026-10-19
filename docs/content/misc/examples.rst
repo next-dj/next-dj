@@ -57,7 +57,8 @@ The table runs roughly in order of how much it assumes.
    * - :repo:`multi-tenant <tree/main/examples/multi-tenant>`
      - Resolves a tenant from a request header in middleware, rewrites every co-located asset URL per tenant on top of the staticfiles names it inherits, stamps a deploy build id into those URLs, and shares a header and footer across page roots.
        Makes the tenant the ``site_name`` and the default title of every workspace page through ``@page.metadata(inherit=True)``, which keeps each workspace ``noindex`` as well.
-     - :doc:`/content/howto/scope-requests-per-tenant`, :doc:`/content/topics/static-assets/backends`, :doc:`/content/topics/seo/metadata`
+       Makes the tenant the ``scope`` dependency, so the editor page loads its note through ``DObject`` and ``visible_to``.
+     - :doc:`/content/howto/scope-requests-per-tenant`, :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/static-assets/backends`, :doc:`/content/topics/seo/metadata`
    * - :repo:`kanban <tree/main/examples/kanban>`
      - Drives a board of React cards, teaching the pipeline a ``.jsx`` asset kind through a custom static backend, deep-merging serialised context across levels, and deduplicating co-located CSS by content hash.
      - :doc:`/content/topics/static-assets/asset-kinds`, :doc:`/content/topics/static-assets/deduplication`, :doc:`/content/topics/partial-rendering/framework-islands`
@@ -70,13 +71,14 @@ The table runs roughly in order of how much it assumes.
        Keeps the whole dashboard ``noindex`` from one root ``metadata`` dict and titles each stats page.
      - :doc:`/content/topics/signals`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/index`
    * - :repo:`admin <tree/main/examples/admin>`
-     - Rebuilds the Django admin on next.dj over the stock ``ModelAdmin`` hooks, with request-aware form factories, guards on every mutating action, server-opened modal layers, keyed inline row forms, several page trees, and Django's ``LoginRequiredMiddleware`` beside a ``proxy.py`` login and permission requirement on every guarded page tree, with ``page.public()`` on the login page in a separate ``auth_pages`` tree.
-       Each application keeps one ``pages/`` tree under the shared ``include("next.urls")``, so the ``library`` outline answers under ``library/book/<int:book>/``, whose ``proxy.py`` checks ``library.change_book`` on the book itself through ``obj=DObject[Book]``.
-       Breadcrumbs cross the trees by URL, so the activity feed reads ``Dashboard › Activity`` and the outline ``Dashboard › Books › Outline``.
+     - Rebuilds the Django admin on next.dj over the stock ``ModelAdmin`` hooks, with request-aware form factories, guards on every mutating action, server-opened modal layers, keyed inline row forms, and several page trees under ``NEXT_FRAMEWORK["LOGIN_REQUIRED"] = True``.
+       Each guarded tree declares its staff login and permission with ``inherit=True`` in its root ``page.py``, and the roots of ``admin_audit`` and ``library`` serve no page of their own and carry only those declarations and the ``Dashboard`` crumb, while the login and logout pages open through ``page.public()``.
+       Each application keeps one ``pages/`` tree under the shared ``include("next.urls")`` at ``admin/``, so the ``library`` outline answers under ``/admin/library/book/<int:book>/outline/``, and the manuscript page beside it checks ``library.change_book`` on the book itself through ``obj=DObject[Book]``.
+       The crumbs of each page come from its own tree, so the activity feed reads ``Dashboard › Activity`` and the outline ``Dashboard › Outline``.
        Titles every model page, the changelist, the add, change, and delete forms, and the history, after its model through ``@page.metadata(inherit=True)``, and keeps the whole site out of search through ``SITE["INDEXABLE"] = False``, publishing no sitemap or robots file.
        Its ``admin_audit`` application serves its activity feed from its own ``pages/activity/`` and plugs its sidebar link and dashboard panel into ``shadcn_admin`` from its ``admin.py`` through ``register_nav`` and ``register_panel``, a registry in ``shadcn_admin/services.py`` that works the way ``admin.register`` does, so the base never imports the plugin.
        Its object permissions in ``permissions.py`` are plain functions that combine their conditions with ``and`` and ``or``, and the seeded ``editor`` account shows them narrowing a staff user.
-     - :doc:`/content/howto/integrate-django-admin`, :doc:`/content/topics/multi-project`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/file-router`, :doc:`/content/topics/proxy`, :doc:`/content/topics/permissions`
+     - :doc:`/content/howto/integrate-django-admin`, :doc:`/content/topics/multi-project`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/file-router`, :doc:`/content/topics/access`, :doc:`/content/topics/permissions`
 
 Shared assets
 -------------
@@ -85,6 +87,7 @@ Shared assets
   A shadcn-inspired component palette every example consumes through ``COMPONENT_BACKENDS`` ``DIRS``, with its design tokens in one stylesheet.
 * :repo:`_template <tree/main/examples/_template>`.
   The skeleton every example is copied from, Django's own ``startproject`` and ``startapp`` output with the canonical next.dj files, the shared UI kit, and the test scaffold.
+  Its application tree answers under ``/myapp/`` through ``path("myapp/", pages("myapp"))``, and ``LoginRequiredMiddleware`` closes its pages and the Django admin beside them.
   It runs and passes its tests while demonstrating nothing beyond the starter, and its README names the commands that produce it, see :ref:`intro-install-project`.
 
 See also

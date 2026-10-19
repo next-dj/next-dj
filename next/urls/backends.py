@@ -310,6 +310,7 @@ class FileRouterBackend(RouterBackend):
             label=self._tree_label(mount.name, mount.subdir),
             prefix=point.prefix,
             namespace=mount.namespace,
+            trail=point.trail,
         )
 
     def _generate_app_urls(self) -> list[URLPattern | URLResolver]:

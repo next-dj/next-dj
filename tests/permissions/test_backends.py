@@ -13,7 +13,7 @@ User = get_user_model()
 
 pytestmark = [
     pytest.mark.django_db(),
-    pytest.mark.usefixtures("isolated_permissions", "object_permission_backend"),
+    pytest.mark.usefixtures("object_permission_backend"),
 ]
 
 
@@ -22,7 +22,7 @@ def _member(username: str = "ada", **fields: object):
 
 
 @pytest.fixture()
-def owned_rules(isolated_permissions) -> None:
+def owned_rules() -> None:
     add_perm("auth.edit_group", owns_group)
     add_perm("auth.see_group", lambda: True)
     add_perm("blog.read_post", lambda user, obj: user.is_active and obj is None)

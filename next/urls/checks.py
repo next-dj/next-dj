@@ -21,14 +21,15 @@ from next.checks.common import (
 from next.conf import import_class_cached, next_framework_settings
 from next.csrf import csrf_url, csrf_view
 from next.forms.uid import URL_NAME_FORM_ACTION, reverse_form_action
+from next.pages.access import routed_pages
 from next.ports import form_routes_slot
-from next.utils import PageRoot, prefix_trail
+from next.utils import PageRoot
 
 from .backends import FILE_ROUTER_CONFIG_KEYS, FileRouterBackend, RouterBackend
 from .dispatcher import scan_pages_tree
 from .errors import DuplicateURLParameterError, URLParameterError
 from .parser import default_url_parser
-from .urlconf import tree_route, urlconf_mounts
+from .urlconf import outer_kwargs, tree_route, urlconf_mounts
 
 
 if TYPE_CHECKING:
@@ -50,6 +51,9 @@ _CollectedPattern = tuple[str, str, str, frozenset[str], str]
 
 _UNMOUNTED = PageRoot(path=Path(), label="")
 """The placement of a tree at the root of `next.urls`, without a prefix."""
+
+type _TreeKey = tuple[Path, str, str]
+"""A mounted tree by its path, the route it is included under and its namespace."""
 
 
 def _router_class(backend_path: str) -> type[RouterBackend] | None:
@@ -475,7 +479,7 @@ def _collect_all_patterns_uncached(
     """Collect one `_CollectedPattern` per route from every router backend."""
     all_patterns: list[_CollectedPattern] = []
     errors: list[CheckMessage] = []
-    seen: set[PageRoot] = set()
+    seen: set[_TreeKey] = set()
 
     for router in router_manager.backends:
         try:
@@ -497,19 +501,20 @@ def _collect_router_patterns(
     router: RouterBackend,
     all_patterns: list[_CollectedPattern],
     errors: list[CheckMessage],
-    seen: set[PageRoot],
+    seen: set[_TreeKey],
 ) -> None:
     """Append patterns from every page tree `router` reports.
 
-    A tree a URLconf mounts is reported by every file router, so it is collected once.
+    Each file router labels a mounted tree its own way, so its route keys it once.
     """
     skip_dir_names = page_tree_skip_names(router)
     include_point = urlconf_mounts().include_point or ""
     for root in get_page_roots(router):
         if root.prefix is not None:
-            if root in seen:
+            key = (root.path, root.prefix, root.namespace)
+            if key in seen:
                 continue
-            seen.add(root)
+            seen.add(key)
         all_patterns.extend(
             _collect_url_patterns(
                 root.path,
@@ -564,8 +569,10 @@ def _collect_url_patterns(
         return patterns
 
     head = tree_route(root, include_point)
-    prefix_names = _prefix_parameters(root)
-    for url_path, page_file in scan_pages_tree(pages_path, skip_dir_names):
+    prefix_names = outer_kwargs(root, urlconf_mounts())
+    for url_path, page_file in routed_pages(
+        scan_pages_tree(pages_path, skip_dir_names)
+    ):
         try:
             django_pattern, parameters = default_url_parser.parse_url_pattern(url_path)
         except URLParameterError as exc:
@@ -573,7 +580,7 @@ def _collect_url_patterns(
             continue
         clash = sorted(prefix_names.intersection(parameters))
         if clash:
-            errors.append(_prefix_clash_error(root, clash, page_file))
+            errors.append(_prefix_clash_error(head, clash, page_file))
             continue
         source = f"{context}: {page_file.relative_to(pages_path)}"
         patterns.append(
@@ -589,26 +596,13 @@ def _collect_url_patterns(
     return patterns
 
 
-def _prefix_parameters(root: PageRoot) -> frozenset[str]:
-    """Return the URL parameter names the include prefix of `root` captures."""
-    if not root.prefix:
-        return frozenset()
-    try:
-        _route, parameters = default_url_parser.parse_url_pattern(
-            prefix_trail(root.prefix)
-        )
-    except URLParameterError:
-        return frozenset()
-    return frozenset(parameters)
-
-
-def _prefix_clash_error(root: PageRoot, names: list[str], page_file: Path) -> Error:
-    """Report a page parameter that the include prefix of its tree already captures."""
+def _prefix_clash_error(head: str, names: list[str], page_file: Path) -> Error:
+    """Report a page parameter that the include over its tree already passes."""
     return Error(
-        f"The page {page_file} captures {names}, which the prefix {root.prefix!r} "
-        "its tree is included under captures already, so one value would overwrite "
-        "the other.",
-        hint="Rename the bracket directory or the parameter in the prefix.",
+        f"The page {page_file} captures {names}, which the include {head!r} of its "
+        "tree passes already, as a captured or an extra kwarg, so one value would "
+        "overwrite the other.",
+        hint="Rename the bracket directory, or the kwarg the include passes.",
         obj=str(page_file),
         id="next.E152",
     )

@@ -18,6 +18,7 @@ from next.deps import (
     DObject,
     UnboundObjectError,
     UnknownDependencyError,
+    objects,
 )
 from next.deps.introspect import cached_type_hints
 from next.deps.objects import (
@@ -25,11 +26,14 @@ from next.deps.objects import (
     ObjectProvider,
     UnservedObjectProvider,
     object_target,
+    scoped_row,
+    url_row,
 )
 from next.pages.context import ContextByNameProvider
 from next.pages.loaders import _load_python_module
 from next.testing import make_resolution_context
 from next.urls import UrlKwargsProvider
+from next.urls.signals import router_reloaded
 from tests.support import (
     bound_dependency,
     inspect_parameter,
@@ -403,6 +407,46 @@ class TestCompileRefusals:
             TypeError, match=r"auth\.Permission\._default_manager\.visible_to\(scope\)"
         ):
             resolver_class().resolve_dependencies(_permission, permission=1)
+
+
+@pytest.mark.usefixtures("scoped_models")
+class TestRowsMemo:
+    """The `visible_to` hook of a model is read once a model until a router reload."""
+
+    @pytest.fixture()
+    def reads(self, monkeypatch: pytest.MonkeyPatch) -> list[type[Model]]:
+        seen: list[type[Model]] = []
+        read = objects._scoped_query
+
+        def spy(model: type[Model]) -> object:
+            seen.append(model)
+            return read(model)
+
+        monkeypatch.setattr(objects, "_scoped_query", spy)
+        return seen
+
+    @pytest.mark.parametrize(
+        "check",
+        [
+            pytest.param(lambda: url_row(Group, None, {"group": "x"}, {}), id="url"),
+            pytest.param(
+                lambda: scoped_row(Group, {"pk": "x"}, HttpRequest()), id="scoped"
+            ),
+        ],
+    )
+    def test_each_check_reuses_the_hook(self, reads, check) -> None:
+        for _ in range(2):
+            with pytest.raises(Http404):
+                check()
+
+        assert reads == [Group]
+
+    def test_a_router_reload_reads_it_again(self, reads) -> None:
+        held = objects._rows(Group)
+        router_reloaded.send(sender=type(self))
+
+        assert objects._rows(Group) is not held
+        assert reads == [Group, Group]
 
 
 @pytest.mark.django_db()
@@ -800,13 +844,16 @@ class TestUnservedObject:
         providers._sync_providers()
         assert type(providers._providers[-1]) is UnservedObjectProvider
 
-    def test_it_claims_what_the_object_provider_claims(self) -> None:
+    @pytest.mark.parametrize(
+        ("annotation", "claimed"), [(DObject[Group], True), (Group, False)]
+    )
+    def test_it_claims_what_the_object_provider_claims(
+        self, annotation: object, *, claimed: bool
+    ) -> None:
         provider = UnservedObjectProvider()
-        context = make_resolution_context()
-        for annotation, claimed in ((DObject[Group], True), (Group, False)):
-            param = inspect_parameter("group", annotation)
-            assert provider.static_can_handle(param) is claimed
-            assert provider.can_handle(param, context) is claimed
+        param = inspect_parameter("group", annotation)
+        assert provider.static_can_handle(param) is claimed
+        assert provider.can_handle(param, make_resolution_context()) is claimed
 
     def test_a_resolver_without_the_object_provider_refuses_on_every_resolve(
         self, resolver_class

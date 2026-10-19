@@ -113,6 +113,22 @@ class TestUrlconfWalk:
         found = _mounted("regex_urls", tmp_path, "audit")
 
         assert [point.prefix for point in found.points] == ["^a/b/"]
+        assert [point.trail for point in found.points] == ["a/b"]
+
+    def test_a_regex_include_reads_as_the_trail_django_reverses(self, tmp_path) -> None:
+        write_app(tmp_path, "audit")
+        (tmp_path / "regex_trail_urls.py").write_text(
+            "from django.urls import include, path, re_path\n\n"
+            "from next.urls import pages\n\n\n"
+            "urlpatterns = [\n"
+            '    path("o/<int:org>/", include([re_path(r"^y/(?P<year>[0-9]{4})/", '
+            'pages("audit"))])),\n'
+            "]\n"
+        )
+
+        found = _mounted("regex_trail_urls", tmp_path, "audit")
+
+        assert [point.trail for point in found.points] == ["o/[int:org]/y/[year]"]
 
     def test_a_tuple_of_patterns_is_walked(self, tmp_path) -> None:
         write_app(tmp_path, "audit")

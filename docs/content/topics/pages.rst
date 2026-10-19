@@ -197,9 +197,9 @@ Pass ``serializer=`` with a ``JsContextSerializer`` instance to use a per-key se
 Page access
 -----------
 
-A ``page.py`` declares the access of its own page through ``page.login_required()``, ``page.permission_required(perm, obj=None)``, and ``page.public()``.
-The declaration binds that page alone, its actions, and its zone requests, and no page below it.
-A requirement a section shares lives in a ``proxy.py`` of the section directory, which binds the directory and every page below it, see :doc:`proxy`.
+A ``page.py`` declares the access of its own page through ``page.login_required()``, ``page.permission_required(perm, *, obj=None)``, and ``page.public()``.
+The declaration binds that page, its actions, and its zone requests, and no page below it.
+A requirement a section shares carries ``inherit=True``, which binds every page below the directory as well, see :doc:`access`.
 
 .. code-block:: python
    :caption: notes/pages/notes/[int:note]/edit/page.py
@@ -211,7 +211,7 @@ A requirement a section shares lives in a ``proxy.py`` of the section directory,
 
    page.permission_required("notes.edit_note", obj=DObject[Note])
 
-``page.public()`` lifts the requirements of every ``proxy.py`` above the page for that page alone, and ``manage.py permissions`` names the file of the lift.
+``page.public()`` lifts what every ``page.py`` above requires for that page alone, and ``manage.py permissions`` names the file of the lift.
 See :ref:`topics-permissions-tree` for the order of the checks and the answer to a refusal.
 
 Custom template loaders
@@ -599,8 +599,7 @@ Fail quiet, the default.
    The view answers 404 and the failure is visible only in the log record.
    A deployment that never reads its logs therefore reads a broken page as a missing one, which is the reason :doc:`/content/deployment/settings` recommends ``STRICT_LOADING`` in production.
 
-The blast radius is one page in every mode.
-A broken ``proxy.py`` reaches further, since it closes every page below it the same way, see :ref:`topics-proxy`.
+The blast radius is the broken page and the pages below it in every mode, since what it would have declared with ``inherit=True`` is unknown, see :ref:`topics-access`.
 The broken page still gets its URL pattern, so the error surfaces at the view rather than while the URL configuration is built, and every sibling page keeps its pattern and keeps serving.
 The record is keyed by modification time, so saving a fixed ``page.py`` clears it on the next request without a restart.
 ``manage.py check --deploy`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message, which catches a broken page before traffic reaches it.
@@ -615,7 +614,7 @@ See also
 
    :doc:`layouts` for how the layout chain wraps the page body.
    :doc:`context` for ``@context`` patterns and inheritance.
-   :doc:`proxy` for the access a section declares over its pages.
+   :doc:`access` for the access a section declares over its pages.
    :doc:`seo/metadata` for the metadata a page declares and the head it renders.
    :doc:`/content/internals/page-discovery` for the discovery pipeline.
    :doc:`/content/ref/pages` for the public API.

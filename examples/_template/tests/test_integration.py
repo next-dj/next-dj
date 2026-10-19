@@ -2,10 +2,11 @@ from io import StringIO
 
 import pytest
 from django.core.management import call_command
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from myapp.models import Item
 
 from next.testing import assert_metadata
+from next.urls import page_reverse
 
 
 PAGE = "/myapp/"
@@ -47,12 +48,14 @@ def test_the_route_map_names_each_page_and_its_access() -> None:
     _header, *lines = out.getvalue().splitlines()
     rows = {line.split()[0]: line.split()[1:] for line in lines}
     assert rows["/"] == ["next:page_", "home/pages/page.py", "public"]
-    assert rows[PAGE] == [
-        "next:page_myapp",
-        "myapp/pages/myapp/page.py",
-        "login",
-        "(middleware)",
-    ]
+    assert rows[PAGE] == ["myapp:page_", "myapp/pages/page.py", "login", "(default)"]
+
+
+def test_the_app_tree_answers_under_its_prefix() -> None:
+    assert page_reverse(namespace="myapp") == PAGE
+    assert reverse("myapp:page_") == PAGE
+    with pytest.raises(NoReverseMatch):
+        reverse("next:page_myapp")
 
 
 def test_an_anonymous_visitor_is_sent_to_sign_in(next_client) -> None:

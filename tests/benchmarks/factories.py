@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Self
+from unittest.mock import patch
+
+from django.contrib.auth.models import Group
 
 from next.components.info import ComponentInfo
+from next.deps.objects import SCOPE_DEPENDENCY
+from tests.support import bound_dependency
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
-
-    from django.contrib.auth.models import Group
 
 
 _DEFAULT_LEAF_BODY = "def render(request):\n    return 'x'\n"
@@ -106,3 +111,24 @@ class StandInRows:
     def __getitem__(self, window: slice) -> list[Group]:
         """Return the one row, whatever the window."""
         return [self._row]
+
+
+STAND_IN_PK = 7
+"""The primary key of the one row a stand-in `Group` manager answers with."""
+
+
+@contextmanager
+def stand_in_rows(pk: int = STAND_IN_PK) -> Iterator[None]:
+    """Give the `Group` manager a `visible_to` that answers one unsaved row of `pk`."""
+    rows = StandInRows(Group(pk=pk, name="bench"))
+    with patch.object(
+        Group._default_manager, "visible_to", rows.visible_to, create=True
+    ):
+        yield
+
+
+@contextmanager
+def stand_in_scope(pk: int = STAND_IN_PK) -> Iterator[None]:
+    """Answer every `Group` lookup with one unsaved row of `pk` and bind the `scope`."""
+    with stand_in_rows(pk), bound_dependency(SCOPE_DEPENDENCY, lambda: "tenant"):
+        yield

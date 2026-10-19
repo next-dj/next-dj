@@ -4,19 +4,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final, Protocol, cast
 
-from django.http import Http404, HttpResponse
+from django.http import HttpResponse
 from django.urls import URLPattern, path
 
 from next.caches import PageCache
-from next.conf import fail_loudly, next_framework_settings
+from next.conf import next_framework_settings
 from next.deps.cache import render_dep_cache
 from next.diagnostics import watch_degraded
-from next.pages.access import page_access, refusal
+from next.pages.access import page_access, refusal, subtree_only
 from next.pages.loaders import (
     build_registered_loaders,
-    has_load_errors,
-    last_load_error,
     load_page_module,
+    load_python_module_memo,
 )
 from next.pages.responses import (
     finish_response,
@@ -67,7 +66,7 @@ def unified_view(
 ) -> Callable[..., HttpResponseBase]:
     """Return the static or the resolving view of a page, as its body source requires.
 
-    Dispatch maps an origin back by `next_page_path`, and its rule loads the proxies.
+    Dispatch maps an origin by `next_page_path`, and a public page skips the middleware.
     """
     has_render = module is not None and callable(getattr(module, "render", None))
     view = (
@@ -81,26 +80,6 @@ def unified_view(
     return view
 
 
-def _raise_load_error(file_path: Path) -> None:
-    """Raise the import failure of `file_path` when the framework fails loudly."""
-    # `has_load_errors` runs first, so a site without a load error runs no stat.
-    if has_load_errors() and fail_loudly():
-        error = last_load_error(file_path)
-        if error is not None:
-            raise error
-
-
-def _reloaded_module(file_path: Path) -> types.ModuleType | None:
-    """Return the module now at `file_path`, raising its import failure or a 404."""
-    # The memo re-reads by mtime and drops the error once the file imports.
-    module, error = load_page_module(file_path)
-    if error is not None:
-        if fail_loudly():
-            raise error
-        raise Http404
-    return module
-
-
 def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]:
     """Return the view of a page whose body comes from files on disk.
 
@@ -110,7 +89,6 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
 
     def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
         watch_degraded()
-        _raise_load_error(file_path)
         dep_cache = render_dep_cache(request)
         denial = refusal(file_path, request, kwargs, dep_cache)
         if denial is not None:
@@ -151,15 +129,13 @@ def _resolving_view(
 
     def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
         watch_degraded()
-        if broken_at_build:
-            active_module = _reloaded_module(file_path)
-        else:
-            _raise_load_error(file_path)
-            active_module = module
         dep_cache = render_dep_cache(request)
         denial = refusal(file_path, request, kwargs, dep_cache)
         if denial is not None:
             return denial
+        active_module = (
+            load_python_module_memo(file_path) if broken_at_build else module
+        )
         shaper = partial_shaper_slot.get()
         intent = shaper.intent(request)
         resolution = page._resolve_page_body(
@@ -252,7 +228,7 @@ def _page_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase] |
         if error is None:
             return None
         return unified_view(page, file_path, None, broken_at_build=True)
-    if not _has_body_source(page, file_path, module):
+    if subtree_only(file_path) or not _has_body_source(page, file_path, module):
         return None
     return unified_view(page, file_path, module)
 

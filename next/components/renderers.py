@@ -32,7 +32,7 @@ from next.seeding import (
     REQUEST_KEY,
     TEMPLATE_PATH_KEY,
 )
-from next.utils import template_edits_watched
+from next.utils import stat_mtime_ns, template_edits_watched
 
 from .context import component
 from .errors import ComponentModuleImportError
@@ -137,14 +137,6 @@ class _CompiledTemplate:
 type _SourceKey = tuple[Path | None, Path | None]
 
 
-def _stat_ns(path: Path) -> int | None:
-    """Return the mtime of `path` in nanoseconds, or `None` when it does not stat."""
-    try:
-        return path.stat().st_mtime_ns
-    except OSError:
-        return None
-
-
 def _source_mtimes(info: ComponentInfo) -> dict[Path, int]:
     """Stat every file a load may read for `info`, before any of them is read.
 
@@ -155,7 +147,7 @@ def _source_mtimes(info: ComponentInfo) -> dict[Path, int]:
     for candidate in (info.template_path, info.module_path):
         if candidate is None or candidate in mtimes:
             continue
-        mtime_ns = _stat_ns(candidate)
+        mtime_ns = stat_mtime_ns(candidate)
         if mtime_ns is not None:
             mtimes[candidate] = mtime_ns
     return mtimes
@@ -199,7 +191,7 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
     def _is_fresh(self, entry: _CompiledTemplate) -> bool:
         if not template_edits_watched():
             return True
-        return _stat_ns(entry.source_path) == entry.mtime_ns
+        return stat_mtime_ns(entry.source_path) == entry.mtime_ns
 
     def _compile(self, key: _SourceKey, info: ComponentInfo) -> Template | None:
         mtimes = _source_mtimes(info)
@@ -213,7 +205,7 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
         # path the pre-read stat missed is stat-ed here rather than left uncached.
         mtime_ns = mtimes.get(source.path)
         if mtime_ns is None:
-            mtime_ns = _stat_ns(source.path)
+            mtime_ns = stat_mtime_ns(source.path)
         if mtime_ns is None:
             # Without an mtime the entry could never expire, so it is not kept.
             self._drop(key)
@@ -368,24 +360,16 @@ class _ContextRun:
 
 
 def _context_run(
-    info: ComponentInfo, context_data: dict[str, Any], request: HttpRequest | None
+    info: ComponentInfo,
+    module_path: Path,
+    context_data: dict[str, Any],
+    request: HttpRequest | None,
 ) -> _ContextRun | None:
     """Return a run over the context functions of `info`, `None` when it has none."""
-    if info.module_path is None:
-        return None
-    functions = component.get_functions(info.module_path)
+    functions = component.get_functions(module_path)
     if not functions:
         return None
     return _ContextRun(info, context_data, request, functions)
-
-
-def _inject_component_context(
-    info: ComponentInfo, context_data: dict[str, Any], request: HttpRequest | None
-) -> None:
-    """Run every context function of `info` into `context_data`."""
-    run = _context_run(info, context_data, request)
-    if run is not None:
-        run.run_to()
 
 
 def _url_object_error(model: type[Model], module_path: Path) -> TypeError:
@@ -509,12 +493,13 @@ class CompositeComponentRenderer:
         request: HttpRequest | None,
     ) -> str:
         """Render `info` via `component.py:render` or fall back to the template."""
-        if info.module_path is None:
+        module_path = info.module_path
+        if module_path is None:
             return ""
 
-        module = self._module_loader.load(info.module_path)
+        module = self._module_loader.load(module_path)
         if module is None:
-            return _unloaded(info.module_path)
+            return _unloaded(module_path)
 
         render_func = getattr(module, "render", None)
         if callable(render_func):
@@ -522,7 +507,7 @@ class CompositeComponentRenderer:
                 return ""
             return self._render_with_function(render_func, context_data, request)
 
-        return self._render_with_template(info, context_data, request)
+        return self._render_with_template(info, module_path, context_data, request)
 
     def _render_with_function(
         self,
@@ -566,6 +551,7 @@ class CompositeComponentRenderer:
     def _render_with_template(
         self,
         info: ComponentInfo,
+        module_path: Path,
         context_data: Mapping[str, Any],
         request: HttpRequest | None,
     ) -> str:
@@ -574,7 +560,7 @@ class CompositeComponentRenderer:
             return ""
 
         context_dict = self._template_context(info, context_data, request)
-        run = _context_run(info, context_dict, request)
+        run = _context_run(info, module_path, context_dict, request)
         if not _granted(info, context_dict, request, run):
             return ""
         if run is not None:

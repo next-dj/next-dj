@@ -135,7 +135,19 @@ DForm
 Type annotation that injects a form instance during action dispatch.
 ``DForm[MyForm]`` names the class directly and ``DForm["MyForm"]`` names it as a string, which keeps a page free of an import it needs for nothing else.
 
-The ten built-in providers are listed with their priorities in :doc:`/content/topics/dependency-injection`.
+DObject
+~~~~~~~
+
+.. autoclass:: next.deps.DObject
+   :no-index:
+
+Type annotation that injects the model row whose primary key the URL kwarg of the parameter name holds, read through ``visible_to(scope)`` of the default manager.
+``DObject[Model, "parent"]`` also filters the row by the field ``parent`` against the context value of the same name.
+A row the scope does not see answers 404, as a missing one does.
+The same marker names the row of an access declaration, as ``page.permission_required(perm, obj=DObject[Model])``.
+See :ref:`topics-di-dobject` for the lookup, the cache it shares, and the checks.
+
+The eleven built-in providers that fill parameters are listed with their priorities in :doc:`/content/topics/dependency-injection`.
 
 Provider base classes
 ---------------------

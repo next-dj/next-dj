@@ -6,7 +6,7 @@ Pages reference
 Module summary
 --------------
 
-``next.pages`` exposes the ``Page`` coordinator and its ``page`` singleton, the ``proxy`` declarations of a ``proxy.py``, the ``@context`` decorator, the ``Context`` and ``ContextResult`` value objects, the ``PageModuleImportError`` raised by a broken ``page.py`` and the ``PageContextShapeError`` raised by a keyless ``@context`` answering no mapping, and the ``checks`` and ``signals`` submodules.
+``next.pages`` exposes the ``Page`` coordinator and its ``page`` singleton, which also carries the access declarations of a ``page.py``, the ``@context`` decorator, the ``Context`` and ``ContextResult`` value objects, the ``PageModuleImportError`` raised by a broken ``page.py`` and the ``PageContextShapeError`` raised by a keyless ``@context`` answering no mapping, and the ``checks`` and ``signals`` submodules.
 It also exposes the page metadata names a page module uses most, the ``ResolvedMetadata`` value, the ``MetadataDict`` input shape, the ``Replace`` and ``RESET`` markers, the ``ld`` nodes, the ``MetadataRenderer`` contract with its ``HtmlMetadataRenderer``, and the four ``PageMetadata*`` errors, see :doc:`metadata`.
 The ``CacheDict`` and ``HeadersDict`` shapes of the ``cache`` and ``headers`` a ``page.py`` declares, and the ``CacheControl`` value a ``cache`` normalises to, complete the surface, see `Response policy`_ below.
 
@@ -33,29 +33,26 @@ Public API
    :no-value:
 
    The process-wide ``Page`` coordinator that every router-built view renders through.
-
-.. autodata:: next.pages.proxy
-   :no-value:
-
-   The ``Proxy`` instance a ``proxy.py`` declares through.
-   ``Proxy`` is documented with ``next.pages.access`` below, and it shares ``login_required``, ``permission_required``, and ``public`` with ``Page`` through ``TreeDeclarations``.
+   ``Page`` takes ``login_required``, ``permission_required``, and ``public`` from ``PageDeclarations``, documented with ``next.pages.access`` below.
 
 Access declarations
 ~~~~~~~~~~~~~~~~~~~
 
-``page.login_required()``, ``page.permission_required(perm, *, obj=None)``, and ``page.public()`` declare the access of the ``page.py`` that calls them, and the same calls on ``proxy`` the access of a ``proxy.py``, its directory, and every page below it, see :doc:`/content/topics/proxy`.
+``page.login_required(*, inherit=False)``, ``page.permission_required(perm, *, obj=None, inherit=False)``, and ``page.public(*, inherit=False)`` declare the access of the page of the ``page.py`` that calls them, and with ``inherit=True`` of every page below its directory as well, see :doc:`/content/topics/access`.
 ``perm`` is a permission name or a tuple of names, and ``obj`` is ``DObject[Model]``, whose row loads through ``visible_to(scope)`` by the URL kwarg named after the ``model_name`` of the model.
 Any other ``perm``, and an ``obj`` that is a string, a bare model, or a ``DObject`` with a parent, raises ``TypeError`` at the call.
-``public()`` lifts the requirements of every ``proxy.py`` above the file for what the file covers, and a requirement declared below binds again.
+``public()`` lifts what every ``page.py`` above requires and the default login, for its own page or under ``inherit=True`` for the pages below, and a requirement declared below binds again.
 A public rule sets the ``login_required`` attribute of the page view to ``False``, which ``LoginRequiredMiddleware`` reads.
-A view answers a refusal with a redirect to ``LOGIN_URL`` for an anonymous user, :exc:`~django.core.exceptions.PermissionDenied` for a missing permission, a 404 for a row the scope does not see, and a 404 or the import failure for a chain that holds a broken file, see :ref:`topics-permissions-tree`.
+A view answers a refusal with a redirect to the login page for an anonymous user, :exc:`~django.core.exceptions.PermissionDenied` for a missing permission, a 404 for a row the scope does not see, and a 404 or the import failure for a chain that holds a broken file, see :ref:`topics-permissions-tree`.
 
 ``next.pages.access`` reads the rule of each page once per reload of a file in its chain.
 ``page_access(file_path)`` returns a ``PageAccess`` with the joined ``rule`` and the first ``broken`` file, and ``owner_access(file_path)`` the rule of the page in the directory of any file of a tree, which an action answers to.
 The joined ``rule`` holds the requirements in the order the chain declared them and ``sources`` naming the files of the requirements, or the file that opened a public rule.
-``refusal(file_path, request, url_kwargs, dep_cache, *, middleware=False)`` is the check a page view and a foreign zone morph run, and ``middleware=True`` adds the login ``LoginRequiredMiddleware`` would ask, for a path the middleware never sees.
-``url_lookup(request, url_kwargs, dep_cache)`` returns the lookup that loads the row an ``obj=DObject[Model]`` names, from the same cache a ``DObject`` parameter reads.
-``middleware_login(rule)`` tells whether the middleware asks a login of a rule, true only for a rule without requirements that is not public, ``admits(file_path, request)`` tells whether a request passes the rule of a page without loading any object, which the breadcrumbs of a host page in another tree read, and ``anonymous_admitted(access)`` tells whether an anonymous request passes the rule of a page, which the sitemap reads to leave closed pages out.
+``enforce(rule, broken, request, url_kwargs, dep_cache, *, undeclared, gate)`` is the one check a page view, a zone morph, and an action dispatch run, and ``refusal(file_path, request, url_kwargs, dep_cache)`` runs it for one page.
+A ``Gate`` carries the ``lookup`` builder and the ``next_url`` a login returns to, and ``enforce`` builds the lookup only for a rule with requirements, so an open rule costs no allocation.
+``url_lookup(request, url_kwargs, dep_cache)`` builds the ``lookup`` of a page, which loads the row an ``obj=DObject[Model]`` names from the same cache a ``DObject`` parameter reads.
+``default_login(rule)`` tells whether the default login asks a login of a rule, true only for a rule without requirements that is not public while ``LOGIN_REQUIRED`` or ``LoginRequiredMiddleware`` turns it on, and ``anonymous_admitted(access)`` tells whether an anonymous request passes the rule of a page, which the sitemap reads to leave closed pages out.
+``subtree_only(file_path)`` tells whether a ``page.py`` declares for the pages below with ``inherit=True`` and serves no page of its own, and ``routed_pages(pages)`` drops such files from a walk of ``(trail, page_file)`` pairs, so the URL checks and the SEO discovery never treat one as a route.
 
 .. automodule:: next.pages.access
    :exclude-members: refusal
@@ -114,10 +111,8 @@ The manager already consults ``module.template`` directly, so registering this l
 .. autoclass:: next.pages.loaders.PythonTemplateLoader
    :members:
 
-``proxy_modules(file_path)`` returns the ``proxy.py`` paths over a page inside its page tree, root first, and the walk stops at the tree root, so a mounted tree inherits nothing from its host.
 ``in_page_tree(directory)`` tells whether a directory lies inside a tree some router serves.
-
-.. autofunction:: next.pages.loaders.proxy_modules
+``AncestorStamps.begin(file_path)`` walks the ``page.py`` files over a page inside its page tree, root first, and the walk stops at the tree root, so a tree that a ``pages()`` include places under a prefix inherits nothing from its host.
 
 .. autofunction:: next.pages.loaders.in_page_tree
 
@@ -156,7 +151,6 @@ Scan
 ``iter_existing_scanned_pages`` yields each existing ``page.py`` once across routers.
 ``iter_existing_scanned_page_pairs`` yields the route of each ``page.py`` beside its path, for a check that reports a page by its URL.
 ``iter_serialized_page_context_keys`` yields the ``page.py`` path and key of every keyed ``serialize=True`` context function.
-``iter_proxy_modules`` yields every ``proxy.py`` of the routed trees, which ``next.E017`` imports beside the pages.
 
 .. automodule:: next.pages.scan
    :members:
@@ -249,7 +243,7 @@ The package splits by subject into ``access``, ``contexts``, ``layouts``, ``load
 ``metadata`` is a package of its own, ``scope``, ``titles``, ``shape``, ``head``, ``ld``, ``links``, ``pages``, and ``templates``, and ``responses`` owns the ``cache``, ``headers``, ``CSRF_DELIVERY``, and ``CSRF_USE_SESSIONS`` checks, see :doc:`system-checks` for the codes each one owns.
 ``access`` owns the checks of the access declarations, ``next.E163``, ``next.E164``, and ``next.W128``, while ``next.E162`` for an ``obj=DObject[Model]`` lives with the ``DObject`` checks in ``next.deps.checks``.
 
-The package exports thirty-seven check callables.
+The package exports thirty-five check callables.
 
 - ``check_conditional_get_order``.
 - ``check_context_functions``.
@@ -260,9 +254,8 @@ The package exports thirty-seven check callables.
 - ``check_csrf_endpoint_reversible``.
 - ``check_csrf_in_session``.
 - ``check_declaring_modules``.
-- ``check_guarded_components_on_public_pages``.
+- ``check_guards_over_pages``.
 - ``check_layout_templates``.
-- ``check_lifted_requirements``.
 - ``check_metadata_callable_returns_mapping``.
 - ``check_metadata_enum_values``.
 - ``check_metadata_head_literals``.
@@ -281,7 +274,6 @@ The package exports thirty-seven check callables.
 - ``check_page_module_imports``.
 - ``check_page_response_declarations``.
 - ``check_pages_structure``.
-- ``check_proxies_over_pages``.
 - ``check_public_beside_requirements``.
 - ``check_request_in_context``.
 - ``check_shared_page_responses``.

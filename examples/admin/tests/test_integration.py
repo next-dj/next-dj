@@ -269,8 +269,8 @@ ACTIVITY_ACCESS = (
     "login, perm shadcn_admin.use_admin, perm admin_audit.view_adminactivitylog"
 )
 
-BOOK_PROXY = "library/pages/library/book/[int:book]/proxy.py"
-MANUSCRIPT_PROXY = "library/pages/library/book/[int:book]/manuscript/proxy.py"
+LIBRARY_RULE = "library/pages/page.py"
+MANUSCRIPT_RULE = "library/pages/library/book/[int:book]/manuscript/page.py"
 MANUSCRIPT_ACCESS = (
     "login, perm shadcn_admin.use_admin, perm library.change_book on library.Book"
 )
@@ -299,7 +299,7 @@ def log_entry(object_repr: str) -> AdminActivityLog:
 
 
 class TestTreeAccess:
-    """`proxy.py` closes each admin tree and the auth tree stays public."""
+    """The `page.py` rules close each admin tree and the auth pages stay public."""
 
     @pytest.mark.parametrize("path", PROTECTED_PATHS)
     def test_an_anonymous_visit_redirects_to_the_login(self, next_client, book, path):
@@ -334,12 +334,12 @@ class TestTreeAccess:
         assert rows["/admin/"] == (
             "page",
             "login, perm shadcn_admin.use_admin",
-            "shadcn_admin/pages/proxy.py",
+            "shadcn_admin/pages/page.py",
         )
         assert rows["/admin/activity/"] == (
             "page",
             ACTIVITY_ACCESS,
-            "admin_audit/pages/proxy.py, admin_audit/pages/activity/page.py",
+            "admin_audit/pages/page.py",
         )
         assert rows["/admin/login/"] == (
             "page",
@@ -347,14 +347,14 @@ class TestTreeAccess:
             "public (shadcn_admin/pages/login/page.py)",
         )
         assert rows["admin:login"][1] == "public"
-        assert rows["admin:logout"][1] == "login (middleware)"
+        assert rows["admin:logout"][1:] == ("login (default)", "LOGIN_REQUIRED")
 
     def test_the_permission_table_narrows_to_one_url(self):
         rows = permission_rows("/admin/library/book/1/history/")
         assert rows["/admin/<str:app_label>/<str:model_name>/<int:pk>/history/"] == (
             "page",
             "login, perm shadcn_admin.use_admin",
-            "shadcn_admin/pages/proxy.py",
+            "shadcn_admin/pages/page.py",
         )
 
     def test_the_permission_table_names_the_book_rules_and_their_files(self):
@@ -362,10 +362,10 @@ class TestTreeAccess:
         assert outline["/admin/library/book/<int:book>/outline/"] == (
             "page",
             "login, perm shadcn_admin.use_admin",
-            BOOK_PROXY,
+            LIBRARY_RULE,
         )
         manuscript = permission_rows("/admin/library/book/1/manuscript/")
-        rule = (MANUSCRIPT_ACCESS, f"{BOOK_PROXY}, {MANUSCRIPT_PROXY}")
+        rule = (MANUSCRIPT_ACCESS, f"{LIBRARY_RULE}, {MANUSCRIPT_RULE}")
         assert manuscript["/admin/library/book/<int:book>/manuscript/"] == (
             "page",
             *rule,
@@ -514,11 +514,10 @@ class TestBookOutline:
     def test_an_unknown_book_is_not_found(self, admin_client):
         assert admin_client.get("/admin/library/book/999/outline/").status_code == 404
 
-    def test_the_crumbs_climb_to_the_dashboard_by_url(self, admin_client, book):
+    def test_the_crumbs_start_at_the_dashboard(self, admin_client, book):
         body = admin_client.get(outline_url(book)).content.decode()
         assert crumbs(body) == [
             ("Dashboard", "/admin/", False),
-            ("Books", "/admin/library/book/", False),
             ("Outline", outline_url(book), True),
         ]
 
@@ -555,7 +554,7 @@ class TestBookOutline:
 
 
 class TestManuscript:
-    """`manuscript/proxy.py` asks `change_book` on the book the URL names."""
+    """`manuscript/page.py` asks `change_book` on the book the URL names."""
 
     def test_the_editor_works_an_own_draft(
         self, editor_client, editor, make_book, make_chapter
@@ -669,7 +668,6 @@ class TestManuscript:
         body = admin_client.get(manuscript_url(book)).content.decode()
         assert crumbs(body) == [
             ("Dashboard", "/admin/", False),
-            ("Books", "/admin/library/book/", False),
             ("Manuscript", manuscript_url(book), True),
         ]
 
@@ -1791,6 +1789,13 @@ class TestAppPageTrees:
             ),
             "access": "login, perm shadcn_admin.use_admin",
         }
+
+    def test_a_tree_rule_routes_no_page_of_its_own(self, admin_client):
+        rows = route_rows()
+        files = {row["file"] for row in rows.values()}
+        assert {"admin_audit/pages/page.py", "library/pages/page.py"}.isdisjoint(files)
+        assert rows["/admin/"]["file"] == "shadcn_admin/pages/page.py"
+        assert admin_client.get("/admin/").status_code == 200
 
     def test_the_admin_tree_holds_the_auth_pages(self):
         rows = route_rows()

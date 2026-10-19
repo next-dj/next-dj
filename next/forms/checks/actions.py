@@ -6,9 +6,9 @@ from django.conf import settings
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
 from next.checks import NEXT
-from next.pages.access import owner_access
-from next.pages.checks.access import access_in_use
-from next.permissions.access import login_middleware_active
+from next.forms.dispatch.permissions import COMPONENT_MODULE, owner_rule
+from next.pages.checks.access import access_in_use, load_declarations
+from next.permissions.access import auth_installed, declared, login_by_default
 from next.utils import middleware_listed
 
 from .sources import diagnostics, iter_registered_actions
@@ -134,7 +134,7 @@ def check_action_guard_permissions(*args, **kwargs) -> list[CheckMessage]:
 
     Only the static `ActionGuard` is inspected, the per-request hooks run user code.
     """
-    if "django.contrib.auth" in settings.INSTALLED_APPS:
+    if auth_installed():
         return []
     return [
         DjangoWarning(
@@ -159,7 +159,7 @@ def _open_actions() -> dict[Path, list[str]]:
         if meta.get("guard") is not None:
             continue
         source = Path(meta["file_path"])
-        owner = owner_access(source)
+        owner = owner_rule(source)
         if owner is None or owner.broken is not None:
             continue
         if owner.rule.requirements or owner.rule.public:
@@ -172,25 +172,64 @@ def _open_actions() -> dict[Path, list[str]]:
 def check_public_actions(*args, **kwargs) -> list[CheckMessage]:
     """Warn about an action of a page tree that nothing guards (`next.W129`).
 
-    It waits for the project to declare access, and the middleware or a guard counts.
+    It waits for the project to declare access, and the default login or a guard counts.
     """
-    if login_middleware_active() or not access_in_use():
+    if login_by_default() or not access_in_use():
         return []
     return [
         DjangoWarning(
             f"{source} declares the actions {', '.join(map(repr, names))}, and no "
-            "requirement from a proxy.py above it, no declaration of its page, no "
-            "Meta guard and no LoginRequiredMiddleware guard them, so anyone may "
-            "post to them.",
+            "declaration of its page or of a page.py above it, no Meta guard and "
+            "no default login guard them, so anyone may post to them.",
             hint=(
-                "Declare page.login_required() or permission_required(), guard the "
-                "directory with a proxy.py, set login_required on the action Meta, "
-                "or declare page.public() if the actions are meant for everyone."
+                "Declare page.login_required() or permission_required(), with "
+                "inherit=True in a page.py above to guard a whole directory, set "
+                "login_required on the action Meta, turn on "
+                'NEXT_FRAMEWORK["LOGIN_REQUIRED"], or declare page.public() if the '
+                "actions are meant for everyone."
             ),
             obj=str(source),
             id="next.W129",
         )
         for source, names in _open_actions().items()
+    ]
+
+
+def _context_objects(source: Path) -> tuple[str, ...]:
+    """Return the context names the permissions of a `component.py` are checked on."""
+    if source.name != COMPONENT_MODULE:
+        return ()
+    found = (item.obj for item in declared(source).requirements)
+    return tuple(dict.fromkeys(obj for obj in found if isinstance(obj, str)))
+
+
+@register(NEXT)
+def check_component_action_objects(*args, **kwargs) -> list[CheckMessage]:
+    """Flag a `component.py` action whose permission names a context (`next.E165`).
+
+    A POST renders no component, so the context is never there and the action refuses.
+    """
+    load_declarations()
+    found: dict[Path, list[str]] = {}
+    for meta in iter_registered_actions():
+        source = Path(meta["file_path"])
+        if _context_objects(source):
+            found.setdefault(source, []).append(meta["name"])
+    return [
+        Error(
+            f"{source} declares permission_required(obj=) on the context "
+            f"{', '.join(map(repr, _context_objects(source)))} and the actions "
+            f"{', '.join(map(repr, names))}. An action POST renders no component, "
+            "so the context is never there and the actions refuse every user.",
+            hint=(
+                "Check the object in the form the action binds, through "
+                "has_object_permission() or a Meta permission_required on a permission "
+                "add_perm() registers, or move the actions to the page.py of the page."
+            ),
+            obj=str(source),
+            id="next.E165",
+        )
+        for source, names in found.items()
     ]
 
 
@@ -224,6 +263,7 @@ def check_success_message_framework(*args, **kwargs) -> list[CheckMessage]:
 __all__ = [
     "check_action_applied_to_class",
     "check_action_guard_permissions",
+    "check_component_action_objects",
     "check_form_action_collisions",
     "check_forms_outside_base_dir",
     "check_instance_from_url_on_non_model_form",

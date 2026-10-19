@@ -53,7 +53,7 @@ def throwaway_apps(
 
 
 _URLCONF_HEAD = (
-    "from django.urls import include, path\n\n"
+    "from django.urls import include, path, re_path\n\n"
     "from next.urls import pages\n\n\n"
     "urlpatterns = [\n"
 )

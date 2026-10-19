@@ -151,9 +151,9 @@ The trees the walk finds through ``pages()`` drop out of the auto-assembly of ``
 
 A ``pages()`` tree builds tree-relative patterns through the first ``FileRouterBackend``, wraps them in the ``URL_RESOLVER`` class, and rebuilds them when the router version moves, while Django joins in the outer route.
 Every page view the file router builds, of ``next.urls`` and of a ``pages()`` tree alike, carries ``next_route_trail``, its route relative to its tree.
-The breadcrumb resolution reads it to pass on the kwargs the includes around the tree capture and to find where the tree starts in the URL, above which it resolves each shorter prefix of the route for a page of another tree whose crumbs lead, see :doc:`/content/topics/seo/breadcrumbs`.
-Layouts and contexts never cross that boundary.
-The views also carry ``next_page_path`` and the ``login_required`` attribute ``LoginRequiredMiddleware`` reads, ``False`` for a page whose rule is public through ``page.public()`` or a ``proxy.public()`` above it, and the ``proxy.py`` chain of a page ends at the root of its own tree.
+The breadcrumb resolution reads it to pass on the kwargs the includes around the tree capture to every crumb, see :doc:`/content/topics/seo/breadcrumbs`.
+Layouts, contexts, access declarations, and breadcrumbs never cross that boundary.
+The views also carry ``next_page_path`` and the ``login_required`` attribute ``LoginRequiredMiddleware`` reads, ``False`` for a page whose rule is public through its own ``page.public()`` or a ``page.public(inherit=True)`` above it, and the ``page.py`` chain of a page ends at the root of its own tree.
 
 Reload mechanics
 ----------------

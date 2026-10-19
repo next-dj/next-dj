@@ -19,7 +19,8 @@ from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog, type_name
 from next.forms.origin import resolve_origin, resolve_url_to_page
 from next.forms.uid import validated_origin_path
 from next.pages import page as page_manager
-from next.pages.access import refusal
+from next.pages.access import page_access, refusal
+from next.pages.loaders import last_load_error
 from next.pages.metadata import resolve_metadata
 from next.pages.metadata.fold import fold_metadata
 from next.pages.metadata.normalize import normalize_metadata
@@ -148,17 +149,17 @@ def _is_reserved_event(name: str) -> bool:
 def _refuse_access(
     page_path: "Path", request: HttpRequest, url_kwargs: "Mapping[str, Any]"
 ) -> None:
-    """Raise when the access rule of `page_path` refuses `request`, as its view would.
+    """Raise when the rule of `page_path` refuses `request`, as its own view would.
 
-    It asks the middleware login too, which the foreign page view never met.
+    A broken `page.py` of its chain raises its import failure, not a 404 of the caller.
     """
+    broken = page_access(page_path).broken
+    error = None if broken is None else last_load_error(broken)
+    if error is not None:
+        raise error
     try:
         redirect = refusal(
-            page_path,
-            request,
-            dict(url_kwargs),
-            render_dep_cache(request),
-            middleware=True,
+            page_path, request, dict(url_kwargs), render_dep_cache(request)
         )
     except PermissionDenied:
         raise ForeignPageNotAuthorizedError(page_path, _FORBIDDEN) from None

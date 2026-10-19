@@ -116,46 +116,23 @@ The next ``get_cached_flag`` call refetches from the database.
    :caption: flags/signals.py
 
    from django.db.models.signals import post_delete, post_save
+   from django.dispatch import receiver
 
    from .cache import invalidate_flag
    from .models import Flag
 
+   @receiver(post_save, sender=Flag)
    def _invalidate_on_save(instance: Flag, **kwargs) -> None:
        """Drop the cached entry so the next read reflects the updated row."""
        invalidate_flag(instance.name)
 
+   @receiver(post_delete, sender=Flag)
    def _invalidate_on_delete(instance: Flag, **kwargs) -> None:
        """Drop the cached entry when the flag is removed from the database."""
        invalidate_flag(instance.name)
 
-   def connect() -> None:
-       post_save.connect(_invalidate_on_save, sender=Flag)
-       post_delete.connect(_invalidate_on_delete, sender=Flag)
-
-Connect the receivers at app ready
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-``flags.deps`` registers ``FlagProvider`` with the resolver as a side effect of import, and the ``next`` application imports the ``deps.py`` and ``signals.py`` of every installed app at startup, see :doc:`/content/ref/settings`.
-``flags.signals`` connects through a ``connect()`` function rather than decorated receivers, so ``AppConfig.ready`` still calls it.
-``flags.signals`` reaches ``flags.models`` through its import chain, so ``AppConfig.ready`` defers the import until the app registry is populated.
-A top-level import in ``apps.py`` would run while Django is still loading app configs, and defining the ``Flag`` model at that point raises :exc:`~django.core.exceptions.AppRegistryNotReady`.
-
-.. code-block:: python
-   :caption: flags/apps.py
-
-   from django.apps import AppConfig
-
-   class FlagsConfig(AppConfig):
-       default_auto_field = "django.db.models.BigAutoField"
-       name = "flags"
-
-       def ready(self) -> None:
-           """Connect the receivers once the app registry is populated."""
-           from flags import signals
-
-           signals.connect()
-
-``signals.connect`` runs at ready time, so the signal connections happen after the app registry knows ``Flag``.
+``flags.deps`` registers ``FlagProvider`` with the resolver as a side effect of import, and the ``next`` application imports the ``deps.py`` and ``signals.py`` of every installed app once the app registry is ready, see :doc:`/content/ref/settings`.
+The receivers therefore need no ``AppConfig.ready`` code, and ``flags/apps.py`` stays the ``AppConfig`` ``startapp`` writes.
 
 Consume the marker in a component
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

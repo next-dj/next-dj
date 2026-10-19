@@ -16,7 +16,7 @@ Overview
 
 The resolver runs at several call sites.
 Page context functions, the page render function, component context functions, and the form dispatch all pass through it.
-The form dispatch resolves the form-class factory, ``get_initial``, ``get_form_kwargs``, ``@action`` handlers, ``on_valid``, and ``wizard.done``.
+The form dispatch resolves the form-class factory, ``get_initial``, ``get_form_kwargs``, ``check_permissions``, ``has_object_permission``, ``@action`` handlers, ``on_valid``, and ``wizard.done``.
 Every call site shares one provider list and one set of markers.
 Custom providers and tests can import ``resolver`` from ``next.deps`` and call ``resolver.resolve_dependencies``.
 
@@ -516,11 +516,11 @@ A linter that reads the string as a forward reference, such as ruff with ``F821`
 Where DObject applies
 ~~~~~~~~~~~~~~~~~~~~~
 
-Page callables, form handlers and form hooks, and named dependencies resolve a ``DObject``.
+Page context callables, ``@page.metadata`` callables, form handlers and form hooks, and named dependencies resolve a ``DObject``.
 A form handler or hook reads the URL kwargs of the page the submission came from, but it resolves with no page context, so a ``DObject`` with a parent there is ``next.E155``.
 A submission whose origin is missing or names a page without the kwarg comes from the client rather than from the wiring, so the dispatcher answers it with 400 Bad Request and logs a warning instead of raising.
 A ``@component.context`` callable receives no URL kwargs at all, so any ``DObject`` there is ``next.E156``, and the component reads the row from the page context by name instead.
-An access declaration of a ``page.py`` or a ``proxy.py`` names its row as ``permission_required(perm, obj=DObject[Model])``, which loads by the URL kwarg named after the ``model_name`` of the model and shares the cached row with a ``DObject`` parameter of the same model and primary key, see :ref:`topics-proxy`.
+An access declaration of a ``page.py`` names its row as ``permission_required(perm, obj=DObject[Model])``, which loads by the URL kwarg named after the ``model_name`` of the model and shares the cached row with a ``DObject`` parameter of the same model and primary key, see :ref:`topics-access`.
 
 ``manage.py check`` reads the annotations without running a query.
 ``next.E153`` reports a model whose default manager has no ``visible_to``, ``next.W126`` a page ``DObject`` whose full route hands it no kwarg of its name, ``next.E162`` the same for an ``obj=DObject[Model]`` of an access declaration, and ``next.E154`` a parent no earlier context callable provides.
@@ -593,7 +593,7 @@ Declare the provider in ``deps.py``.
    A class that registers later still joins the provider list by priority, and the plans compiled without it are recompiled.
 
 A custom provider that does not declare ``priority`` inherits the ``RegisteredParameterProvider`` default of ``100``.
-The eleven built-in providers occupy the range ``0`` (object) through ``80`` (query string), so the default keeps a custom provider after every built-in.
+The eleven built-in providers that fill parameters occupy the range ``0`` (object) through ``80`` (query string), so the default keeps a custom provider after each of them, and only the refusal of an unloaded ``DObject`` runs later, at ``1000``.
 ``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
 Set ``priority`` on the subclass when the new provider has to claim a parameter the built-ins would otherwise match, for example a value below ``60`` for an annotation that should outrank ``DUrl``.
 

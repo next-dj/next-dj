@@ -14,6 +14,7 @@ from next.conf.settings import reload_on_setting_changed
 from next.conf.signals import settings_reloaded
 from next.consent.manager import forget_consent_settings
 from next.csrf import forget_csrf_delivery
+from next.deps.objects import forget_object_rows
 from next.deps.resolver import (
     apply_resolver_setting,
     forget_dep_caches,
@@ -44,7 +45,7 @@ from next.pages.responses import forget_response_policies
 from next.pages.watch import forget_watch_state
 from next.partial.manager import forget_asset_version, forget_partial_backend
 from next.partial.ports import PartialShaperImpl
-from next.permissions.access import forget_login_middleware
+from next.permissions.access import forget_login_default
 from next.ports import (
     form_routes_slot,
     page_scan_slot,
@@ -97,7 +98,7 @@ _SETTING_CHANGED: Final[tuple[Callable[..., None], ...]] = (
     forget_storage_state,
     reload_app_routers,
     forget_script_srcs,
-    forget_login_middleware,
+    forget_login_default,
     staticfiles.reinstall_finders,
     templates.reinstall_builtins,
 )
@@ -138,10 +139,10 @@ _SETTINGS_RELOADED: Final[tuple[Callable[..., None], ...]] = (
 # derived from the old routers is dropped with them.
 _ROUTER_RELOADED: Final[tuple[Callable[..., None], ...]] = (
     forget_watch_state,
-    forget_crumb_routes,
     forget_page_roots,
     forget_manager_page_roots,
     forget_dep_caches,
+    forget_object_rows,
     forget_seo_sources,
     forget_translated_urls,
     forget_scripts,
@@ -163,17 +164,15 @@ class NextFrameworkConfig(AppConfig):
 
     @override
     def ready(self) -> None:
-        """Register checks, connect every receiver, install hooks, compose the ports."""
+        """Register checks, connect every receiver, install hooks, compose the ports.
+
+        The resolver and the ports come before the installs, which import user modules.
+        """
         _register_checks()
         _connect(setting_changed, _SETTING_CHANGED)
         _connect(settings_reloaded, _SETTINGS_RELOADED)
         _connect(router_reloaded, _ROUTER_RELOADED)
-        # Ahead of every install, because app autodiscovery and component discovery
-        # import user modules that must see the configured resolver, not the base one.
         apply_resolver_setting()
-        # The ports are bound before the installs for the same reason, and so a
-        # discovery failure cannot leave a port unbound. Binding the static port
-        # stores the lazy handle without building the manager.
         form_routes_slot.set(form_action_manager)
         page_scan_slot.set(PageScanImpl())
         partial_shaper_slot.set(PartialShaperImpl())

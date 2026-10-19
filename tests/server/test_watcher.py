@@ -114,16 +114,6 @@ class TestServerAutoreloadWatchApi:
             assert len(matches) == 1
 
 
-class TestProxyRestarts:
-    """A `proxy.py` restarts the server like a `page.py` does."""
-
-    def test_a_page_root_watches_every_proxy(self, tmp_path) -> None:
-        entry = file_router_config_entry(pages_dir=str(tmp_path.resolve()))
-        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            specs = _iter_default_autoreload_watch_specs()
-        assert (tmp_path.resolve(), "**/proxy.py") in specs
-
-
 class TestTreeSourcesReloadInProcess:
     """The sources at the top of a page tree reload in-process, not by a restart."""
 

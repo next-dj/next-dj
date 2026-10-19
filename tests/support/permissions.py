@@ -28,20 +28,35 @@ def owns_group(user, obj) -> bool:
     return obj is not None and obj.name == user.username
 
 
-class PermissionHolder:
-    """A signed-in user who holds the permissions named and records every question."""
+class QuietHolder:
+    """A signed-in user who holds the permissions named and records no question.
+
+    A timed loop takes it, so the cost it measures holds no growing record.
+    """
 
     is_authenticated = True
 
     def __init__(self, *held: str) -> None:
-        """Hold the permissions `held`, with nothing asked yet."""
+        """Hold the permissions `held`."""
         self.held = frozenset(held)
+
+    def has_perm(self, perm: str, *obj: object) -> bool:
+        """Answer the question from the held names alone."""
+        return perm in self.held
+
+
+class PermissionHolder(QuietHolder):
+    """A signed-in user who holds the permissions named and records every question."""
+
+    def __init__(self, *held: str) -> None:
+        """Hold the permissions `held`, with nothing asked yet."""
+        super().__init__(*held)
         self.asked: list[tuple[object, ...]] = []
 
     def has_perm(self, perm: str, *obj: object) -> bool:
         """Record the question and answer it from the held names alone."""
         self.asked.append((perm, *obj))
-        return perm in self.held
+        return super().has_perm(perm, *obj)
 
 
 @contextmanager

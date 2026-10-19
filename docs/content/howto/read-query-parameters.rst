@@ -129,7 +129,7 @@ Annotate the ``request`` parameter with :class:`~django.http.HttpRequest`.
 The resolver injects the request by annotation and never by parameter name, so a bare ``def parse_filters(request)`` receives ``None`` and fails on its first attribute read.
 
 .. code-block:: python
-   :caption: catalog/filters.py
+   :caption: catalog/deps.py
 
    from dataclasses import dataclass
 
@@ -155,7 +155,7 @@ The resolver injects the request by annotation and never by parameter name, so a
            sort=g.get("sort") or "newest",
        )
 
-Import ``catalog/filters.py`` from ``AppConfig.ready`` so the registration runs before the first request.
+The ``next`` application imports ``catalog/deps.py`` at startup, so the registration runs before the first request.
 
 Each callable that needs the snapshot takes it through ``Depends("filters")``.
 The resolution cache memoises the value by its registered name for the rest of the pass, so the query string is parsed once however many callables ask for it.
@@ -163,7 +163,7 @@ The resolution cache memoises the value by its registered name for the rest of t
 .. code-block:: python
    :caption: catalog/pages/catalog/page.py
 
-   from catalog.filters import Filters
+   from catalog.deps import Filters
    from catalog.models import Product
 
    from next import Depends, context

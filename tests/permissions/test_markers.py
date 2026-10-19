@@ -154,9 +154,9 @@ class TestArity:
         assert calls.log == [(method, expected)]
 
 
-_ROOT = Path("/tree/proxy.py")
+_ROOT = Path("/tree/page.py")
 
-_LEAF = Path("/tree/a/page.py")
+_LEAF = Path("/tree/a/b/page.py")
 
 
 class TestRequirement:
@@ -201,7 +201,7 @@ class TestJoined:
         assert rule == AccessRule((), True, (_LEAF,))
 
 
-_MIDDLE = Path("/tree/a/proxy.py")
+_MIDDLE = Path("/tree/a/page.py")
 
 _LOGIN = Requirement("login", _ROOT)
 

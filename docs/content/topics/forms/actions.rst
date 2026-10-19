@@ -428,7 +428,7 @@ Access guards
 -------------
 
 The dispatch endpoint of an action lives at ``/_next/form/<uid>/``, outside the page URL space, so a middleware scoped to a URL prefix does not cover it.
-An action declared in a page tree answers to the access its ``page.py`` and the ``proxy.py`` files above it declare, checked before anything below, see :doc:`/content/security/actions`.
+An action declared in a page tree answers to the access of the page in its directory, the ``inherit=True`` declarations of every ``page.py`` above included, checked before anything below, see :doc:`/content/security/actions`.
 The page the submission names authorizes it too, through its access rule and its own ``render()``, so a page that refuses a visitor refuses that visitor's submissions as well, see :doc:`/content/topics/pages`.
 Declare the access requirements on the action itself for a check that stands on its own, such as a shared form outside any page tree.
 ``Meta.login_required`` and ``Meta.permission_required`` guard a class-bound form, and the same names are keyword arguments on ``@action``.
@@ -463,10 +463,10 @@ An authenticated user missing a permission gets :exc:`~django.core.exceptions.Pe
 
 A permission registered through ``add_perm`` in a ``permissions.py`` is an object permission, and a class-bound form checks it on the row it edits rather than up front.
 The static guard leaves it out, and once the form binds the dispatcher asks ``user.has_perm(perm, form.instance)`` for a ``ModelForm`` that edits a saved row, or ``user.has_perm(perm, None)`` for a new record and a plain ``Form``.
-A new record is therefore never checked against the row it is created under, and a rule on that parent row goes into ``has_object_permission`` or into the access of the page as ``permission_required(perm, obj=DObject[Model])`` in its ``page.py`` or a ``proxy.py``, see :ref:`topics-proxy`.
+A new record is therefore never checked against the row it is created under, and a rule on that parent row goes into ``has_object_permission`` or into the access of the page as ``permission_required(perm, obj=DObject[Model])`` in its ``page.py``, see :ref:`topics-access`.
 The check runs once, before ``has_object_permission`` and validation, and a refusal is HTTP 403 with ``form_access_denied`` sent as ``layer="object"`` and ``reason="denied"``.
 A ``FormWizard`` and a handler-only ``@action`` bind no form at that point, so their guard checks every listed permission up front with no object, registered ones included.
-Load the row through ``DObject`` in ``get_form_kwargs`` rather than ``Meta.instance_from_url``, whose unscoped lookup answers a refused user 403 for an existing id and 404 for a missing one.
+Without a ``visible_to`` on the model manager and a registered ``scope``, ``Meta.instance_from_url`` looks the row up unscoped and answers a refused user 403 for an existing id and 404 for a missing one, so load the row through ``DObject`` in ``get_form_kwargs`` or give the model both halves, see :ref:`topics-di-dobject`.
 See :ref:`topics-permissions` for the predicates and the backend that answers them.
 
 Unlike ``Meta.abstract``, which is own-class-only, the guard keys survive subclassing through plain class-attribute lookup.
@@ -482,7 +482,7 @@ Hide the form in the template when the page should not show it to anonymous visi
 
 The guard is stored as an ``ActionGuard`` on the action's registry metadata, so a custom backend that delegates to the standard pipeline inherits the enforcement.
 The ``next.W060`` check warns when ``permission_required`` is declared while ``django.contrib.auth`` is not installed.
-The ``next.W127`` check warns about a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, since such a guard refuses every user but a superuser, once the project declares access through a ``proxy.py``, an access declaration, or ``add_perm``.
+The ``next.W127`` check warns about a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, since such a guard refuses every user but a superuser, once the project declares access through a ``page.py`` or ``component.py`` declaration or ``add_perm``.
 It reads the model permissions off the model classes, so a ``Permission`` row created only by a data migration or through the admin draws it, and declaring that permission in ``Meta.permissions`` or silencing the code quiets it.
 
 .. _topics-forms-actions-dynamic-guards:
@@ -797,6 +797,10 @@ The registration and scope checks are listed here, the wizard checks on :doc:`wi
    An action declares a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, so the guard refuses every user but a superuser.
    It judges a form guard only in a project that declares access, see :doc:`/content/ref/system-checks`.
    The same check reads the names of ``{% has_perm %}`` tags and of access declarations in every project, and the message names the place.
+
+``next.W129`` (Warning)
+   A file of a page tree declares actions that no declaration of its page, no ``inherit=True`` declaration above it, no ``Meta`` guard, and no default login guard, so anyone may post to them.
+   It runs only in a project that declares access and keeps ``LOGIN_REQUIRED`` and ``LoginRequiredMiddleware`` off, see :doc:`/content/security/actions`.
 
 ``next.W061`` (Warning)
    An action declares ``Meta.success_message`` while the messages framework is not fully installed.

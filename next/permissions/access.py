@@ -1,30 +1,38 @@
-"""The access a page, proxy or component declares and the one check every adapter runs.
+"""The access a page or a component declares and the one check every adapter runs.
 
 The check returns a denial rather than a response, so each adapter answers in its form.
 """
 
 import functools
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from enum import Enum, auto
 from pathlib import Path
+from typing import TYPE_CHECKING, Final, cast
 from urllib.parse import urlsplit, urlunsplit
 
 from django.apps import apps
 from django.conf import settings
 from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.core.exceptions import PermissionDenied
-from django.http import HttpResponseRedirect, QueryDict
+from django.http import Http404, HttpRequest, HttpResponseRedirect, QueryDict
+from django.http.response import HttpResponseBase
 from django.shortcuts import resolve_url
+from django.utils.module_loading import import_string
 
-from next.introspect import registering_file
+from next.conf import next_framework_settings
 from next.utils import is_middleware, redirect_or_fallback
 
 from .markers import AccessObject, AccessRule, Denial, Requirement
 from .registry import DeclarationRegistry
 
 
+if TYPE_CHECKING:
+    from django.contrib.auth.middleware import LoginRequiredMiddleware
+
+
 _LOGIN_MIDDLEWARE = "django.contrib.auth.middleware.LoginRequiredMiddleware"
 
-_AUTH_APP = "django.contrib.auth"
+_AUTH_APP: Final = "django.contrib.auth"
 
 declarations = DeclarationRegistry()
 
@@ -43,24 +51,26 @@ def _permissions(perm: object) -> tuple[str, ...]:
     return tuple(names)
 
 
-class Declarations:
-    """The login a page, proxy or component module requires of its requester.
-
-    Each binds to the file that calls it, read from the stack like `@context` reads it.
-    """
-
-    def login_required(self) -> None:
-        """Require a logged-in user, the way Django's `login_required` does."""
-        source = registering_file()
-        declarations.declare(source, Requirement("login", source))
+def require_login(source: Path, *, inherit: bool = False) -> None:
+    """Bind to `source` the requirement of a logged-in user, as `login_required`."""
+    declarations.declare(source, Requirement("login", source), inherit=inherit)
 
 
 def require_permission(
-    source: Path, perm: str | tuple[str, ...], obj: AccessObject | None
+    source: Path,
+    perm: str | tuple[str, ...],
+    obj: AccessObject | None,
+    *,
+    inherit: bool = False,
 ) -> None:
     """Bind to `source` the requirement of every permission in `perm`, on `obj`."""
     requirement = Requirement("permission", source, _permissions(perm), obj)
-    declarations.declare(source, requirement)
+    declarations.declare(source, requirement, inherit=inherit)
+
+
+def declare_public(source: Path, *, inherit: bool = False) -> None:
+    """Mark `source` public, lifting what the files above require of it."""
+    declarations.declare_public(source, inherit=inherit)
 
 
 def declared(file_path: Path) -> AccessRule:
@@ -78,6 +88,29 @@ def signed_in(user: object) -> bool:
     return bool(getattr(user, "is_authenticated", False))
 
 
+class _Unnamed(Enum):
+    """The absent object of a permission asked without one."""
+
+    TOKEN = auto()
+
+
+UNNAMED: Final = _Unnamed.TOKEN
+"""The object of a permission asked of the model, not of one row."""
+
+
+def holds(user: object, perms: Iterable[str], obj: object = UNNAMED) -> bool:
+    """Return whether `user` holds every one of `perms`, on `obj` when one is named.
+
+    A named object that is `None` denies, so it never asks the model question instead.
+    """
+    has_perm = getattr(user, "has_perm", None)
+    if not callable(has_perm) or obj is None:
+        return False
+    if obj is UNNAMED:
+        return all(map(has_perm, perms))
+    return all(has_perm(perm, obj) for perm in perms)
+
+
 def check(
     user: object, rule: AccessRule, lookup: Lookup | None = None
 ) -> Denial | None:
@@ -90,46 +123,35 @@ def check(
         return None
     if not signed_in(user):
         return Denial("login", requirements[0])
-    has_perm = getattr(user, "has_perm", None)
     for requirement in requirements:
         if requirement.obj is not None or not requirement.perms:
             continue
-        if has_perm is None or not all(map(has_perm, requirement.perms)):
+        if not holds(user, requirement.perms):
             return Denial("permission", requirement)
     for requirement in requirements:
         if requirement.obj is None:
             continue
-        if lookup is None or has_perm is None:
-            return Denial("permission", requirement)
-        target = lookup(requirement.obj)
-        if not all(has_perm(perm, target) for perm in requirement.perms):
+        if lookup is None or not holds(
+            user, requirement.perms, lookup(requirement.obj)
+        ):
             return Denial("permission", requirement)
     return None
 
 
-def login_redirect(next_url: str) -> HttpResponseRedirect:
-    """Redirect to `LOGIN_URL` with `next_url`, dropped past Django's Location cap.
-
-    It mirrors `redirect_to_login`, whose module needs `contrib.auth` installed.
-    """
-    login_url = resolve_url(settings.LOGIN_URL)
-    scheme, netloc, path, query, fragment = urlsplit(login_url)
-    querystring = QueryDict(query, mutable=True)
-    querystring[REDIRECT_FIELD_NAME] = next_url
-    target = (scheme, netloc, path, querystring.urlencode(safe="/"), fragment)
-    return redirect_or_fallback(urlunsplit(target), login_url)
+def auth_installed() -> bool:
+    """Return whether `django.contrib.auth` is installed, by any `AppConfig` path."""
+    return apps.is_installed(_AUTH_APP)
 
 
-def answer(denial: Denial, next_url: str) -> HttpResponseRedirect:
-    """Return the login redirect a login denial owes, raising a 403 for any other."""
-    if denial.reason == "login":
-        return login_redirect(next_url)
-    raise PermissionDenied
+def _no_view(request: HttpRequest) -> HttpResponseBase:
+    """Stand in for the view a middleware hook takes, where no URL resolved one."""
+    del request
+    raise Http404
 
 
 def login_middleware() -> str | None:
     """Return the `MIDDLEWARE` entry naming `LoginRequiredMiddleware` or a subclass."""
-    if not apps.is_installed(_AUTH_APP):
+    if not auth_installed():
         return None
     listed = (entry for entry in settings.MIDDLEWARE if isinstance(entry, str))
     return next(
@@ -138,29 +160,84 @@ def login_middleware() -> str | None:
 
 
 @functools.cache
-def login_middleware_active() -> bool:
-    """Return whether `MIDDLEWARE` lists `LoginRequiredMiddleware` or a subclass."""
+def _listed_middleware() -> "LoginRequiredMiddleware | None":
+    """Return the listed login middleware, built the way the request handler builds it.
+
+    Its own login URL and field name then shape a redirect the framework answers.
+    """
+    entry = login_middleware()
+    if entry is None:
+        return None
+    built = import_string(entry)(_no_view)
+    return cast("LoginRequiredMiddleware", built)
+
+
+@functools.cache
+def login_by_default() -> bool:
+    """Return whether an endpoint that declares nothing and is not public asks a login.
+
+    The `LOGIN_REQUIRED` setting turns it on, and so does `LoginRequiredMiddleware`.
+    """
+    if next_framework_settings.LOGIN_REQUIRED:
+        return True
     return login_middleware() is not None
 
 
-def forget_login_middleware(*, setting: str, **kwargs: object) -> None:
-    """Drop the memoised answer once `MIDDLEWARE` or `INSTALLED_APPS` changes."""
-    if setting in {"MIDDLEWARE", "INSTALLED_APPS"}:
-        login_middleware_active.cache_clear()
+def login_redirect(request: HttpRequest, next_url: str) -> HttpResponseRedirect:
+    """Redirect to the login page with `next_url`, as `LoginRequiredMiddleware` would.
+
+    A listed subclass names the URL and the field, another host gets an absolute next.
+    """
+    middleware = _listed_middleware()
+    login_url = settings.LOGIN_URL
+    field = REDIRECT_FIELD_NAME
+    if middleware is not None:
+        view = getattr(request.resolver_match, "func", _no_view)
+        login_url = middleware.get_login_url(view)
+        field = middleware.get_redirect_field_name(view)
+    resolved = resolve_url(login_url)
+    scheme, netloc, path, query, fragment = urlsplit(resolved)
+    if scheme or netloc:
+        here = urlsplit(request.build_absolute_uri(next_url))
+        if (scheme and scheme != here.scheme) or (netloc and netloc != here.netloc):
+            next_url = here.geturl()
+    if field:
+        querystring = QueryDict(query, mutable=True)
+        querystring[field] = next_url
+        query = querystring.urlencode(safe="/")
+    target = (scheme, netloc, path, query, fragment)
+    return redirect_or_fallback(urlunsplit(target), resolved)
+
+
+def answer(denial: Denial, request: HttpRequest, next_url: str) -> HttpResponseRedirect:
+    """Return the login redirect a login denial owes, raising a 403 for any other."""
+    if denial.reason == "login":
+        return login_redirect(request, next_url)
+    raise PermissionDenied
+
+
+def forget_login_default(*, setting: str, **kwargs: object) -> None:
+    """Drop the memoised answers once a setting the default login reads changes."""
+    if setting in {"NEXT_FRAMEWORK", "MIDDLEWARE", "INSTALLED_APPS"}:
+        login_by_default.cache_clear()
+        _listed_middleware.cache_clear()
 
 
 __all__ = [
-    "Declarations",
     "Lookup",
     "answer",
+    "auth_installed",
     "check",
     "declarations",
+    "declare_public",
     "declared",
     "declared_files",
-    "forget_login_middleware",
+    "forget_login_default",
+    "holds",
+    "login_by_default",
     "login_middleware",
-    "login_middleware_active",
     "login_redirect",
+    "require_login",
     "require_permission",
     "signed_in",
 ]

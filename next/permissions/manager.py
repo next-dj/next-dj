@@ -10,15 +10,14 @@ from django.apps import apps
 from django.conf import settings
 from django.utils.module_loading import import_string
 
-from .markers import Predicate, Test
+from .access import auth_installed
+from .markers import Test
 from .registry import PermissionRegistry
 
 
 _NEIGHBOURS: Final[Mapping[str, str]] = {
     "rules.permissions.ObjectPermissionBackend": "rules.permissions.perm_exists"
 }
-
-_AUTH_APP: Final = "django.contrib.auth"
 
 
 class PermissionManager:
@@ -39,9 +38,9 @@ class PermissionManager:
         """Return the counter the registry bumps on every change."""
         return self._registry.version
 
-    def add(self, name: str, predicate: Predicate | Test) -> Predicate:
+    def add(self, name: str, predicate: Test) -> None:
         """Register `predicate` under the permission `name`."""
-        return self._registry.add(name, predicate)
+        self._registry.add(name, predicate)
 
     def is_registered(self, perm: str) -> bool:
         """Return whether `perm` is registered here."""
@@ -89,7 +88,7 @@ class PermissionManager:
 
         The set is kept while the app registry hands out the same model list.
         """
-        if not apps.is_installed(_AUTH_APP):
+        if not auth_installed():
             return frozenset()
         models = apps.get_models()
         held = self._models
@@ -155,9 +154,9 @@ def _neighbour_checks() -> list[Callable[[str], bool]]:
 permission_manager = PermissionManager()
 
 
-def add_perm(name: str, predicate: Predicate | Test) -> Predicate:
+def add_perm(name: str, predicate: Test) -> None:
     """Register `predicate` as the object permission `name`, `app_label.codename`."""
-    return permission_manager.add(name, predicate)
+    permission_manager.add(name, predicate)
 
 
 def has_perm(user: object, perm: str, obj: object = None) -> bool:

@@ -15,9 +15,9 @@ from django.http import (
     QueryDict,
 )
 
+from next.components import render_component
 from next.components.context import component as component_ctx
 from next.components.info import ComponentInfo
-from next.components.renderers import _inject_component_context
 from next.deps import REQUEST_DEP_CACHE_ATTR, Depends, resolver
 from next.forms import (
     ActionOutcome,
@@ -127,12 +127,14 @@ class KwargsDispatchWizard(FormWizard):
 
 
 def _run_component_context(tmp_path: Path, request: object) -> object:
-    """Register a `@component.context` referencing `Depends("token")` and invoke it.
+    """Render a component whose `@component.context` reads `Depends("token")`.
 
-    Returns the value the consumer wrote under the `out` key.
+    Returns what the template printed under the `out` key.
     """
     module_path = tmp_path / "component.py"
     module_path.write_text("")
+    template_path = tmp_path / "component.djx"
+    template_path.write_text("{{ out }}")
 
     def provide(token: str = Depends("token")) -> str:
         return token
@@ -143,13 +145,11 @@ def _run_component_context(tmp_path: Path, request: object) -> object:
             name="t",
             scope_root=tmp_path,
             scope_relative="t",
-            template_path=None,
+            template_path=template_path,
             module_path=module_path,
             is_simple=False,
         )
-        context_data: dict[str, object] = {}
-        _inject_component_context(info, context_data, request)
-        return context_data["out"]
+        return render_component(info, {}, request)
     finally:
         component_ctx._registry.unregister(module_path)
 

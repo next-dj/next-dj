@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
@@ -10,14 +11,15 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from next.forms import ActionGuard, Form, FormWizard, ModelForm, action
 from next.forms.dispatch import FormActionDispatch, _branch
 from next.forms.dispatch.permissions import (
+    FORM_OBJECT,
     _check_access,
     _object_permissions,
-    _split_permissions,
+    guard_rule,
 )
 from next.forms.manager import form_action_manager
 from next.forms.signals import form_access_denied
 from next.permissions import add_perm
-from next.permissions.markers import predicate
+from next.permissions.markers import OPEN, AccessRule, Requirement, predicate
 from next.testing import SignalRecorder, capture_signals
 from tests.support import owns_group
 
@@ -31,6 +33,7 @@ pytestmark = [
 
 _EDIT = "auth.edit_group"
 _MODEL_PERM = "auth.change_group"
+_FORMS = "/x/forms.py"
 
 
 class _Rule:
@@ -132,6 +135,22 @@ class TestSavedInstance:
         assert response["Location"] == "/done/"
         assert ("saved", "ada") in log
         assert _layers(denials) == []
+
+    def test_one_post_reads_the_guard_rule_once(
+        self, client_no_csrf, log, monkeypatch
+    ) -> None:
+        metas: list[object] = []
+
+        def counted(meta):
+            metas.append(meta)
+            return guard_rule(meta)
+
+        monkeypatch.setattr("next.forms.dispatch.guard_rule", counted)
+        Group.objects.create(name="ada")
+        _member(client_no_csrf, "ada")
+        _post(client_no_csrf, "perm_owned_group_form", "/groups/ada/", name="ada")
+        assert ("saved", "ada") in log
+        assert len(metas) == 1
 
     def test_another_user_gets_403_and_nothing_is_saved(
         self, client_no_csrf, log, denials
@@ -450,7 +469,7 @@ class TestNothingRegistered:
         guard = ActionGuard(permissions=(_MODEL_PERM, "auth.add_group"))
         request = rf.post("/_next/form/x/")
         request.user = _GuardUser()
-        assert _check_access(request, guard, object_stage=object_stage) is None
+        assert _check_access(request, _rule(guard, form=object_stage)) is None
         (received,) = request.user.received
         assert received is guard.permissions
 
@@ -458,7 +477,7 @@ class TestNothingRegistered:
         request = rf.post("/_next/form/x/")
         request.user = _GuardUser()
         guard = ActionGuard(login_required=True)
-        assert _check_access(request, guard, object_stage=True) is None
+        assert _check_access(request, _rule(guard, form=True)) is None
         assert request.user.received == []
 
     @pytest.mark.usefixtures("model_form")
@@ -481,53 +500,62 @@ class TestNothingRegistered:
         assert _layers(denials) == []
 
 
-class TestSplitMemo:
-    """The split of a guard tuple is kept until the permission registry changes."""
+class TestGuardRuleMemo:
+    """The rule of a guard is kept until the permission registry changes."""
 
     def test_reused_on_the_same_registry_version(self) -> None:
-        permissions = (_MODEL_PERM, _EDIT)
-        first = _split_permissions(permissions)
-        assert _split_permissions(permissions) is first
-        assert first.static is permissions
-        assert first.registered == ()
+        guard = ActionGuard(permissions=(_MODEL_PERM, _EDIT))
+        first = _rule(guard, form=True)
+        assert _rule(guard, form=True) is first
+        assert first.requirements[1].perms is guard.permissions
+        assert _object_permissions(first) == ()
 
     def test_rebuilt_after_a_registration(self) -> None:
-        permissions = (_MODEL_PERM, _EDIT)
-        before = _split_permissions(permissions)
+        guard = ActionGuard(permissions=(_MODEL_PERM, _EDIT))
+        before = _rule(guard, form=True)
         add_perm(_EDIT, owns_group)
-        after = _split_permissions(permissions)
+        after = _rule(guard, form=True)
         assert after is not before
-        assert after.static == (_MODEL_PERM,)
-        assert after.registered == (_EDIT,)
-        assert _split_permissions(permissions) is after
+        assert after.requirements == (
+            Requirement("login", Path(_FORMS)),
+            Requirement("permission", Path(_FORMS), (_MODEL_PERM,)),
+            Requirement("permission", Path(_FORMS), (_EDIT,), FORM_OBJECT),
+        )
+        assert _rule(guard, form=True) is after
+
+    def test_no_guard_asks_nothing(self) -> None:
+        assert guard_rule({"guard": None, "file_path": _FORMS}) is OPEN
 
     @pytest.mark.parametrize(
-        "guard",
+        ("guard", "form"),
         [
-            pytest.param(None, id="no-guard"),
-            pytest.param(ActionGuard(login_required=True), id="no-permissions"),
-            pytest.param(ActionGuard(permissions=(_MODEL_PERM,)), id="none-registered"),
+            pytest.param(ActionGuard(login_required=True), True, id="no-permissions"),
+            pytest.param(
+                ActionGuard(permissions=(_MODEL_PERM,)), True, id="none-registered"
+            ),
+            pytest.param(ActionGuard(permissions=(_EDIT,)), False, id="not-a-form"),
         ],
     )
-    def test_no_object_permissions(self, guard: ActionGuard | None) -> None:
+    def test_no_object_permissions(self, guard: ActionGuard, form) -> None:
         add_perm(_EDIT, owns_group)
-        assert _object_permissions(guard) == ()
+        assert _object_permissions(_rule(guard, form=form)) == ()
 
     def test_object_permissions_keep_the_guard_order(self) -> None:
         add_perm("auth.b_group", owns_group)
         add_perm("auth.a_group", owns_group)
         guard = ActionGuard(permissions=("auth.a_group", _MODEL_PERM, "auth.b_group"))
-        assert _object_permissions(guard) == ("auth.a_group", "auth.b_group")
+        rule = _rule(guard, form=True)
+        assert _object_permissions(rule) == ("auth.a_group", "auth.b_group")
 
     def test_a_registered_only_guard_leaves_nothing_up_front(self, rf) -> None:
         add_perm(_EDIT, owns_group)
         request = rf.post("/_next/form/x/")
         request.user = _GuardUser(allowed=False)
         guard = ActionGuard(permissions=(_EDIT,))
-        assert _check_access(request, guard, object_stage=True) is None
+        assert _check_access(request, _rule(guard, form=True)) is None
         assert request.user.received == []
         with pytest.raises(PermissionDenied):
-            _check_access(request, guard)
+            _check_access(request, _rule(guard, form=False))
 
 
 def _handler(request: HttpRequest) -> HttpResponse:
@@ -585,9 +613,12 @@ class TestBranch:
         add_perm(_EDIT, owns_group)
         request = rf.post("/_next/form/x/")
         request.user = _GuardUser(allowed=False)
-        meta = {**meta, "guard": ActionGuard(permissions=(_MODEL_PERM, _EDIT))}
+        guard = ActionGuard(permissions=(_MODEL_PERM, _EDIT))
+        meta = {**meta, "guard": guard, "file_path": _FORMS}
         with pytest.raises(PermissionDenied):
-            FormActionDispatch._refuse_access(request, meta, None, "x", {})
+            FormActionDispatch._refuse_access(
+                request, meta, None, "x", {}, guard=guard_rule(meta)
+            )
         expected = (_MODEL_PERM,) if deferred else (_MODEL_PERM, _EDIT)
         assert request.user.received == [expected]
 
@@ -618,8 +649,13 @@ class TestAnonymous:
         request = rf.post("/_next/form/x/")
         request.user = AnonymousUser()
         denial = _check_access(
-            request, ActionGuard(permissions=(_EDIT,)), object_stage=True
+            request, _rule(ActionGuard(permissions=(_EDIT,)), form=True)
         )
         assert denial is not None
         assert denial.status_code == 302
         assert rule.objects() == []
+
+
+def _rule(guard: ActionGuard, *, form: bool) -> AccessRule:
+    branch = {"form_class": _PermStep} if form else {"handler": _handler}
+    return guard_rule({"guard": guard, "file_path": _FORMS, **branch})

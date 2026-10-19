@@ -34,7 +34,7 @@ Each table lists its receivers in the order they run, and each is connected with
 
 - ``setting_changed`` runs ``reload_on_setting_changed`` of ``next.conf.settings`` first, which rebuilds the merged ``NEXT_FRAMEWORK`` and sends ``settings_reloaded``, then the receivers that read Django settings directly, among them ``forget_app_page_roots``, ``reload_app_routers``, ``staticfiles.reinstall_finders``, and ``templates.reinstall_builtins``.
 - ``settings_reloaded`` runs ``reset_failure_logs`` first, so every failure logs again under the new configuration, then every receiver that forgets a memo derived from the settings, among them ``reapply_resolver_setting``, ``forget_site_config``, ``forget_metadata_renderer``, ``forget_serializer``, ``forget_static_manager``, ``forget_seo_sources``, ``forget_scripts``, and ``forget_consent_settings``.
-- ``router_reloaded`` runs ``forget_watch_state``, ``forget_page_roots``, ``forget_manager_page_roots``, ``forget_dep_caches``, ``forget_seo_sources``, ``forget_translated_urls``, and ``forget_scripts``.
+- ``router_reloaded`` runs ``forget_watch_state``, ``forget_page_roots``, ``forget_manager_page_roots``, ``forget_dep_caches``, ``forget_object_rows``, ``forget_seo_sources``, ``forget_translated_urls``, and ``forget_scripts``.
   A reload that replaces the routers from code changes what they report without touching settings, so every memo derived from the old routers goes with them, see :doc:`/content/howto/reload-routes-from-code`.
 
 ``apply_resolver_setting()`` points the dependency-injection singleton at the class named by ``DEPENDENCY_RESOLVER``, see :doc:`settings`.
@@ -66,7 +66,7 @@ Template tag registration
    :members:
 
 ``templates.install()`` also prepends a line-spanning branch to Django's template lexing pattern, so a component tag can carry its arguments over more than one line.
-The branch matches eighteen literal framework tag names and nothing else, and Django's own block-tag branch stays behind it, so a stock tag, a third-party tag, a variable, and a comment all lex as Django lexes them.
+The branch matches nineteen literal framework tag names and nothing else, and Django's own block-tag branch stays behind it, so a stock tag, a third-party tag, a variable, and a comment all lex as Django lexes them.
 See :doc:`template-tags` for the tags this enables and the exact set.
 A Django release that spells the block-tag branch differently raises ``RuntimeError`` out of ``ready``, because a pattern left unwidened would turn every multi-line tag into template text at render time.
 

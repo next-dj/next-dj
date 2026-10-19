@@ -162,17 +162,28 @@ def unresolved_object(annotation: object) -> bool:
     )
 
 
+def scoped_query(model: type[Model]) -> _ScopedQuery | None:
+    """Return the `visible_to` hook the default manager of `model` defines, if any."""
+    hook = getattr(model._default_manager, "visible_to", None)
+    return cast("_ScopedQuery", hook) if callable(hook) else None
+
+
+def unscoped_reason(model: type[Model]) -> str:
+    """Return why the rows of `model` cannot load, its manager lacking `visible_to`."""
+    return (
+        f"{model._meta.label}._default_manager.visible_to(scope), which that manager "
+        "does not define. Add visible_to(scope) to the default manager, returning "
+        "the rows the scope may see."
+    )
+
+
 def _scoped_query(model: type[Model]) -> _ScopedQuery:
     """Return `visible_to` off the default manager, or raise a TypeError naming it."""
-    visible_to = getattr(model._default_manager, "visible_to", None)
-    if not callable(visible_to):
-        msg = (
-            f"DObject[{model._meta.label}] reads through "
-            f"{model._meta.label}._default_manager.visible_to(scope), which the "
-            "manager does not define. Add it, returning the rows the scope may see."
-        )
+    hook = scoped_query(model)
+    if hook is None:
+        msg = f"DObject[{model._meta.label}] reads through {unscoped_reason(model)}"
         raise TypeError(msg)
-    return cast("_ScopedQuery", visible_to)
+    return hook
 
 
 def _owner(context: ResolutionContext, name: str, parent: str) -> object:
@@ -191,13 +202,27 @@ class _Rows(NamedTuple):
     not_found: str
 
 
+_rows_of: dict[type[Model], _Rows] = {}
+
+
 def _rows(model: type[Model]) -> _Rows:
-    """Read the `visible_to` hook of `model` and the names its lookups report."""
-    return _Rows(
-        _scoped_query(model),
-        f"DObject[{model._meta.label_lower}]",
-        f"No {model._meta.object_name} matches the given query.",
-    )
+    """Return the `visible_to` hook of `model` and its lookup names, read once a model.
+
+    A router reload drops them along with the compiled plans that hold them too.
+    """
+    held = _rows_of.get(model)
+    if held is None:
+        held = _rows_of[model] = _Rows(
+            _scoped_query(model),
+            f"DObject[{model._meta.label_lower}]",
+            f"No {model._meta.object_name} matches the given query.",
+        )
+    return held
+
+
+def forget_object_rows(**kwargs: object) -> None:
+    """Drop the memoised `visible_to` hooks, so a reload reads every manager again."""
+    _rows_of.clear()
 
 
 def _primary_key(
@@ -333,7 +358,7 @@ def scoped_model(model: type[Model]) -> bool:
     Both halves are needed, a `visible_to` on the default manager and a `scope`.
     """
     return (
-        callable(getattr(model._default_manager, "visible_to", None))
+        scoped_query(model) is not None
         and current_resolver().get_dependency(SCOPE_DEPENDENCY) is not None
     )
 

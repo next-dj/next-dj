@@ -12,9 +12,11 @@ from next.urls.manager import _RoutedPages, routed_pages
 from next.urls.mount import MountedTree
 from next.utils import PageRoot
 from tests.support import (
+    ENTRY_ROUTER,
     file_router,
     file_router_config_entry,
     installed_apps,
+    routers_from,
     write_app,
     write_page,
     write_urlconf,
@@ -381,16 +383,10 @@ class TestMountedTree:
 
     def test_without_a_file_router_the_tree_routes_nothing(self, tmp_path) -> None:
         write_app(tmp_path, "audit", {"pages": ("", "log")})
-        entry = {"BACKEND": "tests.support.routers.EntryRouter"}
-
         with installed_apps(tmp_path, "audit"):
             tree, _app, _namespace = pages("audit")
-            with patch.object(
-                router_manager, "_get_next_pages_config", return_value=[entry]
-            ):
-                router_manager.reload()
+            with routers_from(ENTRY_ROUTER):
                 inner = list(tree[0].url_patterns)
-            router_manager.reload()
 
         assert inner == []
 

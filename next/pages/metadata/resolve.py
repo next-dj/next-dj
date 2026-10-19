@@ -10,24 +10,14 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import fields, replace
 from datetime import date, datetime
 from functools import lru_cache, partial
-from pathlib import Path
 from typing import Final, cast
-from urllib.parse import quote, urlencode, urljoin, urlsplit
+from urllib.parse import urlencode, urljoin, urlsplit
 
 from django.conf import settings
 from django.http import HttpRequest
-from django.urls import (
-    NoReverseMatch,
-    Resolver404,
-    ResolverMatch,
-    get_script_prefix,
-    resolve,
-    reverse,
-)
-from django.urls.converters import get_converters
+from django.urls import NoReverseMatch, ResolverMatch, reverse
 from django.utils.encoding import escape_uri_path, iri_to_uri
 from django.utils.functional import Promise
-from django.utils.http import RFC3986_SUBDELIMS
 from django.utils.timezone import get_current_timezone, is_naive, make_aware
 from django.utils.translation import get_language, to_locale
 
@@ -37,7 +27,6 @@ from next.pages.errors import PageMetadataRequestError, PageMetadataShapeError
 from next.ports import router_access_slot
 from next.site import SiteOriginError, site_indexable, site_origin
 from next.site.headers import CLOSED_ROBOTS
-from next.utils import decode_url_path
 
 from .dicts import Text, Url
 from .hreflang import hreflang_urls, x_default_url
@@ -70,14 +59,6 @@ from .scope import metadata_options
 
 RESOLVED_METADATA_ATTR: Final = "_next_resolved_metadata"
 """The request attribute a rendered `{% metadata %}` publishes its resolve under."""
-
-_ROUTE_PARAMETER: Final = re.compile(r"<(?:(?P<converter>[^>:]+):)?(?P<name>[^>]+)>")
-
-_URL_SAFE: Final = f"{RFC3986_SUBDELIMS}/~:@"
-
-_REGEX_MARKS: Final = frozenset("^$\\()[]{}|?*+")
-
-_PAGE_FILES: Final = ("page.py", "template.djx")
 
 _PAGE_ONE: Final = ("page", "1")
 _ROBOTS_BOOLEANS: Final = ("noarchive", "nosnippet", "noimageindex", "notranslate")
@@ -150,8 +131,6 @@ _LOCALE_MEMO: Final = 256
 
 type UrlMap = Callable[[Url], str]
 type IdMap = Callable[[str], str]
-type _Walk = tuple[tuple[str, ...], tuple[int, ...], Path]
-type CrumbSource = Callable[[Path, Mapping[str, object]], tuple[Crumb, ...] | None]
 
 
 def _origin(request: HttpRequest | None, url: str) -> tuple[str, str]:
@@ -534,85 +513,9 @@ def _crumb_route(trail: str, template: str) -> tuple[str, tuple[str, ...]]:
     return template.format(name=parser.prepare_url_name(trail)), tuple(parameters)
 
 
-def _has_page(directory: Path) -> bool:
-    """Whether `directory` holds a page, a `page.py` or a lone `template.djx`."""
-    return any((directory / name).is_file() for name in _PAGE_FILES)
-
-
-@lru_cache(maxsize=_ROUTE_MEMO)
-def _host_start(page_path: Path, trail: str) -> tuple[int, Path]:
-    """Return how many route parts the host walk drops first and the tree root.
-
-    The walk starts above the shallowest page of the own tree, whose crumbs it covers.
-    """
-    directory = page_path.parent
-    first = 1
-    for level in range(1, trail.count("/") + 2 if trail else 1):
-        directory = directory.parent
-        if _has_page(directory):
-            first = level + 1
-    return first, directory
-
-
-def _route_parts(route: str) -> tuple[str, ...]:
-    """Return the parts of a Django route, its slashes dropped."""
-    return tuple(part for part in route.split("/") if part)
-
-
-@lru_cache(maxsize=1)
-def _route_index() -> tuple[tuple[Path, tuple[str, ...]], ...]:
-    """Return the tree root and the route parts of every routed page, read once."""
-    return tuple(
-        (tree, _route_parts(route))
-        for tree, route in router_access_slot.get().page_routes()
-    )
-
-
-def _alike(left: str, right: str) -> bool:
-    """Whether two route parts may match one URL part, a parameter matching any."""
-    return left == right or left.startswith("<") or right.startswith("<")
-
-
-def _fits(prefix: tuple[str, ...], parts: tuple[str, ...]) -> bool:
-    """Whether a page routed by `parts` may answer the URL of the route `prefix`.
-
-    A `path` parameter takes the rest of the URL, one part of it or more.
-    """
-    for index, part in enumerate(parts):
-        if part.startswith("<path:"):
-            head = zip(prefix[:index], parts[:index], strict=True)
-            return len(prefix) > index and all(_alike(*pair) for pair in head)
-    pairs = zip(prefix, parts, strict=False)
-    return len(prefix) == len(parts) and all(_alike(*pair) for pair in pairs)
-
-
-@lru_cache(maxsize=_ROUTE_MEMO)
-def _walk_levels(parts: tuple[str, ...], root: Path) -> tuple[int, ...]:
-    """Return how many route parts each step of the host walk keeps, deepest first.
-
-    A step no page can answer is skipped, and a walk no other tree can end is none.
-    """
-    index = _route_index()
-    levels = tuple(
-        kept
-        for kept in range(len(parts), -1, -1)
-        if any(_fits(parts[:kept], routed) for _tree, routed in index)
-    )
-    foreign = any(
-        tree != root and _fits(parts[:kept], routed)
-        for kept in levels
-        for tree, routed in index
-    )
-    return levels if foreign else ()
-
-
 def forget_crumb_routes(**kwargs: object) -> None:
-    """Drop the memoised crumb routes and hosts, so a reload reads the trees anew."""
+    """Drop the memoised crumb routes, so a reconfigured URL parser takes effect."""
     _crumb_route.cache_clear()
-    _host_start.cache_clear()
-    _route_index.cache_clear()
-    _walk_levels.cache_clear()
-    _page_match.cache_clear()
 
 
 def _outer_kwargs(match: ResolverMatch, template: str) -> dict[str, object]:
@@ -647,122 +550,19 @@ def _crumb_url(
         return None
 
 
-def _filled_route(route: str, kwargs: Mapping[str, object]) -> str | None:
-    """Return `route` with each parameter set to its kwarg, `None` when one fails.
-
-    Each value goes through the `to_url` of its converter and is quoted as `reverse`.
-    """
-    converters = get_converters()
-    pieces: list[str] = []
-    end = 0
-    for found in _ROUTE_PARAMETER.finditer(route):
-        try:
-            converter = converters[found["converter"] or "str"]
-            text = str(converter.to_url(kwargs[found["name"]]))
-        except (KeyError, ValueError):
-            return None
-        pieces.extend((route[end : found.start()], quote(text, safe=_URL_SAFE)))
-        end = found.end()
-    pieces.append(route[end:])
-    return "".join(pieces)
-
-
-@lru_cache(maxsize=_ROUTE_MEMO)
-def _page_match(url: str, urlconf: str | None) -> tuple[ResolverMatch, Path] | None:
-    """Return the match of the page view serving `url` with its page, `None` for none.
-
-    The path drops the script prefix `reverse` adds, and a miss is memoised too.
-    """
-    path = decode_url_path(url)
-    script = get_script_prefix()
-    if script != "/" and path.startswith(script):
-        path = "/" + path.removeprefix(script)
-    try:
-        found = resolve(path, urlconf=urlconf)
-    except Resolver404:
-        return None
-    page_path: object = getattr(found.func, "next_page_path", None)
-    return (found, page_path) if isinstance(page_path, Path) else None
-
-
-def _start(match: ResolverMatch) -> _Walk | None:
-    """Return the route parts, the steps of the host walk and the tree root.
-
-    A page whose prefixes no page of another tree may answer walks nothing at all.
-    """
-    trail: object = getattr(match.func, "next_route_trail", None)
-    page_path: object = getattr(match.func, "next_page_path", None)
-    if not isinstance(trail, str) or not isinstance(page_path, Path):
-        return None
-    route = match.route
-    if _REGEX_MARKS.intersection(route):
-        return None
-    first, root = _host_start(page_path, trail)
-    parts = _route_parts(route)
-    if len(parts) < first:
-        return None
-    levels = _walk_levels(parts[: len(parts) - first], root)
-    return (parts, levels, root) if levels else None
-
-
-def _host(
-    match: ResolverMatch, urlconf: str | None
-) -> tuple[ResolverMatch, Path] | None:
-    """Return the page of another tree at the deepest URL prefix above the page.
-
-    A prefix the own tree answers ends the walk, so one tree never hosts itself.
-    """
-    start = _start(match)
-    if start is None:
-        return None
-    parts, levels, root = start
-    for kept in levels:
-        route = "".join(f"{part}/" for part in parts[:kept])
-        filled = _filled_route(route, match.kwargs)
-        found = (
-            None
-            if filled is None
-            else _page_match(f"{get_script_prefix()}{filled}", urlconf)
-        )
-        if found is None:
-            continue
-        return None if found[1].is_relative_to(root) else found
-    return None
-
-
-def _host_crumbs(
-    match: ResolverMatch, path: str, urlconf: str | None, crumbs_of: CrumbSource
-) -> tuple[Breadcrumb, ...]:
-    """Return the linked crumbs of the host page, none if the request cannot see it."""
-    found = _host(match, urlconf)
-    if found is None:
-        return ()
-    host, page_path = found
-    crumbs = crumbs_of(page_path, host.kwargs)
-    if crumbs is None:
-        return ()
-    return _linked_crumbs(crumbs, host, path, urlconf, crumbs_of)
-
-
 def _linked_crumbs(
     crumbs: tuple[Crumb, ...],
     match: ResolverMatch | None,
     path: str,
     urlconf: str | None,
-    crumbs_of: CrumbSource | None = None,
 ) -> tuple[Breadcrumb, ...]:
-    """Reverse the crumbs against `match`, the one at the request `path` current.
-
-    With `crumbs_of`, a page of a tree without a root leads with the crumbs of its host.
-    """
+    """Reverse the crumbs against `match`, the one at the request `path` current."""
     if match is None:
         return tuple(Breadcrumb(crumb.label, None) for crumb in crumbs)
     template = next_framework_settings.URL_NAME_TEMPLATE
     own = escape_uri_path(path)
     outer = _outer_kwargs(match, template)
-    linked: list[Breadcrumb] = (
-        [] if crumbs_of is None else [*_host_crumbs(match, path, urlconf, crumbs_of)]
-    )
+    linked: list[Breadcrumb] = []
     for crumb in crumbs:
         url = _crumb_url(crumb.trail, match, template, urlconf, outer)
         linked.append(
@@ -771,29 +571,19 @@ def _linked_crumbs(
     return tuple(linked)
 
 
-def _crossing(request: HttpRequest | None) -> bool:
-    """Whether the request matched a page of a tree whose root page is not its own."""
-    match = getattr(request, "resolver_match", None)
-    return isinstance(match, ResolverMatch) and _start(match) is not None
-
-
-def _breadcrumbs(
-    meta: Metadata, request: HttpRequest | None, crumbs_of: CrumbSource | None
-) -> Breadcrumbs:
+def _breadcrumbs(meta: Metadata, request: HttpRequest | None) -> Breadcrumbs:
     """Return the crumbs of the fold, reversed on first read under the request URLconf.
 
     That read falls inside the render, so the active language is still the request's.
     """
-    if not meta.breadcrumbs and crumbs_of is None:
+    if not meta.breadcrumbs:
         return NO_BREADCRUMBS
     match = getattr(request, "resolver_match", None)
     if request is None or not isinstance(match, ResolverMatch):
         return Breadcrumbs(partial(_linked_crumbs, meta.breadcrumbs, None, "", None))
     urlconf = getattr(request, "urlconf", None)
     return Breadcrumbs(
-        partial(
-            _linked_crumbs, meta.breadcrumbs, match, request.path, urlconf, crumbs_of
-        )
+        partial(_linked_crumbs, meta.breadcrumbs, match, request.path, urlconf)
     )
 
 
@@ -834,18 +624,10 @@ def _graph_node(item: object, url: IdMap) -> Mapping[str, object] | None:
 
 
 def _crumb_list(
-    meta: Metadata, request: HttpRequest, crumbs: Breadcrumbs, *, crossed: bool
+    meta: Metadata, request: HttpRequest, crumbs: Breadcrumbs
 ) -> BreadcrumbList | None:
-    """Return the trail as a `BreadcrumbList`, none if declared or a parent unlinked.
-
-    Crossed crumbs are built only past the cheaper refusals, since they cost a fold.
-    """
+    """Return the trail as a `BreadcrumbList`, none if declared or a parent unlinked."""
     if any(node_type(item) == _BREADCRUMB_LIST for item in meta.jsonld):
-        return None
-    listed = len(meta.breadcrumbs) >= _ENOUGH_CRUMBS or (
-        crossed and len(crumbs.items()) >= _ENOUGH_CRUMBS
-    )
-    if not listed:
         return None
     linked = crumbs.items()
     if any(crumb.url is None for crumb in linked[:-1]):
@@ -861,36 +643,36 @@ def _crumb_list(
 
 
 def _jsonld(
-    meta: Metadata, request: HttpRequest | None, crumbs: Breadcrumbs, *, crossed: bool
+    meta: Metadata, request: HttpRequest | None, crumbs: Breadcrumbs
 ) -> tuple[Mapping[str, object], ...]:
     """Return every node of the graph resolved, the breadcrumb list added if none."""
-    trail = (
-        None if request is None else _crumb_list(meta, request, crumbs, crossed=crossed)
-    )
-    if not meta.jsonld and trail is None:
+    listed = len(meta.breadcrumbs) >= _ENOUGH_CRUMBS
+    if not meta.jsonld and not listed:
         return ()
     url = _id_map(request)
     nodes = [
         node for item in meta.jsonld if (node := _graph_node(item, url)) is not None
     ]
+    trail = (
+        None if request is None or not listed else _crumb_list(meta, request, crumbs)
+    )
     if trail is not None:
         nodes.append(trail.as_jsonld(url))
     return tuple(nodes)
 
 
 def resolve_metadata(
-    meta: Metadata, *, request: HttpRequest | None, crumbs_of: CrumbSource | None = None
+    meta: Metadata, *, request: HttpRequest | None
 ) -> ResolvedMetadata:
     """Resolve a fold for one response, against the request and the site settings.
 
-    `SITE["INDEXABLE"]` overrides declared robots, and `crumbs_of` adds host crumbs.
+    The site rule of `SITE["INDEXABLE"]` overrides the robots the chain declared.
     """
     indexable = site_indexable(request)
     robots, googlebot = robots_contents(meta, indexable=indexable)
     canonical = _canonical(meta, request)
     url = _url_map(request)
-    crossed = crumbs_of is not None and _crossing(request)
-    crumbs = _breadcrumbs(meta, request, crumbs_of if crossed else None)
+    crumbs = _breadcrumbs(meta, request)
     return ResolvedMetadata(
         title=meta.title,
         description=meta.description,
@@ -903,7 +685,7 @@ def resolve_metadata(
         other=meta.other,
         og=_open_graph(meta, canonical, request),
         twitter=_twitter(meta.twitter, request),
-        jsonld=_jsonld(meta, request, crumbs, crossed=crossed),
+        jsonld=_jsonld(meta, request, crumbs),
         source=meta,
         keywords=meta.keywords,
         viewport=None if meta.viewport is None else viewport_content(meta.viewport),

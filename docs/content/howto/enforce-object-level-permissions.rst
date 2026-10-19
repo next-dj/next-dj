@@ -122,6 +122,7 @@ Close the edit page itself
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The page can declare the same permission on the row it loads, so the ``GET`` of the edit page and every action declared beside it answer to it as well.
+Add the declaration at the top of the same ``page.py``, above ``NoteEditForm``.
 
 .. code-block:: python
    :caption: notes/pages/notes/[int:note]/edit/page.py
@@ -139,6 +140,7 @@ The page can declare the same permission on the row it loads, so the ``GET`` of 
 
 The check loads the row by the URL kwarg ``note`` through ``visible_to(scope)`` before any context runs, answers 404 for a row outside the scope and 403 for a refused user, and the ``note`` context reads the same row from the cache, see :ref:`topics-permissions-tree`.
 The ``Meta`` guard on the form still checks the bound row after the page rule, so the visit and the submission agree on who may edit.
+With the page rule in place the stranger's POST is refused by the rule of the page, and ``form_access_denied`` carries ``layer="page"`` instead of ``layer="object"``.
 
 Check against the request
 ~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -37,7 +37,6 @@ from next.components.manager import (
 from next.components.renderers import (
     TemplateSource,
     _CompiledTemplate,
-    _inject_component_context,
     _merge_csrf_context,
 )
 from next.components.signals import component_backend_loaded
@@ -757,7 +756,7 @@ class TestComponentRenderers:
     def test_render_with_template_returns_empty_when_no_template_string(
         self, tmp_path: Path
     ) -> None:
-        """_render_with_template returns '' when template loader yields None."""
+        """A composite render returns '' when the template loader yields None."""
         d = tmp_path / "nt"
         d.mkdir()
         (d / "component.djx").write_text("<p>x</p>")
@@ -769,7 +768,7 @@ class TestComponentRenderers:
         tl = ComponentTemplateLoader(loader)
         r = CompositeComponentRenderer(loader, tl)
         with patch.object(tl, "load_template", return_value=None):
-            assert r._render_with_template(info, {}, None) == ""
+            assert r.render(info, {}, None) == ""
 
     def test_fallback_template_none_returns_empty(self, tmp_path: Path) -> None:
         """When module load fails and template loader returns None, render is empty."""
@@ -1335,17 +1334,6 @@ class TestBothShippedLoadersAgree:
         cached, plain = SHIPPED_LOADER_PATHS
         assert counts[cached] == 0
         assert counts[plain] == 1
-
-
-class TestInjectComponentContext:
-    """_inject_component_context early exits."""
-
-    def test_no_op_when_no_module_path(self) -> None:
-        """When module_path is None, nothing is merged."""
-        info = ComponentInfo("s", Path("/"), "", Path("/t.djx"), None, True)
-        data: dict[str, object] = {"keep": 1}
-        _inject_component_context(info, data, None)
-        assert data == {"keep": 1}
 
 
 class TestGetComponentPathsForWatch:

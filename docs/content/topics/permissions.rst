@@ -7,7 +7,7 @@ next.dj checks object permissions in Django's own vocabulary.
 A permission is a string ``app_label.codename``, code asks ``user.has_perm(perm, obj)``, and the backends listed in ``AUTHENTICATION_BACKENDS`` answer.
 An application declares a predicate per permission in its ``permissions.py``, and ``ObjectPermissionBackend`` answers ``has_perm`` from those predicates.
 The ``Meta.permission_required`` guard of a form and the ``{% has_perm %}`` tag ask the same question, so one predicate decides a submission, a link, and a button.
-A ``proxy.py``, a page, and a component declare the login and the permissions they require in the same words, and the framework checks them on the page, its actions, and its zones, see `Access on the page tree`_.
+A page and a component declare the login and the permissions they require in the same words, and the framework checks them on the page, its actions, and its zones, see `Access on the page tree`_.
 
 .. contents::
    :local:
@@ -113,7 +113,7 @@ The backend
 
 The backend authenticates nobody, so the backend before it still logs the user in.
 With two entries listed, Django no longer picks the backend for a user that :func:`~django.contrib.auth.authenticate` did not return.
-:func:`~django.contrib.auth.login` then raises ``ValueError`` without a ``backend`` argument, which a signup view that logs in the user it has just created runs into, and ``User.objects.with_perm()`` needs ``backend=`` for the same reason.
+:func:`~django.contrib.auth.login` then raises ``ValueError`` without a ``backend`` argument, which a signup view that logs in the user it created runs into, and ``User.objects.with_perm()`` needs ``backend=`` for the same reason.
 
 .. code-block:: python
    :caption: a signup handler
@@ -139,7 +139,7 @@ It asks no other backend and grants a superuser nothing a predicate refuses, so 
 Access on the page tree
 -----------------------
 
-A ``proxy.py``, a page, and a component declare who may reach them in the words of :func:`~django.contrib.auth.decorators.login_required` and :class:`~django.contrib.auth.mixins.PermissionRequiredMixin`.
+A page and a component declare who may reach them in the words of :func:`~django.contrib.auth.decorators.login_required` and :class:`~django.contrib.auth.mixins.PermissionRequiredMixin`.
 The framework checks the declaration on every request that reaches the endpoint, the page view, an action posted from the page, and a zone request of the page alike.
 
 The declarations
@@ -148,17 +148,18 @@ The declarations
 Three calls form the whole vocabulary, and each binds to the file that makes it at module level.
 
 - ``login_required()`` requires a logged-in user.
-- ``permission_required(perm, obj=None)`` requires every permission in ``perm``, a name or a tuple of names, and with ``obj`` checks them on one row.
-- ``public()`` lifts the requirements of every ``proxy.py`` above the file and lets :class:`~django.contrib.auth.middleware.LoginRequiredMiddleware` pass.
+- ``permission_required(perm, *, obj=None)`` requires every permission in ``perm``, a name or a tuple of names, and with ``obj`` checks them on one row.
+- ``public()`` lifts what the ``page.py`` files above require and the default login, see :ref:`topics-access-default-login`.
 
-``proxy`` from ``next.pages`` declares in a ``proxy.py`` for its directory and every page below it, ``page`` in a ``page.py`` for that page alone, and ``component`` in a ``component.py``, which has no ``public()``.
+``page`` declares in a ``page.py`` for that page, and with ``inherit=True`` for every page below it as well, see :ref:`topics-access`.
+``component`` declares in a ``component.py`` for that component alone, with no ``inherit`` and no ``public()``.
 
 .. code-block:: python
-   :caption: notes/pages/notes/proxy.py
+   :caption: notes/pages/notes/page.py
 
-   from next.pages import proxy
+   from next import page
 
-   proxy.login_required()
+   page.login_required(inherit=True)
 
 .. code-block:: python
    :caption: notes/pages/notes/[int:note]/edit/page.py
@@ -174,24 +175,24 @@ Three calls form the whole vocabulary, and each binds to the file that makes it 
    def note(note: DObject[Note]) -> Note:
        return note
 
-The ``proxy.py`` binds every page under ``notes/``, and the ``page.py`` adds a permission on the note the URL names.
-``obj=DObject[Note]`` loads the row by the URL kwarg ``note``, the ``model_name`` of the model, through ``visible_to(scope)``, and the ``note`` context reads the same row from the cache, so the page runs one query, see :ref:`topics-proxy`.
-A ``perm`` that is no non-empty name or tuple of names raises ``TypeError`` where the call is written, and so does an ``obj`` of a page or a ``proxy.py`` that is no ``DObject[Model]`` without a parent.
+The first ``page.py`` binds every page under ``notes/``, and the second adds a permission on the note the URL names to its own page.
+``obj=DObject[Note]`` loads the row by the URL kwarg ``note``, the ``model_name`` of the model, through ``visible_to(scope)``, and the ``note`` context reads the same row from the cache, so the page runs one query, see :ref:`topics-access`.
+A ``perm`` that is no non-empty name or tuple of names raises ``TypeError`` where the call is written, and so does an ``obj`` of a page that is no ``DObject[Model]`` without a parent.
 The ``obj`` of a component names a prop or a ``@component.context`` value as a string, since a component has no URL of its own.
 
 How the check runs
 ~~~~~~~~~~~~~~~~~~
 
-The rule of a page joins the ``proxy.py`` files from the tree root down to the directory of the page and the ``page.py`` itself, each requirement once, in that order, and a ``public()`` on the way lifts what came before it, see :ref:`topics-proxy`.
-A rule without requirements passes without reading the user, so an open page costs one memo read.
+The rule of a page joins the ``inherit=True`` declarations of every ``page.py`` from the tree root down to the parent directory and everything the ``page.py`` itself declares, each requirement once, in that order, and a ``public()`` on the way lifts what came before it, see :ref:`topics-access`.
+A rule without requirements passes without reading the user, unless the default login asks for one, so an open page costs one memo read.
 The check follows the order of ``AccessMixin`` and ``PermissionRequiredMixin``.
 
-1. An anonymous user is redirected to ``LOGIN_URL`` with the full path of the request as ``next``.
+1. An anonymous user is redirected to the login page with the full path of the request as ``next``.
 2. Every permission without an object is asked as ``user.has_perm(perm)``, and a refusal answers HTTP 403.
 3. Every permission with an object loads its row by the URL kwarg and asks ``user.has_perm(perm, row)``, and a refusal answers HTTP 403.
 
 The check runs before ``render()``, the zone branch, and the page context, so a refused request runs no application code but the ``scope`` dependency the third step needs.
-A row the scope does not see answers 404 before any permission is asked, so a refused user never tells a hidden row from a missing one, see :ref:`topics-di-dobject`.
+A row the scope does not see answers 404 before the permission on that row is asked, so a refused user never tells a hidden row from a missing one, see :ref:`topics-di-dobject`.
 A route that does not capture the kwarg of the model is a configuration mistake rather than a refusal, so it raises ``UnboundObjectError``, which ``next.E162`` reports ahead of any request.
 
 Where a rule applies
@@ -202,8 +203,8 @@ A rule reaches six places, and each answers a refusal in its own form.
 Page.
    The view of a ``page.py`` checks the rule of its chain, as described above.
 
-``proxy.py``.
-   A ``proxy.py`` adds its requirements to every page in its directory and below, and through them to the actions and the zone requests of those pages.
+An inherited declaration.
+   A ``page.py`` declaration with ``inherit=True`` adds its requirements to every page below its directory, and through them to the actions and the zone requests of those pages.
 
 Action.
    An action declared in a file of a page tree answers to the rule of the page in the directory of that file, joined with the rule of the posted origin page.
@@ -215,7 +216,8 @@ Zone request.
 
 Component.
    A ``component.py`` that declares access renders nothing for a refused request, the way a ``{% has_perm %}`` block without ``else`` does, with no redirect and no 403.
-   Its ``obj`` names a prop or a ``@component.context`` value, and the component runs none of its contexts past the one the check reads.
+   Its ``obj`` names a prop or a ``@component.context`` value, and the component runs its contexts only up to the keyed one the check reads, or all of them when no keyed context gives that name.
+   A named object that is ``None`` refuses without asking ``has_perm``, as ``{% has_perm %}`` does, so a missing row never turns into the model-level question.
 
 ``{% has_perm %}`` block.
    A block in a template guards markup rather than an endpoint, see `The has_perm tag`_.
@@ -223,33 +225,24 @@ Component.
 Rules the core keeps
 ~~~~~~~~~~~~~~~~~~~~
 
-Inheritance adds until a public() lifts.
-   A page joins every requirement of the ``proxy.py`` files above it.
-   Only an explicit ``public()`` in a deeper ``proxy.py`` or in the ``page.py`` removes them, ``manage.py permissions`` names the file of every such lift, and a requirement declared below the lift binds again.
-   ``public()`` beside a requirement of the same file is ``next.E163``, since the requirement still binds.
+Inheritance, the lift of ``public()``, and the rules of an action are described in :ref:`topics-access` and :doc:`/content/security/actions`.
+The core keeps two more rules.
 
-Actions and zones pass the access of their page.
-   Neither has a rule of its own to forget, so a closed page stays closed for every action declared beside it and for every zone inside it, and an action under a lift is as public as its page.
-   A forged origin adds the rule of the page it names and lifts none of the owner's rule.
-
-The decision lives inside the zone.
-   A zone under a ``{% has_perm %}`` block or in the body of a component that decides what it shows is refused to a partial request, see `Zones and the decision`_.
-
-``LoginRequiredMiddleware`` works unchanged.
-   The view of every page carries the ``login_required`` attribute the middleware reads, ``False`` for a page whose rule is public, whether its own ``page.public()`` or a ``proxy.py`` above made it so.
-   The action endpoint, the CSRF endpoint, ``sitemap.xml``, and ``robots.txt`` are marked with :func:`~django.contrib.auth.decorators.login_not_required`, and the dispatcher itself requires a login for an action whose owner or origin declares nothing and is not public, an action outside any page tree included.
-   A ``Patches.morph`` onto a foreign page applies the same middleware default to that page.
+The default login is one rule in two switches.
+   ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` and a listed ``LoginRequiredMiddleware`` close the same pages, actions, and zones with the same redirect, see :ref:`topics-access-default-login`.
+   The view of every page carries the ``login_required`` attribute the middleware reads, ``False`` for a page whose rule is public, and the action endpoint, the CSRF endpoint, ``sitemap.xml``, and ``robots.txt`` are marked with :func:`~django.contrib.auth.decorators.login_not_required`.
+   The dispatcher itself requires a login for an action whose owner or origin declares nothing and is not public, an action outside any page tree included, and a ``Patches.morph`` onto a foreign page applies the same default to that page.
 
 Mistakes surface at ``manage.py check``.
-   ``next.E162`` reports an ``obj=DObject[Model]`` whose kwarg the route of a page under it does not capture, ``next.E163`` a ``public()`` beside a requirement of the same file, and ``next.E164`` a declaration made from a module that is no ``page.py``, ``proxy.py``, or ``component.py``.
-   ``next.W127`` warns about a permission nothing defines, ``next.W128`` about a ``proxy.py`` with no page below it, and ``next.W129`` about an action nothing guards, see :doc:`/content/ref/system-checks`.
+   ``next.E162`` reports an ``obj=DObject[Model]`` whose kwarg the route of a page it binds does not capture, ``next.E163`` a ``public()`` beside a requirement of the same file, and ``next.E164`` a declaration made from a module that is no ``page.py`` or ``component.py``.
+   ``next.W127`` warns about a permission nothing defines, ``next.W128`` about a declaring ``page.py`` with no page below it, ``next.W129`` about an action nothing guards, and ``next.W130`` and ``next.W131`` about a ``LOGIN_REQUIRED`` setting that contradicts the middleware or finds no user, see :doc:`/content/ref/system-checks`.
 
 Listing the rules
 ~~~~~~~~~~~~~~~~~
 
 ``manage.py permissions`` prints the rule of every page, every action, and every component that declares one, with the files each requirement comes from, and ``public (file)`` for a public rule, naming the file whose ``public()`` opened it.
 An action row carries the file that declares the action beside its name, since two pages may declare actions of one name.
-Every other view of the URLconf follows as a ``view`` row, read off the ``login_required`` mark ``LoginRequiredMiddleware`` consults, so under the middleware the table answers what an anonymous user reaches.
+Every other view of the URLconf follows as a ``view`` row, read off the ``login_required`` mark ``LoginRequiredMiddleware`` consults, so the table answers what an anonymous user reaches.
 ``manage.py permissions /notes/1/edit/`` narrows the table to one page, the actions of its directory, and the declaring components its template renders, a view URL narrows it to that view, and ``manage.py routes`` shows the same rule in its ``Access`` column, see :doc:`/content/ref/management`.
 
 The has_perm tag
@@ -350,7 +343,7 @@ Forms
 The rule of the page tree the action belongs to runs first, see `Where a rule applies`_, and the static guard follows, so an anonymous visitor is redirected to ``LOGIN_URL`` and an unregistered permission is checked before the form binds, as it is for every model permission.
 A registered permission waits for the bound form and is checked once, as ``user.has_perm(perm, form.instance)`` for a ``ModelForm`` that edits a saved row.
 A ``ModelForm`` that creates a record and a plain ``Form`` pass ``None``, the model-level question.
-A rule on the parent row a record is created under goes into ``has_object_permission`` or into the access of the page as ``permission_required(perm, obj=DObject[Model])``, see :ref:`topics-proxy`.
+A rule on the parent row a record is created under goes into ``has_object_permission`` or into the access of the page as ``permission_required(perm, obj=DObject[Model])``, see :ref:`topics-access`.
 
 The permission runs only once the row has loaded, so the way the form loads it decides what a refused user learns.
 ``DObject`` in ``get_form_kwargs`` reads the row through ``visible_to(scope)``, so a row outside the scope answers 404 before any permission runs, exactly like a missing one, see :ref:`topics-di-dobject`.
@@ -388,8 +381,8 @@ See also
    :doc:`/content/howto/enforce-object-level-permissions` for an owner-only edit form end to end.
    :doc:`/content/ref/permissions` for the public names.
    :ref:`topics-forms-actions-guards` for the static guard and the dynamic hooks.
-   :doc:`proxy` for the access a ``proxy.py`` declares over a subtree and the lift of ``public()``.
-   :doc:`/content/howto/require-login-on-pages` for a login on every page through ``LoginRequiredMiddleware``.
+   :doc:`access` for the access a ``page.py`` declares over a subtree, the default login, and the lift of ``public()``.
+   :doc:`/content/howto/require-login-on-pages` for a login on every page.
    :doc:`application-layout` for where a predicate sits beside ``visible_to(scope)`` and the services.
    :doc:`/content/security/actions` for the access an action owes to the tree it is declared in.
-   :doc:`/content/ref/system-checks` for ``next.E159`` to ``next.E164`` and ``next.W127`` to ``next.W129``.
+   :doc:`/content/ref/system-checks` for ``next.E159`` to ``next.E164`` and ``next.W127`` to ``next.W131``.

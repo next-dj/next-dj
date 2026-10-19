@@ -1,5 +1,3 @@
-import os
-import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +9,7 @@ from next.components import ComponentInfo, sources
 from next.components.renderers import TemplateSource
 from next.partial import guards
 from next.partial.guards import Components, bound_zones, fresh, guarded_zones
+from tests.support import touch_later
 from tests.support.guards import (
     CHILDREN_BODY,
     GUARDED_CHILDREN,
@@ -85,10 +84,9 @@ def _components(page_file: Path, **sources: str | None) -> Components:
     return Components(_Manager(page_file.parent, **sources), page_file)
 
 
-def _touch_later(path: Path, text: str) -> None:
-    path.write_text(text)
-    future = time.time() + 5
-    os.utime(path, (future, future))
+def _forget_cached_templates() -> None:
+    """Drop what the cached loader holds, so an edited include is read again."""
+    Engine.get_default().template_loaders[0].reset()
 
 
 class TestComponentGuarding:
@@ -275,7 +273,7 @@ class TestMemoAndStamps:
             (path, path.stat().st_mtime) for path in (kept, edited, removed)
         )
         assert fresh(stamps) is True
-        _touch_later(edited, "y")
+        touch_later(edited, "y")
         assert fresh(stamps) is False
         assert fresh(frozenset({(kept, kept.stat().st_mtime)})) is True
         removed.unlink()
@@ -288,9 +286,8 @@ class TestMemoAndStamps:
         part = findable_templates("part.html", "{{ children }}")
         text = f'{{% include "{part}" %}}'
         assert _components(page_file, card=text).guarding("card") is False
-        _touch_later(page_file.parent / "templates" / part, f"{_GUARD}x{_END}")
-        # The cached loader would keep the old include, so the engine forgets it.
-        Engine.get_default().template_loaders[0].reset()
+        touch_later(page_file.parent / "templates" / part, f"{_GUARD}x{_END}")
+        _forget_cached_templates()
         settings.DEBUG = debug
         assert _components(page_file, card=text).guarding("card") is guarding
 

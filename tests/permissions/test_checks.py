@@ -1,16 +1,17 @@
 import re
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from django.conf import settings as django_settings
+from django.contrib.auth.middleware import AuthenticationMiddleware
 from django.test import override_settings
 
-from next.components.backends import FileComponentsBackend
+from next.components import sources as component_sources
 from next.forms import Form, action
-from next.pages.checks import access as access_checks
 from next.permissions import ObjectPermissionBackend, add_perm
 from next.permissions.checks import (
+    check_login_required_auth,
+    check_login_required_setting,
     check_permission_backend,
     check_permission_predicates,
     check_permissions_known,
@@ -30,14 +31,25 @@ from tests.support import (
     routed,
     write_page,
 )
-from tests.support.access import COMPONENTS, page_source, write_proxy
-
-
-pytestmark = pytest.mark.usefixtures("isolated_permissions")
+from tests.support.access import (
+    COMPONENTS,
+    LOGIN_REQUIRED_MIDDLEWARE,
+    page_source,
+    write_guard,
+)
 
 
 class SubclassedBackend(ObjectPermissionBackend):
     """A project backend that extends the predicate backend."""
+
+
+class SubclassedAuthentication(AuthenticationMiddleware):
+    """A project middleware that extends the one setting `request.user`."""
+
+
+_AUTH_MIDDLEWARE = "django.contrib.auth.middleware.AuthenticationMiddleware"
+
+_AUTH_SUBCLASS = f"{__name__}.SubclassedAuthentication"
 
 
 def two_params(user, obj):
@@ -183,12 +195,11 @@ def _tag(perm: str) -> str:
 
 
 def _warned(head: str) -> list[tuple[object, str]]:
-    """Return the `obj` and the permission of each W127 whose text opens with `head`."""
+    """Return the `obj` and the permission of each W127, all opening with `head`."""
     found: list[tuple[object, str]] = []
     for message in check_permissions_known():
-        assert message.id == "next.W127"
-        if message.msg.startswith(head):
-            found.append((message.obj, _UNKNOWN.search(message.msg)[1]))
+        assert (message.id, message.msg[: len(head)]) == ("next.W127", head)
+        found.append((message.obj, _UNKNOWN.search(message.msg)[1]))
     return found
 
 
@@ -209,9 +220,7 @@ class TestPermissionsKnownInTemplates:
     def test_an_unknown_name_in_a_page_template_warns(self, pages: Path) -> None:
         page_file = templated_page(pages / "hello", "x = 1\n", _tag("'blog.nope'"))
         with override_settings(NEXT_FRAMEWORK=framework(pages)):
-            (message,) = (
-                m for m in check_permissions_known() if m.msg.startswith(_TEMPLATE)
-            )
+            (message,) = check_permissions_known()
         assert message.obj == str(page_file)
         assert message.msg == (
             f"{{% has_perm %}} in {page_file} names the permission 'blog.nope', which "
@@ -288,14 +297,15 @@ class TestPermissionsKnownInTemplates:
             assert _warned(_TEMPLATE) == [(str(page_file), "blog.nope")]
 
 
-@pytest.mark.usefixtures("isolated_declarations")
 class TestPermissionsKnownInDeclarations:
     """`next.W127` names each file declaring a permission nothing grants."""
 
     @pytest.fixture()
     def project(self, tmp_path) -> Path:
         root = tmp_path / "pages"
-        write_proxy(root, 'proxy.permission_required("auth.no_such_proxy")\n')
+        write_guard(
+            root, 'page.permission_required("auth.no_such_guard", inherit=True)\n'
+        )
         write_page(
             root,
             "a",
@@ -322,7 +332,7 @@ class TestPermissionsKnownInDeclarations:
                 "auth.no_such_card",
             ),
             (str(project / "a" / "page.py"), "auth.no_such_page"),
-            (str(project / "proxy.py"), "auth.no_such_proxy"),
+            (str(project / "page.py"), "auth.no_such_guard"),
         ]
 
     def test_the_message_names_the_file(self, project) -> None:
@@ -330,44 +340,60 @@ class TestPermissionsKnownInDeclarations:
             messages = [
                 m
                 for m in check_permissions_known()
-                if m.obj == str(project / "proxy.py")
+                if m.obj == str(project / "page.py")
             ]
 
         assert [m.msg.split(" names ")[0] for m in messages] == [
-            f"permission_required() in {project / 'proxy.py'}"
+            f"permission_required() in {project / 'page.py'}"
         ]
 
     def test_a_registered_permission_is_silent(self, project) -> None:
-        for perm in ("no_such_proxy", "no_such_page", "no_such_card"):
+        for perm in ("no_such_guard", "no_such_page", "no_such_card"):
             add_perm(f"auth.{perm}", no_params)
 
         with routed(project, COMPONENT_BACKENDS=COMPONENTS):
             assert _warned(_DECLARED) == []
 
     @pytest.mark.parametrize(
-        ("backends", "imported"), [(COMPONENTS, True), (None, False)]
+        ("backends", "card"),
+        [
+            pytest.param(COMPONENTS, ["auth.no_such_card"], id="listed"),
+            pytest.param(None, [], id="unlisted"),
+        ],
     )
-    def test_component_modules_load_only_under_listed_backends(
-        self, project, monkeypatch, backends, imported
+    def test_a_component_declaration_is_named_only_under_listed_backends(
+        self, project, monkeypatch, backends, card
     ) -> None:
         monkeypatch.setattr(
-            access_checks,
+            component_sources,
             "next_framework_settings",
             next_framework_settings_stand_in(COMPONENT_BACKENDS=backends),
         )
+        with routed(project, COMPONENT_BACKENDS=COMPONENTS):
+            warned = _warned(_DECLARED)
+
+        assert sorted(perm for _obj, perm in warned) == sorted(
+            [*card, "auth.no_such_guard", "auth.no_such_page"]
+        )
+
+    def test_auth_installed_by_its_app_config_still_warns(self, project) -> None:
+        installed = [
+            "django.contrib.auth.apps.AuthConfig"
+            if app == "django.contrib.auth"
+            else app
+            for app in django_settings.INSTALLED_APPS
+        ]
         with (
             routed(project, COMPONENT_BACKENDS=COMPONENTS),
-            patch.object(
-                FileComponentsBackend, "import_component_modules", return_value=()
-            ) as loads,
+            override_settings(INSTALLED_APPS=installed),
         ):
             warned = _warned(_DECLARED)
 
-        assert loads.called is imported
-        assert {perm for _obj, perm in warned} >= {
+        assert sorted(perm for _obj, perm in warned) == [
+            "auth.no_such_card",
+            "auth.no_such_guard",
             "auth.no_such_page",
-            "auth.no_such_proxy",
-        }
+        ]
 
     def test_without_contrib_auth_it_is_silent(self, project) -> None:
         installed = [
@@ -445,7 +471,6 @@ class TestPermissionsKnownInFormGuards:
         assert check_permissions_known() == []
 
 
-@pytest.mark.usefixtures("isolated_declarations")
 class TestPermissionsKnownBeforeAccess:
     """A form guard names any permission while the project declares no access."""
 
@@ -454,4 +479,90 @@ class TestPermissionsKnownBeforeAccess:
             class Meta:
                 permission_required = "blog.publish_post"
 
-        assert _guarded("silent_guard_unknown_form") == []
+        assert check_permissions_known() == []
+
+
+class TestLoginRequiredSetting:
+    """`next.W130` warns about a false `LOGIN_REQUIRED` the login middleware overrides."""
+
+    @pytest.mark.parametrize(
+        ("framework", "listed", "expected"),
+        [
+            pytest.param({"LOGIN_REQUIRED": False}, True, ["next.W130"], id="false"),
+            pytest.param({}, True, [], id="unset"),
+            pytest.param({"LOGIN_REQUIRED": True}, True, [], id="true"),
+            pytest.param({"LOGIN_REQUIRED": False}, False, [], id="no-middleware"),
+            pytest.param([], True, [], id="not-a-dict"),
+        ],
+    )
+    def test_the_contradiction(self, framework, listed, expected) -> None:
+        middleware = [*django_settings.MIDDLEWARE]
+        if listed:
+            middleware.append(LOGIN_REQUIRED_MIDDLEWARE)
+        with override_settings(NEXT_FRAMEWORK=framework, MIDDLEWARE=middleware):
+            messages = check_login_required_setting()
+
+        assert check_ids(messages) == expected
+
+    def test_the_message_names_the_middleware(self) -> None:
+        middleware = [*django_settings.MIDDLEWARE, LOGIN_REQUIRED_MIDDLEWARE]
+        with override_settings(
+            NEXT_FRAMEWORK={"LOGIN_REQUIRED": False}, MIDDLEWARE=middleware
+        ):
+            [warning] = check_login_required_setting()
+
+        assert LOGIN_REQUIRED_MIDDLEWARE in warning.msg
+
+
+class TestLoginRequiredWithoutAuth:
+    """`next.W131` warns about a default login that no signed-in user can meet."""
+
+    @pytest.mark.parametrize(
+        ("required", "auth", "middleware", "expected"),
+        [
+            pytest.param(True, False, True, ["next.W131"], id="no-auth"),
+            pytest.param(True, True, False, ["next.W131"], id="no-middleware"),
+            pytest.param(True, True, True, [], id="auth"),
+            pytest.param(False, False, False, [], id="off"),
+        ],
+    )
+    def test_the_setting_without_auth(
+        self, required, auth, middleware, expected
+    ) -> None:
+        installed = [
+            app
+            for app in django_settings.INSTALLED_APPS
+            if auth or app != "django.contrib.auth"
+        ]
+        listed = [
+            entry
+            for entry in django_settings.MIDDLEWARE
+            if middleware or entry != _AUTH_MIDDLEWARE
+        ]
+        with override_settings(
+            NEXT_FRAMEWORK={"LOGIN_REQUIRED": required},
+            INSTALLED_APPS=installed,
+            MIDDLEWARE=listed,
+        ):
+            messages = check_login_required_auth()
+
+        assert check_ids(messages) == expected
+
+    def test_a_subclass_of_the_middleware_counts(self) -> None:
+        listed = [
+            _AUTH_SUBCLASS if entry == _AUTH_MIDDLEWARE else entry
+            for entry in django_settings.MIDDLEWARE
+        ]
+        with override_settings(
+            NEXT_FRAMEWORK={"LOGIN_REQUIRED": True}, MIDDLEWARE=listed
+        ):
+            assert check_login_required_auth() == []
+
+    def test_the_message_names_the_missing_middleware(self) -> None:
+        listed = [e for e in django_settings.MIDDLEWARE if e != _AUTH_MIDDLEWARE]
+        with override_settings(
+            NEXT_FRAMEWORK={"LOGIN_REQUIRED": True}, MIDDLEWARE=listed
+        ):
+            (warning,) = check_login_required_auth()
+
+        assert _AUTH_MIDDLEWARE in warning.msg

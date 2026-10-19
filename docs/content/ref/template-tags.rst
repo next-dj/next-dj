@@ -145,7 +145,7 @@ Multiline tag bodies
 The framework adds one line-spanning branch to Django's template tag pattern during ``AppConfig.ready``, so a framework block tag may carry its arguments over several lines.
 That allows readable block components and slots when the argument list is long.
 
-The added branch matches eighteen literal tag names, ``action_url``, ``asset``, ``breadcrumbs``, ``collect_head``, ``collect_scripts``, ``collect_styles``, ``component``, ``consented``, ``form``, ``metadata``, ``script``, ``set_slot``, ``slot``, ``template``, ``use_module``, ``use_script``, ``use_style``, and ``zone``, in the void form and in the ``{% #name %}`` opening form alike.
+The added branch matches nineteen literal tag names, ``action_url``, ``asset``, ``breadcrumbs``, ``collect_head``, ``collect_scripts``, ``collect_styles``, ``component``, ``consented``, ``form``, ``has_perm``, ``metadata``, ``script``, ``set_slot``, ``slot``, ``template``, ``use_module``, ``use_script``, ``use_style``, and ``zone``, in the void form and in the ``{% #name %}`` opening form alike.
 Django's own block-tag branch stays behind it untouched, so every other tag lexes exactly as stock Django lexes it, in a DJX file and in a plain Django template alike.
 A newline inside ``{% if x %}`` still ends the tag, a third-party tag keeps its stock lexing, and a stray ``{%`` inside inline JavaScript swallows no more text than it does without next.dj installed.
 ``{{ ... }}`` and ``{# ... #}`` are outside the rebind entirely, so a newline still ends a variable or a comment.
@@ -244,7 +244,7 @@ Partial rendering
    It is valid only between a ``{% zone %}`` and its ``{% endzone %}``, and a lazy zone without it is reported as ``next.E064``.
    The branch belongs to lazy zones only, so a zone without ``lazy=`` rejects it with ``TemplateSyntaxError`` when the template compiles.
 
-A zone belongs to a page or layout, not a component, and may not sit inside a ``{% for %}`` or an ``{% if %}``, while a zone inside a ``{% has_perm %}`` is asked again on each standalone render.
+A zone belongs to a page or layout, not a component, and may not sit inside a ``{% for %}``, an ``{% if %}``, or a ``{% has_perm %}``, since a standalone render cannot repeat the decision, and a zone inside a ``{% has_perm %}`` is ``next.E161``, refused to a partial request.
 A zone directly inside a ``{% with %}`` draws the ``next.W067`` warning because the bindings are invisible to a standalone zone render.
 The :doc:`zone placement checks </content/ref/system-checks>` enforce each rule at ``manage.py check`` time.
 
@@ -259,7 +259,7 @@ Permissions
    Without an object it asks ``user.has_perm(perm)``, the model-level question, which model permissions answer as well as registered predicates.
    The permission is a quoted name or a variable, and one that resolves to nothing or to an empty string renders the ``else`` branch.
    Any argument count other than one or two raises ``TemplateSyntaxError`` at parse time.
-   A literal name nothing grants is ``next.W127`` in every project.
+   A literal name nothing grants is ``next.W127`` whenever ``django.contrib.auth`` is installed, with or without access declarations.
    A ``{% zone %}`` inside the block, or in the body of a component whose template reaches the tag, is ``next.E161``, and a partial request for such a zone is refused as an unknown zone for every user, so the tag belongs inside the zone, see :ref:`topics-permissions-zones`.
    A template that runs ``{% load rules %}`` gets django-rules' own ``has_perm`` tag in its place, see :doc:`/content/topics/permissions`.
 

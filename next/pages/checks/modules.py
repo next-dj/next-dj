@@ -21,12 +21,13 @@ from next.checks.common import (
     get_router_manager,
     page_tree_skip_names,
 )
+from next.pages.access import routed_pages
 from next.pages.loaders import (
     build_registered_loaders,
     last_load_error,
     load_python_module_memo,
 )
-from next.pages.scan import iter_existing_scanned_pages, iter_proxy_modules
+from next.pages.scan import iter_existing_scanned_pages
 from next.utils import walk_page_tree
 
 
@@ -87,7 +88,9 @@ def _check_page_functions_in_directory(
     if not pages_path.exists():
         return errors, warnings
 
-    for _url_path, page_file in walk_page_tree(pages_path, skip_dir_names):
+    for _url_path, page_file in routed_pages(
+        walk_page_tree(pages_path, skip_dir_names)
+    ):
         # A virtual page carries a path that never existed, and the
         # template.djx that made it is body source enough.
         if not page_file.exists() or not first_visit(page_file, seen):
@@ -106,6 +109,10 @@ def _check_page_functions_in_directory(
                     f"{context} pages: {page_file.relative_to(pages_path)} "
                     "has no body source. Add a render function, a template "
                     "attribute, a sibling template.djx, or a sibling layout.djx.",
+                    hint=(
+                        "A page.py that only guards the pages below it declares "
+                        "its access with inherit=True and needs no body source."
+                    ),
                     obj=settings,
                     id="next.E012",
                 )
@@ -211,20 +218,16 @@ def _page_import_error_message(page_path: Path) -> str:
 
 @register(Tags.templates, NEXT, deploy=True)
 def check_page_module_imports(*args, **kwargs) -> list[CheckMessage]:
-    """Report `page.py` and `proxy.py` files that raise while importing (`next.E017`).
+    """Report the `page.py` files that raise while importing (`next.E017`).
 
     Importing every user module walks the whole tree, so it runs under `check --deploy`.
     """
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
         return []
-    modules = (
-        *iter_existing_scanned_pages(router_manager, set()),
-        *iter_proxy_modules(router_manager),
-    )
     return [
         Error(_page_import_error_message(path), obj=str(path), id="next.E017")
-        for path in modules
+        for path in iter_existing_scanned_pages(router_manager, set())
         if load_python_module_memo(path) is None
     ]
 

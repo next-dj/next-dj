@@ -2,7 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from next.permissions.endpoints import (
+from next.forms import ActionGuard, Form
+from next.forms.dispatch.permissions import guard_rule
+from next.management.endpoints import (
     Endpoint,
     ViewEndpoint,
     action_endpoint,
@@ -12,9 +14,10 @@ from next.permissions.endpoints import (
     resolve_view,
     view_endpoints,
 )
+from next.permissions import add_perm
 from next.permissions.markers import AccessRule, Requirement
 from next.urls.routes import collect_routes
-from tests.support import isolated_form_registries, routed, write_page
+from tests.support import owns_group, routed, write_page
 from tests.support.access import (
     COMPONENTS,
     login_required_middleware,
@@ -22,17 +25,25 @@ from tests.support.access import (
 )
 
 
+pytestmark = pytest.mark.usefixtures("form_registries")
+
 _FILE = Path("/tree/page.py")
 
-_PROXY = Path("/tree/proxy.py")
+_ABOVE = Path("/page.py")
 
 VIEWS_URLCONF = "tests.permissions.urls_views"
 
+_CARD_ACTION = """
+from next.components import component
+from next.forms import action
 
-@pytest.fixture(autouse=True)
-def _form_registries():
-    with isolated_form_registries():
-        yield
+component.permission_required("auth.view_user", obj="account")
+
+
+@action("card_ping")
+def card_ping():
+    return None
+"""
 
 
 @pytest.fixture()
@@ -66,7 +77,7 @@ class TestEndpointWords:
             (Endpoint("page", "/", _FILE, AccessRule()), "-", ()),
             (
                 Endpoint("page", "/", _FILE, AccessRule(), closed=True),
-                "login (middleware)",
+                "login (default)",
                 (),
             ),
             (
@@ -75,9 +86,9 @@ class TestEndpointWords:
                 (_FILE,),
             ),
             (
-                Endpoint("page", "/", _FILE, AccessRule(), broken=_PROXY),
+                Endpoint("page", "/", _FILE, AccessRule(), broken=_ABOVE),
                 "broken",
-                (_PROXY,),
+                (_ABOVE,),
             ),
             (
                 Endpoint(
@@ -86,15 +97,15 @@ class TestEndpointWords:
                     _FILE,
                     AccessRule(
                         (
-                            Requirement("login", _PROXY),
+                            Requirement("login", _ABOVE),
                             Requirement("permission", _FILE, ("a.x", "a.y"), "note"),
-                            Requirement("permission", _PROXY, ("a.z",)),
+                            Requirement("permission", _ABOVE, ("a.z",)),
                         ),
                         public=True,
                     ),
                 ),
                 "login, perm a.x on note, perm a.y on note, perm a.z",
-                (_PROXY, _FILE),
+                (_ABOVE, _FILE),
             ),
             (
                 Endpoint(
@@ -103,18 +114,18 @@ class TestEndpointWords:
                     _FILE,
                     AccessRule(
                         (
-                            Requirement("login", _PROXY),
-                            Requirement("permission", _PROXY, ("a.x",)),
+                            Requirement("login", _ABOVE),
+                            Requirement("permission", _ABOVE, ("a.x",)),
                             Requirement("login", _FILE),
                             Requirement("permission", _FILE, ("a.x", "a.y")),
                         )
                     ),
                 ),
                 "login, perm a.x, perm a.y",
-                (_PROXY, _FILE),
+                (_ABOVE, _FILE),
             ),
         ],
-        ids=["open", "middleware", "public", "broken", "requirements", "repeated"],
+        ids=["open", "default", "public", "broken", "requirements", "repeated"],
     )
     def test_access_and_sources(self, endpoint, access, sources) -> None:
         assert (endpoint.access, endpoint.sources) == (access, sources)
@@ -154,9 +165,18 @@ class TestEndpoints:
             found = endpoints(project / "open" / "page.py")
 
         assert _summary(found, project) == [
-            ("page", "/open/", "login (middleware)"),
-            ("action", "open_ping", "login (middleware)"),
+            ("page", "/open/", "login (default)"),
+            ("action", "open_ping", "login (default)"),
             ("action", "login_ping", "login"),
+        ]
+
+    def test_under_the_setting_an_open_endpoint_is_closed(self, project) -> None:
+        with routed(project, COMPONENT_BACKENDS=COMPONENTS, LOGIN_REQUIRED=True):
+            found = endpoints(project / "open" / "page.py")
+
+        assert _summary(found, project)[:2] == [
+            ("page", "/open/", "login (default)"),
+            ("action", "open_ping", "login (default)"),
         ]
 
     def test_the_middleware_leaves_a_public_page_open(self, project) -> None:
@@ -173,6 +193,19 @@ class TestEndpoints:
 
         assert (endpoint.access, endpoint.broken, endpoint.closed) == ("-", None, False)
 
+    def test_an_action_of_a_component_answers_to_the_component(self, tmp_path) -> None:
+        root = tmp_path / "pages"
+        write_page(root, "", 'template = "{% component \\"card\\" %}"\n')
+        card = root / "_components" / "card"
+        card.mkdir(parents=True)
+        (card / "component.djx").write_text("card")
+        (card / "component.py").write_text(_CARD_ACTION)
+
+        with routed(root, COMPONENT_BACKENDS=COMPONENTS):
+            found = _summary(endpoints(), root)
+
+        assert ("action", "card_ping", "perm auth.view_user on account") in found
+
     def test_a_page_whose_template_breaks_is_marked_broken(self, tmp_path) -> None:
         root = tmp_path / "pages"
         page_path = write_page(root, "bad", 'template = "{% if %}"\n')
@@ -185,6 +218,36 @@ class TestEndpoints:
             "broken",
             (page_path,),
         )
+
+
+@pytest.mark.usefixtures("isolated_permissions")
+class TestGuardRule:
+    """An action row prints the guard rule dispatch enforces, built in one place."""
+
+    PERMISSIONS = ("auth.change_group", "auth.edit_group")
+
+    def _endpoint(self, **branch: object) -> tuple[Endpoint, dict[str, object]]:
+        guard = ActionGuard(permissions=self.PERMISSIONS)
+        meta = {"name": "x", "file_path": "/app/forms.py", "guard": guard, **branch}
+        return action_endpoint(meta), meta
+
+    def test_a_registered_permission_is_asked_of_the_form(self) -> None:
+        add_perm("auth.edit_group", owns_group)
+
+        endpoint, meta = self._endpoint(form_class=Form)
+
+        assert endpoint.access == (
+            "login, perm auth.change_group, perm auth.edit_group on form"
+        )
+        assert endpoint.rule.requirements == guard_rule(meta).requirements
+
+    def test_a_handler_asks_every_permission_up_front(self) -> None:
+        add_perm("auth.edit_group", owns_group)
+
+        endpoint, meta = self._endpoint(handler=print)
+
+        assert endpoint.access == "login, perm auth.change_group, perm auth.edit_group"
+        assert endpoint.rule.requirements == guard_rule(meta).requirements
 
 
 class TestResolvePage:

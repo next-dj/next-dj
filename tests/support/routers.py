@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from unittest.mock import patch
 
 from next.urls import PageRoot, RouterBackend
+from next.urls.manager import router_manager
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
 
 
 class RootPagesRouter(RouterBackend):
@@ -132,3 +135,20 @@ class RaisingSkipNamesRouter(RootPagesRouter):
         """Fail where the checks ask for the skip set."""
         msg = "skip names unavailable"
         raise RuntimeError(msg)
+
+
+ENTRY_ROUTER: dict[str, object] = {"BACKEND": "tests.support.routers.EntryRouter"}
+"""A `PAGE_BACKENDS` entry naming a router that is no file router."""
+
+
+@contextmanager
+def routers_from(*entries: Mapping[str, object]) -> Iterator[None]:
+    """Build the global routers from `entries` for the block, then from the settings."""
+    try:
+        with patch.object(
+            router_manager, "_get_next_pages_config", return_value=list(entries)
+        ):
+            router_manager.reload()
+            yield
+    finally:
+        router_manager.reload()

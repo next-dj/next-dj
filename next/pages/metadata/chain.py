@@ -10,7 +10,6 @@ from next.conf.settings import fail_loudly
 from next.deps.resolver import current_resolver
 from next.diagnostics import FailureLog, exception_text, type_name
 from next.introspect import callable_name
-from next.pages.access import admits
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.loaders import AncestorStamps, load_page_module
 
@@ -41,7 +40,6 @@ if TYPE_CHECKING:
 
     from django.http import HttpRequest
 
-    from .markers import Crumb
     from .registry import PageMetadataEntry, PageMetadataRegistry
 
 
@@ -475,20 +473,6 @@ class MetadataThunk:
         A chain the schema refuses folds as `contained_chain` describes.
         """
         return contained_chain(self.registry, self.file_path).folded
-
-    def crumbs_of(
-        self, file_path: Path, url_kwargs: Mapping[str, object]
-    ) -> tuple[Crumb, ...] | None:
-        """Return the crumbs the page at `file_path` folds under its own route kwargs.
-
-        Its dependencies resolve afresh, and a page the request may not reach is `None`.
-        """
-        request = self.request
-        if request is not None and not admits(file_path, request):
-            return None
-        host = MetadataThunk(self.registry, file_path, self.request, url_kwargs, {})
-        meta = host.folded()
-        return (host.fold({}) if meta is None else meta).breadcrumbs
 
     def fold(self, context_data: MutableMapping[str, object]) -> Metadata:
         """Fold the chain of the render, its callables reading `context_data`.

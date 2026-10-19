@@ -99,6 +99,7 @@ Scoping the lookup
 
 The lookup reads through ``visible_to(scope)`` as ``DObject`` does once both halves exist, a ``visible_to`` on the default manager of the model and a ``scope`` dependency the project registers, see :ref:`topics-di-dobject`.
 A row the scope cannot see then answers 404 exactly like a missing one, and a lookup by the primary key shares the row a ``DObject`` of the same render loaded.
+An override that reaches the default through ``super()`` passes the request on, as ``super().get_initial(request, **url_kwargs)``, since the scope resolves from it and a call without it raises ``TypeError``.
 
 .. warning::
 
@@ -249,7 +250,7 @@ Override it only when the redirect target differs or extra logic must run after 
 
 .. warning::
 
-   An action answers to the access its page and the ``proxy.py`` files above it declare, and an action nothing guards lets any visitor who can POST to it reach ``on_valid`` and ``self.save()``, which ``next.W129`` reports in a project that declares access, see :doc:`/content/security/actions`.
+   An action answers to the access of its page, the ``inherit=True`` declarations of every ``page.py`` above included, and an action nothing guards lets any visitor who can POST to it reach ``on_valid`` and ``self.save()``, which ``next.W129`` reports in a project that declares access, see :doc:`/content/security/actions`.
    Check the row's ownership before saving, especially when ``instance_from_url`` loads the instance unscoped from a user-controlled value.
    The ``has_object_permission`` hook is the first-class place for that check, since it runs after binding with ``self.instance`` set to the loaded row, see :ref:`topics-forms-actions-dynamic-guards` and the :ref:`howto-enforce-object-level-permissions` recipe.
    See :doc:`/content/security/overview` for access control and :doc:`/content/howto/require-login-on-pages` for a project-wide login requirement.

@@ -393,6 +393,21 @@ A keyed ``@component.context`` serializes its return value under the given key.
 
 An unkeyed callable merges its dict into the component scope, and the names that merge may not take over are covered under :ref:`components-merge-guard`.
 
+Component access
+----------------
+
+A ``component.py`` declares who may see the component with ``component.login_required()`` and ``component.permission_required(perm, *, obj=None)``, where ``obj`` names a prop or a ``@component.context`` value.
+
+.. code-block:: python
+   :caption: notes/pages/_components/admin_toolbar/component.py
+
+   from next import component
+
+   component.permission_required("notes.moderate_note")
+
+A declaration binds that component alone, with no ``inherit`` and no ``public()``, and a refused request renders the component as an empty string, with no redirect and no 403.
+A component without declarations follows the page or the zone it renders in, see :ref:`topics-permissions-tree`.
+
 Co-located static assets
 ------------------------
 

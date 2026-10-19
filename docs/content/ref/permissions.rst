@@ -48,8 +48,9 @@ A rule over several conditions combines them with ``and`` and ``or`` in the body
 Registration and questions
 --------------------------
 
-``add_perm(name, predicate)`` registers the function under the permission name.
+``add_perm(name, predicate) -> None`` registers the function under the permission name.
 A name outside ``app_label.codename`` raises ``ValueError``, the same function under a name already held changes nothing, and a different one raises ``PermissionAlreadyRegisteredError``.
+A function of the same qualified name defined again in the same file, as a module that runs twice under the development server defines it, replaces the one the name held, so an edited ``page.py`` that registers a permission imports again.
 The ``permissions.py`` module of every installed application is imported at startup, so that is where ``add_perm`` calls live.
 
 ``has_perm(user, perm, obj=None)`` answers from the registered predicates alone.
@@ -61,9 +62,13 @@ An inactive user holds nothing, an unregistered name answers ``False``, and the 
 Access declarations
 -------------------
 
-``login_required()``, ``permission_required(perm, *, obj=None)``, and ``public()`` record what a ``proxy.py``, a ``page.py``, or a ``component.py`` declares, see :ref:`topics-permissions-tree` and :doc:`pages` for where each is called.
-Every page view, the action dispatcher, and a zone request check the declared rule before any application code runs, a login first, then every permission without an object, then each permission on the object, the order of ``AccessMixin`` and ``PermissionRequiredMixin``.
-A refused login redirects to ``LOGIN_URL`` and a refused permission raises :exc:`~django.core.exceptions.PermissionDenied`.
+``page.login_required(*, inherit=False)``, ``page.permission_required(perm, *, obj=None, inherit=False)``, and ``page.public(*, inherit=False)`` record what a ``page.py`` declares, for its own page and under ``inherit=True`` for the pages below, see :ref:`topics-access` and :doc:`pages`.
+``component.login_required()`` and ``component.permission_required(perm, *, obj=None)`` record what a ``component.py`` declares for its component alone, which has no ``inherit`` and no ``public()``, see :doc:`components`.
+Every page view, the action dispatcher, and a zone request check the declared rule before any application code but the ``scope`` dependency runs, a login first, then every permission without an object, then each permission on the object, the order of ``AccessMixin`` and ``PermissionRequiredMixin``.
+A refused login redirects to the login page and a refused permission raises :exc:`~django.core.exceptions.PermissionDenied`.
+A refused component renders nothing, and an object it names that is ``None`` refuses without asking ``has_perm``, as ``{% has_perm %}`` does.
+An ``@action`` of a ``component.py`` answers to what the component declares as well, and under a permission on a context it refuses every user, which ``next.E165`` reports.
+``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware`` asks a login of every page, action, and zone that declares nothing and is not public, see :ref:`topics-access-default-login`.
 A file executed again drops what it declared before, so a reload never keeps a stale requirement.
 ``manage.py permissions`` and the ``Access`` column of ``manage.py routes`` print the rule every page, action, and declaring component answers to, and ``manage.py permissions`` adds a ``view`` row for every other view of the URLconf, see :doc:`management`.
 
@@ -83,7 +88,7 @@ Errors
 
 ``PermissionAlreadyRegisteredError`` carries the permission ``name`` that was registered twice.
 ``UnknownAccessObjectError`` is a ``LookupError`` raised when the ``obj=`` of a component names no prop and no context the component produces, and it carries the context ``name`` and the ``endpoint`` file.
-An ``obj=DObject[Model]`` of a page or a ``proxy.py`` whose route lacks the kwarg raises ``UnboundObjectError`` from ``next.deps`` instead, see ``next.E162``.
+An ``obj=DObject[Model]`` of a ``page.py`` whose route lacks the kwarg raises ``UnboundObjectError`` from ``next.deps`` instead, see ``next.E162``.
 
 .. automodule:: next.permissions.errors
 
@@ -101,8 +106,8 @@ Management command
 System checks
 -------------
 
-``next.permissions.checks`` owns ``next.E159``, ``next.E160``, and ``next.W127``.
-``next.W129`` lives with the forms checks and, like ``next.W127`` for a form guard, runs only in a project that declares access, ``next.E161`` with the zone checks, ``next.E162`` with the ``DObject`` checks, and ``next.E163``, ``next.E164``, and ``next.W128`` with the page checks, see :doc:`system-checks`.
+``next.permissions.checks`` owns ``next.E159``, ``next.E160``, ``next.W127``, ``next.W130``, and ``next.W131``.
+``next.W129`` lives with the forms checks and, like ``next.W127`` for a form guard, runs only in a project that declares access, and only while the default login is off, ``next.E161`` with the zone checks, ``next.E162`` with the ``DObject`` checks, and ``next.E163``, ``next.E164``, and ``next.W128`` with the page checks, see :doc:`system-checks`.
 
 See also
 --------

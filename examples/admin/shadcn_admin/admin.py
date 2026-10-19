@@ -1,3 +1,5 @@
+from typing import ClassVar, cast
+
 from django import forms as django_forms
 from django.contrib import admin
 from django.contrib.auth import get_permission_codename
@@ -14,6 +16,25 @@ def may(request: HttpRequest, verb: str, model: type[Model], obj: Model | None) 
     return request.user.has_perm(
         f"{opts.app_label}.{get_permission_codename(verb, opts)}", obj
     )
+
+
+class RowPermissionForm(django_forms.ModelForm):
+    """Refuse a save whose resulting row the admin would no longer let the user change.
+
+    `RowPermissionAdmin.get_form` mixes it into the form it builds, with its request.
+    """
+
+    row_admin: ClassVar["RowPermissionAdmin"]
+    row_request: ClassVar[HttpRequest]
+    row_editable: ClassVar[bool]
+
+    def full_clean(self) -> None:
+        """Clean the form, then refuse a row the user may not change once saved."""
+        super().full_clean()
+        if not self.is_bound or self.errors or not self.row_editable:
+            return
+        if not self.row_admin.has_change_permission(self.row_request, self.instance):
+            self.add_error(None, self.row_admin.refusal(self.instance))
 
 
 class RowPermissionAdmin(admin.ModelAdmin):
@@ -39,25 +60,19 @@ class RowPermissionAdmin(admin.ModelAdmin):
         change: bool = False,
         **kwargs,
     ) -> type[django_forms.ModelForm]:
-        """Refuse a save whose resulting row the user would no longer be let change.
+        """Return the admin form with `RowPermissionForm` mixed in for this request.
 
         A row the user may not change already renders without fields, and its handler
         answers `403`, so the check runs only on rows the user may edit.
         """
         base = super().get_form(request, obj, change=change, **kwargs)
-        model_admin = self
-        editable = obj is None or self.has_change_permission(request, obj)
-
-        class RowPermissionForm(base):  # type: ignore[misc, valid-type]
-            def _post_clean(self) -> None:
-                super()._post_clean()
-                if self.errors or not editable:
-                    return
-                if not model_admin.has_change_permission(request, self.instance):
-                    self.add_error(None, model_admin.refusal(self.instance))
-
-        RowPermissionForm.__name__ = base.__name__
-        return RowPermissionForm
+        bound = {
+            "row_admin": self,
+            "row_request": request,
+            "row_editable": obj is None or self.has_change_permission(request, obj),
+        }
+        form = type(base.__name__, (RowPermissionForm, base), bound)
+        return cast("type[django_forms.ModelForm]", form)
 
     def get_object_links(
         self, request: HttpRequest, obj: Model

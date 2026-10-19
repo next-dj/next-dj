@@ -1,5 +1,3 @@
-import os
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -10,6 +8,7 @@ from django.test import override_settings
 
 from next.forms.origin import OriginMatch
 from next.pages import page
+from next.pages.errors import PageModuleImportError
 from next.partial import (
     ForeignPageNotAuthorizedError,
     Patches,
@@ -27,12 +26,19 @@ from tests.pages.checks.metadata.trees import (
     layout_root,
     templated_page,
 )
-from tests.support import PermissionHolder, build_zone_request, partial_request, routed
+from tests.support import (
+    PermissionHolder,
+    build_zone_request,
+    partial_request,
+    routed,
+    touch_later,
+)
 from tests.support.access import (
     PAGE_HEAD,
     client_as,
     login_required_middleware,
-    write_proxy,
+    login_required_setting,
+    write_guard,
 )
 from tests.support.guards import (
     CHILDREN_BODY,
@@ -520,12 +526,6 @@ class TestTagsAboveAZone:
         assert (b"SECRET" in response.content) is (kind == "holder")
 
 
-def _touch_later(path: Path, text: str) -> None:
-    path.write_text(text)
-    future = time.time() + 5
-    os.utime(path, (future, future))
-
-
 @pytest.mark.django_db()
 class TestEditsUnderDebug:
     """With edits watched, a component turning into a guard refuses its zone at once."""
@@ -541,7 +541,7 @@ class TestEditsUnderDebug:
             override_settings(DEBUG=debug),
         ):
             before = client.get_zones("/leak/", "cz")
-            _touch_later(card, GUARDED_CHILDREN)
+            touch_later(card, GUARDED_CHILDREN)
             edited = client.get_zones("/leak/", "cz")
         assert before.status_code == 200
         assert b"SECRET" in before.content
@@ -553,13 +553,12 @@ class TestEditsUnderDebug:
         leaf = templated_page(pages / "leak", "x = 1\n", wrap("card"))
         settings.DEBUG = True
         with routed(pages, COMPONENT_BACKENDS=COMPONENTS):
-            # A request walks the page tree, so its components resolve by name.
             assert NextClient().get("/leak/").status_code == 200
             template = page.composed_template_for(leaf)
             with capture_signals(zone_registered) as recorder:
                 first = zones_of(template, leaf)
                 assert zones_of(template, leaf) is first
-                _touch_later(card, GUARDED_CHILDREN)
+                touch_later(card, GUARDED_CHILDREN)
                 edited = zones_of(template, leaf)
         assert first["cz"].standalone is True
         assert edited["cz"].standalone is False
@@ -576,7 +575,7 @@ class TestEditsUnderDebug:
 
 _PAGE_RULES = {
     "page": f'from next.pages import page\n\npage.permission_required("{PERM}")\n',
-    "proxy": None,
+    "inherited": None,
 }
 _OPEN_ZONE = '<p>public</p>{% zone "pub" %}<i>open</i>{% endzone %}'
 
@@ -585,7 +584,7 @@ def _ruled_page(tmp_path: Path, where: str) -> Path:
     pages = layout_root(tmp_path)
     source = _PAGE_RULES[where]
     if source is None:
-        write_proxy(pages, f'proxy.permission_required("{PERM}")\n')
+        write_guard(pages, f'page.permission_required("{PERM}", inherit=True)\n')
         source = "x = 1\n"
     return templated_page(pages / "ruled", source, _OPEN_ZONE)
 
@@ -644,12 +643,17 @@ class TestZoneUnderPageAccess:
             ),
         ],
     )
-    def test_a_foreign_morph_under_the_login_middleware(
-        self, tmp_path: Path, source: str, user, status
+    @pytest.mark.parametrize(
+        "framing",
+        [login_required_middleware, login_required_setting],
+        ids=["middleware", "setting"],
+    )
+    def test_a_foreign_morph_under_the_default_login(
+        self, tmp_path: Path, source: str, user, status, framing
     ) -> None:
         leaf = templated_page(layout_root(tmp_path) / "ruled", source, _OPEN_ZONE)
         patches = Patches(_zone_request(user))
-        with login_required_middleware():
+        with framing():
             if status is None:
                 op = patches.morph(zone="pub", page=leaf).envelope().ops[0]
                 assert "open" in op.as_dict()["html"]
@@ -667,10 +671,12 @@ class TestZoneUnderPageAccess:
         self, tmp_path: Path, trail: str, status
     ) -> None:
         pages = layout_root(tmp_path)
-        write_proxy(pages, f'proxy.permission_required("{PERM}")\n')
-        write_proxy(pages / "ruled", "proxy.public()\n")
-        write_proxy(pages / "ruled" / "admin", "proxy.login_required()\n")
-        leaf = templated_page(pages / trail, "x = 1\n", _OPEN_ZONE)
+        write_guard(pages, f'page.permission_required("{PERM}", inherit=True)\n')
+        lifted = f"{PAGE_HEAD}page.public(inherit=True)\n"
+        guarded = f"{PAGE_HEAD}page.login_required(inherit=True)\n"
+        templated_page(pages / "ruled", lifted, _OPEN_ZONE)
+        templated_page(pages / "ruled" / "admin", guarded, _OPEN_ZONE)
+        leaf = pages / trail / "page.py"
         patches = Patches(_zone_request(AnonymousUser()))
         if status is None:
             op = patches.morph(zone="pub", page=leaf).envelope().ops[0]
@@ -692,6 +698,36 @@ class TestZoneUnderPageAccess:
         with pytest.raises(ForeignPageNotAuthorizedError) as caught:
             patches.morph_zone("pub")
         assert caught.value.status_code == status
+
+
+@pytest.mark.django_db()
+class TestBrokenPageUnderAMorph:
+    """A morph over a page whose chain fails to import raises it, never a 404."""
+
+    @pytest.mark.parametrize("where", ["page", "above"])
+    @pytest.mark.parametrize("morph", ["foreign", "origin"])
+    def test_the_import_error(
+        self, tmp_path: Path, monkeypatch, settings, where: str, morph: str
+    ) -> None:
+        settings.DEBUG = False
+        pages = layout_root(tmp_path)
+        failing = "raise RuntimeError('boom')\n"
+        if where == "above":
+            broken = write_guard(pages, failing)
+            leaf = templated_page(pages / "ruled", "x = 1\n", _OPEN_ZONE)
+        else:
+            leaf = broken = templated_page(pages / "ruled", failing, _OPEN_ZONE)
+        match = OriginMatch(page_path=leaf, url_kwargs={}, origin="/ruled/")
+        monkeypatch.setattr(patches_module, "resolve_origin", lambda _request: match)
+        patches = Patches(_zone_request(PermissionHolder()))
+        run = {
+            "foreign": lambda: patches.morph(zone="pub", page=leaf),
+            "origin": lambda: patches.morph_zone("pub"),
+        }[morph]
+        with pytest.raises(PageModuleImportError) as caught:
+            run()
+        assert caught.value.file_path == broken
+        assert patches.envelope().ops == ()
 
 
 _PART = f"{_PREFIX}_part.html"

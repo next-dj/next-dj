@@ -19,7 +19,7 @@ Application composition
 
 Domain code sits flat at the root of the application under fixed names, and the URL tree grows only inside ``pages/``.
 A page at any depth reaches the domain through the same absolute import, such as ``from notes.services import archive_note``, because the domain code never moves when the URL tree does.
-An application starts from Django's own ``manage.py startapp``, which writes ``apps.py``, ``models.py``, ``admin.py``, and ``migrations/``, and gains the next.dj files one by one as it needs them, ``pages/`` with ``page.py``, ``template.djx``, ``layout.djx``, and ``proxy.py``, then ``permissions.py``, ``signals.py``, ``deps.py``, and ``forms.py``.
+An application starts from Django's own ``manage.py startapp``, which writes ``apps.py``, ``models.py``, ``admin.py``, and ``migrations/``, and gains the next.dj files one by one as it needs them, ``pages/`` with ``page.py``, ``template.djx``, and ``layout.djx``, then ``permissions.py``, ``signals.py``, ``deps.py``, and ``forms.py``.
 The pages replace the ``views.py`` that ``startapp`` writes, and a ``tests/`` package replaces its ``tests.py``.
 
 .. code-block:: text
@@ -39,7 +39,6 @@ The pages replace the ``views.py`` that ``startapp`` writes, and a ``tests/`` pa
      tests/
      pages/
        layout.djx
-       proxy.py
        page.py
        template.djx
        _components/
@@ -109,7 +108,7 @@ The last column names what another application of the same project uses, the rec
      - Tests of other applications.
      - No.
    * - ``pages/``
-     - Delivery, which means ``page.py`` with its context, actions, access, and metadata, ``layout.djx`` with the markup of a section, ``proxy.py`` with the access of a section, ``template.djx``, and co-located assets.
+     - Delivery, which means ``page.py`` with its context, actions, access, and metadata, ``layout.djx`` with the markup of a section, ``template.djx``, and co-located assets.
      - Domain rules, model writes outside a form or a service, and every other Python module.
      - No, a page tree has no import path.
    * - ``pages/_components/``
@@ -120,7 +119,7 @@ The last column names what another application of the same project uses, the rec
 
 :doc:`application-layout` shows the ``scope`` dependency, the ``visible_to(scope)`` read, and the ``f(scope, *, ...)`` service in full.
 
-Five of these files load with no import of their own, so ``AppConfig.ready`` holds no import of them.
+Four of these files load with no import of their own, so ``AppConfig.ready`` holds no import of them.
 When the ``next`` application is ready it imports ``deps.py``, then ``permissions.py``, then ``forms.py``, then ``signals.py`` of every installed application, all before any ``component.py``, the way ``django.contrib.admin`` imports ``admin.py``, see :doc:`/content/ref/settings`.
 
 .. code-block:: python
@@ -165,7 +164,7 @@ Delivery stays in pages
 -----------------------
 
 The page tree holds delivery files and nothing else.
-These are ``page.py``, ``proxy.py``, ``layout.djx``, ``template.djx``, ``component.py``, ``component.djx``, their co-located assets, and the ``sitemap.py``, ``robots.py``, and ``scripts.py`` sources the framework reads at the top of a page root.
+These are ``page.py``, ``layout.djx``, ``template.djx``, ``component.py``, ``component.djx``, their co-located assets, and the ``sitemap.py``, ``robots.py``, and ``scripts.py`` sources the framework reads at the top of a page root.
 
 The reason is how the tree loads.
 The loader executes each ``page.py`` by its file path under one fixed module name, outside any package, and treats ``component.py`` the same way.
@@ -467,11 +466,10 @@ next.dj does not check which application imports which, since the import graph i
 Tests
 -----
 
-Place tests under ``tests/`` at the project root.
+Each application keeps its tests in its own ``tests/`` package, as the composition above shows, and a single-application project may keep one ``tests/`` at the project root instead.
 ``pytest.ini`` holds the collection settings and loads ``next.testing.plugin``, which imports the page tree once per session and supplies the ``next_client`` fixture, so the project needs no ``conftest.py`` of its own (see :doc:`/content/topics/testing`).
 A suite with wiring beyond the plugin options adds a ``conftest.py`` for that wiring alone.
 
-A per application ``tests/`` directory, as in the composition above, works for projects with several applications.
 See :doc:`multi-project` for the layered layout.
 
 Static files
@@ -516,7 +514,7 @@ See also
 
    :doc:`application-layout` for where models, querysets, services, and signals hold the logic.
    :doc:`file-router` for the route shapes and the ``pages()`` include of application trees.
-   :doc:`proxy` for the access a ``proxy.py`` declares over a section of the tree.
+   :doc:`access` for the access a ``page.py`` declares over a section of the tree.
    :doc:`permissions` for the predicates of ``permissions.py`` and ``{% has_perm %}``.
    :doc:`/content/howto/serve-an-application-under-a-prefix` for a prefix recipe.
    :doc:`multi-project` for layouts that span several Django projects.

@@ -46,6 +46,7 @@ BOOL_KEYS: Final[frozenset[str]] = frozenset(
     {
         "STRICT_CONTEXT",
         "STRICT_LOADING",
+        "LOGIN_REQUIRED",
         "LAZY_COMPONENT_MODULES",
         "FORM_AUTODISCOVER",
         "STATIC_DISCOVERY_CACHE",

@@ -253,7 +253,7 @@ Fallback root.
 With this configuration the router serves every page under ``<BASE_DIR>/pages/``.
 
 You can use both sources at once.
-URL patterns are built in this order, first from application directories then from each entry in ``DIRS``, and an application tree mounted under a prefix leads both, as *Route order across trees* below describes.
+URL patterns are built in this order, first from application directories then from each entry in ``DIRS``, and a tree that ``pages()`` places under a prefix leads both, as *Route order across trees* below describes.
 If two routes convert to exactly the same Django path string the system check ``next.E015`` reports the conflict, whether they come from one tree or several.
 The comparison is string equality after bracket conversion, so semantic overlap between typed converters stays silent, and ``posts/[int:id]`` next to ``posts/[id]`` is not reported.
 
@@ -367,12 +367,12 @@ An unknown application raises ``LookupError``, and a subdirectory that is missin
        page.py                     /staff/history/
 
 A converter in the route above ``pages()`` reaches every page of the tree as a URL kwarg, as it does for any :func:`~django.urls.include`, through a plain parameter or ``DUrl``.
-A page directory that captures a name the route already captures, such as ``history/[int:wallet]/`` under ``path("w/<int:wallet>/", pages(...))``, makes one value overwrite the other, and the checks report :ref:`next.E152 <ref-system-checks>`, naming the page and the prefix.
+A page directory that captures a name the route already captures, such as ``history/[int:wallet]/`` under ``path("w/<int:wallet>/", pages(...))``, makes one value overwrite the other, and the checks report :ref:`next.E152 <ref-system-checks>`, naming the page and the include.
 
 The pages of a ``pages()`` tree register in a namespace named after the application label, without the outer prefix.
 ``page_reverse("", namespace="audit")`` answers ``/staff/`` and ``{% url "audit:page_log" %}`` answers ``/staff/log/``.
 A second tree of the same application needs a namespace of its own, which the ``namespace`` keyword sets, as ``audit_history`` does above.
-A layout, a context, or a ``proxy.py`` of one tree never reaches the pages of another, see :ref:`topics-proxy-tree-boundary`, while breadcrumbs continue by URL, so a page of ``/staff/history/`` leads its crumbs with those of the nearest page above it in another tree, here the ``/staff/`` page, see :doc:`/content/topics/seo/breadcrumbs`.
+A layout, a context, an access declaration, or a breadcrumb of one tree never reaches the pages of another, see :ref:`topics-access-tree-boundary` and :doc:`/content/topics/seo/breadcrumbs`.
 
 One tree may be included twice, each include under a namespace of its own, such as ``pages("audit", namespace="one")`` under ``one/`` and ``pages("audit", namespace="two")`` under ``two/``.
 Its pages then answer under both prefixes, while the sitemap lists the tree as one section, built from the include the URLconf lists first, so only the URLs under ``one/`` appear in it.
@@ -439,7 +439,7 @@ Route order
 Within one tree a static directory always routes before a parameter sibling, and a parameter sibling before a catch-all.
 ``pages/blog/about/`` therefore answers ``/blog/about/`` even though ``pages/blog/[slug]/`` matches that path too.
 Among siblings of the same kind the more specific one routes first, ``post-[id]`` before ``[slug]`` and ``[int:id]`` before ``[str:key]``, and the name decides the rest, so the order is the same on every file system.
-The framework endpoints under ``/_next/`` route ahead of every page, so a root ``[[rest]]`` page cannot swallow them.
+Inside ``next.urls`` the framework endpoints under ``/_next/`` route ahead of every page, so a root ``[[rest]]`` page of ``next.urls`` cannot swallow them, while a ``pages()`` tree listed above the include can, which ``next.E149`` reports.
 See :doc:`/content/internals/url-router` for the complete rule.
 
 Resolution performance
@@ -543,7 +543,7 @@ See also
    :doc:`/content/howto/add-a-page` for a one page recipe.
    :doc:`/content/howto/serve-an-application-under-a-prefix` for a tree under a prefix.
    :doc:`project-layout` for the files of an application and the trees of a growing project.
-   :doc:`proxy` for the access a ``proxy.py`` declares over a directory of a tree.
+   :doc:`access` for the access a ``page.py`` declares over a directory of a tree.
    :doc:`/content/howto/reload-routes-from-code` for hot reload mechanics.
    :doc:`/content/internals/url-router` for the parser, dispatcher, and signal flow.
    :doc:`/content/ref/urls` for the public API.

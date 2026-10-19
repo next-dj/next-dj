@@ -44,8 +44,6 @@ logger = logging.getLogger(__name__)
 # A token no template source contains, so filling the slot is unambiguous.
 _BODY_SLOT = "\x00next-page-body\x00"
 
-PROXY_MODULE: Final = "proxy.py"
-
 PAGE_MODULE: Final = "page.py"
 
 
@@ -380,16 +378,6 @@ def page_tree_depth(start_dir: Path) -> int:
 def in_page_tree(start_dir: Path) -> bool:
     """Return whether `start_dir` lies inside a page tree some router routes."""
     return _tree_depth(start_dir) is not None
-
-
-def proxy_modules(file_path: Path) -> tuple[Path, ...]:
-    """Return the `proxy.py` paths over `file_path` inside its page tree, root first.
-
-    The walk stops at the tree root, so a mounted tree inherits nothing from its host.
-    """
-    depth = page_tree_depth(file_path.parent)
-    ancestors = page_path_info(file_path).ancestors[:depth]
-    return tuple(ancestor.parent / PROXY_MODULE for ancestor in reversed(ancestors))
 
 
 def _read_string_list(module: types.ModuleType, attr: str) -> list[str]:

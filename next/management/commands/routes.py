@@ -4,8 +4,8 @@ from typing import Any, override
 
 from django.core.management.base import BaseCommand
 
+from next.management.endpoints import page_endpoint
 from next.management.table import relative, write_table
-from next.permissions.endpoints import page_endpoint
 from next.urls.routes import collect_routes
 from next.utils import resolve_base_dir
 

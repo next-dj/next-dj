@@ -7,8 +7,9 @@ from next.pages.checks.contexts import (
     annotation_mismatch,
     check_context_registration_files,
 )
+from next.pages.loaders import load_python_module_memo
 from tests.support import routed, write_page
-from tests.support.access import page_source, write_proxy
+from tests.support.access import page_source
 
 
 _ORG = 'from next.pages import context\n\n@context("org")\ndef org():\n    return 1\n'
@@ -52,13 +53,15 @@ class TestReturnAnnotationHelpers:
         assert annotation_mismatch(func) == expected
 
 
-class TestProxyContexts:
-    """next.E074 flags a `@context` in a `proxy.py`, which no page render collects."""
+class TestStrayContexts:
+    """next.E074 flags a `@context` outside a `page.py`, which no render collects."""
 
-    def test_a_proxy_context_is_flagged(self, tmp_path: Path) -> None:
+    def test_a_helper_context_is_flagged(self, tmp_path: Path) -> None:
         root = tmp_path / "pages"
-        declaring = write_proxy(root, _ORG)
         write_page(root, "a", page_source())
+        declaring = root / "a" / "helpers.py"
+        declaring.write_text(_ORG)
+        load_python_module_memo(declaring)
 
         with routed(root):
             messages = check_context_registration_files()

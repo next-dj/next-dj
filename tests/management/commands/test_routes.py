@@ -95,11 +95,11 @@ class TestRoutesAccessColumn:
     def access_lines(self, tmp_path):
         root = write_access_project(tmp_path / "pages")
 
-        def run() -> list[str]:
+        def run(**framework: object) -> list[str]:
             out = StringIO()
             with (
                 isolated_form_registries(),
-                routed(root, COMPONENT_BACKENDS=COMPONENTS),
+                routed(root, COMPONENT_BACKENDS=COMPONENTS, **framework),
                 override_settings(BASE_DIR=tmp_path),
             ):
                 call_command("routes", stdout=out)
@@ -120,4 +120,7 @@ class TestRoutesAccessColumn:
 
     def test_the_middleware_closes_an_open_page(self, access_lines) -> None:
         with login_required_middleware():
-            assert access_lines()[3] == "login (middleware)"
+            assert access_lines()[3] == "login (default)"
+
+    def test_the_setting_closes_an_open_page(self, access_lines) -> None:
+        assert access_lines(LOGIN_REQUIRED=True)[3] == "login (default)"

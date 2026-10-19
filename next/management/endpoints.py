@@ -19,17 +19,21 @@ from django.urls import (
     resolve,
 )
 
-from next.components.sources import get_components_manager, reached_components
+from next.components.sources import (
+    get_components_manager,
+    import_component_modules,
+    reached_components,
+)
 from next.discovery import discover_page_registrations
+from next.forms.dispatch.permissions import guard_rule, owner_rule
 from next.forms.manager import form_action_manager
-from next.pages.access import middleware_login, owner_access, page_access
+from next.pages.access import default_login, page_access
 from next.pages.loaders import PAGE_MODULE
 from next.pages.manager import page
 from next.pages.paths import page_template_path
+from next.permissions.access import declared, login_middleware
+from next.permissions.markers import AccessRule, Requirement, joined
 from next.urls.routes import collect_routes
-
-from .access import declared, login_middleware_active
-from .markers import OPEN, AccessRule, Requirement, joined
 
 
 if TYPE_CHECKING:
@@ -47,7 +51,7 @@ type Includes = Sequence[URLResolver]
 class Endpoint:
     """A page, an action or a component with the access rule it answers to.
 
-    `closed` marks what `LoginRequiredMiddleware` refuses to an anonymous user.
+    `closed` marks what the default login refuses to an anonymous user.
     """
 
     kind: EndpointKind
@@ -69,7 +73,7 @@ class Endpoint:
         if self.rule.public:
             return "public"
         if self.closed:
-            return "login (middleware)"
+            return "login (default)"
         return "-"
 
     @property
@@ -139,7 +143,7 @@ def _view_endpoint(includes: Includes, pattern: URLPattern) -> ViewEndpoint | No
         return None
     public = not getattr(callback, "login_required", True)
     pieces = [*map(_route_piece, includes), _route_piece(pattern)]
-    closed = not public and login_middleware_active()
+    closed = not public and login_middleware() is not None
     deferred = getattr(callback, "next_access_kind", None)
     return ViewEndpoint(
         "/" + "".join(pieces), pattern.lookup_str, public, closed, deferred
@@ -172,22 +176,11 @@ def _page_path(route: "Route") -> Path:
 
 
 def page_endpoint(route: "Route") -> Endpoint:
-    """Return the access of the page a route serves, its `proxy.py` chain included."""
+    """Return the access of the page a route serves, the `page.py` chain included."""
     held = page_access(_page_path(route))
     rule = held.rule
-    closed = middleware_login(rule)
+    closed = default_login(rule)
     return Endpoint("page", route.url, route.file, rule, closed, held.broken)
-
-
-def _guard_rule(meta: "ActionMeta", source: Path) -> AccessRule:
-    """Return what the `Meta` guard of an action requires, bound to its file."""
-    guard = meta.get("guard")
-    if guard is None:
-        return OPEN
-    requirements = [Requirement("login", source)]
-    if guard.permissions:
-        requirements.append(Requirement("permission", source, guard.permissions))
-    return AccessRule(tuple(requirements), sources=(source,))
 
 
 def action_endpoint(meta: "ActionMeta") -> Endpoint:
@@ -196,8 +189,8 @@ def action_endpoint(meta: "ActionMeta") -> Endpoint:
     The rule of the posted origin page joins it per request and stays out.
     """
     source = Path(meta["file_path"])
-    owner = owner_access(source)
-    rules = [_guard_rule(meta, source)]
+    owner = owner_rule(source)
+    rules = [guard_rule(meta)]
     public = False
     broken = None
     if owner is not None:
@@ -205,9 +198,7 @@ def action_endpoint(meta: "ActionMeta") -> Endpoint:
         public = owner.rule.public
         broken = owner.broken
     rule = joined(rules, public=public)
-    return Endpoint(
-        "action", meta["name"], source, rule, middleware_login(rule), broken
-    )
+    return Endpoint("action", meta["name"], source, rule, default_login(rule), broken)
 
 
 def _component_endpoint(info: "ComponentInfo") -> Endpoint | None:
@@ -231,15 +222,9 @@ def _actions() -> tuple["ActionMeta", ...]:
     )
 
 
-def _import_components() -> None:
-    """Run every `component.py`, so each component has declared its access."""
-    for backend in get_components_manager().backends:
-        backend.import_component_modules()
-
-
 def _components() -> tuple["ComponentInfo", ...]:
     """Return every component once each `component.py` ran its declarations."""
-    _import_components()
+    import_component_modules()
     infos: dict[ComponentInfo, None] = {}
     for backend in get_components_manager().backends:
         infos.update(dict.fromkeys(backend.iter_components()))
@@ -248,7 +233,7 @@ def _components() -> tuple["ComponentInfo", ...]:
 
 def _page_components(page_path: Path) -> tuple["ComponentInfo", ...] | None:
     """Return the components the composed page template renders, `None` if broken."""
-    _import_components()
+    import_component_modules()
     try:
         template = page.composed_template_for(page_path)
     except TemplateSyntaxError:

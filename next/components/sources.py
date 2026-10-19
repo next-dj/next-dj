@@ -16,6 +16,7 @@ from django.template import Engine, Template, TemplateDoesNotExist, TemplateSynt
 from django.template.base import FilterExpression, NodeList
 from django.template.loader_tags import BlockNode, ExtendsNode, IncludeNode
 
+from next.conf import next_framework_settings
 from next.discovery import get_router_manager, iter_page_tree_component_folders
 from next.utils import child_nodelists
 
@@ -80,6 +81,26 @@ def _register_page_tree_component_folders(manager: ComponentsManager) -> None:
 def reset_components_manager_cache(**kwargs) -> None:
     """Drop the cached `ComponentsManager` so the next read rebuilds it."""
     _components_manager_cache.held = None
+
+
+def components_listed() -> bool:
+    """Return whether `COMPONENT_BACKENDS` lists a backend for a check to walk."""
+    configs = next_framework_settings.COMPONENT_BACKENDS
+    return isinstance(configs, list) and bool(configs)
+
+
+def import_component_modules() -> tuple[Path, ...]:
+    """Run every `component.py` the listed backends hold and return their paths.
+
+    Running one registers its context and its access, which the checks then read.
+    """
+    if not components_listed():
+        return ()
+    return tuple(
+        module_path
+        for backend in get_components_manager().backends
+        for module_path in backend.import_component_modules()
+    )
 
 
 def iter_serialized_component_context_keys() -> Iterator[tuple[Path, str]]:
@@ -271,7 +292,9 @@ def reached_components(nodelist: NodeList, anchor: Path) -> tuple[ComponentInfo,
 __all__ = [
     "Position",
     "TemplateWalk",
+    "components_listed",
     "get_components_manager",
+    "import_component_modules",
     "iter_serialized_component_context_keys",
     "reached_components",
     "reset_components_manager_cache",

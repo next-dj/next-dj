@@ -6,8 +6,8 @@ import pytest
 from django.urls import resolve
 
 from tests.benchmarks.factories import build_layout_page
-from tests.support import PermissionHolder, partial_meta, plain_get, routed
-from tests.support.access import write_proxy
+from tests.support import PermissionHolder, QuietHolder, partial_meta, plain_get, routed
+from tests.support.access import write_guard
 
 
 if TYPE_CHECKING:
@@ -25,7 +25,10 @@ _INSIDE = (
     '<main><h1>head</h1>{% zone "z" %}'
     f'{{% has_perm "{_PERM}" %}}<p>SECRET</p>{{% endhas_perm %}}{{% endzone %}}</main>'
 )
-_GUARDED_LAYOUT = f'proxy.login_required()\nproxy.permission_required("{_PERM}")\n'
+_GUARDED_LAYOUT = (
+    "page.login_required(inherit=True)\n"
+    f'page.permission_required("{_PERM}", inherit=True)\n'
+)
 _SHAPES = {
     "open": (_OPEN, False),
     "guarded-page": (_OPEN, True),
@@ -40,7 +43,7 @@ def _write_page(root: Path, shape: str) -> None:
     template, guarded = _SHAPES[shape]
     build_layout_page(root, layouts=2, template=template)
     if guarded:
-        write_proxy(root, _GUARDED_LAYOUT)
+        write_guard(root, _GUARDED_LAYOUT)
 
 
 class TestBenchZoneAccess:
@@ -61,6 +64,7 @@ class TestBenchZoneAccess:
             assert response.status_code == 200
             assert b"SECRET" in response.content
             assert len(request.user.asked) == _ASKED[shape]
+            request.user = QuietHolder(_PERM)
             benchmark(match.func, request, **match.kwargs)
 
     @pytest.mark.benchmark(group="partial.zone_access")
@@ -78,4 +82,5 @@ class TestBenchZoneAccess:
             assert response.status_code == 400
             assert b"SECRET" not in response.content
             assert request.user.asked == []
+            request.user = QuietHolder(_PERM)
             benchmark(match.func, request, **match.kwargs)

@@ -21,7 +21,9 @@ The framework never calls :func:`django.contrib.auth.login` or :func:`django.con
 A login rendered through a form action is an ordinary handler calling the ordinary helper.
 
 The framework reads the user itself in two places, the access rule of the page tree and the action guard.
-A ``login_required()`` or ``permission_required()`` that a ``proxy.py``, a ``page.py``, or a ``component.py`` declares tests ``request.user.is_authenticated`` and ``user.has_perm`` before the page, its actions, and its zones run any application code, and it redirects an anonymous visitor to ``LOGIN_URL`` with the full path as ``next``, see :ref:`topics-permissions-tree`.
+A ``login_required()`` or ``permission_required()`` that a ``page.py`` declares tests ``request.user.is_authenticated`` and ``user.has_perm`` before the page, its actions, and its zones run, and it redirects an anonymous visitor to ``LOGIN_URL`` with the full path as ``next``, see :ref:`topics-permissions-tree`.
+The same declaration in a ``component.py`` hides the component from a refused user, which renders it as an empty string with no redirect.
+``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware`` asks the same login of every page, action, and zone that declares nothing, see :ref:`topics-access-default-login`.
 ``Meta.login_required`` and ``Meta.permission_required`` test ``request.user.is_authenticated`` and ``user.has_perms`` before any POST data reaches a handler, and an anonymous caller gets a 302 to ``LOGIN_URL`` carrying the validated origin path as ``next``, see :ref:`topics-forms-actions-guards`.
 ``manage.py check`` reports ``next.W060`` when an action declares ``permission_required`` while ``django.contrib.auth`` is out of ``INSTALLED_APPS``, because the guard cannot resolve a permission without it.
 
@@ -67,7 +69,7 @@ Every one of these is a stock Django setting, and ``manage.py check --deploy`` r
 - ``SESSION_COOKIE_SAMESITE`` decides whether a cross-site navigation carries the session, with ``"Lax"`` as the Django default and ``"Strict"`` as the tighter option.
 - ``SESSION_COOKIE_AGE`` and ``SESSION_EXPIRE_AT_BROWSER_CLOSE`` bound how long a session and any wizard draft inside it survive.
 - ``SESSION_ENGINE`` selects where the session lives, and a wizard argues for a server-side engine as described above.
-- ``LOGIN_URL`` is where a guarded page or action redirects an anonymous caller, so it points at a real view, and under ``LoginRequiredMiddleware`` that view is public.
+- ``LOGIN_URL`` is where a guarded page or action redirects an anonymous caller, so it points at a real view, and under the default login that view is public.
 
 See Django's :doc:`session documentation <django:topics/http/sessions>` for the engines and :doc:`its deployment checklist <django:howto/deployment/checklist>` for the values a production run expects.
 

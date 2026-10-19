@@ -101,7 +101,7 @@ BENCH_EXTRA ?=
 bench: # run performance benchmarks (opt-in, no coverage, flags match CI)
 	uv run pytest tests/benchmarks $(BENCH_FLAGS) $(BENCH_EXTRA)
 
-test-compat: # run ecosystem compatibility tests (allauth, crispy-forms, django-htmx, django-rules, widget-tweaks)
+test-compat:
 	uv run --group compat pytest tests/compat -q --no-cov
 
 test-examples: # run Python, JS tests for examples with coverage

@@ -144,10 +144,6 @@ class RouterAccess(Protocol):
         """Return the parser the file router routes bracket segments through."""
         ...
 
-    def page_routes(self) -> tuple[tuple[Path, str], ...]:
-        """Return the tree root and the absolute route of every routed page."""
-        ...
-
 
 class StaticAssets(Protocol):
     """The static-manager surface one page render calls.

@@ -171,6 +171,16 @@ class TestComponentDeclarations:
         assert ("[]" in body) is not case.shown
         assert tuple(CALLS) == case.calls
 
+    def test_an_object_of_none_refuses_without_asking(
+        self, tmp_path: Path, isolated_permissions
+    ) -> None:
+        asked: list[object] = []
+        add_perm(_READ, lambda _user, obj: asked.append(obj) is None)
+        pages = _tree(tmp_path, _OBJECT_PERM, '{% component "card" account=None %}')
+        body = _render(pages, "visitor")
+        assert "[]" in body
+        assert asked == []
+
     def test_an_unknown_object_name_is_a_wiring_error(
         self, tmp_path: Path, isolated_permissions
     ) -> None:
@@ -195,8 +205,8 @@ class TestComponentDeclarations:
         module = (
             "from django.contrib.auth.models import Group\n\n"
             "from next.deps import DObject\n"
-            "from next.pages import proxy\n\n"
-            f'proxy.permission_required("{_READ}", obj=DObject[Group])\n'
+            "from next.pages import page\n\n"
+            f'page.permission_required("{_READ}", obj=DObject[Group])\n'
         )
         pages = _tree(tmp_path, module, '{% component "card" %}')
         with pytest.raises(TypeError, match="a component has no URL"):
@@ -217,6 +227,18 @@ class TestOtherRenderPaths:
     def test_render_function(self, tmp_path: Path, kind: str, shown) -> None:
         pages = _tree(tmp_path, _LOGIN + _RENDERED, '{% component "card" %}', None)
         assert ("RENDERED" in _render(pages, kind)) is shown
+
+    @pytest.mark.usefixtures("object_permission_backend")
+    @pytest.mark.parametrize(("account", "shown"), [("acme", True), ("beta", False)])
+    def test_render_function_checks_its_object(
+        self, tmp_path: Path, isolated_permissions, account: str, *, shown: bool
+    ) -> None:
+        asked: list[object] = []
+        add_perm(_READ, lambda _user, obj: asked.append(obj) is None and obj == "acme")
+        tag = f'{{% component "card" account="{account}" %}}'
+        pages = _tree(tmp_path, _OBJECT_PERM + _RENDERED, tag, None)
+        assert ("RENDERED" in _render(pages, "visitor")) is shown
+        assert asked == [account]
 
     @pytest.mark.parametrize("kind", ["anonymous", "visitor"])
     @pytest.mark.parametrize(

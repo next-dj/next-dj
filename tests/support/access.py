@@ -25,8 +25,6 @@ LOGIN_REQUIRED_MIDDLEWARE: Final = (
     "django.contrib.auth.middleware.LoginRequiredMiddleware"
 )
 
-PROXY_HEAD: Final = "from next.pages import proxy\n\n"
-
 PAGE_HEAD: Final = "from next.pages import page\n\n"
 
 CONTEXT_CALLS: list[str] = []
@@ -43,11 +41,11 @@ def declare_login() -> None:
     page.login_required()
 
 
-def write_proxy(directory: Path, source: str = "") -> Path:
-    """Write a `proxy.py` into `directory` whose body follows the `proxy` import."""
+def write_guard(directory: Path, source: str = "") -> Path:
+    """Write a `page.py` with no body into `directory`, running `source` after `page`."""
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / "proxy.py"
-    path.write_text(f"{PROXY_HEAD}{source}")
+    path = directory / "page.py"
+    path.write_text(f"{PAGE_HEAD}{source}")
     return path
 
 
@@ -59,17 +57,21 @@ def page_source(source: str = "", template: str = "ok") -> str:
 @contextmanager
 def restored_declarations() -> Generator[None, None, None]:
     """Run a block over no access declarations, then declare the earlier ones again."""
-    held = {path: declarations.declared(path) for path in declarations.files()}
+    held = {
+        path: (declarations.declared(path), declarations.inherited(path))
+        for path in declarations.files()
+    }
     declarations.reset()
     try:
         yield
     finally:
         declarations.reset()
-        for path, rule in held.items():
+        for path, (rule, inherited) in held.items():
             for requirement in rule.requirements:
-                declarations.declare(path, requirement)
+                inherit = requirement in inherited.requirements
+                declarations.declare(path, requirement, inherit=inherit)
             if rule.public:
-                declarations.declare_public(path)
+                declarations.declare_public(path, inherit=inherited.public)
 
 
 def login_required_middleware() -> override_settings:
@@ -77,6 +79,12 @@ def login_required_middleware() -> override_settings:
     return override_settings(
         MIDDLEWARE=[*settings.MIDDLEWARE, LOGIN_REQUIRED_MIDDLEWARE]
     )
+
+
+def login_required_setting() -> override_settings:
+    """Return an override that turns `NEXT_FRAMEWORK["LOGIN_REQUIRED"]` on."""
+    framework = getattr(settings, "NEXT_FRAMEWORK", {})
+    return override_settings(NEXT_FRAMEWORK={**framework, "LOGIN_REQUIRED": True})
 
 
 def sign_in(client: Client, username: str, *codenames: str) -> object:
@@ -171,11 +179,10 @@ component.login_required()
 def write_access_project(root: Path) -> Path:
     """Write a public index with a guarded card, and a guarded, open and broken page."""
     write_page(root, "", _INDEX)
-    write_proxy(root / "notes", "proxy.login_required()\n")
+    write_guard(root / "notes", "page.login_required(inherit=True)\n")
     write_page(root, "notes/[int:group]", _NOTES)
     write_page(root, "open", _OPEN)
-    write_proxy(root / "broken", "raise RuntimeError('boom')\n")
-    write_page(root, "broken", page_source())
+    write_page(root, "broken", page_source("raise RuntimeError('boom')\n"))
     card = root / "_components" / "card"
     card.mkdir(parents=True)
     (card / "component.py").write_text(_CARD)
