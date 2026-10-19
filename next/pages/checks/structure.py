@@ -21,6 +21,7 @@ from next.checks.common import (
     read_page_roots,
 )
 from next.conf import next_framework_settings
+from next.pages.access import routed
 from next.utils import normalise_route_name, walk_page_tree
 
 
@@ -225,23 +226,23 @@ def _check_missing_page_files(
 ) -> list[CheckMessage]:
     """Check that every routed parameter directory serves a page at some depth.
 
-    The router walk decides what counts, so a page under a `_name` folder or a refused
-    name does not answer for the directory, and a page deeper down does.
+    Only what the router routes counts, never a `layout.djx` or a bodyless `page.py`.
     """
     errors: list[CheckMessage] = []
 
     for item in directories:
-        if not _is_bracket_segment(item.name) or (item / "layout.djx").exists():
+        if not _is_bracket_segment(item.name):
             continue
         relative = item.relative_to(pages_path)
         if any(part.startswith("_") for part in relative.parts):
             continue
-        if next(walk_page_tree(item, skip_dir_names), None) is not None:
+        if any(routed(page) for _trail, page in walk_page_tree(item, skip_dir_names)):
             continue
         errors.append(
             Error(
                 f"{context} pages: Parameter directory "
-                f'"{relative}" is missing page.py file.',
+                f'"{relative}" serves no page. Add a page.py with a body or a '
+                "template.djx in it or below it.",
                 obj=settings,
                 id="next.E010",
             )

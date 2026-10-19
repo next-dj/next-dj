@@ -32,7 +32,9 @@ PAGE_CONTENT_CASES: tuple[PageContentCase, ...] = (
         "with_render", 'def render(request, **kwargs):\n    return "Hello World"'
     ),
     PageContentCase("with_template_djx", template_djx="<h1>Hello World</h1>"),
-    PageContentCase("with_layout_djx", layout_djx="<html>{% template %}</html>"),
+    PageContentCase(
+        "with_layout_djx", layout_djx="<html>{% template %}</html>", errors=1
+    ),
     PageContentCase("no_content", errors=1),
 )
 

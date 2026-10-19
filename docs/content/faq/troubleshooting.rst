@@ -17,7 +17,8 @@ Pages
 Page does not appear at the expected URL
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Confirm that the directory contains a ``page.py`` plus at least one body source, a ``render`` function, a ``template`` attribute, a ``template.djx``, or a sibling ``layout.djx``.
+Confirm that the directory contains a ``page.py`` plus at least one body source, a ``render`` function, a ``template`` attribute, or a ``template.djx``.
+A ``layout.djx`` beside or above the page is no body source.
 Confirm that the application is listed in ``INSTALLED_APPS`` and ``APP_DIRS=True`` in the page backend.
 
 Run ``uv run python manage.py check`` and resolve every warning.
@@ -425,7 +426,8 @@ Virtual routes and bracket directories
 A plain directory that contains only a ``template.djx`` and no ``page.py`` is a virtual route.
 The router still maps it to a URL.
 
-Captured-parameter directories (names in brackets) must contain a ``layout.djx`` or serve a page, a ``page.py`` or a lone ``template.djx``, at any depth the router walks, which leaves out ``_name`` folders.
+Captured-parameter directories (names in brackets) must serve a page, a ``page.py`` with a body or a lone ``template.djx``, at any depth the router walks, which leaves out ``_name`` folders.
+A ``layout.djx`` or a ``page.py`` without a body does not count, since neither routes a URL.
 Otherwise ``manage.py check`` reports :ref:`next.E010 <ref-system-checks>`.
 
 URL name not found

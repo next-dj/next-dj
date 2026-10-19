@@ -123,6 +123,20 @@ A section that shares a value declares it in the ``page.py`` of its directory, a
 Use this for header copy, brand colors, feature flags, and other shared values.
 Without the flag the value is only available when that exact ``page.py`` handles the request, and descendant routes cannot read it.
 
+A directory that shares a value with the pages below it but serves no page of its own gets a ``page.py`` with the ``@context`` and no body, no ``render``, no ``template``, and no ``template.djx``.
+
+.. code-block:: python
+   :caption: shop/pages/admin/page.py
+
+   from next import context
+
+   @context("sidebar", inherit_context=True)
+   def sidebar() -> list[str]:
+       return ["Accounts", "Orders"]
+
+Such a file routes no URL, so ``/admin/`` answers 404, while ``admin/accounts/template.djx`` renders with ``sidebar`` in its context.
+``next.E012`` leaves it alone, and ``next.W128`` warns when no page sits below it, see :doc:`/content/ref/system-checks`.
+
 The zone keyword
 ~~~~~~~~~~~~~~~~
 

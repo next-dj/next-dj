@@ -140,6 +140,7 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
     ),
     "next.ports": frozenset(
         {
+            "ActionOwners",
             "FormRoutes",
             "PageScan",
             "PageScripts",
@@ -148,6 +149,7 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "RouterAccess",
             "SeoRoutes",
             "StaticAssets",
+            "action_owners_slot",
             "form_routes_slot",
             "page_scan_slot",
             "page_scripts_slot",

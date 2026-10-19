@@ -9,12 +9,13 @@ Module summary
 ``next.apps`` contains the Django ``AppConfig`` and the helpers that the framework runs at application startup.
 
 ``NextFrameworkConfig.ready()`` first runs ``next.checks.register_all()`` to register the framework system checks.
-It then runs seventeen startup steps in a fixed order.
+It then runs eighteen startup steps in a fixed order.
 
 #. ``setting_changed`` receivers connected
 #. ``settings_reloaded`` receivers connected
 #. ``router_reloaded`` receivers connected
 #. ``apply_resolver_setting()``
+#. ``action_owners_slot.set(ActionOwnersImpl())``
 #. ``form_routes_slot.set(form_action_manager)``
 #. ``page_scan_slot.set(PageScanImpl())``
 #. ``partial_shaper_slot.set(PartialShaperImpl())``
@@ -44,7 +45,7 @@ It runs ahead of every install because the two discovery steps import user modul
 It runs ahead of ``components.install()``, so a ``component.py`` imported in the last step finds every provider and named dependency registered.
 The ``deps``, ``permissions``, and ``signals`` sweeps always run, the way Django's admin imports every ``admin.py``, and ``FORM_AUTODISCOVER`` turns off the ``forms`` one, see :doc:`settings`.
 
-Steps five to twelve bind the seven :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
+Steps five to thirteen bind the eight :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
 They also run ahead of the discovery steps so a discovery failure leaves no process behind with a slot still empty.
 Each implementation resolves its manager when a method is called rather than when the slot is bound, so the static manager is still built on first use.
 Step eleven moves ``seo_routes_version`` of ``next.urls.manager``, the counter the lazy urlpatterns key their cache on, so they rebuild their pattern list with the routes of the port step ten bound.

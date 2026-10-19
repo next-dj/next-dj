@@ -295,8 +295,8 @@ def _pages_dirs_for_config(config: dict) -> list[Path]:
 
 
 @functools.cache
-def _additional_layout_files() -> tuple[Path, ...]:
-    """Return root-level `layout.djx` files from each page backend `DIRS`.
+def shared_layouts() -> tuple[Path, ...]:
+    """Return the root `layout.djx` of each page backend `DIRS`, which wraps every page.
 
     A tuple, so a caller cannot reorder the shared result.
     """
@@ -313,9 +313,9 @@ def _additional_layout_files() -> tuple[Path, ...]:
     return tuple(dict.fromkeys(candidates))
 
 
-def forget_additional_layouts(**kwargs) -> None:
+def forget_shared_layouts(**kwargs) -> None:
     """Drop cached root-level `layout.djx` paths on settings reload."""
-    _additional_layout_files.cache_clear()
+    shared_layouts.cache_clear()
 
 
 @functools.cache
@@ -541,9 +541,9 @@ class LayoutTemplateLoader:
                 layout_files.append(layout_file)
             current_dir = current_dir.parent
 
-        for additional_layout in self._get_additional_layout_files():
-            if additional_layout not in layout_files:
-                layout_files.append(additional_layout)
+        for shared_layout in shared_layouts():
+            if shared_layout not in layout_files:
+                layout_files.append(shared_layout)
 
         return layout_files, watched_dirs
 
@@ -555,10 +555,6 @@ class LayoutTemplateLoader:
         """
         layout_files, _ = self._walk_ancestors(file_path, 0)
         return layout_files
-
-    def _get_additional_layout_files(self) -> Sequence[Path]:
-        """Return the memoised root-level `layout.djx` files of every page backend."""
-        return _additional_layout_files()
 
     def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
         """Return candidate roots from one router `DIRS` entry (paths only)."""
@@ -621,3 +617,32 @@ def build_registered_loaders() -> Sequence[TemplateLoader]:
 def forget_registered_loaders(**kwargs) -> None:
     """Drop cached loader instances on settings reload."""
     build_registered_loaders.cache_clear()
+
+
+def has_body(file_path: Path, module: types.ModuleType | None) -> bool:
+    """Return whether `render`, a `template` string, or a loader gives the page a body.
+
+    A `layout.djx` is no body, since it only wraps the body of the page beneath it.
+    """
+    if module is not None:
+        if callable(getattr(module, "render", None)):
+            return True
+        if isinstance(getattr(module, "template", None), str):
+            return True
+    return any(loader.can_load(file_path) for loader in build_registered_loaders())
+
+
+def serves(
+    file_path: Path,
+    module: types.ModuleType | None,
+    error: PageModuleImportError | None,
+) -> bool:
+    """Return whether one load of a `page.py` routes a URL, a broken one for its error.
+
+    A path that never existed is a virtual page, so a loader alone gives it a body.
+    """
+    if error is not None:
+        return True
+    if module is None and file_path.exists():
+        return False
+    return has_body(file_path, module)

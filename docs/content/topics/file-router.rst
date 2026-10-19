@@ -158,6 +158,11 @@ The router renders the template directly without invoking a Python page module.
 Virtual routes are useful for marketing pages, static content, and quick mockups.
 A virtual route can still receive layout wrapping from any ancestor ``layout.djx``.
 
+A directory routes nothing until a page sits in it or below it, a ``page.py`` with a body or a ``template.djx``.
+``manage.py check`` warns with ``next.W128`` about the outermost directory with no page and no action at any depth, one message for ``pages/a/`` however deep its empty subdirectories go.
+The message names what the branch holds in vain, a ``layout.djx`` that wraps no page or a ``page.py`` without a body whose ``inherit=True`` access guards no page, or opens none for ``public(inherit=True)``, or whose ``inherit_context=True`` context reaches no page.
+A private ``_name/`` directory and the ``COMPONENTS_DIR`` folder hold no pages, so they leave the branch empty.
+
 Every view the router generates, virtual routes included, carries a ``next_page_path`` attribute naming the page source.
 The form dispatcher reads it when it resolves a posted origin back to the page that should re-render after a validation failure, see :doc:`/content/topics/forms/validation-rerender`.
 
@@ -499,7 +504,7 @@ The router contributes Django system checks that validate the configuration at s
 
 - ``check_next_pages_configuration`` validates the ``NEXT_FRAMEWORK`` structure and each backend entry.
 - ``check_pages_structure`` validates directory naming, captured parameter syntax, and the presence of ``page.py`` or ``template.djx``.
-- ``check_page_functions`` reports :ref:`next.E012 <ref-system-checks>` when a directory has no render function, no template attribute, no loader-backed source, and no sibling ``layout.djx``.
+- ``check_page_functions`` reports :ref:`next.E012 <ref-system-checks>` when a ``page.py`` that declares no access has no render function, no template attribute, and no loader-backed source, a ``layout.djx`` beside or above it counting for none.
 - ``check_url_patterns`` reports two routes that convert to exactly the same Django path string, whether they come from one tree or several (:ref:`next.E015 <ref-system-checks>`).
   It compares full routes, the prefixes of ``pages()`` includes too, so two trees placed onto the same URL are reported as well.
   The comparison is string equality after bracket conversion, so ``posts/[int:id]`` next to ``posts/[id]`` is not reported.

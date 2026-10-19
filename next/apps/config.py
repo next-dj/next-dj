@@ -24,13 +24,14 @@ from next.diagnostics import reset_failure_logs
 from next.discovery import reset_router_manager_cache
 from next.forms.backends import forget_action_urls
 from next.forms.manager import form_action_manager
+from next.forms.ports import ActionOwnersImpl
 from next.forms.wizard import forget_wizard_backend
 from next.pages.access import forget_page_access
 from next.pages.loaders import (
-    forget_additional_layouts,
     forget_app_page_roots,
     forget_page_roots,
     forget_registered_loaders,
+    forget_shared_layouts,
 )
 from next.pages.metadata.backends import forget_metadata_renderer
 from next.pages.metadata.hreflang import (
@@ -47,6 +48,7 @@ from next.partial.manager import forget_asset_version, forget_partial_backend
 from next.partial.ports import PartialShaperImpl
 from next.permissions.access import forget_login_default
 from next.ports import (
+    action_owners_slot,
     form_routes_slot,
     page_scan_slot,
     page_scripts_slot,
@@ -108,7 +110,7 @@ _SETTINGS_RELOADED: Final[tuple[Callable[..., None], ...]] = (
     reset_router_manager_cache,
     reapply_resolver_setting,
     forget_watch_state,
-    forget_additional_layouts,
+    forget_shared_layouts,
     forget_page_roots,
     forget_registered_loaders,
     forget_site_config,
@@ -173,6 +175,7 @@ class NextFrameworkConfig(AppConfig):
         _connect(settings_reloaded, _SETTINGS_RELOADED)
         _connect(router_reloaded, _ROUTER_RELOADED)
         apply_resolver_setting()
+        action_owners_slot.set(ActionOwnersImpl())
         form_routes_slot.set(form_action_manager)
         page_scan_slot.set(PageScanImpl())
         partial_shaper_slot.set(PartialShaperImpl())

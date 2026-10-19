@@ -15,10 +15,11 @@ import re
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, TypeGuard, override
+from typing import TYPE_CHECKING, Any, Final, Protocol, TypeGuard, cast, override
 from urllib.parse import unquote_to_bytes
 
 from django.conf import settings
+from django.contrib.auth.decorators import login_not_required
 from django.core.exceptions import DisallowedRedirect
 from django.http import HttpResponseRedirect
 from django.template.base import NodeList
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     import types
     from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
 
+    from django.http.response import HttpResponseBase
     from django.template.base import Node
 
 
@@ -466,6 +468,22 @@ def is_middleware(entry: object, base: str) -> bool:
 def middleware_listed(middleware: Iterable[object], base: str) -> bool:
     """Whether `middleware` lists the class `base` or a subclass of it."""
     return any(is_middleware(entry, base) for entry in middleware)
+
+
+class _OpenView(Protocol):
+    """A framework view open to everyone, which `manage.py permissions` reads off."""
+
+    next_open: bool
+
+
+def open_view[V: Callable[..., HttpResponseBase]](view: V) -> V:
+    """Exempt a framework view from the login middleware and mark it open to everyone.
+
+    `login_not_required` alone tells nothing of what the view itself still refuses.
+    """
+    exempt = login_not_required(view)
+    cast("_OpenView", exempt).next_open = True
+    return exempt
 
 
 def child_nodelists(node: Node) -> Iterator[NodeList]:

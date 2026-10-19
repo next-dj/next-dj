@@ -93,10 +93,12 @@ def _view_row(view: ViewEndpoint, middleware: str) -> tuple[str, ...]:
     """Return the cells of a view, the dotted view standing for the file of a page."""
     if view.deferred is not None:
         sources = f"see the {view.deferred} rows"
-    elif view.public:
+    elif view.open:
         sources = f"public ({view.view})"
+    elif view.exempt:
+        sources = f"login_not_required ({view.view})"
     elif view.closed:
         sources = middleware
     else:
-        sources = "-"
+        sources = view.view
     return ("view", view.route, view.access, sources)

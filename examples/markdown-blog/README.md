@@ -312,9 +312,9 @@ The framework renders the group and appends the `Sitemap:` line itself, absolute
 
 ## Gotchas
 
-### A page needs a body source, and a sibling layout counts
+### A page needs a body source, and a layout is none
 
-`next.E012` fails when a `page.py` has none of a `render()` function, a `template` attribute, a loader that can load it, or a sibling `layout.djx`. An _ancestor_ layout does not satisfy it. `/about/` passes through its `template.md`, the post route through its `template.djx`.
+`next.E012` fails when a `page.py` has none of a `render()` function, a `template` attribute, or a loader that can load it. A `layout.djx` beside or above the file does not satisfy it, since a layout only wraps a body, and such a file routes no URL. `/about/` passes through its `template.md`, the post route through its `template.djx`.
 
 ### The nav components resolve against `resolver_match`
 

@@ -7,11 +7,18 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 
 from next.checks import NEXT
 from next.forms.dispatch.permissions import COMPONENT_MODULE, owner_rule
-from next.pages.checks.access import access_in_use, load_declarations
+from next.pages.checks.access import (
+    access_in_use,
+    declares_without_page,
+    load_declarations,
+    tree_pages,
+)
+from next.pages.checks.branches import EmptyBranch, empty_branches
+from next.pages.loaders import PAGE_MODULE
 from next.permissions.access import auth_installed, declared, login_by_default
 from next.utils import middleware_listed
 
-from .sources import diagnostics, iter_registered_actions
+from .sources import action_owners, diagnostics, iter_registered_actions
 
 
 _MESSAGE_MIDDLEWARE = "django.contrib.messages.middleware.MessageMiddleware"
@@ -195,6 +202,74 @@ def check_public_actions(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
+@register(NEXT)
+def check_declarations_without_page(*args, **kwargs) -> list[CheckMessage]:
+    """Flag a `page.py` with no body whose declaration binds nothing (`next.E166`).
+
+    An action beside the file answers to its rule, so a directory with one passes.
+    """
+    owners = action_owners()
+    return [
+        Error(
+            f"{file_path} has no body, so it serves no page, no action of its "
+            "directory answers to it, and it declares access without inherit=True, "
+            "which only its own page would. The declaration protects nothing.",
+            hint=(
+                "Add inherit=True to guard the pages below it, or give the file a "
+                "render function, a template attribute, or a template.djx."
+            ),
+            obj=str(file_path),
+            id="next.E166",
+        )
+        for file_path in sorted(entry.page_path for entry in tree_pages())
+        if file_path not in owners and declares_without_page(file_path)
+    ]
+
+
+def _vain_reach(branch: EmptyBranch) -> str:
+    """Return what reaches no page in an empty branch, for the `next.W128` text.
+
+    A file pairing `public()` with a requirement passes no `public()` to its subtree.
+    """
+    source = branch.source
+    if source is None:
+        return "it routes nothing"
+    if source.name != PAGE_MODULE:
+        return f"{source} wraps no page"
+    if branch.access.undeclared:
+        return f"the inherit_context=True context of {source} reaches no page"
+    if branch.context:
+        return (
+            f"the inherit=True access and the inherit_context=True context of {source} "
+            "reach no page"
+        )
+    effect = "opens" if branch.access.public else "guards"
+    return f"the inherit=True access of {source} {effect} no page"
+
+
+@register(NEXT)
+def check_empty_branches(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about a directory of a page tree with no page and no action (`next.W128`).
+
+    One warning names the outermost such directory, since one fix there fills it all.
+    """
+    action_dirs = {owner.parent for owner in action_owners()}
+    return [
+        DjangoWarning(
+            f"{branch.directory} holds no page and no action, so "
+            f"{_vain_reach(branch)}.",
+            hint=(
+                "Add a page.py with a render function or a template attribute, or a "
+                "template.djx, in this directory or below it. Otherwise delete the "
+                "directory, or move what it holds over the pages it is meant for."
+            ),
+            obj=str(branch.directory),
+            id="next.W128",
+        )
+        for branch in empty_branches(action_dirs)
+    ]
+
+
 def _context_objects(source: Path) -> tuple[str, ...]:
     """Return the context names the permissions of a `component.py` are checked on."""
     if source.name != COMPONENT_MODULE:
@@ -264,6 +339,8 @@ __all__ = [
     "check_action_applied_to_class",
     "check_action_guard_permissions",
     "check_component_action_objects",
+    "check_declarations_without_page",
+    "check_empty_branches",
     "check_form_action_collisions",
     "check_forms_outside_base_dir",
     "check_instance_from_url_on_non_model_form",

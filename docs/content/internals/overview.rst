@@ -60,7 +60,7 @@ Subsystems
      - Test client, signal recorder, isolation.
      - ``next.testing``
    * - App
-     - Django ``AppConfig`` that wires autoreload, template-tag builtins, staticfiles integration, app module autodiscovery of ``deps``, ``permissions``, ``forms``, and ``signals``, component bootstrap, and the seven ports during ``ready()``.
+     - Django ``AppConfig`` that wires autoreload, template-tag builtins, staticfiles integration, app module autodiscovery of ``deps``, ``permissions``, ``forms``, and ``signals``, component bootstrap, and the eight ports during ``ready()``.
      - ``next.apps``
 
 Bootstrap
@@ -68,11 +68,11 @@ Bootstrap
 
 Django calls ``NextFrameworkConfig.ready()`` once per process after all applications load.
 The hook calls ``register_all()`` to register the framework system checks.
-It then runs seventeen startup steps in a fixed order.
+It then runs eighteen startup steps in a fixed order.
 The first three connect every signal receiver of the framework, in three ordered tables for ``setting_changed``, ``settings_reloaded``, and ``router_reloaded``, each with a ``dispatch_uid`` of its module and qualified name, so no module connects a receiver at import time.
 ``reset_failure_logs`` runs first on ``settings_reloaded``, and the ``router_reloaded`` table drops every watch, page-root, dependency, object-row, SEO-source, hreflang, and scripts memo a router rebuild leaves stale.
 The fourth, ``apply_resolver_setting()``, points the dependency-injection singleton at the configured resolver class, ahead of every step that imports user modules.
-The next eight bind the seven ``next.ports`` slots that the request path, the URL patterns, the watcher, and the checks all read, each one taking the implementation from the area that owns it, and move ``seo_routes_version`` right after the SEO routes slot so the lazy urlpatterns rebuild with its routes.
+The next nine bind the eight ``next.ports`` slots that the request path, the URL patterns, the watcher, and the checks all read, each one taking the implementation from the area that owns it, and move ``seo_routes_version`` right after the SEO routes slot so the lazy urlpatterns rebuild with its routes.
 They run early for the same reason the resolver setting does, so no discovery failure leaves a process behind with an unbound port.
 The next three install autoreload, template-tag builtins, and staticfiles integration into the Django runtime.
 Then ``autodiscover.install()`` imports the ``deps``, ``permissions``, ``forms``, and ``signals`` modules of every installed application, in that order, so providers, object permissions, shared forms, and receivers register before the first request arrives.
@@ -218,7 +218,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
      - A single flat module that provides ``load_backends``, ``backend_entries``, ``resolve_backend_class``, ``resolve_setting_class``, ``BackendListManager``, ``SingleBackendManager``, and ``BackendRoot`` for every settings-driven backend family.
    * - ``next.ports``
      - A single flat module holding the protocols and slots one subsystem calls another through, each bound in ``AppConfig.ready`` to the implementation its owning area keeps in that area's ``ports`` module.
-       ``FormRoutes`` lets the URL checks read the form action routes without importing ``next.forms``, ``PartialShaper`` lets the page and form paths shape partial responses without importing ``next.partial``, ``RouterAccess`` lets the page watcher and the checks build routers without importing ``next.urls``, ``StaticAssets`` lets the render path reach the static manager without importing ``next.static``, ``PageScan`` lets the checks execute the routed ``page.py`` modules without closing the loop back into ``next.pages.scan``, ``SeoRoutes`` lets the lazy urlpatterns append the SEO routes without importing ``next.seo``, and ``PageScripts`` lets the static injector add the third-party scripts without importing ``next.scripts``.
+       ``ActionOwners`` lets the body-source check read the directories that declare actions without importing ``next.forms``, ``FormRoutes`` lets the URL checks read the form action routes without importing ``next.forms``, ``PartialShaper`` lets the page and form paths shape partial responses without importing ``next.partial``, ``RouterAccess`` lets the page watcher and the checks build routers without importing ``next.urls``, ``StaticAssets`` lets the render path reach the static manager without importing ``next.static``, ``PageScan`` lets the checks execute the routed ``page.py`` modules without closing the loop back into ``next.pages.scan``, ``SeoRoutes`` lets the lazy urlpatterns append the SEO routes without importing ``next.seo``, and ``PageScripts`` lets the static injector add the third-party scripts without importing ``next.scripts``.
    * - ``next.utils``
      - A single flat module holding the path helpers, the ``PageRoot`` value object, the ``template_edits_watched`` predicate, and the ``TreeSource`` loader of a file at the top of a page tree.
    * - ``next.caches``

@@ -5,11 +5,7 @@ Importing the package registers every check.
 
 from __future__ import annotations
 
-from .access import (
-    check_declaring_modules,
-    check_guards_over_pages,
-    check_public_beside_requirements,
-)
+from .access import check_declaring_modules, check_public_beside_requirements
 from .contexts import (
     check_context_functions,
     check_context_registration_files,
@@ -61,7 +57,6 @@ __all__ = [
     "check_csrf_endpoint_reversible",
     "check_csrf_in_session",
     "check_declaring_modules",
-    "check_guards_over_pages",
     "check_layout_templates",
     "check_metadata_callable_returns_mapping",
     "check_metadata_enum_values",

@@ -324,6 +324,9 @@ A port is the narrow surface one subsystem calls another through.
    * - Slot
      - Shipped implementation
      - What it answers
+   * - ``action_owners_slot``
+     - ``next.forms.ports.ActionOwnersImpl``
+     - Answers the ``page.py`` of every directory whose files declare an action.
    * - ``form_routes_slot``
      - ``next.forms.manager.form_action_manager``
      - Answers the URL patterns of every form backend.
@@ -346,7 +349,7 @@ A port is the narrow surface one subsystem calls another through.
      - ``next.static.ports.StaticAssetsImpl``
      - Creates a collector, discovers page and component assets, and injects the placeholder tags.
 
-``NextFrameworkConfig.ready()`` binds all seven, ahead of every step that imports user code.
+``NextFrameworkConfig.ready()`` binds all eight, ahead of every step that imports user code.
 Replace one by subclassing the shipped implementation and calling ``set`` on its slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since a slot holds one implementation and the last binding wins.
 
 .. code-block:: python
@@ -463,7 +466,7 @@ Position the app relative to ``next`` in ``INSTALLED_APPS`` by what it registers
    ]
 
 For every registry on this page the position does not change the outcome, as *App order in* ``INSTALLED_APPS`` above explains.
-A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all seven slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
+A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all eight slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
 A package that reuses an existing kind or placeholder name with different parameters fails at startup either way, and its position only decides which ``ready`` call raises.
 
 Declare the dependency on next.dj under its distribution name, and constrain it from below only.

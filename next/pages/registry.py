@@ -212,6 +212,11 @@ class PageContextRegistry:
             for file_path, entries in self._context_registry.items()
         }
 
+    def passes_context(self, file_path: Path) -> bool:
+        """Return whether `file_path` registers an `inherit_context=True` callable."""
+        entries = self._context_registry.get(file_path, {})
+        return any(entry.inherit_context for entry in entries.values())
+
     def register_context(
         self,
         file_path: Path,

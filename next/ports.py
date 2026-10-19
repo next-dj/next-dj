@@ -8,7 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping
+    from collections.abc import Callable, Collection, Iterator, Mapping
     from pathlib import Path
 
     from django.forms import BaseForm, BaseFormSet
@@ -109,6 +109,17 @@ class PartialShaper(Protocol):
         A full page and a zone envelope answer the same URL, so a shared cache
         needs the same `Vary` set on both or it serves one where the other belongs.
         """
+        ...
+
+
+class ActionOwners(Protocol):
+    """The `page.py` files an `@action` of their directory answers to.
+
+    `next.forms` imports `next.pages`, so the page checks read the actions through this.
+    """
+
+    def page_files(self) -> Collection[Path]:
+        """Return the `page.py` path of each directory whose files declare an action."""
         ...
 
 
@@ -220,6 +231,7 @@ class PageScripts(Protocol):
         ...
 
 
+action_owners_slot = PortSlot["ActionOwners"]("action owners port")
 form_routes_slot = PortSlot["FormRoutes"]("form routes port")
 page_scan_slot = PortSlot["PageScan"]("page scan port")
 partial_shaper_slot = PortSlot["PartialShaper"]("partial shaper")
@@ -230,6 +242,7 @@ static_assets_slot = PortSlot["StaticAssets"]("static assets port")
 
 
 __all__ = [
+    "ActionOwners",
     "FormRoutes",
     "PageScan",
     "PageScripts",
@@ -238,6 +251,7 @@ __all__ = [
     "RouterAccess",
     "SeoRoutes",
     "StaticAssets",
+    "action_owners_slot",
     "form_routes_slot",
     "page_scan_slot",
     "page_scripts_slot",

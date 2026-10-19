@@ -9,7 +9,6 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Concatenate, Final, NamedTuple, cast
 
 from django.conf import settings
-from django.contrib.auth.decorators import login_not_required
 from django.contrib.sitemaps.views import SitemapIndexItem, x_robots_tag
 from django.core.paginator import EmptyPage, PageNotAnInteger
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseNotFound
@@ -23,6 +22,7 @@ from next.diagnostics import FailureLog
 from next.site import site_indexable
 from next.site.config import site_closed_to_crawlers, site_url_failed
 from next.site.headers import site_robots
+from next.utils import open_view
 
 from .discovery import BrokenSource
 from .manager import seo_manager
@@ -382,7 +382,7 @@ def _seo_view[**P](route: str) -> Callable[[_Route[P]], _Route[P]]:
                 return _not_found(_NOT_FOUND)
             return _unavailable()
 
-        return login_not_required(site_robots(require_safe(answer)))
+        return open_view(site_robots(require_safe(answer)))
 
     return decorate
 

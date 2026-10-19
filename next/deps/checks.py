@@ -20,7 +20,7 @@ from next.components.context import component
 from next.components.sources import components_listed, import_component_modules
 from next.forms.checks.sources import iter_registered_actions
 from next.introspect import describe_callable
-from next.pages.access import page_access, subtree_only
+from next.pages.access import page_access, routed
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.manager import page
 from next.urls.routes import page_route
@@ -178,12 +178,12 @@ def _loaded_pages(
 ) -> Iterator[tuple[PageRoot, str, Path]]:
     """Yield each page that loaded once, with the tree the walk found it in.
 
-    A `page.py` that only guards the pages below serves no route, so it is left out.
+    A `page.py` with no body serves no route, so it is left out.
     """
     loaded = {path for _url_path, path in discover_page_registrations(router_manager)}
     for router in router_manager.backends:
         for root, url_path, page_path in iter_scanned_pages(router):
-            if page_path in loaded and not subtree_only(page_path):
+            if page_path in loaded and routed(page_path):
                 loaded.discard(page_path)
                 yield root, url_path, page_path
 

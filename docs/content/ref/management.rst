@@ -87,13 +87,18 @@ permissions
      - A permission ``add_perm`` registers, named in the ``Meta`` guard of an action whose ``form_class`` binds a form, and asked of the bound form.
      - The file declaring the action.
    * - ``public``
-     - A rule a ``public()`` opened, in the ``page.py`` of the page or with ``inherit=True`` above it, or a view :func:`~django.contrib.auth.decorators.login_not_required` marks.
+     - A rule a ``public()`` opened, in the ``page.py`` of the page or with ``inherit=True`` above it, or a view of the framework open to everyone, the CSRF token endpoint and the robots and sitemap views.
      - ``public (file)`` naming the opening ``page.py``, or ``public (module.view)`` for a view.
+   * - ``no login``
+     - A view outside the page trees that :func:`~django.contrib.auth.decorators.login_not_required` marks, so the login middleware lets it through.
+       The framework knows only that the view asks no login, and the view may still refuse by its own code, through a ``permission_required`` or a secret it checks.
+     - ``login_not_required (module.view)``.
    * - ``login (default)``
      - A page or an action that declares nothing and is not public, while ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware`` turns the default login on.
      - ``LOGIN_REQUIRED`` when the key is on, else the class name of the listed middleware or its subclass.
    * - ``login (middleware)``
      - A view outside the page trees that the listed middleware closes, which the key never closes.
+       A login is the least such a view asks, since what it checks on its own, such as the staff flag of the Django admin or a ``permission_required``, leaves no mark.
      - The class name of the middleware.
    * - ``broken``
      - A chain holding a ``page.py`` that failed to import, or, in the table of one page, a page whose composed template does not compile.
@@ -102,8 +107,12 @@ permissions
      - The action endpoint, whose rule each ``action`` row shows.
      - ``see the action rows``.
    * - ``-``
-     - An open endpoint, or a view that decides access in its own code.
+     - A page or an action whose chain declares nothing while the default login is off, so the framework asks nothing of it.
      - ``-``.
+   * - ``?``
+     - A view outside the page trees that no mark and no listed middleware decide, such as one behind Django's :func:`~django.contrib.auth.decorators.login_required` or :func:`~django.contrib.auth.decorators.permission_required`, a ``LoginRequiredMixin`` view, or a view checking access in its own ``dispatch``.
+       Such a decorator leaves no mark on the view, so the framework cannot read its rule.
+     - The dotted path of the view.
 
 .. code-block:: text
    :caption: manage.py permissions
@@ -113,11 +122,12 @@ permissions
    page       /notes/<int:note>/edit/                                     login, perm notes.edit_note on notes.Note                                notes/pages/notes/page.py, notes/pages/notes/[int:note]/edit/page.py
    page       /notes/<int:note>/share/                                    public                                                                   public (notes/pages/notes/[int:note]/share/page.py)
    page       /login/                                                     public                                                                   public (notes/pages/login/page.py)
-   page       /                                                           login (default)                                                          LoginRequiredMiddleware
+   page       /                                                           login (default)                                                          LOGIN_REQUIRED
    action     note_edit_form (notes/pages/notes/[int:note]/edit/page.py)  login, perm notes.edit_note on notes.Note, perm notes.edit_note on form  notes/pages/notes/page.py, notes/pages/notes/[int:note]/edit/page.py
    component  admin_toolbar                                               perm notes.moderate                                                      notes/pages/_components/admin_toolbar/component.py
-   view       /sw.js                                                      public                                                                   public (config.pwa.worker)
-   view       /exports/                                                   login (middleware)                                                       LoginRequiredMiddleware
+   view       /sw.js                                                      no login                                                                 login_not_required (config.pwa.worker)
+   view       /_next/csrf/                                                public                                                                   public (next.csrf.csrf_view)
+   view       /exports/                                                   ?                                                                        config.views.exports
    view       /_next/form/<str:uid>/                                      per action                                                               see the action rows
 
 The share page lifts the login ``notes/pages/notes/page.py`` passes down through its own ``page.public()``, so its ``Sources`` column names that ``page.py``.
@@ -125,9 +135,11 @@ The action asks ``notes.edit_note`` twice, on the note the URL names by the rule
 An action carries the path of its file, the same path the ``File`` column of ``manage.py routes`` shows for the page declaring it, since two pages may declare actions of one name.
 
 The ``view`` rows walk the patterns of ``django.urls.get_resolver()`` through every include in URLconf order and leave out the patterns of the page trees, which already have ``page`` rows.
-They show without the middleware too, as ``-`` for a view that decides access in its own code, a view behind Django's :func:`~django.contrib.auth.decorators.login_required` among them, so the table lists everything the project answers.
+They show without the middleware too, as ``?`` for a view that decides access in its own code, a view behind Django's :func:`~django.contrib.auth.decorators.login_required` among them, so the table lists everything the project answers.
+``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` closes the pages and the actions alone, so ``/exports/`` above reads ``?`` under the key, and a listed ``LoginRequiredMiddleware`` would make it ``login (middleware)``.
+``/sw.js`` reads ``no login`` rather than ``public``, since ``login_not_required`` tells only that the middleware lets the view through, while ``/_next/csrf/`` is a view of the framework that answers anyone.
 The ``/_next/form/<str:uid>/`` endpoint is open to the middleware, yet it reads ``per action``, since the dispatcher applies the rule of each action its ``action`` row shows.
-The dispatch view carries a ``next_access_kind`` attribute naming the kind of rows that decide it, which is how the table tells it from a public view.
+The dispatch view carries a ``next_access_kind`` attribute naming the kind of rows that decide it, which is how the table tells it from a view that asks no login.
 
 ``manage.py permissions <url>`` narrows the table to the page the URL resolves to, the actions declared in its directory, and the declaring components its composed template renders, nested ones included.
 A URL that resolves to a view outside the page trees prints the row of that view alone, and a URL that resolves to nothing is a ``CommandError``.

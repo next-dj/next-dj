@@ -94,10 +94,14 @@ A directory that needs a rule of its own for its subtree but serves no page of i
    page.login_required(inherit=True)
 
 Such a ``page.py`` has no ``render``, no ``template``, and no template a loader finds, and it declares at least one thing with ``inherit=True``.
-It routes no URL, even under a ``layout.djx`` higher up, while its ``inherit=True`` declarations bind every page below it.
+It routes no URL, even beside or under a ``layout.djx``, while its ``inherit=True`` declarations bind every page below it.
 ``next.E012`` does not report it for its missing body, ``manage.py routes``, ``manage.py permissions``, and the sitemap leave it out, and a request to its directory answers 404 unless another tree routes that URL.
-``manage.py check`` warns with ``next.W128`` when no page sits below it, since it then guards nothing.
-A ``page.py`` without a body whose declarations all lack ``inherit=True`` is still a page with no body source, ``next.E012``.
+``manage.py check`` warns with ``next.W128`` when no page and no action sits below it, since it then guards nothing.
+A declaration without ``inherit=True`` in such a file binds only its own page, which it does not serve, and the actions of its directory.
+``manage.py check`` reports ``next.E166`` for it, alone or beside ``inherit=True`` declarations, when the directory declares no action, since the declaration then protects nothing.
+The fix is ``inherit=True`` on the declaration or a template that makes the file a page.
+A ``page.py`` without a body that only registers a ``@context(..., inherit_context=True)`` serves its subtree the same way, see :doc:`context`.
+One that only declares an ``@action`` serves that action, which answers to its rule, and one that passes nothing below it and serves no action is ``next.E012``.
 
 The same file may carry ``metadata``, such as a ``breadcrumb`` for the crumb trail of the pages below, see :doc:`seo/breadcrumbs`.
 
@@ -247,4 +251,4 @@ See also
    :doc:`context` for ``inherit_context=True``.
    :doc:`/content/ref/pages` for the ``page`` object.
    :doc:`/content/ref/settings` for ``LOGIN_REQUIRED``.
-   :doc:`/content/ref/system-checks` for ``next.E162`` to ``next.E164`` and ``next.W128`` to ``next.W131``.
+   :doc:`/content/ref/system-checks` for ``next.E162`` to ``next.E164``, ``next.E166``, and ``next.W128`` to ``next.W131``.

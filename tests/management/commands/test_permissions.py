@@ -174,22 +174,31 @@ class TestPermissionsOfViews:
 
         views = [line.split() for line in lines if line.startswith("view ")]
         assert views[:3] == [
-            ["view", "/sw.js", "-", "-"],
+            ["view", "/sw.js", "?", "tests.permissions.urls_views.worker"],
             [
                 "view",
                 "/api/report/",
-                "public",
-                "public",
+                "no",
+                "login",
+                "login_not_required",
                 "(tests.permissions.urls_views.Report)",
             ],
             [
                 "view",
                 "/robots.txt",
-                "public",
-                "public",
+                "no",
+                "login",
+                "login_not_required",
                 "(tests.permissions.urls_views.robots)",
             ],
         ]
+        assert [
+            "view",
+            "/_next/csrf/",
+            "public",
+            "public",
+            "(next.csrf.csrf_view)",
+        ] in (views)
         assert all(line.split()[0] != "view" for line in lines[: -len(views)])
 
     def test_under_the_middleware_an_unmarked_view_is_closed(self, tmp_path) -> None:
@@ -203,11 +212,46 @@ class TestPermissionsOfViews:
             "view  /sw.js    login (middleware)  LoginRequiredMiddleware",
         ]
 
+    @pytest.mark.parametrize(
+        ("url", "view"),
+        [
+            ("/account/", "account"),
+            ("/staff/", "staff"),
+            ("/members/", "Members"),
+            ("/gate/", "Gate"),
+        ],
+        ids=["login", "permission", "mixin", "dispatch"],
+    )
+    def test_an_unmarked_view_reads_a_question_mark(self, tmp_path, url, view) -> None:
+        lines = _permissions(tmp_path, url, base_dir=tmp_path, urlconf=VIEWS_URLCONF)
+
+        assert lines[1].split() == [
+            "view",
+            url,
+            "?",
+            f"tests.permissions.urls_views.{view}",
+        ]
+
     def test_a_url_answers_for_a_view_under_an_include(self, tmp_path) -> None:
         lines = _permissions(
             tmp_path, "/api/report/", base_dir=tmp_path, urlconf=VIEWS_URLCONF
         )
 
         assert lines[1:] == [
-            "view  /api/report/  public  public (tests.permissions.urls_views.Report)"
+            (
+                "view  /api/report/  no login  "
+                "login_not_required (tests.permissions.urls_views.Report)"
+            )
+        ]
+
+    def test_a_view_asking_no_login_may_still_refuse(self, tmp_path) -> None:
+        lines = _permissions(
+            tmp_path, "/secret/", base_dir=tmp_path, urlconf=VIEWS_URLCONF
+        )
+
+        assert lines[1:] == [
+            (
+                "view  /secret/  no login  "
+                "login_not_required (tests.permissions.urls_views.secret)"
+            )
         ]

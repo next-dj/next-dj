@@ -25,19 +25,19 @@ from next.permissions.access import (
     require_permission,
     signed_in,
 )
-from next.permissions.markers import OPEN, chained
+from next.permissions.markers import chained
 from next.utils import template_edits_watched
 
 from .loaders import (
     PAGE_MODULE,
     AncestorStamps,
-    build_registered_loaders,
     has_load_errors,
     in_page_tree,
     last_load_error,
-    load_python_module_memo,
+    load_page_module,
     module_generation,
     module_version,
+    serves,
 )
 
 
@@ -205,25 +205,15 @@ def anonymous_admitted(access: PageAccess) -> bool:
     return not rule.requirements and not default_login(rule)
 
 
-def subtree_only(file_path: Path) -> bool:
-    """Return whether a `page.py` declares access for the pages below and serves none.
-
-    A layout above does not make it a page, since it has no body of its own.
-    """
-    module = load_python_module_memo(file_path)
-    if module is None or declarations.inherited(file_path) is OPEN:
-        return False
-    if callable(getattr(module, "render", None)):
-        return False
-    if isinstance(getattr(module, "template", None), str):
-        return False
-    return not any(loader.can_load(file_path) for loader in build_registered_loaders())
+def routed(file_path: Path) -> bool:
+    """Return whether a `page.py`, real or virtual, serves a URL of its own."""
+    return serves(file_path, *load_page_module(file_path))
 
 
 def routed_pages(pages: Iterable[tuple[str, Path]]) -> Iterator[tuple[str, Path]]:
     """Yield the `(trail, page_file)` pairs of a walk that serve a URL of their own."""
     for trail, page_file in pages:
-        if not subtree_only(page_file):
+        if routed(page_file):
             yield trail, page_file
 
 
@@ -346,7 +336,7 @@ __all__ = [
     "page_access",
     "refusal",
     "refuse_broken",
+    "routed",
     "routed_pages",
-    "subtree_only",
     "url_lookup",
 ]

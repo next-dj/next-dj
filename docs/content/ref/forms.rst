@@ -58,6 +58,7 @@ Framework machinery.
    ``RegistrationDiagnostics`` and the ``registration_diagnostics`` instance live in ``next.forms.registration``.
    The forms system checks live in ``next.forms.checks``, a package of one-word submodules, ``actions``, ``config``, ``widgets``, and ``wizards`` for the checks themselves and ``sources`` for the registration readers they share.
    The framework application config imports the package at startup, and the forms package re-exports it, so ``next.forms.checks`` names the same package either way.
+   ``next.forms.ports`` holds ``ActionOwnersImpl``, which binds the ``action_owners`` reader of ``sources`` to the ``ActionOwners`` port of :doc:`ports`.
    ``FormActionNotFoundError``, ``UnstorableWizardValueError``, and ``UnregisteredComponentError`` live in ``next.forms.errors`` and are re-exported at the package level.
    The UID helpers ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``ORIGIN_FIELD_NAME``, ``FORM_ORIGIN_OVERRIDE_KEY``, ``MAX_ORIGIN_LENGTH``, ``reverse_form_action``, ``current_origin_path``, ``is_path_only``, ``validated_origin_path``, and ``posted_origin_path`` live in ``next.forms.uid``.
    The test isolation helper ``reset_form_registration_state`` belongs to ``next.testing``, documented under :doc:`/content/ref/testing`.

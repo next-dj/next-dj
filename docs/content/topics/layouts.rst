@@ -56,13 +56,14 @@ The composed template is kept per page and reused by later requests, under a sna
 In a process that watches template edits a layout that is edited, created, or deleted therefore reaches the next render rather than the next restart.
 See :doc:`/content/internals/page-discovery` for the snapshot and the staleness check that reads it.
 
-Layout-only directories
-~~~~~~~~~~~~~~~~~~~~~~~
+A layout is no body
+~~~~~~~~~~~~~~~~~~~
 
-A page directory that contains a sibling ``layout.djx`` but no body source still renders.
-The body slot is the empty string and the layout chain composes around it.
-Use this shape for landing routes whose whole markup belongs in the layout shell.
-:ref:`next.E012 <ref-system-checks>` does not fire in this case.
+A ``layout.djx`` wraps the body of a page and is no body itself.
+A ``page.py`` with no ``render``, no ``template``, and no template a loader finds routes no URL, whatever ``layout.djx`` sits beside it or above it.
+:ref:`next.E012 <ref-system-checks>` reports such a file when it passes nothing to the pages below it and its directory declares no action, and :ref:`next.E166 <ref-system-checks>` when it declares access without ``inherit=True`` and no action of its directory answers to that rule.
+A ``layout.djx`` in a directory with no page and no action at any depth wraps nothing, and :ref:`next.W128 <ref-system-checks>` names the outermost such directory.
+A landing route whose whole markup belongs in the layout shell gets a ``template.djx``, and an empty one is enough.
 
 Layout template contract
 ------------------------

@@ -185,10 +185,7 @@ class TestPublicSurface:
 class TestRetiredReExports:
     """Private page helpers no longer resolve off the checks facade."""
 
-    @pytest.mark.parametrize(
-        "name",
-        ["_has_template_or_djx", "_load_python_module", "load_python_module_memo"],
-    )
+    @pytest.mark.parametrize("name", ["_load_python_module", "load_python_module_memo"])
     def test_private_page_helper_is_gone(self, name: str) -> None:
         assert not hasattr(checks_package, name)
 

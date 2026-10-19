@@ -973,6 +973,28 @@ class TestBrokenPageImportView:
         assert response.status_code == 200
         assert b"<p>revived</p>" in response.content
 
+    @pytest.mark.parametrize(
+        "fixed",
+        [
+            "from next.pages import page\n",
+            "from next.pages import page\n\npage.login_required()\n",
+            "from next.pages import page\n\npage.login_required(inherit=True)\n",
+        ],
+        ids=["bare", "own", "inherit"],
+    )
+    def test_a_fix_without_a_body_answers_404(
+        self, page_instance, tmp_path, url_parser, fixed
+    ) -> None:
+        (tmp_path / "layout.djx").write_text("<main>{% template %}</main>")
+        page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
+
+        stamp = page_file.stat().st_mtime + 10
+        page_file.write_text(fixed)
+        os.utime(page_file, (stamp, stamp))
+
+        with pytest.raises(Http404):
+            pattern.callback(build_page_request())
+
     def test_page_broken_after_build_raises_under_debug(
         self, page_instance, tmp_path, url_parser
     ) -> None:

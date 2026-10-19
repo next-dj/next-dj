@@ -9,7 +9,6 @@ import logging
 from typing import Final
 
 from django.conf import settings
-from django.contrib.auth.decorators import login_not_required
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -34,6 +33,7 @@ from next.caches import BoundedCache
 from next.conf import next_framework_settings
 from next.diagnostics import FailureLog
 from next.site.headers import ROBOTS_HEADER
+from next.utils import open_view
 
 
 logger = logging.getLogger(__name__)
@@ -183,7 +183,7 @@ def _refusal(request: HttpRequest) -> HttpResponse | None:
     return None
 
 
-@login_not_required
+@open_view
 def csrf_view(request: HttpRequest) -> HttpResponse:
     """Return a new token to the runtime of a page whose HTML carries none.
 

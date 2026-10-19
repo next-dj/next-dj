@@ -273,20 +273,24 @@ class TestViewEndpoints:
     @pytest.mark.parametrize(
         ("view", "access"),
         [
-            (ViewEndpoint("/a/", "a.b", public=True, closed=False), "public"),
             (
-                ViewEndpoint("/a/", "a.b", public=False, closed=True),
+                ViewEndpoint("/a/", "a.b", exempt=True, closed=False, open=True),
+                "public",
+            ),
+            (ViewEndpoint("/a/", "a.b", exempt=True, closed=False), "no login"),
+            (
+                ViewEndpoint("/a/", "a.b", exempt=False, closed=True),
                 "login (middleware)",
             ),
-            (ViewEndpoint("/a/", "a.b", public=False, closed=False), "-"),
+            (ViewEndpoint("/a/", "a.b", exempt=False, closed=False), "?"),
             (
                 ViewEndpoint(
-                    "/a/", "a.b", public=True, closed=False, deferred="action"
+                    "/a/", "a.b", exempt=True, closed=False, deferred="action"
                 ),
                 "per action",
             ),
         ],
-        ids=["public", "middleware", "open", "deferred"],
+        ids=["public", "no-login", "middleware", "unread", "deferred"],
     )
     def test_access(self, view, access) -> None:
         assert view.access == access
@@ -295,11 +299,12 @@ class TestViewEndpoints:
         found = view_endpoints()
 
         assert [(view.route, view.view, view.access) for view in found[:3]] == [
-            ("/sw.js", "tests.permissions.urls_views.worker", "-"),
-            ("/api/report/", "tests.permissions.urls_views.Report", "public"),
-            ("/robots.txt", "tests.permissions.urls_views.robots", "public"),
+            ("/sw.js", "tests.permissions.urls_views.worker", "?"),
+            ("/api/report/", "tests.permissions.urls_views.Report", "no login"),
+            ("/robots.txt", "tests.permissions.urls_views.robots", "no login"),
         ]
         by_route = {view.route: view for view in found}
+        assert by_route["/secret/"].access == "no login"
         assert by_route["/_next/csrf/"].access == "public"
         assert by_route["/_next/form/<str:uid>/"].access == "per action"
         assert not [view for view in found if view.route in {"/", "/open/"}]
@@ -311,7 +316,37 @@ class TestViewEndpoints:
             worker, report, *_ = view_endpoints()
 
         assert (worker.closed, worker.access) == (True, "login (middleware)")
-        assert (report.closed, report.access) == (False, "public")
+        assert (report.closed, report.access) == (False, "no login")
+
+
+_UNMARKED_VIEWS = {
+    "/account/": "account",
+    "/staff/": "staff",
+    "/members/": "Members",
+    "/gate/": "Gate",
+}
+
+
+class TestUnmarkedViews:
+    """A view the framework reads no mark on shows `?`, whatever guards it inside."""
+
+    @pytest.mark.parametrize(
+        "route", list(_UNMARKED_VIEWS), ids=["login", "permission", "mixin", "dispatch"]
+    )
+    def test_an_unmarked_view_is_unread(self, views_project, route) -> None:
+        by_route = {view.route: view for view in view_endpoints()}
+
+        assert by_route[route].view.rpartition(".")[2] == _UNMARKED_VIEWS[route]
+        assert by_route[route].access == "?"
+
+    @pytest.mark.parametrize(
+        "route", list(_UNMARKED_VIEWS), ids=["login", "permission", "mixin", "dispatch"]
+    )
+    def test_the_middleware_reads_at_least_a_login(self, views_project, route) -> None:
+        with login_required_middleware():
+            by_route = {view.route: view for view in view_endpoints()}
+
+        assert by_route[route].access == "login (middleware)"
 
 
 class TestResolveView:
@@ -319,14 +354,14 @@ class TestResolveView:
 
     def test_a_view_url(self, views_project) -> None:
         assert resolve_view("/sw.js?v=1") == ViewEndpoint(
-            "/sw.js", "tests.permissions.urls_views.worker", public=False, closed=False
+            "/sw.js", "tests.permissions.urls_views.worker", exempt=False, closed=False
         )
 
     def test_a_view_under_an_include(self, views_project) -> None:
         found = resolve_view("/api/report/")
 
         assert found is not None
-        assert (found.route, found.access) == ("/api/report/", "public")
+        assert (found.route, found.access) == ("/api/report/", "no login")
 
     @pytest.mark.parametrize("url", ["/missing/", "/open/"], ids=["404", "page"])
     def test_anything_but_a_view_is_none(self, views_project, url) -> None:

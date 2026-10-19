@@ -22,6 +22,7 @@ from next.pages.loaders import (
     _page_roots,
     build_registered_loaders,
     forget_page_roots,
+    has_body,
     has_load_errors,
     last_load_error,
     load_page_module,
@@ -32,6 +33,8 @@ from next.pages.loaders import (
     page_tree_depth,
     read_module_string_lists,
     reset_module_memo,
+    serves,
+    shared_layouts,
 )
 from next.pages.processors import _get_context_processors, _import_context_processor
 from next.utils import MAX_ANCESTOR_WALK_DEPTH
@@ -228,6 +231,77 @@ def get_landing_data(*args, **kwargs):
         assert "<p>Test Description</p>" in result
 
 
+class TestHasBody:
+    """`has_body` reads `render`, a `template` string and the loaders, never a layout."""
+
+    @pytest.mark.parametrize(
+        ("source", "djx", "expected"),
+        [
+            ('template = "Hello"', False, True),
+            ("def render(request):\n    return 'x'\n", False, True),
+            ("x = 1", True, True),
+            ("x = 1", False, False),
+            ("render = 'not callable'", False, False),
+            ("template = 42", False, False),
+        ],
+        ids=[
+            "template_attr",
+            "render",
+            "template_djx",
+            "nothing",
+            "render_not_callable",
+            "template_not_a_string",
+        ],
+    )
+    def test_reads_the_own_sources(
+        self, tmp_path: Path, source: str, *, djx: bool, expected: bool
+    ) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text(source)
+        if djx:
+            (tmp_path / "template.djx").write_text("<p>x</p>")
+        assert has_body(page_file, load_python_module_memo(page_file)) is expected
+
+    @pytest.mark.parametrize("where", ["sibling", "ancestor"])
+    def test_a_layout_is_no_body(self, tmp_path: Path, where: str) -> None:
+        page_dir = tmp_path / "a"
+        page_dir.mkdir()
+        layout_dir = page_dir if where == "sibling" else tmp_path
+        (layout_dir / "layout.djx").write_text("<main>{% template %}</main>")
+        page_file = page_dir / "page.py"
+        page_file.write_text("x = 1")
+        assert has_body(page_file, load_python_module_memo(page_file)) is False
+
+    def test_a_virtual_page_has_its_template_for_a_body(self, tmp_path: Path) -> None:
+        (tmp_path / "template.djx").write_text("<p>x</p>")
+        assert has_body(tmp_path / "page.py", None) is True
+
+
+class TestServes:
+    """`serves` routes a page with a body, a broken file, and a virtual page."""
+
+    def test_a_page_without_a_body_serves_nothing(self, tmp_path: Path) -> None:
+        (tmp_path / "layout.djx").write_text("<main>{% template %}</main>")
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1")
+        assert serves(page_file, *load_page_module(page_file)) is False
+
+    def test_a_broken_page_serves_its_error(self, tmp_path: Path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("raise RuntimeError('boom')")
+        assert serves(page_file, *load_page_module(page_file)) is True
+
+    def test_a_file_that_loads_no_module_serves_nothing(self, tmp_path: Path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1")
+        (tmp_path / "template.djx").write_text("<p>x</p>")
+        assert serves(page_file, None, None) is False
+
+    def test_a_virtual_page_serves_its_template(self, tmp_path: Path) -> None:
+        (tmp_path / "template.djx").write_text("<p>x</p>")
+        assert serves(tmp_path / "page.py", None, None) is True
+
+
 class TestLayoutTemplateLoader:
     """``LayoutTemplateLoader`` discovering and composing the ``layout.djx`` chain."""
 
@@ -263,40 +337,32 @@ class TestLayoutTemplateLoader:
         result = loader.can_load(page_file)
         assert result is expected_can_load
 
-    def test_get_additional_layout_files_with_next_pages_config(self, tmp_path) -> None:
+    def test_shared_layouts_with_next_pages_config(self, tmp_path) -> None:
         """Layout roots configured on a page backend contribute their ``layout.djx``."""
-        loader = LayoutTemplateLoader()
-
         layout_file = tmp_path / "layout.djx"
         layout_file.write_text("layout content")
 
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tmp_path)}
         ):
-            result = loader._get_additional_layout_files()
+            result = shared_layouts()
 
         assert len(result) == 1
         assert layout_file in result
 
-    def test_get_additional_layout_files_when_routers_not_list(self) -> None:
+    def test_shared_layouts_when_routers_not_list(self) -> None:
         """When ``ROUTERS`` is not a list, skip scanning (defensive)."""
-        loader = LayoutTemplateLoader()
-
         mock_nf = SimpleNamespace(
             PAGE_BACKENDS="not-a-list", URL_NAME_TEMPLATE="page_{name}"
         )
         with patch("next.pages.loaders.next_framework_settings", mock_nf):
-            assert loader._get_additional_layout_files() == ()
+            assert shared_layouts() == ()
 
     @pytest.mark.parametrize("case", LAYOUT_CONFIG_CASES, ids=lambda case: case.id)
-    def test_get_additional_layout_files_scenarios(
-        self, case: LayoutConfigCase
-    ) -> None:
+    def test_shared_layouts_scenarios(self, case: LayoutConfigCase) -> None:
         """A malformed entry or a missing directory contributes no layout files."""
-        loader = LayoutTemplateLoader()
-
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": list(case.config)}):
-            assert loader._get_additional_layout_files() == ()
+            assert shared_layouts() == ()
 
     @pytest.mark.parametrize("case", PAGES_DIRS_CONFIG_CASES, ids=lambda case: case.id)
     def test_get_pages_dirs_for_config_scenarios(
@@ -378,10 +444,8 @@ class TestLayoutTemplateLoader:
         assert len(result) == 1
         assert layout_file in result
 
-    def test_get_additional_layout_files_with_duplicate_layouts(self, tmp_path) -> None:
+    def test_shared_layouts_with_duplicate_layouts(self, tmp_path) -> None:
         """Two backends pointing at one root yield that root's layout once."""
-        loader = LayoutTemplateLoader()
-
         layout_file = tmp_path / "layout.djx"
         layout_file.write_text("layout content")
 
@@ -390,24 +454,21 @@ class TestLayoutTemplateLoader:
         )
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
-            result = loader._get_additional_layout_files()
+            result = shared_layouts()
 
         assert len(result) == 1
         assert layout_file in result
 
-    def test_get_additional_layout_files_hands_back_an_immutable_memo(
-        self, tmp_path
-    ) -> None:
+    def test_shared_layouts_hands_back_an_immutable_memo(self, tmp_path) -> None:
         """Every walk reads the one memo, so no caller may reorder it."""
-        loader = LayoutTemplateLoader()
         (tmp_path / "layout.djx").write_text("layout content")
 
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tmp_path)}
         ):
-            first = loader._get_additional_layout_files()
+            first = shared_layouts()
 
-            assert first is loader._get_additional_layout_files()
+            assert first is shared_layouts()
             with pytest.raises(AttributeError):
                 first.append(tmp_path / "late.djx")
 

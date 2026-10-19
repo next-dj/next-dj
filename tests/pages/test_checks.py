@@ -25,7 +25,6 @@ from next.pages.checks import (
     check_template_loaders,
     check_unrouted_working_directory_pages,
 )
-from next.pages.checks.modules import _has_template_or_djx
 from next.pages.manager import page
 from next.pages.registry import PageContextRegistry
 from next.urls import PageRoot, RouterBackend
@@ -46,49 +45,6 @@ from tests.support import (
     restored_provider_registry,
 )
 from tests.support.access import PAGE_HEAD
-
-
-class TestPageChecks:
-    """Checks that decide whether a routed ``page.py`` can produce a body."""
-
-    @pytest.mark.parametrize(
-        ("page_content", "create_djx", "djx_content", "expected_result"),
-        [
-            ('template = "Hello {{ name }}!"', False, None, True),
-            ('print("test")', True, "<h1>{{ title }}</h1>", True),
-            ('print("test")', False, None, False),
-            (
-                """
-def render(request, **kwargs):
-    return "Hello World!"
-            """,
-                False,
-                None,
-                False,
-            ),
-            ("invalid python syntax {", False, None, False),
-        ],
-        ids=[
-            "template_attr",
-            "with_djx",
-            "no_template_no_djx",
-            "render_function_only",
-            "invalid_syntax",
-        ],
-    )
-    def test_has_template_or_djx(
-        self, tmp_path, page_content, create_djx, djx_content, expected_result
-    ) -> None:
-        """Only a ``template`` attribute or ``template.djx`` counts, not render()."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text(page_content)
-
-        if create_djx:
-            djx_file = tmp_path / "template.djx"
-            djx_file.write_text(djx_content)
-
-        result = _has_template_or_djx(page_file)
-        assert result is expected_result
 
 
 class TestRequestInContextCheck:
@@ -293,15 +249,38 @@ class TestMemoAndBrokenPages:
                 [],
                 id="permission-inherit",
             ),
-            pytest.param("page.login_required()\n", ["next.E012"], id="own"),
-            pytest.param("page.public()\n", ["next.E012"], id="public-own"),
+            pytest.param("page.login_required()\n", [], id="own"),
+            pytest.param("page.public()\n", [], id="public-own"),
         ],
     )
-    def test_a_page_module_declaring_for_the_pages_below_needs_no_body(
+    def test_a_page_module_declaring_access_is_left_to_the_access_checks(
         self, tmp_path, declarations, expected
     ) -> None:
-        """Only a declaration with inherit=True excuses a page.py without a body."""
+        """A page.py without a body that declares access answers to E166, not E012."""
         (tmp_path / "page.py").write_text(f"{PAGE_HEAD}{declarations}")
+
+        with patch_checks_router_manager_with_routers(
+            routers=[AppRootRouter(tmp_path)]
+        ):
+            messages = check_page_functions(None)
+
+        assert [m.id for m in messages] == expected
+
+    @pytest.mark.parametrize(
+        ("inherit", "expected"),
+        [(True, []), (False, ["next.E012"])],
+        ids=["inherit-context", "own-context"],
+    )
+    def test_a_page_module_passing_context_below_needs_no_body(
+        self, tmp_path, inherit, expected
+    ) -> None:
+        """A page.py without a body that passes context below it is no E012."""
+        (tmp_path / "page.py").write_text(
+            "from next.pages import context\n\n"
+            f'@context("sidebar", inherit_context={inherit})\n'
+            "def sidebar():\n"
+            '    return "menu"\n'
+        )
 
         with patch_checks_router_manager_with_routers(
             routers=[AppRootRouter(tmp_path)]
@@ -1342,7 +1321,8 @@ class TestRealFileRouterBackend:
         assert [m.msg for m in e010] == [
             (
                 "App 'shop_app' pages: Parameter directory \"items/[id]\" "
-                "is missing page.py file."
+                "serves no page. Add a page.py with a body or a template.djx in it "
+                "or below it."
             )
         ]
 
@@ -1440,7 +1420,8 @@ class TestSkippedDirectoriesLeaveThePageChecks:
         self, tmp_path
     ) -> None:
         """A page under a refused name is no child route, so the parameter dir is bare."""
-        self._write_bodyless_page(tmp_path, "items/[id]/drafts")
+        page_file = self._write_bodyless_page(tmp_path, "items/[id]/drafts")
+        page_file.with_name("template.djx").write_text("ok")
 
         with patch_checks_router_manager_with_routers(
             routers=[SkippingRouter([tmp_path], frozenset({"drafts"}))]
@@ -1757,9 +1738,11 @@ class TestParameterDirectoryServesAPage:
     @pytest.mark.parametrize(
         "files",
         [
-            pytest.param(("[app]/[model]/deep/page.py",), id="deep-page"),
+            pytest.param(
+                ("[app]/[model]/deep/page.py", "[app]/[model]/deep/template.djx"),
+                id="deep-page",
+            ),
             pytest.param(("[id]/a/b/template.djx",), id="deep-virtual-page"),
-            pytest.param(("[id]/layout.djx",), id="layout"),
             pytest.param(("_drafts/[id]/notes.txt",), id="under-a-private-folder"),
         ],
     )
@@ -1775,11 +1758,15 @@ class TestParameterDirectoryServesAPage:
         ("files", "reported"),
         [
             pytest.param(("[id]/a/b/notes.txt",), "[id]", id="no-page-at-any-depth"),
+            pytest.param(("[id]/layout.djx",), "[id]", id="layout"),
+            pytest.param(("[id]/a/page.py",), "[id]", id="page-without-a-body"),
             pytest.param(
                 ("[id]/_private/page.py",), "[id]", id="page-in-a-private-folder"
             ),
             pytest.param(
-                ("[id]/[slug]/notes.txt", "[id]/page.py"), "[id]/[slug]", id="nested"
+                ("[id]/[slug]/notes.txt", "[id]/page.py", "[id]/template.djx"),
+                "[id]/[slug]",
+                id="nested",
             ),
         ],
     )

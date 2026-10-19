@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from django.http import HttpRequest, HttpResponse
 from django.middleware.locale import LocaleMiddleware
 from django.template import Template
 from django.test import override_settings
@@ -24,6 +25,7 @@ from next.utils import (
     join_trail,
     load_tree_source,
     middleware_listed,
+    open_view,
     prefix_trail,
     redirect_or_fallback,
     regex_trail,
@@ -475,6 +477,20 @@ class TestMiddlewareDetection:
         assert middleware_listed(["a.B", f"{__name__}._Locale"], self.LOCALE)
         assert not middleware_listed(["a.B"], self.LOCALE)
         assert not middleware_listed([], self.LOCALE)
+
+
+def _plain_view(request: HttpRequest) -> HttpResponse:
+    return HttpResponse("ok")
+
+
+class TestOpenView:
+    """`open_view` exempts a framework view from the login and marks it open."""
+
+    def test_the_view_is_exempt_and_open(self) -> None:
+        view = open_view(_plain_view)
+
+        assert view is _plain_view
+        assert (view.login_required, view.next_open) == (False, True)
 
 
 class TestRedirectOrFallback:

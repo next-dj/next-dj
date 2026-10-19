@@ -30,9 +30,8 @@ A page module can supply its body through these sources.
 Registered template loaders.
    The ordered list under ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]``, whose default first entry ``DjxTemplateLoader`` resolves the sibling ``template.djx``.
 
-A page directory may instead host only a sibling ``layout.djx``.
-That directory has no body source, and the layout chain renders with an empty body slot.
-See *Layout-only directories* under :doc:`layouts` for the wrapping rules, and note that :ref:`next.E012 <ref-system-checks>` does not fire when a sibling ``layout.djx`` is present.
+A ``layout.djx`` is no body source, since it only wraps the body of the page beneath it.
+A ``page.py`` with none of the three sources routes no URL, even beside or under a ``layout.djx``, and :ref:`next.E012 <ref-system-checks>` reports it unless it declares access, passes context to the pages below, or serves an ``@action`` of its directory, see *A layout is no body* under :doc:`layouts`.
 
 See *Render order* below for the per-request sequence and the ``render`` short-circuit.
 Processor ordering and ``STRICT_CONTEXT`` behaviour are documented in :doc:`context` and :ref:`ref-settings`.
@@ -550,7 +549,8 @@ The pages subsystem contributes Django system checks.
 The ``check_page_functions`` check inspects every ``page.py`` and reports the following.
 
 ``next.E012``.
-   The page module has neither a ``render`` function nor a ``template`` attribute, no registered loader can produce a body, and no sibling ``layout.djx`` wraps it.
+   The page module has neither a ``render`` function nor a ``template`` attribute, no registered loader can produce a body, it declares no access, and it passes no context with ``inherit_context=True`` to the pages below.
+   A ``layout.djx`` beside or above it is no body, since it only wraps one.
 
 ``next.E013``.
    The page module defines a ``render`` attribute that is not callable.

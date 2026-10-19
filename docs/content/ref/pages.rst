@@ -52,7 +52,8 @@ The joined ``rule`` holds the requirements in the order the chain declared them 
 A ``Gate`` carries the ``lookup`` builder and the ``next_url`` a login returns to, and ``enforce`` builds the lookup only for a rule with requirements, so an open rule costs no allocation.
 ``url_lookup(request, url_kwargs, dep_cache)`` builds the ``lookup`` of a page, which loads the row an ``obj=DObject[Model]`` names from the same cache a ``DObject`` parameter reads.
 ``default_login(rule)`` tells whether the default login asks a login of a rule, true only for a rule without requirements that is not public while ``LOGIN_REQUIRED`` or ``LoginRequiredMiddleware`` turns it on, and ``anonymous_admitted(access)`` tells whether an anonymous request passes the rule of a page, which the sitemap reads to leave closed pages out.
-``subtree_only(file_path)`` tells whether a ``page.py`` declares for the pages below with ``inherit=True`` and serves no page of its own, and ``routed_pages(pages)`` drops such files from a walk of ``(trail, page_file)`` pairs, so the URL checks and the SEO discovery never treat one as a route.
+``routed(file_path)`` tells whether a ``page.py`` serves a URL, the same answer the router gives, and ``routed_pages(pages)`` keeps only such files of a walk of ``(trail, page_file)`` pairs, so the URL checks and the SEO discovery treat no file without a body as a route.
+Both read ``has_body(file_path, module)`` of ``next.pages.loaders``, the one criterion of a body, a ``render`` function, a ``template`` string, or a registered loader match, where a ``layout.djx`` counts for none.
 
 .. automodule:: next.pages.access
    :exclude-members: refusal
@@ -239,11 +240,14 @@ System checks
 
 ``next.pages.checks`` registers the Django system checks for the pages subsystem.
 They run through ``uv run python manage.py check``, except ``check_page_module_imports``, which is a deployment check and runs under ``manage.py check --deploy``.
-The package splits by subject into ``access``, ``contexts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, and ``zones``, and importing the package registers every one of them.
+The package splits by subject into ``access``, ``branches``, ``contexts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, and ``zones``, and importing the package registers every one of them.
 ``metadata`` is a package of its own, ``scope``, ``titles``, ``shape``, ``head``, ``ld``, ``links``, ``pages``, and ``templates``, and ``responses`` owns the ``cache``, ``headers``, ``CSRF_DELIVERY``, and ``CSRF_USE_SESSIONS`` checks, see :doc:`system-checks` for the codes each one owns.
-``access`` owns the checks of the access declarations, ``next.E163``, ``next.E164``, and ``next.W128``, while ``next.E162`` for an ``obj=DObject[Model]`` lives with the ``DObject`` checks in ``next.deps.checks``.
+``access`` owns the checks of the access declarations, ``next.E163`` and ``next.E164``, while ``next.E162`` for an ``obj=DObject[Model]`` lives with the ``DObject`` checks in ``next.deps.checks``.
+Its ``subtree_only(file_path)`` tells whether a ``page.py`` without a body passes access with ``inherit=True`` or context with ``inherit_context=True`` to the pages below.
+``modules`` builds on it with ``faulty(file_path)``, whether ``next.E012``, ``next.E013``, or ``next.E166`` names a ``page.py``, so ``next.W128`` leaves to that error the branch it names, and ``next.E012`` reads the directories that declare actions through the ``ActionOwners`` port of :doc:`ports`.
+``branches`` finds the directories with no page and no action for ``next.W128``, which ``next.forms.checks.actions`` registers, since only the forms area knows the actions.
 
-The package exports thirty-five check callables.
+The package exports thirty-four check callables.
 
 - ``check_conditional_get_order``.
 - ``check_context_functions``.
@@ -254,7 +258,6 @@ The package exports thirty-five check callables.
 - ``check_csrf_endpoint_reversible``.
 - ``check_csrf_in_session``.
 - ``check_declaring_modules``.
-- ``check_guards_over_pages``.
 - ``check_layout_templates``.
 - ``check_metadata_callable_returns_mapping``.
 - ``check_metadata_enum_values``.

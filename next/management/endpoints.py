@@ -110,25 +110,31 @@ def _words(requirement: Requirement) -> tuple[str, ...]:
 class ViewEndpoint:
     """A view of the URLconf outside the page trees, as the login middleware sees it.
 
-    `deferred` names the endpoint kind whose own rows decide a view next dispatches.
+    `exempt` is `login_not_required`, and `open` marks a framework view open to anyone.
     """
 
     route: str
     view: str
-    public: bool
+    exempt: bool
     closed: bool
+    open: bool = False
     deferred: str | None = None
 
     @property
     def access(self) -> str:
-        """Return the access in the words the `manage.py permissions` table prints."""
+        """Return the access in the words the `manage.py permissions` table prints.
+
+        An unmarked view reads `?`, since Django `login_required` leaves no mark on it.
+        """
         if self.deferred is not None:
             return f"per {self.deferred}"
-        if self.public:
+        if self.open:
             return "public"
+        if self.exempt:
+            return "no login"
         if self.closed:
             return "login (middleware)"
-        return "-"
+        return "?"
 
 
 def _route_piece(pattern: URLResolver | URLPattern) -> str:
@@ -141,12 +147,16 @@ def _view_endpoint(includes: Includes, pattern: URLPattern) -> ViewEndpoint | No
     callback = pattern.callback
     if getattr(callback, "next_page_path", None) is not None:
         return None
-    public = not getattr(callback, "login_required", True)
+    exempt = not getattr(callback, "login_required", True)
     pieces = [*map(_route_piece, includes), _route_piece(pattern)]
-    closed = not public and login_middleware() is not None
-    deferred = getattr(callback, "next_access_kind", None)
+    closed = not exempt and login_middleware() is not None
     return ViewEndpoint(
-        "/" + "".join(pieces), pattern.lookup_str, public, closed, deferred
+        "/" + "".join(pieces),
+        pattern.lookup_str,
+        exempt,
+        closed,
+        open=exempt and getattr(callback, "next_open", False),
+        deferred=getattr(callback, "next_access_kind", None),
     )
 
 

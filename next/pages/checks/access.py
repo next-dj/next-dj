@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Error, register
 
 from next.checks import NEXT
 from next.checks.common import RunMemo
@@ -18,10 +18,18 @@ from next.discovery import (
     get_router_manager,
     iter_scanned_page_pairs,
 )
-from next.pages.access import page_access, subtree_only
-from next.pages.loaders import PAGE_MODULE, in_page_tree
-from next.permissions.access import declared, declared_files
+from next.pages.access import page_access
+from next.pages.loaders import (
+    PAGE_MODULE,
+    has_body,
+    in_page_tree,
+    load_page_module,
+    load_python_module_memo,
+)
+from next.pages.manager import page
+from next.permissions.access import declarations, declared, declared_files
 from next.permissions.manager import permission_manager
+from next.permissions.markers import OPEN
 
 
 if TYPE_CHECKING:
@@ -99,28 +107,28 @@ def check_public_beside_requirements(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
-def _below(directory: Path, page_path: Path) -> bool:
-    """Return whether a page sits in `directory` or below, the guard itself left out."""
-    return page_path.parent.is_relative_to(directory)
+def subtree_only(file_path: Path) -> bool:
+    """Return whether a bodyless `page.py` passes access or context to its subtree.
+
+    An `inherit=True` declaration passes access and an `inherit_context=True` context.
+    """
+    module = load_python_module_memo(file_path)
+    if module is None or has_body(file_path, module):
+        return False
+    if declarations.inherited(file_path) is not OPEN:
+        return True
+    return page.contexts.passes_context(file_path)
 
 
-@register(NEXT)
-def check_guards_over_pages(*args, **kwargs) -> list[CheckMessage]:
-    """Warn about a `page.py` guarding the pages below when none is (`next.W128`)."""
-    entries = tree_pages()
-    guards = [entry.page_path for entry in entries if subtree_only(entry.page_path)]
-    pages = [entry.page_path for entry in entries if entry.page_path not in guards]
-    return [
-        DjangoWarning(
-            f"{guard} serves no page and declares access with inherit=True for the "
-            "pages below it, and no page is below it, so it guards nothing.",
-            hint="Move it to a directory over the pages it is meant for, or delete it.",
-            obj=str(guard),
-            id="next.W128",
-        )
-        for guard in guards
-        if not any(_below(guard.parent, page_path) for page_path in pages)
-    ]
+def declares_without_page(file_path: Path) -> bool:
+    """Return whether a `page.py` with no body declares something without inherit."""
+    module, _error = load_page_module(file_path)
+    if module is None or has_body(file_path, module):
+        return False
+    own, passed = declared(file_path), declarations.inherited(file_path)
+    if own.public and not passed.public:
+        return True
+    return not set(own.requirements).issubset(passed.requirements)
 
 
 _COMPONENT_MODULE = "component.py"
@@ -160,8 +168,9 @@ def check_declaring_modules(*args, **kwargs) -> list[CheckMessage]:
 __all__ = [
     "access_in_use",
     "check_declaring_modules",
-    "check_guards_over_pages",
     "check_public_beside_requirements",
+    "declares_without_page",
     "load_declarations",
+    "subtree_only",
     "tree_pages",
 ]

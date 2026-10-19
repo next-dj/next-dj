@@ -235,7 +235,7 @@ The default login is one rule in two switches.
 
 Mistakes surface at ``manage.py check``.
    ``next.E162`` reports an ``obj=DObject[Model]`` whose kwarg the route of a page it binds does not capture, ``next.E163`` a ``public()`` beside a requirement of the same file, and ``next.E164`` a declaration made from a module that is no ``page.py`` or ``component.py``.
-   ``next.W127`` warns about a permission nothing defines, ``next.W128`` about a declaring ``page.py`` with no page below it, ``next.W129`` about an action nothing guards, and ``next.W130`` and ``next.W131`` about a ``LOGIN_REQUIRED`` setting that contradicts the middleware or finds no user, see :doc:`/content/ref/system-checks`.
+   ``next.W127`` warns about a permission nothing defines, ``next.W128`` about a directory with no page and no action below it, ``next.W129`` about an action nothing guards, and ``next.W130`` and ``next.W131`` about a ``LOGIN_REQUIRED`` setting that contradicts the middleware or finds no user, see :doc:`/content/ref/system-checks`.
 
 Listing the rules
 ~~~~~~~~~~~~~~~~~

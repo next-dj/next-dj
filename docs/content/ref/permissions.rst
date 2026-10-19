@@ -107,7 +107,8 @@ System checks
 -------------
 
 ``next.permissions.checks`` owns ``next.E159``, ``next.E160``, ``next.W127``, ``next.W130``, and ``next.W131``.
-``next.W129`` lives with the forms checks and, like ``next.W127`` for a form guard, runs only in a project that declares access, and only while the default login is off, ``next.E161`` with the zone checks, ``next.E162`` with the ``DObject`` checks, and ``next.E163``, ``next.E164``, and ``next.W128`` with the page checks, see :doc:`system-checks`.
+``next.W128``, ``next.W129``, and ``next.E166`` live with the forms checks, ``next.E161`` with the zone checks, ``next.E162`` with the ``DObject`` checks, and ``next.E163`` and ``next.E164`` with the page checks, see :doc:`system-checks`.
+``next.W129``, like ``next.W127`` for a form guard, runs only in a project that declares access, and only while the default login is off.
 
 See also
 --------

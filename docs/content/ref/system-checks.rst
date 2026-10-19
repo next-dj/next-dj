@@ -182,7 +182,7 @@ Permissions
 
 ``next.permissions.checks`` reads the registered predicates, ``AUTHENTICATION_BACKENDS``, and every permission name the project writes, the literal name of a ``{% has_perm %}`` tag in a composed page or a component template, the ``permission_required()`` declarations of every ``page.py`` and ``component.py``, and the guard of every form action.
 It also owns ``next.W130`` and ``next.W131`` for the ``LOGIN_REQUIRED`` setting.
-``next.W129`` for an action nothing guards and ``next.E165`` for an action of a ``component.py`` whose permission names a context live in ``next.forms.checks.actions``, and ``next.E161`` for a zone under a ``{% has_perm %}`` or in the body of a component that decides what it shows lives in ``next.partial.checks.zones``, beside the other zone placement checks.
+``next.W129`` for an action nothing guards, ``next.E165`` for an action of a ``component.py`` whose permission names a context, ``next.E166`` for a ``page.py`` without a body whose declaration binds neither a page nor an action, and ``next.W128`` for a directory with no page and no action live in ``next.forms.checks.actions``, and ``next.E161`` for a zone under a ``{% has_perm %}`` or in the body of a component that decides what it shows lives in ``next.partial.checks.zones``, beside the other zone placement checks.
 
 .. automodule:: next.permissions.checks
    :members:
@@ -260,18 +260,22 @@ Errors
      - A ``[[args]]`` directory names no route, because the brackets hold nothing or hold a name that is no Python identifier once ``-`` is read as ``_``.
      - ``next.pages.checks.structure``
    * - ``next.E010``
-     - A routed parameter directory serves no page at any depth and holds no ``layout.djx``.
+     - A routed parameter directory serves no page at any depth the router walks.
+       A page is a ``page.py`` with a body, a broken one that routes to show its error, or a lone ``template.djx``, so a ``layout.djx`` or a ``page.py`` without a body does not count.
      - ``next.pages.checks.structure``
    * - ``next.E011``
      - An error was raised while checking page functions.
        What failed is the page-tree walk of one router, so the body-source checks ``next.E012``, ``next.E013``, and ``next.W043`` report nothing for the pages beneath it and a ``page.py`` with neither a body source nor a conflict passes unexamined.
      - ``next.pages.checks.modules``
    * - ``next.E012``
-     - A ``page.py`` has no body source, meaning no ``render`` function, no ``template`` attribute, no loader match, and no sibling ``layout.djx``.
-       A ``page.py`` that declares access with ``inherit=True`` and has no ``render``, no ``template``, and no loader match routes no URL and guards the pages below it, so it is not judged, and the hint of the message names that form.
+     - A ``page.py`` has no body source, meaning no ``render`` function, no ``template`` attribute, and no loader match, it declares no access, it passes no context with ``inherit_context=True`` to the pages below, and no action of its directory answers to it.
+       A ``layout.djx`` beside or above the file is no body source, since it only wraps the body of a page, so such a file routes no URL either.
+       A ``page.py`` with no body is legitimate and routes no URL of its own when it passes access with ``inherit=True`` or a ``@context(..., inherit_context=True)`` to the pages below, or when it or a file beside it declares an ``@action``, which answers to its rule.
+       One that declares access without ``inherit=True`` answers to ``next.E166`` instead.
      - ``next.pages.checks.modules``
    * - ``next.E013``
      - A page ``render`` attribute is not callable.
+       The file routes no URL, and ``next.W128`` leaves its branch to this error even when the file passes access or context to the pages below.
      - ``next.pages.checks.modules``
    * - ``next.E014``
      - An error was raised while checking URL conflicts.
@@ -810,6 +814,12 @@ Errors
      - A ``component.py`` declares ``component.permission_required(perm, obj="name")`` and registers an ``@action``, and an action POST renders no component, so the context is never there and the action refuses every user, a superuser included.
        The message names the contexts and the actions, and the hint asks for the object check in the form the action binds, through ``has_object_permission()`` or a ``Meta`` ``permission_required`` on a permission ``add_perm()`` registers, or for the actions in the ``page.py`` of the page.
      - ``next.forms.checks.actions``
+   * - ``next.E166``
+     - A ``page.py`` with no body source declares ``login_required()``, ``permission_required()``, or ``public()`` without ``inherit=True``, and no action of its directory answers to its rule.
+       The file routes no URL, and only its own page and the actions declared in it or in a file beside it would answer to such a declaration, so it protects nothing.
+       A directory with such an action passes, since the declaration guards that action.
+       The hint asks for ``inherit=True`` to guard the pages below, or for a ``render`` function, a ``template`` attribute, or a ``template.djx`` to make the file a page.
+     - ``next.forms.checks.actions``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -1115,9 +1125,11 @@ Warnings
        A model permission counts as known when a model class declares it, through ``default_permissions`` or ``Meta.permissions``, so a ``Permission`` row created only by a data migration or through the admin draws the warning, and declaring it in ``Meta.permissions`` or listing the code in ``SILENCED_SYSTEM_CHECKS`` quiets it.
      - ``next.permissions.checks``
    * - ``next.W128``
-     - A ``page.py`` that serves no page and declares access with ``inherit=True`` for the pages below it has no page below it, so it guards nothing.
-       A page in a private directory such as ``_drafts/`` counts as none, since it routes no URL.
-     - ``next.pages.checks.access``
+     - A directory of a routed page tree holds no page and no action at any depth, so the message names what it holds in vain, a ``page.py`` whose ``inherit=True`` access guards no page, or opens none for a ``public(inherit=True)``, or whose ``inherit_context=True`` context reaches no page, else a ``layout.djx`` that wraps no page, else nothing that routes.
+       A page is a ``page.py`` with a body, a broken one, or a lone ``template.djx``, and a private ``_name/`` directory or the ``COMPONENTS_DIR`` folder is neither content nor a branch of its own.
+       One message names the outermost such directory, the tree root when the whole tree is empty, unless the root holds the ``layout.djx`` of a ``DIRS`` tree, which wraps the pages of every tree.
+       A branch holding a file or a directory that ``next.E010``, ``next.E012``, ``next.E013``, or ``next.E166`` already reports is left to that error.
+     - ``next.forms.checks.actions``
    * - ``next.W129``
      - A ``page.py`` or another file of a page tree declares actions that no declaration of its page, no ``inherit=True`` declaration of a ``page.py`` above it, no ``Meta`` guard, and no default login guard, so anyone may post to them.
        An action declared outside a page tree answers to the rule of its origin page alone and is not judged.

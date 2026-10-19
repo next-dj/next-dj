@@ -4,19 +4,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final, Protocol, cast
 
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.urls import URLPattern, path
 
 from next.caches import PageCache
 from next.conf import next_framework_settings
 from next.deps.cache import render_dep_cache
 from next.diagnostics import watch_degraded
-from next.pages.access import page_access, refusal, subtree_only
-from next.pages.loaders import (
-    build_registered_loaders,
-    load_page_module,
-    load_python_module_memo,
-)
+from next.pages.access import page_access, refusal, routed
+from next.pages.loaders import load_page_module, load_python_module_memo, serves
 from next.pages.responses import (
     finish_response,
     finish_zone_response,
@@ -123,12 +119,14 @@ def _resolving_view(
 ) -> Callable[..., HttpResponseBase]:
     """Return the view that resolves a per-request body before composing.
 
-    `broken_at_build` re-reads the module per request, so a fix takes effect without a
-    restart and a still-broken file never bypasses the guards `render()` applies.
+    `broken_at_build` re-reads the module per request, so a fix needs no restart, one
+    without a body answers 404, and a still-broken file never bypasses the guards.
     """
 
     def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
         watch_degraded()
+        if broken_at_build and not routed(file_path):
+            raise Http404
         dep_cache = render_dep_cache(request)
         denial = refusal(file_path, request, kwargs, dep_cache)
         if denial is not None:
@@ -199,38 +197,16 @@ def _finish_render_response(
     return response
 
 
-def _has_body_source(
-    page: Page, file_path: Path, module: types.ModuleType | None
-) -> bool:
-    """Return True when `file_path` can produce a body or layout body."""
-    if module is not None:
-        if callable(getattr(module, "render", None)):
-            return True
-        if isinstance(getattr(module, "template", None), str):
-            return True
-    if any(loader.can_load(file_path) for loader in build_registered_loaders()):
-        return True
-    return page._layout_loader.can_load(file_path)
-
-
 def _page_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase] | None:
     """Return the view of a real or virtual page, or `None` when it has no body.
 
     A `page.py` whose import failed still gets a view to surface that error per
     request, while a path that never existed is a template-only page with no module.
     """
-    if not file_path.exists():
-        if not _has_body_source(page, file_path, module=None):
-            return None
-        return unified_view(page, file_path, None)
     module, error = load_page_module(file_path)
-    if module is None:
-        if error is None:
-            return None
-        return unified_view(page, file_path, None, broken_at_build=True)
-    if subtree_only(file_path) or not _has_body_source(page, file_path, module):
+    if not serves(file_path, module, error):
         return None
-    return unified_view(page, file_path, module)
+    return unified_view(page, file_path, module, broken_at_build=error is not None)
 
 
 def create_url_pattern(
