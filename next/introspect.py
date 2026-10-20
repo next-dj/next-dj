@@ -79,6 +79,15 @@ def registering_file() -> Path:
     return Path(sys._getframe(2).f_code.co_filename)
 
 
+def registering_site() -> tuple[Path, bool]:
+    """Return the file calling the caller of this helper, and whether its top level did.
+
+    Module code runs once per load, so only a call from there declares for good.
+    """
+    code = sys._getframe(2).f_code
+    return Path(code.co_filename), code.co_name == "<module>"
+
+
 def declared_file(
     func: Callable[..., Any],
     registered_from: Path,
@@ -154,4 +163,5 @@ __all__ = [
     "defining_file",
     "describe_callable",
     "registering_file",
+    "registering_site",
 ]

@@ -17,8 +17,9 @@ from next.introspect import (
     declared_file,
     defining_file,
     registering_file,
+    registering_site,
 )
-from next.permissions.access import require_login, require_permission
+from next.permissions.access import declaring, require_login, require_permission
 from next.utils import resolved_tree
 
 
@@ -233,13 +234,14 @@ class ComponentContextManager:
 
     def login_required(self) -> None:
         """Require a logged-in user, the way Django's `login_required` does."""
-        require_login(registering_file())
+        require_login(declaring(registering_site()))
 
     def permission_required(
         self, perm: str | tuple[str, ...], *, obj: str | None = None
     ) -> None:
         """Require every permission in `perm`, checked on the context `obj` names."""
-        require_permission(registering_file(), perm, _context_name(obj))
+        name = _context_name(obj)
+        require_permission(declaring(registering_site()), perm, name)
 
     def get_functions(self, component_path: Path) -> Sequence[ContextFunction]:
         """Return context callables registered for this `component.py` path."""

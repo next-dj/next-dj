@@ -14,12 +14,13 @@ from django.http import Http404
 from next.caches import PageCache
 from next.conf import fail_loudly
 from next.deps.objects import object_target, url_row
-from next.introspect import registering_file
+from next.introspect import registering_site
 from next.permissions.access import (
     answer,
     check,
     declarations,
     declare_public,
+    declaring,
     login_by_default,
     login_redirect,
     require_login,
@@ -83,7 +84,7 @@ class PageDeclarations:
 
     def login_required(self, *, inherit: bool = False) -> None:
         """Require a logged-in user, the way Django's `login_required` does."""
-        require_login(registering_file(), inherit=inherit)
+        require_login(declaring(registering_site()), inherit=inherit)
 
     def permission_required(
         self,
@@ -96,14 +97,15 @@ class PageDeclarations:
 
         The row loads through `visible_to(scope)` by the URL kwarg named like the model.
         """
-        require_permission(registering_file(), perm, _url_model(obj), inherit=inherit)
+        model = _url_model(obj)
+        require_permission(declaring(registering_site()), perm, model, inherit=inherit)
 
     def public(self, *, inherit: bool = False) -> None:
         """Lift what every `page.py` above requires, for this page or the pages below.
 
         A requirement declared here, or by a `page.py` below, still binds.
         """
-        declare_public(registering_file(), inherit=inherit)
+        declare_public(declaring(registering_site()), inherit=inherit)
 
 
 @dataclass(frozen=True, slots=True)

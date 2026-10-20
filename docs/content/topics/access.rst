@@ -219,8 +219,8 @@ Each ``page.py`` runs once before the first request, when the router builds the 
 In a process that watches template edits an edited ``page.py`` runs again on the next request, and its old declarations are dropped before the new ones register.
 In a process that does not, a new ``page.py`` above a page, or an edit to one, applies after the process restarts, as any new module does.
 
-A declaration binds to the module that calls it, and only while a page or component loader runs that module.
-A call made at request time, inside ``render()`` or a context function, or from a helper module raises ``DeclarationOutsideModuleError``, so no request can rewrite the rule of a page.
+A declaration binds to the module that calls it, and only a call from the top level of that module counts.
+A call made inside a function, such as ``render()``, a context function, or a helper that a page calls, raises ``DeclarationOutsideModuleError``, so no request can rewrite the rule of a page.
 A ``page.py`` a loader ran outside every tree declares for nothing, and ``manage.py check`` reports it as ``next.E164``.
 
 .. _topics-access-tree-boundary:

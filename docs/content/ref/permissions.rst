@@ -87,7 +87,7 @@ Errors
 ------
 
 ``PermissionAlreadyRegisteredError`` carries the permission ``name`` that was registered twice.
-``DeclarationOutsideModuleError`` is a ``RuntimeError`` raised when ``login_required()``, ``permission_required()`` or ``public()`` runs while no page or component loader executes the file it binds to, such as at request time or from a helper module, and it carries that ``source`` file.
+``DeclarationOutsideModuleError`` is a ``RuntimeError`` raised when ``login_required()``, ``permission_required()`` or ``public()`` runs inside a function rather than at the top level of the module it binds to, such as in ``render()`` or in a helper a page calls, and it carries that ``source`` file.
 
 ``UnknownAccessObjectError`` is a ``LookupError`` raised when the ``obj=`` of a component names no prop and no context the component produces, and it carries the context ``name`` and the ``endpoint`` file.
 An ``obj=DObject[Model]`` of a ``page.py`` whose route lacks the kwarg raises ``UnboundObjectError`` from ``next.deps`` instead, see ``next.E162``.

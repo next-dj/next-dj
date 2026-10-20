@@ -804,7 +804,7 @@ Errors
      - ``next.pages.checks.access``
    * - ``next.E164``
      - An access declaration binds to a file that is neither a ``page.py`` of a page tree nor a ``component.py``, such as a ``page.py`` a loader ran outside every tree, so it guards nothing.
-       A declaration from a helper module never gets here, since it raises ``DeclarationOutsideModuleError`` when the page loads.
+       A declaration from a helper function never gets here, since it raises ``DeclarationOutsideModuleError`` when the page loads.
      - ``next.pages.checks.access``
    * - ``next.E165``
      - A ``component.py`` declares ``component.permission_required(perm, obj="name")`` and registers an ``@action``, and an action POST renders no component, so the context is never there and the action refuses every user, a superuser included.

@@ -15,14 +15,14 @@ class PermissionAlreadyRegisteredError(Exception):
 
 
 class DeclarationOutsideModuleError(RuntimeError):
-    """An access declaration runs while no loader executes the file it binds to."""
+    """An access declaration runs off the top level of the module it binds to."""
 
     def __init__(self, source: Path) -> None:
         """Name the file the declaration bound to."""
         super().__init__(
-            f"An access declaration binds to {source}, which no page or component "
-            "loader is executing. Declare access at the top level of the page.py or "
-            "component.py it guards, never in a helper or at request time."
+            f"An access declaration in {source} runs inside a function, so it would "
+            "change the rule whenever that function runs. Declare access at the top "
+            "level of the page.py or component.py it guards."
         )
         self.source = source
 

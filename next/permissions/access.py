@@ -53,18 +53,19 @@ def _permissions(perm: object) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _executing(source: Path) -> None:
-    """Refuse a declaration made while no loader executes `source`.
+def declaring(site: tuple[Path, bool]) -> Path:
+    """Return the file of a declaration site, refusing one off a module's top level.
 
     One made at request time would rewrite the rule of every user until a reload.
     """
-    if not declarations.executing(source):
+    source, top_level = site
+    if not top_level:
         raise DeclarationOutsideModuleError(source)
+    return source
 
 
 def require_login(source: Path, *, inherit: bool = False) -> None:
     """Bind to `source` the requirement of a logged-in user, as `login_required`."""
-    _executing(source)
     declarations.declare(source, Requirement("login", source), inherit=inherit)
 
 
@@ -76,14 +77,12 @@ def require_permission(
     inherit: bool = False,
 ) -> None:
     """Bind to `source` the requirement of every permission in `perm`, on `obj`."""
-    _executing(source)
     requirement = Requirement("permission", source, _permissions(perm), obj)
     declarations.declare(source, requirement, inherit=inherit)
 
 
 def declare_public(source: Path, *, inherit: bool = False) -> None:
     """Mark `source` public, lifting what the files above require of it."""
-    _executing(source)
     declarations.declare_public(source, inherit=inherit)
 
 
@@ -262,6 +261,7 @@ __all__ = [
     "declare_public",
     "declared",
     "declared_files",
+    "declaring",
     "forget_login_default",
     "holds",
     "login_by_default",
