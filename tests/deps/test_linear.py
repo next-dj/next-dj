@@ -310,8 +310,7 @@ _PARAMS: tuple[inspect.Parameter, ...] = (
     inspect_parameter("with_default", int, default=7),
 )
 
-# The parameters `provides` is asked about: every one the parity callables declare,
-# one the signature skips, and one no signature carries.
+# Names `provides` is asked about: each declared one, a skipped one, an absent one.
 _PROVIDES_NAMES: tuple[str, ...] = (*(p.name for p in _PARAMS), "kwargs", "absent")
 
 _CONTEXTS: dict[str, dict[str, object]] = {
@@ -386,8 +385,7 @@ class TestPathParity:
 class TestProviderContract:
     """Every provider owes the compiler the verdicts its `can_handle` makes.
 
-    Parity between the two paths rests on this, so it is pinned per provider
-    rather than inferred from the callables the matrices happen to cover.
+    Parity between the two paths rests on this, so it is pinned per provider.
     """
 
     @pytest.fixture()

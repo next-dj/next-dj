@@ -49,14 +49,12 @@ _END_BLOCK_SET_SLOT = ("/set_slot",)
 # The key a component pushes for its body to write slots into.
 _SLOT_COLLECTOR_KEY = "_component_slots"
 
-# Keys the component body sees but the component scope must not. The collector
-# is one. ``_component_props`` stays out because every node overwrites it.
+# Body-only keys. ``_component_props`` is not listed as every node overwrites it.
 _INTERNAL_CONTEXT_KEYS = frozenset({_SLOT_COLLECTOR_KEY})
 
 _DASH_BEFORE_DASH = re.compile(r"-(?=-)")
 
-# Sentinel distinguishing "slot key absent" from "slot present but empty", since
-# only a missing slot falls back to the ``{% #set_slot %}`` default body.
+# Distinguishes an absent slot key from an empty one, only absence takes the default.
 _SLOT_MISSING: Any = object()
 
 
@@ -68,8 +66,7 @@ def _strip_quotes(raw: str) -> str:
 def _resolve_template_path(raw: str) -> Path:
     """Return the resolved file for a raw ``current_template_path`` string.
 
-    Memoised process-wide and keyed by the raw string, since one page path reaches
-    every node it renders, and dropped along with the shared page-tree resolutions.
+    Memoised per raw string and dropped along with the shared page-tree resolutions.
     """
     return Path(raw).resolve()
 
@@ -80,8 +77,7 @@ on_forget_resolved_trees(_resolve_template_path.cache_clear)
 def _comment_safe(text: str) -> str:
     """Break every `--` run so `text` cannot terminate an HTML comment early.
 
-    Replacing whole pairs would leave an odd run closing the comment anyway,
-    so the space goes after each dash that another dash follows.
+    An odd run would still close it, so a space follows each dash before a dash.
     """
     return _DASH_BEFORE_DASH.sub("- ", text)
 
@@ -91,8 +87,7 @@ def _parse_component(
 ) -> tuple[str, dict[str, FilterExpression]]:
     """Parse ``tag "name" key=expr …`` into the component name and its props.
 
-    Django reads the props, so each value compiles to a `FilterExpression` that
-    resolves against the context at render time and a filter argument may hold spaces.
+    Django reads the props, so each value compiles to a render-time `FilterExpression`.
     """
     bits = token.split_contents()[1:]
     if not bits:
@@ -111,8 +106,7 @@ def _parse_props(parser: Parser, bits: list[str]) -> dict[str, FilterExpression]
     while bits:
         props.update(token_kwargs(bits, parser))
         if bits:
-            # Django stops at the first bit that is no pair, which is a word the
-            # dialect never gave a meaning to, so it is dropped rather than refused.
+            # Django stops at the first non-pair bit, an unmeant word, so it is dropped.
             del bits[0]
     return props
 
@@ -158,15 +152,13 @@ class SlotNode(SlotTagNode):
         """Remember the slot name and nested nodes."""
         self.name = name
         self.nodelist = nodelist
-        # Claimed by the component that compiles this node into its body. A
-        # slot reached from another template, through an include, fills nothing.
+        # Claimed by the compiling component, so a slot via include fills nothing.
         self.owner: ComponentNode | None = None
 
     def collect(self, context: template.Context, slots: dict[str, str]) -> None:
         """Append the rendered body to the entry this slot name holds.
 
-        A repeat appends rather than replaces, so a slot written once per
-        ``{% for %}`` iteration keeps every body in render order.
+        A repeat appends so a slot in ``{% for %}`` keeps every body in render order.
         """
         body = self.nodelist.render(context)
         previous = slots.get(self.name)
@@ -176,8 +168,7 @@ class SlotNode(SlotTagNode):
     def render(self, context: template.Context) -> str:
         """Fill the owning component's slot, or render the body where it stands.
 
-        Filling contributes nothing to ``children``, and a slot whose owner isn't
-        the component rendering around it renders its body in place instead.
+        A slot whose owner is not the component rendering around it renders in place.
         """
         collector = context.get(_SLOT_COLLECTOR_KEY)
         if isinstance(collector, _SlotCollector) and collector.owner is self.owner:
@@ -198,10 +189,7 @@ class ComponentNode(ComponentTagNode):
         self.nodelist = nodelist
         # Prop names are fixed at compile time, so the guard rebuilds nothing.
         self.prop_names = frozenset(props)
-        # The slots a body holds are fixed once the body is compiled, so the
-        # recursive walk runs here rather than on every render. Django's
-        # ``get_nodes_by_type`` also descends into a nested ``{% #component %}``,
-        # which parses first and has already claimed the slots of its own body.
+        # Slots are fixed once compiled, so walk once, nested ones claim their own.
         claimed = [
             node
             for node in cast("list[SlotNode]", nodelist.get_nodes_by_type(SlotNode))
@@ -214,16 +202,14 @@ class ComponentNode(ComponentTagNode):
     def _resolved_props(self, context: template.Context) -> dict[str, Any]:
         """Resolve every prop expression against the active template context.
 
-        ``FilterExpression`` marks a bare string literal safe, so the marker is stripped
-        from plain literals and raw HTML needs an explicit ``|safe``.
+        ``FilterExpression`` marks a string literal safe, so raw HTML needs ``|safe``.
         """
         resolved: dict[str, Any] = {}
         for key, expr in self.props.items():
             value = expr.resolve(context)
             is_literal = not isinstance(expr.var, Variable)
             if is_literal and not expr.filters and isinstance(value, SafeString):
-                # Bare string literal that Django marked safe by convention.
-                # Demote to a plain ``str`` so ``{{ prop }}`` autoescapes it.
+                # Django marks a bare literal safe, demote it so it autoescapes.
                 value = str.__str__(value)
             resolved[key] = value
         return resolved
@@ -231,8 +217,7 @@ class ComponentNode(ComponentTagNode):
     def _template_path_from_context(self, context: template.Context) -> Path | None:
         """Return a resolved path from ``current_template_path``, or ``None``."""
         raw = context.get(TEMPLATE_PATH_KEY)
-        # A ``Path`` under this key was written by a render that already
-        # resolved it, so only the ``str`` spelling reaches the filesystem.
+        # A ``Path`` was resolved by an earlier render, only ``str`` hits the disk.
         if isinstance(raw, Path):
             return raw
         if isinstance(raw, str):
@@ -242,8 +227,7 @@ class ComponentNode(ComponentTagNode):
     def _close_match(self, path: Path) -> str | None:
         """Return the closest visible component name for a did-you-mean hint.
 
-        The visibility map for `path` was just built by the failed `get_component`
-        lookup, so this read is a cache hit, not a rescan.
+        The failed `get_component` lookup just built the visibility map, a cache hit.
         """
         names = collect_visible_components(path)
         matches = difflib.get_close_matches(self.name, sorted(names))
@@ -314,21 +298,18 @@ class ComponentNode(ComponentTagNode):
         slots: dict[str, str] = {}
         children = self._render_children(context, slots)
 
-        # ``flatten`` returns a dict built for this call alone, so the render
-        # context is filled in place instead of through another copy.
+        # ``flatten`` returns a fresh dict, so the render context is filled in place.
         render_ctx = cast("dict[str, Any]", context.flatten())
         for key in _INTERNAL_CONTEXT_KEYS:
             render_ctx.pop(key, None)
         render_ctx.update(self._resolved_props(context))
         render_ctx[TEMPLATE_PATH_KEY] = path
-        # Children are finished markup, inserted unescaped like slot content.
-        # Escaping inside them is the responsibility of the calling template.
+        # Children are finished markup inserted unescaped, the calling template escapes.
         render_ctx["children"] = children
         render_ctx[COMPONENT_PROPS_CONTEXT_KEY] = self.prop_names
 
         for slot_name, content in slots.items():
-            # Slot content lives only under ``slot_<name>``, because an
-            # unprefixed key would shadow a prop that shares the slot's name.
+            # Slot content lives under ``slot_<name>`` so it cannot shadow a prop.
             render_ctx[f"{SLOT_KEY_PREFIX}{slot_name}"] = content
 
         request = render_ctx.get(REQUEST_KEY)
@@ -349,8 +330,7 @@ class SetSlotNode(SetSlotTagNode):
     def render(self, context: template.Context) -> str:
         """Render injected slot HTML when present, otherwise the fallback body.
 
-        The prefixed ``slot_<name>`` key never collides with a same-named prop, and
-        only a missing key falls back, not an explicitly empty slot.
+        Only a missing key falls back, not an explicitly empty slot.
         """
         slot_content = context.get(f"{SLOT_KEY_PREFIX}{self.name}", _SLOT_MISSING)
         if slot_content is _SLOT_MISSING:

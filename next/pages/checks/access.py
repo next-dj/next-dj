@@ -19,13 +19,7 @@ from next.discovery import (
     iter_scanned_page_pairs,
 )
 from next.pages.access import page_access
-from next.pages.loaders import (
-    PAGE_MODULE,
-    has_body,
-    in_page_tree,
-    load_page_module,
-    load_python_module_memo,
-)
+from next.pages.loaders import PAGE_MODULE, in_page_tree
 from next.pages.manager import page
 from next.permissions.access import declarations, declared, declared_files
 from next.permissions.manager import permission_manager
@@ -107,26 +101,20 @@ def check_public_beside_requirements(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
-def subtree_only(file_path: Path) -> bool:
-    """Return whether a bodyless `page.py` passes access or context to its subtree.
-
-    An `inherit=True` declaration passes access and an `inherit_context=True` context.
-    """
-    module = load_python_module_memo(file_path)
-    if module is None or has_body(file_path, module):
-        return False
+def passes_down(file_path: Path) -> bool:
+    """Return whether a `page.py` passes access or context to the pages below it."""
     if declarations.inherited(file_path) is not OPEN:
         return True
     return page.contexts.passes_context(file_path)
 
 
-def declares_without_page(file_path: Path) -> bool:
-    """Return whether a `page.py` with no body declares something without inherit."""
-    module, _error = load_page_module(file_path)
-    if module is None or has_body(file_path, module):
-        return False
+def declares_for_itself(file_path: Path) -> bool:
+    """Return whether a `page.py` declares access only a page of its own would take.
+
+    A `public()` beside a requirement of the same file is left to `next.E163`.
+    """
     own, passed = declared(file_path), declarations.inherited(file_path)
-    if own.public and not passed.public:
+    if own.public and not own.requirements and not passed.public:
         return True
     return not set(own.requirements).issubset(passed.requirements)
 
@@ -169,8 +157,8 @@ __all__ = [
     "access_in_use",
     "check_declaring_modules",
     "check_public_beside_requirements",
-    "declares_without_page",
+    "declares_for_itself",
     "load_declarations",
-    "subtree_only",
+    "passes_down",
     "tree_pages",
 ]

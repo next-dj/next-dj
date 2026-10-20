@@ -45,8 +45,7 @@ BACKEND_LOADED_SIGNALS = (
 def page_key(file_path: object) -> str:
     """Return the page path relative to the project root.
 
-    The signal carries an absolute path, and a metric label built from it
-    would put the machine's home directory on the dashboard.
+    The signal carries an absolute path that would leak the home directory.
     """
     raw = Path(str(file_path))
     try:

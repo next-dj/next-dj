@@ -32,11 +32,7 @@ def _directive_name(directive: str) -> str:
 
 
 def _shared(response: HttpResponseBase, names: set[str]) -> bool:
-    """Whether a shared cache may store `response` under its current headers.
-
-    `public`, `s-maxage` or a CDN header permit it, and so does a `max-age` or `Expires`
-    lifetime without `private` or `no-store`, the form `cache_page` emits.
-    """
+    """Whether a shared cache may store `response` under its current headers."""
     if not _SHARED_DIRECTIVES.isdisjoint(names):
         return True
     if any(name in response for name in CDN_HEADERS):
@@ -47,10 +43,7 @@ def _shared(response: HttpResponseBase, names: set[str]) -> bool:
 
 
 def _route(request: HttpRequest) -> str:
-    """Return the name of the route `request` resolved to, a constant when none.
-
-    A key never holds request data, and every request to a route has the same cause.
-    """
+    """Return the name of the route `request` resolved to, a constant when none."""
     match = getattr(request, "resolver_match", None)
     return _UNRESOLVED if match is None else match.view_name
 
@@ -58,11 +51,7 @@ def _route(request: HttpRequest) -> str:
 def guard_shared_cache(
     request: HttpRequest, response: HttpResponseBase
 ) -> HttpResponseBase:
-    """Make `response` private when it sets a cookie that a shared cache would store.
-
-    `private` replaces `public` and `s-maxage`, the CDN headers go, and `Vary` gains
-    `Cookie`. The warning is logged per route name at the `FailureLog` rate.
-    """
+    """Make `response` private when it sets a cookie that a shared cache would store."""
     if not response.cookies:
         return response
     directives = [
@@ -92,9 +81,7 @@ def guard_shared_cache(
 class SharedCacheGuardMiddleware(MiddlewareMixin):
     """Make private every response that sets a cookie while a shared cache may store it.
 
-    A page makes its own response private when a cookie is set, but a third-party
-    middleware or a 304 built above the page can still combine the two. List it first
-    in `MIDDLEWARE`, or directly below `UpdateCacheMiddleware`, so it sees every cookie.
+    List it first in `MIDDLEWARE`, or directly below `UpdateCacheMiddleware`.
     """
 
     def process_response(

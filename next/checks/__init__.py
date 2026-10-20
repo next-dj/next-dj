@@ -1,7 +1,6 @@
 """Aggregate system-check registration for all `next-dj` subpackages.
 
-Importing a helper loads every subpackage's `checks` module and so triggers its
-`@register` side effects. Re-exports resolve lazily to break the cycle back here.
+Re-exports resolve lazily to break the import cycle back here.
 """
 
 from __future__ import annotations
@@ -551,11 +550,9 @@ def register_all() -> None:
 def reset_check_caches() -> None:
     """Drop every per-run check cache so the next run rebuilds from disk.
 
-    Tests that mutate the page or component tree in place need this, since the caches
-    otherwise freeze the scanned state for the process lifetime.
+    Tests that mutate the page or component tree in place need this.
     """
-    # Reached by name because each of these pulls in an area package that imports
-    # its own `checks` module, and that module imports `NEXT` back from here.
+    # Reached by name because each pulls in an area whose `checks` imports `NEXT` here.
     importlib.import_module("next.discovery").reset_router_manager_cache()
     importlib.import_module("next.checks.common").forget_run_memos()
     sources = importlib.import_module("next.components.sources")

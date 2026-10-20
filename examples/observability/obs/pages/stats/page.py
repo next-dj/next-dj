@@ -29,8 +29,7 @@ def _minutes_for(window: str) -> int:
 def live_zone() -> str:
     """Name the zone the filter form re-aggregates without leaving the page.
 
-    Page-local, not inherited, so only this index carries the zone the filter targets
-    while nested stats sub-pages keep an empty value and fall back to a full submit.
+    Page-local, so nested stats pages keep it empty and fall back to a full submit.
     """
     return LIVE_TOTALS_ZONE
 
@@ -39,8 +38,7 @@ def live_zone() -> str:
 def window(request: HttpRequest | None = None) -> str:
     """Return the active aggregation window, propagated to nested pages.
 
-    The `HttpRequest | None` annotation matches the union `HttpRequestProvider` accepts,
-    so DI fills it on a render while unit calls keep the `None` default.
+    The `HttpRequest | None` default lets unit calls skip DI.
     """
     if request is None:
         return DEFAULT_WINDOW
@@ -56,8 +54,7 @@ def window(request: HttpRequest | None = None) -> str:
 def live_stats(window: str = DEFAULT_WINDOW) -> dict[str, Any]:
     """Build the windowed snapshot exposed under `window.Next.context.live_stats`.
 
-    The decorator override wraps the payload in `{"v": 1, "data": ...}` while sibling
-    keys stay flat through the global `JS_CONTEXT_SERIALIZER`.
+    Its decorator wraps the payload in `{"v": 1, "data": ...}`, sibling keys stay flat.
     """
     minutes = _minutes_for(window)
     pages = metrics.read_window("pages.rendered", minutes)

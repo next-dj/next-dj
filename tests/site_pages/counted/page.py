@@ -5,8 +5,7 @@ from next.partial import zone_requested
 from tests.site_pages.counted.probe import counters
 
 
-# The counters live in `probe`, a singleton module, so every reload of this page
-# shares one store. A marker counts only when a zone body stringifies it.
+# Counters live in the singleton `probe`, and a marker counts only when stringified.
 
 
 class CountingMarker:

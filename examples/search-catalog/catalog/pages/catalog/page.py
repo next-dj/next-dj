@@ -14,8 +14,7 @@ metadata: MetadataDict = {"title": "All products", "canonical": True}
 def filter_zones() -> str:
     """Name every zone the live filter re-renders on the all-products listing.
 
-    Page-local and never inherited, so the filter panel in the shared layout targets
-    zones here and falls back to a plain GET on the product detail page.
+    Page-local and never inherited, so the product detail page uses a plain GET.
     """
     return zone_target(LISTING_ZONES)
 

@@ -49,12 +49,15 @@ from tests.support.access import (
 
 pytestmark = pytest.mark.django_db
 
+_LOGIN_INHERIT = "page.login_required(inherit=True)\n"
+_VIEW_INHERIT = 'page.permission_required("auth.view_group", inherit=True)\n'
+
 _LIFT_URLS = ("/t/a/", "/t/a/kid/")
 
 
 def _three_levels(root: Path) -> Path:
     write_guard(root)
-    write_guard(root / "team", "page.login_required(inherit=True)\n")
+    write_guard(root / "team", _LOGIN_INHERIT)
     return write_page(root, "team/notes", page_source())
 
 
@@ -93,19 +96,13 @@ class TestInheritedAccess:
         ("declaration", "statuses"),
         [
             pytest.param("page.login_required()\n", [302, 200, 200], id="own"),
-            pytest.param(
-                "page.login_required(inherit=True)\n", [302, 302, 302], id="inherit"
-            ),
+            pytest.param(_LOGIN_INHERIT, [302, 302, 302], id="inherit"),
             pytest.param(
                 'page.permission_required("auth.view_group")\n',
                 [302, 200, 200],
                 id="own-permission",
             ),
-            pytest.param(
-                'page.permission_required("auth.view_group", inherit=True)\n',
-                [302, 302, 302],
-                id="inherit-permission",
-            ),
+            pytest.param(_VIEW_INHERIT, [302, 302, 302], id="inherit-permission"),
         ],
     )
     def test_a_declaration_reaches_the_child_and_the_grandchild_under_inherit(
@@ -124,7 +121,7 @@ class TestInheritedAccess:
 
     def test_a_guard_page_serves_no_url_under_a_layout(self, root, client) -> None:
         (root / "layout.djx").write_text("<main>{% template %}</main>")
-        write_guard(root / "a", "page.login_required(inherit=True)\n")
+        write_guard(root / "a", _LOGIN_INHERIT)
         write_page(root, "a/b", page_source())
 
         with routed(root):
@@ -156,10 +153,8 @@ class TestInheritedAccess:
     def test_three_levels_join_root_first(
         self, root, client, isolated_permissions
     ) -> None:
-        write_guard(root, "page.login_required(inherit=True)\n")
-        write_guard(
-            root / "a", 'page.permission_required("auth.view_group", inherit=True)\n'
-        )
+        write_guard(root, _LOGIN_INHERIT)
+        write_guard(root / "a", _VIEW_INHERIT)
         write_page(
             root, "a/b", page_source('page.permission_required("auth.change_group")\n')
         )
@@ -184,7 +179,7 @@ class TestInheritedAccess:
     def test_the_inherited_permission_decides(
         self, root, client, holder, status, location
     ) -> None:
-        write_guard(root, 'page.permission_required("auth.view_group", inherit=True)\n')
+        write_guard(root, _VIEW_INHERIT)
         write_page(root, "a", page_source())
         if holder:
             sign_in(client, "ada", "view_group")
@@ -195,7 +190,7 @@ class TestInheritedAccess:
         assert (response.status_code, response.get("Location")) == (status, location)
 
     def test_a_sibling_directory_stays_open(self, root, client) -> None:
-        write_page(root, "closed", page_source("page.login_required(inherit=True)\n"))
+        write_page(root, "closed", page_source(_LOGIN_INHERIT))
         write_page(root, "open", page_source())
 
         with routed(root):
@@ -205,7 +200,7 @@ class TestInheritedAccess:
         assert (closed.status_code, opened.status_code) == (302, 200)
 
     def test_a_guard_above_the_tree_root_binds_nothing(self, tmp_path, client) -> None:
-        write_guard(tmp_path, "page.login_required(inherit=True)\n")
+        write_guard(tmp_path, _LOGIN_INHERIT)
         root = tmp_path / "pages"
         write_page(root, "a", page_source())
 
@@ -223,10 +218,10 @@ class TestMountedTrees:
     @pytest.fixture()
     def mounted(self, tmp_path) -> Path:
         app = write_app(tmp_path, "wallets", {"pages": ()})
-        write_guard(app, "page.login_required(inherit=True)\n")
+        write_guard(app, _LOGIN_INHERIT)
         write_guard(app / "pages")
         write_page(app / "pages", "ops", page_source(template="w"))
-        write_guard(tmp_path / "site", "page.login_required(inherit=True)\n")
+        write_guard(tmp_path / "site", _LOGIN_INHERIT)
         write_page(tmp_path / "site", "contact", page_source())
         urlconf = write_urlconf(
             tmp_path,
@@ -254,7 +249,7 @@ class TestLiftedRequirements:
     @pytest.fixture()
     def booking(self, root) -> Path:
         booking = root / "booking"
-        write_guard(booking, "page.login_required(inherit=True)\n")
+        write_guard(booking, _LOGIN_INHERIT)
         write_page(root, "booking/[int:booking]", page_source())
         write_page(
             root,
@@ -262,9 +257,7 @@ class TestLiftedRequirements:
             page_source("page.public(inherit=True)\n"),
         )
         write_page(
-            root,
-            "booking/[int:booking]/receipt/admin",
-            page_source("page.login_required(inherit=True)\n"),
+            root, "booking/[int:booking]/receipt/admin", page_source(_LOGIN_INHERIT)
         )
         return booking
 
@@ -319,7 +312,7 @@ class TestLiftedRequirements:
         )
 
     def test_a_public_page_lifts_for_itself_alone(self, root, client) -> None:
-        write_guard(root, "page.login_required(inherit=True)\n")
+        write_guard(root, _LOGIN_INHERIT)
         page_path = write_page(root, "a", page_source("page.public()\n"))
         write_page(root, "a/b", page_source())
 
@@ -336,25 +329,19 @@ class TestLiftedRequirements:
         [
             pytest.param("", [200, 200, 200], id="nothing"),
             pytest.param("page.login_required()\n", [200, 302, 200], id="own"),
-            pytest.param(
-                "page.login_required(inherit=True)\n", [200, 302, 302], id="inherit"
-            ),
+            pytest.param(_LOGIN_INHERIT, [200, 302, 302], id="inherit"),
             pytest.param(
                 'page.permission_required("auth.view_group")\n',
                 [200, 302, 200],
                 id="own-permission",
             ),
-            pytest.param(
-                'page.permission_required("auth.view_group", inherit=True)\n',
-                [200, 302, 302],
-                id="inherit-permission",
-            ),
+            pytest.param(_VIEW_INHERIT, [200, 302, 302], id="inherit-permission"),
         ],
     )
     def test_a_page_below_a_lifted_subtree_binds_again(
         self, root, client, declaration, statuses
     ) -> None:
-        write_guard(root, "page.login_required(inherit=True)\n")
+        write_guard(root, _LOGIN_INHERIT)
         write_page(root, "a", page_source("page.public(inherit=True)\n"))
         write_page(root, "a/b", page_source(declaration))
         write_page(root, "a/b/c", page_source())
@@ -411,7 +398,7 @@ class TestLiftedRequirements:
         assert below.requirements[0].perms == ("auth.add_group",)
 
     def test_a_second_public_keeps_the_first_as_the_source(self, root) -> None:
-        write_guard(root, "page.login_required(inherit=True)\n")
+        write_guard(root, _LOGIN_INHERIT)
         write_guard(root / "a", "page.public(inherit=True)\n")
         page_path = write_page(root, "a/b", page_source("page.public()\n"))
 
@@ -533,7 +520,7 @@ class TestObjectRequirements:
     def test_a_permission_without_an_object_is_checked_first(
         self, root, client
     ) -> None:
-        write_guard(root, 'page.permission_required("auth.view_group", inherit=True)\n')
+        write_guard(root, _VIEW_INHERIT)
         write_page(root, "edit/[int:group]", _GROUP_PAGE)
         group = Group.objects.create(name="t:ada")
         sign_in(client, "ada")
@@ -704,7 +691,7 @@ class TestRefusal:
 
         with routed(root):
             broken = client.get("/a/")
-            write_guard(root, "page.login_required(inherit=True)\n")
+            write_guard(root, _LOGIN_INHERIT)
             touch_later(declaring)
             fixed = client.get("/a/")
 
@@ -789,7 +776,7 @@ class TestOwnerAccess:
         assert held.rule.public is True
 
     def test_another_file_answers_with_the_page_beside_it(self, root) -> None:
-        write_guard(root, "page.login_required(inherit=True)\n")
+        write_guard(root, _LOGIN_INHERIT)
         page_path = write_page(
             root, "a", page_source('page.permission_required("x.y")\n')
         )
@@ -804,7 +791,7 @@ class TestOwnerAccess:
         assert [item.kind for item in held.rule.requirements] == ["login", "permission"]
 
     def test_a_directory_without_a_page_answers_with_its_chain(self, root) -> None:
-        write_guard(root, "page.login_required(inherit=True)\n")
+        write_guard(root, _LOGIN_INHERIT)
         other = root / "a" / "forms.py"
         other.parent.mkdir()
         other.write_text("")

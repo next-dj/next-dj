@@ -32,8 +32,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Django's own apps and the framework package hold no project pages, and the
-# framework ships a `next/pages` package that otherwise reads as a page tree.
+# Django's own apps and the framework's `next/pages` package hold no project pages.
 _NON_PAGE_APP_ROOTS = ("django", "next")
 
 FILE_ROUTER_CONFIG_KEYS = ("PAGES_DIR", "APP_DIRS", "OPTIONS", "DIRS")
@@ -89,8 +88,7 @@ def _installed_app_directories() -> dict[str, Path]:
     try:
         configs = tuple(apps.get_app_configs())
     except AppRegistryNotReady:
-        # Answering keeps a caller reached during app loading alive, but the
-        # answer reads as "this project has no app pages", so it is named.
+        # A caller reached during app loading is told "no app pages".
         logger.warning(
             "the app registry was read before Django populated it, so no "
             "application page tree is reported for this call. Move the read "
@@ -122,24 +120,21 @@ class RouterBackend(ABC):
     def page_roots(self) -> list[PageRoot]:
         """Labelled page trees this backend routes, for system checks to walk.
 
-        A backend that routes from somewhere else reports none, which leaves it
-        out of every page-tree check and out of the development watcher.
+        A backend routing from elsewhere reports none, so checks and watcher skip it.
         """
         return []
 
     def components_folder_name(self) -> str | None:
         """Folder name this backend registers components from while it walks.
 
-        A backend that registers no component folder answers None, and the
-        development watcher then watches no component glob under its trees.
+        No component folder answers None, so no component glob is watched.
         """
         return None
 
     def skip_dir_names(self) -> frozenset[str]:
         """Directory names this backend's own walk of its trees refuses to enter.
 
-        The checks walk with the same set, so a directory this backend routes
-        nothing from is a directory they report nothing from either.
+        The checks walk with the same set, so they skip those directories too.
         """
         return frozenset()
 
@@ -163,8 +158,7 @@ class FileRouterBackend(RouterBackend):
     def __init__(self, config: Mapping[str, Any]) -> None:
         """Read the pages dir, the extra roots, and the narrowed OPTIONS off the entry.
 
-        A subclass renaming the component folder overrides
-        `_resolve_components_folder_name`, which is read here and nowhere else.
+        A subclass renaming the component folder overrides its resolver method.
         """
         self._require_config_keys(config)
         self.pages_dir = str(config["PAGES_DIR"])
@@ -362,14 +356,12 @@ class FileRouterBackend(RouterBackend):
     ) -> Path | None:
         """Return `<app>/pages_dir` when that directory exists.
 
-        Memoised per app directory, so a static lookup pays no probe per call. The memo
-        dies with this router, which the watch layer rebuilds per read.
+        Memoised per app directory and dropped with this router.
         """
         app_path = directories.get(app_name)
         if app_path is None:
             return None
-        # The directory sits beside the answer rather than in the key, because
-        # this runs per static lookup and a `str` key hashes cheaper.
+        # The directory sits beside the answer as a `str` key hashes cheaper.
         cached = self._app_pages_path_cache.get(app_name)
         if cached is not None and cached[0] == app_path:
             return cached[1]
@@ -381,8 +373,7 @@ class FileRouterBackend(RouterBackend):
     def _get_root_pages_paths(self) -> list[Path]:
         """Return paths from `DIRS` plus optional `BASE_DIR` / `pages_dir`.
 
-        Memoised per instance, because the roots belong to this router's configuration
-        and every reader asks per call. A copy goes back, so appending moves no root.
+        Memoised per instance and a copy goes back, so appending moves no root.
         """
         if self._root_pages_paths_cache is None:
             result = [p for p in self._extra_root_paths if p.exists()]
@@ -438,8 +429,7 @@ class FileRouterBackend(RouterBackend):
 class RouterFactory:
     """Build one `RouterBackend` from one `PAGE_BACKENDS` entry.
 
-    `RouterManager` loads the whole list through `next.backends`. This is the
-    single-entry build the router access port hands the development watcher.
+    `RouterManager` loads the list through `next.backends`, this is the watcher's build.
     """
 
     @classmethod

@@ -20,9 +20,7 @@ type _Address = tuple[str | None, str, str]
 def _body_file(cls: type) -> str | None:
     """Return the file the body of `cls` was compiled from, or `None` for none.
 
-    The file router execs every `page.py` under one module name, so the module
-    alone cannot tell two providers of the same class name apart. A method
-    written in the class body still carries the path in its code object.
+    The router execs each `page.py` under one module name, so the module is not enough.
     """
     for value in vars(cls).values():
         code = getattr(value, "__code__", None)
@@ -39,9 +37,7 @@ def _address(cls: type) -> _Address:
 class ProviderRegistry:
     """Ordered list of provider classes with a version every resolver compares.
 
-    A class registering under an address another class already holds replaces
-    it in place, so the dev reloader re-executing the module that declares a
-    provider leaves one entry rather than a growing pile of dead ones.
+    A class registering under a held address replaces it, so a reload leaves one entry.
     """
 
     __slots__ = ("_index", "_ordered", "_version")
@@ -72,8 +68,7 @@ class ProviderRegistry:
     def replace(self, classes: Iterable[type[RegisteredParameterProvider]]) -> None:
         """Put `classes` in place of the registered ones and move the version on.
 
-        The counter goes forward even though the list goes back, so two states
-        never share a version a cached plan would read as fresh.
+        The counter still moves forward, so no two states share a version.
         """
         self._ordered[:] = classes
         self._index = {_address(cls): i for i, cls in enumerate(self._ordered)}

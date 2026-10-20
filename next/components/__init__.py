@@ -1,8 +1,4 @@
-"""Discover and render DJX components for templates.
-
-Each subsystem lives in its own submodule, and internal classes stay reachable through
-deep imports such as `from next.components.registry import ComponentRegistry`.
-"""
+"""Discover and render DJX components for templates."""
 
 from __future__ import annotations
 

@@ -31,8 +31,7 @@ class DDependencyBase[T]:
 def unwrap_annotated(annotation: object) -> object:
     """Return the type an `Annotated[...]` wraps, or the annotation unchanged.
 
-    The plan keeps the extras a resolved hint carries, so every provider
-    matching on a marker has to look past the metadata a caller wrapped it in.
+    The plan keeps hint extras, so marker-matching providers must look past them.
     """
     if get_origin(annotation) is Annotated:
         return get_args(annotation)[0]
@@ -42,8 +41,7 @@ def unwrap_annotated(annotation: object) -> object:
 def marker_origin(annotation: object) -> object:
     """Return the marker an annotation names, seeing through one `Annotated` layer.
 
-    Spelled out rather than built on `unwrap_annotated`, because the plain
-    annotation is the common case and reads its origin once here.
+    Not built on `unwrap_annotated`, as the plain annotation reads its origin once.
     """
     origin = get_origin(annotation)
     if origin is Annotated:
@@ -54,8 +52,7 @@ def marker_origin(annotation: object) -> object:
 def factory_key(factory: object) -> str:
     """Return the dotted identity a callable `Depends` is tracked under.
 
-    A factory carries no registered name, so its address stands in for one on the
-    resolution stack and in the cycle a `DependencyCycleError` reports.
+    A factory has no registered name, so its address stands in on the stack.
     """
     qualname = getattr(factory, "__qualname__", "")
     if not qualname:
@@ -90,8 +87,7 @@ def call_factory(
 class Depends:
     """Mark a parameter as a dependency resolved by the resolver.
 
-    The argument decides which of the four forms applies, so one marker
-    covers a registered name, a factory, a constant, and the parameter name.
+    The argument picks one of four forms: a name, a factory, a constant, or none.
     """
 
     dependency: object | None = None

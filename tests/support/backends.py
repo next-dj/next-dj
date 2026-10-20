@@ -218,8 +218,7 @@ class MockAutoreloadSender:
 class PlainStaticBackend(StaticFilesBackend):
     """Static backend with deterministic URLs and no bookkeeping of its own.
 
-    The counterpart of `RecordingStaticBackend` for a benchmark, where a list
-    growing inside the timed loop would be measured along with the framework.
+    Counterpart of `RecordingStaticBackend` for benchmarks, with no log to grow.
     """
 
     def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
@@ -231,8 +230,7 @@ class PlainStaticBackend(StaticFilesBackend):
 class RecordingStaticBackend(StaticFilesBackend):
     """Static backend with deterministic URLs that logs what it registered.
 
-    The URLs keep discovery-order assertions readable, and the log is what
-    tells a warm render that registered nothing from a cold one that did.
+    The log tells a warm render that registered nothing from a cold one.
     """
 
     def __init__(self) -> None:
@@ -250,8 +248,7 @@ class RecordingStaticBackend(StaticFilesBackend):
 class PrefixingStaticBackend(StaticFilesBackend):
     """Backend that stamps a per-request prefix onto every asset URL.
 
-    Refuses a URL already carrying a version stamp, so a pipeline that stamped the
-    version before asking the hook fails here rather than passing unnoticed.
+    Refuses a URL already carrying a version stamp, so a pipeline stamping early fails.
     """
 
     def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
@@ -271,8 +268,7 @@ PREFIXED_BACKENDS = {"STATIC_BACKENDS": [{"BACKEND": PREFIXING_STATIC_BACKEND}]}
 class RequestRecordingStaticBackend(StaticFilesBackend):
     """Backend whose rendered tags name the request they were rendered under.
 
-    A per-request scheme lives behind these hooks, so the injected HTML is where a
-    caller reads whether the request arrived, rather than the spelling of the seam.
+    The injected HTML is where a caller reads whether the request arrived.
     """
 
     NO_REQUEST: ClassVar[str] = "none"
@@ -339,8 +335,7 @@ MANIFEST_BACKENDS = {"STATIC_BACKENDS": [{"BACKEND": BUILD_MANIFEST_BACKEND}]}
 class StaticAssetProvider:
     """The narrow ``BackendProvider`` the asset discovery layer reads.
 
-    Holds a backend and already resolved page roots, so a test wires discovery
-    up without standing a whole static manager behind it.
+    Holds a backend and resolved page roots, so discovery needs no static manager.
     """
 
     def __init__(self, backend: StaticBackend, roots: tuple[Path, ...] = ()) -> None:

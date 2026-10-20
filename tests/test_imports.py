@@ -57,8 +57,7 @@ def _import_each_first(names: list[str]) -> dict[str, str]:
 
     Forking skips the interpreter start, and the preloaded parent holds no `next`.
     """
-    # Importing a module first runs its packages first, so a module that a package
-    # run already loaded repeats that run and gets no child of its own.
+    # Importing a module runs its packages first, so a loaded one gets no child.
     completed = subprocess.run(
         [
             sys.executable,

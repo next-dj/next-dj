@@ -39,8 +39,7 @@ def partial_backends_active() -> bool:
 def check_partial_backends_is_a_list(*args, **kwargs) -> list[CheckMessage]:
     """Error when `PARTIAL_BACKENDS` is not a list (`next.E067`).
 
-    The settings layer silently drops a non-list value and falls back to the default
-    protocol backend, so this check is the only place the drop is reported.
+    The settings layer silently drops a non-list value, so only this reports it.
     """
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if not isinstance(raw, dict):
@@ -103,8 +102,7 @@ def check_partial_backend_names_a_path(*args, **kwargs) -> list[CheckMessage]:
 def check_manifest_version_has_manifest_storage(*args, **kwargs) -> list[CheckMessage]:
     """Warn when manifest versioning has no manifest storage (`next.W069`).
 
-    Only an explicit `VERSION: "manifest"` demands the hashing, and without a storage
-    that hashes files the guard silently never asks a client to reload.
+    Without a hashing storage the guard silently never asks a client to reload.
     """
     if not _manifest_version_requested():
         return []
@@ -126,8 +124,7 @@ def check_manifest_version_has_manifest_storage(*args, **kwargs) -> list[CheckMe
 def check_asset_version_moves_between_deploys(*args, **kwargs) -> list[CheckMessage]:
     """Warn when no deploy can move the partial asset version (`next.W083`).
 
-    A development checkout is exactly the configuration the check describes, so it
-    answers to the deployment audit rather than to every `manage.py check`.
+    A development checkout matches by design, so it is a deployment audit only.
     """
     if not partial_backends_active() or _version_option_named():
         return []
@@ -159,28 +156,19 @@ def _configured_versions() -> list[object]:
 
 
 def _manifest_version_requested() -> bool:
-    """Return True when a partial backend names the manifest sentinel itself.
-
-    The default derives the version from whatever the project offers, so only the
-    sentinel states an intent a plain staticfiles storage can contradict.
-    """
+    """Return True when a partial backend names the manifest sentinel itself."""
     return any(version == MANIFEST_VERSION for version in _configured_versions())
 
 
 def _version_option_named() -> bool:
-    """Return True when a partial backend states a version source of its own.
-
-    A pinned tag moves by hand and the sentinel answers to `next.W069`, so either
-    way the version is the project's own statement rather than a derived default.
-    """
+    """Return True when a partial backend states a version source of its own."""
     return any(isinstance(version, str) for version in _configured_versions())
 
 
 def _staticfiles_storage_is_manifest() -> bool:
     """Return True when the configured staticfiles storage hashes its files.
 
-    Reads the dotted path rather than the resolved `staticfiles_storage` proxy, staying
-    side-effect-free on a project that has not set STATIC_ROOT.
+    Reads the dotted path, not the proxy, so a missing STATIC_ROOT is safe.
     """
     backend_path = _staticfiles_storage_path()
     if backend_path is None:

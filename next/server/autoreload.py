@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, override
 
 from django.utils.autoreload import StatReloader
 
-from next.pages.loaders import has_body
+from next.pages.access import routed
 from next.pages.watch import get_pages_directories_for_watch
 from next.urls.dispatcher import scan_pages_tree
 
@@ -27,8 +27,7 @@ logger = logging.getLogger(__name__)
 def _tree_dir_signature(root: Path) -> tuple[float, int]:
     """Return `(max mtime, directory count)` across every subdirectory.
 
-    `os.scandir` hands back a cached stat per `DirEntry`, sparing a second syscall, and
-    the count catches two renames that preserve the latest mtime.
+    The count catches two renames that preserve the latest mtime.
     """
     try:
         root_st = root.stat()
@@ -79,16 +78,16 @@ class NextStatReloader(StatReloader):
         self._previous_routes = current
 
     def _collect_routes(self) -> set[tuple[str, Path, bool]]:
-        """Return the routes and their loader bodies, cached while signatures match.
+        """Return the routes and whether each one routes, cached while signatures match.
 
-        A body in `page.py` changes with the file, which the `.py` watch restarts on.
+        A bodyless `page.py` that gains a `template.djx` starts routing without an edit.
         """
         pages_paths = get_pages_directories_for_watch()
         new_signatures = {p: _tree_dir_signature(p) for p in pages_paths}
         if self._cached_routes is not None and new_signatures == self._dir_signatures:
             return self._cached_routes
         routes = {
-            (url_path, file_path.resolve(), has_body(file_path, None))
+            (url_path, file_path.resolve(), routed(file_path))
             for pages_path in pages_paths
             for url_path, file_path in scan_pages_tree(pages_path)
         }
@@ -104,8 +103,7 @@ class NextStatReloader(StatReloader):
             try:
                 routes = self._collect_routes()
             except (OSError, ImportError, ValueError) as e:
-                # Narrow on purpose. The watch helpers already absorb what a
-                # router raises, so a blind catch would hide a framework bug.
+                # Narrow on purpose, the watch helpers absorb what a router raises.
                 logger.debug("next route set check skipped: %s", e)
             else:
                 self._check_routes(routes)

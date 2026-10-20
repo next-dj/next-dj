@@ -60,11 +60,7 @@ class RowPermissionAdmin(admin.ModelAdmin):
         change: bool = False,
         **kwargs,
     ) -> type[django_forms.ModelForm]:
-        """Return the admin form with `RowPermissionForm` mixed in for this request.
-
-        A row the user may not change already renders without fields, and its handler
-        answers `403`, so the check runs only on rows the user may edit.
-        """
+        """Return the admin form with `RowPermissionForm` mixed in for this request."""
         base = super().get_form(request, obj, change=change, **kwargs)
         bound = {
             "row_admin": self,

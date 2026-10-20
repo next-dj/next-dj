@@ -55,11 +55,7 @@ DEP_CACHE_KEY: Final = "_next_dep_cache"
 
 @dataclass(frozen=True, slots=True)
 class RenderFrame:
-    """The ambient values a component render inherits from the page around it.
-
-    A render that copies the surrounding context inherits them for free, so only a
-    caller building its context from scratch carries the frame itself.
-    """
+    """The ambient values a component render inherits from the page around it."""
 
     template_path: Path | str | None = None
     page_module_path: Path | str | None = None
@@ -115,8 +111,7 @@ def seed_collector(page_path: Path, context_data: dict[str, object]) -> StaticCo
     js_context = context_data.pop(JS_CONTEXT_KEY, None)
     js_serializers = context_data.pop(JS_SERIALIZERS_KEY, None)
     if isinstance(js_context, dict):
-        # A zone render is handed whatever context its caller kept, so neither
-        # key is trusted to hold what `build_render_context` left behind.
+        # A zone render gets whatever context its caller kept, so trust neither key.
         serializers = js_serializers if isinstance(js_serializers, dict) else {}
         for key, value in js_context.items():
             collector.add_js_context(key, value, serializer=serializers.get(key))

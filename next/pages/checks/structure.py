@@ -47,13 +47,11 @@ def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
     # Nested and doubly-mounted roots reach one directory through several trees.
     seen: set[Path] = set()
     for router in router_manager.backends:
-        # The one check that names a failing `page_roots`, every other reader
-        # takes the empty list, so a broken router costs one message and trace.
+        # The one check naming a failing `page_roots`, so one report per router.
         try:
             roots = read_page_roots(router)
         except PageRootsError as e:
-            # Only a raised failure carries a traceback, a wrong shape has no
-            # cause and its whole diagnosis is the message below.
+            # Only a raised failure has a traceback, a wrong shape has none.
             hint = None
             if e.__cause__ is not None:
                 logger.exception("a router failed to report its page trees")
@@ -113,8 +111,7 @@ def _working_directory_page_trees() -> list[Path]:
 def _touches_a_routed_tree(directory: Path, routed: set[Path]) -> bool:
     """Whether a routed page tree is this directory, or sits above or below it.
 
-    A routed tree nested inside the candidate makes it part of a served layout, the
-    shape of an app package that happens to carry the `PAGES_DIR` name.
+    A tree nested inside makes the directory part of a served layout.
     """
     return any(
         root.is_relative_to(directory) or directory.is_relative_to(root)
@@ -256,8 +253,7 @@ def _iter_routed_directories(
 ) -> Iterator[Path]:
     """Yield every directory under `pages_path` the router's own walk enters.
 
-    A refused name takes its whole subtree with it, so a structural report
-    names only directories a route can come out of.
+    A refused name takes its subtree with it, so only routable directories are named.
     """
     try:
         items = sorted(pages_path.iterdir())
@@ -293,8 +289,7 @@ def _check_pages_directory(
 def _route_name_error(name: str) -> str | None:
     """Return why Django refuses `name` between its angle brackets, or `None`.
 
-    Django compiles a route as the pattern is built, so a name it refuses is a
-    traceback out of the first URL resolution rather than a report here.
+    Django compiles a route when the pattern is built, so a refusal is a traceback.
     """
     if normalise_route_name(name).isidentifier():
         return None
@@ -341,8 +336,7 @@ def _parameter_syntax_error(param_str: str) -> str | None:
 def _args_syntax_error(args_str: str) -> str | None:
     """Return why a `[[args]]` directory names no route, or `None` when it does.
 
-    The name is read unstripped, because the router captures whatever sits
-    between the brackets and Django allows no whitespace in a route parameter.
+    The name is read unstripped, since Django allows no whitespace in a route parameter.
     """
     if not _is_args_segment(args_str):
         return _ARGS_FORMAT_HINT

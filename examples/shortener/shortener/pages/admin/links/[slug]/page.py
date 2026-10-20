@@ -26,10 +26,7 @@ def link_context(link: DLink[Link]) -> dict[str, object]:
 def reset_link_clicks(request: HttpRequest, slug: str) -> HttpResponse:
     """Reset this link's cached clicks and refresh the home badge out of band.
 
-    The home page owns the `links-badge` zone that totals unflushed
-    clicks. Resetting from the detail page morphs that foreign zone out
-    of band so an open home tab updates without its own request. Without
-    the runtime the builder falls back to a redirect to this detail page.
+    The detail page morphs the home `links-badge` zone, redirecting without a runtime.
     """
     reset_clicks(slug)
     return (

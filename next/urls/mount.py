@@ -76,10 +76,7 @@ class _TreePatterns(MountedPatterns):
 
 
 class MountedTree(MountedPatterns):
-    """The include target of `pages()`, one resolver over the patterns of a tree.
-
-    The resolver is rebuilt per router version, so a reload reaches its reverse map.
-    """
+    """The include target of `pages()`, one resolver rebuilt per router version."""
 
     mount: Mount
 
@@ -108,10 +105,7 @@ class MountedTree(MountedPatterns):
 
 
 def _tree_subdir(app: str, subdir: str | None) -> str:
-    """Return the directory `pages()` mounts, by default the tree router's `PAGES_DIR`.
-
-    Only an explicit name must be plain, since the default is the router's own string.
-    """
+    """Return the directory `pages()` mounts, by default the router's `PAGES_DIR`."""
     if subdir is not None:
         if not is_plain_subdir(subdir):
             msg = (
@@ -132,10 +126,7 @@ def _tree_subdir(app: str, subdir: str | None) -> str:
 def pages(
     app: str, subdir: str | None = None, *, namespace: str | None = None
 ) -> tuple[Sequence[URLPattern | URLResolver], str, str]:
-    """Mount the page tree `subdir` of `app` where a URLconf includes the result.
-
-    The tree it names leaves the auto-assembly, so only this include routes it.
-    """
+    """Mount the page tree `subdir` of `app` where a URLconf includes the result."""
     config = _app_config(app)
     directory = _tree_subdir(app, subdir)
     tree = Path(config.path) / directory

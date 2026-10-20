@@ -3,19 +3,14 @@ from typing import Any
 from next import component
 
 
-# The Chart.js CDN URL lives in the page-level `scripts` list of
-# `stats/page.py`, not here, because page scripts are injected before
-# this widget's co-located `component.js` that needs `window.Chart`.
+# The Chart.js URL lives in the `scripts` list of `stats/page.py` so it loads first.
 
 
 @component.context("render_rates", serialize=True)
 def render_rates(live_stats: dict[str, Any]) -> dict[str, Any]:
     """Expose the per-source totals under `window.Next.context.render_rates`.
 
-    No `serializer=` override here. The value travels through the
-    process-wide `JS_CONTEXT_SERIALIZER`, so the rendered HTML carries
-    a flat object. Compare against the wrapped `live_stats` and
-    `totals_chart` keys to see the per-key override semantics.
+    With no `serializer=` it goes through the global `JS_CONTEXT_SERIALIZER` flat.
     """
     totals = live_stats["totals"]
     return {

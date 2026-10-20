@@ -177,8 +177,7 @@ class TestBackendLoadedSignal:
         assert isinstance(event.kwargs["config"], dict)
 
     def test_a_cached_backend_is_not_announced_again(self) -> None:
-        # the signal marks a build, so a subscriber counting it would otherwise
-        # see one announcement per request that touches a partial response
+        # the signal marks a build, so it must not fire once per partial response
         partial_backend_manager.get()
         with capture_signals(partial_backend_loaded) as recorded:
             partial_backend_manager.get()

@@ -26,16 +26,14 @@ class UnknownDependencyError(LookupError):
     ) -> None:
         """Record the missing name, the parameter, and the closest registered name.
 
-        The callable being filled is attached afterwards by the resolve that
-        failed, so a successful replay owns no callable and pays nothing.
+        The failed resolve attaches the callable later, so a good replay pays nothing.
         """
         self.name = name
         self.param_name = param_name
         self.func: Callable[..., Any] | None = None
         matches = get_close_matches(name, registered, n=1)
         self.suggestion: str | None = str(matches[0]) if matches else None
-        # Both arguments reach `args`, so the exception survives the copy a
-        # process pool or a caching layer makes of it.
+        # Both arguments reach `args`, so a pickled copy survives.
         super().__init__(name, param_name)
 
     def attribute_to(self, func: Callable[..., Any]) -> None:
@@ -47,8 +45,7 @@ class UnknownDependencyError(LookupError):
     def __str__(self) -> str:
         """Compose the message from the name, the parameter, and the owner.
 
-        A registered name close to the missing one replaces the generic advice,
-        because a near miss is almost always a typo at the `Depends` site.
+        A near-miss registered name replaces the generic advice, as it is likely a typo.
         """
         where = "" if self.param_name is None else f' on parameter "{self.param_name}"'
         owner = "" if self.func is None else f" of {describe_callable(self.func)}"

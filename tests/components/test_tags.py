@@ -224,15 +224,13 @@ class TestComponentTag:
     @pytest.mark.parametrize(
         ("call_site", "expected_substring", "forbidden_substrings"),
         [
-            # Void form passes ``description`` only as a prop. The slot
-            # was never injected so the default body must render.
+            # The void form passes `description` as a prop, so the default body renders.
             (
                 '{% component "card" description="prop value" %}',
                 "<i>fallback</i>",
                 ("prop value",),
             ),
-            # ``description`` arrives as both a prop and a slot body, and the
-            # injected slot wins over the prop and the default body.
+            # `description` as prop and slot body: the injected slot wins over both.
             (
                 (
                     '{% #component "card" description="prop value" %}'
@@ -1056,11 +1054,9 @@ class TestSetSlotTag:
     @pytest.mark.parametrize(
         ("context_data", "expected_substring", "forbidden_substrings"),
         [
-            # With no slot key in context, a prop sharing the slot name must
-            # not shadow the default body through the unprefixed key.
+            # With no slot key, a prop named like the slot must not shadow the default.
             ({"description": "prop value"}, "<span>default</span>", ("prop value",)),
-            # With both slot_<name> and a same-named prop present, the
-            # caller-injected slot wins over the prop and the default body.
+            # With `slot_<name>` and a same-named prop, the slot wins over both.
             (
                 {"slot_description": "<em>real</em>", "description": "prop"},
                 "<em>real</em>",
@@ -1102,8 +1098,7 @@ class TestComponentMissReporting:
         return t.render(Context(ctx))
 
     def _not_found_patches(self, visible: dict[str, None]):
-        # Patch the manager, not the facade, so the miss path runs through
-        # the real facade delegation the tag imports.
+        # Patch the manager, not the facade, so the miss uses the real delegation.
         return (
             patch.object(components_manager, "get_component", return_value=None),
             patch.object(

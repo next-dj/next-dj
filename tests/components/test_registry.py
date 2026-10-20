@@ -282,8 +282,7 @@ class TestComponentVisibilityResolver:
         scope_root.mkdir()
         sub = scope_root / "area"
         sub.mkdir()
-        # Two components share a scope_root, so one `resolve_visible()` queries
-        # `_get_relative_parts_cached` twice and the second hit moves the entry.
+        # A shared scope_root makes `resolve_visible()` hit the parts cache twice.
         reg.register(
             ComponentInfo("c1", scope_root, "area", sub / "c1.djx", None, True)
         )
@@ -443,8 +442,7 @@ class TestRootsAreMarkedUnderBothSpellings:
 class TestTheResolvedPathMemoKeysOnTheCallerSpelling:
     """A render repeating one unresolved path keeps hitting the memo it seeded.
 
-    Keying the memo on the resolved path left the caller's own spelling missing
-    forever, so every render paid the `resolve()` again.
+    Keying on the resolved path made the caller's spelling miss forever.
     """
 
     def _tree_behind_a_link(self, tmp_path: Path) -> tuple[ComponentRegistry, Path]:
@@ -462,8 +460,7 @@ class TestTheResolvedPathMemoKeysOnTheCallerSpelling:
     def test_a_repeat_of_one_spelling_answers_without_resolving_again(
         self, tmp_path: Path
     ) -> None:
-        # The link goes between the two calls, so a second `resolve()` would land
-        # somewhere else and the memo is the only thing that can answer the same.
+        # The link moves between calls, so only the memo answers the second `resolve()`.
         reg, linked = self._tree_behind_a_link(tmp_path)
         res = ComponentVisibilityResolver(reg)
         template = linked / "home.djx"

@@ -1,7 +1,6 @@
 """Cross-area helpers for paths, `DIRS` entries, page trees, routes, and edit watching.
 
-Everything here sits below the subpackages that share it, so a value object two of
-them build is defined here rather than in one of them, which would close a cycle.
+It sits below the subpackages that share it, so no shared object closes a cycle.
 """
 
 from __future__ import annotations
@@ -15,11 +14,10 @@ import re
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, Protocol, TypeGuard, cast, override
+from typing import TYPE_CHECKING, Any, Final, NamedTuple, TypeGuard, override
 from urllib.parse import unquote_to_bytes
 
 from django.conf import settings
-from django.contrib.auth.decorators import login_not_required
 from django.core.exceptions import DisallowedRedirect
 from django.http import HttpResponseRedirect
 from django.template.base import NodeList
@@ -36,7 +34,6 @@ if TYPE_CHECKING:
     import types
     from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
 
-    from django.http.response import HttpResponseBase
     from django.template.base import Node
 
 
@@ -103,11 +100,7 @@ def is_dynamic_trail(url_path: str) -> bool:
 
 
 def normalise_route_name(raw_name: str) -> str:
-    """Return the route name a bracket segment maps to, reading `-` as `_`.
-
-    Django accepts only a Python identifier between its angle brackets, and the parser
-    and the directory check both read the name through this one rule.
-    """
+    """Return the route name a bracket segment maps to, reading `-` as `_`."""
     return raw_name.replace("-", "_")
 
 
@@ -121,11 +114,7 @@ def decode_url_path(path: str) -> str:
 
 @functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
 def resolved_tree(path: Path) -> Path:
-    """Return the resolved form of a page tree, memoised across the process.
-
-    A router re-reads the same handful of trees, and resolving one costs more than
-    everything else the read pays for, so the LRU bound caps a runaway caller too.
-    """
+    """Return the resolved form of a page tree, memoised across the process."""
     return path.resolve()
 
 
@@ -148,8 +137,7 @@ def forget_resolved_trees() -> None:
 def stat_mtime_ns(path: Path) -> int | None:
     """Return the nanosecond mtime of `path`, or `None` when it does not stat.
 
-    Nanoseconds rather than a float, because a float timestamp rounds two
-    writes a filesystem told apart back into one value.
+    A float timestamp would round two distinct writes into one value.
     """
     try:
         return path.stat().st_mtime_ns
@@ -241,20 +229,19 @@ class PageRoot:
         return join_trail(head, trail)
 
 
-def page_roots_shape_error(source: str, roots: list[Any]) -> str | None:
-    """Return why `roots` is no list of page trees, or `None` when it is one.
+UNMOUNTED: Final = PageRoot(path=Path(), label="")
+"""A tree with no `pages()` include, whose pages route by their own trail."""
 
-    Both readers of `page_roots` dereference `root.path`, so the rule they
-    refuse a third-party backend by lives here with the value object.
-    """
+
+def page_roots_shape_error(source: str, roots: list[Any]) -> str | None:
+    """Return why `roots` is no list of page trees, or `None` when it is one."""
     for root in roots:
         if not isinstance(root, PageRoot):
             return (
                 f"{source} reported {type(root).__name__} instead of a "
                 "next.urls.PageRoot page tree"
             )
-        # Widened from the declared `Path`, because a dataclass validates no
-        # field and every reader dereferences the value as a path.
+        # Widened from `Path`, as a dataclass validates no field.
         tree: object = root.path
         if not isinstance(tree, Path):
             return (
@@ -275,11 +262,7 @@ def resolve_base_dir() -> Path | None:
 
 
 def template_edits_watched() -> bool:
-    """Whether the caches re-read the disk to notice a change under way.
-
-    Autoreload ignores `.djx` edits and new directories, so only a re-read notices
-    either, and `DEBUG` is read per call so an override takes effect.
-    """
+    """Whether the caches re-read the disk, since autoreload misses `.djx` edits."""
     return bool(settings.DEBUG)
 
 
@@ -296,8 +279,7 @@ def _dir_entry_candidate(item: Path, base_dir: Path | None) -> Path | None:
 def _dir_entry_segment_name(item: Path) -> str:
     """Return the URL segment name a ``DIRS`` entry that names no tree carries.
 
-    A relative Windows-style entry read on POSIX carries no separator of its own, so
-    its last component comes from the forward-slashed text instead of `Path` splitting.
+    A Windows-style entry read on POSIX has no separator, so split the slashed text.
     """
     if item.is_absolute():
         return item.name
@@ -333,22 +315,20 @@ def classify_dirs_entries(
     segments: set[str] = set()
     for item in items:
         candidate = _dir_entry_candidate(item, base_dir)
-        # Resolved before the probe, so a `..` reaching past a directory that
-        # does not exist still names the tree the entry means.
+        # Resolved before the probe, so `..` past a missing directory still resolves.
         resolved = None if candidate is None else resolved_tree(candidate)
         if resolved is not None and resolved.is_dir():
             path_roots.append(resolved)
         else:
             name = _dir_entry_segment_name(item)
-            # An entry that is nothing but separators names no segment, and an
-            # empty name would reach `skip_dir_names` as a directory to refuse.
+            # Separators alone name no segment, and an empty name would be skipped.
             if name:
                 segments.add(name)
 
     return path_roots, frozenset(segments)
 
 
-_PAGE_FILES: Final = frozenset({"page.py", "template.djx"})
+PAGE_FILES: Final = frozenset({"page.py", "template.djx"})
 """The files that make a directory a page, a `template.djx` alone a virtual one."""
 
 
@@ -377,11 +357,7 @@ A converter a project registers is read as `slug`, narrower than `str`.
 def _route_rank(name: str) -> tuple[int, int, int, str]:
     """Rank a directory among its siblings, the most specific route first.
 
-    Django tries patterns in order, so a static `about` precedes a `[slug]` that would
-    match it too, whatever order the directory read returned. A static segment comes
-    first, then a parameter, then a catch-all. Within each, the one with more literal
-    text goes first, so `post-[id]` precedes `[slug]`, then the narrower converters,
-    so `[uuid:key]` precedes `[str:key]`, and the name breaks the remaining ties.
+    Static, then parameter, then catch-all, then more literal text, narrower converter.
     """
     param = wildcard = False
     width = 0
@@ -396,6 +372,38 @@ def _route_rank(name: str) -> tuple[int, int, int, str]:
     return wildcard + param, -literal, width, name
 
 
+class PageDir(NamedTuple):
+    """One listing of a page-tree directory, its file names and its subdirectories."""
+
+    files: frozenset[str]
+    children: tuple[Path, ...]
+
+
+def list_page_dir(directory: Path) -> PageDir:
+    """List `directory` once, its subdirectories in `_route_rank` order."""
+    try:
+        with os.scandir(directory) as scan:
+            entries = list(scan)
+    except OSError as e:
+        logger.debug("Cannot list directory %s: %s", directory, e)
+        return PageDir(frozenset(), ())
+    files: set[str] = set()
+    children: list[Path] = []
+    for entry in entries:
+        # `is_dir` reads the type the listing returned, so only a symlink costs a stat.
+        if entry.is_dir():
+            children.append(Path(entry.path))
+        else:
+            files.add(entry.name)
+    children.sort(key=lambda child: _route_rank(child.name))
+    return PageDir(frozenset(files), tuple(children))
+
+
+def routes_into(name: str, skip_dir_names: frozenset[str]) -> bool:
+    """Return whether the router descends into a directory named `name`."""
+    return not name.startswith("_") and name not in skip_dir_names
+
+
 def _visit_page_dir(
     current_path: Path,
     tree_root: Path,
@@ -405,35 +413,19 @@ def _visit_page_dir(
 ) -> Generator[tuple[str, Path], None, None]:
     """Yield the page of one directory, then descend into its route children.
 
-    The page comes first, real or virtual, and the children follow in `_route_rank`
-    order, so the patterns come out the same on every file system.
+    The children follow in `_route_rank` order, so every file system yields one order.
     """
-    try:
-        with os.scandir(current_path) as scan:
-            entries = list(scan)
-    except OSError as e:
-        logger.debug("Cannot list directory %s: %s", current_path, e)
-        return
-    has_page = False
-    children: list[os.DirEntry[str]] = []
-    for entry in entries:
-        # `is_dir` reads the type the directory listing returned, so only a symlink
-        # costs a stat.
-        if entry.is_dir():
-            children.append(entry)
-        elif entry.name in _PAGE_FILES:
-            has_page = True
-    if has_page:
+    listing = list_page_dir(current_path)
+    if not listing.files.isdisjoint(PAGE_FILES):
         yield url_path, current_path / "page.py"
-    children.sort(key=lambda entry: _route_rank(entry.name))
-    for entry in children:
-        if entry.name.startswith("_") or entry.name in skip_dir_names:
+    for child in listing.children:
+        if not routes_into(child.name, skip_dir_names):
             if on_skipped_dir is not None:
-                on_skipped_dir(Path(entry.path), tree_root, url_path)
+                on_skipped_dir(child, tree_root, url_path)
             continue
-        child_url = f"{url_path}/{entry.name}" if url_path else entry.name
+        child_url = f"{url_path}/{child.name}" if url_path else child.name
         yield from _visit_page_dir(
-            Path(entry.path), tree_root, child_url, skip_dir_names, on_skipped_dir
+            child, tree_root, child_url, skip_dir_names, on_skipped_dir
         )
 
 
@@ -468,22 +460,6 @@ def is_middleware(entry: object, base: str) -> bool:
 def middleware_listed(middleware: Iterable[object], base: str) -> bool:
     """Whether `middleware` lists the class `base` or a subclass of it."""
     return any(is_middleware(entry, base) for entry in middleware)
-
-
-class _OpenView(Protocol):
-    """A framework view open to everyone, which `manage.py permissions` reads off."""
-
-    next_open: bool
-
-
-def open_view[V: Callable[..., HttpResponseBase]](view: V) -> V:
-    """Exempt a framework view from the login middleware and mark it open to everyone.
-
-    `login_not_required` alone tells nothing of what the view itself still refuses.
-    """
-    exempt = login_not_required(view)
-    cast("_OpenView", exempt).next_open = True
-    return exempt
 
 
 def child_nodelists(node: Node) -> Iterator[NodeList]:

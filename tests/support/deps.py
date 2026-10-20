@@ -15,8 +15,7 @@ from next.deps.providers import ParameterProvider
 class PlanEntry(NamedTuple):
     """One compiled plan entry read by field name instead of by position.
 
-    Building it from the raw tuple fails loudly the day the plan grows a
-    field, where indexing would quietly shift every assertion one slot over.
+    Building it from the raw tuple fails loudly when the plan grows a field.
     """
 
     name: str

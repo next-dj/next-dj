@@ -78,10 +78,7 @@ STATICFILES_DIRS = [SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# next.W059 flags a field name two static wizard steps share, because the merged
-# get_all_cleaned_data() keeps only the last step's value. The acknowledgement is a
-# control field here, read per step from the submitted POST in check_permissions and
-# dropped before the model create, so nothing reads the merged value.
+# The acknowledgement repeats on every step but is read per step, never merged.
 SILENCED_SYSTEM_CHECKS = ["next.W059"]
 
 NEXT_FRAMEWORK = {
@@ -102,8 +99,7 @@ NEXT_FRAMEWORK = {
         }
     ],
     "FORM_ACTION_BACKENDS": [{"BACKEND": "access.backends.AuditedFormActionBackend"}],
-    # Wizard step drafts live in the dedicated `wizards` cache alias rather
-    # than the session, with a short lifetime that fits a PII-carrying flow.
+    # Drafts live in a dedicated cache alias with a short lifetime for PII.
     "FORM_WIZARD_BACKEND": {
         "BACKEND": "next.forms.CacheFormWizardBackend",
         "OPTIONS": {"CACHE_ALIAS": "wizards", "TIMEOUT": 1800},

@@ -27,8 +27,7 @@ if TYPE_CHECKING:
     from next.static import StaticCollector
 
 
-# Per-request component lookup cache attached to the request object, mirroring
-# REQUEST_DEP_CACHE_ATTR in next.deps. Keyed by (component name, anchor path).
+# Per-request component lookup cache on the request, keyed by (name, anchor path).
 COMPONENT_LOOKUP_CACHE_ATTR: Final[str] = "_next_component_lookup_cache"
 
 
@@ -113,15 +112,13 @@ class ComponentWidget(django_forms.Widget):
             )
         static_assets_slot.get().collect_component_assets(info, frame.collector)
         merged = self.build_attrs(self.attrs, attrs or {})
-        # Hyphenated keys such as aria-invalid cannot be read as template vars,
-        # so they alias to an underscore form unless that name is already taken.
+        # Hyphenated keys like aria-invalid alias to underscores unless already taken.
         aliased = {
             k.replace("-", "_"): v
             for k, v in merged.items()
             if "-" in k and k.replace("-", "_") not in merged
         }
-        # The shared input and textarea components read identifier-named vars, so
-        # the merged attrs spread to the top level while "attrs" keeps the originals.
+        # Shared components read identifier vars, so merged attrs spread to the top.
         context = {
             **merged,
             **aliased,
@@ -131,12 +128,10 @@ class ComponentWidget(django_forms.Widget):
             "value": self.format_value(value),
             "errors": self._errors,
         }
-        # Every name above comes from this widget and its field binding, so a
-        # keyless component context must not take any of them over.
+        # A keyless component context must not take over any name set by this widget.
         context[COMPONENT_PROPS_CONTEXT_KEY] = frozenset(context)
         frame.seed(context)
-        # render_component returns template-rendered, already-escaped HTML, so a
-        # SafeString wrapper matches the Widget.render contract without re-escaping.
+        # render_component returns escaped HTML, so SafeString avoids re-escaping it.
         html = render_component(info, context, request=frame.request)
         return SafeString(html)
 
@@ -196,8 +191,7 @@ def _bind_frame(
         widget = getattr(field, "widget", None)
         if not isinstance(widget, ComponentWidget):
             continue
-        # Django deep-copies base_fields and their widgets per form instance, so
-        # the frame stays scoped to this form and never leaks across forms.
+        # Django deep-copies widgets per form instance, so the frame stays per form.
         widget._frame = frame
         if with_errors:
             widget._errors = form[field_name].errors

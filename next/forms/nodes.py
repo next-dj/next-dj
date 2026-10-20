@@ -148,8 +148,7 @@ class FormNode(template.Node):
     def _origin_path(context: template.Context, request: "HttpRequest") -> str | None:
         """Return the page URL the form belongs to, query string included.
 
-        `FORM_ORIGIN_OVERRIDE_KEY` wins over both the posted origin and the current
-        URL, for a validation-error re-render and a wizard step advance alike.
+        `FORM_ORIGIN_OVERRIDE_KEY` wins over both the posted origin and the current URL.
         """
         override = context.get(FORM_ORIGIN_OVERRIDE_KEY)
         if override is not None:

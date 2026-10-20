@@ -65,8 +65,7 @@ def check_context_processor_signature(*args, **kwargs) -> list[CheckMessage]:
 def _iter_page_backend_configs() -> list[tuple[int, dict[str, Any]]]:
     """Return the indexed page backend dicts, read through the settings façade.
 
-    The façade is what every reader of the merged settings sees, so a project
-    naming no backend is checked on the defaults it actually runs.
+    A project naming no backend is checked on the defaults it actually runs.
     """
     configured = next_framework_settings.PAGE_BACKENDS
     if not isinstance(configured, list):

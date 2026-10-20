@@ -143,8 +143,7 @@ class TestValidateBehindGuard:
 class TestValidateBehindViewPermissions:
     """A validate request denied by the view-permission layer runs no validator.
 
-    The hook runs before the form binds, so an anonymous blur never turns
-    the unique-email validator into a brute-force oracle.
+    The hook runs before the form binds, so a blur is no brute-force oracle.
     """
 
     def test_anonymous_validate_is_denied_not_an_envelope(

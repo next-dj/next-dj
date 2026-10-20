@@ -1,7 +1,6 @@
 """Template tags for static asset injection slots and reference resolution.
 
-Collect tags emit placeholders, use tags register assets `StaticManager.inject`
-fills, and `asset` resolves a reference to a URL without touching a collector.
+Collect tags emit placeholders and use tags register assets for injection.
 """
 
 from __future__ import annotations
@@ -70,8 +69,7 @@ def use_style(context: template.Context, url: str) -> str:
 def use_script(context: template.Context, url: str, kind: str = _KIND_JS) -> str:
     """Register an external URL on the active collector under the given kind.
 
-    The kind reaches the registry unchanged, so it picks both the slot and the
-    renderer and a custom kind needs no tag of its own.
+    The kind reaches the registry unchanged, so a custom kind needs no tag of its own.
     """
     _register_asset(context, url, kind)
     return ""
@@ -101,8 +99,7 @@ def asset(context: template.Context, reference: str, *, version: object = None) 
 def _register_asset(context: template.Context, url: str, kind: str) -> None:
     """Prepend an asset to the render's ``StaticCollector`` when context carries one.
 
-    URL-tag assets are shared dependencies, so they belong ahead of co-located
-    files and the CSS cascade flows from generic to page-specific.
+    URL-tag assets are shared dependencies, so they go ahead of co-located files.
     """
     if not isinstance(url, str) or not url:
         return
@@ -116,8 +113,7 @@ def _register_asset(context: template.Context, url: str, kind: str) -> None:
 class _InlineAssetNode(Node):
     """Render an inline asset body and push it onto the active collector.
 
-    The body renders with the current context, and nothing is emitted in place because
-    the collector owns final placement inside the matching slot.
+    Nothing is emitted in place, the collector owns final placement in its slot.
     """
 
     def __init__(self, kind: str, nodelist: NodeList) -> None:

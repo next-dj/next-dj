@@ -16,8 +16,7 @@ from tests.forms import actions
 from tests.support import TWIN_ACTION
 
 
-# `actions` registers the baseline form actions on import. Bind it so the
-# module survives unused-import cleanup whatever the collection order is.
+# Importing `actions` registers the baseline form actions, so keep it bound.
 _BASELINE_ACTIONS = actions
 
 
@@ -189,8 +188,7 @@ class TestEnvelopeHelpers:
         envelope = envelope_of(NextClient().get_zones("/zoned/", ("alpha", "beta")))
         assert isinstance(envelope, PartialEnvelope)
         assert envelope.version == "0"
-        # The zoned page registers a serialize=True provider, so the batch
-        # ends with the context op carrying its js-context delta.
+        # The zoned page registers a serialize=True provider, so a context op ends it.
         assert envelope.op_verbs() == ["morph", "morph", "context"]
         assert envelope.targets() == [{"zone": "alpha"}, {"zone": "beta"}, None]
 

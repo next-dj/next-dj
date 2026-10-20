@@ -12,13 +12,12 @@ Module summary
 A ``DIRS`` that is no sequence of trees raises :class:`~next.errors.InvalidDirsError`, a bare string included, because iterating a string would split it into characters.
 ``PageRoot`` pairs a page tree with the label a report names it by.
 ``prefix`` is the route a ``pages()`` include places the tree under, in Django :func:`~django.urls.path` syntax, and ``None`` for a tree ``next.urls`` routes, and ``namespace`` is the URL namespace of its names, ``next`` unless a ``pages()`` include names another.
-Both fields default, so a custom backend that builds ``PageRoot(path=..., label=...)`` reports a tree of ``next.urls``.
 ``route_trail(trail)`` returns the trail a page at the tree-relative ``trail`` routes by, prefix included.
 It lives here rather than beside the router because the system checks build one too, and it is re-exported as ``next.urls.PageRoot`` for the router contract that produces it.
 
 The rest of the module is framework machinery and is excluded from the listing below.
-It holds ``walk_page_tree``, the depth-first page-tree walk the file router and the system checks both run, ``page_roots_shape_error``, the shared shape probe a check runs over what a router reports, ``template_edits_watched``, the ``DEBUG`` predicate the page, component, and static caches read before they stat anything, and ``normalise_route_name``, the one reading of a hyphen as an underscore that the URL parser and the directory check share.
-Those four sit beside ``PageRoot`` for the reason ``PageRoot`` sits here, that more than one subsystem reads each of them.
+It holds ``walk_page_tree``, the depth-first page-tree walk the file router and the system checks both run, ``list_page_dir`` and ``routes_into``, the one listing of a page-tree directory and the one rule for which subdirectories the router enters, that the walk and the empty-branch check share with ``PAGE_FILES``, ``page_roots_shape_error``, the shared shape probe a check runs over what a router reports, ``template_edits_watched``, the ``DEBUG`` predicate the page, component, and static caches read before they stat anything, and ``normalise_route_name``, the one reading of a hyphen as an underscore that the URL parser and the directory check share.
+Those sit beside ``PageRoot`` for the reason ``PageRoot`` sits here, that more than one subsystem reads each of them.
 ``WEB_SCHEMES``, ``is_int``, ``ROUTE_BRACKET_PATTERN``, and ``is_dynamic_trail`` join them for the same reason, the URL schemes a head tag or a sitemap may name, the strict int probe the metadata normaliser and the SEO checks share, and the bracket-segment pattern behind the predicate that tells a route with a parameter from a static one.
 ``prefix_trail`` and ``join_trail`` sit beside that pattern, the first reading a ``pages()`` prefix as a trail with ``<int:wallet>`` turned into ``[int:wallet]``, the second joining two trails with one slash, and the router, the URL checks, the breadcrumb resolution, and ``PageRoot.route_trail`` all build the full trail of a page under a prefix through them.
 ``regex_trail`` reads a :func:`~django.urls.re_path` route the way Django reverses it, a named group as ``[name]`` and a route Django cannot reverse as a catch-all, so no page under such a route reads as static.
@@ -45,7 +44,7 @@ Public API
 
 .. automodule:: next.utils
    :members:
-   :exclude-members: walk_page_tree, page_roots_shape_error, template_edits_watched, normalise_route_name, stat_mtime_ns, resolved_tree, forget_resolved_trees, on_forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH, WEB_SCHEMES, is_int, ROUTE_BRACKET_PATTERN, is_dynamic_trail, prefix_trail, join_trail, TreeSource, load_tree_source, decode_url_path, exec_module_file, is_middleware, middleware_listed
+   :exclude-members: walk_page_tree, PageDir, list_page_dir, routes_into, PAGE_FILES, page_roots_shape_error, template_edits_watched, normalise_route_name, stat_mtime_ns, resolved_tree, forget_resolved_trees, on_forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH, WEB_SCHEMES, is_int, ROUTE_BRACKET_PATTERN, is_dynamic_trail, prefix_trail, join_trail, TreeSource, load_tree_source, decode_url_path, exec_module_file, is_middleware, middleware_listed
 
 See also
 --------

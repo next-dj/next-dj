@@ -1,11 +1,3 @@
-"""One full page through the test client, against the same HTML from a Django view.
-
-The page carries a head of about twenty tags, a `scripts.py` with consent-gated
-scripts, and a configured consent banner, so the row prices every per-request layer
-the framework adds to a page view: the response policy, the metadata fold and head
-render, the scripts plan, the consent payload and the static injection.
-"""
-
 from __future__ import annotations
 
 import types

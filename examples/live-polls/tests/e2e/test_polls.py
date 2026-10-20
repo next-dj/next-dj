@@ -40,11 +40,7 @@ def vim_or_emacs(demo_data: None) -> Poll:
 
 @pytest.fixture()
 def watcher(page: Page, tabs_or_spaces: Poll) -> Iterator[Page]:
-    """Return a second tab of the same context, watching the poll over SSE.
-
-    A parked source notices the gone client only on its next wake, so the
-    teardown publishes once to release the server thread ahead of the timeout.
-    """
+    """Return a second tab watching the poll, released by a publish on teardown."""
     second = page.context.new_page()
     probe = PageProbe()
     probe.attach(second)

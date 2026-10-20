@@ -39,9 +39,7 @@ def _maybe_validate_only(
 ) -> "HttpResponse | None":
     """Return a validate-only response when the request asks for one.
 
-    Fires only once both authorization layers pass and the form is bound, so a guarded
-    action's validator is never an anonymous oracle, and the handler, success signals,
-    and wizard storage stay untouched until the real submit.
+    Runs only after both authorization layers pass, so no validator is an oracle.
     """
     shaper = partial_shaper_slot.get()
     intent = shaper.intent(request)
@@ -67,8 +65,7 @@ def _bind_wizard_step(
 ) -> "HttpResponse | tuple[FormWizard, str, django_forms.Form]":
     """Authorize the step POST and bind its form, or return an early response.
 
-    Both permission layers and the validate-only short circuit run here before any
-    storage write, so a guarded validator never runs for an unauthorized caller.
+    Permission layers and validate-only run before any storage write.
     """
     if state.origin_match is None:
         return HttpResponseBadRequest("Missing or invalid _next_form_origin")
@@ -130,8 +127,7 @@ def _dispatch_wizard(
 
     next_step = wizard.next_step(step_name)
     if next_step is None:
-        # A direct POST to the last step must not finalise while an earlier step has no
-        # stored data, so reroute to the first gap.
+        # A direct POST to the last step must not finalise over a gap, so reroute to it.
         next_step = wizard.first_incomplete_step()
     if next_step is None:
         merged = wizard.get_all_cleaned_data()

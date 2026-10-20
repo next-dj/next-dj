@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-import os
-from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 from next.checks.common import (
@@ -13,32 +10,26 @@ from next.checks.common import (
     get_router_manager,
     page_tree_skip_names,
 )
-from next.pages.access import routed
-from next.pages.loaders import PAGE_MODULE, shared_layouts
+from next.pages.loaders import LAYOUT_TEMPLATE, PAGE_MODULE, shared_layouts
 from next.pages.manager import page
 from next.permissions.access import declarations
 from next.permissions.markers import OPEN
+from next.utils import PAGE_FILES, list_page_dir, routes_into
 
-from .modules import faulty
+from .modules import faulty, load_page
 
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterator
+    from pathlib import Path
 
     from next.permissions.markers import AccessRule
-
-
-logger = logging.getLogger(__name__)
-
-_LAYOUT = "layout.djx"
-_TEMPLATE = "template.djx"
 
 
 class EmptyBranch(NamedTuple):
     """The outermost directory of a branch with no page and no action in it.
 
-    `source` names the first bodyless `page.py` passing to the branch, else its first
-    `layout.djx`, and `access` and `context` hold what that `page.py` passes.
+    `source` names the bodyless `page.py` passing to it, else its `layout.djx`.
     """
 
     directory: Path
@@ -50,8 +41,7 @@ class EmptyBranch(NamedTuple):
 class _Survey(NamedTuple):
     """What one directory and everything below it hold, as the branch report reads it.
 
-    `reported` means an error already names a file or a directory of an empty branch,
-    and `branches` lists the empty branches of the children, outermost only.
+    `reported` means an error already names something in it, so `branches` goes up.
     """
 
     directory: Path
@@ -75,59 +65,36 @@ def _branch(survey: _Survey) -> EmptyBranch:
     )
 
 
-def _listing(
-    directory: Path, skip_dir_names: frozenset[str]
-) -> tuple[frozenset[str], list[Path]]:
-    """Return the file names of `directory` and the directories the router enters.
-
-    One listing answers both, and the directories come sorted by name.
-    """
-    try:
-        with os.scandir(directory) as scan:
-            entries = list(scan)
-    except OSError as e:
-        logger.debug("Cannot list directory %s: %s", directory, e)
-        return frozenset(), []
-    files: set[str] = set()
-    children: list[Path] = []
-    for entry in entries:
-        if not entry.is_dir():
-            files.add(entry.name)
-        elif not entry.name.startswith("_") and entry.name not in skip_dir_names:
-            children.append(Path(entry.path))
-    return frozenset(files), sorted(children)
-
-
 def _survey(
     directory: Path, skip_dir_names: frozenset[str], action_dirs: Collection[Path]
 ) -> _Survey:
     """Survey one directory and its subtree for pages, actions, and what fills neither.
 
-    A bracketed directory without a page is `next.E010`, and a bodyless `page.py` that
-    `faulty` names is `next.E012`, `next.E013` or `next.E166`, so either is reported.
+    A pageless `[param]` is `next.E010` and a `faulty` page.py has its own error.
     """
-    files, child_dirs = _listing(directory, skip_dir_names)
+    listing = list_page_dir(directory)
     page_file = directory / PAGE_MODULE
-    has_page_file = PAGE_MODULE in files
-    filled = directory in action_dirs or (
-        (has_page_file or _TEMPLATE in files) and routed(page_file)
-    )
-    name = directory.name
-    reported = name.startswith("[") and name.endswith("]")
+    filled = directory in action_dirs
+    reported = directory.name.startswith("[") and directory.name.endswith("]")
     passing: Path | None = None
-    if has_page_file and not filled:
-        if faulty(page_file):
-            reported = True
-        else:
-            passing = page_file
-    layout = directory / _LAYOUT if _LAYOUT in files else None
-    children = [_survey(child, skip_dir_names, action_dirs) for child in child_dirs]
+    if not filled and not listing.files.isdisjoint(PAGE_FILES):
+        loaded = load_page(page_file)
+        filled = loaded.routed
+        if loaded.bodyless:
+            if faulty(page_file, loaded):
+                reported = True
+            else:
+                passing = page_file
+    layout = directory / LAYOUT_TEMPLATE if LAYOUT_TEMPLATE in listing.files else None
     branches: list[EmptyBranch] = []
-    for child in children:
+    for child_dir in listing.children:
+        if not routes_into(child_dir.name, skip_dir_names):
+            continue
+        child = _survey(child_dir, skip_dir_names, action_dirs)
         filled = filled or child.filled
-        if child.filled:
+        if child.filled or child.reported:
             branches.extend(child.branches)
-        elif not child.reported:
+        else:
             branches.append(_branch(child))
         reported = reported or child.reported
         passing = passing or child.passing
@@ -140,15 +107,16 @@ def _tree_branches(
 ) -> tuple[EmptyBranch, ...]:
     """Return the empty branches of one tree, the root itself when all of it is one.
 
-    A root `layout.djx` of `DIRS` wraps every page of every tree, so that root is none.
+    A root `layout.djx` of `DIRS` wraps the pages of every tree, so it alone is none.
     """
     survey = _survey(root, skip_dir_names, action_dirs)
-    if survey.filled:
+    if survey.filled or survey.reported:
         return survey.branches
     shared = {layout.resolve() for layout in shared_layouts()}
-    if (root / _LAYOUT).resolve() in shared:
+    own_guard = survey.passing == root / PAGE_MODULE
+    if not own_guard and (root / LAYOUT_TEMPLATE).resolve() in shared:
         return survey.branches
-    return () if survey.reported else (_branch(survey),)
+    return (_branch(survey),)
 
 
 def empty_branches(action_dirs: Collection[Path]) -> Iterator[EmptyBranch]:

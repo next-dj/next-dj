@@ -17,8 +17,7 @@ _CSRF_ROTATED_FLAG = "CSRF_COOKIE_NEEDS_UPDATE"
 def _csrf_rotated(request: "HttpRequest") -> bool:
     """Return True when the request rotated its CSRF token.
 
-    Django sets the flag in `request.META`, so it is read before a render creates a
-    new token. A `META` that is not a dict reads as not rotated.
+    Django sets the flag in `request.META`, read before a render creates a new token.
     """
     meta = getattr(request, "META", None)
     if not isinstance(meta, dict):

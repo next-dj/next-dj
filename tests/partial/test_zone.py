@@ -134,8 +134,7 @@ class TestZoneTagSyntax:
             Template('{% zone "z" garbage %}body{% endzone %}')
 
     def test_spaces_around_equals_raise(self) -> None:
-        # token splitting turns poll = "5s" into three bits, the first of
-        # which carries no '=' and must fail loudly instead of dropping poll
+        # poll = "5s" splits into three bits and must fail loudly, not drop poll
         with pytest.raises(TemplateSyntaxError, match='key="value"'):
             Template('{% zone "z" poll = "5s" %}body{% endzone %}')
 
@@ -236,8 +235,7 @@ class TestRenderZoneStandalone:
         assert LAZY_ATTR not in out
 
     def test_standalone_render_carries_poll_interval(self) -> None:
-        # The client re-reads the interval from the live element after every
-        # morph, so a delivered poll zone must keep the hint on its wrapper.
+        # The client re-reads the interval from the live element, so the zone keeps it.
         template = Template('{% zone "p" poll="5s" %}<b>{{ v }}</b>{% endzone %}')
         node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
         out = render_zone_standalone(

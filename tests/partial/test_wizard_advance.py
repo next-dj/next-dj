@@ -112,15 +112,13 @@ class TestWizardAdvanceRendersZoneNotPageView:
 class TestWizardAdvanceCsrfMeta:
     """A token rotation on a step advance stamps the CSRF meta on the morph.
 
-    The advance reads the rotation flag before minting the next step's
-    token, so a mid-wizard login and the step swap share one envelope.
+    The advance reads the rotation flag before minting the next step's token.
     """
 
     def test_rotation_on_advance_stamps_csrf(
         self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # The submit request rotated its token, modelled by forcing the flag
-        # the shaper reads before any step re-render mints a fresh one.
+        # The submit rotated its token, modelled by forcing the flag the shaper reads.
         monkeypatch.setattr(outcomes_module, "_csrf_rotated", lambda _request: True)
         response = _advance_identity(next_client, zones="wizard-zone")
         envelope = envelope_of(response).data
@@ -138,8 +136,7 @@ class TestWizardAdvanceCsrfMeta:
 class TestWizardInvalidStepZoneMorph:
     """An invalid wizard step morphs the bound form with errors into the zone.
 
-    The bound form carries the submitted value into the zone body, so the error
-    state renders rather than an empty unbound step.
+    The bound form carries the submitted value, so the error state renders.
     """
 
     def test_invalid_step_zone_carries_bound_submitted_value(
@@ -192,8 +189,7 @@ class TestWizardAdvanceShipsZoneAssetsAndContext:
 class TestWizardAdvanceWholePage:
     """A wizard advance with no zone extract-morphs the next step form.
 
-    Without a named zone the advance re-renders the whole next step page and trims the
-    form out by uid, so the envelope is never an empty 204.
+    Without a named zone the whole next step page is re-rendered, never an empty 204.
     """
 
     @pytest.fixture()
@@ -228,8 +224,7 @@ class TestWizardAdvanceWholePage:
 class TestWizardAdvanceStorageBudget:
     """One round trip to wizard storage per advanced step.
 
-    A failing assertion means the advance grew a storage round-trip: one
-    save for the draft, one load for the prefilled next step, nothing more.
+    A failure means the advance grew a round trip beyond one save and one load.
     """
 
     def test_partial_advance_pays_one_save_and_one_load(

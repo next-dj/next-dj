@@ -27,8 +27,7 @@ def render_dep_cache(request: object | None) -> dict[str, Any]:
 class DependencyCache:
     """Store resolved dependency values and detect cycles via in-progress keys.
 
-    The in-progress set is allocated on first use, because every resolve builds
-    a cache while only a named `Depends` ever marks a key.
+    The in-progress set is allocated on first use, as only a named `Depends` marks.
     """
 
     __slots__ = ("_cache", "_in_progress")

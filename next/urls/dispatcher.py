@@ -1,7 +1,6 @@
 """Walk filesystem page trees once to emit routes and register components.
 
-`FilesystemTreeDispatcher` runs the shared `walk_page_tree` once per root, yielding
-`(url_path, page_file)` pairs and registering `_components` folders along the way.
+`FilesystemTreeDispatcher` runs `walk_page_tree` once per root.
 """
 
 from __future__ import annotations

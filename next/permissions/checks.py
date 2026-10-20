@@ -1,5 +1,6 @@
 """System checks for the object permissions and the `{% has_perm %}` tags."""
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Final, cast
 
@@ -100,28 +101,12 @@ type _Place = tuple[str, str]
 """Where a permission name is written, as a message names it and as its `obj`."""
 
 
-def _template_places() -> dict[tuple[str, _Place], None]:
-    """Return each literal `{% has_perm %}` name with the first page or file using it.
-
-    It names the first page reaching a literal name, else the component template.
-    """
-    found: dict[tuple[str, _Place], None] = {}
-    seen: set[str] = set()
-    where = ""
-
-    def collect(nodelist: NodeList) -> bool:
-        nodes = cast("list[HasPermNode]", nodelist.get_nodes_by_type(HasPermNode))
-        for node in nodes:
-            perm = node.literal_perm()
-            if perm is not None and perm not in seen:
-                seen.add(perm)
-                found[perm, (f"{{% has_perm %}} in {where}", where)] = None
-        return False
-
-    search = TemplateSearch(collect)
+def _searched_templates(
+    search: TemplateSearch,
+) -> Iterator[tuple[Path, NodeList, Path]]:
+    """Yield each page composition, then each component template no page reached."""
     for page_path, template in iter_composed_pages():
-        where = str(page_path)
-        search.reaches(template.nodelist, page_template_path(page_path))
+        yield page_path, template.nodelist, page_template_path(page_path)
     for path, text in _component_sources():
         if path in search.memo:
             continue
@@ -129,9 +114,30 @@ def _template_places() -> dict[tuple[str, _Place], None]:
             compiled = Template(text)
         except TemplateSyntaxError:
             continue
-        where = str(path)
-        search.reaches(compiled.nodelist, path)
-    return found
+        yield path, compiled.nodelist, path
+
+
+def _template_places() -> dict[tuple[str, _Place], None]:
+    """Return each literal `{% has_perm %}` name with the first place using it."""
+    perms: list[str] = []
+
+    def collect(nodelist: NodeList) -> bool:
+        nodes = cast("list[HasPermNode]", nodelist.get_nodes_by_type(HasPermNode))
+        literals = (node.literal_perm() for node in nodes)
+        perms.extend(perm for perm in literals if perm is not None)
+        return False
+
+    search = TemplateSearch(collect)
+    first: dict[str, str] = {}
+    for place, nodelist, template_path in _searched_templates(search):
+        search.reaches(nodelist, template_path)
+        for perm in perms:
+            first.setdefault(perm, str(place))
+        perms.clear()
+    return {
+        (perm, (f"{{% has_perm %}} in {where}", where)): None
+        for perm, where in first.items()
+    }
 
 
 def _declared_places() -> dict[tuple[str, _Place], None]:

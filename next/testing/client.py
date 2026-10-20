@@ -24,8 +24,7 @@ if TYPE_CHECKING:
 class PartialEnvelope:
     """Structural view over a decoded patch envelope for test assertions.
 
-    The payload is rebuilt into the producer's own envelope objects, so the helpers
-    answer from named fields instead of a second reading of the wire.
+    The payload is rebuilt into the producer's envelope objects, not a second wire read.
     """
 
     def __init__(self, data: dict[str, Any]) -> None:
@@ -36,8 +35,7 @@ class PartialEnvelope:
     def _envelope(self) -> Envelope:
         """Return the envelope objects behind the mapping, built once per view.
 
-        Deferred rather than built in the constructor, so a view over a mapping no
-        assertion reads costs nothing and a malformed one is refused where it is read.
+        Deferred so an unread view costs nothing and a malformed one fails where read.
         """
         if self._parsed is None:
             self._parsed = Envelope.from_dict(self.data)
@@ -121,8 +119,7 @@ def envelope_of(response: HttpResponse) -> PartialEnvelope:
 class NextClient(Client):
     """Django test client with next-dj form-action shortcuts.
 
-    `post_action` POSTs to a resolved action name, `get_action_url` resolves without
-    dispatching, and `get_zones` GETs a URL as a partial zone request.
+    `post_action` POSTs to an action name, `get_zones` GETs a URL as partial zones.
     """
 
     def post_action(
@@ -140,8 +137,7 @@ class NextClient(Client):
     ) -> HttpResponse:
         """Resolve `action_name` and POST `data` to the resulting URL.
 
-        `origin` fills `_next_form_origin` unless `data` has one, `page` picks among
-        same-named actions as in `resolve_action_url`, `partial` stamps the request.
+        `origin` fills the origin field, `page` picks among same-named actions.
         """
         url = resolve_action_url(action_name, page=page)
         payload: dict[str, Any] = dict(data or {})
@@ -173,8 +169,7 @@ class NextClient(Client):
     ) -> HttpResponse:
         """GET `url` as a partial request for the named zones.
 
-        `zones` joins into the `X-Next-Zone` header, and `version` sets the client
-        asset version header so tests can drive the version-sync branch.
+        `zones` joins into `X-Next-Zone` and `version` sets the asset version header.
         """
         names = zones if isinstance(zones, str) else ",".join(zones)
         sent = dict(headers or {})

@@ -30,8 +30,7 @@ class CountingComponentsBackend(FileComponentsBackend):
 class BabelJsxBackend(StaticFilesBackend):
     """`StaticFilesBackend` that renders `.jsx` as `<script type="text/babel">`.
 
-    The `jsx` kind is registered in `apps.py`, and a `babel_tag` option overrides the
-    tag template the way `css_tag` and `js_tag` do on the parent.
+    A `babel_tag` option overrides the tag template like `css_tag` and `js_tag`.
     """
 
     _DEFAULT_BABEL_TAG: ClassVar[str] = (

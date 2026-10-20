@@ -41,8 +41,7 @@ def check_repeated_form_has_key(*args, **kwargs) -> list[CheckMessage]:
 def check_form_backend_partial_aware(*args, **kwargs) -> list[CheckMessage]:
     """Warn when partial rendering is on but a form backend is not aware (`next.W068`).
 
-    A backend that overrides `shape_response` without the partial branch drops the patch
-    envelope and serves a full page, so only an override is warned about.
+    An override of `shape_response` without the partial branch serves a full page.
     """
     if not partial_backends_active():
         return []

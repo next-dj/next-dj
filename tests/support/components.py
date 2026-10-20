@@ -15,8 +15,7 @@ def components_config(root: Path) -> dict[str, object]:
 def write_colocated_component_assets(sources: Iterable[Path]) -> None:
     """Write a `component.css` beside each component source the caller names.
 
-    A page-tree fixture builds template and layout assets only, so the folder a watch
-    case points at has to exist on disk before a finder scan can report anything.
+    A page-tree fixture builds only template and layout assets.
     """
     for source in sources:
         folder = source.parent

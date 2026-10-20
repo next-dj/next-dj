@@ -1,7 +1,4 @@
-"""The zones a standalone render of a page refuses, read once from its templates.
-
-The `next.E161` and `next.E063` checks and the zone registry read this one analysis.
-"""
+"""The zones a standalone render refuses, read once for checks and the registry."""
 
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
@@ -134,10 +131,7 @@ type _Source = tuple[object, ...] | NodeList
 
 
 def _bindings(node: Node) -> Iterator[tuple[frozenset[str], _Source]]:
-    """Yield each set of names a node binds with what it binds them to.
-
-    A component tag binds its `children` and a slot tag the slot to the nodes they hold.
-    """
+    """Yield each set of names a node binds with what it binds them to."""
     if isinstance(node, ForNode):
         loopvars = node.loopvars
         names = [loopvars] if isinstance(loopvars, str) else loopvars
@@ -154,10 +148,7 @@ def _bindings(node: Node) -> Iterator[tuple[frozenset[str], _Source]]:
 
 
 class _Body:
-    """The variable names that may hold one part of the body a page hands over.
-
-    The part is `children` or one `slot_<name>`, every binding of it grows the names.
-    """
+    """The variable names that may hold `children` or one `slot_<name>` part."""
 
     def __init__(self, placed: _Placed, part: str) -> None:
         """Start from the variable of `part` and grow it through every binding."""
@@ -215,10 +206,7 @@ class _Body:
 
 
 def _opaque(node: Node) -> bool:
-    """Return whether a node runs code the analysis cannot read.
-
-    A tag helper is told apart by its function, since every helper node is Django's.
-    """
+    """Return whether a node runs code the analysis cannot read."""
     if isinstance(node, TagHelperNode):
         module = getattr(node.func, "__module__", None) or ""
         return node.takes_context and not module.startswith(_KNOWN_MODULES)
@@ -226,10 +214,7 @@ def _opaque(node: Node) -> bool:
 
 
 class _Closure(TemplateWalk):
-    """Place every node one component template reaches, under a condition or not.
-
-    A walk answers `True` the moment it meets what it cannot follow.
-    """
+    """Place every node one component template reaches, under a condition or not."""
 
     def __init__(self, manager: "ComponentsManager", anchor: Path) -> None:
         """Resolve nested components through `manager` from the page's `anchor`."""
@@ -267,10 +252,7 @@ class _Closure(TemplateWalk):
 def _template_source(
     manager: "ComponentsManager", name: str, anchor: Path
 ) -> "TemplateSource | None":
-    """Return the template of a component only a template renders, else `None`.
-
-    A `component.py` decides in code the analysis does not read, so it counts as one.
-    """
+    """Return the template of a component only a template renders, else `None`."""
     info = manager.get_component(name, anchor)
     if info is None or info.module_path is not None:
         return None
@@ -278,10 +260,7 @@ def _template_source(
 
 
 class Components:
-    """Tell which components of one page guard a part of their body, from its anchor.
-
-    A `{% has_perm %}`, a decision around it, a `component.py` or a blind include count.
-    """
+    """Tell which components of one page guard a part of their body."""
 
     def __init__(self, manager: "ComponentsManager", page_path: Path) -> None:
         """Resolve components through `manager` from the template of `page_path`."""
@@ -296,10 +275,7 @@ class Components:
         return frozenset(self._stamps)
 
     def guarding(self, name: str, part: str = _BODY) -> bool:
-        """Return whether the component `name` renders a part behind a decision.
-
-        The part is `children` or the `slot_<name>` variable of one slot.
-        """
+        """Return whether the component `name` renders a part behind a decision."""
         held = self._names.get((name, part))
         if held is None:
             held = self._names[name, part] = self._component(name, part)
@@ -366,10 +342,7 @@ def _held_zones(
 def opaque_zones(
     nodelist: NodeList, tag: Node | None = None
 ) -> Iterator[tuple[str, Node]]:
-    """Yield each zone under a block tag the analysis cannot read, with the outermost.
-
-    A tag of a module outside `django.` and `next.` may hide its body in code.
-    """
+    """Yield each zone under a tag the analysis cannot read, with the outermost."""
     for node in nodelist:
         if isinstance(node, ZoneNode) and tag is not None:
             yield node.name, tag
@@ -381,10 +354,7 @@ def opaque_zones(
 
 
 def bound_zones(nodelist: NodeList, components: Components) -> frozenset[str]:
-    """Return the zones a standalone render must refuse, in a guard or a condition.
-
-    A `{% has_perm %}`, a condition or an unread tag above a zone decides like one.
-    """
+    """Return the zones a standalone render must refuse, in a guard or a condition."""
     guarded = {name for name, _ in guarded_zones(nodelist, components)}
     guarded.update(name for name, _ in opaque_zones(nodelist))
     return frozenset(guarded.union(zones_under(nodelist, _CONDITIONS)))

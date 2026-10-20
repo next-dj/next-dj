@@ -106,8 +106,7 @@ class TestSerializedPageContextKeys:
             assert list(iter_serialized_page_context_keys()) == []
 
     def test_a_router_reporting_the_wrong_tree_shape_is_skipped(self, tmp_path) -> None:
-        # This runs on the render path, so a plugin handing back bare paths
-        # may not turn a page render into an AttributeError.
+        # On the render path, bare paths from a plugin may not raise an AttributeError.
         manager = MagicMock()
         manager.backends = (MalformedRootsRouter([tmp_path]),)
         with patch("next.pages.scan.get_router_manager", return_value=(manager, [])):

@@ -174,7 +174,7 @@ class TestRequestedZonesStaysOutOfTheContext:
     ) -> None:
         """The render context and its JS subset stay free of the batch."""
         page_path = tmp_path / "page.py"
-        page_instance._context_manager.register_context(
+        page_instance.contexts.register_context(
             page_path, "a", lambda: "a-value", serialize=True, zone="a"
         )
 
@@ -210,10 +210,10 @@ class TestUrlKwargNamedLikeTheBatch:
     ) -> None:
         """The batch narrows the callables while the kwarg reaches the context."""
         page_path = tmp_path / "page.py"
-        page_instance._context_manager.register_context(
+        page_instance.contexts.register_context(
             page_path, "a", lambda: "a-value", zone="a"
         )
-        page_instance._context_manager.register_context(
+        page_instance.contexts.register_context(
             page_path, "b", lambda: "b-value", zone="b"
         )
 

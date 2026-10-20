@@ -162,8 +162,7 @@ class TestMorphFacadeRefusals:
     def test_the_refused_keyword_is_named_in_the_message(
         self, case: MorphRefusalCase
     ) -> None:
-        # the message is the only place the caller learns which keyword was wrong,
-        # so it is pinned whole rather than searched for the bracketed list
+        # the message is the only place the caller learns which keyword was wrong
         with pytest.raises(TypeError) as exc:
             case.call()
         assert str(exc.value) == (
@@ -179,8 +178,7 @@ class TestMorphFacadeRefusals:
             Patches.versioned("v1").morph()
 
     def test_a_route_carrying_only_its_own_keywords_is_accepted(self) -> None:
-        # the refusal returns before naming anything on the hot path, and a false
-        # positive here would break every plain morph
+        # the refusal returns before naming anything, and a false positive breaks morphs
         envelope = Patches(partial_request()).morph(zone="alpha").envelope()
         assert envelope.ops[0].as_dict()["target"] == {"zone": "alpha"}
 

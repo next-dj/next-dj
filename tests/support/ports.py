@@ -50,8 +50,7 @@ def _shaping_refused(method: str) -> NoReturn:
 class IntentOnlyShaper:
     """Shaper stub that answers intent lookups and refuses to shape anything.
 
-    Intent parsing stays real, so a call site keeps taking the same branch it
-    takes in production, and reaching a shape method fails the test outright.
+    Intent parsing stays real, so a call site takes its production branch.
     """
 
     def __init__(self) -> None:

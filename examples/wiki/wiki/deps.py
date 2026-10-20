@@ -20,10 +20,9 @@ class DArticle[T](DDependencyBase[T]):
 
 
 def _by_url_slug(model_cls: type[Model], context: ResolutionContext) -> Model | None:
-    """Fetch the row named by the URL ``slug``, or ``None`` when no slug is captured.
+    """Fetch the row named by the URL `slug`, or `None` when no slug is captured.
 
-    Both the plain ``resolve`` path and the compiled filler land here, so the
-    lookup and its two empty answers are written once for the two of them.
+    Both the plain `resolve` path and the compiled filler land here.
     """
     slug = context.url_kwargs.get("slug")
     if slug is None:
@@ -42,11 +41,7 @@ class ArticleProvider(RegisteredParameterProvider):
         return self.static_can_handle(param)
 
     def static_can_handle(self, param: inspect.Parameter) -> bool:
-        """Claim every ``DArticle[...]`` parameter and rule out the others for good.
-
-        The annotation settles the match, so the plan compiler makes this provider
-        the terminal one for the parameter instead of asking again per request.
-        """
+        """Claim every `DArticle[...]` parameter and rule out the others for good."""
         return get_origin(param.annotation) is DArticle
 
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:

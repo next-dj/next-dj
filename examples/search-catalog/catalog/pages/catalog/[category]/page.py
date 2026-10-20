@@ -12,8 +12,7 @@ from next.pages import MetadataDict
 def filter_zones() -> str:
     """Name every zone the live filter re-renders on a category listing.
 
-    The category listing paginates instead of growing on scroll, so the set drops
-    `catalog-more` and keeps the pager beside the results.
+    The listing paginates, so the set drops `catalog-more` and keeps the pager.
     """
     return zone_target(CATEGORY_ZONES)
 

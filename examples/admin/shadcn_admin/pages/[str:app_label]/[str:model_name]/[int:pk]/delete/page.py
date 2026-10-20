@@ -16,8 +16,7 @@ def deletion(
 ) -> tuple[dict[str, int], set[str], list[Model], bool]:
     """Return what deleting `obj` takes and whether the user may do all of it.
 
-    Every row the delete cascades to must be one the user may delete, as Django's own
-    `delete_view` demands, so a parent never removes rows the user could not.
+    Every cascaded row must be deletable too, as in Django's own `delete_view`.
     """
     _to_delete, model_count, perms_needed, protected = get_deleted_objects(
         [obj], request, model_admin.admin_site

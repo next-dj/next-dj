@@ -66,8 +66,7 @@ def recent_links() -> list[Link]:
 def pending_total_label() -> str:
     """Label the badge zone with the live total of unflushed clicks.
 
-    The `zone=` binding keeps the click-cache sum out of a `latest-links`
-    render, while the badge morph the detail page aims here still gets it.
+    The `zone=` binding keeps the click-cache sum out of a `latest-links` render.
     """
     total = sum(pending_clicks().values())
     return f"{total} pending clicks"

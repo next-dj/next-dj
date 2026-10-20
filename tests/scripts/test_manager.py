@@ -572,8 +572,7 @@ class TestHeldScripts:
     def test_a_held_script_waits_for_its_own_category_and_the_block(
         self, tmp_path: Path
     ) -> None:
-        # A marketing pixel named inside an analytics block must not load once
-        # analytics alone is granted, so it waits for both.
+        # A marketing pixel inside an analytics block waits for both grants.
         root = write_tree(
             tmp_path / "pages",
             scripts=(

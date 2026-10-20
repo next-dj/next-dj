@@ -1,7 +1,6 @@
 """Where the form checks read their registrations from.
 
-A page-scoped `@action`, form class or `FormWizard` registers only as its `page.py`
-runs, so every reader below discovers the page tree first.
+A page-scoped registration appears only as its `page.py` runs, so readers load pages.
 """
 
 from pathlib import Path

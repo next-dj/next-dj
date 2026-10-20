@@ -42,8 +42,7 @@ class DFlag[T](DDependencyBase[T]):
 def _fetch_flag(model_cls: type[Model], context: ResolutionContext) -> object:
     """Return the cached flag named by the URL kwargs or the template context.
 
-    Shared by `resolve` and the compiled filler, so the two paths cannot drift
-    apart and the only difference between them is when the annotation is read.
+    Shared by `resolve` and the compiled filler so the two paths cannot drift apart.
     """
     name = context.url_kwargs.get("name") or context.context_data.get("flag_name")
     if not name:
@@ -53,23 +52,14 @@ def _fetch_flag(model_cls: type[Model], context: ResolutionContext) -> object:
 
 
 class FlagProvider(RegisteredParameterProvider):
-    """Resolve `DFlag[...]` parameters by looking up `flag_name`.
-
-    The lookup runs against URL kwargs first, then template context. When the
-    flag does not exist yet, a disabled placeholder instance is returned so
-    guard components can hide their content without raising.
-    """
+    """Resolve `DFlag[...]` by name, with a disabled placeholder for a missing flag."""
 
     def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:
         """Defer to the static verdict, which the context never changes."""
         return self.static_can_handle(param)
 
     def static_can_handle(self, param: inspect.Parameter) -> bool:
-        """Settle on the annotation alone, so the plan claims the parameter for good.
-
-        A `DFlag[...]` parameter is owned here in every context, which makes this
-        provider the terminal of its plan entry and skips the per-request walk.
-        """
+        """Settle on the annotation alone, so the plan claims the parameter for good."""
         return get_origin(param.annotation) is DFlag
 
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:

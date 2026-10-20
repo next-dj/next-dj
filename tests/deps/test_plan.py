@@ -153,8 +153,7 @@ def _with_theme(
     return planned
 
 
-# One request and one form shared by the kwargs and the expected mapping, because
-# neither type defines equality and the plan hands back the very object it was given.
+# Shared request and form, as neither defines equality and the plan returns them.
 _REQUEST = RequestFactory().get("/?page=3&ident=9")
 _FORM = AForm()
 
@@ -194,9 +193,7 @@ _FORM_PARAMS_UNFILLED: dict[str, object] = {
     "cleaned_data": None,
 }
 
-# Every callable against every context, so a context that must leave a parameter
-# alone is pinned as firmly as one that decides it. The two callables with
-# nothing to read take one row, because they have no pairing to vary.
+# Every callable against every context, except the two with nothing to read.
 PLAN_CASES: tuple[PlanCase, ...] = (
     PlanCase(
         "markers_full",
@@ -354,9 +351,7 @@ PLAN_CASES: tuple[PlanCase, ...] = (
 )
 
 
-# The component entry point differs from the kwargs one in three ways, and each
-# row below turns one of them into a literal: URL kwargs are always empty, the
-# form comes from the template context itself, and cleaned data never exists.
+# Component entry: empty URL kwargs, form from the context, no cleaned data.
 TEMPLATE_CONTEXT_CASES: tuple[TemplateContextCase, ...] = (
     TemplateContextCase(
         "markers_request_and_context",
@@ -409,9 +404,7 @@ TEMPLATE_CONTEXT_CASES: tuple[TemplateContextCase, ...] = (
             "built": "True:None",
         },
     ),
-    # A template key named like a `DUrl` parameter outranks the marker, because
-    # the name provider sits ahead of it and hands the value over uncoerced,
-    # while the marker itself only ever reads the empty `url_kwargs`.
+    # A template key named like a `DUrl` parameter outranks the marker.
     TemplateContextCase(
         "markers_template_names_shadow_the_url_markers",
         _markers,
@@ -464,8 +457,7 @@ TEMPLATE_CONTEXT_CASES: tuple[TemplateContextCase, ...] = (
 class TestGoldenMatrix:
     """A compile and a replay both yield the literal pinned for the pair.
 
-    Every row runs under the plan resolver and the linear one, so a literal
-    pinned once holds the two paths to the same answer.
+    Every row runs under the plan and linear resolvers.
     """
 
     @pytest.mark.parametrize("case", PLAN_CASES, ids=attrgetter("id"))
@@ -478,8 +470,7 @@ class TestGoldenMatrix:
         replayed = planned.resolve_dependencies(case.func, **case.kwargs)
         assert compiled == case.expected
         assert replayed == case.expected
-        # Equality on a request or a form is identity, so the pinned object is
-        # the one the plan handed back and not a lookalike.
+        # Equality on a request or form is identity, so the pinned object is returned.
         for name, value in case.expected.items():
             if isinstance(value, HttpRequest | forms.Form):
                 assert compiled[name] is value

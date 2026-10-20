@@ -14,13 +14,7 @@ _VALID_KIND_FILTERS = frozenset(k for k, _ in AuditEntry.KIND_CHOICES)
 
 @context("entries", zone="audit-table")
 def entries(request: HttpRequest) -> list[AuditEntry] | None:
-    """Load audit rows only when the lazy `audit-table` zone is rendered.
-
-    The full page render leaves this `None` so the heavy query never
-    runs behind the skeleton. The query fires only on the partial GET the
-    runtime issues for the zone, where `zone_requested` is true. The
-    `zone=` binding saves even the call itself on a GET for another zone.
-    """
+    """Load audit rows only on the partial GET that renders the `audit-table` zone."""
     if not zone_requested(request, "audit-table"):
         return None
     requested_kind = request.GET.get("kind", "")

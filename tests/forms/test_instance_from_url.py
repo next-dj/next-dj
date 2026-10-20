@@ -65,67 +65,50 @@ class GroupNoSpecForm(ModelForm):
 class TestInstanceFromUrlDbFields:
     """_instance_from_url_db_fields enumerates the model lookup fields of a spec."""
 
-    def test_string_spec_yields_single_field(self) -> None:
-        """A string spec names exactly one db field."""
-        assert _instance_from_url_db_fields("slug") == ["slug"]
-
-    def test_dict_spec_yields_mapped_values(self) -> None:
-        """A dict spec yields its values stringified as db fields."""
-        assert _instance_from_url_db_fields({"id": "pk", "code": "slug"}) == [
-            "pk",
-            "slug",
-        ]
-
-    def test_non_str_dict_spec_yields_empty(self) -> None:
-        """A non-str/dict spec contributes no db fields."""
-        assert _instance_from_url_db_fields(7) == []
+    @pytest.mark.parametrize(
+        ("spec", "expected"),
+        [
+            pytest.param("slug", ["slug"], id="string-names-one-field"),
+            pytest.param(
+                {"id": "pk", "code": "slug"}, ["pk", "slug"], id="dict-yields-values"
+            ),
+            pytest.param(7, [], id="non-str-non-dict-yields-none"),
+        ],
+    )
+    def test_spec_yields_db_fields(self, spec, expected: list[str]) -> None:
+        assert _instance_from_url_db_fields(spec) == expected
 
 
 class TestInstanceLookupFromSpec:
     """_instance_lookup_from_spec builds an ORM lookup or None when a kwarg is absent."""
 
-    def test_string_present_maps_to_self(self) -> None:
-        """A present string kwarg maps the field name to its value."""
-        assert _instance_lookup_from_spec("slug", {"slug": "intro"}) == {
-            "slug": "intro"
-        }
-
-    def test_string_missing_returns_none(self) -> None:
-        """A missing string kwarg yields None."""
-        assert _instance_lookup_from_spec("slug", {}) is None
-
-    def test_string_none_value_returns_none(self) -> None:
-        """A string kwarg present but None yields None."""
-        assert _instance_lookup_from_spec("slug", {"slug": None}) is None
-
-    def test_string_falsy_zero_value_is_kept(self) -> None:
-        """A present-but-falsy `0` is a valid lookup value, not treated as absent."""
-        assert _instance_lookup_from_spec("id", {"id": 0}) == {"id": 0}
-
-    def test_dict_falsy_empty_string_value_is_kept(self) -> None:
-        """A present but empty string is a valid lookup value, not an absent one."""
-        assert _instance_lookup_from_spec({"id": "pk"}, {"id": ""}) == {"pk": ""}
-
-    def test_dict_single_pair_maps_to_db_field(self) -> None:
-        """A single-pair dict maps the url kwarg value onto the db field."""
-        assert _instance_lookup_from_spec({"id": "pk"}, {"id": 5}) == {"pk": 5}
-
-    def test_dict_multi_pair_maps_each(self) -> None:
-        """A multi-pair dict maps every url kwarg onto its db field."""
-        lookup = _instance_lookup_from_spec(
-            {"id": "pk", "code": "slug"}, {"id": 5, "code": "x"}
-        )
-        assert lookup == {"pk": 5, "slug": "x"}
-
-    def test_dict_one_missing_kwarg_returns_none(self) -> None:
-        """A dict with any missing url kwarg yields None."""
-        assert (
-            _instance_lookup_from_spec({"id": "pk", "code": "slug"}, {"id": 5}) is None
-        )
-
-    def test_non_str_dict_spec_returns_none(self) -> None:
-        """A non-str/dict spec yields None."""
-        assert _instance_lookup_from_spec(7, {"id": 5}) is None
+    @pytest.mark.parametrize(
+        ("spec", "url_kwargs", "expected"),
+        [
+            pytest.param(
+                "slug", {"slug": "intro"}, {"slug": "intro"}, id="str-present"
+            ),
+            pytest.param("slug", {}, None, id="str-missing"),
+            pytest.param("slug", {"slug": None}, None, id="str-none-value"),
+            pytest.param("id", {"id": 0}, {"id": 0}, id="str-falsy-zero-kept"),
+            pytest.param(
+                {"id": "pk"}, {"id": ""}, {"pk": ""}, id="dict-empty-str-kept"
+            ),
+            pytest.param({"id": "pk"}, {"id": 5}, {"pk": 5}, id="dict-single-pair"),
+            pytest.param(
+                {"id": "pk", "code": "slug"},
+                {"id": 5, "code": "x"},
+                {"pk": 5, "slug": "x"},
+                id="dict-multi-pair",
+            ),
+            pytest.param(
+                {"id": "pk", "code": "slug"}, {"id": 5}, None, id="dict-one-missing"
+            ),
+            pytest.param(7, {"id": 5}, None, id="non-str-non-dict"),
+        ],
+    )
+    def test_lookup(self, spec, url_kwargs, expected) -> None:
+        assert _instance_lookup_from_spec(spec, url_kwargs) == expected
 
 
 @pytest.mark.django_db()
@@ -137,7 +120,6 @@ class TestGetInitial:
         group = Group.objects.create(name="editors")
         result = GroupByNameForm.get_initial(name="editors")
         assert result == group
-        # model __eq__ only compares pk+class, so pin the loaded row's data
         assert result.pk == group.pk
         assert result.name == "editors"
 
@@ -177,6 +159,13 @@ class TestGetInitial:
             GroupByNameForm.get_initial(name="nope")
 
 
+def _flagged_unknown_field(class_name: str) -> bool:
+    return any(
+        qualname.endswith(class_name)
+        for qualname, _label, _field in registration_diagnostics.instance_from_url_unknown_field
+    )
+
+
 class TestValidateInstanceFromUrlE048:
     """_validate_instance_from_url records unknown model fields for E048."""
 
@@ -203,10 +192,7 @@ class TestValidateInstanceFromUrlE048:
                 fields: ClassVar[list[str]] = ["name"]
                 instance_from_url: ClassVar[dict[str, str]] = {"id": "pk"}
 
-        assert not any(
-            qualname.endswith("PkLookupForm")
-            for qualname, _label, _field in registration_diagnostics.instance_from_url_unknown_field
-        )
+        assert not _flagged_unknown_field("PkLookupForm")
 
     def test_valid_field_records_nothing(self) -> None:
         """A spec naming a real model field records nothing."""
@@ -217,10 +203,7 @@ class TestValidateInstanceFromUrlE048:
                 fields: ClassVar[list[str]] = ["name"]
                 instance_from_url = "name"
 
-        assert not any(
-            qualname.endswith("ValidFieldForm")
-            for qualname, _label, _field in registration_diagnostics.instance_from_url_unknown_field
-        )
+        assert not _flagged_unknown_field("ValidFieldForm")
 
     def test_double_underscore_validates_first_segment(self) -> None:
         """A `__`-lookup validates only the leading segment, so a real relation is fine."""
@@ -231,10 +214,7 @@ class TestValidateInstanceFromUrlE048:
                 fields: ClassVar[list[str]] = ["name"]
                 instance_from_url = "name__iexact"
 
-        assert not any(
-            qualname.endswith("RelatedLookupForm")
-            for qualname, _label, _field in registration_diagnostics.instance_from_url_unknown_field
-        )
+        assert not _flagged_unknown_field("RelatedLookupForm")
 
     def test_no_model_records_nothing(self) -> None:
         """A ModelForm with instance_from_url but no Meta.model records nothing."""
@@ -243,10 +223,7 @@ class TestValidateInstanceFromUrlE048:
             class Meta:
                 instance_from_url = "anything"
 
-        assert not any(
-            qualname.endswith("NoModelForm")
-            for qualname, _label, _field in registration_diagnostics.instance_from_url_unknown_field
-        )
+        assert not _flagged_unknown_field("NoModelForm")
 
 
 class TestValidateInstanceFromUrlE049:
@@ -349,7 +326,6 @@ class TestCallGetInitial:
 
             @classmethod
             def get_initial(cls, request: HttpRequest) -> dict[str, object]:
-                # record exactly what bound, so a leaked url kwarg would show up here
                 seen["received"] = {"request": request}
                 return {}
 
@@ -359,7 +335,6 @@ class TestCallGetInitial:
         )
         assert result == {}
         assert "request" in seen["received"]
-        # the url kwarg name must not have been threaded into the non-**kwargs call
         assert "name" not in seen["received"]
 
     def test_missing_get_initial_raises_typeerror(self, mock_http_request) -> None:
@@ -415,58 +390,48 @@ class TestDispatchInstanceFromUrlEndToEnd:
         )
         return backend
 
-    def test_string_spec_post_updates_existing_row(self, mock_http_request) -> None:
-        """The origin's `name` kwarg drives a string-spec UPDATE through dispatch."""
-        group = Group.objects.create(name="editors")
-        backend = self._backend_for(GroupByNameForm)
-
+    def _dispatch(self, mock_http_request, form_class, fields: dict[str, str]):
         post = QueryDict(mutable=True)
-        post["_next_form_origin"] = "/groups/editors/"
-        post["name"] = "editors-renamed"
+        post.update(fields)
         request = mock_http_request(method="POST", POST=post, FILES=QueryDict())
-
+        backend = self._backend_for(form_class)
         meta = backend.get_meta("edit_group")
         assert meta is not None
-        response = FormActionDispatch.dispatch(backend, request, "edit_group", meta)
+        return FormActionDispatch.dispatch(backend, request, "edit_group", meta)
+
+    @pytest.mark.parametrize(
+        ("form_class", "created", "origin"),
+        [
+            pytest.param(GroupByNameForm, "editors", "/groups/editors/", id="string"),
+            pytest.param(GroupByPkForm, "staff", "/items/{pk}/", id="dict"),
+        ],
+    )
+    def test_spec_post_updates_existing_row(
+        self, mock_http_request, form_class, created: str, origin: str
+    ) -> None:
+        """The origin kwargs drive a spec UPDATE through dispatch."""
+        group = Group.objects.create(name=created)
+
+        response = self._dispatch(
+            mock_http_request,
+            form_class,
+            {
+                "_next_form_origin": origin.format(pk=group.pk),
+                "name": f"{created}-renamed",
+            },
+        )
 
         assert response.status_code == 302
         assert Group.objects.count() == 1
-        refreshed = Group.objects.get(pk=group.pk)
-        assert refreshed.name == "editors-renamed"
-
-    def test_dict_spec_post_updates_existing_row(self, mock_http_request) -> None:
-        """The origin's int `id` kwarg drives a dict-spec pk UPDATE through dispatch."""
-        group = Group.objects.create(name="staff")
-        backend = self._backend_for(GroupByPkForm)
-
-        post = QueryDict(mutable=True)
-        post["_next_form_origin"] = f"/items/{group.pk}/"
-        post["name"] = "staff-renamed"
-        request = mock_http_request(method="POST", POST=post, FILES=QueryDict())
-
-        meta = backend.get_meta("edit_group")
-        assert meta is not None
-        response = FormActionDispatch.dispatch(backend, request, "edit_group", meta)
-
-        assert response.status_code == 302
-        assert Group.objects.count() == 1
-        refreshed = Group.objects.get(pk=group.pk)
-        assert refreshed.name == "staff-renamed"
+        assert Group.objects.get(pk=group.pk).name == f"{created}-renamed"
 
     def test_post_without_origin_kwargs_creates_new_row(
         self, mock_http_request
     ) -> None:
         """With no origin URL kwargs the spec is dormant and dispatch creates a new row."""
         Group.objects.create(name="existing")
-        backend = self._backend_for(GroupByNameForm)
 
-        post = QueryDict(mutable=True)
-        post["name"] = "fresh"
-        request = mock_http_request(method="POST", POST=post, FILES=QueryDict())
-
-        meta = backend.get_meta("edit_group")
-        assert meta is not None
-        response = FormActionDispatch.dispatch(backend, request, "edit_group", meta)
+        response = self._dispatch(mock_http_request, GroupByNameForm, {"name": "fresh"})
 
         assert response.status_code == 302
         assert Group.objects.count() == 2
@@ -532,14 +497,16 @@ class TestScopedGetInitial:
         ("form", "kwargs"),
         [
             pytest.param(GroupByNameForm, {"name": "other:outsiders"}, id="field"),
-            pytest.param(GroupByPkForm, {"id": "outsiders"}, id="pk"),
+            pytest.param(GroupByPkForm, {"id": None}, id="pk"),
             pytest.param(GroupByPkForm, {"id": "not-a-pk"}, id="malformed-pk"),
         ],
     )
     def test_a_hidden_row_answers_404(self, form, kwargs) -> None:
         outsiders = Group.objects.create(name="other:outsiders")
-        if kwargs.get("id") == "outsiders":
-            kwargs = {"id": outsiders.pk}
+        kwargs = {
+            key: outsiders.pk if value is None else value
+            for key, value in kwargs.items()
+        }
         with pytest.raises(Http404):
             form.get_initial(HttpRequest(), **kwargs)
 

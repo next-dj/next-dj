@@ -1,8 +1,4 @@
-"""Component renderers and render-time helpers.
-
-`ComponentTemplateLoader` reads raw source and `CachedComponentTemplateLoader` caches
-its compilation, feeding the two strategies `ComponentRenderer` picks between.
-"""
+"""Component renderers and render-time helpers."""
 
 from __future__ import annotations
 
@@ -92,8 +88,7 @@ class ComponentTemplateLoader:
     def load_source(self, info: ComponentInfo) -> TemplateSource | None:
         """Return the template text for `info` with the file it came from.
 
-        This is the one place that picks between the `.djx` body and the `component`
-        module string, so no caller has to guess which one a render used.
+        The one place that picks between the `.djx` body and the `component` string.
         """
         if info.template_path is not None and info.template_path.suffix == ".djx":
             with contextlib.suppress(OSError, UnicodeDecodeError):
@@ -140,8 +135,7 @@ type _SourceKey = tuple[Path | None, Path | None]
 def _source_mtimes(info: ComponentInfo) -> dict[Path, int]:
     """Stat every file a load may read for `info`, before any of them is read.
 
-    Reading first and stat-ing after would store the old text under the mtime of a
-    save made in between, hiding that edit until the next one.
+    A stat after the read would pair old text with a newer mtime and hide an edit.
     """
     mtimes: dict[Path, int] = {}
     for candidate in (info.template_path, info.module_path):
@@ -156,8 +150,7 @@ def _source_mtimes(info: ComponentInfo) -> dict[Path, int]:
 class CachedComponentTemplateLoader(ComponentTemplateLoader):
     """Reuse a compiled template until the file it was read from changes.
 
-    A render then costs at most one `stat` instead of a read plus a full parse, and a
-    `component` string picks up its own edits through the `component.py` autoreload.
+    A render costs at most one `stat`, and a `component` string reloads via autoreload.
     """
 
     def __init__(
@@ -173,8 +166,7 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
     def load_template(self, info: ComponentInfo) -> Template | None:
         """Return the compiled template for `info` from the cache or a fresh read.
 
-        An entry is keyed by the files that define the component and
-        revalidated against the mtime of the one the body was read from.
+        Keyed by the defining files and revalidated against the body file's mtime.
         """
         key = (info.template_path, info.module_path)
         entry = self._compiled.get(key)
@@ -201,8 +193,7 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
             return None
 
         template = Template(source.text)
-        # A subclass may read a file neither `ComponentInfo` field names, so a
-        # path the pre-read stat missed is stat-ed here rather than left uncached.
+        # A subclass may read a file `ComponentInfo` does not name, so stat it here.
         mtime_ns = mtimes.get(source.path)
         if mtime_ns is None:
             mtime_ns = stat_mtime_ns(source.path)
@@ -227,8 +218,7 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
 def _stamp_component_anchor(info: ComponentInfo, context_dict: dict[str, Any]) -> None:
     """Overwrite the form-action anchor with this component's own module path.
 
-    Always written, so a component without a component.py never inherits
-    the anchor of an enclosing component or a caller-supplied value.
+    Always written, so a component without `component.py` inherits no outer anchor.
     """
     context_dict[COMPONENT_MODULE_PATH_KEY] = (
         str(info.module_path) if info.module_path is not None else None
@@ -518,8 +508,7 @@ class CompositeComponentRenderer:
         cache = DependencyCache()
         stack: list[str] = []
 
-        # Nothing here writes to the context, and no provider writes to the
-        # mapping it reads, so this branch hands it straight through.
+        # No provider writes to the mapping, so it passes straight through.
         resolved = current_resolver().resolve_with_template_context(
             render_func,
             request=request,

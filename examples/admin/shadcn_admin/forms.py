@@ -89,8 +89,7 @@ class AdminFormSpec:
     def auto_id(self) -> str:
         """Id template namespacing the main form's fields by model.
 
-        A server-opened layer drops one change view's markup into another's document,
-        so a bare `id_%s` would repeat `id_title` and steal the outer form's labels.
+        A layer opened over another change view would otherwise repeat `id_title`.
         """
         return f"id_{self.model_name}_%s"
 
@@ -181,8 +180,7 @@ def _row_form_class(
 ) -> type[django_forms.ModelForm]:
     """Wrap a row form so the model checks still see the link to the parent.
 
-    A keyed row form never renders the parent key, so Django excludes it and skips every
-    check naming it, letting a duplicate reach the database as an `IntegrityError`.
+    Without the parent key a duplicate reaches the database as an `IntegrityError`.
     """
 
     class InlineRowForm(base):  # type: ignore[misc, valid-type]
@@ -310,10 +308,9 @@ class AdminInlineSpec:
         return self.inline.has_add_permission(self.spec.request, self.spec.instance)
 
     def _auto_id(self, instance: Model) -> str:
-        """Return the id template that keeps every row's fields addressable.
+        """Return the id template that keeps every row's `id_title` unique.
 
-        A keyed row form posts under plain field names, so a `prefix=` would break the
-        handlers, and namespacing only the id keeps every row's `id_title` unique.
+        A `prefix=` would change the posted field names the handlers read.
         """
         suffix = instance.pk if instance.pk is not None else "add"
         return f"id_{self.token}_{suffix}_%s"
@@ -358,11 +355,7 @@ class AdminInlineSpec:
 
 
 def _build_form_class(spec: AdminFormSpec) -> type[django_forms.Form]:
-    """Wrap `ModelAdmin.get_form` so inline-formset errors surface on the main form.
-
-    `clean()` rebuilds the inline formsets against the same POST and raises when a
-    row is broken, so the dispatcher re-renders the origin page with the row errors.
-    """
+    """Wrap `ModelAdmin.get_form` so inline-formset errors surface on the main form."""
     base = spec.model_admin.get_form(spec.request, spec.instance, change=spec.is_change)
 
     class AdminForm(base, BaseModelForm):  # type: ignore[misc, valid-type]
@@ -537,11 +530,7 @@ def handle_inline_add(
     form: django_forms.ModelForm,
     spec: AdminFormSpec = Depends("admin_spec"),
 ) -> HttpResponse:
-    """Create one inline row and open its own editor in a result layer.
-
-    A live runtime opens the new row's `record` zone in a result layer for immediate
-    detail edits, then refreshes the parent's row-count badge in place.
-    """
+    """Create one inline row, open its editor in a layer and refresh the row count."""
     inline = AdminInlineSpec.for_request(spec)
     if not inline.has_add_permission():
         raise PermissionDenied
@@ -563,11 +552,7 @@ def handle_inline_add(
 
 @action("admin:discard", login_required=True)
 def handle_discard(request: HttpRequest) -> HttpResponse:
-    """Dismiss the editor layer server-side, carrying a discard reason.
-
-    Closing as a rejection rather than a `layer_close(result=...)` accept fires
-    `partial:layer-dismissed` and skips accept side effects.
-    """
+    """Dismiss the editor layer as a rejection so accept side effects are skipped."""
     if not is_partial_request(request):
         return HttpResponseRedirect(utils.dashboard_url())
     return Patches(request).layer_close(dismiss="discarded").response()

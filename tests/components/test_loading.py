@@ -22,8 +22,7 @@ BODIES_THAT_RAISE = [
 class TestAFailingComponentModuleDegradesTheRender:
     """A `component.py` body runs arbitrary user code and may raise anything.
 
-    Every failure has to come back as the bare template instead of a 500, so the
-    loader catches the lot and records what it caught for the deployment check.
+    The loader catches and records it, so the render degrades instead of a 500.
     """
 
     @pytest.mark.parametrize(("body", "raised"), BODIES_THAT_RAISE)

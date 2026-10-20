@@ -162,8 +162,7 @@ class TestComponentWidgetRender:
     def test_base_dir_fallback_without_template_path(
         self, echo_component: Path
     ) -> None:
-        # No frame bound: render must fall back to settings.BASE_DIR. The
-        # echo component is registered as a global root so it resolves anyway.
+        # No frame bound: render falls back to BASE_DIR and the global echo root.
         widget = ComponentWidget("echo")
         html = widget.render("slug", "v", attrs={})
         assert "name=slug" in html
@@ -667,8 +666,7 @@ class TestCheckComponentWidgetComponents:
         assert check_component_widget_components() == []
 
     def test_backend_without_iter_actions_override_is_clean(self, monkeypatch) -> None:
-        # A from-scratch backend keeping the iter_actions default must not
-        # raise: the check sees an empty iterator and reports nothing.
+        # A backend keeping the iter_actions default yields an empty iterator.
         class _BareBackend(FormActionBackend):
             def register_action(self, *args, **kwargs) -> None:
                 pass

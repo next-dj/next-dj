@@ -38,8 +38,7 @@ class Context:
 class ContextResult:
     """Hold the full template context and its JavaScript-serializable subset.
 
-    Only the keys of a context marked for serialization reach the client, each through
-    its own serializer, so that subset is held separately.
+    Only keys marked for serialization reach the client, each via its own serializer.
     """
 
     context_data: dict[str, Any]
@@ -70,8 +69,7 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Fill the parameter through the same filler the plan compiler builds for it.
 
-        Both paths share one decision tree, so a marker cannot resolve differently in a
-        compiled plan and in a resolve without a plan.
+        One decision tree serves both paths, so a marker resolves alike in each.
         """
         if not isinstance(param.default, Context):
             return None

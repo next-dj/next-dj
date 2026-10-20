@@ -362,8 +362,7 @@ class TestCheckReverseNameCollisions:
     def test_a_failing_tree_listing_leaves_the_url_checks_silent(self) -> None:
         """A router that cannot list its trees contributes none, and raises nothing.
 
-        The finding itself is `next.E030` from the pages structure check, which
-        is the one place that names it, so the run reports it exactly once.
+        `next.E030` from the pages structure check names it, so it reports once.
         """
         with patch_checks_router_manager_with_routers(routers=[_BrokenRouter()]):
             path_messages = check_url_patterns(None)

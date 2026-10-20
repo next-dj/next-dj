@@ -1,8 +1,4 @@
-"""Value objects and kind registry for static assets.
-
-Depends on nothing that needs the app registry, so it imports early, and ships empty
-so built-in kinds register through the same public API user code uses.
-"""
+"""Value objects and kind registry for static assets."""
 
 from __future__ import annotations
 
@@ -18,16 +14,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-# The client insertion verb each built-in renderer stands for. The registry owns
-# the table because it is the only place that knows which renderer a kind uses.
+# The client insertion verb each built-in renderer stands for.
 _RENDERER_LOADS: Final[dict[str, str]] = {
     "render_link_tag": "link",
     "render_script_tag": "script",
     "render_module_tag": "module",
 }
 
-# The element the runtime builds around an inline body for each verb. A kind whose
-# own `inline_tag` differs is withheld, and `module` names no element at all.
+# The element the runtime wraps an inline body in per verb, `module` has none.
 _LOAD_INLINE_TAGS: Final[dict[str, str]] = {"link": "style", "script": "script"}
 
 
@@ -35,11 +29,7 @@ _VERSION_QUERY_KEY: Final = "v"
 
 
 def _with_query_param(url: str, key: str, value: str) -> str:
-    """Return `url` carrying exactly one `key` pair, set to `value`.
-
-    Every other pair keeps the spelling it was authored with, while the named pair
-    moves to the end, because only the version is rewritten and nothing reads order.
-    """
+    """Return `url` carrying exactly one `key` pair, set to `value`."""
     split = urlsplit(url)
     kept = [
         pair
@@ -55,8 +45,7 @@ def _with_query_param(url: str, key: str, value: str) -> str:
 def with_version(url: str, version: object) -> str:
     """Return the URL carrying a `v` query parameter naming the given version.
 
-    An opaque URI such as `data:` or `blob:` has no query, so an appended pair would
-    end up inside its payload. Such a URL is returned unchanged.
+    An opaque URI such as `data:` or `blob:` has no query and is returned unchanged.
     """
     value = "" if version is None else str(version)
     if not value:
@@ -68,11 +57,7 @@ def with_version(url: str, version: object) -> str:
 
 
 def static_name(reference: str) -> str | None:
-    """Return the staticfiles name a reference holds, or None when it is a ready URL.
-
-    Read by the URL parser, so a scheme without `//` such as `data:` is no name, and
-    the normalised path is what reaches a lookup rather than the reference verbatim.
-    """
+    """Return the staticfiles name a reference holds, or None when it is a ready URL."""
     split = urlsplit(reference)
     if split.scheme or split.netloc or split.query or split.fragment:
         return None
@@ -95,11 +80,7 @@ class StaticNamespace:
 
 @dataclass(frozen=True, slots=True)
 class StaticAsset:
-    """Immutable record describing one asset reference.
-
-    A URL form carries a non-empty `url` and an optional `source_path`, while a block
-    form carries a pre-rendered `inline` body and leaves `url` empty.
-    """
+    """Immutable record of one asset, either a `url` or a pre-rendered `inline` body."""
 
     url: str
     kind: str
@@ -135,11 +116,7 @@ class KindRegistry:
         renderer: str,
         inline_tag: str | None = None,
     ) -> None:
-        """Register an asset kind and its dispatch metadata.
-
-        `inline_tag` names the element wrapping a co-located inline body, and a repeated
-        call with different parameters raises rather than masking a bug.
-        """
+        """Register an asset kind, a repeat with different parameters raises."""
         if not kind or not kind.isidentifier():
             msg = f"Invalid kind {kind!r}: must be a non-empty identifier"
             raise ValueError(msg)
@@ -204,8 +181,7 @@ class KindRegistry:
     def load(self, kind: str, *, inline: bool = False) -> str | None:
         """Return the client insertion verb for the kind, or None when it has none.
 
-        An unregistered kind or custom renderer has no verb, so the wire omits the
-        field. With `inline`, the verb also needs the kind's `inline_tag` to match.
+        With `inline`, the verb also needs the kind's `inline_tag` to match.
         """
         renderer = self._renderers.get(kind)
         if renderer is None:

@@ -52,8 +52,7 @@ def build_zone_request(zone: str) -> HttpRequest:
 def build_nested_page(root: Path, *, body: str = "<h1>{{ title }}</h1>") -> Path:
     """Write a page under two ancestor layouts with a sibling ``template.djx``.
 
-    The ancestor layouts wrap the body in ``<html>`` and ``<main>``, so a
-    composition reads back as the chain that produced it.
+    The layouts wrap the body in ``<html>`` and ``<main>``, so composition reads back.
     """
     (root / "layout.djx").write_text("<html>{% template %}</html>")
     mid = root / "mid"
@@ -103,8 +102,7 @@ def write_page_chain(root: Path, specs: Sequence[tuple[str, str]]) -> list[Path]
 def page_naming_one_style(root: Path, *, directory: str = "named") -> Path:
     """Write a page whose ``styles`` list names a staticfiles asset, not a URL.
 
-    The name is what makes the plan hold a URL a backend resolved rather than a
-    literal, so every test about resolved plans starts from this one shape.
+    Every test about resolved plans starts from this shape.
     """
     page_dir = root / directory
     page_dir.mkdir()

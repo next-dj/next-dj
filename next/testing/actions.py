@@ -53,20 +53,19 @@ def resolve_action_url(
 ) -> str:
     """Return the reverse URL for a registered form action by name.
 
-    A bare name imports every routed `page.py` first and refuses one several pages
-    declare. `page`, the `page.py` or its directory, picks one of them instead.
+    A bare name refuses one several pages declare, so `page` picks one of them.
     """
-    if page is not None:
-        page_path = _page_file(page)
-        try:
-            return form_action_manager.get_action_url(action_name, page_path=page_path)
-        except FormActionNotFoundError:
-            discover_page_registrations()
+    if page is None:
+        discover_page_registrations()
+        url = form_action_manager.get_action_url(action_name)
+        _refuse_ambiguous(action_name)
+        return url
+    page_path = _page_file(page)
+    try:
         return form_action_manager.get_action_url(action_name, page_path=page_path)
-    discover_page_registrations()
-    url = form_action_manager.get_action_url(action_name)
-    _refuse_ambiguous(action_name)
-    return url
+    except FormActionNotFoundError:
+        discover_page_registrations()
+    return form_action_manager.get_action_url(action_name, page_path=page_path)
 
 
 def build_form_for(
@@ -74,9 +73,7 @@ def build_form_for(
 ) -> django_forms.Form:
     """Instantiate the form class registered for `action_name`.
 
-    Useful for unit-testing form validation without dispatching an HTTP request. Raises
-    `FormActionNotFoundError` with close-match suggestions when the action is unknown
-    and `LookupError` when the action is registered without a form class.
+    Raises `FormActionNotFoundError` for an unknown action, `LookupError` for no form.
     """
     meta = form_action_manager.require_action_meta(action_name)
     form_class = meta.get("form_class")

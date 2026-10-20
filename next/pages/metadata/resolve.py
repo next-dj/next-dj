@@ -344,8 +344,7 @@ def _first(value: Text | None, fallback: Text | None) -> Text | None:
 def og_locale(language: str | None) -> str | None:
     """Return the `ll_CC` Open Graph locale of a language code, `None` without one.
 
-    A code without a region takes the one `locale.normalize` names, `en` as `en_US`,
-    unless `OG_LOCALES` holds the one Facebook reads instead.
+    A code without a region takes the `locale.normalize` one unless `OG_LOCALES` sets.
     """
     if not language:
         return None

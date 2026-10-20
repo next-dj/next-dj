@@ -1,8 +1,4 @@
-"""Static assets implementation bound into the `next.ports` slot at app startup.
-
-Every method reads the manager when it is called, so binding the port at startup
-does no work until a render requests an asset.
-"""
+"""Static assets implementation bound into the `next.ports` slot at app startup."""
 
 from __future__ import annotations
 

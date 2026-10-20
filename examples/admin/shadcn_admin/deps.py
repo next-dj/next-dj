@@ -10,11 +10,7 @@ from shadcn_admin.forms import AdminFormSpec
 def admin_spec(
     request: HttpRequest, app_label: str, model_name: str, pk: int | None = None
 ) -> AdminFormSpec:
-    """Resolve `(model, ModelAdmin, instance)` once per dispatch.
-
-    Named so `Depends("admin_spec")` shares one resolution across the factory,
-    `get_initial`, the action handler, and any re-render context in the same POST.
-    """
+    """Resolve `(model, ModelAdmin, instance)` once and share it across a dispatch."""
     return AdminFormSpec.resolve(request, app_label, model_name, pk=pk)
 
 

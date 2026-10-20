@@ -37,16 +37,14 @@ _NOT_BUILT = (
     f"{QUIET_PERIOD:.0f} seconds or until the framework is reconfigured."
 )
 
-# Every read of a router goes through one log, so a backend that keeps raising is
-# logged at the same bounded rate wherever the watch layer reads it.
+# Every router read goes through one log, so a failing backend logs at a bounded rate.
 _reads = BackendReadLog(logger)
 
 
 class _BackendsMemo(NamedTuple):
     """The held routers, and the base directory they were built against.
 
-    The base directory is stored because a change to it alone emits no reload, and
-    `backends=None` marks an incomplete build so the next read retries it.
+    A base directory change emits no reload, `backends=None` marks an incomplete build.
     """
 
     base_dir: Path | None
@@ -105,8 +103,7 @@ def _page_backends_for_watch() -> list[RouterBackend]:
     memo = _state.memo
     if memo is not None:
         if memo.base_dir != base_dir:
-            # A change of BASE_DIR alone emits no reload, so the routers built
-            # against the previous one go, and their diagnostics with them.
+            # A BASE_DIR change emits no reload, so routers built on the old one go.
             _forget_backends()
         elif memo.backends is not None:
             return memo.backends
@@ -118,8 +115,7 @@ def _page_backends_for_watch() -> list[RouterBackend]:
 def iter_page_backends_for_watch() -> Iterator[RouterBackend]:
     """Return one router per `PAGE_BACKENDS` entry, skipping the ones that fail.
 
-    A backend that cannot be built loses only its own trees, so the watcher still sees
-    every tree the other entries report. Every router is built eagerly.
+    A backend that cannot be built loses only its own trees, and routers build eagerly.
     """
     return iter(_page_backends_for_watch())
 

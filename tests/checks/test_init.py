@@ -193,8 +193,7 @@ class TestRetiredReExports:
 class TestCheckIdAllocation:
     """Every `next.*` check id is allocated to one module across the framework.
 
-    Two areas reaching for the same free number is invisible when each area asserts
-    its own id in isolation, so the whole tree is read in one pass here.
+    Each area asserting its own id hides two areas taking the same number.
     """
 
     def test_the_tree_allocates_check_ids(self) -> None:

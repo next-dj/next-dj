@@ -1,8 +1,4 @@
-"""Django staticfiles finders for next-dj co-located assets and the client runtime.
-
-Shares `PathResolver` with request-time discovery so both layers agree on every URL,
-and caches the mapping until the same freshness token discovery uses goes stale.
-"""
+"""Django staticfiles finders for next-dj co-located assets and the client runtime."""
 
 from __future__ import annotations
 
@@ -117,8 +113,7 @@ _RUNTIME_BUNDLE_PATHS: Final = (
 def _runtime_bundle_source(logical_path: str) -> Path | None:
     """Return the built runtime file the logical path names, or None when unbuilt.
 
-    Checked per lookup rather than memoised, because a source checkout may build the
-    bundle while the process runs and a memoised miss would return 404 until restart.
+    Not memoised, because a source checkout may build the bundle while running.
     """
     if logical_path not in _RUNTIME_BUNDLE_PATHS:
         return None
@@ -127,11 +122,7 @@ def _runtime_bundle_source(logical_path: str) -> Path | None:
 
 
 def _runtime_bundle_static_files() -> dict[str, Path]:
-    """Map the built runtime, its chunks and their sourcemaps into `next/`.
-
-    A source checkout carries no build output, so a missing file is left unmapped.
-    One directory scan covers every bundle.
-    """
+    """Map the built runtime, its chunks and their sourcemaps into `next/`."""
     folder = _RUNTIME_BUNDLE_ROOT / _RUNTIME_BUNDLE_DIR
     try:
         with os.scandir(folder) as scan:
@@ -215,11 +206,7 @@ class _Scan(NamedTuple):
 
 
 class _SettingsGeneration:
-    """The reconfiguration counter every held scan carries.
-
-    A reconfiguration moves what the walk finds and shifts no mtime the scan
-    would notice, so it is counted rather than watched.
-    """
+    """The reconfiguration counter every held scan carries, as no mtime moves."""
 
     def __init__(self) -> None:
         """Start at the generation the first scan is stamped with."""
@@ -239,11 +226,7 @@ def forget_scans(**kwargs) -> None:
 
 
 def _registry_generation() -> tuple[int, int, int]:
-    """Return the generation of everything a scan reads while it is built.
-
-    The placeholder registry is left out, because the finder names files rather than
-    slots and no registration there moves which file a logical name means.
-    """
+    """Return the generation of everything a scan reads while it is built."""
     return (default_stems.version, default_kinds.version, _settings_generation.value)
 
 
@@ -268,8 +251,7 @@ def _stat_directory(directory: Path) -> os.stat_result | None:
 def _child_directories(directory: Path) -> list[Path]:
     """Return the directories held directly by `directory` that can hold an asset.
 
-    A symlinked directory counts since the component glob reads through it. A
-    bytecode cache is excluded so the scan's own imports cannot invalidate its answer.
+    A bytecode cache is excluded so the scan's own imports cannot stale its answer.
     """
     try:
         with os.scandir(directory) as entries:
@@ -288,7 +270,6 @@ def _scan_directories(roots: _ScanRoots) -> tuple[tuple[Path, int | None], ...]:
     """Snapshot the mtime of every directory the trees of `roots` hold.
 
     A missing directory records as `None`, so one appearing later rebuilds the scan.
-    A directory reached by two configured trees is recorded once.
     """
     out: dict[Path, int | None] = {}
     seen: set[tuple[int, int]] = set()
@@ -312,8 +293,7 @@ def _scan_directories(roots: _ScanRoots) -> tuple[tuple[Path, int | None], ...]:
 def _build_scan(roots: _ScanRoots) -> _Scan:
     """Discover every co-located asset and note what the answer was read from.
 
-    Generations and the snapshot are taken before the walk, so a change during the walk
-    leaves the scan stale rather than wrongly fresh.
+    Generations and snapshot precede the walk, so a change during it stales the scan.
     """
     registries = _registry_generation()
     watched = template_edits_watched()
@@ -327,8 +307,7 @@ def _build_scan(roots: _ScanRoots) -> _Scan:
 def _scan_stale(scan: _Scan, roots: _ScanRoots) -> bool:
     """Whether anything the scan was read from has moved since.
 
-    Generations and roots are always compared, directory mtimes only when the process
-    watches template edits. A scan taken unwatched reads as stale once watching starts.
+    Directory mtimes are compared only when the process watches template edits.
     """
     if scan.registries != _registry_generation():
         return True
@@ -345,11 +324,7 @@ def _scan_stale(scan: _Scan, roots: _ScanRoots) -> bool:
 
 
 class NextStaticFilesFinder(BaseFinder):
-    """Expose next-dj co-located assets under the `next/` staticfiles namespace.
-
-    Discovered assets are held until the tree they were read from moves, while the
-    client runtime bundles are fixed paths and are stat'd on every lookup.
-    """
+    """Expose next-dj co-located assets under the `next/` staticfiles namespace."""
 
     def __init__(self) -> None:
         """Start with no held scan, built on the first lookup."""
@@ -373,11 +348,9 @@ class NextStaticFilesFinder(BaseFinder):
     ) -> str | list[str]:
         """Resolve the logical path to an absolute path, or an empty list on a miss.
 
-        A miss returns `[]` whatever `find_all` is, since `finders.find` reads another
-        falsy value as a match. The ignore covers django-stubs typing the result `str`.
+        A miss is `[]` whatever `find_all` is, and django-stubs types the result `str`.
         """
-        # Django's BaseFinder.find dictates a positional bool and a deprecated
-        # `all` keyword, so the override matches it and normalises `all` back.
+        # Django dictates a positional bool and a deprecated `all` keyword.
         find_all = kwargs.get("all", find_all)
         source = self._current_scan().mapping.get(path) or _runtime_bundle_source(path)
         if source is None:

@@ -28,6 +28,7 @@ from tests.support import bound_dependency
 _FAKE_FILE = "/fake/myapp/forms.py"
 _ACTION = "kwargs_action"
 _DENIED = HttpResponse("nope", status=403)
+_ACTION_RETURNED = r"^Action 'kwargs_action': KwargsForm\.get_form_kwargs returned "
 
 
 def _kwargs_form(result: object, calls: list[str]) -> type[Form]:
@@ -374,26 +375,16 @@ class TestOverrideOnPost:
         [
             pytest.param(
                 [("prefix", "p")],
-                r"^Action 'kwargs_action': KwargsForm\.get_form_kwargs returned "
-                r"list, expected a dict",
+                _ACTION_RETURNED + r"list, expected a dict",
                 id="list",
             ),
             pytest.param(
-                None,
-                r"^Action 'kwargs_action': KwargsForm\.get_form_kwargs returned "
-                r"NoneType, expected a dict",
-                id="none",
+                None, _ACTION_RETURNED + r"NoneType, expected a dict", id="none"
             ),
-            pytest.param(
-                {"data": {}},
-                r"^Action 'kwargs_action': KwargsForm\.get_form_kwargs returned "
-                r"the 'data' key",
-                id="data",
-            ),
+            pytest.param({"data": {}}, _ACTION_RETURNED + r"the 'data' key", id="data"),
             pytest.param(
                 {"prefix": "p", "files": {}},
-                r"^Action 'kwargs_action': KwargsForm\.get_form_kwargs returned "
-                r"the 'files' key",
+                _ACTION_RETURNED + r"the 'files' key",
                 id="files",
             ),
         ],

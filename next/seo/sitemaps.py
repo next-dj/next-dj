@@ -129,8 +129,7 @@ def sitemap_languages(options: SitemapOptions) -> list[str]:
 def effective_limit(options: SitemapOptions, languages: Sequence[str]) -> int:
     """Return how many URLs one page lists, reduced while URLs carry alternates.
 
-    Each URL then links every language and `x-default`, so a page of 50000 URLs
-    could exceed the 50 MB limit of a sitemap document.
+    Alternates link every language, so 50000 URLs could exceed the 50 MB limit.
     """
     if not (options.i18n and options.alternates):
         return options.limit
@@ -169,9 +168,7 @@ def lastmod_datetime(value: datetime.date) -> datetime.datetime:
 def static_noindex(page_path: Path) -> bool:
     """Whether the static metadata of a page sets noindex, for the sitemap view.
 
-    A chain the schema refuses reads as noindex, so the sitemap leaves the page out.
-    The refusal is contained as `contained_chain` describes, so it raises under
-    `DEBUG`. A system check reads the chain through a strict read instead.
+    A chain the schema refuses reads as noindex, and a system check reads it strictly.
     """
     return page.static_metadata(page_path).metadata.noindex
 
@@ -301,8 +298,7 @@ class PageTreeSitemap(_SitemapBase):
         self.languages = None if options.languages is None else list(options.languages)
         self.limit = effective_limit(options, self.language_codes())
         self.alternates = options.alternates
-        # Django strips the language prefix from its x-default URL, while the page
-        # head names the URL of the default language, so `get_urls` adds that one.
+        # Django strips the language prefix from x-default, so `get_urls` adds it back.
         self.x_default = False
         self._static = static_trails(seo_root.root, static)
         self._declared = tuple(items)

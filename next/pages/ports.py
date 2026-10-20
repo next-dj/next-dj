@@ -1,7 +1,6 @@
 """Page-scan implementation bound into the `next.ports` slot at app startup.
 
-The scan reads the router manager from `next.discovery`, so discovery calls the scan
-through the port instead of through a circular import.
+The scan reads the router manager from `next.discovery`, which calls it via the port.
 """
 
 from typing import TYPE_CHECKING, override

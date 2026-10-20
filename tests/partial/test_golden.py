@@ -293,8 +293,7 @@ def _result_form_visit() -> GoldenCase:
 
 
 def _context_merge() -> GoldenCase:
-    # The wire shape the request-bound builder emits for a context patch, built
-    # from the low-level value objects so the fixture needs no serialize provider.
+    # Built from low-level value objects so the fixture needs no serialize provider.
     envelope = Envelope(
         version="9f3c2e1b",
         ops=(Patch(op="context", extras={"data": {"unread": 3, "user": "ada"}}),),

@@ -1,7 +1,6 @@
 """One-level merge of the user `NEXT_FRAMEWORK` mapping over framework defaults.
 
-A user value replaces the default for its key whole rather than blending, and a
-mistyped value is dropped here and reported instead by the configuration checks.
+A user value replaces the default whole, and a mistyped one is dropped and checked.
 """
 
 from __future__ import annotations

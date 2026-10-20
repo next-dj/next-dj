@@ -14,8 +14,7 @@ if TYPE_CHECKING:
 class PageContentCase:
     """One routed directory, pinned to the counts ``check_page_functions`` reports.
 
-    An unset `template_djx` or `layout_djx` means the file is never written, which
-    is what tells a page with no body source from one carrying a sibling template.
+    An unset `template_djx` or `layout_djx` means the file is never written.
     """
 
     id: str
@@ -189,8 +188,7 @@ LAYOUT_CONFIG_CASES: tuple[LayoutConfigCase, ...] = (
 class PagesDirsConfigCase:
     """One router entry the layout loader reads its page roots from.
 
-    `roots_the_tree` is the one row whose ``DIRS`` names a directory that exists, so the
-    expected roots are the test's own tree rather than a path pinned here.
+    `roots_the_tree` names an existing ``DIRS`` directory, so roots are the test tree.
     """
 
     id: str
@@ -209,8 +207,7 @@ PAGES_DIRS_CONFIG_CASES: tuple[PagesDirsConfigCase, ...] = (
 class PageRenderCase:
     """One template beside its registered context, pinned to the HTML a render yields.
 
-    `context` maps a registration key to its callable, with `None` for the keyless one,
-    and `kwargs` is what the caller passes `render` on top of that.
+    `context` maps a key to its callable, `kwargs` goes to `render` on top.
     """
 
     id: str

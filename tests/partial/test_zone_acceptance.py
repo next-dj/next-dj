@@ -48,8 +48,7 @@ class TestZoneGetAssetsManifest:
 class TestZoneAssetsFollowTheBackendRewrite:
     """A backend that rewrites URLs reaches the assets a zone body introduces.
 
-    The envelope ships bare URLs the client inserts itself, so a manifest built
-    from the raw collector would hand a CDN deployment an origin-relative URL.
+    The client inserts bare URLs itself, so a raw-collector manifest breaks CDNs.
     """
 
     def test_manifest_url_carries_the_prefix(self) -> None:
@@ -69,8 +68,7 @@ class TestEarlyRenderResponseIsVerbatim:
         assert response["Location"] == "/login/"
 
     def test_early_response_is_not_an_envelope(self) -> None:
-        # a non-envelope content type is the client's navigation signal, so
-        # the structural reader refuses to treat it as a patch envelope
+        # a non-envelope content type is the client's navigation signal, not a patch
         response = NextClient().get_zones("/redirecting/", "alpha")
         assert response["Content-Type"] != CONTENT_TYPE
         with pytest.raises(AssertionError, match="not a patch envelope"):

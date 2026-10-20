@@ -44,6 +44,7 @@ The concat's cache token reads ``seo_routes_version`` in ``next.urls.manager``, 
 
 ``ActionOwners`` answers the ``page.py`` of every directory whose files declare an ``@action``, the file whose rule such an action answers to.
 The forms area imports ``next.pages``, so the body-source check ``next.E012`` reads ``action_owners_slot`` rather than importing ``next.forms`` back, and a ``page.py`` with no body that serves an action passes.
+``next.E166`` and ``next.W128`` read the same slot, so a replaced binding moves all three checks together.
 
 ``FormRoutes`` answers the URL patterns of every form backend.
 The forms area imports ``next.pages``, which loads the URL checks, so those checks read ``form_routes_slot`` rather than importing ``next.forms.manager`` back.

@@ -13,8 +13,6 @@ class Strategy(enum.StrEnum):
     """When a script loads.
 
     The server renders `BLOCKING`, `ASYNC` and `DEFER` in the head when consent allows.
-    The runtime loads the rest from the manifest, `IDLE` after the load event,
-    `INTERACTION` on the first input, and `MANUAL` when the page asks for it.
     """
 
     BLOCKING = "blocking"

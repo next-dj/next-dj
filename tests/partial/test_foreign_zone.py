@@ -111,8 +111,7 @@ class TestResolvePartialOrigin:
         assert resolve_partial_origin(request) is None
 
     def test_offsite_header_is_rejected_and_falls_back_to_the_form(self) -> None:
-        # An off-site X-Next-Origin must not steer the OOB render, the same-site
-        # guard drops it and the resolver falls back to the posted form origin.
+        # An off-site X-Next-Origin is dropped, so the posted form origin wins.
         request = partial_request(origin="/zoned/", host="//evil.example.com/")
         origin = resolve_partial_origin(request)
         assert origin is not None
@@ -120,8 +119,7 @@ class TestResolvePartialOrigin:
         assert origin.source is OriginSource.FORM
 
     def test_header_that_does_not_resolve_falls_back_to_the_form(self) -> None:
-        # A same-site header that names no page leaves the form origin to win,
-        # so a stale layer host never blanks the resolved page.
+        # A same-site header naming no page leaves the form origin to win.
         request = partial_request(origin="/zoned/", host="/no/such/url/")
         origin = resolve_partial_origin(request)
         assert origin is not None
@@ -211,15 +209,11 @@ class TestNonPageHeaderOrigin:
 class TestLayerOriginMorphsTheHostNotTheStep:
     """A layer carries its host in `X-Next-Origin`, the OOB morph renders it.
 
-    This covers the layer path end to end. The request posts from the wizard
-    step page while `X-Next-Origin` carries the layer host. The resolver
-    prefers the header, so a `done` handler that morphs `page=origin`
-    re-renders the host page's zone, not the step page the form lived on.
+    The header beats the form origin, so the host page's zone is re-rendered.
     """
 
     def test_header_host_renders_the_host_pages_zone_body(self) -> None:
-        # The form origin names the step page, the layer host header names the
-        # owning page, so the resolver must steer the render to the host.
+        # The layer host header outranks the step page named by the form origin.
         request = partial_request(origin="/counted/", host="/zoned/")
         origin = resolve_partial_origin(request)
         assert origin is not None
@@ -237,6 +231,5 @@ class TestLayerOriginMorphsTheHostNotTheStep:
         )
         op = envelope.ops[0].as_dict()
         assert op["target"] == {"zone": "beta"}
-        # The body is the host page's zone, never the step page the form posts
-        # from, so the layer's accept re-GET addresses the right list.
+        # The body is the host page's zone, never the step page the form posts from.
         assert op["html"] == '<section data-next-zone="beta"><p>beta hi</p></section>'

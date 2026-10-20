@@ -23,7 +23,7 @@ from next.csrf import csrf_url, csrf_view
 from next.forms.uid import URL_NAME_FORM_ACTION, reverse_form_action
 from next.pages.access import routed_pages
 from next.ports import form_routes_slot
-from next.utils import PageRoot
+from next.utils import UNMOUNTED, PageRoot
 
 from .backends import FILE_ROUTER_CONFIG_KEYS, FileRouterBackend, RouterBackend
 from .dispatcher import scan_pages_tree
@@ -49,7 +49,6 @@ _NON_FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset({"BACKEND"})
 _CollectedPattern = tuple[str, str, str, frozenset[str], str]
 """`(django_pattern, url_path, source, parameter_names, namespace)` for one route."""
 
-_UNMOUNTED = PageRoot(path=Path(), label="")
 """The placement of a tree at the root of `next.urls`, without a prefix."""
 
 type _TreeKey = tuple[Path, str, str]
@@ -290,8 +289,7 @@ def check_next_pages_configuration(*args, **kwargs) -> list[CheckMessage]:
 def check_router_manager(*args, **kwargs) -> list[CheckMessage]:
     """Report a router that fails to initialise (`next.E007`), once per check run.
 
-    Every check that walks the routers skips the failure without a message. This check
-    carries each tag those checks run under, so any `--tag` selection reports it.
+    Router-walking checks skip the failure silently, so this carries every tag they use.
     """
     _router_manager, init_errors = get_router_manager()
     return init_errors
@@ -333,8 +331,7 @@ def check_reverse_name_collisions(*args, **kwargs) -> list[CheckMessage]:
     if router_manager is None:
         return []
 
-    # Collection errors surface through check_url_patterns already, so
-    # they are dropped here instead of being reported twice.
+    # Collection errors already surface through check_url_patterns.
     all_patterns, _ = _collect_all_patterns(router_manager)
 
     # reverse() picks by arguments, so a collision needs name and parameters both.
@@ -508,7 +505,6 @@ def _collect_router_patterns(
     Each file router labels a mounted tree its own way, so its route keys it once.
     """
     skip_dir_names = page_tree_skip_names(router)
-    include_point = urlconf_mounts().include_point or ""
     for root in get_page_roots(router):
         if root.prefix is not None:
             key = (root.path, root.prefix, root.namespace)
@@ -517,12 +513,7 @@ def _collect_router_patterns(
             seen.add(key)
         all_patterns.extend(
             _collect_url_patterns(
-                root.path,
-                root.label,
-                errors,
-                skip_dir_names=skip_dir_names,
-                root=root,
-                include_point=include_point,
+                root.path, root.label, errors, skip_dir_names=skip_dir_names, root=root
             )
         )
 
@@ -556,8 +547,7 @@ def _collect_url_patterns(
     errors: list[CheckMessage],
     skip_dir_names: Iterable[str] = (),
     *,
-    root: PageRoot = _UNMOUNTED,
-    include_point: str = "",
+    root: PageRoot = UNMOUNTED,
 ) -> list[_CollectedPattern]:
     """Collect one `_CollectedPattern` per route from one pages root.
 
@@ -568,8 +558,9 @@ def _collect_url_patterns(
     if not pages_path.exists():
         return patterns
 
-    head = tree_route(root, include_point)
-    prefix_names = outer_kwargs(root, urlconf_mounts())
+    mounts = urlconf_mounts()
+    head = tree_route(root, mounts.include_point or "")
+    prefix_names = outer_kwargs(root, mounts)
     for url_path, page_file in routed_pages(
         scan_pages_tree(pages_path, skip_dir_names)
     ):
@@ -613,8 +604,7 @@ def _parameter_refusal_error(
 ) -> Error:
     """Report one parser refusal under the code its own subclass owns."""
     if isinstance(exc, DuplicateURLParameterError):
-        # Two wildcards with distinct names raise without a name duplicate, so fall back
-        # to the name the parser flagged.
+        # Two wildcards with distinct names raise no duplicate, so use the flagged name.
         names = default_url_parser.duplicate_parameter_names(url_path) or [
             exc.param_name
         ]

@@ -5,7 +5,7 @@ Page access
 
 A ``page.py`` declares who may reach its page, and with ``inherit=True`` every page below it, in the words of :func:`~django.contrib.auth.decorators.login_required` and :class:`~django.contrib.auth.mixins.PermissionRequiredMixin`.
 The framework checks the declarations on the page view, on every action posted from that part of the tree, and on every zone request of its pages.
-The model follows ``@context("name", inherit_context=True)``, which passes a value down the tree only when the ``page.py`` asks for it, see :doc:`context`.
+Inheritance is opt-in as it is for ``@context("name", inherit_context=True)``, see :doc:`context`.
 
 .. contents::
    :local:
@@ -214,8 +214,7 @@ A POST renders no component, so a permission on a context, ``obj="name"``, finds
 Loading
 -------
 
-The router reads the access of every page while it builds the URL patterns, so each ``page.py`` of a chain runs once before the first request.
-The ``login_required`` mark the middleware reads is set at that point, while the framework reads the rule itself on every request.
+Each ``page.py`` runs once before the first request, when the router builds the URL patterns.
 In a process that watches template edits an edited ``page.py`` runs again on the next request, and its old declarations are dropped before the new ones register.
 In a process that does not, a new ``page.py`` above a page, or an edit to one, applies after the process restarts, as any new module does.
 

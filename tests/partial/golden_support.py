@@ -58,8 +58,7 @@ def _meta_text(meta: dict[str, object]) -> bytes:
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
     """Write bytes through a pid-unique temp and an atomic replace.
 
-    Parallel xdist workers rewrite the same shared fixture, so a pid-suffixed temp keeps
-    them off each other and the replace never shows a reader a half file.
+    Parallel xdist workers rewrite one shared fixture, so readers never see a half file.
     """
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp.write_bytes(data)
@@ -69,8 +68,7 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
 def write_case(case: GoldenCase) -> tuple[Path, Path]:
     """Regenerate the committed envelope bytes and metadata sidecar for one case.
 
-    This is the explicit update step, not verification. The envelope file holds the
-    exact bytes the backend emits and the sidecar the headers vitest needs.
+    This is the explicit update step, not verification.
     """
     body, meta = serialize_case(case)
     GOLDEN_DIR.mkdir(parents=True, exist_ok=True)

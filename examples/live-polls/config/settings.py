@@ -7,10 +7,7 @@ from next.conf import extend_default_backend
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# `VITE_DEV_ORIGIN` wins when set, an empty value included, so an empty one asks for the
-# built manifest. Under pytest a stub origin keeps asset URLs identical everywhere
-# without a build, and with no manifest on disk the local Vite dev server is the
-# default, so `runserver` plus `npm run dev` needs no env-var ceremony.
+# `VITE_DEV_ORIGIN` wins when set, an empty value asking for the built manifest.
 _VITE_MANIFEST_PATH = BASE_DIR / "polls/static/polls/dist/.vite/manifest.json"
 VITE_DEV_ORIGIN = os.environ.get("VITE_DEV_ORIGIN", "")
 if "VITE_DEV_ORIGIN" not in os.environ:
@@ -93,9 +90,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            # `studio/` is the project-level page root for the live-polls
-            # broadcast. It supplies the shared HTML envelope wrapped
-            # around every poll list, detail, and stream surface.
+            # `studio/` is the project-level page root with the shared HTML envelope.
             "DIRS": [str(BASE_DIR / "studio")],
             "PAGES_DIR": "pages",
         }

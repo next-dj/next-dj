@@ -60,10 +60,9 @@ class AccessRequestWizard(FormWizard):
 
     @classmethod
     def check_permissions(cls, request: HttpRequest) -> PermissionOutcome:
-        """Deny every binding step POST that omits the retention acknowledgement.
+        """Deny a binding step POST that omits the retention acknowledgement.
 
-        A replayed action URL that never rendered the form is denied before any PII
-        binds, while a blur-validation probe checking one field is let through unacked.
+        A blur-validation probe checking one field is let through unacknowledged.
         """
         if partial_intent(request).validate_fields:
             return True
@@ -72,11 +71,7 @@ class AccessRequestWizard(FormWizard):
     def done(
         self, request: HttpRequest, cleaned_data: dict[str, Any]
     ) -> PatchResponse | HttpResponse:
-        """Create the request, close the wizard layer, and link the next dispatch.
-
-        The acknowledgement rides every step as a control field, so it is dropped here
-        before the fields reach the model instead of being declared on it.
-        """
+        """Create the request, close the wizard layer, and link the next dispatch."""
         fields = {k: v for k, v in cleaned_data.items() if k != POLICY_FIELD}
         access_request = create_access_request(**fields)
         request.session["access_request_just_created"] = access_request.pk

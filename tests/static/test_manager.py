@@ -489,8 +489,7 @@ class TestProjectStaticVersion:
 class TestWarmPlanFollowsTheStaticUrl:
     """A warm plan re-resolves its module-list URLs when `STATIC_URL` moves.
 
-    The plan holds resolved URLs, so dropping the discovery with the backend memo is
-    what carries the new prefix into a warm render rather than any file on disk.
+    Dropping the discovery with the backend memo carries the prefix to a warm render.
     """
 
     def _warmed_manager(self, tmp_path: Path) -> StaticManager:

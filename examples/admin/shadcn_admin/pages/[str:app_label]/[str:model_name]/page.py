@@ -25,8 +25,7 @@ _EMPTY = mark_safe("&mdash;")
 
 
 def _visible_columns(cl: ChangeList) -> list[str]:
-    # `cl.list_display` adds "action_checkbox" when actions are registered.
-    # We render the selection column ourselves through `selectable=`.
+    # The selection column is rendered through `selectable=`, not `action_checkbox`.
     return [n for n in cl.list_display if n != "action_checkbox"]
 
 
@@ -122,9 +121,7 @@ def _filters(cl: ChangeList) -> list[dict[str, Any]]:
 
 
 def _actions(model_admin: ModelAdmin, request: HttpRequest) -> list[dict[str, Any]]:
-    # `get_actions` answers with a `(callable, name, description)` tuple on Django 5.2
-    # and an `Action` dataclass from 6.0 on. `get_action_choices` is stable across both
-    # and interpolates `%(verbose_name_plural)s` against the model itself.
+    # `get_actions` changes shape between Django 5.2 and 6.0, the choices do not.
     return [
         {"name": name, "description": str(description)}
         for name, description in model_admin.get_action_choices(

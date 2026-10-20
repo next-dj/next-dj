@@ -25,8 +25,7 @@ def board_object(board: DObject[Board]) -> Board:
 def board_url_kwargs(board: DObject[Board]) -> dict[str, int]:
     """Expose the reverse() kwargs for the current board route.
 
-    Shared by the nav_link calls in the board layout so the tabs link back to themselves
-    using `url_name` without hard-coding the URL converter on the call site.
+    The layout's nav links reuse them instead of hard-coding the URL converter.
     """
     return {"board": board.pk}
 
@@ -50,8 +49,7 @@ def moved_card(board: DObject[Board], request: HttpRequest) -> Card | None:
 def board_payload(board: DObject[Board], request: HttpRequest) -> dict[str, object]:
     """Expose the full board tree under the merged board JS context key.
 
-    Drives the React layer at `window.Next.context.board` and includes
-    excerpts and wip_limits so client renders match the SSR fallback.
+    It carries excerpts and wip_limits so client renders match the SSR fallback.
     """
     cols = board.columns.prefetch_related("cards").order_by("position")
     return {

@@ -174,8 +174,7 @@ def _no_options(_vite_root: Path, _tmp_path: Path) -> dict[str, str]:
 class TestRefusalWithoutBuildOrDevServer:
     """Three failure modes raise `RuntimeError` with actionable messages.
 
-    A raw `.vue` file is unrenderable, unlike the raw `.jsx` the kanban example falls
-    back to, so an actionable error beats a 200 the browser cannot execute.
+    A raw `.vue` file cannot run in the browser, so a clear error beats a 200.
     """
 
     @pytest.mark.parametrize(
@@ -431,8 +430,7 @@ class TestBrokerChangeLoop:
     ) -> None:
         """A revision bump whose cache entry is missing loops without yielding.
 
-        The branch guards a cache eviction landing between `notify_all` and the
-        subscriber read, so the consumer spins past the evicted revision.
+        The branch guards a cache eviction landing between `notify_all` and the read.
         """
         local = PollBroker()
         captured: list[object] = []

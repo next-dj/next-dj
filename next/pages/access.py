@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
-from django.http import Http404
+from django.http import Http404, HttpRequest
 
 from next.caches import PageCache
 from next.conf import fail_loudly
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from django.db.models import Model
-    from django.http import HttpRequest, HttpResponseRedirect
+    from django.http import HttpResponseRedirect
 
     from next.deps.objects import DObject
     from next.permissions.access import Lookup
@@ -140,7 +140,7 @@ def _read(file_path: Path) -> PageAccess:
     A `page.py` above passes down what it declares with `inherit=True` alone.
     """
     version = declarations.version
-    ancestors, _modules = AncestorStamps.begin(file_path).loaded()
+    ancestors = AncestorStamps.begin(file_path).loaded()[0]
     paths = ancestors.paths
     broken = None
     if has_load_errors():
@@ -225,11 +225,6 @@ def refuse_broken(broken: Path) -> None:
     raise Http404
 
 
-def _full_path(request: HttpRequest) -> str:
-    """Return the path a login sends `request` back to, its own with the query."""
-    return request.get_full_path()
-
-
 def url_lookup(
     request: HttpRequest | None,
     url_kwargs: Mapping[str, object],
@@ -264,7 +259,7 @@ class Gate:
     next_url: Callable[[HttpRequest], str]
 
 
-_PAGE_GATE = Gate(url_lookup, _full_path)
+_PAGE_GATE = Gate(url_lookup, HttpRequest.get_full_path)
 
 
 def enforce(

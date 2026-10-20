@@ -230,11 +230,7 @@ class TestARouterReloadDropsThePageRootMemos:
     """Three layers memoise what the routers report, and a reload moves all three."""
 
     def test_every_page_root_memo_reads_the_tree_that_appeared(self, tmp_path) -> None:
-        """A reload from code touches no setting, so each memo needs the signal.
-
-        The watch layer holds the routers off `DEBUG`, and the loaders and the
-        static manager hold what those routers reported.
-        """
+        """A reload from code touches no setting, so each memo needs the signal."""
         with override_settings(
             BASE_DIR=tmp_path,
             DEBUG=False,
@@ -297,8 +293,7 @@ class TestAutoreloadInstallIdempotent:
 
     def test_uninstall_restores_original_and_disconnects(self) -> None:
         """`uninstall()` puts back the previous `StatReloader` and detaches the signal."""
-        # Grab the true Django `StatReloader` class from `NextStatReloader.__bases__`
-        # because the module attribute has already been monkey-patched by `ready()`.
+        # `ready()` patched the module attribute, so read Django's class off the bases.
         real_django_stat_reloader = NextStatReloader.__bases__[0]
 
         class Placeholder(real_django_stat_reloader):  # type: ignore[misc,valid-type]
@@ -367,8 +362,7 @@ class TestComponentsInstall:
             components_manager.reload()
 
     def test_install_asks_every_backend_through_the_contract(self) -> None:
-        # A backend resolving names on demand implements no eager pass, and the
-        # hook it inherits is a public one, not a private attribute probed for.
+        # A backend resolving names on demand has no eager pass, only an inherited hook.
         config = {"BACKEND": DUMMY_COMPONENTS_BACKEND}
         try:
             with override_settings(NEXT_FRAMEWORK={"COMPONENT_BACKENDS": [config]}):

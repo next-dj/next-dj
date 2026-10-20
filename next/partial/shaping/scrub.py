@@ -40,8 +40,7 @@ class _Member:
     def scrub(self, requested: frozenset[str]) -> None:
         """Keep only the errors of the requested fields.
 
-        The non-field errors go whatever was requested, because a `clean()`
-        belongs to the submit and not to a per-field blur.
+        Non-field errors go whatever was requested, as `clean()` belongs to the submit.
         """
         errors = self.form.errors
         survivors = {
@@ -57,8 +56,7 @@ class _Member:
 class _Pass(ABC):
     """Uniform view of the members a form or a formset offers to one pass.
 
-    A formset differs from a plain form only in the members it holds and in the
-    prefixed names their fields travel under, so every pass shares one body.
+    A formset differs only in its members and prefixed names, so one body serves both.
     """
 
     @abstractmethod
@@ -118,8 +116,7 @@ def _validate_targets(
 ) -> frozenset[str]:
     """Return the requested field names with file fields removed.
 
-    A multipart file is never re-uploaded on a blur, so even if a client
-    names a file field the server drops it from the validate target set.
+    A multipart file is never re-uploaded on a blur, even when a client names it.
     """
     files = _file_field_names(form)
     return frozenset(name for name in validate_fields if name not in files)
@@ -135,8 +132,7 @@ def _file_field_names(form: "BaseForm | BaseFormSet") -> frozenset[str]:
 def _scrub_errors(form: "BaseForm | BaseFormSet", requested: frozenset[str]) -> None:
     """Drop every error the validate request did not ask to surface.
 
-    Only the errors of the requested fields survive, and a formset loses its non-form
-    errors too, so no cross-member clean surfaces on a per-field blur.
+    A formset loses its non-form errors too, so no cross-member clean surfaces.
     """
     walk = _pass_over(form)
     for member in walk.members():

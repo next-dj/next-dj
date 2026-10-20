@@ -34,9 +34,7 @@ class ParameterProvider(Protocol):
     def static_can_handle(self, param: inspect.Parameter) -> bool | None:
         """Classify the parameter from its signature alone, ahead of any context.
 
-        True claims it in every context, False rules it out for good, and None
-        leaves the verdict to `can_handle` at resolve time. The parameter
-        carries the resolved type hint, falling back to the raw annotation.
+        True claims it for good, False rules it out, and None defers to `can_handle`.
         """
         raise NotImplementedError
 
@@ -45,16 +43,13 @@ class ParameterProvider(Protocol):
 class CompilingParameterProvider(ParameterProvider, Protocol):
     """Protocol of a provider that also compiles the call filling its parameters.
 
-    Split off `ParameterProvider`, because the hook is optional and folding it in would
-    fail the structural check for a provider written against the mandatory contract.
+    Split off `ParameterProvider`, as the hook is optional for existing providers.
     """
 
     def compile_resolve(self, param: inspect.Parameter) -> ParameterFiller | None:
         """Fold the work `resolve` repeats for `param` into one call the plan holds.
 
-        The compiler asks only about a parameter `static_can_handle` claimed for good,
-        so what it reads off the signature is paid once per plan rather than once per
-        resolve. Returning None, or defining no hook, keeps the plain `resolve` path.
+        Asked only for parameters `static_can_handle` claimed, once per plan.
         """
 
 
@@ -81,15 +76,13 @@ class RegisteredParameterProvider(ABC):
     def static_can_handle(self, _param: inspect.Parameter) -> bool | None:
         """Leave every verdict to `can_handle`.
 
-        A provider that can settle a parameter from the signature alone
-        overrides this, so the plan compiler drops or claims it ahead of time.
+        A provider settling a parameter from its signature overrides this.
         """
         return None
 
     def compile_resolve(self, _param: inspect.Parameter) -> ParameterFiller | None:
         """Leave every resolve to `resolve`.
 
-        A provider that claims a parameter statically overrides this to hand the
-        compiler the call it would otherwise rebuild on every resolve.
+        A provider claiming a parameter statically overrides this with a prebuilt call.
         """
         return None

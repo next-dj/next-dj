@@ -33,8 +33,7 @@ def request_obj() -> object:
 def async_request_obj() -> object:
     """Return a bare ASGI GET request to bind an async stream to.
 
-    Django buffers an async iterator under WSGI, so an async source needs
-    an ASGI request to pass the source-kind guard.
+    Django buffers an async iterator under WSGI, so the source-kind guard needs ASGI.
     """
     return AsyncRequestFactory().get("/polls/7/stream/")
 
@@ -378,8 +377,7 @@ class TestSyncSourceCleanup:
         stream = response.streaming_content
         next(stream)
         next(stream)
-        # a mid-stream disconnect closes the byte generator, whose finally
-        # closes the source generator without draining it
+        # a mid-stream disconnect closes the byte generator and then the source
         response._iterator.close()
         assert source.finalized is True
 

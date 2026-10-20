@@ -43,8 +43,7 @@ def render_form_page_with_errors(
 ) -> str:
     """Render the page template for `page_file_path` with a bound form in context.
 
-    The HTML flows through `Page.render_with_static_assets`, and dispatch authorized the
-    page first, so the re-render never decides for itself who may see what it composes.
+    Dispatch authorized the page first, so the re-render never decides who may see what.
     """
     file_path = page_file_path
     action_name = params.action_name
@@ -67,8 +66,7 @@ def render_form_page_with_errors(
     if form is not None:
         namespace = types.SimpleNamespace(form=form)
         wizard_class = meta.get("wizard_class")
-        # A wizard in the overrides is already bound to the right step, a
-        # rebuild here would bind the posted previous-step origin instead.
+        # An overridden wizard is bound to its step, a rebuild would use the old origin.
         if wizard_class is not None and "wizard" not in overrides:
             origin_match = resolve_origin(request)
             origin = origin_match.path if origin_match is not None else ""

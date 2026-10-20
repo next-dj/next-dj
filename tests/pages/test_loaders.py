@@ -216,7 +216,7 @@ def get_landing_data(*args, **kwargs):
             if template_content:
                 page_instance.register_template(page_file, template_content)
 
-        page_instance._context_manager.register_context(
+        page_instance.contexts.register_context(
             page_file,
             "landing",
             lambda *args, **kwargs: {
@@ -683,8 +683,7 @@ class TestLayoutTemplateLoader:
     def test_the_watched_directories_stop_at_the_page_root(self, tmp_path) -> None:
         """A page inside a routed tree watches no directory above that tree.
 
-        The layout above still joins the chain, only the mtime watch stops, so
-        an unrelated write to a shared parent evicts no composition.
+        The layout above still joins the chain, only the mtime watch stops.
         """
         loader = LayoutTemplateLoader()
 
@@ -1448,8 +1447,7 @@ class TestPageModuleImportErrors:
     def test_any_body_exception_is_recorded(
         self, tmp_path, source: str, cause_type: type[Exception]
     ) -> None:
-        # The exec boundary is not a closed exception list, so exotic body
-        # failures record instead of drowning as an absent module.
+        # The exec boundary is no closed exception list, so exotic failures record.
         page_file = tmp_path / "page.py"
         page_file.write_text(source)
 
@@ -1717,8 +1715,7 @@ class TestPageModuleImportErrors:
         assert has_load_errors() is False
 
     def test_last_load_error_returns_fresh_instance_per_call(self, tmp_path) -> None:
-        # A shared instance would grow its traceback on every re-raise, so
-        # each call must wrap the one recorded cause in a new error object.
+        # A shared instance would grow its traceback per re-raise, so wrap the cause.
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
         assert load_python_module_memo(page_file) is None

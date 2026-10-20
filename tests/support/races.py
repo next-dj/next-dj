@@ -10,9 +10,7 @@ if TYPE_CHECKING:
 class LockWonByAnotherThread:
     """Stand-in lock that flips a flag on `holder` the moment it is entered.
 
-    Double-checked locking guards against a second thread arriving while the first
-    one loads. Swapping the lock for this one puts the waiting thread in the test,
-    so the inner re-check sees the flag the winner set.
+    Entering it puts the waiting thread in the test, so the re-check sees the flag.
     """
 
     __slots__ = ("_flag", "_holder", "entered")

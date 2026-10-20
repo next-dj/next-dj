@@ -40,10 +40,9 @@ class CardProvider(RegisteredParameterProvider):
         return bool(request.POST.get(CARD_PARAM))
 
     def static_can_handle(self, param: inspect.Parameter) -> bool | None:
-        """Rule out every other annotation and leave the POST check to ``can_handle``.
+        """Rule out every other annotation and leave the POST check to `can_handle`.
 
-        A card is owned only while the request carries ``card_id``, so this stays a
-        runtime candidate rather than a compiled terminal.
+        A card is owned only while the request carries `card_id`.
         """
         return None if get_origin(param.annotation) is DCard else False
 

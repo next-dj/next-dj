@@ -55,10 +55,7 @@ class ConsentBackend(ABC):
     def client_config(self) -> Mapping[str, object]:
         """Return the entries the backend adds to `$consent` for the runtime.
 
-        It is read once per backend instance, so the entries depend on settings
-        alone. The runtime stores a choice only in its consent cookie, so a backend
-        that reads another source receives no choice from the browser. The default
-        adds nothing, and the runtime writes the cookie under its default name and age.
+        It is read once per instance, and the runtime keeps a choice only in its cookie.
         """
         return {}
 

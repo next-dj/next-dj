@@ -14,10 +14,7 @@ from next import component
 def totals_chart(totals: dict[str, int]) -> dict[str, Any]:
     """Expose chart-ready data under `window.Next.context.totals_chart`.
 
-    The override demonstrates that a single `@component.context` key
-    can route through a different serializer than the global default.
-    The sparkline reads `window.Next.context.totals_chart.data.bars`
-    because the envelope is `{"v": 1, "data": ...}`.
+    Its own serializer wraps the value in a `{"v": 1, "data": ...}` envelope.
     """
     return {
         "bars": [{"name": name, "value": int(value)} for name, value in totals.items()]

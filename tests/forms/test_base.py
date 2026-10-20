@@ -238,8 +238,7 @@ class TestAutoRegistration:
             "class FrameworkInternalForm(Form):\n"
             "    title = CharField()\n"
         )
-        # Treating tmp_path as a framework root makes the import look like one
-        # of next's own, which the stack walk answers with an importlib frame.
+        # Treating tmp_path as a framework root makes the stack walk see importlib.
         foreign_roots = (*_FOREIGN_ROOTS, (str(tmp_path), str(tmp_path) + os.sep))
 
         with (

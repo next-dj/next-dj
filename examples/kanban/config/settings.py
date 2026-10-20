@@ -102,9 +102,7 @@ NEXT_FRAMEWORK = {
             "OPTIONS": {
                 "DEDUP_STRATEGY": "next.static.collector.HashContentDedup",
                 "JS_CONTEXT_POLICY": "next.static.collector.DeepMergePolicy",
-                # The HMR receiver reads this value back from the backend
-                # options, so one variable moves every dev-server URL. An empty
-                # value is what routes assets through the built manifest.
+                # An empty value routes assets through the built manifest.
                 "DEV_ORIGIN": os.environ.get("VITE_ORIGIN", VITE_DEV_ORIGIN),
                 "VITE_ROOT": str(BASE_DIR),
                 "MANIFEST_PATH": str(VITE_MANIFEST),

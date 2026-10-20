@@ -132,7 +132,7 @@ When the ``next`` application is ready it imports ``deps.py``, then ``permission
        name = "notes"
        label = "notes"
 
-The method stays empty only of what next.dj imports itself.
+``ready()`` holds none of the modules next.dj imports itself.
 The application still fills its own registries and registers its own system checks in :meth:`~django.apps.AppConfig.ready`, as any Django application does, see :doc:`django:topics/checks`.
 A module that imports models is imported inside the method, since the app registry is ready only once it runs.
 
@@ -278,7 +278,7 @@ This page, the tutorial, and every repository example use ``pages`` and ``_compo
 Settings helpers
 ----------------
 
-When you need to override a single key inside ``PAGE_BACKENDS`` without rewriting the entire list, use ``extend_default_backend``.
+``extend_default_backend`` overrides a single key inside ``PAGE_BACKENDS`` without rewriting the entire list.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -368,22 +368,9 @@ Several applications
 Several subject areas become several applications in ``INSTALLED_APPS``, each with the composition above.
 With ``APP_DIRS`` on, the file router walks the ``pages/`` tree of every installed application and serves the routes of all of them through the single ``include("next.urls")`` line.
 The first directory inside ``pages/`` is the first URL segment, for example ``billing/pages/billing/invoices/page.py`` for ``/billing/invoices/``, so the URL names of the tree stay in the ``next`` namespace.
-An application whose tree should answer under a prefix without the repeated directory is included from the root URLconf through ``pages()``.
-
-.. code-block:: python
-   :caption: config/urls.py
-
-   from django.urls import include, path
-
-   from next.urls import pages
-
-   urlpatterns = [
-       path("billing/", pages("billing")),
-       path("", include("next.urls")),
-   ]
-
-With that include ``billing/pages/invoices/page.py`` answers ``/billing/invoices/`` under the name ``billing:page_invoices``.
-A second tree of one application, such as a staff area beside its public pages, sits in a subdirectory of its own and gets a ``pages()`` include of its own, as :ref:`topics-file-router-trees` describes.
+An application whose tree should answer under a prefix without the repeated directory is included from the root URLconf through ``pages()``, so ``billing/pages/invoices/page.py`` answers ``/billing/invoices/`` under the name ``billing:page_invoices``.
+A second tree of one application, such as a staff area beside its public pages, sits in a subdirectory of its own and gets a ``pages()`` include of its own.
+:doc:`/content/howto/serve-an-application-under-a-prefix` walks through both and :ref:`topics-file-router-trees` states the rules.
 Two applications that answer the same URL path are reported by the ``next.E015`` check.
 
 A layout in a project ``DIRS`` root such as ``chrome/`` wraps the pages of every application, as *Per project page DIRS* above shows.

@@ -33,6 +33,9 @@ from tests.support.access import (
 )
 
 
+_LOGIN_INHERIT = "page.login_required(inherit=True)\n"
+_VIEW_INHERIT = 'page.permission_required("auth.view_group", inherit=True)\n'
+
 _CARD = (
     "from next.components import component\n\n"
     'component.permission_required("auth.view_group")\n'
@@ -52,10 +55,7 @@ class TestPublicBesideRequirements:
             ("", "page.public()\n", []),
             ("", "page.public()\npage.login_required()\n", [("next.E163", "page.py")]),
             (
-                (
-                    "page.public(inherit=True)\n"
-                    'page.permission_required("auth.view_group", inherit=True)\n'
-                ),
+                "page.public(inherit=True)\n" + _VIEW_INHERIT,
                 "",
                 [("next.E163", "page.py")],
             ),
@@ -72,8 +72,8 @@ class TestPublicBesideRequirements:
                 "",
                 [("next.E163", "page.py")],
             ),
-            ("page.login_required(inherit=True)\n", "page.public()\n", []),
-            ("page.login_required(inherit=True)\n", "page.public(inherit=True)\n", []),
+            (_LOGIN_INHERIT, "page.public()\n", []),
+            (_LOGIN_INHERIT, "page.public(inherit=True)\n", []),
         ],
         ids=[
             "public",
@@ -113,10 +113,7 @@ class TestDeclaringModules:
 
     @pytest.mark.parametrize(
         ("guard", "page"),
-        [
-            ("page.login_required(inherit=True)\n", "page.public()\n"),
-            ("", "page.login_required()\n"),
-        ],
+        [(_LOGIN_INHERIT, "page.public()\n"), ("", "page.login_required()\n")],
         ids=["guard-and-page", "page"],
     )
     def test_segment_modules_are_silent(self, root, guard, page) -> None:
@@ -181,14 +178,14 @@ class TestEmptyBranches:
     """next.W128 names the outermost directory that holds no page and no action."""
 
     def test_a_guard_over_a_page_is_silent(self, root) -> None:
-        write_guard(root / "a", "page.login_required(inherit=True)\n")
+        write_guard(root / "a", _LOGIN_INHERIT)
         write_page(root, "a/b", page_source())
 
         assert _branches(root) == []
 
     @pytest.mark.parametrize("trail", ["a", "empty/_drafts"], ids=["beside", "private"])
     def test_a_guard_over_no_page_warns(self, root, trail) -> None:
-        guard = write_guard(root / "empty", "page.login_required(inherit=True)\n")
+        guard = write_guard(root / "empty", _LOGIN_INHERIT)
         write_page(root, "c", page_source())
         write_page(root, trail, page_source())
 
@@ -200,8 +197,8 @@ class TestEmptyBranches:
     @pytest.mark.parametrize(
         ("source", "reach"),
         [
-            ("page.login_required(inherit=True)\n", "guards"),
-            ('page.permission_required("auth.view_group", inherit=True)\n', "guards"),
+            (_LOGIN_INHERIT, "guards"),
+            (_VIEW_INHERIT, "guards"),
             ("page.public(inherit=True)\n", "opens"),
         ],
         ids=["login", "permission", "public"],
@@ -215,14 +212,14 @@ class TestEmptyBranches:
         assert f"the inherit=True access of {guard} {reach} no page." in message
 
     def test_a_guard_over_another_guard_alone_warns_once(self, root) -> None:
-        write_guard(root / "a", "page.login_required(inherit=True)\n")
+        write_guard(root / "a", _LOGIN_INHERIT)
         write_guard(root / "a" / "b", "page.public(inherit=True)\n")
         write_page(root, "c", page_source())
 
         assert _branch_dirs(root) == ["pages/a"]
 
     def test_a_page_with_a_body_is_no_branch(self, root) -> None:
-        write_page(root, "a", page_source("page.login_required(inherit=True)\n"))
+        write_page(root, "a", page_source(_LOGIN_INHERIT))
 
         assert _branches(root) == []
 
@@ -276,7 +273,7 @@ class TestEmptyBranches:
         write_page(root, "", page_source())
         (root / "a").mkdir()
         (root / "a" / "layout.djx").write_text("<main>{% template %}</main>")
-        guard = write_guard(root / "a" / "b", "page.login_required(inherit=True)\n")
+        guard = write_guard(root / "a" / "b", _LOGIN_INHERIT)
 
         [(_id, _directory, message)] = _branches(root)
 
@@ -286,7 +283,7 @@ class TestEmptyBranches:
     @pytest.mark.parametrize("trail", ["a", "a/b"], ids=["beside", "below"])
     def test_an_action_fills_its_branch(self, root, trail) -> None:
         write_page(root, "", page_source())
-        write_guard(root / "a", "page.login_required(inherit=True)\n")
+        write_guard(root / "a", _LOGIN_INHERIT)
         write_guard(root / trail, f"page.login_required(inherit=True)\n{_ACTION}")
 
         assert _branches(root) == []
@@ -311,22 +308,20 @@ class TestEmptyBranches:
     )
     def test_a_branch_an_error_names_is_left_to_it(self, root, make) -> None:
         write_page(root, "", page_source())
-        write_guard(root / "a", "page.login_required(inherit=True)\n")
+        write_guard(root / "a", _LOGIN_INHERIT)
         make(root)
 
         assert _branches(root) == []
 
     @pytest.mark.parametrize(
-        "source",
-        ["page.login_required(inherit=True)\n", _INHERIT_CONTEXT],
-        ids=["access", "context"],
+        "source", [_LOGIN_INHERIT, _INHERIT_CONTEXT], ids=["access", "context"]
     )
     @pytest.mark.parametrize("trail", ["a", "a/b"], ids=["top", "below"])
     def test_a_render_that_is_not_callable_is_left_to_e013(
         self, root, source, trail
     ) -> None:
         write_page(root, "", page_source())
-        write_guard(root / "a", "page.login_required(inherit=True)\n")
+        write_guard(root / "a", _LOGIN_INHERIT)
         write_guard(root / trail, f"{source}render = 5\n")
 
         with routed(root):
@@ -349,7 +344,7 @@ class TestEmptyBranches:
                 raise PermissionError(path)
             return listing(path)
 
-        monkeypatch.setattr("next.pages.checks.branches.os.scandir", refuse)
+        monkeypatch.setattr("next.utils.os.scandir", refuse)
 
         assert _branch_dirs(root) == ["pages/a"]
 
@@ -363,12 +358,20 @@ class TestEmptyBranches:
 
     def test_a_tree_without_a_page_warns_at_its_root(self, root) -> None:
         (root / "a" / "b").mkdir(parents=True)
-        guard = write_guard(root, "page.login_required(inherit=True)\n")
+        guard = write_guard(root, _LOGIN_INHERIT)
 
         [(_id, directory, message)] = _branches(root)
 
         assert directory == "pages"
         assert str(guard) in message
+
+    @pytest.mark.parametrize("trail", ["", "a"], ids=["root", "nested"])
+    def test_a_branch_beside_a_reported_one_still_warns(self, root, trail) -> None:
+        write_page(root, "c", page_source())
+        (root / trail / "[slug]").mkdir(parents=True)
+        write_guard(root / trail / "admin", _LOGIN_INHERIT)
+
+        assert _branch_dirs(root) == [str(Path("pages", trail, "admin"))]
 
     def test_a_tree_root_an_error_names_is_left_to_it(self, root) -> None:
         write_guard(root)
@@ -382,6 +385,18 @@ class TestEmptyBranches:
         (shell / "layout.djx").write_text("<main>{% template %}</main>")
 
         assert _branch_dirs(root, shell) == ["shell/empty"]
+
+    def test_a_guard_beside_a_shared_root_layout_warns(self, root) -> None:
+        write_page(root, "a", page_source())
+        shell = root.parent / "shell"
+        shell.mkdir()
+        (shell / "layout.djx").write_text("<main>{% template %}</main>")
+        guard = write_guard(shell, _LOGIN_INHERIT)
+
+        [(_id, directory, message)] = _branches(root, shell)
+
+        assert directory == "shell"
+        assert str(guard) in message
 
     def test_a_tree_reached_twice_warns_once(self, root) -> None:
         write_page(root, "", page_source())
@@ -399,11 +414,8 @@ _DECLARATIONS = {
     "none": "",
     "own": "page.login_required()\n",
     "own-public": "page.public()\n",
-    "inherit": "page.login_required(inherit=True)\n",
-    "mixed": (
-        "page.login_required(inherit=True)\n"
-        'page.permission_required("auth.view_group")\n'
-    ),
+    "inherit": _LOGIN_INHERIT,
+    "mixed": (_LOGIN_INHERIT + 'page.permission_required("auth.view_group")\n'),
 }
 
 _BODYLESS_CHECKS = {
@@ -473,7 +485,7 @@ class TestBodylessDeclarations:
 
     @pytest.mark.usefixtures("form_registries")
     def test_a_bodyless_page_below_a_guard_is_no_page(self, root) -> None:
-        write_guard(root / "a", "page.login_required(inherit=True)\n")
+        write_guard(root / "a", _LOGIN_INHERIT)
         lone = write_guard(root / "a" / "b", "page.login_required()\n")
 
         with routed(root):
@@ -500,6 +512,20 @@ class TestBodylessDeclarations:
             [error] = check_declarations_without_page()
 
         assert (error.id, error.obj) == ("next.E166", str(lone))
+
+    def test_a_public_inherit_beside_a_requirement_is_left_to_e163(self, root) -> None:
+        write_page(root, "a/b", page_source())
+        write_guard(
+            root / "a", "page.public(inherit=True)\npage.login_required(inherit=True)\n"
+        )
+
+        with routed(root):
+            found = [
+                *check_declarations_without_page(),
+                *check_public_beside_requirements(),
+            ]
+
+        assert [message.id for message in found] == ["next.E163"]
 
     @pytest.mark.parametrize(
         "source", ["", "raise RuntimeError('boom')\n"], ids=["virtual", "broken"]
@@ -534,7 +560,7 @@ class TestPublicActions:
 
     @pytest.fixture(autouse=True)
     def _guard_elsewhere(self, root) -> None:
-        write_guard(root / "elsewhere", "page.login_required(inherit=True)\n")
+        write_guard(root / "elsewhere", _LOGIN_INHERIT)
 
     _actions = staticmethod(_open_actions)
 
@@ -558,7 +584,7 @@ class TestPublicActions:
     @pytest.mark.parametrize(
         ("guard", "declared"),
         [
-            ("page.login_required(inherit=True)\n", ""),
+            (_LOGIN_INHERIT, ""),
             ("", "page.login_required()\n"),
             ("", "page.public()\n"),
             ("raise RuntimeError('boom')\n", ""),
@@ -644,7 +670,7 @@ class TestGuardImports:
         assert "RuntimeError: boom" in messages[0].msg
 
     def test_a_sound_guard_is_silent(self, root) -> None:
-        write_guard(root, "page.login_required(inherit=True)\n")
+        write_guard(root, _LOGIN_INHERIT)
         write_page(root, "a", page_source())
 
         with routed(root):
@@ -670,7 +696,7 @@ class TestComponentActions:
 
     @pytest.fixture()
     def card(self, root) -> Path:
-        write_guard(root / "elsewhere", "page.login_required(inherit=True)\n")
+        write_guard(root / "elsewhere", _LOGIN_INHERIT)
         write_page(root, "", page_source("", '{% component "card" %}'))
         folder = root / "_components" / "card"
         folder.mkdir(parents=True)
@@ -804,9 +830,7 @@ class TestSubtreePageModules:
 class TestActionPages:
     """A `page.py` with no body whose directory declares an action serves the action."""
 
-    @pytest.mark.parametrize(
-        "guard", [None, "page.login_required(inherit=True)\n"], ids=["alone", "below"]
-    )
+    @pytest.mark.parametrize("guard", [None, _LOGIN_INHERIT], ids=["alone", "below"])
     def test_an_action_alone_is_no_error(self, root, guard) -> None:
         write_page(root, "", page_source())
         if guard is not None:

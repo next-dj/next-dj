@@ -44,7 +44,7 @@ Backends
 
 ``prefix``, ``namespace``, and ``trail`` default, so ``PageRoot(path=..., label=...)`` from a custom backend reports a tree of ``next.urls``.
 ``route_trail(trail)`` returns the trail a page at the tree-relative ``trail`` routes by, prefix included, read from ``trail`` when it is set and from ``prefix`` otherwise.
-The walk of the URLconf builds ``trail`` segment by segment, a :func:`~django.urls.path` segment by its converters and a :func:`~django.urls.re_path` segment the way Django reverses it, a named group becoming ``[name]`` and a pattern Django cannot reverse becoming a catch-all, so the SEO checks and the sitemap read the trail of a tree under ``re_path()`` as Django would reverse it.
+The walk builds ``trail`` from a :func:`~django.urls.path` segment by its converters and from a :func:`~django.urls.re_path` segment the way Django reverses it, a named group becoming ``[name]`` and a pattern Django cannot reverse becoming a catch-all.
 A tree under a prefix Django cannot reverse lists no static page in the sitemap.
 
 Every page view the file router generates carries a ``next_page_path`` attribute naming the page source, including the synthesised ``page.py`` location of a virtual ``template.djx`` route.
@@ -65,7 +65,7 @@ The application name of the triple is the application label, and the namespace d
 The include target builds its patterns on first read through the first ``FileRouterBackend`` of ``router_manager``, with the same walk, skip names, component registration, and ``route_registered`` signal as ``next.urls``, wraps them in the ``URL_RESOLVER`` class, and rebuilds them when the router version moves.
 Its pattern names stay relative to the tree, so ``page_reverse("log", namespace="audit")`` reverses ``audit/pages/log/page.py``.
 
-The router finds each ``pages()`` include by walking the URLconf ``ROOT_URLCONF`` names, nested includes included, once per root resolver, so :func:`~django.urls.clear_url_caches` or a swapped ``ROOT_URLCONF`` reads it again.
+The router finds each ``pages()`` include by walking ``ROOT_URLCONF``, nested includes included, see :doc:`/content/internals/url-router`.
 The patterns of ``next.urls`` are cached per router version, so they follow a new ``ROOT_URLCONF`` only after ``router_manager.reload()``, which the ``setting_changed`` receiver ``reload_app_routers`` runs, see :ref:`topics-testing-urlconf`.
 A tree found there leaves the auto-assembly of ``next.urls``.
 A subdirectory other than ``PAGES_DIR`` routes only through a ``pages()`` include.

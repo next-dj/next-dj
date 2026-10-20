@@ -34,8 +34,7 @@ _NESTABLE_BATCH: Final = 2
 class ZoneRenderResult:
     """Rendered zones plus the assets their bodies collected.
 
-    A morph or replace addresses the wrapped element in `html`, while an append or
-    prepend grafts the bare body in `bodies` into the live zone.
+    `html` holds the wrapped element for morph or replace, `bodies` the bare body.
     """
 
     html: dict[str, str]
@@ -134,8 +133,7 @@ def _context_zone_names(
 ) -> frozenset[str]:
     """Return the batch names widened by the zones nested in their bodies.
 
-    A nested zone renders inside the body of a requested one, so its
-    zone-bound context callables have to run for the batch.
+    A nested zone renders inside a requested one, so its zone-bound context must run.
     """
     widened = set(rendered)
     for name in rendered:

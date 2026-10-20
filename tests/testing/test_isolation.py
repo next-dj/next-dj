@@ -63,8 +63,7 @@ class TestResetFormActions:
             assert not form_action_manager.default_backend._registry
             assert form_action_manager.default_backend._uid_to_name == {}
         finally:
-            # The reload built fresh backends, so the populated one goes back
-            # in place of them rather than being restored in place.
+            # The reload built fresh backends, so the populated one replaces them.
             form_action_manager._backends = [original]
 
     def test_clear_registries_accepts_a_stateless_backend(self) -> None:

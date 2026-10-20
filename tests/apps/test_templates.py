@@ -221,8 +221,7 @@ class TestBuiltinsFollowAnOverride:
     def test_builtins_reach_engines_read_before_the_install(self) -> None:
         """A handler that already read `TEMPLATES` is dropped, so it reads again."""
         with override_settings(TEMPLATES=[_django_engine()]):
-            # A plain write emits no `setting_changed`, so the handler below
-            # reads the engines an app readied before next-dj would have read.
+            # A plain write emits no `setting_changed`, so the handler reads old ones.
             settings.TEMPLATES = [_django_engine()]
             assert engines.templates["django"]["OPTIONS"]["builtins"] == []
 

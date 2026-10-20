@@ -46,8 +46,7 @@ def django_db_setup(django_db_setup, django_db_blocker):
 def allauth_env(_isolate_form_registries, db):
     """Run one test with allauth installed, routed, and middleware-wrapped.
 
-    Yields the lazily imported `allauth.account.forms` module, which can
-    only load while allauth sits in INSTALLED_APPS.
+    Yields `allauth.account.forms`, importable only while allauth is installed.
     """
     with (
         override_settings(

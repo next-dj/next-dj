@@ -51,6 +51,17 @@ _GUARD_REASON: Final = (
     "decision inside the zone, or the zone outside the component."
 )
 
+_PERMISSION_REASON: Final = (
+    "A standalone zone render does not ask the permission, so a partial request for "
+    "the zone is refused with a 400. Ask the permission inside the zone body instead."
+)
+
+_CONDITION_REASON: Final = (
+    "A standalone zone render does not evaluate the enclosing condition, so the "
+    "zone's visibility cannot be honoured. Move the condition inside the zone body "
+    "instead."
+)
+
 _ZONE_SLUG = re.compile(r"\A[A-Za-z0-9_-]+\Z")
 
 _TAG_LABELS: Final[dict[type[Node], str]] = {
@@ -116,18 +127,6 @@ def check_zone_not_in_loop(*args, **kwargs) -> list[CheckMessage]:
             "wrap each item in a component."
         ),
     )
-
-
-_PERMISSION_REASON: Final = (
-    "A standalone zone render does not ask the permission, so a partial request for "
-    "the zone is refused with a 400. Ask the permission inside the zone body instead."
-)
-
-_CONDITION_REASON: Final = (
-    "A standalone zone render does not evaluate the enclosing condition, so the "
-    "zone's visibility cannot be honoured. Move the condition inside the zone body "
-    "instead."
-)
 
 
 @register(Tags.templates, NEXT)
@@ -254,8 +253,7 @@ def check_with_directly_over_zone(*args, **kwargs) -> list[CheckMessage]:
 def check_context_zone_names_exist(*args, **kwargs) -> list[CheckMessage]:
     """Error when a `@context(zone=)` names an undeclared zone (`next.E078`).
 
-    A full render runs every callable, so a misspelt zone name looks healthy there and
-    silently drops the callable from every zone request instead.
+    A full render runs every callable, so a misspelt zone looks healthy there.
     """
     messages: list[CheckMessage] = []
     # The composed-template walk imports each `page.py`, so read bindings after.
@@ -296,8 +294,7 @@ def _zone_bound_contexts(
 ) -> "Iterator[tuple[str, str]]":
     """Yield the label and bound zone name of every zone-bound `@context` of a page.
 
-    The registry keys on the file declaring the callable, which for a `page.py` is the
-    path the page scan walked, so the composed-page path looks the bindings up directly.
+    The registry keys on the declaring file, so the page path looks bindings up.
     """
     for binding in bindings:
         if binding.zones is None:

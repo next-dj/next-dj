@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 def loaded_seo_roots() -> tuple[SeoRoot, ...]:
     """Return every routed page tree with its sources, from the runtime discovery.
 
-    Reusing the discovery executes no `sitemap.py` or `robots.py` a second time.
     A router that fails to start yields no tree, as `next.E007` already reports it.
     """
     router_manager, init_errors = get_router_manager()
@@ -79,8 +78,7 @@ def items_trails(root: SeoRoot) -> set[str]:
 def checked_noindex(page_path: Path) -> bool:
     """Whether the static metadata of a page sets noindex, read without raising.
 
-    A chain the schema refuses reads as noindex, as the sitemap view reads it. The
-    metadata checks report the refusal, so this read neither raises nor logs it.
+    A chain the schema refuses reads as noindex, and the metadata checks report it.
     """
     try:
         return page.metadata_chain(page_path).static.noindex

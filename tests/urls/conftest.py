@@ -51,8 +51,7 @@ def router():
 def mock_settings():
     """Patch the ``settings`` object ``resolve_base_dir`` reads.
 
-    ``DEBUG`` starts off, because a bare ``Mock`` attribute reads as truthy and
-    would put every router that consults it on the disk-watching path.
+    ``DEBUG`` starts off, as a bare ``Mock`` attribute is truthy and forces disk watch.
     """
     mock = Mock()
     mock.DEBUG = False

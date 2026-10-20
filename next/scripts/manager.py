@@ -62,8 +62,7 @@ _ASSET_ERRORS: Final = (StaticAssetNotFoundError, StaticAssetTraversalError)
 class GatedNote:
     """A script a client-rendered `{% #consented %}` body asked for, held back.
 
-    `target` is the name of a declared script or an asset the body registered, and
-    the runtime loads it once the visitor grants `category`.
+    `target` names a declared script or an asset the body registered.
     """
 
     category: str
@@ -89,8 +88,7 @@ class ScriptsManager:
         self._failures = FailureLog(logger)
 
     def _load(self) -> None:
-        # A source whose file is unchanged since the reset is reused, so a reload
-        # executes only the `scripts.py` files that changed.
+        # An unchanged source is reused, so a reload runs only the changed `scripts.py`.
         for tree, _skip_names in routed_page_trees(router_manager):
             root = tree.path.resolve()
             if root in self._kept and not source_stale(self._kept[root], root):
@@ -127,8 +125,7 @@ class ScriptsManager:
     def _root_of(self, page_path: Path) -> Path | None:
         """Return the page tree `page_path` belongs to, the innermost one.
 
-        A miss is filled under the lock from a loaded registry, so a concurrent reset
-        cannot leave a `None` root behind for a page that has one.
+        A miss is filled under the lock so a concurrent reset leaves no `None` root.
         """
         held = self._roots_of.get(page_path, UNSET)
         if held is not UNSET:

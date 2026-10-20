@@ -261,17 +261,14 @@ def _all_callables(sites: _ObjectSites) -> Iterator[Callable[..., Any]]:
     """Yield every callable the sites hold, each once."""
     page_funcs = (entry.func for run in sites.pages for _key, entry in run.steps)
     metadata_funcs = (func for run in sites.pages for func in run.metadata)
-    seen: set[int] = set()
-    for func in (
+    every = (
         *page_funcs,
         *metadata_funcs,
         *sites.components,
         *sites.forms,
         *sites.dependencies,
-    ):
-        if id(func) not in seen:
-            seen.add(id(func))
-            yield func
+    )
+    yield from {id(func): func for func in every}.values()
 
 
 def _all_params(sites: _ObjectSites) -> Iterator[_ObjectParam]:
@@ -282,13 +279,7 @@ def _all_params(sites: _ObjectSites) -> Iterator[_ObjectParam]:
 
 def _unique(messages: Iterable[CheckMessage]) -> list[CheckMessage]:
     """Return `messages` without repeats, since one callable may register many times."""
-    reported: set[str] = set()
-    unique: list[CheckMessage] = []
-    for message in messages:
-        if message.msg not in reported:
-            reported.add(message.msg)
-            unique.append(message)
-    return unique
+    return list({message.msg: message for message in messages}.values())
 
 
 def _site(param: _ObjectParam) -> str:
@@ -316,12 +307,9 @@ def _declared_site(declaration: _ObjectDeclaration) -> str:
 
 def _declarations(sites: _ObjectSites) -> Iterator[_ObjectDeclaration]:
     """Yield every `obj=DObject[...]` some page answers to, each once."""
-    seen: set[_ObjectDeclaration] = set()
-    for run in sites.pages:
-        for declaration in run.objects:
-            if declaration not in seen:
-                seen.add(declaration)
-                yield declaration
+    yield from dict.fromkeys(
+        declaration for run in sites.pages for declaration in run.objects
+    )
 
 
 def _model_sites(sites: _ObjectSites) -> Iterator[tuple[type[Model], str]]:
@@ -338,22 +326,18 @@ def check_object_managers(*args, **kwargs) -> list[CheckMessage]:
     sites = object_sites()
     if sites is None:
         return []
-    errors: list[CheckMessage] = []
-    checked: set[type[Model]] = set()
+    first_site: dict[type[Model], str] = {}
     for model, site in _model_sites(sites):
-        if model in checked:
-            continue
-        checked.add(model)
-        if scoped_query(model) is not None:
-            continue
-        errors.append(
-            Error(
-                f"{site} loads its row through {unscoped_reason(model)}",
-                obj=model,
-                id="next.E153",
-            )
+        first_site.setdefault(model, site)
+    return [
+        Error(
+            f"{site} loads its row through {unscoped_reason(model)}",
+            obj=model,
+            id="next.E153",
         )
-    return errors
+        for model, site in first_site.items()
+        if scoped_query(model) is None
+    ]
 
 
 def _provides(

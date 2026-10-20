@@ -4,11 +4,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 
 class InvalidDirsError(ImproperlyConfigured):
-    """Raised when a ``DIRS`` value is no sequence of trees.
-
-    A string is refused with the other scalars, because iterating one hands the
-    split its characters and a ``/`` among them would name the filesystem root.
-    """
+    """Raised when a ``DIRS`` value is no sequence of trees, a string included."""
 
     def __init__(self, entries: object) -> None:
         """Store the offending value and build a readable message."""

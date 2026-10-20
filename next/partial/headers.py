@@ -46,8 +46,7 @@ class MergeMode(enum.StrEnum):
 class PartialIntent:
     """Parsed partial-request headers naming what the client asks for.
 
-    Without the `X-Next-Request` switch a request is not partial and every derived field
-    stays empty. Names are server-registry indices, never selectors.
+    Without the `X-Next-Request` switch every derived field stays empty.
     """
 
     partial: bool = False
@@ -59,8 +58,7 @@ class PartialIntent:
     origin: str | None = None
 
 
-# Every field defaults to an immutable empty value, so one instance is
-# shared by every non-partial request instead of being rebuilt per request.
+# Every field is immutable and empty, so non-partial requests share one instance.
 _NOT_PARTIAL = PartialIntent()
 
 

@@ -54,10 +54,6 @@ Terms used throughout the next.dj documentation.
       A Python callable decorated with ``@context("key")`` that publishes a value to the template scope.
       Also written ``@context`` callable.
 
-   DObject
-      The annotation that injects the model row whose primary key a URL kwarg holds, read through ``visible_to(scope)``, and names the row of an access declaration as ``obj=DObject[Model]``.
-      See :ref:`topics-di-dobject`.
-
    declaring page.py
       A ``page.py`` with no body that declares access with ``inherit=True`` for the pages below its directory and routes no URL of its own.
       See :ref:`topics-access-declaring-page`.
@@ -67,6 +63,10 @@ Terms used throughout the next.dj documentation.
       An annotation marker is written in the type position, for example ``param: DUrl[int]``, and covers ``DUrl``, ``DQuery``, and ``DForm``.
       A default-value marker is written as the parameter default, for example ``param: str = Context()``, and covers ``Context`` and ``Depends``.
       ``DObject`` is an annotation marker as well.
+
+   DObject
+      The annotation that injects the model row whose primary key a URL kwarg holds, read through ``visible_to(scope)``, and names the row of an access declaration as ``obj=DObject[Model]``.
+      See :ref:`topics-di-dobject`.
 
    discovery
       The filesystem walk that builds the asset registry, the components registry, and the page registry at startup.
@@ -187,7 +187,6 @@ Terms used throughout the next.dj documentation.
       A class that produces a value for a parameter.
       Implements ``can_handle`` and ``resolve``.
 
-
    request cache
       The dependency cache a form dispatch attaches to the request, shared by its handler and by the context functions, metadata callables, and components of the re-render.
 
@@ -202,15 +201,15 @@ Terms used throughout the next.dj documentation.
       Values come from ``NEXT_FRAMEWORK["URL_NAME_TEMPLATE"]``, default ``"page_{name}"``, where ``{name}`` is derived from the normalized filesystem path.
       Reverse from templates as ``{% url 'next:page_notes_id' id=note.id %}`` or from Python through :doc:`/content/topics/url-reversing`.
 
-   scope dependency
-      The named dependency a project registers with ``@resolver.dependency("scope")``, which ``DObject`` passes to ``visible_to`` on the default manager of a model.
-      See :ref:`topics-di-dobject`.
-
    scope
       The keying rule for an action name, ``page`` or ``shared``.
       A page-scoped action is keyed to the absolute path of its declaring ``page.py`` or ``component.py``, while a shared action is keyed to its dotted module name and is reachable project-wide.
       The resulting key is the scope key that the UID hashes together with the action name.
       See :doc:`/content/topics/forms/actions`.
+
+   scope dependency
+      The named dependency a project registers with ``@resolver.dependency("scope")``, which ``DObject`` passes to ``visible_to`` on the default manager of a model.
+      See :ref:`topics-di-dobject`.
 
    signal
       A Django signal emitted by one subsystem.

@@ -2,12 +2,7 @@ from django.db import models
 
 
 class MetricSnapshot(models.Model):
-    """One persisted counter row produced by `flush_metrics`.
-
-    The triple `(kind, key, captured_at)` is unique. The kind groups
-    counters by signal family (for example `pages` or `static.dedup`)
-    and the key is the per-event identifier inside that family.
-    """
+    """One persisted counter row produced by `flush_metrics`."""
 
     kind = models.CharField(max_length=64)
     key = models.CharField(max_length=200)

@@ -156,8 +156,7 @@ class CacheControl:
     def apply(self, response: HttpResponseBase) -> None:
         """Patch the directives and the `Vary` names onto `response`.
 
-        Django writes an empty `Cache-Control` when given no directive, so none is
-        written for a declaration that only names `Vary` headers.
+        Django writes an empty `Cache-Control` for no directive, so Vary-only skips it.
         """
         if self.directives:
             patch_cache_control(response, **dict(self.directives))
@@ -308,9 +307,7 @@ class ResponsePolicy:
 class _Declared:
     """The declarations of the `page.py` files above one page, with their load stamps.
 
-    `dynamic` holds a callable `cache`, which needs a request, and `policy` the rest.
-    `uncached` is `policy` without its cache, for a non-cacheable method, and `zone`
-    holds only the headers. `refused` marks a chain the schema refused.
+    `dynamic` holds a callable `cache`, `policy` the rest, `uncached` drops its cache.
     """
 
     ancestors: AncestorStamps
@@ -400,8 +397,7 @@ def response_policy(
 ) -> ResponsePolicy:
     """Return the policy of a full page, reading the static part once per reload.
 
-    Only a `GET` or a `HEAD` receives a cache, and a callable `cache` runs only when the
-    `response` that `render()` built, if any, would carry it.
+    Only `GET` or `HEAD` receives a cache, and a callable `cache` is run only then.
     """
     held = _declared(page, file_path)
     if request.method not in _CACHEABLE:
@@ -464,8 +460,7 @@ _COOKIE_VARY_ATTR: Final = "_next_cookie_vary"
 def prepare_page_render(policy: ResponsePolicy, request: HttpRequest) -> None:
     """Prepare the render of a full page according to its policy.
 
-    The CSRF token is deferred where `CSRF_DELIVERY` requires it, and a page a shared
-    cache may store is marked as a shared render.
+    CSRF is deferred where `CSRF_DELIVERY` requires, and a shareable page is flagged.
     """
     mode = csrf_delivery()
     if mode is CsrfDelivery.LAZY or (mode is CsrfDelivery.AUTO and policy.shared):
@@ -599,8 +594,7 @@ class SharedCookies(SimpleCookie):
 def _personal(request: HttpRequest, response: HttpResponseBase) -> bool:
     """Whether the response is specific to the visitor, by a cookie, session or HTML.
 
-    A request with an `Authorization` header is personal too, since a shared copy would
-    reach every visitor, and so is a render that read the CSP nonce in any template.
+    An `Authorization` header or a read CSP nonce makes it personal too.
     """
     if (
         response.cookies
@@ -654,8 +648,7 @@ def _apply_cache(
 def _hold_degraded(response: HttpResponseBase) -> None:
     """Send a page whose failure was contained with `Cache-Control: private, no-store`.
 
-    The page lacks what the failing source would have added, possibly a `noindex`, so
-    neither a CDN nor the browser may store it.
+    The page lacks what the failing source would have added, so no cache may store it.
     """
     cookies = response.cookies
     if isinstance(cookies, SharedCookies):
@@ -697,10 +690,7 @@ def _seal(
 ) -> None:
     """Set the robots headers and the cookie `Vary`, then make a degraded page private.
 
-    Every stamp runs first, since the site robots header may call a callable
-    `INDEXABLE` for the first time in the render, and a failure it contains must
-    still keep the response out of every cache. A rendered head published the robots
-    of this request, and the static metadata of the page stands in for a missing one.
+    Every stamp runs first, so a failure the robots header contains still blocks caches.
     """
     stamp_site_robots(response, request)
     resolved = published_metadata(request)
@@ -722,9 +712,7 @@ def finish_response[R: HttpResponseBase](
 ) -> R:
     """Set the headers, the cache and the robots header of a page on its response.
 
-    A response that `render()` built keeps every header it set, and the declarations
-    of the page fill only the missing ones. A response whose template is not rendered
-    yet gets these headers after its render, so the robots of its head reach the header.
+    A response `render()` built keeps its headers, and one unrendered gets these later.
     """
     _stamp_headers(response, policy)
     if policy.cache is not None and not degraded():
@@ -743,9 +731,7 @@ def finish_zone_response[R: HttpResponseBase](
 ) -> R:
     """Set the headers and the site robots header of a page on a zone response.
 
-    Many CDNs ignore `Vary` and would serve a zone response for the full page, so a
-    response without its own `Cache-Control` is sent with `private, no-store`. A
-    response whose render contained a failure is sent with `private, no-store` too.
+    Many CDNs ignore `Vary`, so a bare zone response is sent `private, no-store`.
     """
     _stamp_headers(response, policy)
     if not response.has_header("Cache-Control"):

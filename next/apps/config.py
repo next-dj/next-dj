@@ -137,8 +137,7 @@ _SETTINGS_RELOADED: Final[tuple[Callable[..., None], ...]] = (
     forget_consent_settings,
 )
 
-# A reload from code replaces the routers without changing settings, so every memo
-# derived from the old routers is dropped with them.
+# A reload from code keeps the settings, so memos derived from old routers drop.
 _ROUTER_RELOADED: Final[tuple[Callable[..., None], ...]] = (
     forget_watch_state,
     forget_page_roots,

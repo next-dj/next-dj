@@ -56,8 +56,7 @@ class TestGenerateSlugIntegrityRetry:
 
     def test_retries_until_unique(self, make_link) -> None:
         make_link("abcdef")
-        # Force the first attempt to collide with the existing slug so the
-        # retry uses the next random slug from `secrets.choice`.
+        # Force the first attempt to collide so the retry draws the next random slug.
         candidates = iter(["abcdef", "xyz123"])
         with mock.patch(
             "shortener.services._random_slug",

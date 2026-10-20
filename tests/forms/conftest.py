@@ -5,8 +5,7 @@ from tests.forms import actions
 from tests.support import GuardedTenantForm, isolated_form_registries
 
 
-# `actions` registers baseline form actions on import. Bind it so the registry
-# snapshot below always reflects them, whatever the collection order happens to be.
+# `actions` registers baseline form actions on import, so bind it for the snapshot.
 _BASELINE_ACTIONS = actions
 
 

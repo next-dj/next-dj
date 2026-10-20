@@ -54,8 +54,7 @@ class FormProvider(RegisteredParameterProvider):
     def static_can_handle(self, param: inspect.Parameter) -> bool | None:
         """Rule out every annotation no form can inhabit. The rest waits for context.
 
-        Keeps the costliest provider out of the candidate list of a signature that has
-        nothing to do with forms, even the bare `form` name since context may lack one.
+        Keeps the costliest provider off signatures unrelated to forms, even `form`.
         """
         if param.name == "form":
             return None

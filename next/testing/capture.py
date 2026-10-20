@@ -1,7 +1,6 @@
 """Signal capture utility for tests.
 
-`SignalRecorder` connects to one or more Django signals, stores every emission as a
-`SignalEvent`, and disconnects on exit.
+`SignalRecorder` stores every emission of the given signals as a `SignalEvent`.
 """
 
 from __future__ import annotations
@@ -31,8 +30,7 @@ class SignalEvent:
 class SignalRecorder:
     """Record every emission of the given signals until `stop` is called.
 
-    Use as a context manager for scoped capture or call `start` and
-    `stop` explicitly when the lifecycle spans multiple helpers.
+    Use as a context manager, or call `start` and `stop` across helpers.
     """
 
     def __init__(self, *signals: Signal) -> None:

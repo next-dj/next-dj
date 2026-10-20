@@ -13,8 +13,7 @@ if TYPE_CHECKING:
 def active_filters(request: HttpRequest) -> dict[str, Any]:
     """Expose active-filter chips with a precomputed drop URL each.
 
-    The `drop_url` reproduces the current query string with that one pair removed, so a
-    template renders `<a href="?{{ chip.drop_url }}">` without building the URL itself.
+    The `drop_url` is the current query string minus that pair, ready for an `<a href>`.
     """
     f = parse_filters(request)
     items: list[tuple[str, str]] = [

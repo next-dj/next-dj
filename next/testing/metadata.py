@@ -1,7 +1,6 @@
 """Read back the head tags `{% metadata %}` rendered, strictly, and assert on them.
 
-A head that renders a single-valued tag twice or a JSON-LD body that is no JSON
-raises `HeadParseError`, so the test fails on the markup a crawler would trip on.
+A repeated single-valued tag or a non-JSON JSON-LD body raises `HeadParseError`.
 """
 
 from __future__ import annotations
@@ -178,8 +177,7 @@ class _HeadParser(HTMLParser):
 def head_tags(html: str) -> HeadTags:
     """Return the metadata tags the head of `html` carries, the whole of a fragment.
 
-    A single-valued tag rendered twice or a JSON-LD body that is not JSON raises
-    `HeadParseError`, the first failure the parser meets.
+    Raises `HeadParseError` on a repeated single-valued tag or non-JSON JSON-LD.
     """
     parser = _HeadParser()
     parser.feed(html)
@@ -229,8 +227,7 @@ def _wanted(key: str, expected: object) -> object:
 def assert_metadata(response: HttpResponseBase | str, **expected: object) -> None:
     """Assert the head tags of a response, `None` expecting a tag to be absent.
 
-    `og` and `twitter` take property suffixes, `alternates` and `jsonld` whole values,
-    and `og=None` or `twitter=None` expects no tag of that block at all.
+    `og` and `twitter` take property suffixes, `alternates` and `jsonld` whole values.
     """
     unknown = sorted(set(expected) - _KEYS)
     if unknown:

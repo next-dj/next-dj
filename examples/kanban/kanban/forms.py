@@ -30,8 +30,7 @@ def _is_full(column: Column) -> bool:
 class MoveCardForm(Form):
     """Move a card to a target column at a chosen position.
 
-    `CardProvider` resolves the moved card from the POST, and the target column is
-    narrowed to that card's own board, so a column on another board never validates.
+    The target column is narrowed to the moved card's own board.
     """
 
     target_column = django_forms.ModelChoiceField(
@@ -128,8 +127,7 @@ class CreateCardForm(Form):
     def clean(self) -> dict[str, object]:
         """Reject creation when the column is at its WIP limit.
 
-        The check is best-effort. The authoritative lock+check+insert
-        lives in on_valid under select_for_update.
+        Best effort, the authoritative check runs in `on_valid` under a row lock.
         """
         cleaned = super().clean() or {}
         column = cleaned.get("column")
@@ -152,8 +150,7 @@ class CreateCardForm(Form):
                 body=self.cleaned_data.get("body", ""),
                 position=count,
             )
-        # The redirect names the new row the same way move_card names the moved
-        # one, so a fetch that follows it learns the id from the final URL.
+        # The redirect names the new row as move_card does, so a fetch learns the id.
         return HttpResponseRedirect(
             with_query(page_reverse(BOARD_PAGE, board=column.board_id), created=card.pk)
         )

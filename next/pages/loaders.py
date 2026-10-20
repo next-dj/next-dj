@@ -46,6 +46,8 @@ _BODY_SLOT = "\x00next-page-body\x00"
 
 PAGE_MODULE: Final = "page.py"
 
+LAYOUT_TEMPLATE: Final = "layout.djx"
+
 
 @dataclass(frozen=True, slots=True)
 class _PageLoad:
@@ -63,8 +65,7 @@ _MODULE_MEMO: PageCache[Path, _PageLoad] = PageCache()
 _FAILED_PATHS: set[Path] = set()
 _MEMO_WRITE_LOCK = threading.Lock()
 
-# The mtime of the current load per path, successful or failed. An eviction from the
-# memo keeps it, since re-executing a file at the same mtime changes nothing.
+# Load mtime per path, kept on eviction since a re-exec at that mtime is a no-op.
 _stamps: dict[Path, int] = {}
 
 
@@ -246,8 +247,7 @@ def _page_load(file_path: Path) -> _PageLoad | None:
 
     cached = _MODULE_MEMO.get(file_path)
     if cached is not None and cached.mtime_ns == mtime_ns:
-        # Not reordered, because this runs up to three times per URL dispatch and the
-        # bound limits memory rather than ranking pages.
+        # Not reordered, since it runs up to three times per dispatch.
         return cached
 
     try:
@@ -308,7 +308,7 @@ def shared_layouts() -> tuple[Path, ...]:
         for config in configs
         if isinstance(config, dict)
         for directory in _pages_dirs_for_config(config)
-        if directory.exists() and (layout := directory / "layout.djx").exists()
+        if directory.exists() and (layout := directory / LAYOUT_TEMPLATE).exists()
     )
     return tuple(dict.fromkeys(candidates))
 
@@ -337,8 +337,7 @@ def forget_page_roots(**kwargs) -> None:
 def forget_app_page_roots(*, setting: str, **kwargs) -> None:
     """Drop the memoised page trees when the app list behind them moves.
 
-    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half, and the trees
-    of a router with `APP_DIRS` move with `INSTALLED_APPS`.
+    `settings_reloaded` misses `INSTALLED_APPS`, which the `APP_DIRS` trees follow.
     """
     if setting == "INSTALLED_APPS":
         forget_page_roots()
@@ -393,8 +392,7 @@ def read_module_string_lists(
 ) -> dict[str, list[str]] | None:
     """Return the named module-level string lists a page-tree module declares.
 
-    `None` tells an absent or broken module apart from one that declares none of the
-    names, and anything but a list of non-empty strings reads as empty.
+    `None` tells an absent or broken module from one declaring none.
     """
     module = load_python_module_memo(file_path)
     if module is None:
@@ -492,8 +490,7 @@ class LayoutTemplateLoader:
     def compose_skeleton(self, file_path: Path) -> str:
         """Return the layout chain for `file_path` with a slot where the body goes.
 
-        The chain depends on the path alone, so a caller with a body that
-        changes per request caches this and fills the slot per request.
+        The chain depends on the path alone, so a per-request body fills a cached slot.
         """
         return self.compose_body(_BODY_SLOT, file_path)
 
@@ -504,22 +501,20 @@ class LayoutTemplateLoader:
     def compose_body(self, body: str, file_path: Path) -> str:
         """Wrap `body` through the ancestor layout chain for `file_path`.
 
-        A sibling `layout.djx` substitutes `body` directly, otherwise `body` becomes
-        the fallback of a paired placeholder the ancestor layout renders in its place.
+        A sibling `layout.djx` substitutes `body`, else it is a placeholder fallback.
         """
         layout_files = self._find_layout_files(file_path)
         if not layout_files:
             return body
 
-        sibling_layout = (file_path.parent / "layout.djx").exists()
+        sibling_layout = (file_path.parent / LAYOUT_TEMPLATE).exists()
         wrapped = body if sibling_layout else _as_placeholder_fallback(body)
         return self._compose_layout_hierarchy(wrapped, layout_files)
 
     def layout_sources(self, file_path: Path) -> tuple[list[Path], list[Path]]:
         """Return the layout files behind `file_path` and the directories watched.
 
-        A `layout.djx` appearing or disappearing moves the mtime of its directory and of
-        no tracked file, so a caller detecting change needs the directories too.
+        A new `layout.djx` moves only its directory's mtime, so watch directories too.
         """
         return self._walk_ancestors(file_path, page_tree_depth(file_path.parent))
 
@@ -536,7 +531,7 @@ class LayoutTemplateLoader:
                 break
             if depth < watched_depth:
                 watched_dirs.append(current_dir)
-            layout_file = current_dir / "layout.djx"
+            layout_file = current_dir / LAYOUT_TEMPLATE
             if layout_file.exists():
                 layout_files.append(layout_file)
             current_dir = current_dir.parent
@@ -550,8 +545,7 @@ class LayoutTemplateLoader:
     def _find_layout_files(self, file_path: Path) -> list[Path]:
         """Return `layout.djx` paths from near to far plus global layouts.
 
-        The walk skips the watched directories, which cost a `resolve` of the page trees
-        and which no caller of this method reads.
+        The walk skips the watched directories, which cost a `resolve` no caller reads.
         """
         layout_files, _ = self._walk_ancestors(file_path, 0)
         return layout_files
@@ -565,8 +559,7 @@ class LayoutTemplateLoader:
     ) -> str:
         """Wrap the content in each layout from the nearest to the outermost.
 
-        Each layout receives the content in its first placeholder, and `next.W078`
-        reports a layout that carries more than one.
+        Each layout gets the content in its first placeholder, see `next.W078`.
         """
         result = template_content
 
@@ -585,8 +578,7 @@ class LayoutTemplateLoader:
 def build_registered_loaders() -> Sequence[TemplateLoader]:
     """Instantiate `TEMPLATE_LOADERS` dotted paths into `TemplateLoader` instances.
 
-    Bad entries are skipped with a debug log rather than raised, since
-    `check_template_loaders` already reports the same misconfiguration to the user.
+    Bad entries are skipped with a debug log, as `check_template_loaders` reports them.
     """
     configured = next_framework_settings.TEMPLATE_LOADERS
     seen: set[type[TemplateLoader]] = set()

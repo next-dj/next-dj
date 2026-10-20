@@ -24,16 +24,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Every read of a components backend goes through one log, so a backend that keeps
-# raising reports once per configuration wherever the watch layer reads it.
+# One log for every backend read, so a raising backend reports once per configuration.
 _reads = BackendReadLog(logger)
 
 
 def _roots_of(backend: ComponentsBackend) -> list[Path]:
     """Return the trees one backend reports watching, or none when it cannot.
 
-    Every third-party backend read in the watch layer answers an empty result rather
-    than reaching a caller that dereferences what came back.
+    A failing third-party backend answers an empty result, never a bad value.
     """
     return _reads.read(
         backend,
@@ -47,8 +45,7 @@ def _roots_of(backend: ComponentsBackend) -> list[Path]:
 def component_watch_roots() -> list[Path]:
     """Return every tree the loaded components backends report watching.
 
-    The one reader of `watch_roots`, so the autoreload watcher, the link
-    tooling and the staticfiles finder all see a backend fail the same way.
+    The one reader of `watch_roots`, so every consumer sees a backend fail alike.
     """
     return [
         root for backend in components_manager.backends for root in _roots_of(backend)

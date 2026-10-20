@@ -1,8 +1,6 @@
 """Form actions and helpers for next-dj.
 
-Any public `django.forms` name resolves through `next.forms` unless next.dj overrides
-it. Only the formset and modelform factories plus `BoundField` are re-exported
-statically for type checkers, the rest of the passthrough resolves at runtime only.
+Public `django.forms` names resolve through `next.forms` unless next.dj overrides them.
 """
 
 from django import forms as _django_forms

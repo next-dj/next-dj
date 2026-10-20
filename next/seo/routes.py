@@ -42,10 +42,7 @@ _failures = FailureLog(logger)
 def _served(route: str, probe: Callable[[], bool]) -> bool:
     """Whether `probe` mounts `route`, a probe that raises keeping the route.
 
-    It runs during URL resolution, outside any view, so an intended exception such as
-    `Http404` is contained like any other. A failure fails the request under `DEBUG`
-    or `STRICT_LOADING`, and otherwise keeps the route, whose view answers 503 for the
-    same failure while the other routes still resolve.
+    It runs outside any view, so even an `Http404` is contained during URL resolution.
     """
     with _failures.guard(
         route,

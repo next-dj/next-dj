@@ -32,8 +32,8 @@ from django.utils.cache import add_never_cache_headers, patch_vary_headers
 from next.caches import BoundedCache
 from next.conf import next_framework_settings
 from next.diagnostics import FailureLog
+from next.permissions.access import open_view
 from next.site.headers import ROBOTS_HEADER
-from next.utils import open_view
 
 
 logger = logging.getLogger(__name__)
@@ -106,11 +106,7 @@ def nonce_minted(request: HttpRequest) -> bool:
 
 
 def csrf_header_name() -> str:
-    """Return the CSRF header name in HTTP wire form from Django settings.
-
-    Django stores `CSRF_HEADER_NAME` in WSGI `META` form, so it is converted to the
-    wire name with the rule `request.headers` applies.
-    """
+    """Return `CSRF_HEADER_NAME` in wire form, converted as `request.headers` does."""
     raw = settings.CSRF_HEADER_NAME
     name = HttpHeaders.parse_header_name(raw)
     if name is not None:
@@ -136,9 +132,7 @@ that is not the current one marks a stale address.
 def csrf_url() -> str:
     """Return the token endpoint, reversed once per URLconf, script prefix and language.
 
-    The endpoint is named `csrf` under the `next` namespace. Where `next.urls` is the
-    root URLconf it has no namespace, so the address of `csrf_view` itself is used,
-    never a project pattern that is also named `csrf`.
+    Under a root `next.urls` there is no namespace, so `csrf_view` is addressed itself.
     """
     urlconf = get_urlconf()
     resolver = get_resolver(urlconf)

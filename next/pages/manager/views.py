@@ -70,17 +70,16 @@ def unified_view(
         if has_render or broken_at_build
         else _static_view(page, file_path)
     )
-    routed = cast("_RoutedPageView", view)
-    routed.next_page_path = file_path
-    routed.login_required = not page_access(file_path).rule.public
+    tagged = cast("_RoutedPageView", view)
+    tagged.next_page_path = file_path
+    tagged.login_required = not page_access(file_path).rule.public
     return view
 
 
 def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]:
     """Return the view of a page whose body comes from files on disk.
 
-    The body does not depend on the request, so the view renders the compiled
-    composed template and resolves no body per request.
+    The body is request-independent, so the view renders the compiled template.
     """
 
     def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
@@ -119,8 +118,7 @@ def _resolving_view(
 ) -> Callable[..., HttpResponseBase]:
     """Return the view that resolves a per-request body before composing.
 
-    `broken_at_build` re-reads the module per request, so a fix needs no restart, one
-    without a body answers 404, and a still-broken file never bypasses the guards.
+    `broken_at_build` re-reads the module per request, a 404 once it has no body.
     """
 
     def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
@@ -184,8 +182,7 @@ def _finish_render_response(
 ) -> HttpResponseBase:
     """Finish the full-page response `render()` returned, varying a cacheable one.
 
-    A browser may serve a stored full page in place of a zone fetch to the same URL,
-    so a successful response that carries `Cache-Control` gets the partial `Vary`.
+    A browser may serve a stored full page for a zone fetch, so `Vary` is added.
     """
     finish_response(response, policy, request, file_path)
     if (
@@ -200,8 +197,7 @@ def _finish_render_response(
 def _page_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase] | None:
     """Return the view of a real or virtual page, or `None` when it has no body.
 
-    A `page.py` whose import failed still gets a view to surface that error per
-    request, while a path that never existed is a template-only page with no module.
+    A `page.py` whose import failed keeps a view, so each request surfaces the error.
     """
     module, error = load_page_module(file_path)
     if not serves(file_path, module, error):
@@ -213,8 +209,7 @@ def create_url_pattern(
     page: Page, url_path: str, file_path: Path, url_parser: URLPatternParser
 ) -> URLPattern | None:
     """Return a `path()` pattern for a page, template, or virtual entry."""
-    # The error class comes through the parser, because importing next.urls
-    # at module level would create an import cycle between next.pages and next.urls.
+    # The error class comes through the parser, as importing next.urls is a cycle.
     try:
         django_pattern, _parameters = url_parser.parse_url_pattern(url_path)
     except url_parser.parameter_error as exc:
@@ -234,8 +229,7 @@ def create_url_pattern(
 def fit_page_caches(patterns: Iterable[object]) -> None:
     """Size the page-keyed memos by the pages that `patterns` mount.
 
-    The URL build calls it once with the router patterns it built. A router reuses its
-    patterns between builds, so the count is read from the views they hold.
+    The URL build calls it once, and routers reuse patterns, so views give the count.
     """
     pages = {
         page_path

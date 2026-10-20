@@ -235,8 +235,7 @@ _roots_memo: Final = _RootsMemo()
 def page_tree_roots() -> tuple[SeoRoot, ...]:
     """Return every page tree the URL router serves, discovered once per routes version.
 
-    Discovery runs under a lock, so concurrent callers execute each source once. Trees
-    discovered while a reset moves the version are returned but never served again.
+    Discovery runs under a lock, so concurrent callers execute each source once.
     """
     roots = _roots_memo.current(seo_routes_version.value)
     if roots is not None:

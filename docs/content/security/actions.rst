@@ -77,7 +77,7 @@ The public action warning
 One message covers every such action of the file, and its hint names the declarations that close them.
 The warning runs only in a project that declares access and keeps the default login off, because a project without any access declaration keeps every action open by design.
 A project declares access once it holds a ``login_required()``, ``permission_required()``, or ``public()`` in a ``page.py`` or a ``component.py``, or a permission registered through ``add_perm``.
-A ``page.public()`` is itself such a declaration and states that the actions under it are open on purpose, so they draw no warning.
+A ``public()`` states that the actions under it are open on purpose, so they draw no warning.
 An action declared outside a page tree is not judged, because its rule depends on the origin each request posts.
 
 See also

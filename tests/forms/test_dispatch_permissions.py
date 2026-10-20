@@ -18,6 +18,7 @@ from next.forms.dispatch.permissions import (
 )
 from next.forms.manager import form_action_manager
 from next.forms.signals import form_access_denied
+from next.forms.uid import ORIGIN_FIELD_NAME
 from next.permissions import add_perm
 from next.permissions.markers import OPEN, AccessRule, Requirement, predicate
 from next.testing import SignalRecorder, capture_signals
@@ -79,7 +80,22 @@ def _member(client, username: str, *codenames: str):
 
 def _post(client, action_name: str, origin: str = "/", **data: str) -> HttpResponse:
     url = form_action_manager.get_action_url(action_name)
-    return client.post(url, data={"_next_form_origin": origin, **data})
+    return client.post(url, data={ORIGIN_FIELD_NAME: origin, **data})
+
+
+def _rule(guard: ActionGuard, *, form: bool) -> AccessRule:
+    branch = {"form_class": _PermStep} if form else {"handler": _handler}
+    return guard_rule({"guard": guard, "file_path": _FORMS, **branch})
+
+
+def _guarded_request(rf, user: object) -> HttpRequest:
+    request = rf.post("/_next/form/x/")
+    request.user = user
+    return request
+
+
+def _post_owned(client, name: str = "ada") -> HttpResponse:
+    return _post(client, "perm_owned_group_form", "/groups/ada/", name=name)
 
 
 def _layers(recorder: SignalRecorder) -> list[tuple[str, str]]:
@@ -118,7 +134,7 @@ class TestSavedInstance:
     ) -> None:
         group = Group.objects.create(name="ada")
         _member(client_no_csrf, "ada")
-        _post(client_no_csrf, "perm_owned_group_form", "/groups/ada/", name="ada")
+        _post_owned(client_no_csrf)
         (obj,) = rule.objects()
         assert isinstance(obj, Group)
         assert obj.pk == group.pk
@@ -128,9 +144,7 @@ class TestSavedInstance:
     ) -> None:
         Group.objects.create(name="ada")
         _member(client_no_csrf, "ada")
-        response = _post(
-            client_no_csrf, "perm_owned_group_form", "/groups/ada/", name="ada"
-        )
+        response = _post_owned(client_no_csrf)
         assert response.status_code == 302
         assert response["Location"] == "/done/"
         assert ("saved", "ada") in log
@@ -148,7 +162,7 @@ class TestSavedInstance:
         monkeypatch.setattr("next.forms.dispatch.guard_rule", counted)
         Group.objects.create(name="ada")
         _member(client_no_csrf, "ada")
-        _post(client_no_csrf, "perm_owned_group_form", "/groups/ada/", name="ada")
+        _post_owned(client_no_csrf)
         assert ("saved", "ada") in log
         assert len(metas) == 1
 
@@ -157,9 +171,7 @@ class TestSavedInstance:
     ) -> None:
         group = Group.objects.create(name="ada")
         _member(client_no_csrf, "bob")
-        response = _post(
-            client_no_csrf, "perm_owned_group_form", "/groups/ada/", name="renamed"
-        )
+        response = _post_owned(client_no_csrf, "renamed")
         assert response.status_code == 403
         assert _layers(denials) == [("object", "denied")]
         event = denials.first_for(form_access_denied)
@@ -175,9 +187,7 @@ class TestSavedInstance:
         Group.objects.create(name="ada")
         root = User.objects.create_superuser("root", "root@example.com")
         client_no_csrf.force_login(root)
-        response = _post(
-            client_no_csrf, "perm_owned_group_form", "/groups/ada/", name="ada"
-        )
+        response = _post_owned(client_no_csrf)
         assert response.status_code == 302
         assert rule.objects() == []
 
@@ -467,15 +477,13 @@ class TestNothingRegistered:
     @pytest.mark.parametrize("object_stage", [True, False])
     def test_has_perms_gets_the_guards_own_tuple(self, rf, object_stage) -> None:
         guard = ActionGuard(permissions=(_MODEL_PERM, "auth.add_group"))
-        request = rf.post("/_next/form/x/")
-        request.user = _GuardUser()
+        request = _guarded_request(rf, _GuardUser())
         assert _check_access(request, _rule(guard, form=object_stage)) is None
         (received,) = request.user.received
         assert received is guard.permissions
 
     def test_a_login_only_guard_never_asks_has_perms(self, rf) -> None:
-        request = rf.post("/_next/form/x/")
-        request.user = _GuardUser()
+        request = _guarded_request(rf, _GuardUser())
         guard = ActionGuard(login_required=True)
         assert _check_access(request, _rule(guard, form=True)) is None
         assert request.user.received == []
@@ -549,8 +557,7 @@ class TestGuardRuleMemo:
 
     def test_a_registered_only_guard_leaves_nothing_up_front(self, rf) -> None:
         add_perm(_EDIT, owns_group)
-        request = rf.post("/_next/form/x/")
-        request.user = _GuardUser(allowed=False)
+        request = _guarded_request(rf, _GuardUser(allowed=False))
         guard = ActionGuard(permissions=(_EDIT,))
         assert _check_access(request, _rule(guard, form=True)) is None
         assert request.user.received == []
@@ -611,8 +618,7 @@ class TestBranch:
         self, rf, meta, deferred
     ) -> None:
         add_perm(_EDIT, owns_group)
-        request = rf.post("/_next/form/x/")
-        request.user = _GuardUser(allowed=False)
+        request = _guarded_request(rf, _GuardUser(allowed=False))
         guard = ActionGuard(permissions=(_MODEL_PERM, _EDIT))
         meta = {**meta, "guard": guard, "file_path": _FORMS}
         with pytest.raises(PermissionDenied):
@@ -624,8 +630,7 @@ class TestBranch:
 
     def test_an_action_with_no_branch_is_a_400(self, rf) -> None:
         backend_meta = {"guard": None, "file_path": "/x/forms.py"}
-        request = rf.post("/_next/form/x/")
-        request.user = _GuardUser()
+        request = _guarded_request(rf, _GuardUser())
         response = FormActionDispatch.dispatch(
             None, request, "branchless", backend_meta
         )
@@ -638,24 +643,16 @@ class TestAnonymous:
     @pytest.mark.usefixtures("owned_group_form")
     def test_redirected_to_login(self, client_no_csrf, rule: _Rule) -> None:
         Group.objects.create(name="ada")
-        response = _post(
-            client_no_csrf, "perm_owned_group_form", "/groups/ada/", name="ada"
-        )
+        response = _post_owned(client_no_csrf)
         assert response.status_code == 302
         assert response["Location"] == "/accounts/login/?next=/groups/ada/"
         assert rule.objects() == []
 
     def test_an_anonymous_request_at_the_object_stage(self, rf, rule: _Rule) -> None:
-        request = rf.post("/_next/form/x/")
-        request.user = AnonymousUser()
+        request = _guarded_request(rf, AnonymousUser())
         denial = _check_access(
             request, _rule(ActionGuard(permissions=(_EDIT,)), form=True)
         )
         assert denial is not None
         assert denial.status_code == 302
         assert rule.objects() == []
-
-
-def _rule(guard: ActionGuard, *, form: bool) -> AccessRule:
-    branch = {"form_class": _PermStep} if form else {"handler": _handler}
-    return guard_rule({"guard": guard, "file_path": _FORMS, **branch})

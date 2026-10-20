@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from django.core.checks import (
@@ -23,7 +22,7 @@ from next.site.config import indexable_without_request
 from next.urls.errors import URLParameterError
 from next.urls.parser import default_url_parser
 from next.urls.reverse import page_reverse
-from next.utils import PageRoot
+from next.utils import UNMOUNTED, PageRoot
 
 from .roots import (
     checked_noindex,
@@ -38,6 +37,7 @@ from .roots import (
 if TYPE_CHECKING:
     import types
     from collections.abc import Sequence
+    from pathlib import Path
 
     from next.seo.discovery import SeoRoot
 
@@ -45,7 +45,6 @@ if TYPE_CHECKING:
 SITEMAP_URL: Final = "/sitemap.xml"
 _PARAMETER: Final = re.compile(r"<(?P<converter>[^>:]+):(?P<name>[^>]+)>")
 _PLACEHOLDERS: Final = ("0", "x", "00000000-0000-0000-0000-000000000000")
-_UNMOUNTED: Final = PageRoot(path=Path(), label="")
 
 
 def _single_source(url: str, paths: Sequence[Path]) -> list[CheckMessage]:
@@ -155,7 +154,7 @@ def _placeholder(converter_name: str) -> tuple[object, str] | None:
     return None
 
 
-def route_path(trail: str, root: PageRoot = _UNMOUNTED) -> str | None:
+def route_path(trail: str, root: PageRoot = UNMOUNTED) -> str | None:
     """Return the URL path of `trail` up to its first parameter, `None` if unknown.
 
     Placeholder values fill the parameters, those of the include over `root` too.

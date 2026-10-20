@@ -37,8 +37,7 @@ def _debug_engine() -> Engine:
 def _partial_of(source: str, engine: Engine) -> tuple[Template, ZoneNode]:
     template = Template(source, engine=engine)
     node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
-    # The compile hook stores the default engine, which the suite mutates, so
-    # pin the debug one to reach the `render_annotated` branch production takes.
+    # The compile hook stores the default engine, so pin the debug one explicitly.
     node.partial.engine = engine
     return template, node
 

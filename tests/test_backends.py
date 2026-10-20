@@ -81,8 +81,7 @@ class TestResolveBackendClass:
             resolve_backend_class({"OPTIONS": {}}, base=FakeBackend)
 
     def test_empty_backend_is_improperly_configured(self) -> None:
-        # an empty dotted path would otherwise reach the importer and fail
-        # with a message about module paths rather than about the entry
+        # An empty dotted path would reach the importer and fail with a module message.
         with pytest.raises(ImproperlyConfigured, match="under BACKEND"):
             resolve_backend_class({"BACKEND": ""}, base=FakeBackend)
 
@@ -154,8 +153,7 @@ class TestLoadBackends:
         [("type", TypeError), ("value", ValueError), ("import", ImportError)],
     )
     def test_other_errors_from_construction_escape(self, kind, error) -> None:
-        # a constructor failing for anything but its own
-        # config is a bug rather than an entry to skip
+        # A constructor failing for anything but its own config is a bug, not a skip.
         with pytest.raises(error, match="boom"):
             load_backends(
                 [{"BACKEND": RAISING, "ERROR": kind}, {"BACKEND": ALPHA}],

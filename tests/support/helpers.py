@@ -59,8 +59,7 @@ class SignalSender:
 def typing_optional(cls: type) -> object:
     """Return the `typing.Optional` spelling of `cls | None`, as user code may write it.
 
-    Built through the subscript method, because the literal spelling is rewritten
-    to the PEP 604 form, which is a different object on Python 3.12 and 3.13.
+    Subscripted, since the literal spelling is rewritten to PEP 604 on 3.12 and 3.13.
     """
     return Optional.__getitem__(cls)
 

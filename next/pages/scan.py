@@ -60,8 +60,7 @@ def load_scanned_page_modules(router_manager: RouterManager) -> list[tuple[str, 
 def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
     """Yield the `page.py` path and key of every keyed `serialize=True` context.
 
-    A keyless callable produces its keys only at render time, so those are not listed,
-    and a page reached through two path spellings yields its keys once.
+    A keyless callable yields keys only at render time, and a page yields its keys once.
     """
     router_manager, _errors = get_router_manager()
     if router_manager is None:

@@ -1,7 +1,6 @@
 """The sentinel the configuration layer and the areas above it mark an absent value by.
 
-It lives in the configuration layer, which imports nothing else of the framework, so
-every layer can share it without an import cycle.
+It lives here because this layer imports nothing else, so no import cycle can form.
 """
 
 from __future__ import annotations

@@ -34,10 +34,9 @@ _load_errors: BoundedCache[Path, Exception] = BoundedCache()
 
 
 def _detached(exc: Exception) -> Exception:
-    """Return `exc` without the traceback and the chain it was raised with.
+    """Return `exc` without its traceback and chain.
 
-    The record outlives the import, and a live traceback would pin the frames of the
-    failing module and their globals for as long as the entry stands.
+    A live traceback would pin the failing module's frames while the entry stands.
     """
     exc.__cause__ = None
     exc.__context__ = None
@@ -75,11 +74,7 @@ class ModuleCache:
         self._order.clear()
 
     def __len__(self) -> int:
-        """Return the number of cached entries.
-
-        An empty cache is therefore falsy, so a caller taking one as an
-        argument checks it against `None` rather than for truth.
-        """
+        """Return the number of cached entries, so an empty cache is falsy."""
         return len(self._order)
 
     def __contains__(self, path: Path) -> bool:

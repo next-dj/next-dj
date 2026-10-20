@@ -1,8 +1,4 @@
-"""Signature and annotation reads of a callable, memoised per callable.
-
-Both resolvers and the plan compiler read the same facts off a callable, so the
-memos and the parameter preparation they share sit below all three.
-"""
+"""Signature and annotation reads of a callable, memoised per callable."""
 
 from __future__ import annotations
 
@@ -21,9 +17,7 @@ if TYPE_CHECKING:
 
 type IntrospectKey = tuple[object, bool]
 
-# Everything an annotation expression is allowed to fail with. A string hint
-# raises from the parser as readily as from the lookup, and under deferred
-# evaluation the expression itself runs at this point.
+# Everything an annotation expression may fail with, string hints included.
 HINT_ERRORS: tuple[type[Exception], ...] = (
     NameError,
     TypeError,
@@ -37,9 +31,7 @@ HINT_ERRORS: tuple[type[Exception], ...] = (
 
 _EMPTY = inspect.Parameter.empty
 
-# Bounded because the dev reloader re-executes a `page.py` on every save and mints
-# fresh function objects, each of which would otherwise stay pinned here for good.
-# Keyed by the stable `__func__` plus a bound flag, since a bound method is recreated.
+# Bounded as the reloader mints new function objects per save, keyed by `__func__`.
 _signature_cache: LruCache[IntrospectKey, inspect.Signature] = LruCache()
 _type_hints_cache: LruCache[IntrospectKey, dict[str, Any]] = LruCache()
 _var_keyword_cache: LruCache[IntrospectKey, bool] = LruCache()
@@ -47,8 +39,7 @@ _var_keyword_cache: LruCache[IntrospectKey, bool] = LruCache()
 
 def introspect_key(func: Callable[..., Any]) -> IntrospectKey:
     """Return the key the memos hold `func` under."""
-    # `isinstance` over `inspect.ismethod`, which is a Python wrapper around the
-    # same check and sits on every memoised lookup and plan replay.
+    # `isinstance` over `inspect.ismethod`, a Python wrapper on every memoised lookup.
     if isinstance(func, MethodType):
         return (func.__func__, True)
     return (func, False)
@@ -61,8 +52,7 @@ def _memoised[V](
 ) -> V:
     """Return `compute(func)` through `cache`, computing it on a miss.
 
-    A missing key raises rather than answering `None`, so a memo whose value may
-    legitimately be `None` still tells a stored answer from an absent one.
+    A missing key raises rather than answering `None`, so a stored `None` is distinct.
     """
     key = introspect_key(func)
     try:
@@ -104,8 +94,7 @@ def _resolve_hints(func: Callable[..., Any]) -> dict[str, Any]:
 def cached_type_hints(func: Callable[..., Any]) -> dict[str, Any]:
     """Return the type hints of `func` with the `Annotated` extras kept, memoised.
 
-    The hints come from whatever `inspect.signature` reads, so the plan never
-    pairs one object's parameters with another object's annotations.
+    Read from the same object as `inspect.signature`, so parameters and hints agree.
     """
     return _memoised(_type_hints_cache, func, _resolve_hints)
 

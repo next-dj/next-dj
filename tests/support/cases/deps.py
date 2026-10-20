@@ -144,8 +144,7 @@ URL_BY_ANNOTATION_RESOLVE_CASES: tuple[UrlByAnnotationResolveCase, ...] = (
 class PlanCase:
     """One callable resolved in one context, pinned to the literal it must yield.
 
-    `kwargs` is the loose mapping `resolve_dependencies` takes, and `expected`
-    the mapping a compile and a replay of the plan both have to produce.
+    `kwargs` is the loose mapping `resolve_dependencies` takes, `expected` the result.
     """
 
     id: str
@@ -158,8 +157,7 @@ class PlanCase:
 class TemplateContextCase:
     """One callable resolved the way a component render resolves it.
 
-    `template_context` is the mapping the tag hands the resolver, and `expected` the
-    literal both the compile and the replay have to produce.
+    `template_context` is what the tag hands the resolver, `expected` the literal.
     """
 
     id: str
@@ -173,8 +171,7 @@ class TemplateContextCase:
 class ParityCase:
     """One callable and one loose kwargs mapping both resolvers have to agree on.
 
-    `build` installs whatever providers or dependencies the case needs, so the two
-    resolvers under comparison are set up identically and independently.
+    `build` installs the providers the case needs, so both resolvers start identical.
     """
 
     id: str
@@ -187,8 +184,7 @@ class ParityCase:
 class ContextMarkerCase:
     """One `Context` marker source, resolved against one template context.
 
-    `source` is what the marker was built with, a name, a callable, a constant, or None
-    for the parameter name, and `expected` is what both paths have to answer.
+    `source` is a name, a callable, a constant, or None for the parameter name.
     """
 
     id: str

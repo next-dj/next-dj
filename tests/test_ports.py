@@ -108,8 +108,7 @@ class TestAppComposition:
 class TestUrlsBuiltBeforeTheSeoPortBinds:
     """A URL build that runs before `ready()` binds the SEO port caches nothing stale.
 
-    A project app listed ahead of `next` can reverse a URL in its own `ready()`, so the
-    page patterns are built while the slot is unbound.
+    An app listed ahead of `next` can reverse a URL in `ready()` with the slot unbound.
     """
 
     def test_the_seo_routes_join_once_the_port_binds(self) -> None:
@@ -118,8 +117,7 @@ class TestUrlsBuiltBeforeTheSeoPortBinds:
         lazy = _LazyUrlPatterns()
         with patch("next.urls.manager.seo_routes_slot", slot):
             early = list(lazy)
-            # Bound without moving the SEO routes version, so only an uncached early
-            # build lets the routes join.
+            # Bound without bumping the SEO routes version, so an uncached build joins.
             slot.set(SimpleNamespace(patterns=lambda: [sitemap]))
             late = list(lazy)
 

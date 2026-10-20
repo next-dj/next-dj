@@ -66,6 +66,9 @@ _REQUIRES_OBJECT = f'page.permission_required("{_READ}", obj=DObject[Group])'
 _PUBLIC = "page.public()"
 _INHERITED_PERM = f'permission_required("{_PERM}", inherit=True)'
 
+_PERM_STATUS = [("anonymous", 302), ("visitor", 403), ("holder", 200)]
+_LOGIN_STATUS = [("anonymous", 302), ("visitor", 200)]
+
 
 def _action(name: str, *declarations: str) -> str:
     return _ACTION.format(name=name, declarations="\n".join(declarations))
@@ -136,15 +139,13 @@ class TestOwnerRule:
     """An action answers the access rule of the file it is declared in."""
 
     @pytest.mark.parametrize("where", list(_OWNED))
-    @pytest.mark.parametrize(
-        ("kind", "status"), [("anonymous", 302), ("visitor", 403), ("holder", 200)]
-    )
+    @pytest.mark.parametrize(("kind", "status"), _PERM_STATUS)
     def test_status(self, tmp_path: Path, where: str, kind: str, status: int) -> None:
         root = _OWNED[where].write(tmp_path / "pages")
         response = _post(root, kind, "note", "/notes/")
         _assert_status(response, status, "/notes/")
 
-    @pytest.mark.parametrize(("kind", "status"), [("anonymous", 302), ("visitor", 200)])
+    @pytest.mark.parametrize(("kind", "status"), _LOGIN_STATUS)
     def test_login_only(self, tmp_path: Path, kind: str, status: int) -> None:
         root = _Tree({"notes": _action("note", _LOGIN)}).write(tmp_path / "pages")
         _assert_status(_post(root, kind, "note", "/notes/"), status, "/notes/")
@@ -187,7 +188,7 @@ class TestOwnerRule:
             )
         _assert_status(response, 302, origin or "/")
 
-    @pytest.mark.parametrize(("kind", "status"), [("anonymous", 302), ("visitor", 200)])
+    @pytest.mark.parametrize(("kind", "status"), _LOGIN_STATUS)
     def test_a_guard_in_a_skipped_folder_binds_its_files(
         self, tmp_path: Path, kind: str, status: int
     ) -> None:
@@ -232,9 +233,7 @@ class TestForgedOrigin:
             pytest.param("secret_note", "/open/", id="secret-action-open-origin"),
         ],
     )
-    @pytest.mark.parametrize(
-        ("kind", "status"), [("anonymous", 302), ("visitor", 403), ("holder", 200)]
-    )
+    @pytest.mark.parametrize(("kind", "status"), _PERM_STATUS)
     def test_status(
         self, tmp_path: Path, action: str, origin: str, kind: str, status: int
     ) -> None:
@@ -299,7 +298,6 @@ class TestTreeMemo:
         self, tmp_path: Path
     ) -> None:
         page_path = self._page(tmp_path)
-
         login = Requirement("login", page_path)
 
         with routed(page_path.parent.parent):

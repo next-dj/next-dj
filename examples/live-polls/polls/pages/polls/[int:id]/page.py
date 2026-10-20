@@ -22,8 +22,6 @@ def poll_meta(poll: Poll) -> MetadataDict:
 def live_results(poll: Poll) -> dict[str, object]:
     """Seed the live snapshot under `window.Next.context.live_results`.
 
-    A page-level serialize provider so the vote handler can push fresh
-    counts through `Patches(request).context(live_results=...)`, the
-    name resolves against the origin page rather than the component.
+    The vote handler pushes fresh counts to this page-level key through `Patches`.
     """
     return build_snapshot(poll).to_payload()

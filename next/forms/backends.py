@@ -37,8 +37,7 @@ if TYPE_CHECKING:
     from .wizard import FormWizard
 
 
-# Memoised by raw path, because both hit a syscall on every registration and
-# scoped lookup, and a process-stable resolve() needs no invalidation.
+# Memoised by raw path because both hit a syscall per registration and scoped lookup.
 _resolved_path_cache: BoundedCache[str, str] = BoundedCache()
 _dotted_module_cache: BoundedCache[str, str] = BoundedCache()
 
@@ -156,8 +155,7 @@ class RegistryBackendSnapshot:
 class ActionRegistration:
     """A form action to register with its name, declaration site, and target.
 
-    Exactly one of `handler`, `form_class`, or `wizard_class` is the target, except
-    `@action(form_class=...)`, which supplies a handler and a form factory together.
+    One of `handler`, `form_class` or `wizard_class` is the target, or a handler+form.
     """
 
     name: str
@@ -186,9 +184,7 @@ class FormActionBackend(ABC):
     def register_action(self, registration: ActionRegistration) -> None:
         """Record an action from the decorator or __init_subclass__.
 
-        A bare name resolves to the first registration unless a later one sets
-        `claims_name_binding`, and only `FormActionManager.register_action` moves the
-        URL-pattern cache token, which a direct backend caller otherwise misses.
+        Only `FormActionManager.register_action` moves the URL-pattern cache token.
         """
 
     @abstractmethod
@@ -199,16 +195,14 @@ class FormActionBackend(ABC):
     def generate_urls(self) -> "list[URLPattern]":
         """Return URLconf entries for this backend.
 
-        Each call returns the same view objects, because `next.E149` identifies the
-        form action endpoint by the view that `resolve()` returns for it.
+        Each call returns the same view objects, as `next.E149` compares identity.
         """
 
     @abstractmethod
     def dispatch(self, request: "HttpRequest", uid: str) -> "HttpResponseBase":
         """Run the handler for `uid`.
 
-        The return widens to `HttpResponseBase`, because a guarded origin page may
-        short-circuit this POST with whatever response its own `render()` would serve.
+        Returns `HttpResponseBase` since a guarded origin page may answer with its own.
         """
 
     def get_meta(
@@ -216,8 +210,7 @@ class FormActionBackend(ABC):
     ) -> "ActionMeta | None":
         """Return optional per-action metadata for subclasses.
 
-        A lookup with `page_path` returns that path's meta or a shared fallback, never
-        another path's, so the template tags can tell an exact hit from the fallback.
+        A `page_path` lookup returns that path's meta or the shared fallback only.
         """
         del action_name, page_path
         return None
@@ -229,16 +222,14 @@ class FormActionBackend(ABC):
     def clear_registry(self) -> None:
         """Drop every action this backend stores, for test isolation.
 
-        A backend that keeps no state of its own, because it answers each
-        lookup from its source, has nothing to drop and leaves this alone.
+        A stateless backend answering from its source has nothing to drop.
         """
         return
 
     def snapshot(self) -> object:
         """Return an opaque token holding the actions this backend stores.
 
-        The token travels back into `restore` untouched, so a backend keeps its own
-        representation, or returns None when it holds no state to snapshot.
+        The token goes back into `restore` untouched, None means no state to snapshot.
         """
         return None
 
@@ -264,8 +255,7 @@ class FormActionBackend(ABC):
     ) -> "HttpResponse":
         """Turn one pipeline outcome into the HTTP response.
 
-        A partial request routes through the partial shaper port for a
-        patch envelope, a plain request takes the default full-page path.
+        A partial request uses the partial shaper port, a plain one the full page.
         """
         shaper = partial_shaper_slot.get()
         if shaper.intent(request).partial:
@@ -351,8 +341,7 @@ class RegistryFormActionBackend(FormActionBackend):
     def clear_registry(self) -> None:
         """Drop every registered action and reset the UID index. For test isolation.
 
-        Rebinding beats clearing four populated dicts, and an escaped
-        FormActionNotFoundError keeps its raise-time candidates view.
+        Rebinding keeps an escaped FormActionNotFoundError's raise-time candidates view.
         """
         self._registry = {}
         self._uid_to_name = {}
@@ -375,8 +364,7 @@ class RegistryFormActionBackend(FormActionBackend):
     def restore(self, snapshot: object) -> None:
         """Restore the registered actions captured by `snapshot`.
 
-        The token is opaque in the contract, so a token this backend never
-        handed out is refused rather than half-applied.
+        A token this backend never handed out is refused rather than half-applied.
         """
         if not isinstance(snapshot, RegistryBackendSnapshot):
             msg = (
@@ -471,15 +459,13 @@ class RegistryFormActionBackend(FormActionBackend):
         if meta is None:
             meta = self._fallback_meta(action_name, scoped=page_path is not None)
         if meta is not None:
-            # The script prefix is request-scoped state and reverse() bakes it
-            # into the URL, so it must be part of the cache key.
+            # The script prefix is request-scoped and reverse() bakes it into the URL.
             cache_key = (get_script_prefix(), meta["uid"])
             url = self._url_cache.get(cache_key)
             if url is None:
                 url = reverse_form_action(meta["uid"])
                 if not self._url_cache:
-                    # Only a backend that cached a URL needs the ROOT_URLCONF signal,
-                    # so the hookup is lazy.
+                    # Only a backend that cached a URL needs the ROOT_URLCONF signal.
                     _url_caching_backends.add(self)
                 self._url_cache[cache_key] = url
             return url
@@ -510,6 +496,11 @@ class RegistryFormActionBackend(FormActionBackend):
         view = login_not_required(require_http_methods(["GET", "POST"])(self.dispatch))
         cast("_DispatchView", view).next_access_kind = "action"
         return view
+
+    def action_name(self, uid: str) -> str | None:
+        """Return the name of the action registered under `uid`, `None` for none."""
+        key = self._uid_to_name.get(uid)
+        return key[1] if key is not None and key in self._registry else None
 
     @override
     def dispatch(self, request: "HttpRequest", uid: str) -> "HttpResponseBase":

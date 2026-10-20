@@ -346,8 +346,7 @@ class TestInitScriptGoldenParity:
 class TestInitScriptEscaping:
     """The assembled payload is escaped for the inline `<script>` context.
 
-    A `serialize=True` value whose text holds `</script>`, `<!--`, or the
-    JS line separators must not break out of the inline init element.
+    A `serialize=True` value with `</script>`, `<!--`, or line separators must not leak.
     """
 
     def _payload(self, out: str) -> str:

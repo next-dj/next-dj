@@ -28,8 +28,7 @@ if TYPE_CHECKING:
     from next.pages.registry import ZoneBinding
 
 
-# The file router routes only this name, so a context bound to any other file never
-# runs, including one bound to a sibling page.py.
+# The file router routes only this name, so a context in any other file never runs.
 _PAGE_CONTEXT_SUBJECT = RegistrationSubject(
     decorator="@context", anchor_name="page.py", render="page render", code="next.E074"
 )
@@ -46,8 +45,7 @@ class PageContexts(NamedTuple):
 def load_routed_pages() -> list[tuple[str, Path]] | None:
     """Import every routed `page.py` once per run and return the ones that loaded.
 
-    The router manager is the one these checks resolved, so a patched router tree is
-    used. `None` means the routers failed to load, which `next.E007` reports.
+    `None` means the routers failed to load, which `next.E007` reports.
     """
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
@@ -58,8 +56,7 @@ def load_routed_pages() -> list[tuple[str, Path]] | None:
 def loaded_page_contexts() -> list[PageContexts]:
     """Return the `@context` every routed `page.py` registered as it imported.
 
-    The registry keys on the path importlib gave the module, the same spelling the
-    walk reports, so a binding is looked up without resolving a symlink on either side.
+    The registry keys on the path importlib gave the module, so no symlink is resolved.
     """
     loaded = load_routed_pages() or []
     bindings = page.zone_bindings()
@@ -150,8 +147,7 @@ def check_context_functions(*args, **kwargs) -> list[CheckMessage]:
 def check_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
     """Flag a `@context` no page render collects (`next.E074`).
 
-    A registration keys on the file declaring the callable, so an imported helper
-    binds to its own module, and a sibling page's callable binds to that other page.
+    A registration keys on the declaring file, so an imported helper binds elsewhere.
     """
     if load_routed_pages() is None:
         return []

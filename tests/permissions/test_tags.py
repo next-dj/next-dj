@@ -22,6 +22,7 @@ from tests.support import (
 )
 
 
+_VARIABLE = "{% has_perm perm %}yes{% else %}no{% endhas_perm %}"
 _GRANTED = "{% has_perm 'blog.change_post' %}yes{% else %}no{% endhas_perm %}"
 _WITH_OBJECT = "{% has_perm 'blog.change_post' post %}yes{% else %}no{% endhas_perm %}"
 
@@ -123,7 +124,7 @@ class TestPermissionExpression:
     """The permission may be a variable, anything but a non-empty string denies."""
 
     def test_a_variable_permission(self) -> None:
-        source = "{% has_perm perm %}yes{% else %}no{% endhas_perm %}"
+        source = _VARIABLE
         user = PermissionHolder("blog.change_post")
         assert _render(source, user=user, perm="blog.change_post") == "yes"
         assert _render(source, user=user, perm="blog.delete_post") == "no"
@@ -138,7 +139,7 @@ class TestPermissionExpression:
         ],
     )
     def test_a_non_string_or_empty_permission_denies(self, context) -> None:
-        source = "{% has_perm perm %}yes{% else %}no{% endhas_perm %}"
+        source = _VARIABLE
         user = PermissionHolder("")
         assert _render(source, user=user, **context) == "no"
         assert user.asked == []
@@ -147,7 +148,7 @@ class TestPermissionExpression:
         self, monkeypatch
     ) -> None:
         monkeypatch.setattr(Engine.get_default(), "string_if_invalid", "blog.view_post")
-        source = "{% has_perm perm %}yes{% else %}no{% endhas_perm %}"
+        source = _VARIABLE
         user = PermissionHolder("blog.view_post")
         assert _render(source, user=user) == "no"
         assert user.asked == []

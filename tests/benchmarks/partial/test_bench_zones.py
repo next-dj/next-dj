@@ -72,8 +72,7 @@ def _priced_page(directory: Path, *, scoped: bool) -> Iterator[Path]:
 class TestBenchFiveZonePageAgainstBaseline:
     """Full render of a five-zone page against an equivalent plain page.
 
-    The zone wrapper is concatenation only, so the gap against the plain
-    baseline isolates the per-zone overhead and stays minimal.
+    The zone wrapper is concatenation only, so the gap is the per-zone overhead.
     """
 
     @pytest.mark.benchmark(group="partial.full_render")
@@ -97,8 +96,7 @@ class TestBenchSingleZoneRender:
     @pytest.mark.benchmark(group="partial.zone_render")
     def test_render_one_zone(self, tmp_path: Path, benchmark) -> None:
         page_file = _write_zoned_page(tmp_path, _ZONED_DJX)
-        # render_zone drives the module-level page singleton, so seed its
-        # composed-template cache once before the timed loop.
+        # render_zone uses the page singleton, so seed its template cache before timing.
         page_singleton.composed_template_for(page_file)
         request = RequestFactory().get("/")
         benchmark(render_zone, page_file, ("z_0",), request, url_kwargs=_KWARGS)
@@ -107,8 +105,7 @@ class TestBenchSingleZoneRender:
 class TestBenchZoneGetProviderScope:
     """One zone GET over ten priced providers, bound to a zone and unbound.
 
-    The pair is the delta of the `@context(zone=)` filter on a poll tick,
-    measured on one branch rather than against a checked-out base.
+    The pair is the delta of the `@context(zone=)` filter on a poll tick.
     """
 
     @pytest.mark.benchmark(group="partial.zone_get")

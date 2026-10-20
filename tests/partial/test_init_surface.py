@@ -96,8 +96,7 @@ class TestDemotedNames:
 class TestFrozenImportPaths:
     """Value objects and public errors import from the aggregator facade.
 
-    The facade is the frozen import path, so the test pins the names on
-    `next.partial` rather than on the submodule that defines them.
+    The facade is the frozen path, so names are pinned on `next.partial`.
     """
 
     def test_value_objects_import_from_facade(self) -> None:

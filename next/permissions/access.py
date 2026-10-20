@@ -7,12 +7,13 @@ import functools
 from collections.abc import Callable, Iterable
 from enum import Enum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final, Protocol, cast
 from urllib.parse import urlsplit, urlunsplit
 
 from django.apps import apps
 from django.conf import settings
 from django.contrib.auth import REDIRECT_FIELD_NAME
+from django.contrib.auth.decorators import login_not_required
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpRequest, HttpResponseRedirect, QueryDict
 from django.http.response import HttpResponseBase
@@ -216,6 +217,22 @@ def answer(denial: Denial, request: HttpRequest, next_url: str) -> HttpResponseR
     raise PermissionDenied
 
 
+class _OpenView(Protocol):
+    """A framework view open to everyone, which `manage.py permissions` reads off."""
+
+    next_open: bool
+
+
+def open_view[V: Callable[..., HttpResponseBase]](view: V) -> V:
+    """Exempt a framework view from the login middleware and mark it open to everyone.
+
+    `login_not_required` alone tells nothing of what the view itself still refuses.
+    """
+    exempt = login_not_required(view)
+    cast("_OpenView", exempt).next_open = True
+    return exempt
+
+
 def forget_login_default(*, setting: str, **kwargs: object) -> None:
     """Drop the memoised answers once a setting the default login reads changes."""
     if setting in {"NEXT_FRAMEWORK", "MIDDLEWARE", "INSTALLED_APPS"}:
@@ -237,6 +254,7 @@ __all__ = [
     "login_by_default",
     "login_middleware",
     "login_redirect",
+    "open_view",
     "require_login",
     "require_permission",
     "signed_in",

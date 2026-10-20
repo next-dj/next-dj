@@ -41,8 +41,7 @@ class TestPageGetWithoutPartialSwitch:
         assert response["Content-Type"] == "text/html; charset=utf-8"
 
     def test_vary_names_every_partial_negotiation_header(self) -> None:
-        # the full page and a later patch envelope share this URL, so a shared cache
-        # that ignored the switch would answer the partial request with the page
+        # the page and a patch share this URL, so a cache must vary on the switch
         response = Client().get("/")
         varied = {name.strip().lower() for name in response["Vary"].split(",")}
         assert {name.lower() for name in VARY_HEADERS} <= varied

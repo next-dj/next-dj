@@ -134,8 +134,7 @@ class TestRouteOrder:
         ]
 
     def test_the_most_specific_sibling_comes_first(self, tmp_path) -> None:
-        # `post-[id]` would be shadowed by `[slug]` and `[uuid:key]` by
-        # `[str:key]`, since Django tries the patterns in order.
+        # `post-[id]` is shadowed by `[slug]` and `[uuid:key]` by `[str:key]` in order.
         names = [
             "[[rest]]",
             "docs-[[rest]]",

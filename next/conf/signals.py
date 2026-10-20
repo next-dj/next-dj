@@ -19,8 +19,7 @@ settings_reloaded: Signal = Signal()
 def dispatch_settings_reloaded(sender: type) -> None:
     """Run every `settings_reloaded` receiver, then raise what one of them raised.
 
-    Every receiver still has to drop what it built when another one raises, so the
-    robust send runs them all and the first error leaves only after that.
+    The robust send runs them all so one failure never leaves another's caches stale.
     """
     first: Exception | None = None
     for receiver, response in settings_reloaded.send_robust(sender=sender):

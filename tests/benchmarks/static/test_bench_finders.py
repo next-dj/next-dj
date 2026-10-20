@@ -14,8 +14,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-# Enough page directories that a walk of the tree stands out against the
-# per-lookup work, and far fewer than a real site of that size holds.
+# Enough page directories that a tree walk stands out against per-lookup work.
 _PAGES = 60
 _SECTION_SIZE = 10
 _ASSET = "next/sec0/page0.css"

@@ -165,8 +165,7 @@ class TestBenchDispatchEndToEnd:
     def test_dispatch_unguarded_form_no_hook_overhead(self, benchmark) -> None:
         """A no-hook form pays no permission-hook resolve on the dispatch path.
 
-        Pins the zero-overhead promise: an undeclared check_permissions or
-        has_object_permission costs two ClassVar reads, never a resolver call.
+        Undeclared hooks cost two ClassVar reads, never a resolver call.
         """
         backend = RegistryFormActionBackend()
         backend.register_action(

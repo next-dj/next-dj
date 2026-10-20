@@ -42,14 +42,21 @@ class Predicate:
         return bool(self.test())
 
 
+def _parameters(test: Test) -> list[inspect.Parameter] | None:
+    """Return the parameters of `test`, `None` when Python cannot read its signature."""
+    try:
+        return list(inspect.signature(test).parameters.values())
+    except (TypeError, ValueError):
+        return None
+
+
 def signature_problem(test: Test) -> str | None:
     """Return why a predicate cannot call `test`, `None` when it takes up to two.
 
     A test takes `()`, `(user)` or `(user, obj)`, and `**kwargs` is harmless.
     """
-    try:
-        parameters = inspect.signature(test).parameters.values()
-    except (TypeError, ValueError):
+    parameters = _parameters(test)
+    if parameters is None:
         return "has no signature Python can read"
     positional = 0
     for parameter in parameters:
@@ -68,9 +75,8 @@ def signature_problem(test: Test) -> str | None:
 
 def _arity(test: Test) -> int:
     """Return how many of `(user, obj)` a predicate passes `test`, two if unreadable."""
-    try:
-        parameters = inspect.signature(test).parameters.values()
-    except (TypeError, ValueError):
+    parameters = _parameters(test)
+    if parameters is None:
         return _MAX_ARITY
     positional = sum(parameter.kind in _POSITIONAL for parameter in parameters)
     return min(positional, _MAX_ARITY)

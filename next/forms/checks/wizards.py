@@ -102,8 +102,7 @@ def check_wizard_step_actions(*args, **kwargs) -> list[CheckMessage]:
 def check_wizard_url_param_route(*args, **kwargs) -> list[CheckMessage]:
     """Error when a page-scoped wizard's page path lacks the url_param segment.
 
-    Only wizards declared in a page module are inspected, since the page file path
-    maps one to one onto the route and a missing segment is a definite misconfiguration.
+    Only page-module wizards are inspected, as the file path maps onto the route.
     """
     messages: list[CheckMessage] = []
     for meta in iter_registered_actions():

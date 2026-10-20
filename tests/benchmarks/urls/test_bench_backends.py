@@ -93,8 +93,7 @@ def installed_many_apps(tmp_path: Path, settings) -> Iterator[None]:
 class TestBenchFileRouter:
     """A fresh backend per round, because the second call is a cache copy.
 
-    `generate_urls` copies `_root_patterns_cache` after the first tree walk,
-    so reusing a backend would time a list copy instead of the discovery.
+    `generate_urls` copies `_root_patterns_cache` after the first walk.
     """
 
     @pytest.mark.benchmark(group="urls.backends")

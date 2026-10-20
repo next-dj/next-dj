@@ -9,10 +9,7 @@ from next import component
 def submit_url(category: object = None) -> str:
     """Return the URL the filter form submits to.
 
-    The form posts back to the current category page when the panel is
-    rendered inside `[category]/`. Otherwise it targets the all-products
-    listing. The parameter is typed `object` because DI may inject
-    either a slug string or a resolved `Category` instance.
+    The parameter is typed `object` because DI may inject a slug or a `Category`.
     """
     if isinstance(category, Category):
         return reverse("next:page_catalog_category", kwargs={"category": category.slug})

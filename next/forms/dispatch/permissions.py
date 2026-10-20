@@ -107,16 +107,15 @@ def _build_guard_rule(
 
     On the form branch a permission `add_perm` registered is asked of the bound form.
     """
-    permissions = guard.permissions
-    registered = (
-        tuple(perm for perm in permissions if permission_manager.is_registered(perm))
-        if on_form
-        else ()
+    registered = tuple(
+        perm
+        for perm in guard.permissions
+        if on_form and permission_manager.is_registered(perm)
     )
     static = (
-        tuple(perm for perm in permissions if perm not in registered)
+        tuple(perm for perm in guard.permissions if perm not in registered)
         if registered
-        else permissions
+        else guard.permissions
     )
     requirements = [Requirement("login", source)]
     if static:
@@ -311,10 +310,9 @@ def _check_page_access(
     uid: str | None,
     sender: type,
 ) -> "HttpResponseBase | None":
-    """Return the origin page's own short-circuit for this action POST, or None.
+    """Return the origin page's own refusal of this action POST, or None.
 
-    The action endpoint is not the page URL, so the page view never runs and this is
-    the only place a guarded page refuses a submission it would refuse a visit.
+    The page view never runs for an action URL, so a guarded page refuses here.
     """
     if origin_match is None or origin_match.page_path is None:
         return None

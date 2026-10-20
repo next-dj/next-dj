@@ -162,8 +162,7 @@ class TestLayoutChecks:
             assert msg_substring in warnings[0].msg
 
     def test_nested_roots_report_one_layout_once(self, tmp_path) -> None:
-        # A root nested inside another reaches the same page twice, and the
-        # layout is warned about once however many routes reach it.
+        # A root nested in another reaches the page twice, yet the layout warns once.
         outer = tmp_path / "pages"
         inner = outer / "blog"
         inner.mkdir(parents=True)
@@ -758,8 +757,7 @@ class TestPageModuleImports:
         assert messages == []
 
     def test_broken_page_in_a_later_root_reports_e017(self, tmp_path) -> None:
-        # The body-source checks stay silent on a broken import, so E017 is
-        # the only report left for a page outside the first root.
+        # The body-source checks stay silent on a broken import, leaving only E017.
         first_root = tmp_path / "first"
         second_root = tmp_path / "second"
         healthy = first_root / "ok" / "page.py"
@@ -776,8 +774,7 @@ class TestPageModuleImports:
         assert [(m.id, m.obj) for m in messages] == [("next.E017", str(broken))]
 
     def test_symlinked_root_does_not_double_report_one_page(self, tmp_path) -> None:
-        # The two roots spell one tree differently, and only the resolved
-        # spelling reveals that a second walk would report the same file twice.
+        # Only the resolved spelling shows a second walk would report the file twice.
         real_root = tmp_path / "real"
         broken = real_root / "bad" / "page.py"
         broken.parent.mkdir(parents=True)
@@ -792,8 +789,7 @@ class TestPageModuleImports:
         assert [(m.id, m.obj) for m in messages] == [("next.E017", str(broken))]
 
     def test_symlink_inside_one_tree_does_not_double_report(self, tmp_path) -> None:
-        # One walk of one root reaches the same file under two spellings, so the
-        # page identity has to be the resolved path rather than the walked one.
+        # One walk reaches a file under two spellings, so identity is the resolved path.
         real = tmp_path / "real"
         real.mkdir()
         (real / "page.py").write_text("def render( invalid syntax {\n")
@@ -806,8 +802,7 @@ class TestPageModuleImports:
         assert [m.id for m in messages] == ["next.E017"]
 
     def test_virtual_page_without_file_is_skipped(self, tmp_path) -> None:
-        # A `template.djx` with no `page.py` beside it routes as a virtual page,
-        # and the pair carries a path that never existed.
+        # A `template.djx` with no `page.py` routes as a virtual page with no real path.
         (tmp_path / "virtual").mkdir()
         (tmp_path / "virtual" / "template.djx").write_text("<p>ok</p>\n")
 
@@ -1087,8 +1082,7 @@ class TestContextChecksDeduplicate:
         assert [m.id for m in messages] == ["next.E029"]
 
     def test_e029_reported_once_for_a_symlinked_spelling(self, tmp_path) -> None:
-        # The registry keys on the spelling importlib loaded, so the check has to
-        # dedupe on the resolved path while still looking the page up as walked.
+        # The registry keys on the loaded spelling, so dedupe resolved, look up walked.
         real = tmp_path / "real"
         real.mkdir()
         page_file = real / "page.py"
@@ -1197,8 +1191,7 @@ class TestRouterFailureIsReportedNotRaised:
         assert "RaisingRootsRouter" in messages[0].msg
 
     def test_every_other_page_check_stays_quiet(self) -> None:
-        # The finding belongs to one check, so the rest of the run degrades to
-        # "this router reports no tree" instead of repeating the failure.
+        # The finding belongs to one check, so the rest of the run reports no tree.
         with patch_checks_router_manager_with_routers(routers=[RaisingRootsRouter()]):
             assert check_page_functions(None) == []
             assert check_page_module_imports(None) == []
@@ -1228,8 +1221,7 @@ class TestRouterFailureIsReportedNotRaised:
         assert "None" not in messages[0].msg
 
     def test_the_checks_that_walk_survive_a_wrong_tree_shape(self, tmp_path) -> None:
-        # These read the trees through the swallowing seam, so a bare path
-        # costs the router its reports instead of ending the run.
+        # These read trees through the swallowing seam, so a bare path costs reports.
         with patch_checks_router_manager_with_routers(
             routers=[MalformedRootsRouter([tmp_path])]
         ):
@@ -1448,8 +1440,7 @@ class TestThirdPartyBackendReachesEverySeam:
         return broken / "page.py"
 
     def test_the_import_check_sees_its_pages(self, tmp_path) -> None:
-        # next.E017 reaches the pairs through the framework's own walk, so a
-        # backend that walks nothing of its own is still covered.
+        # next.E017 reaches the pairs through the framework's walk, not the backend's.
         broken = self._write_project(tmp_path)
 
         with patch_checks_router_manager_with_routers(
@@ -1539,8 +1530,7 @@ class TestUnroutedWorkingDirectoryPages:
     def test_the_page_checks_leave_the_unrouted_tree_alone(
         self, tmp_path, monkeypatch
     ) -> None:
-        # The tree stops being walked, so its contents no longer reach
-        # next.E012 or next.E017. One warning stands for the lot.
+        # The tree is no longer walked, so one warning stands for E012 and E017 hits.
         self._write_unrouted_tree(tmp_path)
         (tmp_path / "pages" / "bare").mkdir()
         (tmp_path / "pages" / "bare" / "page.py").write_text("")
@@ -1585,8 +1575,7 @@ class TestUnroutedWorkingDirectoryPages:
                 assert check_unrouted_working_directory_pages(None) == []
 
     def test_a_directory_holding_no_page_is_silent(self, tmp_path, monkeypatch) -> None:
-        # An application package that happens to carry the PAGES_DIR name has
-        # no page under it, and naming it would be noise.
+        # An app package named like PAGES_DIR holds no page, so naming it is noise.
         (tmp_path / "pages").mkdir()
         (tmp_path / "pages" / "__init__.py").write_text("")
         (tmp_path / "pages" / "models.py").write_text("")
@@ -1598,8 +1587,7 @@ class TestUnroutedWorkingDirectoryPages:
                 assert check_unrouted_working_directory_pages(None) == []
 
     def test_an_application_named_pages_is_silent(self, tmp_path, monkeypatch) -> None:
-        # `pages/pages/` is the routed tree of an application called `pages`,
-        # so the directory above it is part of a served layout.
+        # `pages/pages/` is the tree of an app called `pages`, so the parent is served.
         app_pages = tmp_path / "pages" / "pages" / "hello"
         app_pages.mkdir(parents=True)
         (app_pages / "page.py").write_text('template = "ok"\n')

@@ -67,12 +67,10 @@ logger = logging.getLogger(__name__)
 class FormActionDispatch:
     """Shared POST pipeline and response shaping for backends.
 
-    It sends `action_dispatched`, `form_validation_failed` and `form_access_denied` with
-    itself as the sender, and the wizard signals with the wizard class.
+    Sends its signals with itself as sender and the wizard signals with the wizard.
     """
 
-    # The documented address a custom backend that drives the pipeline by
-    # hand calls, so the alias is part of the public surface.
+    # Documented address for custom backends driving the pipeline, so it is public.
     ensure_http_response = staticmethod(ensure_http_response)
 
     @staticmethod
@@ -84,8 +82,7 @@ class FormActionDispatch:
     ) -> "HttpResponseBase":
         """Validate the form, run the handler, or re-render errors.
 
-        The posted origin page authorizes the request before anything renders it, so a
-        submission never reaches a page body the requester would be refused on a visit.
+        The posted origin page authorizes the request before anything renders it.
         """
         if request.method != "POST":
             return HttpResponseNotAllowed(["POST"])
@@ -139,10 +136,7 @@ class FormActionDispatch:
         meta: "ActionMeta",
         state: "_DispatchState",
     ) -> "HttpResponseBase":
-        """Run the wizard, handler-only or form branch the action declares.
-
-        Every URL kwarg comes from the posted origin, so a miss at any depth is a 400.
-        """
+        """Run the wizard, handler-only or form branch the action declares."""
         branch = _branch(meta)
         if branch == "wizard":
             wizard_class = cast("type[FormWizard]", meta.get("wizard_class"))
@@ -360,8 +354,7 @@ class FormActionDispatch:
     ) -> HttpResponse:
         """Build the default envelope for one pipeline outcome.
 
-        Invalid submissions re-render the origin page with HTTP 200 and the
-        `X-Next-Form`/`X-Next-Action` headers, wizard advances redirect.
+        Invalid ones re-render the origin with HTTP 200, wizard advances redirect.
         """
         if outcome.kind == ActionOutcomeKind.INVALID:
             if outcome.page_path is None:

@@ -62,15 +62,14 @@ An inactive user holds nothing, an unregistered name answers ``False``, and the 
 Access declarations
 -------------------
 
-``page.login_required(*, inherit=False)``, ``page.permission_required(perm, *, obj=None, inherit=False)``, and ``page.public(*, inherit=False)`` record what a ``page.py`` declares, for its own page and under ``inherit=True`` for the pages below, see :ref:`topics-access` and :doc:`pages`.
-``component.login_required()`` and ``component.permission_required(perm, *, obj=None)`` record what a ``component.py`` declares for its component alone, which has no ``inherit`` and no ``public()``, see :doc:`components`.
+``page.login_required``, ``page.permission_required``, and ``page.public`` record what a ``page.py`` declares, see :ref:`topics-access` and :doc:`pages`.
+``component.login_required`` and ``component.permission_required`` record what a ``component.py`` declares for its component alone, see :doc:`components`.
 Every page view, the action dispatcher, and a zone request check the declared rule before any application code but the ``scope`` dependency runs, a login first, then every permission without an object, then each permission on the object, the order of ``AccessMixin`` and ``PermissionRequiredMixin``.
 A refused login redirects to the login page and a refused permission raises :exc:`~django.core.exceptions.PermissionDenied`.
 A refused component renders nothing, and an object it names that is ``None`` refuses without asking ``has_perm``, as ``{% has_perm %}`` does.
 An ``@action`` of a ``component.py`` answers to what the component declares as well, and under a permission on a context it refuses every user, which ``next.E165`` reports.
-``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware`` asks a login of every page, action, and zone that declares nothing and is not public, see :ref:`topics-access-default-login`.
 A file executed again drops what it declared before, so a reload never keeps a stale requirement.
-``manage.py permissions`` and the ``Access`` column of ``manage.py routes`` print the rule every page, action, and declaring component answers to, and ``manage.py permissions`` adds a ``view`` row for every other view of the URLconf, see :doc:`management`.
+``manage.py permissions`` prints the rule every endpoint answers to, see :doc:`management`.
 
 Backend
 -------

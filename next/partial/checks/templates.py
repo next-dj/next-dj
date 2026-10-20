@@ -24,8 +24,7 @@ if TYPE_CHECKING:
 def check_composed_templates_compile(*args, **kwargs) -> list[CheckMessage]:
     """Error when a composed page template fails to compile (`next.E072`).
 
-    The zone checks skip a page whose composed template does not compile, so without
-    this check the syntax error would surface only as a 500 on the first request.
+    The zone checks skip such a page, so the error would otherwise surface as a 500.
     """
     messages: list[CheckMessage] = []
     router_manager, _errors = get_router_manager()

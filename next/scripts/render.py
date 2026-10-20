@@ -24,8 +24,7 @@ _INLINE_DIGEST: Final = 12
 def inline_body(init: str) -> str:
     """Return an `init` body that cannot close or swallow the element it sits in.
 
-    `</script` closes the element, and `<!--` before `<script` keeps the real end tag
-    from closing it. Each gains a backslash, which a string literal ignores.
+    `</script` and `<!--` before `<script` gain a backslash a string literal ignores.
     """
     return _SCRIPT_MARKUP.sub(r"<\\\1", init)
 
@@ -75,7 +74,6 @@ def asset_entry(
 ) -> dict[str, object]:
     """Return the `$scripts` entry of an asset a gated block held back.
 
-    It loads in order with the other deferred entries, an inline body as its `init`.
     It is named by its URL, or by a digest of an inline body.
     """
     if asset.inline is not None:

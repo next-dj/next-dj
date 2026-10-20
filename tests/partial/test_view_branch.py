@@ -12,8 +12,7 @@ class TestZoneGetEnvelope:
         assert response.status_code == 200
         assert response["Content-Type"] == CONTENT_TYPE
         envelope = envelope_of(response)
-        # The zoned page registers a serialize=True provider, so the batch
-        # ends with the context op carrying its js-context delta.
+        # The zoned page has a serialize=True provider, so a context op ends the batch.
         assert envelope.op_verbs() == ["morph", "morph", "context"]
         assert envelope.zone_targets() == ["alpha", "beta"]
 
@@ -74,8 +73,7 @@ class TestZoneGetVersionConflict:
         assert response.content == b""
 
     def test_empty_version_is_not_a_conflict(self) -> None:
-        # A browser opening a zone before it has learned a version sends an
-        # empty X-Next-Version, which asserts nothing and must render.
+        # An empty X-Next-Version from a browser with no version asserts nothing.
         response = NextClient().get(
             "/zoned/",
             HTTP_X_NEXT_REQUEST="1",

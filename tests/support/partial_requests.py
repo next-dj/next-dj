@@ -24,8 +24,7 @@ def partial_meta(
 ) -> dict[str, str]:
     """Return WSGI META that flags a request as partial, optional host origin.
 
-    Pass `host` to stamp the `X-Next-Origin` header with a host page URL, and
-    the keyword arguments to name zones, validate-only fields, or a merge mode.
+    `host` stamps `X-Next-Origin`, the keyword arguments name zones, fields, or merge.
     """
     meta = {wsgi_header(REQUEST_FLAG): "1"}
     for header, value in (
@@ -42,8 +41,7 @@ def partial_meta(
 def partial_request(origin: str | None = "/zoned/", host: str | None = None):
     """Return a partial POST whose form origin resolves to a real page.
 
-    Pass `origin=None` to post a partial that names no resolvable origin
-    page and `host` to stamp the `X-Next-Origin` host page URL.
+    `origin=None` names no resolvable page, `host` stamps `X-Next-Origin`.
     """
     data = {} if origin is None else {ORIGIN_FIELD_NAME: origin}
     return RequestFactory().post(_ACTION_PATH, data=data, **partial_meta(host))

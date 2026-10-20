@@ -38,6 +38,7 @@ from next.forms.registration import registration_diagnostics
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
+_REGISTRY_BACKEND = {"BACKEND": "next.forms.RegistryFormActionBackend"}
 _FAKE_FILE_PAGE = "/fake/myapp/page.py"
 
 
@@ -315,6 +316,21 @@ class TestRegistryFormActionBackend:
         assert isinstance(backend, RegistryFormActionBackend)
         with pytest.raises(FormActionNotFoundError, match="Unknown form action"):
             backend.get_action_url("nonexistent_xyz")
+
+    def test_action_name_reads_the_uid_of_a_registered_action(self) -> None:
+        """`action_name` answers the name behind a uid, `None` for an unknown one."""
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="named", file_path=_FAKE_FILE, scope="shared", handler=print
+            )
+        )
+        meta = backend.get_meta("named")
+        assert meta is not None
+        assert (backend.action_name(meta["uid"]), backend.action_name("x")) == (
+            "named",
+            None,
+        )
 
     def test_generate_urls_empty_when_no_actions(self) -> None:
         """Empty backend yields no URL patterns."""
@@ -964,11 +980,7 @@ class TestManagerBackendsAccessor:
 
     def test_loads_configuration_lazily(self, settings) -> None:
         """An unprimed manager builds its backends from settings."""
-        settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [
-                {"BACKEND": "next.forms.RegistryFormActionBackend"}
-            ]
-        }
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": [_REGISTRY_BACKEND]}
         manager = FormActionManager()
         backends = manager.backends
         assert len(backends) == 1
@@ -987,10 +999,7 @@ class TestFormActionManagerReload:
     def test_non_dict_entries_are_skipped(self, settings) -> None:
         """Non-dict entries inside the list are skipped without raising."""
         settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [
-                "not-a-dict",
-                {"BACKEND": "next.forms.RegistryFormActionBackend"},
-            ]
+            "FORM_ACTION_BACKENDS": ["not-a-dict", _REGISTRY_BACKEND]
         }
         manager = FormActionManager()
         manager.reload()
@@ -1009,12 +1018,7 @@ class TestFormActionManagerReload:
         self, settings, caplog, broken
     ) -> None:
         """A broken entry costs its own backend and nothing else."""
-        settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [
-                broken,
-                {"BACKEND": "next.forms.RegistryFormActionBackend"},
-            ]
-        }
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": [broken, _REGISTRY_BACKEND]}
         manager = FormActionManager()
         with caplog.at_level(logging.ERROR, logger="next.backends"):
             manager.reload()
@@ -1049,11 +1053,7 @@ class TestFormActionManagerLoadedFlag:
         manager = FormActionManager()
         assert manager.backends == ()
 
-        settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [
-                {"BACKEND": "next.forms.RegistryFormActionBackend"}
-            ]
-        }
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": [_REGISTRY_BACKEND]}
         assert [type(backend) for backend in manager.backends] == [
             RegistryFormActionBackend
         ]
@@ -1101,11 +1101,7 @@ class TestFormActionManagerLoadedFlag:
 
     def test_explicit_backends_are_not_replaced_by_settings(self, settings) -> None:
         """A manager built with backends never reads the settings list."""
-        settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [
-                {"BACKEND": "next.forms.RegistryFormActionBackend"}
-            ]
-        }
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": [_REGISTRY_BACKEND]}
         explicit = _MinimalBackend()
         manager = FormActionManager(backends=[explicit])
         with patch("next.forms.manager.load_backends") as load_backends_mock:
@@ -1227,10 +1223,7 @@ class TestManagerClearRegistries:
 
 
 class TestFormActionManagerVersion:
-    """The `version` cache token moves on every registry mutation.
-
-    The counter is process-wide, so a test pins that the token moved, not its value.
-    """
+    """The `version` cache token moves on every registry mutation."""
 
     def test_register_action_bumps_version(self) -> None:
         """register_action moves the version after forwarding."""
@@ -1278,11 +1271,7 @@ class TestFormActionManagerVersion:
 
     def test_reload_bumps_version(self, settings) -> None:
         """Reloading moves the version alongside the backend rebuild."""
-        settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [
-                {"BACKEND": "next.forms.RegistryFormActionBackend"}
-            ]
-        }
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": [_REGISTRY_BACKEND]}
         manager = FormActionManager()
         before = manager.version
         manager.reload()
@@ -1292,11 +1281,7 @@ class TestFormActionManagerVersion:
         """The public entry point swaps the backends for the configured ones."""
         manager = FormActionManager(backends=[RegistryFormActionBackend()])
         first = manager.backends[0]
-        settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [
-                {"BACKEND": "next.forms.RegistryFormActionBackend"}
-            ]
-        }
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": [_REGISTRY_BACKEND]}
 
         manager.reload()
 

@@ -9,8 +9,7 @@ from tests.support import partial_meta, plain_get
 class TestBenchIntentParse:
     """Header parsing, the first thing every request pays on the shaper gate.
 
-    The parse is benched through the private entry point, because the public
-    one memoises on the request and would measure a dict lookup instead.
+    Benched through the private entry point, as the public one memoises on the request.
     """
 
     @pytest.mark.benchmark(group="partial.intent")

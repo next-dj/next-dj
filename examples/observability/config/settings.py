@@ -80,12 +80,10 @@ STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# `obs/apps.py` registers the `jsx` kind with a custom Babel renderer, so the client has
-# no insertion verb and next.W074 fires. The sparkline sits outside every zone anyway.
+# The custom `jsx` kind has no insertion verb, so next.W074 fires.
 SILENCED_SYSTEM_CHECKS = ["next.W074"]
 
-# The custom components backend counts every name resolution, the dedup policy counts
-# every filtered duplicate, and the serializer encodes `window.Next.context`.
+# Custom components backend, dedup policy and serializer feed the dashboard counters.
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {

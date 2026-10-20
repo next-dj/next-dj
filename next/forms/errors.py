@@ -36,8 +36,7 @@ class FormActionNotFoundError(LookupError):
         declared_in: "Callable[[], Iterable[str]] | Iterable[str]" = (),
     ) -> None:
         """Store the lookup context, deferring close-match work until rendered."""
-        # The manager probes backends by catching this, so raising stays cheap.
-        # The close-match search and the message run only when the error is rendered.
+        # The manager catches this to probe backends, so the message builds on render.
         self._context = _LookupContext(
             name, page_path, candidates, registry_empty, declared_in
         )

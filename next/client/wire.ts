@@ -316,9 +316,11 @@ export class Wire {
     const contentType = response.headers.get("content-type") ?? "";
     const baseType = contentType.replace(/;.*$/, "").trim();
     const hook = this.#parseHooks.get(baseType);
+    // A mutation never navigates to its own endpoint, that would answer 405
     if (hook === undefined && (baseType !== CONTENT_TYPE || response.redirected)) {
       const navigates = response.redirected || SAFE_METHODS.has(method);
-      if (!response.redirected && (response.status >= 400 || !navigates)) {
+      const refused = !response.redirected && (response.status >= 400 || !navigates);
+      if (refused) {
         const body = await response.text();
         this.#dispatch("partial:error", {
           kind: "http",

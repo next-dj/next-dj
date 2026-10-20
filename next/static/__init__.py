@@ -1,8 +1,4 @@
-"""Discover and inject co-located static assets for pages and components.
-
-The `Next` runtime injects by default as the first script plus an inline init
-script. `ScriptInjectionPolicy.DISABLED` or `MANUAL` opts out.
-"""
+"""Discover and inject co-located static assets for pages and components."""
 
 from __future__ import annotations
 

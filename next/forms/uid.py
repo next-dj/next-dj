@@ -25,8 +25,7 @@ def reverse_form_action(uid: str) -> str:
 
 ORIGIN_FIELD_NAME = "_next_form_origin"
 
-# Render-context key the shaping layer sets on a wizard advance to override the
-# rendered form's _next_form_origin, instead of mutating a request attribute.
+# Render-context key set on a wizard advance to override the form's _next_form_origin.
 FORM_ORIGIN_OVERRIDE_KEY = "form_origin_override"
 
 # Django's redirect Location cap, pinned because Django before 5.2.9 has no constant.
@@ -41,8 +40,7 @@ def current_origin_path(request: HttpRequest) -> str | None:
     path = getattr(request, "path", None)
     if not path:
         return None
-    # A request whose META is not a real mapping is a unit-test stand-in, and
-    # asking it for the query string would splice a stub into the field value.
+    # A non-mapping META is a unit-test stand-in and would pollute the field value.
     meta = getattr(request, "META", None)
     query = meta.get("QUERY_STRING", "") if isinstance(meta, dict) else ""
     encoded = escape_uri_path(str(path))

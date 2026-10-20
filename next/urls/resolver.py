@@ -1,9 +1,6 @@
 """Trie-backed URL resolver that narrows resolve() to a few candidates.
 
-The file router owns its whole subtree, so the route list is a ready-made
-trie. Candidates for a path are picked in O(depth) from a static route map
-plus a segment trie, then tried in original pattern order, which keeps
-Django's first-match-wins semantics for overlapping routes.
+Candidates come in O(depth) and run in pattern order, keeping first-match-wins.
 """
 
 from __future__ import annotations
@@ -93,8 +90,7 @@ class _RouteIndex:
                     node.param = _TrieNode()
                 node = node.param
             else:
-                # `<path:...>` and custom converters can span "/", so the
-                # candidate must match any remaining tail from this node.
+                # `<path:...>` and custom converters span "/", so match any tail.
                 node.tail_terminals.append(candidate)
                 return
         node.terminals.append(candidate)
@@ -131,9 +127,7 @@ def _join_route(route1: str, route2: str) -> str:
 class TrieURLResolver(URLResolver):
     """URLResolver that dispatches resolve() through a route trie.
 
-    The index is rebuilt whenever the `version_token()` of the wrapped
-    patterns changes. Any miss falls back to the inherited linear scan
-    for the canonical `Resolver404` with a complete `tried` list.
+    The index follows `version_token()` and any miss falls back to the linear scan.
     """
 
     _index_cache: tuple[tuple[int, ...], _RouteIndex] | None = None
@@ -149,8 +143,7 @@ class TrieURLResolver(URLResolver):
         if cached is not None and cached[0] == self._current_token():
             return cached[1]
         index = _RouteIndex(self.url_patterns)
-        # The token is read after the build because materialising lazy
-        # patterns can register form actions and bump their version.
+        # Read after the build, as materialising lazy patterns can bump the version.
         self._index_cache = (self._current_token(), index)
         return index
 

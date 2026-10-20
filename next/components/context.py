@@ -33,8 +33,7 @@ if TYPE_CHECKING:
 class ContextFunction:
     """One function registered to add variables before a component template runs.
 
-    The optional `serializer` overrides the global JS context serializer for the value
-    this callable produces, but only when `serialize` is true.
+    The optional `serializer` overrides the global one when `serialize` is set.
     """
 
     func: Callable[..., Any]
@@ -51,8 +50,7 @@ class ComponentContextRegistry:
         self._registry: dict[Path, dict[str | None, ContextFunction]] = {}
         self._misattributions = MisattributionLog()
         self._version = 0
-        # Bounded because a render may spell a component path no earlier render
-        # spelled, and a project holds far fewer components than the bound reaches.
+        # Bounded because a render may spell a component path no earlier render did.
         self._lookup_cache: BoundedCache[Path, tuple[ContextFunction, ...]] = (
             BoundedCache()
         )
@@ -76,8 +74,7 @@ class ComponentContextRegistry:
     ) -> None:
         """Record a `@component.context` declared outside the running file.
 
-        The registration binds to `declared_in`, which no render of `registered_from`
-        reads, so the pair feeds the `next.E075` diagnostic.
+        The registration binds to `declared_in`, so the pair feeds `next.E075`.
         """
         self._misattributions.record(registered_from, declared_in, func)
 
@@ -146,8 +143,7 @@ class ComponentContextRegistry:
     def get_functions(self, component_path: Path) -> Sequence[ContextFunction]:
         """Return a tuple of registered context functions for `component_path`.
 
-        Memoised under the path as passed, including the empty result, and dropped only
-        when the registry version moves, so a symlinked spelling costs its own entry.
+        Memoised per path spelling until the registry version moves.
         """
         if self._lookup_version != self._version:
             self._lookup_cache.clear()
@@ -219,8 +215,7 @@ class ComponentContextManager:
     ) -> Callable[..., Any]:
         """Mark a function so it fills template variables for this component module.
 
-        `serialize=True` publishes the return value on `window.Next.context`, and
-        `serializer=` overrides the global `JS_CONTEXT_SERIALIZER` for this key.
+        `serialize=True` publishes the value on `window.Next.context` via `serializer`.
         """
         registered_from = registering_file()
 

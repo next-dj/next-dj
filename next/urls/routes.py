@@ -41,19 +41,13 @@ class PageRoute:
 
 
 def _route_url(root: PageRoot, trail: str, base: str) -> tuple[str, dict[str, str]]:
-    """Return the URL a page at `trail` answers and the parameters its trail captures.
-
-    `base` is where the URLconf includes `next.urls`, and a refused trail raises.
-    """
+    """Return the URL a page at `trail` answers and the parameters it captures."""
     pattern, parameters = default_url_parser.parse_url_pattern(trail)
     return f"/{tree_route(root, base)}{pattern}", parameters
 
 
 def page_route(root: PageRoot, trail: str) -> PageRoute | None:
-    """Return the route a page at the tree-relative `trail` of `root` answers.
-
-    The includes around the tree count, and `None` means the parser refuses the trail.
-    """
+    """Return the route a page at `trail` of `root` answers, `None` if refused."""
     mounts = urlconf_mounts()
     try:
         url, parameters = _route_url(root, trail, mounts.include_point or "")
@@ -85,10 +79,7 @@ def _tree_routes(
 
 
 def _routed_pages(first: FileRouterBackend, mounted: list[PageRoot]) -> frozenset[Path]:
-    """Return the page files the built patterns route, the one test of what is routed.
-
-    The routers build the same patterns a first request builds, so this adds nothing.
-    """
+    """Return the page files the built patterns route."""
     patterns = [
         *router_manager,
         *(
@@ -106,10 +97,7 @@ def _routed_pages(first: FileRouterBackend, mounted: list[PageRoot]) -> frozense
 
 
 def collect_routes() -> list[Route]:
-    """Return a row per page the file routers serve, in resolution order.
-
-    An auto-assembled tree is listed only where the URLconf includes `next.urls`.
-    """
+    """Return a row per page the file routers serve, in resolution order."""
     first = tree_router()
     if first is None:
         return []
@@ -131,19 +119,12 @@ def collect_routes() -> list[Route]:
     )
     split = mounts.include_index
     skip_names = first.skip_dir_names()
-    return [
-        *(
-            route
-            for root in mounted[:split]
-            for route in _tree_routes(root, "", skip_names, routed)
-        ),
-        *auto,
-        *(
-            route
-            for root in mounted[split:]
-            for route in _tree_routes(root, "", skip_names, routed)
-        ),
-    ]
+
+    def mounted_rows(roots: list[PageRoot]) -> Iterator[Route]:
+        for root in roots:
+            yield from _tree_routes(root, "", skip_names, routed)
+
+    return [*mounted_rows(mounted[:split]), *auto, *mounted_rows(mounted[split:])]
 
 
 __all__ = ["PageRoute", "Route", "collect_routes", "page_route"]

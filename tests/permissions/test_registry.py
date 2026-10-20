@@ -107,10 +107,7 @@ _OWNER_SOURCE = "def own(user, obj):\n    return obj == {!r}\n"
 
 
 def _defined(path: Path, allowed: str) -> object:
-    """Write a module defining `own` at `path`, run it as a page module and return it.
-
-    Each run defines a new function, as a reload of an edited module does.
-    """
+    """Run a page module defining a fresh `own`, as a reload of an edited one does."""
     path.write_text(_OWNER_SOURCE.format(allowed))
     module = exec_module_file(path, "page_module")
     assert module is not None

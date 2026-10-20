@@ -182,8 +182,7 @@ class TestEagerLoadComponents:
     def test_a_backend_that_implements_neither_hook_keeps_working(
         self, monkeypatch
     ) -> None:
-        # A backend resolving names on demand owns no modules, so both
-        # hooks keep their inherited no-op behaviour.
+        # A backend resolving names on demand owns no modules, so both hooks no-op.
         backend = DummyComponentsBackend({})
         manager = _StubManager(backend)
         monkeypatch.setattr(loaders, "components_manager", manager)

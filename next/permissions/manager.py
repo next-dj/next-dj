@@ -20,6 +20,11 @@ _NEIGHBOURS: Final[Mapping[str, str]] = {
 }
 
 
+def _active(user: object) -> bool:
+    """Return whether `user` is active, as an inactive one holds nothing in Django."""
+    return bool(getattr(user, "is_active", False))
+
+
 class PermissionManager:
     """Registers object permissions and answers `has_perm` questions about them."""
 
@@ -47,18 +52,15 @@ class PermissionManager:
         return perm in self._registry
 
     def has_perm(self, user: object, perm: str, obj: object = None) -> bool:
-        """Return whether an active `user` holds the registered `perm` on `obj`.
-
-        An inactive user holds nothing, the rule Django's `ModelBackend` follows.
-        """
-        if not getattr(user, "is_active", False):
+        """Return whether an active `user` holds the registered `perm` on `obj`."""
+        if not _active(user):
             return False
         rule = self._registry.get(perm)
         return rule is not None and rule(user, obj)
 
     def perms_for(self, user: object, obj: object = None) -> frozenset[str]:
         """Return every registered permission an active `user` holds on `obj`."""
-        if not getattr(user, "is_active", False):
+        if not _active(user):
             return frozenset()
         return frozenset(
             name for name, rule in self._registry.items() if rule(user, obj)
@@ -66,7 +68,7 @@ class PermissionManager:
 
     def has_module_perms(self, user: object, app_label: str) -> bool:
         """Return whether an active `user` holds any registered perm of `app_label`."""
-        if not getattr(user, "is_active", False):
+        if not _active(user):
             return False
         prefix = f"{app_label}."
         return any(

@@ -238,10 +238,10 @@ def render(request, **kwargs):
         djx_content = "<h1>{{ title }}</h1><p>{{ description }}</p>"
         djx_file.write_text(djx_content)
 
-        page_instance._context_manager.register_context(
+        page_instance.contexts.register_context(
             page_file, "title", lambda: "Context Title"
         )
-        page_instance._context_manager.register_context(
+        page_instance.contexts.register_context(
             page_file, "description", lambda: "Context Description"
         )
 

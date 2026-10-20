@@ -127,10 +127,7 @@ class KwargsDispatchWizard(FormWizard):
 
 
 def _run_component_context(tmp_path: Path, request: object) -> object:
-    """Render a component whose `@component.context` reads `Depends("token")`.
-
-    Returns what the template printed under the `out` key.
-    """
+    """Render a component whose `@component.context` reads `Depends("token")`."""
     module_path = tmp_path / "component.py"
     module_path.write_text("")
     template_path = tmp_path / "component.djx"
@@ -258,8 +255,7 @@ class TestDispatchViaClient:
             data={"name": "Alice", "email": "", "_next_form_origin": "/"},
             follow=False,
         )
-        # SimpleForm.on_valid returns None, so the dispatcher re-renders the
-        # origin page with 200 and none of the invalid-submission headers.
+        # SimpleForm.on_valid returns None, so the origin page re-renders with 200.
         assert resp.status_code == 200
         assert "Location" not in resp.headers
         assert "X-Next-Form" not in resp.headers
@@ -956,10 +952,7 @@ class TestDispatchSharedDepCache:
     def test_depends_provider_invoked_once_across_phases(
         self, mock_http_request
     ) -> None:
-        """A ``Depends("name")`` shared by factory and handler resolves exactly once.
-
-        The dispatcher threads one ``dep_cache`` keyed by name, so reuse hits cache.
-        """
+        """A ``Depends("name")`` shared by factory and handler resolves once."""
         calls = {"n": 0}
 
         def make_widget() -> str:

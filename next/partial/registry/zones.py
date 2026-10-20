@@ -85,8 +85,7 @@ def _zones_from_template(template: "Template", page_path: "Path") -> _Entry:
 def _nested_names(partial: "ZonePartial") -> frozenset[str]:
     """Return the names of the zones declared inside the body of a zone.
 
-    The walk starts at the body, so the placeholder branch stays out, and
-    Django recurses through the child node lists, so any depth is covered.
+    The walk starts at the body and Django recurses through child node lists.
     """
     inner = cast("list[ZoneNode]", partial.nodelist.get_nodes_by_type(ZoneNode))
     return frozenset(child.name for child in inner)

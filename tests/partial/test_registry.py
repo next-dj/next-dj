@@ -120,8 +120,7 @@ class TestRegistryRecords:
         assert registry.version == 2
 
     def test_re_registering_a_held_verb_leaves_the_version_alone(self) -> None:
-        # a reload re-runs every register() call, and a bumped version there would
-        # invalidate every consumer cache keyed on it for no change at all
+        # a reload re-runs every register() call, so a bump would drop consumer caches
         registry = PatchOpRegistry()
         registry.register("confetti")
         registry.register("confetti")
@@ -134,8 +133,7 @@ class TestRegistryRecords:
         assert registry.custom_names() == frozenset({"confetti"})
 
     def test_re_registering_a_held_verb_still_announces_it(self) -> None:
-        # the signal is how a late subscriber learns the verb exists, so it fires
-        # on the repeat call even though the records do not change
+        # the signal tells a late subscriber the verb exists, so a repeat call fires it
         registry = PatchOpRegistry()
         registry.register("confetti")
         with capture_signals(patch_op_registered) as recorded:

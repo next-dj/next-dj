@@ -55,8 +55,7 @@ def _scanned_root(root: Path) -> Iterator[None]:
 def _context_pages(*pages: tuple[Path, str, str]) -> Iterator[None]:
     """Point the page-scanning checks at real on-disk page directories.
 
-    Real imports and compiles match production, so a zone tag and a `@context`
-    registration are recorded the same way as in a live process.
+    Real imports and compiles record zone tags and `@context` as a live process does.
     """
     root = pages[0][0].parent.parent
     for page_file, source, body in pages:
@@ -508,43 +507,38 @@ class TestContextZoneNameCheck:
         assert "Declared zones: 'table'." in messages[0].msg
         assert messages[0].obj == str(page_file)
 
-    def test_declared_zone_is_silent(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("decorator", "body"),
+        [
+            pytest.param(
+                "'rows', zone='table'",
+                '{% zone "table" %}<p>{{ rows }}</p>{% endzone %}',
+                id="declared",
+            ),
+            pytest.param(
+                "'rows', zone='inner'",
+                '{% zone "outer" %}<p>{{ rows }}</p>'
+                '{% zone "inner" %}<b>{{ rows }}</b>{% endzone %}'
+                "{% endzone %}",
+                id="nested",
+            ),
+            pytest.param(
+                "'rows'",
+                '{% zone "table" %}<p>{{ rows }}</p>{% endzone %}',
+                id="no-zone",
+            ),
+        ],
+    )
+    def test_declared_zone_is_silent(
+        self, tmp_path: Path, decorator: str, body: str
+    ) -> None:
         page_file = _page_dir(tmp_path, "zone_ok")
         source = (
             "from next.pages import page\n\n"
-            "@page.context('rows', zone='table')\n"
+            f"@page.context({decorator})\n"
             "def rows():\n"
             "    return []\n"
         )
-        body = '{% zone "table" %}<p>{{ rows }}</p>{% endzone %}'
-        with _context_pages((page_file, source, body)):
-            assert checks.check_context_zone_names_exist() == []
-
-    def test_nested_zone_counts_as_declared(self, tmp_path: Path) -> None:
-        page_file = _page_dir(tmp_path, "zone_nested")
-        source = (
-            "from next.pages import page\n\n"
-            "@page.context('rows', zone='inner')\n"
-            "def rows():\n"
-            "    return []\n"
-        )
-        body = (
-            '{% zone "outer" %}<p>{{ rows }}</p>'
-            '{% zone "inner" %}<b>{{ rows }}</b>{% endzone %}'
-            "{% endzone %}"
-        )
-        with _context_pages((page_file, source, body)):
-            assert checks.check_context_zone_names_exist() == []
-
-    def test_context_without_a_zone_is_silent(self, tmp_path: Path) -> None:
-        page_file = _page_dir(tmp_path, "zone_less")
-        source = (
-            "from next.pages import page\n\n"
-            "@page.context('rows')\n"
-            "def rows():\n"
-            "    return []\n"
-        )
-        body = '{% zone "table" %}<p>{{ rows }}</p>{% endzone %}'
         with _context_pages((page_file, source, body)):
             assert checks.check_context_zone_names_exist() == []
 
@@ -719,8 +713,7 @@ class TestFormBackendPartialAwareCheck:
             assert checks.check_form_backend_partial_aware() == []
 
     def test_inherited_shape_response_is_silent(self) -> None:
-        # a subclass that does not override shape_response inherits the
-        # partial-aware base method, so the check stays quiet
+        # a subclass without its own shape_response inherits the partial-aware base
         assert _PartialUnawareBackend.shape_response is not (
             FormActionBackend.shape_response
         )
@@ -759,8 +752,7 @@ class TestManifestVersionStorageCheck:
             assert checks.check_manifest_version_has_manifest_storage() == []
 
     def test_stock_project_is_silent(self) -> None:
-        # a project on the framework defaults never asked for the manifest, so the
-        # plain storage of a fresh startproject contradicts nothing
+        # a project on the framework defaults never asked for the manifest storage
         with override_settings(
             NEXT_FRAMEWORK={}, STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}
         ):
@@ -818,8 +810,7 @@ class TestAssetVersionMovesBetweenDeploysCheck:
         ids=["pinned_tag", "manifest_sentinel"],
     )
     def test_a_named_version_is_silent(self, options: dict[str, object]) -> None:
-        # A pinned tag is moved by hand and the sentinel is reported as next.W069,
-        # so neither case gets a second warning about the same decision.
+        # A pinned tag is moved by hand and the sentinel is reported as next.W069.
         with _partial_options(options):
             assert checks.check_asset_version_moves_between_deploys() == []
 

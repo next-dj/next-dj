@@ -24,8 +24,7 @@ def _request():
 def scoped_zone_page(tmp_path) -> Iterator[tuple[Path, list[str]]]:
     """Build a two-zone page whose providers record their own calls.
 
-    The providers register against the module-level page the renderer
-    drives, so the registration is dropped again on teardown.
+    The providers register on the page the renderer drives, dropped on teardown.
     """
     page_file = tmp_path / "page.py"
     page_file.write_text("x = 1\n")
@@ -34,7 +33,7 @@ def scoped_zone_page(tmp_path) -> Iterator[tuple[Path, list[str]]]:
         '{% zone "right" %}<p>{{ right }}</p>{% endzone %}'
     )
     calls: list[str] = []
-    registry = render_module.page._context_manager
+    registry = render_module.page.contexts
     registry.register_context(
         page_file, "left", counting_provider(calls, "left"), zone="left"
     )
@@ -59,7 +58,7 @@ def nested_zone_page(tmp_path) -> Iterator[tuple[Path, list[str]]]:
         '{% zone "away" %}<p>{{ away }}</p>{% endzone %}'
     )
     calls: list[str] = []
-    registry = render_module.page._context_manager
+    registry = render_module.page.contexts
     for name in ("outer", "inner", "deep", "away"):
         registry.register_context(
             page_file, name, counting_provider(calls, name), zone=name

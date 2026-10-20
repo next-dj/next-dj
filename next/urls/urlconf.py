@@ -1,7 +1,4 @@
-"""Walk of the root URLconf for where `next.urls` and each `pages()` tree are included.
-
-Walking it, not a registry of `pages()` calls, follows a swapped URLconf and its prefix.
-"""
+"""Walk of the root URLconf for where `next.urls` and `pages()` trees are included."""
 
 from __future__ import annotations
 
@@ -39,10 +36,7 @@ class Mount:
 
 
 class MountedPatterns(Sequence["URLPattern | URLResolver"]):
-    """A lazy pattern sequence the walk records where it is included, never iterating.
-
-    Iterating one builds page routes, and the walk also runs while they are being built.
-    """
+    """A lazy pattern sequence the walk records without iterating it."""
 
     mount: Mount | None = None
 
@@ -89,10 +83,7 @@ class MountPoint:
 
 @dataclass(frozen=True, slots=True)
 class UrlconfMounts:
-    """Where the root URLconf includes `next.urls` and every `pages()` tree.
-
-    `include_index` counts the `pages()` trees listed ahead of the `next.urls` include.
-    """
+    """Where the root URLconf includes `next.urls` and every `pages()` tree."""
 
     include_point: str | None = None
     include_index: int = 0
@@ -106,10 +97,7 @@ NO_MOUNTS = UrlconfMounts()
 
 
 def tree_route(root: PageRoot, include_point: str) -> str:
-    """Return the route the patterns of `root` start at, from the URLconf root.
-
-    A `pages()` tree carries it as its prefix, and any other starts at `include_point`.
-    """
+    """Return the route the patterns of `root` start at, from the URLconf root."""
     return include_point if root.prefix is None else root.prefix
 
 
@@ -147,10 +135,7 @@ def _route_trail(pattern: object) -> str:
 
 
 class _Walk:
-    """The state of one walk over the include tree of the root URLconf.
-
-    `complete` turns false on a module still importing, so the walk is not kept.
-    """
+    """The state of one walk over the include tree of the root URLconf."""
 
     def __init__(self) -> None:
         """Start with nothing found."""
@@ -167,10 +152,7 @@ class _Walk:
         kwargs: frozenset[str] = frozenset(),
         trail: str = "",
     ) -> None:
-        """Record a mounted include target, or walk on into a list of patterns.
-
-        Another lazy sequence is skipped, since building its routes may read the trees.
-        """
+        """Record a mounted include target, or walk on into a list of patterns."""
         source = resolver.urlconf_module
         if isinstance(source, ModuleType) and not hasattr(source, "urlpatterns"):
             self.complete = False
@@ -225,10 +207,7 @@ _memo = _WalkMemo()
 
 
 def urlconf_mounts() -> UrlconfMounts:
-    """Return where the root URLconf mounts page trees, walking it once per resolver.
-
-    A new resolver is walked anew, and a locale prefix is read in `LANGUAGE_CODE`.
-    """
+    """Return where the root URLconf mounts page trees, walking it once per resolver."""
     urlconf = getattr(settings, "ROOT_URLCONF", None)
     if urlconf is None:
         return NO_MOUNTS

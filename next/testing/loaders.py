@@ -1,7 +1,6 @@
 """Eager page-module loader used in tests.
 
-`eager_load_pages` imports every `page.py` under a directory so `@context` and
-`@forms.action` side effects register before a test dispatches HTTP requests.
+`eager_load_pages` imports every `page.py` under a directory so registrations exist.
 """
 
 from __future__ import annotations
@@ -19,8 +18,7 @@ _loaded_dirs: set[Path] = set()
 def eager_load_pages(base_dir: Path | str) -> list[Path]:
     """Import every `page.py` under `base_dir` and return loaded paths.
 
-    Each file runs through the loader a request uses, so a page never runs as two
-    modules, and a broken one raises `PageModuleImportError` in setup.
+    Each file runs through the loader a request uses, so no page runs as two modules.
     """
     directory = Path(base_dir).resolve()
     if not directory.is_dir():
@@ -41,8 +39,7 @@ def eager_load_pages(base_dir: Path | str) -> list[Path]:
 def clear_loaded_dirs() -> None:
     """Drop the memoisation cache so the next call reloads page modules.
 
-    Intended for self-tests of the loader. Production test suites do not need to call
-    this because each pytest session gets a fresh interpreter.
+    Only loader self-tests need it, as each pytest session gets a fresh interpreter.
     """
     _loaded_dirs.clear()
     reset_module_memo()
@@ -51,8 +48,7 @@ def clear_loaded_dirs() -> None:
 def _register_page_tree_components() -> None:
     """Register the components folder of every configured page tree.
 
-    A live registry holds only what a request made the router walk, and a component
-    test that renders before the first request would miss the folders of the trees.
+    A live registry holds only what a request walked, so renders before one miss them.
     """
     router_manager, _errors = get_router_manager()
     if router_manager is None:

@@ -21,9 +21,7 @@ def _related_wrapper_around(
 ) -> RelatedFieldWidgetWrapper:
     """Construct a `RelatedFieldWidgetWrapper` without admin-site plumbing.
 
-    The real `__init__` requires `rel`, an admin site, and permission flags.
-    The wrapper unwrap path in `field_spec` only reads `widget.widget`, so
-    bypassing `__init__` keeps the test independent from admin internals.
+    `field_spec` unwrapping only reads `widget.widget`, so `__init__` is bypassed.
     """
     wrapper = RelatedFieldWidgetWrapper.__new__(RelatedFieldWidgetWrapper)
     wrapper.widget = inner_widget
@@ -210,8 +208,7 @@ class TestFormSpec:
         assert [f.bound.name for f in spec.sections[0].fields] == ["name"]
 
     def test_empty_fieldset_collects_all_fields_into_trailing_section(self) -> None:
-        # A label-only fieldset (no `fields`) leaves every form field as
-        # leftover and the builder appends one trailing unlabelled section.
+        # A label-only fieldset leaves every field over and adds one unlabelled section.
         spec = form_spec(_SampleForm(), fieldsets=[("Empty", {})])
         labels = [s.label for s in spec.sections]
         assert labels == ["Empty", ""]

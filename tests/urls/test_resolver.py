@@ -43,8 +43,7 @@ _RESOLVE_CASE_IDS = (
     "path_in_route_middle",
 )
 
-# Overlap winners depend on filesystem registration order, so they are
-# asserted against the linear scan instead of a pinned route.
+# Overlap winners depend on registration order, so assert against the linear scan.
 _OVERLAP_PATHS = ("articles/latest/", "articles/other/", "num/7/")
 
 _PARITY_FIELDS = (

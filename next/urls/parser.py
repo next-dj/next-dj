@@ -1,7 +1,6 @@
 """Map bracket segments in file-based URL paths to Django converters.
 
-`URLPatternParser` turns a filesystem-style trail into a Django path pattern: `[name]`
-maps to `<str:name>`, `[int:id]` to `<int:id>`, and `[[args]]` to `<path:args>`.
+`[name]` maps to `<str:name>`, `[int:id]` to `<int:id>` and `[[args]]` to `<path:args>`.
 """
 
 from __future__ import annotations
@@ -44,9 +43,7 @@ _COERCERS: dict[type, Callable[[str], object]] = {
 def _coerce_url_value(value: object, hint: object) -> object:
     """Coerce `value` to `hint`, passing it through on failure or unsupported hint.
 
-    The annotation is a hint and not a gate. A typed directory such as `[int:id]`
-    refuses a malformed segment with a 404 and a query string passes no converter at
-    all, so raising here would answer a bad parameter with a 500.
+    A hint is not a gate, so raising would answer a bad parameter with a 500.
     """
     if not isinstance(hint, type):
         return value
@@ -65,8 +62,7 @@ def _coerce_url_value(value: object, hint: object) -> object:
 class URLPatternParser:
     """Map bracket segments in a file-based path to Django path converters.
 
-    An empty `url_path` means the tree root, it is a logical trail of directory names
-    and no `pathlib.Path`, and the on-disk file comes from the page-tree scanner.
+    `url_path` is a logical trail of directory names, empty for the tree root.
     """
 
     parameter_error: ClassVar[type[URLParameterError]] = URLParameterError

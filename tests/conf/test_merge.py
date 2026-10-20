@@ -101,8 +101,7 @@ class TestAcceptedValue:
 class TestMergeUserSettings:
     """The merge lays usable user values over frozen defaults, one level deep.
 
-    Both the isolated instance and the process-wide singleton walk this matrix, so
-    a merged view one of the two keeps past a reload fails here.
+    The isolated instance and the singleton both walk this matrix.
     """
 
     @pytest.mark.parametrize("user", [None, {}], ids=["none", "empty"])

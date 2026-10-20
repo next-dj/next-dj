@@ -13,9 +13,7 @@ MAX_FEATURED = 12
 def featured(show: DQuery[int] = DEFAULT_FEATURED) -> list[Product]:
     """Return featured products for the home page.
 
-    The optional `?show=N` query parameter lets visitors widen the
-    featured grid up to `MAX_FEATURED`. The value is clamped on the
-    upper bound so a large request cannot exhaust the database.
+    `?show=N` widens the grid up to `MAX_FEATURED`, which caps the query size.
     """
     count = max(1, min(MAX_FEATURED, show))
     return featured_products(count)

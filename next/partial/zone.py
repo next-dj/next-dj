@@ -43,8 +43,7 @@ _POLL_DIGITS = re.compile(r"[0-9]+")
 def _literal(raw: str, subject: str) -> str:
     """Return the text of a quoted tag literal, refusing anything unquoted.
 
-    The tag reads literals only. An unquoted value is a template variable, and its
-    name would be used in place of its value without an error.
+    An unquoted value is a template variable, whose name would silently replace it.
     """
     try:
         return unescape_string_literal(raw).strip()
@@ -59,8 +58,7 @@ def _literal(raw: str, subject: str) -> str:
 def _wrap_zone(tag: str, name: str, body: str, *, extra: str = "") -> SafeString:
     """Return the addressable wrapper element around a rendered zone body.
 
-    A non-empty `extra` carries its own leading space, so the plain
-    wrapper stays byte-for-byte free of trailing whitespace.
+    A non-empty `extra` carries its own leading space, so the plain wrapper has none.
     """
     return SafeString(f'<{tag} {ZONE_ATTR}="{name}"{extra}>{body}</{tag}>')
 
@@ -69,8 +67,7 @@ def _wrap_zone(tag: str, name: str, body: str, *, extra: str = "") -> SafeString
 class ZoneOptions:
     """Compile-time rendering options of one zone.
 
-    Both render paths derive their wrapper attributes from these options, so a new mode
-    cannot diverge the full render from the standalone delivery.
+    Both render paths derive wrapper attributes from it, so they cannot diverge.
     """
 
     tag: str = _DEFAULT_TAG
@@ -113,8 +110,7 @@ def render_zone_standalone(
 ) -> SafeString:
     """Render one zone body wrapped in its addressable element.
 
-    The wrapper carries the delivery attributes of the zone options,
-    which drop the lazy hint because the body has already arrived.
+    The wrapper drops the lazy hint because the body has already arrived.
     """
     _body, wrapped = render_zone_body(partial, name, options, context)
     return wrapped
@@ -123,8 +119,7 @@ def render_zone_standalone(
 class ZonePartial:
     """Standalone renderable for one zone body that owns its template state.
 
-    The body renders in its own render-context state so a partial can render the zone
-    alone, and `get_exception_info` delegates to keep DEBUG tracebacks honest.
+    `get_exception_info` delegates so DEBUG tracebacks stay honest.
     """
 
     def __init__(
@@ -161,8 +156,7 @@ class ZonePartial:
 class ZoneNode(Node):
     """A named zone of a page template, rendered inline or as a placeholder.
 
-    A non-lazy zone wraps its body in an addressable marker element. A lazy zone
-    renders only its placeholder branch, its body arrives later as a patch.
+    A lazy zone renders only its placeholder branch, its body arrives later as a patch.
     """
 
     child_nodelists = ("nodelist", "placeholder")
@@ -200,23 +194,16 @@ type Ancestor = type[Node] | tuple[type[Node], ...]
 """A node class, or several, whose subtree a walk tells apart."""
 
 
-def _nodes_under(
+def zones_under(
     nodelist: NodeList, ancestor: "Ancestor", *, inside: bool = False
-) -> "Iterator[Node]":
-    """Yield every node below an `ancestor` node, at any depth."""
+) -> "Iterator[str]":
+    """Yield the name of every zone below an `ancestor` node, zone bodies included."""
     for node in nodelist:
-        if inside:
-            yield node
+        if inside and isinstance(node, ZoneNode):
+            yield node.name
         now_inside = inside or isinstance(node, ancestor)
         for child in child_nodelists(node):
-            yield from _nodes_under(child, ancestor, inside=now_inside)
-
-
-def zones_under(nodelist: NodeList, ancestor: "Ancestor") -> "Iterator[str]":
-    """Yield the name of every zone below an `ancestor` node, zone bodies included."""
-    for node in _nodes_under(nodelist, ancestor):
-        if isinstance(node, ZoneNode):
-            yield node.name
+            yield from zones_under(child, ancestor, inside=now_inside)
 
 
 def _parse_options(token: "Token") -> tuple[str, ZoneOptions]:

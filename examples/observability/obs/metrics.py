@@ -40,8 +40,7 @@ def _bucket_key(kind: str, key: str, minute_iso: str) -> str:
 def _track(full_key: str) -> None:
     """Record `full_key` in the index used by `read_all` and `flush`.
 
-    The index key never expires, otherwise a long idle stretch would let the default
-    cache timeout drop the index while its entries are still alive.
+    The index never expires, or idle time would drop it while its entries live on.
     """
     index = cache.get(INDEX_KEY) or set()
     if full_key not in index:
@@ -98,8 +97,7 @@ def read_kind(kind: str) -> dict[str, int]:
 def read_window(kind: str, minutes: int) -> dict[str, int]:
     """Return per-key totals across every bucket in the last `minutes` minutes.
 
-    The only write is dropping already-expired bucket entries from the index, so a
-    narrow window cannot evict the buckets a wider one still needs.
+    Only expired bucket entries leave the index, so a narrow window evicts nothing live.
     """
     cutoff = _now() - timedelta(minutes=minutes)
     index = cache.get(INDEX_KEY) or set()

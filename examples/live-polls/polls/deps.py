@@ -20,11 +20,9 @@ class DPoll[T](DDependencyBase[T]):
 
 
 def _by_url_or_post(model_cls: type[Model], context: ResolutionContext) -> Model | None:
-    """Fetch the poll named by ``url_kwargs["id"]``, falling back to POST ``poll``.
+    """Fetch the poll named by `url_kwargs["id"]`, falling back to POST `poll`.
 
-    The POST field is the one ``VoteForm`` already carries, so an action handler
-    reaches the same row as a page render without a query of its own. Both the
-    plain ``resolve`` path and the compiled filler land here.
+    The POST field is the one `VoteForm` carries, so an action reaches the same row.
     """
     pk = context.url_kwargs.get("id")
     if pk is None and context.request is not None:
@@ -45,11 +43,7 @@ class PollProvider(RegisteredParameterProvider):
         return self.static_can_handle(param)
 
     def static_can_handle(self, param: inspect.Parameter) -> bool:
-        """Claim every ``DPoll[...]`` parameter and rule out the others for good.
-
-        The annotation settles the match, so the plan compiler makes this provider
-        the terminal one for the parameter instead of asking again per request.
-        """
+        """Claim every `DPoll[...]` parameter and rule out the others for good."""
         return get_origin(param.annotation) is DPoll
 
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:

@@ -5,8 +5,7 @@ from next import component
 from next.forms import FieldSpec
 
 
-# The template writes these itself, so echoing the widget's copy would either
-# duplicate the attribute or overwrite the shadcn styling with Django's own.
+# The template writes these itself, so echoing the widget's copy would duplicate them.
 TEMPLATE_OWNED = frozenset(
     {
         "checked",
@@ -27,11 +26,7 @@ TEMPLATE_OWNED = frozenset(
 
 @component.context("widget_attrs")
 def widget_attrs(info: FieldSpec) -> SafeString:
-    """Flatten the attributes Django computed for the widget.
-
-    A hand-written input carries only what the template spells out, so the constraints
-    the form field derived are lost and a decimal renders as a whole-number input.
-    """
+    """Flatten the widget attributes Django derived, such as a decimal's `step`."""
     attrs = {
         name: value
         for name, value in info.bound.field.widget.attrs.items()

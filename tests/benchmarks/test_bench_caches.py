@@ -11,8 +11,7 @@ from next.caches import BoundedCache, LruCache
 _WARM = 512
 _SMALL = 64
 
-# Far past the bound, so a cycled key is one the cache evicted long ago rather
-# than one it still holds, and every timed write is an eviction.
+# Far past the bound, so every timed write is an eviction.
 _OVERFLOW = 4096
 
 

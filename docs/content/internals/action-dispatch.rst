@@ -32,6 +32,7 @@ Pipeline
        Lookup -- "found, POST" --> Tree{"Page tree access rule"}
        Tree -- anonymous --> LoginRedirect
        Tree -- "refused" --> Forbidden
+       Tree -- "refused" --> AccessDenied
        Tree -- pass --> Guard{"Static access guard"}
        Guard -- anonymous --> LoginRedirect["HTTP 302 to LOGIN_URL"]
        Guard -- "missing permission" --> Forbidden["HTTP 403"]
@@ -152,13 +153,16 @@ Modules
 Page tree access
 ----------------
 
-``_check_tree_access`` runs first, right after origin resolution.
+The page tree access check runs first, right after origin resolution.
 It joins the rule of the owner, the page of the directory the action is declared in, with the rule of the resolved origin page, so a forged origin adds requirements and lifts none, see :doc:`/content/security/actions`.
 It runs through ``enforce`` of ``next.pages.access``, the check a page view runs.
-An anonymous user is redirected to the login page with the posted origin as ``next``, under the default login before a broken chain is judged, a chain holding a broken file answers 404 or raises under ``fail_loudly``, and a refusal raises ``PermissionDenied`` after sending ``form_access_denied`` with ``layer="page"`` and ``reason="denied"``.
-Each ``obj=DObject[Model]`` loads its row through ``url_lookup`` from the URL kwargs of the posted origin, the kwargs a ``DObject`` parameter of the handler reads, and through the same dependency cache, so the check and the handler see one row.
+An anonymous user is redirected to the login page with the posted origin as ``next``.
+A chain holding a broken file answers 404 or raises under ``fail_loudly``, and under the default login the redirect comes before that judgement.
+A refusal raises ``PermissionDenied`` after sending ``form_access_denied`` with ``layer="page"`` and ``reason="denied"``.
+Each ``obj=DObject[Model]`` loads its row through ``url_lookup`` from the URL kwargs of the posted origin, through the same dependency cache the handler reads, so the check and the handler see one row.
 An origin whose route does not capture the kwarg of the model raises ``UnboundObjectError``, and a row the scope does not see answers 404 before any permission is asked.
-A rule without requirements still requires a login while ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware`` turns the default login on, through the ``deferred`` flag of the joined rules, when the owner rule or the origin rule declares nothing and is not public, and an action outside any tree has an empty owner rule, so it is closed at any origin, because the endpoint itself is marked with ``login_not_required``.
+Under the default login an owner or origin rule that declares nothing and is not public still requires a login, through the ``deferred`` flag of the joined rules.
+An action outside any tree has an empty owner rule, so it is closed at any origin under the default login, because the endpoint itself is marked with ``login_not_required``.
 
 Access guard
 ------------
@@ -168,7 +172,7 @@ An action that declares ``login_required`` or ``permission_required`` carries an
 The shared pipeline enforces this static guard right after the page tree access and ahead of the page authorization, ``get_initial``, and form binding, so no application code or database access runs for a request the static guard denies.
 An anonymous user receives a redirect to ``LOGIN_URL`` whose ``next`` is the validated posted origin, and an authenticated user missing a permission raises ``PermissionDenied``.
 
-On the form-class branch the guard leaves out every permission ``next.permissions`` has registered, and ``_enforce_registered_permissions`` checks them once the form binds, as ``user.has_perm(perm, obj)``.
+On the form-class branch the guard leaves out every permission ``next.permissions`` has registered, and the dispatcher checks them once the form binds, as ``user.has_perm(perm, obj)``.
 ``obj`` is the instance of a ``ModelForm`` that edits a saved row and ``None`` otherwise, and a refusal raises ``PermissionDenied`` after sending ``form_access_denied`` with ``layer="object"`` and ``reason="denied"``.
 The split between the two sets is kept per permission tuple until the registry version moves.
 The wizard and handler-only branches bind no form at the guard, so the guard checks every permission there with no object.

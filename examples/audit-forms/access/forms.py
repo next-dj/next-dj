@@ -19,11 +19,7 @@ class AcknowledgedStep(django_forms.Form):
 
     @classmethod
     def is_acknowledged(cls, request: HttpRequest) -> bool:
-        """Read the tick off a POST the way binding the field would read it.
-
-        `CheckboxInput` accepts `on`, `true` and `1` alike, so asking the widget keeps
-        the gate and the bound form from disagreeing over an unusual client.
-        """
+        """Read the tick off a POST the way binding the field would read it."""
         widget = cls.base_fields[POLICY_FIELD].widget
         return bool(
             widget.value_from_datadict(request.POST, request.FILES, POLICY_FIELD)

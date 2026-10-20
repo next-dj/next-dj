@@ -154,8 +154,7 @@ def page_instance():
 def watched_template_edits() -> Generator[None, None, None]:
     """Run the body with the dev-loop staleness checks engaged.
 
-    The suite runs with ``DEBUG`` off, so a test about picking an edit up
-    without a restart asks for the dev setting by name.
+    The suite runs with ``DEBUG`` off, so a test about edits asks for the dev setting.
     """
     with override_settings(DEBUG=True):
         yield
@@ -240,8 +239,7 @@ def intent_only_shaper():
 def counting_wizard_backend() -> Generator[CountingWizardBackend, None, None]:
     """Count wizard backend round-trips, putting the cached backend back after.
 
-    The manager caches its backend in the instance dict, so the entry found on entry
-    is restored rather than dropped by a `reset()` the next test would pay for.
+    The manager caches its backend in the instance dict, so the entry is restored.
     """
     cached = wizard_backend_manager.__dict__.get("_backend")
     had_backend = "_backend" in wizard_backend_manager.__dict__

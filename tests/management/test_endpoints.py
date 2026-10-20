@@ -31,7 +31,7 @@ _FILE = Path("/tree/page.py")
 
 _ABOVE = Path("/page.py")
 
-VIEWS_URLCONF = "tests.permissions.urls_views"
+_VIEWS_URLCONF = "tests.permissions.urls_views"
 
 _CARD_ACTION = """
 from next.components import component
@@ -56,7 +56,7 @@ def project(tmp_path) -> Path:
 @pytest.fixture()
 def views_project(tmp_path) -> Path:
     root = write_access_project(tmp_path / "pages")
-    with routed(root, urlconf=VIEWS_URLCONF, COMPONENT_BACKENDS=COMPONENTS):
+    with routed(root, urlconf=_VIEWS_URLCONF, COMPONENT_BACKENDS=COMPONENTS):
         yield root
 
 
@@ -226,27 +226,31 @@ class TestGuardRule:
 
     PERMISSIONS = ("auth.change_group", "auth.edit_group")
 
-    def _endpoint(self, **branch: object) -> tuple[Endpoint, dict[str, object]]:
+    @pytest.mark.parametrize(
+        ("branch", "access"),
+        [
+            pytest.param(
+                {"form_class": Form},
+                "login, perm auth.change_group, perm auth.edit_group on form",
+                id="form",
+            ),
+            pytest.param(
+                {"handler": print},
+                "login, perm auth.change_group, perm auth.edit_group",
+                id="handler",
+            ),
+        ],
+    )
+    def test_a_registered_permission_is_asked_where_the_branch_says(
+        self, branch: dict[str, object], access: str
+    ) -> None:
+        add_perm("auth.edit_group", owns_group)
         guard = ActionGuard(permissions=self.PERMISSIONS)
         meta = {"name": "x", "file_path": "/app/forms.py", "guard": guard, **branch}
-        return action_endpoint(meta), meta
 
-    def test_a_registered_permission_is_asked_of_the_form(self) -> None:
-        add_perm("auth.edit_group", owns_group)
+        endpoint = action_endpoint(meta)
 
-        endpoint, meta = self._endpoint(form_class=Form)
-
-        assert endpoint.access == (
-            "login, perm auth.change_group, perm auth.edit_group on form"
-        )
-        assert endpoint.rule.requirements == guard_rule(meta).requirements
-
-    def test_a_handler_asks_every_permission_up_front(self) -> None:
-        add_perm("auth.edit_group", owns_group)
-
-        endpoint, meta = self._endpoint(handler=print)
-
-        assert endpoint.access == "login, perm auth.change_group, perm auth.edit_group"
+        assert endpoint.access == access
         assert endpoint.rule.requirements == guard_rule(meta).requirements
 
 
@@ -303,7 +307,7 @@ class TestViewEndpoints:
             ("/api/report/", "tests.permissions.urls_views.Report", "no login"),
             ("/robots.txt", "tests.permissions.urls_views.robots", "no login"),
         ]
-        by_route = {view.route: view for view in found}
+        by_route = _views_by_route()
         assert by_route["/secret/"].access == "no login"
         assert by_route["/_next/csrf/"].access == "public"
         assert by_route["/_next/form/<str:uid>/"].access == "per action"
@@ -326,25 +330,29 @@ _UNMARKED_VIEWS = {
     "/gate/": "Gate",
 }
 
+_UNMARKED_ROUTES = pytest.mark.parametrize(
+    "route", list(_UNMARKED_VIEWS), ids=["login", "permission", "mixin", "dispatch"]
+)
+
+
+def _views_by_route() -> dict[str, ViewEndpoint]:
+    return {view.route: view for view in view_endpoints()}
+
 
 class TestUnmarkedViews:
     """A view the framework reads no mark on shows `?`, whatever guards it inside."""
 
-    @pytest.mark.parametrize(
-        "route", list(_UNMARKED_VIEWS), ids=["login", "permission", "mixin", "dispatch"]
-    )
+    @_UNMARKED_ROUTES
     def test_an_unmarked_view_is_unread(self, views_project, route) -> None:
-        by_route = {view.route: view for view in view_endpoints()}
+        by_route = _views_by_route()
 
         assert by_route[route].view.rpartition(".")[2] == _UNMARKED_VIEWS[route]
         assert by_route[route].access == "?"
 
-    @pytest.mark.parametrize(
-        "route", list(_UNMARKED_VIEWS), ids=["login", "permission", "mixin", "dispatch"]
-    )
+    @_UNMARKED_ROUTES
     def test_the_middleware_reads_at_least_a_login(self, views_project, route) -> None:
         with login_required_middleware():
-            by_route = {view.route: view for view in view_endpoints()}
+            by_route = _views_by_route()
 
         assert by_route[route].access == "login (middleware)"
 

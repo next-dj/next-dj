@@ -200,14 +200,12 @@ def action_endpoint(meta: "ActionMeta") -> Endpoint:
     """
     source = Path(meta["file_path"])
     owner = owner_rule(source)
-    rules = [guard_rule(meta)]
-    public = False
-    broken = None
-    if owner is not None:
-        rules.insert(0, owner.rule)
-        public = owner.rule.public
+    if owner is None:
+        rule = guard_rule(meta)
+        broken = None
+    else:
+        rule = joined([owner.rule, guard_rule(meta)], public=owner.rule.public)
         broken = owner.broken
-    rule = joined(rules, public=public)
     return Endpoint("action", meta["name"], source, rule, default_login(rule), broken)
 
 
@@ -291,20 +289,18 @@ def endpoints(page_path: Path | None = None) -> tuple[Endpoint, ...]:
     routes = collect_routes()
     if page_path is None:
         pages = tuple(page_endpoint(route) for route in routes)
-        return (
-            *pages,
-            *(action_endpoint(meta) for meta in _actions()),
-            *_declaring(_components()),
-        )
-    pages = tuple(
-        page_endpoint(route) for route in routes if _page_path(route) == page_path
-    )
-    actions = tuple(meta for meta in _actions() if _owned(meta, page_path))
-    infos = _page_components(page_path)
-    if infos is None:
+        actions = _actions()
+        infos: tuple[ComponentInfo, ...] | None = _components()
+    else:
         pages = tuple(
-            replace(found, broken=found.broken or page_path) for found in pages
+            page_endpoint(route) for route in routes if _page_path(route) == page_path
         )
+        actions = tuple(meta for meta in _actions() if _owned(meta, page_path))
+        infos = _page_components(page_path)
+        if infos is None:
+            pages = tuple(
+                replace(found, broken=found.broken or page_path) for found in pages
+            )
     return (
         *pages,
         *(action_endpoint(meta) for meta in actions),

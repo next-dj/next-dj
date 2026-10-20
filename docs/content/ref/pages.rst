@@ -49,7 +49,7 @@ A view answers a refusal with a redirect to the login page for an anonymous user
 ``page_access(file_path)`` returns a ``PageAccess`` with the joined ``rule`` and the first ``broken`` file, and ``owner_access(file_path)`` the rule of the page in the directory of any file of a tree, which an action answers to.
 The joined ``rule`` holds the requirements in the order the chain declared them and ``sources`` naming the files of the requirements, or the file that opened a public rule.
 ``enforce(rule, broken, request, url_kwargs, dep_cache, *, undeclared, gate)`` is the one check a page view, a zone morph, and an action dispatch run, and ``refusal(file_path, request, url_kwargs, dep_cache)`` runs it for one page.
-A ``Gate`` carries the ``lookup`` builder and the ``next_url`` a login returns to, and ``enforce`` builds the lookup only for a rule with requirements, so an open rule costs no allocation.
+A ``Gate`` carries the ``lookup`` builder and the ``next_url`` a login returns to.
 ``url_lookup(request, url_kwargs, dep_cache)`` builds the ``lookup`` of a page, which loads the row an ``obj=DObject[Model]`` names from the same cache a ``DObject`` parameter reads.
 ``default_login(rule)`` tells whether the default login asks a login of a rule, true only for a rule without requirements that is not public while ``LOGIN_REQUIRED`` or ``LoginRequiredMiddleware`` turns it on, and ``anonymous_admitted(access)`` tells whether an anonymous request passes the rule of a page, which the sitemap reads to leave closed pages out.
 ``routed(file_path)`` tells whether a ``page.py`` serves a URL, the same answer the router gives, and ``routed_pages(pages)`` keeps only such files of a walk of ``(trail, page_file)`` pairs, so the URL checks and the SEO discovery treat no file without a body as a route.
@@ -243,8 +243,10 @@ They run through ``uv run python manage.py check``, except ``check_page_module_i
 The package splits by subject into ``access``, ``branches``, ``contexts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, and ``zones``, and importing the package registers every one of them.
 ``metadata`` is a package of its own, ``scope``, ``titles``, ``shape``, ``head``, ``ld``, ``links``, ``pages``, and ``templates``, and ``responses`` owns the ``cache``, ``headers``, ``CSRF_DELIVERY``, and ``CSRF_USE_SESSIONS`` checks, see :doc:`system-checks` for the codes each one owns.
 ``access`` owns the checks of the access declarations, ``next.E163`` and ``next.E164``, while ``next.E162`` for an ``obj=DObject[Model]`` lives with the ``DObject`` checks in ``next.deps.checks``.
-Its ``subtree_only(file_path)`` tells whether a ``page.py`` without a body passes access with ``inherit=True`` or context with ``inherit_context=True`` to the pages below.
-``modules`` builds on it with ``faulty(file_path)``, whether ``next.E012``, ``next.E013``, or ``next.E166`` names a ``page.py``, so ``next.W128`` leaves to that error the branch it names, and ``next.E012`` reads the directories that declare actions through the ``ActionOwners`` port of :doc:`ports`.
+Its ``passes_down(file_path)`` tells whether a ``page.py`` passes access with ``inherit=True`` or context with ``inherit_context=True`` to the pages below, and ``declares_for_itself(file_path)`` whether it declares access only a page of its own would take.
+``modules`` builds on them with ``load_page(file_path)``, one load of a ``page.py`` and whether it routes, which every body check reads instead of loading the file again.
+Its ``faulty(file_path, loaded)`` tells whether ``next.E012``, ``next.E013``, or ``next.E166`` names a ``page.py``, so ``next.W128`` leaves to that error the branch it names and still reports every other empty branch around it.
+``next.E012``, ``next.E166``, and ``next.W128`` read the directories that declare actions through the one ``ActionOwners`` port of :doc:`ports`.
 ``branches`` finds the directories with no page and no action for ``next.W128``, which ``next.forms.checks.actions`` registers, since only the forms area knows the actions.
 
 The package exports thirty-four check callables.

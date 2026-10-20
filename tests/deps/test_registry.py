@@ -25,8 +25,7 @@ _late_serial = count()
 
 
 def _late(priority_value: int, value: object = "late") -> type:
-    # A distinct qualname per class, because the registry reads a repeated
-    # address as the dev reloader replacing the class that held it.
+    # A distinct qualname per class, as a repeated address reads as a reloader swap.
     serial = next(_late_serial)
 
     class Late(RegisteredParameterProvider):
@@ -206,8 +205,7 @@ class TestResolverSync:
         assert all(type(p) is not DependsProvider for p in planned._providers)
         late = _late(5)
         planned.resolve_dependencies(_plain)
-        # The resync rebuilds every auto instance from the registry, and the
-        # class the caller took out stays out while the newcomer joins.
+        # The resync rebuilds auto instances, and the removed class stays out.
         assert _index_of(planned, late) == _index_of(planned, ObjectProvider) + 1
         assert all(type(p) is not DependsProvider for p in planned._providers)
 
@@ -218,8 +216,7 @@ class TestResolverSync:
         planned.remove_provider(planned._providers[_index_of(planned, first)])
         reloaded = _declare_in_page_module("/pages/flags/page.py")
         planned.resolve_dependencies(_plain)
-        # The reloader mints a fresh class under the address the caller took
-        # out, so the removal has to read the address rather than the class.
+        # The reloader mints a new class at one address, so removal reads the address.
         assert reloaded is not first
         assert all(type(p).__qualname__ != "Flag" for p in planned._providers)
 

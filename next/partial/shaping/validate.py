@@ -41,8 +41,7 @@ def shape_validate(
 ) -> "HttpResponse":
     """Shape a validate-only pass as a form morph envelope.
 
-    The origin page and both action layers have already authorized this request, so
-    `is_valid()` never leaks a guarded validator to an anonymous caller.
+    The origin page and both action layers already authorized it.
     """
     rotated = _csrf_rotated(request)
     form.is_valid()

@@ -49,6 +49,9 @@ from tests.support.cases.forms import (
 )
 
 
+_LOGIN_NEXT = "/accounts/login/?next=/"
+
+
 User = get_user_model()
 
 
@@ -246,7 +249,7 @@ class TestCheckAccess:
         request.user = AnonymousUser()
         denial = _check_access(request, _rule(ActionGuard(login_required=True)))
         assert denial is not None
-        assert denial.url == "/accounts/login/?next=/"
+        assert denial.url == _LOGIN_NEXT
 
     def test_offsite_origin_falls_back_to_root(self, rf) -> None:
         request = rf.post(
@@ -254,7 +257,7 @@ class TestCheckAccess:
         )
         denial = _check_access(request, _rule(ActionGuard(login_required=True)))
         assert denial is not None
-        assert denial.url == "/accounts/login/?next=/"
+        assert denial.url == _LOGIN_NEXT
 
     def test_origin_past_the_url_length_cap_rides_along(self, rf) -> None:
         origin = "/items/?q=" + "x" * 3000
@@ -297,7 +300,7 @@ class TestGuardDispatchViaClient:
     def test_anonymous_post_redirects_to_login(self, client_no_csrf) -> None:
         resp = self._post(client_no_csrf, "guarded_login_form", {"name": "Ada"})
         assert resp.status_code == 302
-        assert resp.url == "/accounts/login/?next=/"
+        assert resp.url == _LOGIN_NEXT
 
     def test_authenticated_post_dispatches(self, client_no_csrf) -> None:
         client_no_csrf.force_login(User.objects.create_user("ada", password="pw"))
@@ -308,7 +311,7 @@ class TestGuardDispatchViaClient:
     def test_anonymous_permission_post_redirects_to_login(self, client_no_csrf) -> None:
         resp = self._post(client_no_csrf, "guarded_permission_form", {"name": "Ada"})
         assert resp.status_code == 302
-        assert resp.url == "/accounts/login/?next=/"
+        assert resp.url == _LOGIN_NEXT
 
     def test_authenticated_without_permission_gets_403(self, client_no_csrf) -> None:
         client_no_csrf.force_login(User.objects.create_user("bob", password="pw"))
@@ -326,7 +329,7 @@ class TestGuardDispatchViaClient:
     def test_inherited_guard_protects_subclass(self, client_no_csrf) -> None:
         resp = self._post(client_no_csrf, "inherited_guard_form", {"name": "Ada"})
         assert resp.status_code == 302
-        assert resp.url == "/accounts/login/?next=/"
+        assert resp.url == _LOGIN_NEXT
 
     def test_wizard_step_post_is_guarded(self, client_no_csrf) -> None:
         url = form_action_manager.get_action_url("guarded_wizard")
@@ -354,7 +357,7 @@ class TestGuardDispatchViaClient:
     def test_handler_action_is_guarded(self, client_no_csrf) -> None:
         resp = self._post(client_no_csrf, "guarded_handler_action")
         assert resp.status_code == 302
-        assert resp.url == "/accounts/login/?next=/"
+        assert resp.url == _LOGIN_NEXT
 
     def test_handler_action_runs_for_authenticated_user(self, client_no_csrf) -> None:
         client_no_csrf.force_login(User.objects.create_user("kim", password="pw"))
@@ -633,11 +636,7 @@ class TestDetectionFlags:
         assert _Guarded._has_check_permissions is True
 
     def test_unguarded_subclass_of_guarded_inherits_the_hook(self) -> None:
-        """A concrete subclass of a guarded abstract base inherits the True flag.
-
-        The subclass does not re-declare the method, so __func__ identity still
-        resolves to the base override, keeping the flag True.
-        """
+        """A concrete subclass of a guarded abstract base inherits the True flag."""
 
         class _GuardedBase(Form):
             @classmethod
@@ -874,7 +873,7 @@ class TestStaticGuardPrecedesDynamicHook:
             backend, request, "ordering_action", meta
         )
         assert response.status_code == 302
-        assert response.url == "/accounts/login/?next=/"
+        assert response.url == _LOGIN_NEXT
         # The static guard short-circuited before the hook could run.
         assert _OrderingForm.check_calls == []
 

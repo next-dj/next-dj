@@ -1,8 +1,4 @@
-"""Render collected assets into the placeholder tokens of a finished page.
-
-The injector reads the backend, the URL rewrite, and the script builder from the
-static manager, and holds every step that renders a collector into markup.
-"""
+"""Render collected assets into the placeholder tokens of a finished page."""
 
 from __future__ import annotations
 
@@ -46,8 +42,7 @@ _RUNTIME_SLOT_NAME: Final = "scripts"
 _HEAD_SLOT_NAME: Final = "head"
 _NO_SCRIPTS: tuple[str, Mapping[str, object]] = ("", {})
 
-# The storage URLs of the listed chunks, the URLs a page names, the serializer type
-# and the encoded entry.
+# Storage URLs of the listed chunks, page URLs, serializer type and encoded entry.
 type _ChunksMemo = tuple[
     tuple[tuple[str, str], ...], dict[str, str], type[JsContextSerializer], str
 ]
@@ -119,8 +114,7 @@ class PlaceholderInjector:
     ) -> str:
         """Replace every registered placeholder token with rendered tags.
 
-        Every URL passes through `asset_url` first, so a per-request rewrite applies to
-        every renderer and both signals. A new asset kind needs no change here.
+        Every URL passes through `asset_url` first, so a per-request rewrite applies.
         """
         sender = self._provider
         collector_finalized.send(sender=collector, page_path=page_path, request=request)
@@ -130,14 +124,12 @@ class PlaceholderInjector:
             replaced = tuple(
                 slot.name for slot in default_placeholders if slot.token in html
             )
-        # The runtime loads only from the scripts placeholder, so a page without one
-        # gets no preload hint for it.
+        # The runtime loads only from the scripts placeholder, so only it gets a hint.
         runtime_slot = default_placeholders.get(_RUNTIME_SLOT_NAME)
         hints_runtime = runtime_slot is not None and runtime_slot.token in html
         backend = sender.default_backend
         builder = sender.script_builder()
-        # Resolved once per render, so the script tag and the preload hint share one
-        # URL and the backend hook runs once.
+        # Resolved once so the script tag and the preload hint share one URL.
         runtime_url = (
             sender.asset_url(builder.url, request=request)
             if builder.policy is ScriptInjectionPolicy.AUTO
@@ -202,10 +194,7 @@ class PlaceholderInjector:
     ) -> tuple[dict[str, str], str]:
         """Return the `$chunks` entry and its encoding, reused while the URLs match.
 
-        Every chunk is listed because a later patch may need any of them, except the
-        dev chunk, which only `DEBUG` lists. A chunk the storage lacks is left out.
-        Without a per-request rewrite the page URLs follow from the storage URLs, so
-        the backend is asked only when those move.
+        Only `DEBUG` lists the dev chunk, and a chunk the storage lacks is left out.
         """
         provider = self._provider
         stored = tuple(

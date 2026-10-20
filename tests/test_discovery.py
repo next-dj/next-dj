@@ -204,8 +204,7 @@ class TestRouterManagerCache:
         ] == [tmp_path.resolve()]
 
     def test_an_unbound_port_is_reported_rather_than_raised(self) -> None:
-        # `manage.py check` on a project whose app never started reports the
-        # misconfiguration, where a traceback would report nothing at all.
+        # `manage.py check` with an app that never started reports the misconfiguration.
         with patch("next.discovery.router_access_slot", PortSlot("router access port")):
             manager, errors = get_router_manager()
 
@@ -224,8 +223,7 @@ class TestRouterManagerCache:
         assert access.built == 1
 
     def test_a_full_check_run_reports_one_failure_once(self) -> None:
-        # Every check that walks the routers skips on the same failure, so one
-        # broken router is one message however many checks would have read it.
+        # Router-walking checks skip on one failure, so a broken router is one message.
         reset_router_manager_cache()
         with _counting_router_access(ImportError("boom")):
             messages = run_checks(include_deployment_checks=True)
@@ -489,8 +487,7 @@ class TestEveryPagesRootIsScanned:
         assert [page_file for _url, page_file in pairs] == [page_a, page_b]
 
     def test_directories_are_reported_without_duplicates(self, tmp_path: Path) -> None:
-        # A repeat sits between two distinct roots, so a first-root-only walk
-        # and a walk that keeps duplicates both fail this.
+        # A repeat between two roots fails first-root-only and duplicate-keeping walks.
         tree_a = tmp_path / "a"
         tree_b = tmp_path / "b"
         write_page(tree_a, "blog")
@@ -512,8 +509,7 @@ class TestEveryPagesRootIsScanned:
         assert list(iter_scanned_page_pairs(router)) == list(scan_pages_tree(real))
 
     def test_one_tree_under_two_labels_is_scanned_once(self, tmp_path: Path) -> None:
-        # An app tree also listed in DIRS is routed twice for real, so the roots
-        # keep both entries while the scan behind the page checks walks it once.
+        # An app tree also in DIRS is routed twice, so roots keep both and the scan one.
         write_page(tmp_path, "blog")
         router = _TwoLabelRouter(tmp_path)
 
@@ -521,8 +517,7 @@ class TestEveryPagesRootIsScanned:
         assert get_pages_directories(router) == [tmp_path]
 
     def test_reported_spelling_survives_the_collapse(self, tmp_path: Path) -> None:
-        # The page registries key on the path the module was loaded by, so the
-        # router's own spelling has to come back out, not the resolved one.
+        # The page registries key on the loaded path, so keep the router's spelling.
         real = tmp_path / "real"
         write_page(real, "blog")
         linked = tmp_path / "linked"
@@ -643,8 +638,7 @@ class TestPageTreeSkipNames:
     def test_the_dirs_of_another_backend_entry_name_no_skip_name_here(
         self, tmp_path: Path
     ) -> None:
-        # A `blog` that one entry refuses is a route of the next entry's tree,
-        # so the skip set of a router may never gather what another declared.
+        # A `blog` one entry refuses routes in the next tree, so skip sets stay apart.
         tree = tmp_path / "site"
         write_page(tree, "blog")
         entries = [
@@ -700,8 +694,7 @@ class TestPageTreeSkipNames:
     def test_a_raising_router_is_asked_for_its_contract_once_per_run(
         self, tmp_path: Path
     ) -> None:
-        # Three checks ask the same questions, and a failing router would
-        # otherwise write one traceback per asking check.
+        # Three checks ask the same questions, so a failing router writes one traceback.
         router = RaisingComponentsRouter([tmp_path])
         with patch.object(
             RaisingComponentsRouter,
@@ -914,8 +907,7 @@ class TestPerRouterCachesKeyOnIdentity:
     def test_an_unhashable_router_is_cached_without_being_hashed(
         self, tmp_path: Path
     ) -> None:
-        # A dataclass router carries `__hash__ = None`, which no cache lookup
-        # may turn into a traceback out of a check run.
+        # A dataclass router has `__hash__ = None`, which no cache lookup may surface.
         write_page(tmp_path, "blog")
         router = _UnhashableRouter(tree=tmp_path)
 

@@ -1,8 +1,4 @@
-"""Build the `next.min.js` preload, script and init tags, and name its lazy chunks.
-
-The tag templates are constructor arguments, so a project overrides them without
-subclassing. An injection policy decides whether the tags are emitted.
-"""
+"""Build the `next.min.js` preload, script and init tags, and name its lazy chunks."""
 
 from __future__ import annotations
 
@@ -141,9 +137,7 @@ def usable_template(
 ) -> str:
     """Return `template` when it formats with `fields`, else `default`.
 
-    A template that cannot format would fail every render, so the default replaces it.
     The error is raised under `DEBUG` and otherwise logged at the `FailureLog` rate.
-    The default itself is known to format, so it is returned without a dry run.
     """
     if template == default:
         return default
@@ -162,11 +156,7 @@ def usable_template(
 
 
 class ScriptInjectionPolicy(enum.Enum):
-    """Controls whether `next.min.js` is automatically injected.
-
-    `AUTO` emits every tag automatically. `DISABLED` skips injection entirely.
-    `MANUAL` still builds the fragments but leaves emitting them to the template.
-    """
+    """Controls whether `next.min.js` is automatically injected."""
 
     AUTO = "auto"
     DISABLED = "disabled"
@@ -230,21 +220,13 @@ class NextScriptBuilder:
         return self._url
 
     def preload_link(self, url: str | None = None, *, nonce: str | None = None) -> str:
-        """Return the preload hint tag for early browser download.
-
-        An explicit `url` replaces the resolved runtime URL, so the injector can pass
-        the URL a request-aware backend rewrote.
-        """
+        """Return the preload hint tag, an explicit `url` replaces the runtime URL."""
         return self._preload_template.format(
             url=escape(str(url or self._url)), nonce_attr=nonce_attr(nonce)
         )
 
     def script_tag(self, url: str | None = None, *, nonce: str | None = None) -> str:
-        """Return the blocking script tag that executes `next.min.js`.
-
-        An explicit `url` replaces the resolved runtime URL, so the injector can pass
-        the URL a request-aware backend rewrote.
-        """
+        """Return the blocking script tag, an explicit `url` replaces the runtime's."""
         return self._script_tag_template.format(
             url=escape(str(url or self._url)), nonce_attr=nonce_attr(nonce)
         )
@@ -259,8 +241,7 @@ class NextScriptBuilder:
     ) -> str:
         """Return the inline script that passes the context to `Next._init`.
 
-        A value in `encoded` is reused instead of serialised again. The payload is
-        escaped so a `</script>` inside it cannot close the element.
+        The payload is escaped so a `</script>` inside it cannot close the element.
         """
         default = resolve_serializer()
         serializers = key_serializers or {}

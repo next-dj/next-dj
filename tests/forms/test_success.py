@@ -386,8 +386,7 @@ class TestSuccessMessageRerenderOrdering:
     """The success message reaches the store before an in-place origin re-render."""
 
     def _record_messages_at_render(self, monkeypatch) -> list[list[str]]:
-        # Reading messages inside render_invalid_page mirrors a {% messages %}
-        # block, capturing what the store holds when the origin re-renders.
+        # Reading messages inside render_invalid_page mirrors a {% messages %} block.
         seen: list[list[str]] = []
         original = RegistryFormActionBackend.render_invalid_page
 

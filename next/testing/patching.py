@@ -1,7 +1,6 @@
 """Context managers for test-scoped overrides.
 
-Each helper is a plain `@contextlib.contextmanager`, so the surface needs neither pytest
-nor `unittest.mock`, and state is restored even when the block raises.
+Each is a plain `@contextlib.contextmanager` that restores state when the block raises.
 """
 
 from __future__ import annotations
@@ -33,8 +32,7 @@ if TYPE_CHECKING:
 def override_next_settings(**overrides) -> Iterator[None]:
     """Merge `overrides` into `NEXT_FRAMEWORK` for the duration of the block.
 
-    The merge is shallow, and `override_settings` underneath fires the `setting_changed`
-    then `settings_reloaded` chain so managers pick the values up.
+    The merge is shallow, and `override_settings` fires the chain that reloads managers.
     """
     current = getattr(django_settings, "NEXT_FRAMEWORK", None) or {}
     merged = {**current, **overrides}
@@ -63,8 +61,7 @@ def override_dependency(name: str, value: object) -> Iterator[None]:
 def override_provider(provider: ParameterProvider) -> Iterator[None]:
     """Prepend `provider` to the resolver's provider list for the block.
 
-    Placing the provider first means it wins over any auto-registered
-    provider that would otherwise handle the same parameter.
+    Placed first, it wins over any auto-registered provider for the same parameter.
     """
     resolver.prepend_provider(provider)
     try:
@@ -82,8 +79,7 @@ def override_form_action(
 ) -> Iterator[None]:
     """Register `handler` as the named form action for the block.
 
-    The override wins name-based lookup for the block, and the whole registry is
-    snapshotted on entry so that an action it shadows survives the block.
+    The registry is snapshotted on entry so an action it shadows survives the block.
     """
     saved = form_action_manager.snapshot_actions()
     form_action_manager.register_action(
@@ -106,12 +102,10 @@ def override_form_action(
 def override_component_backends(*configs: dict[str, Any]) -> Iterator[None]:
     """Replace `COMPONENT_BACKENDS` for the block.
 
-    Uses `override_next_settings` so the `settings_reloaded` signal
-    rebuilds `components_manager`'s backends automatically.
+    Goes through `override_next_settings`, so `components_manager` rebuilds.
     """
     with override_next_settings(COMPONENT_BACKENDS=list(configs)):
-        # Reading the backends builds them now, so the block body sees the
-        # swapped list rather than the one a later render would rebuild.
+        # Reading the backends builds them now, so the block sees the swapped list.
         _ = components_manager.backends
         yield
 
@@ -129,8 +123,7 @@ def patch_static_collector(
 ) -> Iterator[StaticCollectorProxy]:
     """Replace `default_manager.create_collector` for the block.
 
-    The yielded proxy holds the collector of the latest call to the patched factory,
-    so a test reads the emitted styles and scripts without parsing HTML.
+    The yielded proxy holds the latest collector, so tests skip parsing HTML.
     """
     manager = get_static_manager()
     original = manager.create_collector

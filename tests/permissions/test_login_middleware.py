@@ -19,6 +19,7 @@ from tests.support.access import (
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("form_registries")]
 
+_LOGIN_GUARD = "page.login_required(inherit=True)\n"
 _ZONED = '{% zone "z" %}Z{% endzone %}'
 
 _ACTION = """
@@ -51,9 +52,9 @@ def site(tmp_path, request) -> Path:
         page_source("page.public()\n", _ZONED) + _ACTION.format(name="open_act"),
     )
     write_page(root, "shut", page_source("", _ZONED) + _ACTION.format(name="shut_act"))
-    write_guard(root / "fenced", "page.login_required(inherit=True)\n")
+    write_guard(root / "fenced", _LOGIN_GUARD)
     write_page(root, "fenced/in", page_source("page.public()\n"))
-    write_guard(root / "lifted", "page.login_required(inherit=True)\n")
+    write_guard(root / "lifted", _LOGIN_GUARD)
     write_page(
         root,
         "lifted/receipt",
@@ -63,8 +64,7 @@ def site(tmp_path, request) -> Path:
     write_page(
         root,
         "lifted/receipt/admin",
-        page_source("page.login_required(inherit=True)\n", _ZONED)
-        + _ACTION.format(name="admin_act"),
+        page_source(_LOGIN_GUARD, _ZONED) + _ACTION.format(name="admin_act"),
     )
     for name, module in (("card", ""), ("lock", _LOCKED)):
         folder = root / "_components" / name

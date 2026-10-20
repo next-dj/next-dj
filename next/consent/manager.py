@@ -106,8 +106,7 @@ def get_consent(request: HttpRequest | None) -> Consent:
 def _backend() -> ConsentBackend | None:
     """Return the configured backend, `None` where it cannot be built.
 
-    A failure is memoised too, so a broken entry is not imported on every render. Each
-    render reading it is degraded and logged at the `FailureLog` rate.
+    A failure is memoised too, so a broken entry is not imported on every render.
     """
     backend, failed = _built_backend()
     if failed:
@@ -223,8 +222,7 @@ def server_mode(request: HttpRequest | None) -> bool:
 def consent_payload(consent: Consent) -> dict[str, object]:
     """Return the `$consent` entry for the runtime, the backend's own entries included.
 
-    The choice overrides a backend entry of the same name, so the runtime always
-    starts from the state the server read.
+    The choice overrides a backend entry of the same name.
     """
     categories = consent_categories()
     payload: dict[str, object] = dict(_backend_config())

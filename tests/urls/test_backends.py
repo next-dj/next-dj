@@ -155,8 +155,7 @@ class TestFileRouterBackend:
     def test_get_app_pages_path_memoises_a_missing_tree(self, tmp_path) -> None:
         """An app without a pages tree is answered from the memo too.
 
-        The memo lives as long as this router, and a tree an app grows later reaches the
-        watcher through the next router, not through this one probing again.
+        A tree an app grows later reaches the watcher through the next router.
         """
         app_dir = tmp_path / "shop"
         app_dir.mkdir()
@@ -799,8 +798,7 @@ class TestAppDirectoryResolution:
         ):
             assert router.page_roots() == []
 
-        # The empty answer reads as "this project has no app pages", so it is
-        # named rather than left to pass for the truth.
+        # The empty answer reads as no app pages, so it is named, not left as truth.
         assert "read before Django populated it" in caplog.text
 
 

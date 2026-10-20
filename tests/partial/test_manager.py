@@ -62,8 +62,7 @@ class TestAssetVersion:
     """`asset_version` resolves the version stamped on a partial response."""
 
     def test_explicit_version_wins(self) -> None:
-        # an explicit VERSION string wins over the manifest sentinel even when a
-        # manifest storage is active, so a release tag pins the version
+        # an explicit VERSION wins over the manifest sentinel, so a release tag pins it
         storage = _RecordedHashStorage("deadbeef")
         with (
             patch("next.partial.manager.staticfiles_storage", storage),
@@ -96,8 +95,7 @@ class TestAssetVersion:
             assert asset_version() == "0"
 
     def test_missing_version_resolves_to_default(self) -> None:
-        # an absent VERSION option derives the version like the sentinel does,
-        # which falls back to the stable default under the plain test storage
+        # an absent VERSION derives like the sentinel, with the stable default fallback
         with (
             patch("next.partial.manager.staticfiles_storage", _PlainStorage()),
             _backend_options({}),
@@ -105,8 +103,7 @@ class TestAssetVersion:
             assert asset_version() == "0"
 
     def test_default_version_derives_from_the_manifest(self) -> None:
-        # the framework default pins nothing, so a project that never names the
-        # sentinel still gets the hash a manifest storage records
+        # the framework default pins nothing, so the manifest storage hash is used
         storage = _RecordedHashStorage("c0ffee123456")
         with (
             patch("next.partial.manager.staticfiles_storage", storage),
@@ -115,8 +112,7 @@ class TestAssetVersion:
             assert asset_version() == "c0ffee123456"
 
     def test_project_static_version_derives_the_version(self) -> None:
-        # the deploy stamp a project already sets on every asset URL is what moves
-        # between deploys, so the derived default reads it before the manifest
+        # the deploy stamp moves between deploys, so it is read before the manifest
         with (
             patch("next.partial.manager.staticfiles_storage", _PlainStorage()),
             _backend_options({}, static_version="build-42"),
@@ -139,8 +135,7 @@ class TestAssetVersion:
             assert asset_version() == "release-9"
 
     def test_manifest_sentinel_ignores_the_project_stamp(self) -> None:
-        # the sentinel names the manifest as the source, so a project stamp does
-        # not quietly answer in its place and next.W069 keeps meaning what it says
+        # the sentinel names the manifest as the source, so a project stamp stays out
         with (
             patch("next.partial.manager.staticfiles_storage", _PlainStorage()),
             _backend_options({"VERSION": "manifest"}, static_version="build-42"),
@@ -156,8 +151,7 @@ class TestAssetVersion:
             assert asset_version() == "c0ffee123456"
 
     def test_unconfigured_storage_falls_back_to_default(self) -> None:
-        # the lazy storage proxy raises ImproperlyConfigured when STATIC_ROOT is
-        # unset, and the guard degrades to the stable default rather than 500ing
+        # the lazy storage proxy raises ImproperlyConfigured without STATIC_ROOT
 
         def _unconfigured() -> object:
             raise ImproperlyConfigured
@@ -181,8 +175,7 @@ class TestPartialBackendSelection:
             assert backend.options == {"VERSION": "pinned"}
 
     def test_default_backend_serves_an_unconfigured_project(self) -> None:
-        # the bundled entry names the default protocol backend, so a project
-        # that lists no entry of its own still gets a working wire format
+        # the bundled entry names the default protocol backend for projects listing none
         with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": []}):
             assert isinstance(partial_backend_manager.get(), PartialProtocolBackend)
 

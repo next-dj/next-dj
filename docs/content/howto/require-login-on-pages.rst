@@ -55,8 +55,7 @@ An anonymous request for any page is redirected to ``LOGIN_URL`` with the full p
 A zone request travels the URL of its page, so it meets the same redirect, and the client runtime follows it with a full navigation.
 Under the key alone a view of the project closes with :func:`~django.contrib.auth.decorators.login_required` on the view, see :ref:`topics-access-default-login`.
 
-The framework marks its own endpoints with :func:`~django.contrib.auth.decorators.login_not_required`, the action endpoint ``/_next/form/<uid>/``, the CSRF endpoint ``/_next/csrf/``, ``sitemap.xml``, and ``robots.txt``.
-An action is not left open by that mark, because the dispatcher requires a login for an action unless the rule of the page of its directory is public and its origin is public too.
+The action endpoint ``/_next/form/<uid>/``, the CSRF endpoint ``/_next/csrf/``, ``sitemap.xml``, and ``robots.txt`` stay open to the middleware, and an action is still closed, because the dispatcher requires a login for an action unless the rule of the page of its directory is public and its origin is public too.
 
 Open the public pages
 ~~~~~~~~~~~~~~~~~~~~~
@@ -70,7 +69,7 @@ A page that anyone may visit declares ``page.public()`` at module level of its `
 
    page.public()
 
-The view of that page carries ``login_required = False``, the attribute the middleware reads, and the framework asks no login of it under the key.
+The framework asks no login of that page under the key.
 The actions of the same ``page.py`` posted from it stay open as well, so a login page built as a page of the tree declares ``page.public()`` and its form keeps working for anonymous visitors.
 ``page.public(inherit=True)`` opens every page below the directory the same way, such as a whole ``auth/`` section of sign-in, sign-up, and password-reset pages.
 Keep ``LOGIN_URL`` on a public page or on Django's :class:`~django.contrib.auth.views.LoginView`, which Django marks public itself, since a closed login page redirects to itself forever.

@@ -1,9 +1,3 @@
-"""The lazy chunks are named in TypeScript, Python, npm, and packaging alike.
-
-Each list is read from its own file, so a chunk added to one and forgotten in another
-fails here rather than as a 404 on the first page that needs it.
-"""
-
 from __future__ import annotations
 
 import ast

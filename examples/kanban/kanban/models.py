@@ -72,10 +72,7 @@ class Card(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        # Position uniqueness inside a column is maintained by move_card
-        # and create_card under select_for_update. SQLite does not
-        # support deferrable UNIQUE constraints, so the invariant lives
-        # at the application layer rather than in the schema.
+        # SQLite lacks deferrable UNIQUE, so services keep positions unique by a lock.
         ordering: ClassVar = ["position", "id"]
 
     def __str__(self) -> str:

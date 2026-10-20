@@ -124,8 +124,9 @@ Access control
 --------------
 
 Every form action answers at ``/_next/form/<uid>/``, an endpoint any visitor can POST to.
-An action declared in a page tree answers to the access its page and the ``page.py`` files above it declare, and a forged origin lifts none of it, see :doc:`actions`.
-An action nothing guards, declared under no requirement, with no ``Meta`` guard, and without the default login, runs for anonymous visitors, which ``next.W129`` reports in a project that declares access, see :doc:`actions`.
+An action declared in a page tree answers to the access its page and the ``page.py`` files above it declare, and a forged origin lifts none of it.
+An action nothing guards, declared under no requirement, with no ``Meta`` guard, and without the default login, runs for anonymous visitors, which ``next.W129`` reports in a project that declares access.
+:doc:`actions` states the rule in full.
 
 Enforce access at one of these layers.
 

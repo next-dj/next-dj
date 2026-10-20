@@ -259,8 +259,7 @@ class TestConditionalGetOrder:
         ids=["below_a_cookie", "above_update_cache"],
     )
     def test_the_guard_further_down_does_not(self, tmp_path, middleware) -> None:
-        # Above `UpdateCacheMiddleware` the guard runs after the public copy is
-        # stored, so the cache replays the cookie to everyone.
+        # Above `UpdateCacheMiddleware` the guard runs late, so the cache replays it.
         with (
             routed(_pages(tmp_path, "cache = 60\n")),
             override_settings(MIDDLEWARE=middleware),

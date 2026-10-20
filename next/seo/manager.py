@@ -134,8 +134,7 @@ def stable_repr(value: object) -> str:
 def _serves(backend: SitemapBackend) -> bool:
     """Whether `backend` serves, an exception counting as serving once contained.
 
-    It runs during URL resolution, outside any view, so an intended exception such as
-    `Http404` is contained too and never fails the resolution of every other URL.
+    It runs outside any view, so even an `Http404` is contained during URL resolution.
     """
     path = backend_path(backend)
     with _failures.guard(
@@ -209,9 +208,7 @@ class SeoManager(BackendListManager[SitemapBackend]):
     def serves_sitemap(self) -> bool:
         """Whether a backend has sections, which mounts `/sitemap.xml`.
 
-        It runs during URL resolution. A backend that raises fails the request under
-        `DEBUG` or `STRICT_LOADING`, and otherwise counts as serving, so its route
-        answers 503 instead of failing every other route.
+        A raising backend fails under `DEBUG` or `STRICT_LOADING`, else it answers 503.
         """
         return any(_serves(backend) for backend in self.backends)
 
@@ -232,8 +229,7 @@ class SeoManager(BackendListManager[SitemapBackend]):
     def sections(self, request: HttpRequest | None) -> dict[str, Sitemap[Any]]:
         """Return the sections of every backend, keeping the first for a shared name.
 
-        A site closed to crawlers lists none. A site that only `DEBUG` closes lists
-        its sections for a preview under noindex.
+        A site closed to crawlers lists none, and one only `DEBUG` closes lists them.
         """
         if site_closed_to_crawlers(request):
             return {}
@@ -273,8 +269,7 @@ class SeoManager(BackendListManager[SitemapBackend]):
     def fingerprint(self) -> str:
         """Return a digest of the sources and the settings the SEO responses read.
 
-        It prefixes the cache keys, so a response cached before an edit is never
-        served. A digest taken while a reset happens is not memoised.
+        It prefixes the cache keys, so a response cached before an edit is never served.
         """
         held = self._fingerprint
         if held is not None:

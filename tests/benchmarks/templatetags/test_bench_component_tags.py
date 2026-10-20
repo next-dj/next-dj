@@ -17,8 +17,7 @@ if TYPE_CHECKING:
     from django.template.base import Template as CompiledTemplate
 
 
-# Touching the engines triggers the global init that registers the next tags,
-# so warm it up here and keep the bench body on render cost alone.
+# Touching the engines registers the next tags, so warm them off the timed body.
 engines.all()
 
 _CARD = '<article class="card"><h2>{{ title }}</h2><p>{{ body }}</p></article>'
@@ -31,8 +30,7 @@ _INCLUSION_TAG = '{% bench_card "Bench" "Body text" %}'
 
 _PAGE_TAG_COUNT = 10
 
-# A cold round rereads and recompiles the component template, so the count stays
-# modest and the warmup rounds keep the backend discovery out of the median.
+# A cold round rereads and recompiles the template, so keep the count modest.
 _COLD_ROUNDS = 50
 _COLD_WARMUP_ROUNDS = 5
 
@@ -121,8 +119,7 @@ class TestBenchColdComponentTag:
 class TestBenchComponentTag:
     """`{% component %}` on a page beside the vanilla tags it competes with.
 
-    One tag prices the whole path, ten tags the marginal tag, and the ``{% include %}``
-    and ``inclusion_tag`` rows price the same work in plain Django.
+    ``{% include %}`` and ``inclusion_tag`` rows price the same work in plain Django.
     """
 
     @pytest.mark.benchmark(group="templatetags.component")

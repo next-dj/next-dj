@@ -69,7 +69,6 @@ A predicate is a plain function with one of three signatures, and a check passes
 ``(user, obj)`` receives the user and the row the question names, ``None`` on the model-level question that ``user.has_perm(perm)`` and ``{% if perms.notes.edit_note %}`` ask.
 A callable takes at most two positional parameters, and a parameter with a default counts toward the two, so ``(user, obj=None)`` is the two-argument form.
 ``**kwargs`` is allowed, while ``*args`` and a keyword-only parameter without a default are not.
-``add_perm`` counts the parameters once, when it registers the function, so a check costs no signature inspection.
 
 ``is_owner`` answers ``False`` on the model-level question, since no row has an owner yet, while ``is_editor`` answers it from the user alone.
 
@@ -184,7 +183,7 @@ How the check runs
 ~~~~~~~~~~~~~~~~~~
 
 The rule of a page joins the ``inherit=True`` declarations of every ``page.py`` from the tree root down to the parent directory and everything the ``page.py`` itself declares, each requirement once, in that order, and a ``public()`` on the way lifts what came before it, see :ref:`topics-access`.
-A rule without requirements passes without reading the user, unless the default login asks for one, so an open page costs one memo read.
+A rule without requirements passes without reading the user, unless the default login asks for one.
 The check follows the order of ``AccessMixin`` and ``PermissionRequiredMixin``.
 
 1. An anonymous user is redirected to the login page with the full path of the request as ``next``.
@@ -198,13 +197,10 @@ A route that does not capture the kwarg of the model is a configuration mistake 
 Where a rule applies
 ~~~~~~~~~~~~~~~~~~~~
 
-A rule reaches six places, and each answers a refusal in its own form.
+A rule reaches five places, and each answers a refusal in its own form.
 
 Page.
    The view of a ``page.py`` checks the rule of its chain, as described above.
-
-An inherited declaration.
-   A ``page.py`` declaration with ``inherit=True`` adds its requirements to every page below its directory, and through them to the actions and the zone requests of those pages.
 
 Action.
    An action declared in a file of a page tree answers to the rule of the page in the directory of that file, joined with the rule of the posted origin page.
@@ -230,7 +226,7 @@ The core keeps two more rules.
 
 The default login is one rule in two switches.
    ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` and a listed ``LoginRequiredMiddleware`` close the same pages, actions, and zones with the same redirect, see :ref:`topics-access-default-login`.
-   The view of every page carries the ``login_required`` attribute the middleware reads, ``False`` for a page whose rule is public, and the action endpoint, the CSRF endpoint, ``sitemap.xml``, and ``robots.txt`` are marked with :func:`~django.contrib.auth.decorators.login_not_required`.
+   The action endpoint, the CSRF endpoint, ``sitemap.xml``, and ``robots.txt`` are marked with :func:`~django.contrib.auth.decorators.login_not_required`.
    The dispatcher itself requires a login for an action whose owner or origin declares nothing and is not public, an action outside any page tree included, and a ``Patches.morph`` onto a foreign page applies the same default to that page.
 
 Mistakes surface at ``manage.py check``.

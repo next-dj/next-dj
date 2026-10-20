@@ -1,8 +1,4 @@
-"""Discovery of the configured routers and of the page trees they route.
-
-It sits outside every area since checks, sources, and the page scan share it, and it
-reaches the routers through a port to avoid a `next.urls`/`next.pages` import cycle.
-"""
+"""Discovery of the configured routers and of the page trees they route."""
 
 from __future__ import annotations
 
@@ -62,8 +58,7 @@ class _RouterContract:
     skip_names: frozenset[str]
 
 
-# Keyed by identity, because a third-party backend is free to compare equal to
-# another one. The list pins each key so no `id` is reused while live.
+# Keyed by identity since backends may compare equal, and the list pins each `id`.
 _CACHED_ROUTERS: list[RouterBackend] = []
 _SCANNED_TREES_CACHE: dict[int, _ScannedTrees] = {}
 _ROUTER_CONTRACT_CACHE: dict[int, _RouterContract] = {}
@@ -94,11 +89,7 @@ def _keep_alive(router: RouterBackend) -> int:
 def get_router_manager() -> tuple[RouterManager | None, list[CheckMessage]]:
     """Return a per-run cached `RouterManager` or initialisation errors.
 
-    Only `check_router_manager` reports the errors. Every other check returns no
-    messages when the manager is `None`, so one failure is one `next.E007`.
-
-    Only `settings_reloaded` or an explicit `reset_check_caches` drops the cache, so
-    a change to another router input like `INSTALLED_APPS` needs a manual reset.
+    Only `settings_reloaded` or `reset_check_caches` drops the cache.
     """
     cached = _router_manager_cache.held
     if cached is not None:
@@ -106,8 +97,7 @@ def get_router_manager() -> tuple[RouterManager | None, list[CheckMessage]]:
     result: tuple[RouterManager | None, list[CheckMessage]]
     try:
         router_manager = router_access_slot.get().create_manager()
-        # Throwaway manager for this check run, so the live URL caches and the
-        # memos hanging off `router_reloaded` stay warm.
+        # A throwaway manager keeps the live URL caches warm.
         router_manager.reload(notify=False)
     except (ImproperlyConfigured, ImportError, AttributeError) as e:
         error = Error(
@@ -172,18 +162,13 @@ def first_visit(path: Path, seen: set[Path]) -> bool:
 
 
 class PageRootsError(Exception):
-    """A router failed to report usable page trees.
-
-    A raised failure is kept as `__cause__`, so the check that reports it
-    names the cause while every other reader takes the empty list.
-    """
+    """A router failed to report usable page trees, a raised failure is its cause."""
 
 
 def read_page_roots(router: RouterBackend) -> list[PageRoot]:
     """Return the page trees `router` reports, raising `PageRootsError` on failure.
 
-    Third-party `page_roots` can raise or answer any shape, so both failure modes
-    collapse into one exception a check run survives with a message, not a traceback.
+    A third-party `page_roots` can raise or answer any shape.
     """
     try:
         roots = list(router.page_roots())
@@ -199,8 +184,7 @@ def read_page_roots(router: RouterBackend) -> list[PageRoot]:
 def get_page_roots(router: RouterBackend) -> list[PageRoot]:
     """Return every page tree `router` reports, duplicates and all, in router order.
 
-    A failing router reports none here rather than raising, since one check already
-    calls `read_page_roots` directly and turns the failure into a single message.
+    A failing router reports none, since one check reports it via `read_page_roots`.
     """
     try:
         return read_page_roots(router)
@@ -211,8 +195,7 @@ def get_page_roots(router: RouterBackend) -> list[PageRoot]:
 def get_pages_directories(router: RouterBackend) -> list[Path]:
     """Return every pages root a scanning check walks once, in router order.
 
-    Keyed on the resolved path since a symlinked tree has several spellings, but
-    reported under the router's own spelling since the page registries key on that.
+    Deduplicated on the resolved path, reported under the router's own spelling.
     """
     roots: dict[Path, Path] = {}
     for root in get_page_roots(router):
@@ -223,8 +206,7 @@ def get_pages_directories(router: RouterBackend) -> list[Path]:
 def _read_components_folder_name(router: RouterBackend) -> str | None:
     """Return the components folder `router` names, dropping anything but a name.
 
-    `components_folder_name` is third-party code that can raise or answer the wrong
-    shape, and a check run survives both by skipping no folder at all.
+    A raise or a wrong shape from third-party code skips no folder at all.
     """
     try:
         name: object = router.components_folder_name()
@@ -288,8 +270,7 @@ def _skip_names(contract: _RouterContract) -> frozenset[str]:
 def page_tree_skip_names(router: RouterBackend) -> frozenset[str]:
     """Return the directory names a walk of `router`'s page trees does not enter.
 
-    Both halves come from that router alone, so the walk never refuses a name another
-    `PAGE_BACKENDS` entry declared for a tree this router does not serve.
+    Both halves come from that router alone, not from another `PAGE_BACKENDS` entry.
     """
     return _skip_names(_router_contract(router))
 
@@ -297,13 +278,8 @@ def page_tree_skip_names(router: RouterBackend) -> frozenset[str]:
 def _skip_names_by_router(
     manager: RouterManager, routers: tuple[RouterBackend, ...]
 ) -> dict[int, frozenset[str]]:
-    """Return the skip names of every router of `manager`, read once per version.
-
-    Keyed on the manager version rather than the check-run cache, so a reload of the
-    routers replaces the memo instead of adding the new routers to it.
-    """
-    # Read after `backends`, since the first read of the backends loads them and
-    # moves the version.
+    """Return the skip names of every router of `manager`, read once per version."""
+    # Read after `backends`, since their first read loads them and moves the version.
     version = manager.version
     held = _routed_skip_names.held
     if held is not None and held[0] == version:
@@ -392,8 +368,7 @@ def _scanned_trees(router: RouterBackend) -> _ScannedTrees:
 def iter_scanned_page_pairs(router: RouterBackend) -> Iterator[tuple[str, Path]]:
     """Yield `(url_path, page_file)` for every page under the trees `router` routes.
 
-    The walk is the framework's own, not the backend's, so a backend that
-    reports its trees through `page_roots` is checked whatever it routes from.
+    The walk is the framework's own, so a backend reporting `page_roots` is checked.
     """
     for _root, url_path, page_path in _scanned_trees(router).pages:
         yield url_path, page_path
@@ -412,8 +387,7 @@ def iter_page_tree_component_folders(
 ) -> Iterator[tuple[Path, Path, str]]:
     """Yield `(folder, tree_root, route_trail)` per components folder in the trees.
 
-    The walk, the skip set and the folder name are the router's own, so a
-    check discovers the folders that walk registers and no others.
+    The walk is the router's own, so a check finds the folders that walk registers.
     """
     yield from _scanned_trees(router).component_folders
 

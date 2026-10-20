@@ -35,8 +35,7 @@ def _inherited_value() -> str:
 def _build_ancestor_chain(page: Page, root: Path, depth: int, inherited: int) -> Path:
     """Write ``depth`` ancestor ``page.py`` files above a leaf page and return the leaf.
 
-    Every ancestor registers ``inherited`` inheritable callables, so a run at
-    zero separates the walk itself from the callables it finds.
+    Every ancestor registers ``inherited`` inheritable callables.
     """
     directory = root
     for i in range(depth):
@@ -107,9 +106,7 @@ class TestBenchPageRenderedSignal:
     ) -> None:
         """``page_rendered`` kwarg overhead with a 20-key context.
 
-        Shows how ``tuple(context_data.keys())`` in the send kwargs scales
-        with context size. Difference against ``test_render_no_receiver``
-        (or the small-context variant above) isolates the receiver cost.
+        Against ``test_render_no_receiver`` it isolates the receiver cost.
         """
         page = Page()
         page_path = tmp_path / "page.py"

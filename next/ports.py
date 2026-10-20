@@ -25,11 +25,7 @@ if TYPE_CHECKING:
 
 
 class PortSlot[T]:
-    """Holds the one implementation of a port composed at app startup.
-
-    The binding is static, so unlike a settings-driven backend manager a
-    slot never rebinds itself once the app is ready.
-    """
+    """Holds the one implementation of a port composed at app startup, never rebound."""
 
     __slots__ = ("_impl", "_subject")
 
@@ -61,11 +57,7 @@ class PortSlot[T]:
 
 
 class PartialShaper(Protocol):
-    """Shapes page and form responses for partial requests.
-
-    The caller decides through `intent` whether a request is partial, and that
-    intent is passed as an argument so no shape method re-reads the request.
-    """
+    """Shapes page and form responses for partial requests."""
 
     def intent(self, request: HttpRequest) -> PartialIntent:
         """Return what the request headers ask for."""
@@ -104,11 +96,7 @@ class PartialShaper(Protocol):
         ...
 
     def set_vary(self, response: HttpResponse) -> None:
-        """Declare the partial request headers `response` was negotiated on.
-
-        A full page and a zone envelope answer the same URL, so a shared cache
-        needs the same `Vary` set on both or it serves one where the other belongs.
-        """
+        """Declare the partial request headers `response` was negotiated on."""
         ...
 
 
@@ -126,8 +114,7 @@ class ActionOwners(Protocol):
 class PageScan(Protocol):
     """The page-tree scan the checks and the discovery helpers run.
 
-    `next.pages.scan` reads the router manager from `next.discovery`, so the scan
-    is reached through the port rather than through an import that closes the loop.
+    `next.pages.scan` imports `next.discovery`, so discovery reaches the scan here.
     """
 
     def load_scanned_page_modules(

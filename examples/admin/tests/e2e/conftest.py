@@ -16,13 +16,7 @@ def pytest_ignore_collect(config: pytest.Config) -> bool | None:
 
 @pytest.fixture()
 def signed_in(context, live_server, admin_user) -> None:
-    """Hand the browser a session cookie for the superuser.
-
-    A session built server-side lands in the same transactional database the live
-    server reads, so the browser starts authenticated without walking the login
-    form. A session-scoped `storage_state` cannot do the job here because the
-    database is flushed between tests and the session row would go with it.
-    """
+    """Hand the browser a session cookie for the superuser."""
     session = SessionStore()
     session[SESSION_KEY] = str(admin_user.pk)
     session[BACKEND_SESSION_KEY] = settings.AUTHENTICATION_BACKENDS[0]

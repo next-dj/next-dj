@@ -7,18 +7,15 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 
 from next.checks import NEXT
 from next.forms.dispatch.permissions import COMPONENT_MODULE, owner_rule
-from next.pages.checks.access import (
-    access_in_use,
-    declares_without_page,
-    load_declarations,
-    tree_pages,
-)
+from next.pages.checks.access import access_in_use, load_declarations, tree_pages
 from next.pages.checks.branches import EmptyBranch, empty_branches
+from next.pages.checks.modules import declares_without_page, load_page
 from next.pages.loaders import PAGE_MODULE
 from next.permissions.access import auth_installed, declared, login_by_default
+from next.ports import action_owners_slot
 from next.utils import middleware_listed
 
-from .sources import action_owners, diagnostics, iter_registered_actions
+from .sources import diagnostics, iter_registered_actions
 
 
 _MESSAGE_MIDDLEWARE = "django.contrib.messages.middleware.MessageMiddleware"
@@ -208,7 +205,7 @@ def check_declarations_without_page(*args, **kwargs) -> list[CheckMessage]:
 
     An action beside the file answers to its rule, so a directory with one passes.
     """
-    owners = action_owners()
+    owners = action_owners_slot.get().page_files()
     return [
         Error(
             f"{file_path} has no body, so it serves no page, no action of its "
@@ -222,7 +219,8 @@ def check_declarations_without_page(*args, **kwargs) -> list[CheckMessage]:
             id="next.E166",
         )
         for file_path in sorted(entry.page_path for entry in tree_pages())
-        if file_path not in owners and declares_without_page(file_path)
+        if file_path not in owners
+        and declares_without_page(file_path, load_page(file_path))
     ]
 
 
@@ -253,7 +251,7 @@ def check_empty_branches(*args, **kwargs) -> list[CheckMessage]:
 
     One warning names the outermost such directory, since one fix there fills it all.
     """
-    action_dirs = {owner.parent for owner in action_owners()}
+    action_dirs = {owner.parent for owner in action_owners_slot.get().page_files()}
     return [
         DjangoWarning(
             f"{branch.directory} holds no page and no action, so "
@@ -285,15 +283,15 @@ def check_component_action_objects(*args, **kwargs) -> list[CheckMessage]:
     A POST renders no component, so the context is never there and the action refuses.
     """
     load_declarations()
-    found: dict[Path, list[str]] = {}
+    found: dict[Path, tuple[tuple[str, ...], list[str]]] = {}
     for meta in iter_registered_actions():
         source = Path(meta["file_path"])
-        if _context_objects(source):
-            found.setdefault(source, []).append(meta["name"])
+        if objects := _context_objects(source):
+            found.setdefault(source, (objects, []))[1].append(meta["name"])
     return [
         Error(
             f"{source} declares permission_required(obj=) on the context "
-            f"{', '.join(map(repr, _context_objects(source)))} and the actions "
+            f"{', '.join(map(repr, objects))} and the actions "
             f"{', '.join(map(repr, names))}. An action POST renders no component, "
             "so the context is never there and the actions refuse every user.",
             hint=(
@@ -304,7 +302,7 @@ def check_component_action_objects(*args, **kwargs) -> list[CheckMessage]:
             obj=str(source),
             id="next.E165",
         )
-        for source, names in found.items()
+        for source, (objects, names) in found.items()
     ]
 
 

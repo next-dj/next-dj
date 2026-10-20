@@ -89,8 +89,7 @@ def _default_resolver() -> DependencyResolver:
 def _themed_resolver() -> DependencyResolver:
     """Fresh resolver with its providers loaded and the `theme` dependency bound.
 
-    The registry sync is paid here, so a plan benchmark measures the compile of
-    one callable rather than the one-off instantiation of every provider.
+    The registry sync is paid here, so a plan benchmark prices one compile only.
     """
     planned = DependencyResolver()
     planned.dependency("theme")(lambda: "dark")
@@ -154,8 +153,7 @@ class TestBenchDependencyResolver:
     def test_resolve_claimed_request_and_default(self, benchmark) -> None:
         """Plan replay over an ``HttpRequest`` annotation and one default kwarg.
 
-        The compile narrows the request parameter to one provider, which still asks
-        ``can_handle`` because only the context knows whether a request is in flight.
+        The request provider still asks ``can_handle`` because only the context knows.
         """
         resolver = _default_resolver()
         request = build_mock_http_request()
@@ -203,8 +201,7 @@ class TestBenchDependencyResolver:
     def test_linear_resolve_four_markers(self, benchmark) -> None:
         """The four-marker handler walked by the plan-free reference resolver.
 
-        Paired with ``test_resolve_four_markers``, which is the same work under
-        the compiled plan, so the price of the safety net stays a measurement.
+        Pairs with ``test_resolve_four_markers``, the same work under the compiled plan.
         """
         walked = _linear_resolver()
         benchmark(
@@ -237,8 +234,7 @@ class TestBenchDependencyResolver:
 class TestBenchInjectionPlan:
     """Cold compile against warm replay of the same four-marker handler.
 
-    Signature and type-hint memos are process-wide and warm after the first
-    round, so only the initial static-verdict walk pays the cold-compile price.
+    Type-hint memos are process-wide, so only the first static-verdict walk is cold.
     """
 
     @pytest.mark.benchmark(group="deps.plan")
@@ -312,8 +308,7 @@ class TestBenchObjectFill:
 class TestBenchIntrospectionCache:
     """Warm reads of the per-callable introspection memos.
 
-    Every page, component, and action callable goes through these on each
-    resolve, and the form dispatcher reads the var-keyword one on its own.
+    Every page, component, and action callable goes through these on each resolve.
     """
 
     @pytest.mark.benchmark(group="deps.introspection")

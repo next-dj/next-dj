@@ -20,8 +20,7 @@ class RegressionForm(Form):
 class ValidateForm(Form):
     """Two required fields, a file field, and a cross-field clean.
 
-    The file field and the non-field clean exist so a validate pass proves
-    it scrubs file names, drops non-field errors, and filters per field.
+    They prove validate scrubs file names and drops non-field errors.
     """
 
     name = forms.CharField(max_length=100)
@@ -42,8 +41,7 @@ class ValidateForm(Form):
 class GuardedValidateForm(Form):
     """Login-guarded form used to prove validate runs only behind the guard.
 
-    An anonymous validate request must reach a denial, not the validator,
-    so a guarded uniqueness check is never an anonymous brute-force oracle.
+    An anonymous validate must reach a denial, never the uniqueness check.
     """
 
     email = forms.EmailField()
@@ -61,10 +59,7 @@ class GuardedValidateForm(Form):
 class ViewGuardValidateForm(Form):
     """Form guarded by a view-level hook, with no action guard at all.
 
-    The denial must come from the view-permission layer before the form binds, so the
-    second authorization layer is proven independent of the action guard. The
-    unique-email validator only ever runs behind that hook, so an authenticated blur can
-    surface its error and an anonymous blur cannot reach it.
+    The denial must come from the view-permission layer before the form binds.
     """
 
     email = forms.EmailField()
@@ -91,9 +86,7 @@ class ViewGuardValidateForm(Form):
 class RotatingValidateForm(Form):
     """Form that rotates the CSRF token during initial resolution.
 
-    A login rotates the token mid-request, so this stands in for that
-    rotation and proves the validate envelope stamps the fresh CSRF
-    payload only when the request actually rotated.
+    The validate envelope stamps the fresh CSRF payload only when the request rotated.
     """
 
     email = forms.EmailField()

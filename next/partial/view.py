@@ -37,8 +37,7 @@ def zone_response(
 ) -> HttpResponse:
     """Build the partial response for a zone GET, or a 400/409 short-circuit.
 
-    A zone named on a dynamic body has no compiled source to render, so it is a 400
-    before any render, and a version mismatch on a safe method is a 409.
+    A zone on a dynamic body is a 400 before any render, a version mismatch a 409.
     """
     if dynamic_body:
         return _bad_request("zone in dynamic body")
@@ -58,8 +57,7 @@ def zone_response(
 def _version_conflict(intent: "PartialIntent", version: str) -> bool:
     """Return True when the client asserts a version that differs from the current.
 
-    An absent or empty client version asserts nothing, so the first partial request of a
-    page, made before the client has learned a version, never conflicts.
+    An absent or empty client version asserts nothing, so a first request is safe.
     """
     return bool(intent.version) and intent.version != version
 
@@ -72,8 +70,7 @@ def _build_envelope(
 ) -> Envelope:
     """Assemble one envelope patching every rendered zone with its assets.
 
-    An append/prepend merge intent grows the zone rather than replacing it. The verb is
-    server-authored from the parsed intent, never named directly by the client.
+    The verb is server-authored from the parsed intent, never named by the client.
     """
     patches = Patches.versioned(version, request=request)
     for name in result.html:
@@ -87,8 +84,7 @@ def _patch_zone(
 ) -> None:
     """Patch one zone in place, morphing it or merging deduplicated children.
 
-    A morph addresses the wrapped marker element, while an append or prepend grafts
-    the bare inner body to avoid nesting a second wrapper inside it.
+    Append and prepend graft the bare inner body to avoid nesting a second wrapper.
     """
     target = {keys.ZONE: name}
     if merge is MergeMode.APPEND:

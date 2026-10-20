@@ -35,8 +35,7 @@ def _block_tags(content: str) -> Iterator[tuple[str, int, int]]:
         if token.token_type is not TokenType.BLOCK:
             continue
         head = token.contents.split(maxsplit=1)
-        # The debug lexer records the bounds of every token, which the plain lexer
-        # leaves unset, so the stubs type them as optional.
+        # The debug lexer records token bounds that the plain lexer leaves unset.
         start, end = cast("tuple[int, int]", token.position)
         yield (head[0] if head else ""), start, end
 
@@ -44,8 +43,7 @@ def _block_tags(content: str) -> Iterator[tuple[str, int, int]]:
 def placeholder_spans(content: str) -> list[tuple[int, int]]:
     """Return the bounds of every placeholder a parse of `content` would reach.
 
-    Django's own lexer decides what counts as a tag, so a placeholder written under
-    `{% verbatim %}` or `{% comment %}` is text that composition must not fill.
+    Django's lexer decides what is a tag, so a `{% verbatim %}` placeholder is text.
     """
     spans: list[tuple[int, int]] = []
     open_at: int | None = None
@@ -56,8 +54,7 @@ def placeholder_spans(content: str) -> list[tuple[int, int]]:
         elif command == _COMMENT_TAG:
             commented = True
         elif open_at is not None:
-            # Everything up to the close belongs to the fallback body, including
-            # another placeholder, which the paired form renders rather than fills.
+            # The fallback runs to the close, and a placeholder in it renders.
             if command == _CLOSE_TAG:
                 spans.append((open_at, end))
                 open_at = None

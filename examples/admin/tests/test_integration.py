@@ -848,11 +848,7 @@ class TestChangelistChrome:
         assert 'value="delete_selected"' not in body
 
     def test_action_labels_come_from_a_version_stable_admin_api(self, admin_client):
-        """`get_actions` answers a tuple on Django 5.2 and an `Action` from 6.0.
-
-        `get_action_choices` reads the same registry on both without the deprecated
-        tuple unpacking, so the changelist render must raise no deprecation warning.
-        """
+        """The changelist render raises no deprecation warning on either Django."""
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
             warnings.simplefilter("error", PendingDeprecationWarning)
@@ -995,11 +991,7 @@ class TestInlineFieldIds:
     def test_a_layered_editor_shares_no_id_with_the_page_behind_it(
         self, admin_client, book_with_one_chapter
     ):
-        """`admin:inline_add` opens the chapter editor over the book editor.
-
-        Both documents then live in one DOM, so a bare `id_%s` would repeat
-        `id_title` and every label inside the layer would address the book.
-        """
+        """The chapter editor layered over the book editor repeats no `id_title`."""
         book, _chapter = book_with_one_chapter
         page = admin_client.get(f"/admin/library/book/{book.pk}/change/")
         new_chapter = Chapter.objects.create(
@@ -1125,11 +1117,7 @@ class TestInlines:
         assert '<select name="author"' in body
 
     def test_add_book_through_browser_flow(self, admin_client, author, make_tag):
-        """Walk the browser flow, copying every rendered input from the GET to the POST.
-
-        Catches a GET page missing a hidden field, or an unfilled `extra` row whose
-        initial values drag empty required fields into validation.
-        """
+        """Copy every rendered input from the GET to the POST like a browser."""
         tag = make_tag("Fantasy")
 
         get = admin_client.get("/admin/library/book/add/")
@@ -1180,10 +1168,9 @@ _INLINE_ACTIONS = ("admin:inline_change", "admin:inline_add")
 
 @pytest.fixture()
 def chapter_unique_constraint(monkeypatch):
-    """Restate the chapter pair rule as the `UniqueConstraint` Django documents.
+    """Restate the chapter pair rule as a `UniqueConstraint`, checked separately.
 
-    `unique_together` and `Meta.constraints` run through two different `_post_clean`
-    checks, so the modern spelling needs its own proof that the parent key is in scope.
+    It runs through a different `_post_clean` check than `unique_together`.
     """
     monkeypatch.setattr(Chapter._meta, "unique_together", ())
     monkeypatch.setattr(
@@ -1292,11 +1279,7 @@ class TestLiveInlines:
     def test_a_duplicate_number_comes_back_as_a_row_error(
         self, admin_client, book_with_two_chapters
     ):
-        """`Chapter.unique_together` is checked before the INSERT reaches SQLite.
-
-        The parent link is absent from a keyed row form, so without the exclusion
-        Django skips the pair check and errors with `IntegrityError`.
-        """
+        """`Chapter.unique_together` is checked before the INSERT reaches SQLite."""
         book, first, second = book_with_two_chapters
         r = admin_client.post_action(
             "admin:inline_change",
@@ -1545,11 +1528,7 @@ class TestLayerDismiss:
         assert "Discard" in html
 
     def test_only_a_change_view_renders_the_discard_form(self, admin_client, chapter):
-        """Discard dismisses an open editor, so the add view never offers it.
-
-        Whether the editor sits in a layer is a client-side fact, so the co-located CSS
-        hides the button. This test asserts only which pages carry the form.
-        """
+        """Discard dismisses an open editor, so the add view never offers it."""
         discard_url = admin_client.get_action_url("admin:discard")
         change = admin_client.get(
             f"/admin/library/chapter/{chapter.pk}/change/"
@@ -1595,11 +1574,7 @@ class TestHistoryView:
 
 
 class TestInlineValidationFailure:
-    """The add view's batch inline formset re-renders with errors on a bad row.
-
-    Filling `chapters-0-number` marks the row "intent to save", so the empty required
-    `chapters-0-title` flips the formset invalid and `AdminForm.clean()` re-renders it.
-    """
+    """The add view's batch inline formset re-renders with errors on a bad row."""
 
     def test_inline_invalid_rerenders_with_errors(self, admin_client, author):
         get = admin_client.get("/admin/library/book/add/")

@@ -1,7 +1,6 @@
 """The manager over every component source and the context keys it declares.
 
-The live registry holds only what a request made the router walk, so the checks and the
-JS-context key walk read a second manager built here, outside any `checks` module.
+The live registry holds only routed components, so checks read a second manager here.
 """
 
 from __future__ import annotations
@@ -51,8 +50,7 @@ _components_manager_cache = _ComponentsManagerCache()
 def get_components_manager() -> ComponentsManager:
     """Return a per-run cached `ComponentsManager` holding every component source.
 
-    The manager is this module's own, because the live registry holds only what
-    requests have already made the router walk. Dropped on `settings_reloaded`.
+    The live registry holds only walked components. Dropped on `settings_reloaded`.
     """
     cached = _components_manager_cache.held
     if cached is not None:
@@ -106,8 +104,7 @@ def import_component_modules() -> tuple[Path, ...]:
 def iter_serialized_component_context_keys() -> Iterator[tuple[Path, str]]:
     """Yield the `component.py` path and key of every keyed `serialize=True` context.
 
-    Reading the keys imports every `component.py`, even under `LAZY_COMPONENT_MODULES`.
-    The keys of a keyless callable exist only at render time.
+    Imports every `component.py` even under lazy loading, and skips keyless callables.
     """
     manager = get_components_manager()
     for backend in manager.backends:

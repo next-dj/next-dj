@@ -6,7 +6,7 @@ from django.contrib.auth.middleware import LoginRequiredMiddleware
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied
-from django.http import Http404
+from django.http import Http404, HttpRequest, HttpResponse
 from django.template import Context, Template
 from django.test import RequestFactory, override_settings
 
@@ -22,6 +22,7 @@ from next.permissions.access import (
     login_by_default,
     login_middleware,
     login_redirect,
+    open_view,
     require_permission,
     signed_in,
 )
@@ -399,3 +400,17 @@ class TestLoginByDefault:
             with override_settings(INSTALLED_APPS=installed):
                 assert login_by_default() is False
             assert login_by_default() is True
+
+
+def _plain_view(request: HttpRequest) -> HttpResponse:
+    return HttpResponse("ok")
+
+
+class TestOpenView:
+    """`open_view` exempts a framework view from the login and marks it open."""
+
+    def test_the_view_is_exempt_and_open(self) -> None:
+        view = open_view(_plain_view)
+
+        assert view is _plain_view
+        assert (view.login_required, view.next_open) == (False, True)

@@ -1,8 +1,4 @@
-"""Coordinate static backends, asset discovery, and the page-root cache.
-
-Backends load lazily, page-tree roots are held until a reload moves them, and
-`default_manager` resets on a `NEXT_FRAMEWORK` change.
-"""
+"""Coordinate static backends, asset discovery, and the page-root cache."""
 
 from __future__ import annotations
 
@@ -54,11 +50,7 @@ _HELD_BACKENDS: Final = "held static backends"
 
 
 def _reused(key: str, message: str, *args: object) -> None:
-    """Mark the render degraded and log the reused fallback at the `FailureLog` rate.
-
-    A memo calls it on every read of a fallback, so a failure that lasts for the life
-    of the process is logged again after each quiet period.
-    """
+    """Mark the render degraded and log the reused fallback at the `FailureLog` rate."""
     mark_degraded()
     _failures.warn(key, message, *args)
 
@@ -66,8 +58,7 @@ def _reused(key: str, message: str, *args: object) -> None:
 def _isolated[T](key: str, build: Callable[[], T]) -> tuple[T, bool]:
     """Return what `build` returns and whether it contained a failure.
 
-    The build logged the cause, so a failed build starts the quiet period of `key`,
-    and the first read of the fallback is not logged a second time.
+    A failed build starts the quiet period of `key`, so its cause is not logged twice.
     """
     value, failed = isolated_build(build)
     if failed:
@@ -76,11 +67,7 @@ def _isolated[T](key: str, build: Callable[[], T]) -> tuple[T, bool]:
 
 
 def _bundle_url(path: str) -> str | None:
-    """Return the storage URL of a runtime bundle, `None` when the storage lacks it.
-
-    A hashing storage raises for a file `collectstatic` did not copy. The page then
-    renders without the bundle, and the error is raised under `DEBUG`.
-    """
+    """Return the storage URL of a runtime bundle, `None` when the storage lacks it."""
     with _failures.guard(
         path,
         "The static files storage has no %s, so pages render without it. Build the "
@@ -122,8 +109,7 @@ def _script_builder(url: str | None, options: dict[str, object]) -> NextScriptBu
 def _rewrites_asset_urls(backend: StaticBackend) -> bool:
     """Report whether the backend replaces the identity `asset_url` hook.
 
-    Computed once per backend load, so a pipeline without a rewrite skips the call.
-    Checked on the instance, so a backend that assigns its rewrite in `__init__` counts.
+    Checked on the instance, so a rewrite assigned in `__init__` counts.
     """
     return getattr(backend.asset_url, "__func__", None) is not StaticBackend.asset_url
 
@@ -150,11 +136,7 @@ def _load_static_backends() -> list[StaticBackend]:
 
 
 class StaticManager(BackendListManager[StaticBackend]):
-    """Coordinate static backends, asset discovery, and the placeholder injector.
-
-    Backends load lazily from `NEXT_FRAMEWORK['STATIC_BACKENDS']` on first access, and
-    the default one delegates URL resolution to Django staticfiles.
-    """
+    """Coordinate static backends, asset discovery, and the placeholder injector."""
 
     def __init__(self) -> None:
         """Initialise empty backend and discovery caches, loaded lazily."""
@@ -180,8 +162,7 @@ class StaticManager(BackendListManager[StaticBackend]):
     def default_backend(self) -> StaticBackend:
         """Return the first configured backend used for file registration.
 
-        A backend list that a contained failure shaped, such as a tag template replaced
-        by its default, marks every render that reads it as degraded.
+        A list shaped by a contained failure marks every render reading it degraded.
         """
         self._ensure_backends()
         if self._backends_degraded:
@@ -260,8 +241,7 @@ class StaticManager(BackendListManager[StaticBackend]):
     def script_builder(self) -> NextScriptBuilder:
         """Return the builder holding the runtime URL and the tag templates.
 
-        A builder that a contained failure shaped marks every render that uses it as
-        degraded, not only the render that built it.
+        A builder shaped by a contained failure marks every render using it degraded.
         """
         held = self._script_builder
         if held is None:
@@ -307,8 +287,7 @@ class StaticManager(BackendListManager[StaticBackend]):
     def reload(self) -> None:
         """Rebuild the backend list from merged framework settings.
 
-        A failing entry is skipped, and an empty list falls back to staticfiles. The
-        load is marked last, so a thread that sees it reads the derived state too.
+        The load is marked last, so a thread that sees it reads the derived state too.
         """
         self._discovery = None
         self._cached_page_roots = None
@@ -324,11 +303,7 @@ class StaticManager(BackendListManager[StaticBackend]):
         self._mark_loaded()
 
     def _resolve_collector_strategies(self) -> None:
-        """Read the pipeline-level facts the first backend settles for a render.
-
-        One render holds one collector, so only the first `STATIC_BACKENDS` entry
-        settles the dedup strategy and JS-context policy for the whole pipeline.
-        """
+        """Read the pipeline-level facts the first backend settles for a render."""
         backend = self._backends[0]
         self._rewrites_urls = _rewrites_asset_urls(backend)
         options = dict(backend.config.get("OPTIONS") or {})
@@ -357,9 +332,7 @@ class StaticManager(BackendListManager[StaticBackend]):
     def forget_backend_urls(self) -> None:
         """Tell every loaded backend the storage behind its URLs was rebuilt.
 
-        Driven from the backend list, so a third-party backend memoising resolved URLs
-        is invalidated on the same terms as the bundled one. The script builder is
-        dropped too, and so is the discovery, whose plans hold resolved URLs.
+        The script builder and the discovery are dropped too, both hold resolved URLs.
         """
         self._script_builder = None
         self._chunk_urls = {}
@@ -396,11 +369,7 @@ default_manager: DefaultStaticManager = DefaultStaticManager()
 
 
 def get_static_manager() -> StaticManager:
-    """Return the live `StaticManager` behind the lazy default handle.
-
-    A caller that patches a method and restores it needs the instance itself, so a
-    settings reload that replaces the handle cannot redirect the restore.
-    """
+    """Return the live `StaticManager` behind the lazy default handle."""
     manager = default_manager._wrapped
     if manager is empty:
         default_manager._setup()
@@ -413,8 +382,7 @@ def collect_component_assets(
 ) -> None:
     """Discover a composite component's co-located assets into the collector.
 
-    A simple component has no co-located assets and a missing collector has nowhere to
-    record them, so both return before the lazy default manager is built.
+    A simple component or a missing collector returns before the manager is built.
     """
     if collector is None or info.is_simple:
         return
@@ -422,11 +390,7 @@ def collect_component_assets(
 
 
 def reset_default_manager() -> None:
-    """Drop the wrapped static manager so the next access rebuilds it.
-
-    Hooked into the `settings_reloaded` signal from `next.conf`, so test code changing
-    `NEXT_FRAMEWORK` sees a fresh manager on the next access.
-    """
+    """Drop the wrapped static manager so the next access rebuilds it."""
     default_manager._wrapped = empty  # type: ignore[assignment]
 
 
@@ -456,8 +420,7 @@ def forget_static_manager(**kwargs) -> None:
 def forget_storage_state(*, setting: str, **kwargs) -> None:
     """Drop the derived state that a changed Django setting invalidates.
 
-    `settings_reloaded` covers only `NEXT_FRAMEWORK`. `APP_DIRS` trees change with
-    `INSTALLED_APPS`, and memoised URLs are stale once the storage is rebuilt.
+    `settings_reloaded` covers only `NEXT_FRAMEWORK`, not these Django settings.
     """
     if setting == "INSTALLED_APPS":
         forget_manager_page_roots()

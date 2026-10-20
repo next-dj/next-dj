@@ -1,8 +1,6 @@
 """Wire-key constants of the partial protocol, shared by every area that writes them.
 
-These names are the frozen partial wire contract. The TypeScript runtime mirrors
-them in next/client/protocol.ts and the per-op fields in next/client/apply.ts, so
-a change here is a wire break that must move in lockstep with the client.
+Frozen wire contract mirrored in next/client/protocol.ts and apply.ts.
 """
 
 from typing import Final

@@ -361,8 +361,7 @@ class TestInstalledAppsMovesTheRouters:
     def _routed_names(self) -> set[str]:
         """Return the reverse name of every pattern the served urlconf carries.
 
-        Read through the lazy concat rather than the manager, because that is the
-        sequence a stale version token would keep answering from.
+        Read through the lazy concat, which a stale version token would keep serving.
         """
         return {getattr(pattern, "name", None) for pattern in lazy_urlpatterns}
 
