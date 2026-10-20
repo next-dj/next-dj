@@ -3,6 +3,7 @@
 Nothing here imports a model, so the area loads before the app registry is ready.
 """
 
+import logging
 from collections.abc import Callable, Mapping
 from typing import Final
 
@@ -14,6 +15,8 @@ from .access import auth_installed
 from .markers import Test
 from .registry import PermissionRegistry
 
+
+logger = logging.getLogger(__name__)
 
 _NEIGHBOURS: Final[Mapping[str, str]] = {
     "rules.permissions.ObjectPermissionBackend": "rules.permissions.perm_exists"
@@ -32,6 +35,7 @@ class PermissionManager:
         """Start with a registry of its own unless given one."""
         self._registry = registry if registry is not None else PermissionRegistry()
         self._models: tuple[object, frozenset[str]] | None = None
+        self._objectless: set[str] = set()
 
     @property
     def registry(self) -> PermissionRegistry:
@@ -56,14 +60,16 @@ class PermissionManager:
         if not _active(user):
             return False
         rule = self._registry.get(perm)
-        return rule is not None and rule(user, obj)
+        return rule is not None and self._ask(perm, rule, user, obj)
 
     def perms_for(self, user: object, obj: object = None) -> frozenset[str]:
         """Return every registered permission an active `user` holds on `obj`."""
         if not _active(user):
             return frozenset()
         return frozenset(
-            name for name, rule in self._registry.items() if rule(user, obj)
+            name
+            for name, rule in self._registry.items()
+            if self._ask(name, rule, user, obj)
         )
 
     def has_module_perms(self, user: object, app_label: str) -> bool:
@@ -72,9 +78,28 @@ class PermissionManager:
             return False
         prefix = f"{app_label}."
         return any(
-            name.startswith(prefix) and rule(user, None)
+            name.startswith(prefix) and self._ask(name, rule, user, None)
             for name, rule in self._registry.items()
         )
+
+    def _ask(self, name: str, rule: Test, user: object, obj: object) -> bool:
+        """Ask `rule` about `obj`, denying a model question a row-only rule cannot read.
+
+        Django asks without an object for the admin and `get_all_permissions` alike.
+        """
+        if obj is not None:
+            return bool(rule(user, obj))
+        try:
+            return bool(rule(user, None))
+        except (AttributeError, TypeError):
+            if name not in self._objectless:
+                self._objectless.add(name)
+                logger.warning(
+                    "The predicate of %s failed without an object, so it denies.",
+                    name,
+                    exc_info=True,
+                )
+            return False
 
     def known(self, perm: str) -> bool:
         """Return whether `perm` names a permission something can grant.
@@ -114,6 +139,7 @@ class PermissionManager:
         """Drop every registered permission and the model permission memo."""
         self._registry.reset()
         self._models = None
+        self._objectless.clear()
 
 
 def _class_paths(path: str) -> frozenset[str]:

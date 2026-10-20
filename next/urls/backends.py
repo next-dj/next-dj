@@ -303,7 +303,7 @@ class FileRouterBackend(RouterBackend):
             path=mount.path,
             label=self._tree_label(mount.name, mount.subdir),
             prefix=point.prefix,
-            namespace=mount.namespace,
+            namespace=point.namespace,
             trail=point.trail,
         )
 

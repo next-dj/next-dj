@@ -245,12 +245,9 @@ def _page_import_error_message(page_path: Path) -> str:
     )
 
 
-@register(Tags.templates, NEXT, deploy=True)
+@register(Tags.templates, NEXT)
 def check_page_module_imports(*args, **kwargs) -> list[CheckMessage]:
-    """Report the `page.py` files that raise while importing (`next.E017`).
-
-    Importing every user module walks the whole tree, so it runs under `check --deploy`.
-    """
+    """Report the `page.py` files that raise while importing (`next.E017`)."""
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
         return []

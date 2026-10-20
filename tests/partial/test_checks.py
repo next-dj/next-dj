@@ -453,17 +453,11 @@ class TestComposedTemplateCompileCheck:
         assert [m.obj for m in messages] == [str(page_file)]
 
 
-class TestComposedTemplateCompileIsDeployOnly:
-    """`next.E072` compiles the whole tree, so only `check --deploy` runs it."""
+class TestComposedTemplateCompileRunsOnCheck:
+    """`next.E072` runs on a plain `check`, as the other checks compile the tree too."""
 
-    def test_absent_from_the_default_registry(self) -> None:
-        assert (
-            checks.check_composed_templates_compile not in check_registry.get_checks()
-        )
-
-    def test_present_once_deployment_checks_are_asked_for(self) -> None:
-        registered = check_registry.get_checks(include_deployment_checks=True)
-        assert checks.check_composed_templates_compile in registered
+    def test_present_in_the_default_registry(self) -> None:
+        assert checks.check_composed_templates_compile in check_registry.get_checks()
 
 
 class TestWithOverZoneCheck:

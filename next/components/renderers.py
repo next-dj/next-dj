@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
     from next.permissions.markers import AccessObject
     from next.static import StaticCollector
+    from next.static.serializers import JsContextSerializer
 
     from .context import ContextFunction
     from .info import ComponentInfo
@@ -283,6 +284,7 @@ class _ContextRun:
         "info",
         "position",
         "request",
+        "serialized",
         "stack",
     )
 
@@ -306,6 +308,7 @@ class _ContextRun:
         self.guarded = _guarded_keys(context_data)
         self.cache = DependencyCache(backing_dict=dict(render_dep_cache(request)))
         self.stack: list[str] = []
+        self.serialized: list[tuple[str, object, JsContextSerializer | None]] = []
 
     def pending(self, key: str) -> bool:
         """Return whether a function not run yet registers under `key`."""
@@ -321,10 +324,21 @@ class _ContextRun:
             if key is not None and ctx_func.key == key:
                 return
 
+    def finish(self) -> None:
+        """Run the functions left and hand what they serialize to the page collector.
+
+        The serialized values wait for the grant, so a denied render publishes none.
+        """
+        self.run_to()
+        collector = self.collector
+        if collector is None:
+            return
+        for key, value, serializer in self.serialized:
+            collector.add_js_context(key, value, serializer=serializer)
+
     def _run(self, ctx_func: ContextFunction) -> None:
         """Run one context function and merge or store what it returns."""
         context_data = self.context_data
-        collector = self.collector
         resolved = current_resolver().resolve_with_template_context(
             ctx_func.func,
             request=self.request,
@@ -337,16 +351,15 @@ class _ContextRun:
             if isinstance(data, dict):
                 _reject_collisions(self.info, data, self.guarded)
                 context_data.update(data)
-                if ctx_func.serialize and collector is not None:
-                    for k, v in data.items():
-                        collector.add_js_context(k, v, serializer=ctx_func.serializer)
+                if ctx_func.serialize:
+                    self.serialized.extend(
+                        (k, v, ctx_func.serializer) for k, v in data.items()
+                    )
         else:
             result = ctx_func.func(**resolved)
             context_data[ctx_func.key] = result
-            if ctx_func.serialize and collector is not None:
-                collector.add_js_context(
-                    ctx_func.key, result, serializer=ctx_func.serializer
-                )
+            if ctx_func.serialize:
+                self.serialized.append((ctx_func.key, result, ctx_func.serializer))
 
 
 def _context_run(
@@ -553,7 +566,7 @@ class CompositeComponentRenderer:
         if not _granted(info, context_dict, request, run):
             return ""
         if run is not None:
-            run.run_to()
+            run.finish()
 
         return template.render(DjangoTemplateContext(context_dict))
 

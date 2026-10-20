@@ -253,34 +253,3 @@ class TestTickReadsTheWatchedTrees:
             next(gen)
 
         assert notified == [(page_dir / "page.py").resolve()]
-
-    def test_a_template_beside_a_rendering_page_keeps_the_server(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A `template.djx` beside a `page.py` that already renders routes nothing new."""
-        root = tmp_path / "shell"
-        page_dir = root / "hello"
-        page_dir.mkdir(parents=True)
-        (page_dir / "page.py").write_text("def render(request):\n    return 'hi'\n")
-        reloader = NextStatReloader()
-        notified: list[Path] = []
-        monkeypatch.setattr(
-            reloader, "notify_file_changed", lambda p: notified.append(Path(p))
-        )
-
-        with (
-            override_settings(
-                NEXT_FRAMEWORK={
-                    "PAGE_BACKENDS": [file_router_config_entry(pages_dir=root)]
-                }
-            ),
-            patch.object(reloader, "snapshot_files", return_value=iter([])),
-        ):
-            gen = reloader.tick()
-            next(gen)
-            (page_dir / "template.djx").write_text("<p>hi</p>")
-            stamp = page_dir.stat().st_mtime + 10
-            os.utime(page_dir, (stamp, stamp))
-            next(gen)
-
-        assert notified == []

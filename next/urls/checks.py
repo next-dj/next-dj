@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,7 +30,7 @@ from .backends import FILE_ROUTER_CONFIG_KEYS, FileRouterBackend, RouterBackend
 from .dispatcher import scan_pages_tree
 from .errors import DuplicateURLParameterError, URLParameterError
 from .parser import default_url_parser
-from .urlconf import outer_kwargs, tree_route, urlconf_mounts
+from .urlconf import NO_MOUNTS, UrlconfMounts, outer_kwargs, tree_route, urlconf_mounts
 
 
 if TYPE_CHECKING:
@@ -48,8 +49,6 @@ _NON_FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset({"BACKEND"})
 
 _CollectedPattern = tuple[str, str, str, frozenset[str], str]
 """`(django_pattern, url_path, source, parameter_names, namespace)` for one route."""
-
-"""The placement of a tree at the root of `next.urls`, without a prefix."""
 
 type _TreeKey = tuple[Path, str, str]
 """A mounted tree by its path, the route it is included under and its namespace."""
@@ -116,9 +115,19 @@ def _validate_file_router_backend_fields(
 
 
 def _validate_dirs_field(config: dict[str, Any], prefix: str) -> list[CheckMessage]:
-    """Validate that `DIRS`, when present, is a list."""
-    if "DIRS" in config and not isinstance(config["DIRS"], list):
+    """Validate that `DIRS`, when present, is a list of paths and segment names.
+
+    The router drops an entry it cannot read, so only this check names the cause.
+    """
+    if "DIRS" not in config:
+        return []
+    dirs = config["DIRS"]
+    if not isinstance(dirs, list):
         return [Error(f"{prefix}.DIRS must be a list.", obj=settings, id="next.E006")]
+    bad = [item for item in dirs if not isinstance(item, str | os.PathLike | None)]
+    if bad:
+        msg = f"{prefix}.DIRS holds {bad!r}, neither a path nor a segment name."
+        return [Error(msg, obj=settings, id="next.E006")]
     return []
 
 
@@ -505,6 +514,7 @@ def _collect_router_patterns(
     Each file router labels a mounted tree its own way, so its route keys it once.
     """
     skip_dir_names = page_tree_skip_names(router)
+    mounts = urlconf_mounts()
     for root in get_page_roots(router):
         if root.prefix is not None:
             key = (root.path, root.prefix, root.namespace)
@@ -513,7 +523,12 @@ def _collect_router_patterns(
             seen.add(key)
         all_patterns.extend(
             _collect_url_patterns(
-                root.path, root.label, errors, skip_dir_names=skip_dir_names, root=root
+                root.path,
+                root.label,
+                errors,
+                skip_dir_names=skip_dir_names,
+                root=root,
+                mounts=mounts,
             )
         )
 
@@ -548,6 +563,7 @@ def _collect_url_patterns(
     skip_dir_names: Iterable[str] = (),
     *,
     root: PageRoot = UNMOUNTED,
+    mounts: UrlconfMounts = NO_MOUNTS,
 ) -> list[_CollectedPattern]:
     """Collect one `_CollectedPattern` per route from one pages root.
 
@@ -558,7 +574,6 @@ def _collect_url_patterns(
     if not pages_path.exists():
         return patterns
 
-    mounts = urlconf_mounts()
     head = tree_route(root, mounts.include_point or "")
     prefix_names = outer_kwargs(root, mounts)
     for url_path, page_file in routed_pages(

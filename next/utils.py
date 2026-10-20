@@ -331,6 +331,9 @@ def classify_dirs_entries(
 PAGE_FILES: Final = frozenset({"page.py", "template.djx"})
 """The files that make a directory a page, a `template.djx` alone a virtual one."""
 
+LAYOUT_TEMPLATE: Final = "layout.djx"
+"""The template that wraps every page of its directory and the directories below."""
+
 
 def walk_page_tree(
     tree_root: Path,
@@ -429,18 +432,24 @@ def _visit_page_dir(
         )
 
 
-@functools.cache
+_MIDDLEWARE_CLASSES: dict[str, type] = {}
+
+
 def _middleware_class(path: str) -> type | None:
     """Import a `MIDDLEWARE` entry, `None` when it does not import as a class.
 
-    A broken entry is Django's to report at startup, so it is not logged here.
+    Only a class is kept, so an entry fixed after a failed import is read again.
     """
+    known = _MIDDLEWARE_CLASSES.get(path)
+    if known is not None:
+        return known
     capture = Capture()
     with capture:
         found = import_string(path)
-    if capture.failed:
+    if capture.failed or not isinstance(found, type):
         return None
-    return found if isinstance(found, type) else None
+    _MIDDLEWARE_CLASSES[path] = found
+    return found
 
 
 def is_middleware(entry: object, base: str) -> bool:

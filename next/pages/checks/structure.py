@@ -22,7 +22,7 @@ from next.checks.common import (
 )
 from next.conf import next_framework_settings
 from next.pages.access import routed
-from next.utils import normalise_route_name, walk_page_tree
+from next.utils import list_page_dir, normalise_route_name, routes_into, walk_page_tree
 
 
 if TYPE_CHECKING:
@@ -231,8 +231,6 @@ def _check_missing_page_files(
         if not _is_bracket_segment(item.name):
             continue
         relative = item.relative_to(pages_path)
-        if any(part.startswith("_") for part in relative.parts):
-            continue
         if any(routed(page) for _trail, page in walk_page_tree(item, skip_dir_names)):
             continue
         errors.append(
@@ -255,16 +253,10 @@ def _iter_routed_directories(
 
     A refused name takes its subtree with it, so only routable directories are named.
     """
-    try:
-        items = sorted(pages_path.iterdir())
-    except OSError as e:
-        logger.debug("Cannot list directory %s: %s", pages_path, e)
-        return
-    for item in items:
-        if not item.is_dir() or item.name in skip_dir_names:
-            continue
-        yield item
-        yield from _iter_routed_directories(item, skip_dir_names)
+    for item in list_page_dir(pages_path).children:
+        if routes_into(item.name, skip_dir_names):
+            yield item
+            yield from _iter_routed_directories(item, skip_dir_names)
 
 
 def _check_pages_directory(

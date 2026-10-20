@@ -140,6 +140,42 @@ class TestHasPerm:
         assert manager.has_perm(_user(), "blog.change_post") is False
 
 
+def _row_only(user, obj) -> bool:
+    return obj.author is user
+
+
+class TestObjectlessQuestions:
+    """A model question a row-only predicate cannot read denies instead of failing."""
+
+    def test_every_model_question_denies(self, manager) -> None:
+        manager.add("blog.edit_post", _row_only)
+        user = _user()
+        assert manager.has_perm(user, "blog.edit_post") is False
+        assert manager.perms_for(user) == frozenset()
+        assert manager.has_module_perms(user, "blog") is False
+
+    def test_the_failure_is_logged_once_per_permission(
+        self, manager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        manager.add("blog.edit_post", _row_only)
+        user = _user()
+        with caplog.at_level("WARNING", logger=manager_module.__name__):
+            manager.has_perm(user, "blog.edit_post")
+            manager.has_perm(user, "blog.edit_post")
+            manager.reset()
+            manager.add("blog.edit_post", _row_only)
+            manager.has_perm(user, "blog.edit_post")
+        assert len(caplog.records) == 2
+        assert "blog.edit_post" in caplog.records[0].getMessage()
+
+    def test_a_row_question_still_reads_the_row(self, manager) -> None:
+        manager.add("blog.edit_post", _row_only)
+        user = _user()
+        assert manager.has_perm(user, "blog.edit_post", SimpleNamespace(author=user))
+        with pytest.raises(AttributeError):
+            manager.has_perm(user, "blog.edit_post", SimpleNamespace())
+
+
 class TestPermsFor:
     """`perms_for` lists every registered permission an active user holds."""
 

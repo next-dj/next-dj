@@ -8,6 +8,7 @@ from django.test import override_settings
 from next.components import ComponentInfo, ComponentModuleImportError
 from next.components.renderers import _granted
 from next.permissions import UnknownAccessObjectError, add_perm
+from next.static import StaticCollector
 from tests.components.calls import CALLS
 from tests.pages.checks.metadata.trees import (
     COMPONENTS,
@@ -47,6 +48,13 @@ _SPREAD = """
 def spread():
     CALLS.append("spread")
     return {"account": "acme"}
+"""
+
+_SECRET = """
+
+@component.context("secret", serialize=True)
+def secret():
+    return "s3cret"
 """
 
 _LOGIN = "component.login_required()\n"
@@ -170,6 +178,31 @@ class TestComponentDeclarations:
         assert ("<b>" in body) is case.shown
         assert ("[]" in body) is not case.shown
         assert tuple(CALLS) == case.calls
+
+    @pytest.mark.parametrize(("allowed", "published"), [("acme", True), ("x", False)])
+    def test_a_serialized_context_waits_for_the_grant(
+        self,
+        tmp_path: Path,
+        isolated_permissions,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        allowed: str,
+        published: bool,
+    ) -> None:
+        keys: list[str] = []
+        original = StaticCollector.add_js_context
+
+        def spy(collector, key, value, **kwargs):
+            keys.append(key)
+            original(collector, key, value, **kwargs)
+
+        monkeypatch.setattr(StaticCollector, "add_js_context", spy)
+        add_perm(_READ, lambda _user, obj: obj == allowed)
+        pages = _tree(
+            tmp_path, _OBJECT_PERM + _SECRET + _CONTEXTS, '{% component "card" %}'
+        )
+        _render(pages, "visitor")
+        assert ("secret" in keys) is published
 
     def test_an_object_of_none_refuses_without_asking(
         self, tmp_path: Path, isolated_permissions

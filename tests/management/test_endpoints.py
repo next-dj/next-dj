@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from django.urls import set_script_prefix
 
 from next.forms import ActionGuard, Form
 from next.forms.dispatch.permissions import guard_rule
@@ -262,6 +263,17 @@ class TestResolvePage:
             resolve_page("/notes/1/?a=1")
             == project / "notes" / "[int:group]" / "page.py"
         )
+
+    @pytest.mark.parametrize(
+        "url", ["notes/1/", "/app/notes/1/"], ids=["bare", "prefixed"]
+    )
+    def test_a_path_without_slash_or_with_the_script_prefix(self, project, url) -> None:
+        set_script_prefix("/app/")
+        try:
+            found = resolve_page(url)
+        finally:
+            set_script_prefix("/")
+        assert found == project / "notes" / "[int:group]" / "page.py"
 
     def test_an_empty_url_reads_as_the_root(self, project) -> None:
         assert resolve_page("") == project / "page.py"

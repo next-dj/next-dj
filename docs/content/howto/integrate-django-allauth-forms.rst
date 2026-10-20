@@ -152,7 +152,7 @@ A subclass keeps the next-forms style with auto-registration and ``on_valid``.
 Both metaclasses are ``DeclarativeFieldsMetaclass``, so the bases compose.
 
 .. code-block:: python
-   :caption: accounts/forms.py — auto-registered as ``login_action``
+   :caption: accounts/forms.py, auto-registered as ``login_action``
 
    from allauth.account.forms import LoginForm
    from allauth.core import context as allauth_context

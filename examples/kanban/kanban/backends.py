@@ -24,7 +24,7 @@ class ViteManifestBackend(StaticFilesBackend):
     """
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
-        """Initialise from OPTIONS: DEV_ORIGIN, VITE_ROOT, MANIFEST_PATH."""
+        """Initialise from the OPTIONS keys DEV_ORIGIN, VITE_ROOT, and MANIFEST_PATH."""
         super().__init__(config)
         opts = dict(self._config.get("OPTIONS") or {})
         self._dev_origin: str = opts.get("DEV_ORIGIN", "")

@@ -6,9 +6,10 @@ A rule is read once per reload of a file in its chain, so a request reads one me
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from operator import methodcaller
 from typing import TYPE_CHECKING, Any
 
-from django.http import Http404, HttpRequest
+from django.http import Http404
 
 from next.caches import PageCache
 from next.conf import fail_loudly
@@ -46,7 +47,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from django.db.models import Model
-    from django.http import HttpResponseRedirect
+    from django.http import HttpRequest, HttpResponseRedirect
 
     from next.deps.objects import DObject
     from next.permissions.access import Lookup
@@ -200,9 +201,9 @@ def default_login(rule: AccessRule) -> bool:
 
 
 def anonymous_admitted(access: PageAccess) -> bool:
-    """Return whether the rule `access` holds lets an anonymous request in."""
+    """Return whether an anonymous request reaches the page `access` guards."""
     rule = access.rule
-    return not rule.requirements and not default_login(rule)
+    return access.broken is None and not rule.requirements and not default_login(rule)
 
 
 def routed(file_path: Path) -> bool:
@@ -259,7 +260,7 @@ class Gate:
     next_url: Callable[[HttpRequest], str]
 
 
-_PAGE_GATE = Gate(url_lookup, HttpRequest.get_full_path)
+_PAGE_GATE = Gate(url_lookup, methodcaller("get_full_path"))
 
 
 def enforce(

@@ -114,7 +114,9 @@ def declares_for_itself(file_path: Path) -> bool:
     A `public()` beside a requirement of the same file is left to `next.E163`.
     """
     own, passed = declared(file_path), declarations.inherited(file_path)
-    if own.public and not own.requirements and not passed.public:
+    if own.public and own.requirements:
+        return False
+    if own.public and not passed.public:
         return True
     return not set(own.requirements).issubset(passed.requirements)
 
@@ -133,7 +135,7 @@ def _segment_module(file_path: Path) -> bool:
 def check_declaring_modules(*args, **kwargs) -> list[CheckMessage]:
     """Flag an access declaration bound to a file no endpoint reads (`next.E164`).
 
-    A declaration binds to the file calling it, so one made in a helper guards nothing.
+    A loader may run a `page.py` outside every tree, whose declarations guard nothing.
     """
     tree_pages()
     return [
@@ -141,9 +143,8 @@ def check_declaring_modules(*args, **kwargs) -> list[CheckMessage]:
             f"An access declaration binds to {file_path}, which is no page.py of "
             "a page tree and no component.py, so it guards nothing.",
             hint=(
-                "Call login_required(), permission_required() or public() at the top "
-                "level of the page.py or component.py it is meant for, not from a "
-                "helper in another module."
+                "Move the module into a page tree, or drop its access declarations. "
+                "A declaration from a helper module raises when the page loads."
             ),
             obj=str(file_path),
             id="next.E164",

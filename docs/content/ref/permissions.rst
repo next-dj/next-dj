@@ -7,7 +7,7 @@ Module summary
 --------------
 
 ``next.permissions`` binds a predicate to each object permission ``app_label.codename`` and answers ``user.has_perm(perm, obj)`` through ``ObjectPermissionBackend``.
-The package exports ``ObjectPermissionBackend``, ``PermissionAlreadyRegisteredError``, ``UnknownAccessObjectError``, ``add_perm``, and ``has_perm``.
+The package exports ``DeclarationOutsideModuleError``, ``ObjectPermissionBackend``, ``PermissionAlreadyRegisteredError``, ``UnknownAccessObjectError``, ``add_perm``, and ``has_perm``.
 ``next.permissions.checks`` registers the system checks and stays out of the package namespace, so import it by its full path.
 Nothing in it imports a model, so the package loads before the app registry is ready.
 :doc:`/content/topics/permissions` covers the concepts, the access declarations, and the forms integration.
@@ -55,6 +55,7 @@ The ``permissions.py`` module of every installed application is imported at star
 
 ``has_perm(user, perm, obj=None)`` answers from the registered predicates alone.
 An inactive user holds nothing, an unregistered name answers ``False``, and the function neither asks another backend nor grants a superuser anything a predicate refuses.
+A question without an object, as the admin and ``get_all_permissions`` ask, denies when the predicate raises ``AttributeError`` or ``TypeError`` on ``obj=None``, and the first such failure of each permission is logged as a warning.
 
 .. automodule:: next.permissions.manager
    :members: add_perm, has_perm
@@ -86,6 +87,8 @@ Errors
 ------
 
 ``PermissionAlreadyRegisteredError`` carries the permission ``name`` that was registered twice.
+``DeclarationOutsideModuleError`` is a ``RuntimeError`` raised when ``login_required()``, ``permission_required()`` or ``public()`` runs while no page or component loader executes the file it binds to, such as at request time or from a helper module, and it carries that ``source`` file.
+
 ``UnknownAccessObjectError`` is a ``LookupError`` raised when the ``obj=`` of a component names no prop and no context the component produces, and it carries the context ``name`` and the ``endpoint`` file.
 An ``obj=DObject[Model]`` of a ``page.py`` whose route lacks the kwarg raises ``UnboundObjectError`` from ``next.deps`` instead, see ``next.E162``.
 

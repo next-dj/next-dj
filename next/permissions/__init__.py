@@ -4,11 +4,16 @@
 """
 
 from .backends import ObjectPermissionBackend
-from .errors import PermissionAlreadyRegisteredError, UnknownAccessObjectError
+from .errors import (
+    DeclarationOutsideModuleError,
+    PermissionAlreadyRegisteredError,
+    UnknownAccessObjectError,
+)
 from .manager import add_perm, has_perm
 
 
 __all__ = [
+    "DeclarationOutsideModuleError",
     "ObjectPermissionBackend",
     "PermissionAlreadyRegisteredError",
     "UnknownAccessObjectError",

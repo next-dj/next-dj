@@ -230,15 +230,13 @@ A project built exactly as this page prescribes reports a clean run.
 The command exits with status zero, and every message it does print names both the configuration key it read and the recommended fix.
 The partial asset version needs no settings of its own, because it is derived from the staticfiles manifest when the project has one and falls back to a stable string when it does not, see :doc:`/content/ref/settings`.
 
-Nine framework checks carry Django's ``deploy`` flag and stay silent until the deployment run asks for them.
+Among its reports ``next.E017`` names a ``page.py`` that raises while importing, ``next.E084`` names the same for a ``component.py``, and ``next.E072`` names a composed page template that fails to compile.
+Six other framework checks carry Django's ``deploy`` flag and stay silent until the deployment run asks for them.
 
 .. code-block:: bash
    :caption: shell
 
    uv run python manage.py check --deploy
-
-Among them ``next.E017`` reports a ``page.py`` that raises while importing, ``next.E084`` reports the same for a ``component.py``, and ``next.E072`` reports a composed page template that fails to compile.
-A typo in a page module is invisible to a plain ``manage.py check`` and named by ``next.E017`` here, so run the deploy variant whenever a page stops responding for no visible reason.
 
 .. _intro-install-project:
 

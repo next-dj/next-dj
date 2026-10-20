@@ -182,7 +182,7 @@ The constructor receives the backend config dict, which lets a backend read its 
 Point ``FORM_WIZARD_BACKEND["BACKEND"]`` at the class to use it.
 
 .. code-block:: python
-   :caption: access/wizard_backend.py — a Redis-backed wizard store
+   :caption: access/wizard_backend.py, a Redis-backed wizard store
 
    import json
    from typing import Any

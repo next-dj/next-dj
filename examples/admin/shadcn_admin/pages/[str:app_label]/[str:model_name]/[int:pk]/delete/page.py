@@ -33,7 +33,7 @@ def deletion(
 def delete_state(
     request: HttpRequest, app_label: str, model_name: str, pk: int
 ) -> dict[str, Any]:
-    """Build confirmation context: object, deps, protected refs, permissions."""
+    """Build the confirmation context for the object and its protected refs."""
     model, model_admin, obj = utils.resolve_object_or_404(
         request, app_label, model_name, pk
     )

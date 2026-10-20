@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.apps import apps
 from django.conf import settings
@@ -12,6 +12,10 @@ from django.utils.module_loading import import_string
 
 from next.checks import NEXT
 from next.conf import next_framework_settings
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 REQUEST_CONTEXT_PROCESSOR = "django.template.context_processors.request"
@@ -30,9 +34,7 @@ def check_request_in_context(*args, **kwargs) -> list[CheckMessage]:
     for i, config in enumerate(templates):
         if not isinstance(config, dict):
             continue
-        options = config.get("OPTIONS", {})
-        processors = options.get("context_processors", [])
-        if REQUEST_CONTEXT_PROCESSOR not in processors:
+        if REQUEST_CONTEXT_PROCESSOR not in _processors(config):
             msg = (
                 f"TEMPLATES[{i}]: 'request' must be in template context "
                 "when using next (required for {% form %} and CSRF). Add "
@@ -48,8 +50,7 @@ def check_context_processor_signature(*args, **kwargs) -> list[CheckMessage]:
     """Report a context processor that takes no `request` parameter (`next.E040`)."""
     errors: list[CheckMessage] = []
     for backend_index, backend in _iter_page_backend_configs():
-        processors = backend.get("OPTIONS", {}).get("context_processors") or []
-        for processor_index, path in enumerate(processors):
+        for processor_index, path in enumerate(_processors(backend)):
             if not isinstance(path, str):
                 continue
             loc = (
@@ -60,6 +61,18 @@ def check_context_processor_signature(*args, **kwargs) -> list[CheckMessage]:
             if message is not None:
                 errors.append(message)
     return errors
+
+
+def _processors(config: dict[str, Any]) -> Sequence[object]:
+    """Return the context processors a config lists, none for a malformed shape.
+
+    A malformed shape has an error of its own, so it must not crash the whole run.
+    """
+    options = config.get("OPTIONS", {})
+    if not isinstance(options, dict):
+        return []
+    processors = options.get("context_processors")
+    return processors if isinstance(processors, list | tuple) else []
 
 
 def _iter_page_backend_configs() -> list[tuple[int, dict[str, Any]]]:
@@ -83,7 +96,7 @@ def _check_processor_request_parameter(
     """Return an error when the callable at `processor_path` lacks `request`."""
     try:
         callable_obj = import_string(processor_path)
-    except ImportError:
+    except (ImportError, ValueError):
         return None
     if not callable(callable_obj):
         return None

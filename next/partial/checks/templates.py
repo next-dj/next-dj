@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-@register(Tags.templates, NEXT, deploy=True)
+@register(Tags.templates, NEXT)
 def check_composed_templates_compile(*args, **kwargs) -> list[CheckMessage]:
     """Error when a composed page template fails to compile (`next.E072`).
 

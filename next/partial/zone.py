@@ -194,16 +194,21 @@ type Ancestor = type[Node] | tuple[type[Node], ...]
 """A node class, or several, whose subtree a walk tells apart."""
 
 
-def zones_under(
-    nodelist: NodeList, ancestor: "Ancestor", *, inside: bool = False
+def _zones_inside(
+    nodelist: NodeList, ancestor: "Ancestor", *, inside: bool
 ) -> "Iterator[str]":
-    """Yield the name of every zone below an `ancestor` node, zone bodies included."""
+    """Yield the zone names of `nodelist`, all of them once `inside` an `ancestor`."""
     for node in nodelist:
         if inside and isinstance(node, ZoneNode):
             yield node.name
         now_inside = inside or isinstance(node, ancestor)
         for child in child_nodelists(node):
-            yield from zones_under(child, ancestor, inside=now_inside)
+            yield from _zones_inside(child, ancestor, inside=now_inside)
+
+
+def zones_under(nodelist: NodeList, ancestor: "Ancestor") -> "Iterator[str]":
+    """Yield the name of every zone below an `ancestor` node, zone bodies included."""
+    return _zones_inside(nodelist, ancestor, inside=False)
 
 
 def _parse_options(token: "Token") -> tuple[str, ZoneOptions]:

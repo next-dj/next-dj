@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 from pathlib import Path
@@ -470,6 +471,20 @@ class TestMiddlewareDetection:
     def test_a_base_that_does_not_import_matches_by_its_path_alone(self) -> None:
         assert is_middleware("csp.missing.CSPMiddleware", "csp.missing.CSPMiddleware")
         assert not is_middleware(self.LOCALE, "csp.missing.CSPMiddleware")
+
+    def test_an_entry_fixed_after_a_failed_import_matches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.syspath_prepend(tmp_path)
+        entry = "late_locale_middleware.Late"
+        assert not is_middleware(entry, self.LOCALE)
+        (tmp_path / "late_locale_middleware.py").write_text(
+            "from django.middleware.locale import LocaleMiddleware\n\n"
+            "class Late(LocaleMiddleware):\n    pass\n"
+        )
+        importlib.invalidate_caches()
+        assert is_middleware(entry, self.LOCALE)
+        sys.modules.pop("late_locale_middleware")
 
     def test_a_list_holding_a_match_lists_the_base(self) -> None:
         assert middleware_listed(["a.B", f"{__name__}._Locale"], self.LOCALE)

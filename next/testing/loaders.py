@@ -8,7 +8,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from next.components import components_manager
-from next.discovery import get_router_manager, iter_page_tree_component_folders
+from next.discovery import (
+    get_router_manager,
+    iter_page_tree_component_folders,
+    reset_router_manager_cache,
+)
 from next.pages.loaders import PAGE_MODULE, load_page_module, reset_module_memo
 
 
@@ -39,10 +43,11 @@ def eager_load_pages(base_dir: Path | str) -> list[Path]:
 def clear_loaded_dirs() -> None:
     """Drop the memoisation cache so the next call reloads page modules.
 
-    Only loader self-tests need it, as each pytest session gets a fresh interpreter.
+    The page scan goes too, so the next registration lookup runs every page again.
     """
     _loaded_dirs.clear()
     reset_module_memo()
+    reset_router_manager_cache()
 
 
 def _register_page_tree_components() -> None:

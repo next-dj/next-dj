@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 
 class PortSlot[T]:
-    """Holds the one implementation of a port composed at app startup, never rebound."""
+    """Holds the port implementation `AppConfig.ready` binds, which a test may swap."""
 
     __slots__ = ("_impl", "_subject")
 

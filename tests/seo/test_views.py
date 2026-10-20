@@ -993,6 +993,15 @@ class TestClosedPagesInTheSitemap:
         assert len(_locs(before)) == 3
         assert _locs(closed) == ["http://testserver/public/"]
 
+    def test_a_page_under_a_broken_chain_is_left_out(self, tmp_path) -> None:
+        root = tmp_path / "pages"
+        write_tree(root, pages=("",), sitemap="")
+        write_page(root, "broken", page_source("raise RuntimeError('boom')\n"))
+        write_page(root, "broken/child", page_source())
+        with routed(root, urlconf=USER_URLCONF):
+            response = Client().get("/sitemap.xml")
+        assert _locs(response) == ["http://testserver/"]
+
     def test_a_guard_page_is_left_out(self, tmp_path) -> None:
         root = tmp_path / "pages"
         write_tree(root, pages=("",), sitemap="")

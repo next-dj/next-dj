@@ -424,6 +424,23 @@ class TestPagesConfigurationCodes:
             errors = check_next_pages_configuration()
         assert [e.id for e in errors] == ["next.E002"]
 
+    @pytest.mark.parametrize(
+        ("dirs", "fragment"),
+        [("pages", "must be a list"), ([5], "neither a path nor a segment name")],
+        ids=["not_a_list", "item_of_another_type"],
+    )
+    def test_a_dirs_value_the_router_cannot_read_is_e006(self, dirs, fragment) -> None:
+        entry = {**file_router_config_entry(), "DIRS": dirs}
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
+            errors = check_next_pages_configuration()
+        assert [e.id for e in errors] == ["next.E006"]
+        assert fragment in errors[0].msg
+
+    def test_paths_strings_and_none_in_dirs_pass(self, tmp_path) -> None:
+        entry = {**file_router_config_entry(), "DIRS": [tmp_path, "shell", None]}
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
+            assert check_next_pages_configuration() == []
+
     def test_an_entry_without_options_passes(self) -> None:
         entry = file_router_config_entry()
         del entry["OPTIONS"]

@@ -20,7 +20,8 @@ from next.pages.checks.access import (
     check_public_beside_requirements,
 )
 from next.pages.checks.modules import check_page_functions, check_page_module_imports
-from next.pages.loaders import load_python_module_memo
+from next.pages.loaders import load_page_module, load_python_module_memo
+from next.permissions import DeclarationOutsideModuleError
 from next.permissions.access import declared_files
 from tests.support import routed, write_page
 from tests.support.access import (
@@ -96,8 +97,8 @@ class TestPublicBesideRequirements:
 class TestDeclaringModules:
     """next.E164 flags a declaration bound to a file no endpoint reads."""
 
-    def test_a_declaration_through_a_helper(self, root) -> None:
-        write_page(
+    def test_a_declaration_through_a_helper_breaks_the_page(self, root) -> None:
+        page_path = write_page(
             root,
             "a",
             page_source(
@@ -106,10 +107,11 @@ class TestDeclaringModules:
         )
 
         with routed(root):
-            [error] = check_declaring_modules()
+            _module, error = load_page_module(page_path)
+            assert check_declaring_modules() == []
 
-        assert (error.id, Path(error.obj).name) == ("next.E164", "access.py")
-        assert "helper" in error.hint
+        assert isinstance(error.__cause__, DeclarationOutsideModuleError)
+        assert error.__cause__.source.name == "access.py"
 
     @pytest.mark.parametrize(
         ("guard", "page"),
@@ -373,6 +375,19 @@ class TestEmptyBranches:
 
         assert _branch_dirs(root) == [str(Path("pages", trail, "admin"))]
 
+    def test_a_pageless_param_takes_its_empty_subtree(self, root) -> None:
+        write_page(root, "c", page_source())
+        (root / "a" / "[slug]" / "edit").mkdir(parents=True)
+
+        assert _branch_dirs(root) == []
+
+    def test_a_faulty_guard_takes_its_empty_subtree(self, root) -> None:
+        write_page(root, "c", page_source())
+        write_guard(root / "a")
+        (root / "a" / "sub").mkdir()
+
+        assert _branch_dirs(root) == []
+
     def test_a_tree_root_an_error_names_is_left_to_it(self, root) -> None:
         write_guard(root)
 
@@ -482,6 +497,20 @@ class TestBodylessDeclarations:
         assert "protects nothing" in error.msg
         assert "inherit=True" in error.hint
         assert "template" in error.hint
+
+    def test_public_beside_a_requirement_is_reported_once(self, root) -> None:
+        write_page(root, "", page_source())
+        page_path = write_guard(root / "a", "page.public()\npage.login_required()\n")
+
+        with routed(root):
+            found = [
+                *check_public_beside_requirements(),
+                *check_declarations_without_page(),
+            ]
+
+        assert [(message.id, message.obj) for message in found] == [
+            ("next.E163", str(page_path))
+        ]
 
     @pytest.mark.usefixtures("form_registries")
     def test_a_bodyless_page_below_a_guard_is_no_page(self, root) -> None:

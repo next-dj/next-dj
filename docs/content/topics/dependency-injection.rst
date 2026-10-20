@@ -441,6 +441,7 @@ A heavy column is deferred there with :meth:`~django.db.models.query.QuerySet.de
 The marker refuses a shape no lookup could serve.
 A model class that is abstract or not a model at all raises ``TypeError`` where the annotation is written.
 A bare ``DObject`` and a ``DObject`` inside a union such as ``DObject[Note] | None`` raise ``TypeError`` when the resolver first resolves the callable, since a missing row is a 404 rather than ``None``.
+A PEP 695 ``type`` alias of ``DObject[...]`` is claimed like the marker itself, whether the alias is nested in another alias or written inside ``Annotated`` or a union.
 
 The scope dependency
 ~~~~~~~~~~~~~~~~~~~~
@@ -510,7 +511,9 @@ The lookup filters the rows by the model field of that same name, so a comment U
        return comment
 
 Each level loads its own row through ``visible_to``, so the chain never reaches the child of a parent the scope could not see.
-A parent value of ``None`` answers 404 without a query, and a parent name the context does not hold raises ``UnboundObjectError``.
+A parent value of ``None`` answers 404 without a query.
+A parent value that names no row, such as an unsaved instance, a malformed value, or an instance of a foreign model, answers 404 the same way.
+A parent name the context does not hold raises ``UnboundObjectError``.
 A linter that reads the string as a forward reference, such as ruff with ``F821``, accepts ``DObject[Comment, Literal["post"]]``, which the marker treats the same way.
 
 Where DObject applies

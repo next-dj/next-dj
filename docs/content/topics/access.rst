@@ -209,6 +209,7 @@ An action and a zone under a lift therefore behave as the page of their subtree 
 A ``component.py`` declares for its own component alone, through ``component.login_required()`` and ``component.permission_required(perm, *, obj=None)``.
 It has no ``inherit`` and no ``public()``, and a refused request renders the component as an empty string, with no redirect and no 403, see :ref:`topics-permissions-tree`.
 An ``@action`` in a ``component.py`` answers to the rule of its directory joined with what the component declares, so a user the component hides from cannot post to it either.
+A component whose check refuses the user also publishes none of its ``serialize=True`` context, because those values reach the page collector only after the grant.
 A POST renders no component, so a permission on a context, ``obj="name"``, finds no object there, the action refuses every user, and ``manage.py check`` reports it as ``next.E165``.
 
 Loading
@@ -218,8 +219,9 @@ Each ``page.py`` runs once before the first request, when the router builds the 
 In a process that watches template edits an edited ``page.py`` runs again on the next request, and its old declarations are dropped before the new ones register.
 In a process that does not, a new ``page.py`` above a page, or an edit to one, applies after the process restarts, as any new module does.
 
-A declaration binds to the module that calls it.
-A call made from a helper module guards nothing, and ``manage.py check`` reports it as ``next.E164``.
+A declaration binds to the module that calls it, and only while a page or component loader runs that module.
+A call made at request time, inside ``render()`` or a context function, or from a helper module raises ``DeclarationOutsideModuleError``, so no request can rewrite the rule of a page.
+A ``page.py`` a loader ran outside every tree declares for nothing, and ``manage.py check`` reports it as ``next.E164``.
 
 .. _topics-access-tree-boundary:
 
@@ -238,7 +240,7 @@ Their views answer 404, or raise ``PageModuleImportError`` when ``next.conf.fail
 Under the default login an anonymous request meets the login redirect first, the answer ``LoginRequiredMiddleware`` gives before any view runs, so the key and the middleware answer alike and the redirect tells nothing about the broken file.
 A ``Patches.morph`` onto a page under a broken ``page.py`` raises ``PageModuleImportError`` in production too, since a 404 would name the URL of the request in flight rather than the page.
 The chain is read again on every request while a file in it is broken, so a fixed ``page.py`` serves on the next request.
-``manage.py check --deploy`` reports the failure as ``next.E017``.
+``manage.py check`` reports the failure as ``next.E017``.
 
 See also
 --------

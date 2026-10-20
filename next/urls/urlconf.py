@@ -73,12 +73,22 @@ class MountedPatterns(Sequence["URLPattern | URLResolver"]):
 
 @dataclass(frozen=True, slots=True)
 class MountPoint:
-    """One `pages()` tree, the route the URLconf includes it under and its kwargs."""
+    """One `pages()` tree, the route the URLconf includes it under and its kwargs.
+
+    `outer` joins the namespaces of the includes around it, as `reverse` names them.
+    """
 
     mount: Mount
     prefix: str
     kwargs: frozenset[str] = frozenset()
     trail: str = ""
+    outer: str = ""
+
+    @property
+    def namespace(self) -> str:
+        """Return the full namespace the routes of the tree reverse under."""
+        own = self.mount.namespace
+        return f"{self.outer}:{own}" if self.outer else own
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +161,7 @@ class _Walk:
         prefix: str,
         kwargs: frozenset[str] = frozenset(),
         trail: str = "",
+        outer: str = "",
     ) -> None:
         """Record a mounted include target, or walk on into a list of patterns."""
         source = resolver.urlconf_module
@@ -159,10 +170,12 @@ class _Walk:
             return
         patterns = getattr(source, "urlpatterns", source)
         if isinstance(patterns, MountedPatterns):
-            self._note(patterns.mount, prefix, kwargs, trail)
+            self._note(patterns.mount, prefix, kwargs, trail, outer)
             return
         if not isinstance(patterns, list | tuple):
             return
+        if resolver.namespace:
+            outer = f"{outer}:{resolver.namespace}" if outer else resolver.namespace
         for entry in patterns:
             if isinstance(entry, URLResolver):
                 self.visit(
@@ -170,13 +183,19 @@ class _Walk:
                     _join_route(prefix, str(entry.pattern)),
                     kwargs | _captured(entry),
                     join_trail(trail, _route_trail(entry.pattern)),
+                    outer,
                 )
 
     def _note(
-        self, mount: Mount | None, prefix: str, kwargs: frozenset[str], trail: str
+        self,
+        mount: Mount | None,
+        prefix: str,
+        kwargs: frozenset[str],
+        trail: str,
+        outer: str,
     ) -> None:
         if mount is not None:
-            self.points.append(MountPoint(mount, prefix, kwargs, trail))
+            self.points.append(MountPoint(mount, prefix, kwargs, trail, outer))
         elif self.include_point is None:
             self.include_point = prefix
             self.include_index = len(self.points)

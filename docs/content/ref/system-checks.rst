@@ -8,7 +8,7 @@ Module summary
 
 next.dj contributes Django system checks for every subsystem.
 Run them through ``uv run python manage.py check`` and the framework reports configuration mistakes with a code and a hint.
-Nine of them are deployment checks and answer only to ``uv run python manage.py check --deploy``, see `Check registration`_ for which nine and why.
+Six of them are deployment checks and answer only to ``uv run python manage.py check --deploy``, see `Check registration`_ for which six and why.
 
 Check registration
 ------------------
@@ -22,10 +22,9 @@ Each of these modules registers checks.
 ``next.pages.checks.metadata`` is a package inside the pages one and splits the same way.
 The address a project imports stays the same either way, and the tables under `Check code reference`_ name the submodule behind each code.
 
-Nine checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
-Four of them are ``check_page_module_imports`` (``next.E017``), ``check_component_module_imports`` (``next.E084``), ``check_composed_templates_compile`` (``next.E072``), and ``check_asset_version_moves_between_deploys`` (``next.W083``).
-The first three import or compile every user module of a tree, which costs a full walk that a routine ``manage.py`` command should not pay.
-The fourth describes a configuration every development checkout has, so reporting it outside a deployment audit would warn every project about nothing.
+Six checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
+``check_asset_version_moves_between_deploys`` (``next.W083``) describes a configuration every development checkout has, so reporting it outside a deployment audit would warn every project about nothing.
+``check_page_module_imports`` (``next.E017``), ``check_component_module_imports`` (``next.E084``), and ``check_composed_templates_compile`` (``next.E072``) run on every ``manage.py check``, since the other page and component checks already import and compile those modules.
 ``check_runtime_bundles_deployed`` (``next.W090``) asks the static files a deployment serves for the client runtime, which a source checkout builds only on demand.
 The other four read the settings a deployment runs on, ``check_site_url_for_deploy`` (``next.W110``, ``next.W122``) and ``check_seo_sources_on_closed_site`` (``next.W111``) with the ``seo`` tag, ``check_script_deploy`` (``next.W118``), and ``check_consent_cookie_secure`` (``next.W119``).
 
@@ -33,7 +32,7 @@ Every next.dj check carries the ``next`` tag.
 That tag is the importable string constant ``next.checks.NEXT``, so a project check joins the framework ones by decorating itself with ``@register(NEXT)`` rather than by repeating the literal.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
-A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the nine deployment checks to it.
+A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the six deployment checks to it.
 The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check, every page metadata check, and the site checks.
 ``manage.py check --tag seo`` runs the metadata, crawler-document, and site checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.
 Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
@@ -246,7 +245,7 @@ Errors
      - The file router ``APP_DIRS`` value is not a boolean.
      - ``next.urls.checks``
    * - ``next.E006``
-     - The file router ``DIRS`` value is not a list.
+     - The file router ``DIRS`` value is not a list, or holds an entry that is neither a path nor a segment name.
        The ``OPTIONS`` shapes carry ``next.E094`` through ``next.E097``, so one malformed key costs one error.
      - ``next.urls.checks``
    * - ``next.E007``
@@ -293,7 +292,6 @@ Errors
        A broken ``page.py`` closes its own page and every page below it, since what it declares with ``inherit=True`` is unknown, so they answer 404 or raise under ``next.conf.fail_loudly``.
        The message names the recorded exception type and text, so an ``ImportError`` raised by the module body reads as such instead of masking as a missing body source.
        The body-source checks ``next.E012``, ``next.E013``, and ``next.W043`` stay silent for that file, so the import failure surfaces once.
-       Importing every routed module costs a full tree walk, so the check carries ``deploy=True`` and the code fires under ``manage.py check --deploy`` alone.
      - ``next.pages.checks.modules``
    * - ``next.E018``
      - A ``page.py`` registers more than one keyless ``@context`` callable, and only the last one runs.
@@ -471,7 +469,6 @@ Errors
      - ``next.forms.checks.config``
    * - ``next.E072``
      - A composed page template does not compile, so the syntax error would otherwise surface only as a 500 on the first request to the page.
-       Compiling every composed template of every tree costs a full walk, so the check carries ``deploy=True`` and the code fires under ``manage.py check --deploy`` alone.
      - ``next.partial.checks.templates``
    * - ``next.E073``
      - A ``PARTIAL_BACKENDS`` entry has no ``BACKEND`` key, so the entry would fall back to the default protocol backend and the intended wire format would never load.
@@ -524,7 +521,6 @@ Errors
    * - ``next.E084``
      - A ``component.py`` raises while importing, so the component renders as an empty string, since the access it would have declared is unknown, and under ``next.conf.fail_loudly`` it raises ``ComponentModuleImportError`` with the import failure as ``__cause__``.
        The message names the recorded exception type and text, which is what tells a missing import path apart from a typo in the module.
-       Importing every component module costs a full tree walk, so the check carries ``deploy=True`` and the code fires under ``manage.py check --deploy`` alone.
      - ``next.components.checks``
    * - ``next.E085``
      - An ``@action`` declares a ``scope`` keyword other than ``"page"`` or ``"shared"``.
@@ -807,8 +803,8 @@ Errors
        The hint suggests ``page.public()`` alone in the page meant to open under a guarded directory.
      - ``next.pages.checks.access``
    * - ``next.E164``
-     - An access declaration binds to a file that is neither a ``page.py`` of a page tree nor a ``component.py``, such as a helper module that calls ``page.login_required()`` for the page, so it guards nothing.
-       The message names the file, and the hint asks for the call at the top level of the segment module.
+     - An access declaration binds to a file that is neither a ``page.py`` of a page tree nor a ``component.py``, such as a ``page.py`` a loader ran outside every tree, so it guards nothing.
+       A declaration from a helper module never gets here, since it raises ``DeclarationOutsideModuleError`` when the page loads.
      - ``next.pages.checks.access``
    * - ``next.E165``
      - A ``component.py`` declares ``component.permission_required(perm, obj="name")`` and registers an ``@action``, and an action POST renders no component, so the context is never there and the action refuses every user, a superuser included.

@@ -12,10 +12,9 @@ from next.pages.checks.branches import EmptyBranch, empty_branches
 from next.pages.checks.modules import declares_without_page, load_page
 from next.pages.loaders import PAGE_MODULE
 from next.permissions.access import auth_installed, declared, login_by_default
-from next.ports import action_owners_slot
 from next.utils import middleware_listed
 
-from .sources import diagnostics, iter_registered_actions
+from .sources import action_owners, diagnostics, iter_registered_actions
 
 
 _MESSAGE_MIDDLEWARE = "django.contrib.messages.middleware.MessageMiddleware"
@@ -205,7 +204,7 @@ def check_declarations_without_page(*args, **kwargs) -> list[CheckMessage]:
 
     An action beside the file answers to its rule, so a directory with one passes.
     """
-    owners = action_owners_slot.get().page_files()
+    owners = action_owners()
     return [
         Error(
             f"{file_path} has no body, so it serves no page, no action of its "
@@ -251,7 +250,7 @@ def check_empty_branches(*args, **kwargs) -> list[CheckMessage]:
 
     One warning names the outermost such directory, since one fix there fills it all.
     """
-    action_dirs = {owner.parent for owner in action_owners_slot.get().page_files()}
+    action_dirs = {owner.parent for owner in action_owners()}
     return [
         DjangoWarning(
             f"{branch.directory} holds no page and no action, so "

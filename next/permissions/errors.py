@@ -14,6 +14,19 @@ class PermissionAlreadyRegisteredError(Exception):
         self.name = name
 
 
+class DeclarationOutsideModuleError(RuntimeError):
+    """An access declaration runs while no loader executes the file it binds to."""
+
+    def __init__(self, source: Path) -> None:
+        """Name the file the declaration bound to."""
+        super().__init__(
+            f"An access declaration binds to {source}, which no page or component "
+            "loader is executing. Declare access at the top level of the page.py or "
+            "component.py it guards, never in a helper or at request time."
+        )
+        self.source = source
+
+
 class UnknownAccessObjectError(LookupError):
     """An `obj=` of an access declaration names no context its endpoint produces."""
 
@@ -27,4 +40,8 @@ class UnknownAccessObjectError(LookupError):
         self.endpoint = endpoint
 
 
-__all__ = ["PermissionAlreadyRegisteredError", "UnknownAccessObjectError"]
+__all__ = [
+    "DeclarationOutsideModuleError",
+    "PermissionAlreadyRegisteredError",
+    "UnknownAccessObjectError",
+]

@@ -1,7 +1,7 @@
 """Wizard step dispatch and the validate-only short circuit."""
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from django.http import HttpResponse, HttpResponseBadRequest
 
@@ -26,6 +26,17 @@ if TYPE_CHECKING:
     from next.forms.wizard import FormWizard
 
     from . import _DispatchState
+
+
+def live_cleaned_data(wizard: "FormWizard") -> dict[str, Any]:
+    """Merge the stored data of the steps `get_steps` lists now, in their order.
+
+    A step an edited answer dropped keeps its draft, which must not reach `done`.
+    """
+    merged: dict[str, Any] = {}
+    for name in wizard.step_names():
+        merged.update(wizard.get_cleaned_data_for_step(name) or {})
+    return merged
 
 
 def _maybe_validate_only(
@@ -130,7 +141,7 @@ def _dispatch_wizard(
         # A direct POST to the last step must not finalise over a gap, so reroute to it.
         next_step = wizard.first_incomplete_step()
     if next_step is None:
-        merged = wizard.get_all_cleaned_data()
+        merged = live_cleaned_data(wizard)
         resolved = current_resolver().resolve_dependencies(
             wizard.done,
             request=request,
@@ -170,6 +181,7 @@ def _dispatch_wizard(
                 uid=state.uid,
                 redirect_to=wizard.goto(next_step),
                 wizard=wizard,
+                page_path=state.page_path,
             ),
         )
         duration_ms = 0.0

@@ -3,14 +3,17 @@
 from typing import TYPE_CHECKING
 
 from django.contrib.messages import get_messages
-from django.http import HttpResponse, HttpResponseRedirect
+from django.core.exceptions import PermissionDenied
+from django.http import Http404, HttpResponse, HttpResponseRedirect
 from django.utils.http import url_has_allowed_host_and_scheme
 
+from next.deps import render_dep_cache
 from next.forms.dispatch import FormActionDispatch
 from next.forms.dispatch.responses import ActionOutcome, ActionOutcomeKind
 from next.forms.origin import filter_reserved_url_kwargs
 from next.forms.uid import FORM_ORIGIN_OVERRIDE_KEY
 from next.pages import page as page_manager
+from next.pages.access import page_access, refusal
 from next.partial import keys
 from next.partial.headers import RESPONSE_ACTION, RESPONSE_FORM, set_partial_vary
 from next.partial.patches import Patches, PatchResponse
@@ -126,7 +129,10 @@ def _shape_advance(
     if target is None:
         return _step_redirect(redirect_to)
     page_path, url_kwargs = target
-    if _step_denies(request, page_path, url_kwargs, redirect_to):
+    # The step URL comes from the posted origin, so only the wizard's own page morphs.
+    if page_path != outcome.page_path or _step_denies(
+        request, page_path, url_kwargs, redirect_to
+    ):
         return _step_redirect(redirect_to)
     next_wizard = type(wizard)(
         request=request, url_kwargs=url_kwargs, base_path=redirect_to
@@ -169,8 +175,16 @@ def _step_denies(
 ) -> bool:
     """Return True when the next step's page refuses to serve a visit of `step_url`.
 
-    The guard sees the DI-safe subset of captured parameters, as the page's view does.
+    Its declared rule runs first and its guard sees the DI-safe parameters, as its view.
     """
+    if page_access(page_path).broken is not None:
+        return True
+    try:
+        login = refusal(page_path, request, dict(url_kwargs), render_dep_cache(request))
+    except (PermissionDenied, Http404):
+        return True
+    if login is not None:
+        return True
     denial, _dynamic = page_manager.authorization_outcome(
         page_path, request, step_url, filter_reserved_url_kwargs(url_kwargs)
     )

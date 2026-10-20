@@ -44,6 +44,8 @@ The hook resolves its parameters through the injector, so a per-request gate rea
 
 The step pages carry their own authorization alongside both guards.
 A step POST authorizes the page its origin names before the wizard binds anything, and a partial step transition authorizes the next step's page before rendering that step's zone.
+That check covers the declared access rule of the next step's page, meaning login, permission, inherited rules, and a broken rule chain.
+A step URL that resolves to another page than the one the step was posted from takes the plain step redirect as well, since the URL follows the posted origin.
 A next step that denies the transition is answered with the plain step redirect a client without the runtime follows anyway, so the browser lands on the step URL and meets that page's own response there.
 Declare a requirement shared by every step on the wizard action, through ``Meta.login_required`` and ``Meta.permission_required`` or through ``check_permissions``, and keep a requirement specific to one step in that step page's ``render()``.
 
@@ -54,7 +56,7 @@ Declare the ordered steps under ``Meta.steps`` as a list of ``(name, FormClass)`
 Each form class is a plain ``django.forms.Form`` or ``django.forms.ModelForm``.
 
 .. code-block:: python
-   :caption: access/pages/request/[step]/page.py — auto-registered as ``access_request_wizard``
+   :caption: access/pages/request/[step]/page.py, auto-registered as ``access_request_wizard``
 
    from access.models import AccessRequest
    from django import forms
@@ -112,6 +114,7 @@ It defaults to ``"step"``, so a route segment of ``[step]`` works with no furthe
 ``Meta.push_steps`` decides whether an advance under partial rendering pushes the next step's URL onto browser history, overriding the project-wide ``PUSH_WIZARD_STEPS`` option for this one wizard, see :doc:`/content/topics/partial-rendering/reference`.
 
 Per-step drafts persist through the configured ``FORM_WIZARD_BACKEND``, which the project sets once for every wizard.
+The draft bucket is keyed by the URL kwargs other than the step ``url_param``, so ``/orders/1/edit/<step>/`` and ``/orders/2/edit/<step>/`` keep separate drafts.
 See :doc:`wizard-backend` for the backend contract and its options.
 
 The ``done`` method
@@ -380,6 +383,8 @@ The hook reads the accumulated data through ``self.get_all_cleaned_data()`` and 
 
 When ``get_steps`` is not overridden it returns ``Meta.steps`` unchanged.
 The navigation helpers, the current-step resolution, and the final-step detection all read from ``get_steps``, so a conditional list flows through routing without extra wiring.
+``done`` receives the merged data of the steps ``get_steps()`` lists at finish time only, in step order, so a step an edited answer dropped does not leak into ``done``.
+``get_all_cleaned_data()`` itself still returns every stored step.
 
 Cross-step inputs
 -----------------

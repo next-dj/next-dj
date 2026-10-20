@@ -16,6 +16,7 @@ from next.caches import BoundedCache
 from next.conf import next_framework_settings
 from next.pages import loaders as pages_loaders
 from next.utils import (
+    LAYOUT_TEMPLATE,
     MAX_ANCESTOR_WALK_DEPTH,
     resolved_tree,
     stat_mtime_ns,
@@ -468,7 +469,7 @@ class AssetDiscovery:
         for depth in range(MAX_ANCESTOR_WALK_DEPTH):
             # Stat first, so a file created in between leaves the plan stale.
             mtime = stat_mtime_ns(current_dir)
-            holds_layout = (current_dir / "layout.djx").exists()
+            holds_layout = (current_dir / LAYOUT_TEMPLATE).exists()
             if holds_layout:
                 layouts.append(current_dir)
             if inside_a_tree or holds_layout or depth == 0:

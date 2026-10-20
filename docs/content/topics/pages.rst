@@ -602,8 +602,7 @@ Fail quiet, the default.
 The blast radius is the broken page and the pages below it in every mode, since what it would have declared with ``inherit=True`` is unknown, see :ref:`topics-access`.
 The broken page still gets its URL pattern, so the error surfaces at the view rather than while the URL configuration is built, and every sibling page keeps its pattern and keeps serving.
 The record is keyed by modification time, so saving a fixed ``page.py`` clears it on the next request without a restart.
-``manage.py check --deploy`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message, which catches a broken page before traffic reaches it.
-The check imports every routed ``page.py`` and so costs a full tree walk, which is why it runs under the deployment flag rather than on every ``manage.py`` command.
+``manage.py check`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message, which catches a broken page before traffic reaches it.
 
 See :doc:`/content/ref/pages` for the exception class and :ref:`ref-settings` for the loudness table across ``DEBUG`` and the strict flags.
 

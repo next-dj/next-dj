@@ -372,7 +372,7 @@ A ``(FormClass, init_kwargs)`` tuple.
    A ``next.forms`` class takes the same arguments from its own ``get_form_kwargs``, see :ref:`topics-forms-actions-form-kwargs`.
 
 .. code-block:: python
-   :caption: page.py — a factory returning the tuple form
+   :caption: page.py, a factory returning the tuple form
 
    from django.shortcuts import get_object_or_404, redirect
 
@@ -401,7 +401,7 @@ A project base class that other forms subclass should not register as an action 
 Set ``Meta.abstract = True`` to skip auto-registration.
 
 .. code-block:: python
-   :caption: app/forms.py — a shared base that does not register
+   :caption: app/forms.py, a shared base that does not register
 
    from django.http import HttpRequest
 
@@ -505,7 +505,7 @@ Unlike the static guard, the dynamic hooks intentionally run application code.
 ``has_object_permission`` runs after the form is bound, so ``self.instance`` is the loaded target on a ``ModelForm``, and before ``is_valid`` and the handler.
 
 .. code-block:: python
-   :caption: page.py — view-level gate with no parameters
+   :caption: page.py, view-level gate with no parameters
 
    from notes.models import Note
 
@@ -524,7 +524,7 @@ A parameterless override always allows.
 Declare ``request`` to read the user, and any further parameter the injector resolves.
 
 .. code-block:: python
-   :caption: page.py — view-level gate reading the request, a URL kwarg, and a provider
+   :caption: page.py, view-level gate reading the request, a URL kwarg, and a provider
 
    from django.http import HttpRequest
    from notes.models import Note
@@ -552,7 +552,7 @@ Declare ``request`` to read the user, and any further parameter the injector res
 The object-level hook reads the bound instance.
 
 .. code-block:: python
-   :caption: page.py — object-level gate on the loaded row
+   :caption: page.py, object-level gate on the loaded row
 
    from django.http import HttpRequest
    from notes.models import Note

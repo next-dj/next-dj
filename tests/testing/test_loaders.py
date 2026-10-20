@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 from django.test import override_settings
 
+from next import discovery
 from next.components import components_manager
 from next.forms.checks import check_form_action_collisions
 from next.pages.errors import PageModuleImportError
@@ -110,6 +111,12 @@ class TestEagerLoadPages:
         clear_loaded_dirs()
         loaded = eager_load_pages(tmp_path)
         assert len(loaded) == 1
+
+
+def test_clear_loaded_dirs_drops_the_page_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(discovery._router_manager_cache, "pages", (object(), []))
+    clear_loaded_dirs()
+    assert discovery._router_manager_cache.pages is None
 
 
 class _RecordingBackend(DummyComponentsBackend):

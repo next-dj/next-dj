@@ -194,7 +194,7 @@ They run through ``uv run python manage.py check``.
 The module exports six check callables.
 
 - ``check_component_context_registration_files``.
-- ``check_component_module_imports``, registered with ``deploy=True`` so it runs under ``manage.py check --deploy`` alone.
+- ``check_component_module_imports``.
 - ``check_component_py_no_pages_context``.
 - ``check_cross_root_component_name_conflicts``.
 - ``check_duplicate_component_names``.

@@ -334,12 +334,9 @@ def check_component_py_no_pages_context(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
-@register(NEXT, deploy=True)
+@register(NEXT)
 def check_component_module_imports(*args, **kwargs) -> list[CheckMessage]:
-    """Report a `component.py` that raises while importing (`next.E084`).
-
-    Importing every user module costs a tree walk, so it runs only under `--deploy`.
-    """
+    """Report a `component.py` that raises while importing (`next.E084`)."""
     configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return []

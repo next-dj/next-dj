@@ -20,7 +20,7 @@ from next.forms.dispatch.permissions import (
 )
 from next.forms.signals import form_access_denied
 from next.pages.errors import PageModuleImportError
-from next.pages.loaders import _load_python_module
+from next.pages.loaders import _load_python_module, load_page_module
 from next.permissions import add_perm
 from next.permissions.access import declarations
 from next.permissions.markers import OPEN, AccessRule, Requirement
@@ -94,7 +94,7 @@ class _Tree:
         for trail, call in self.guards.items():
             write_guard(root / trail, f"page.{call}\n")
         for trail, source in self.pages.items():
-            _load_python_module(write_page(root, trail, source, body="<p>x</p>"))
+            load_page_module(write_page(root, trail, source, body="<p>x</p>"))
         for trail, source in self.beside.items():
             module = root / trail / "forms.py"
             module.parent.mkdir(parents=True, exist_ok=True)

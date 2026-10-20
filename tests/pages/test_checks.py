@@ -699,6 +699,35 @@ class TestContextProcessorSignature:
         errors = check_context_processor_signature()
         assert errors == []
 
+    @pytest.mark.parametrize(
+        "options",
+        [5, {"context_processors": 5}, {"context_processors": ["a."]}],
+        ids=["options_not_dict", "processors_not_list", "empty_module_name"],
+    )
+    def test_a_malformed_shape_reports_nothing_instead_of_crashing(
+        self, options
+    ) -> None:
+        backend = {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "APP_DIRS": True,
+            "DIRS": [],
+            "PAGES_DIR": "pages",
+            "OPTIONS": options,
+        }
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [backend]}):
+            assert check_context_processor_signature() == []
+
+    def test_malformed_template_processors_read_as_no_request(self) -> None:
+        options = {"context_processors": 5}
+        templates = [
+            {
+                "BACKEND": "django.template.backends.django.DjangoTemplates",
+                "OPTIONS": options,
+            }
+        ]
+        with override_settings(TEMPLATES=templates):
+            assert [e.id for e in check_request_in_context()] == ["next.E019"]
+
     @override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": "not a list"})
     def test_bad_settings_shape_is_tolerated(self) -> None:
         errors = check_context_processor_signature()

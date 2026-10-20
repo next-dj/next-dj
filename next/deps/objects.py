@@ -15,6 +15,7 @@ from typing import (
     Literal,
     NamedTuple,
     Protocol,
+    TypeAliasType,
     Union,
     cast,
     get_args,
@@ -117,9 +118,16 @@ def _validated(args: tuple[object, ...]) -> tuple[type[Model], str | None]:
     return model, parent
 
 
+def _unaliased(annotation: object) -> object:
+    """Return what a `type` alias, or a chain of them, stands for."""
+    while isinstance(annotation, TypeAliasType):
+        annotation = annotation.__value__
+    return annotation
+
+
 def object_target(annotation: object) -> tuple[type[Model], str | None] | None:
     """Return the model and parent a `DObject` annotation names, or None for others."""
-    marker = unwrap_annotated(annotation)
+    marker = _unaliased(unwrap_annotated(_unaliased(annotation)))
     if get_origin(marker) is not DObject:
         return None
     args = get_args(marker)
@@ -142,7 +150,9 @@ def names_object(annotation: object) -> bool:
 
 
 def _names_object_in_form(annotation: object) -> bool:
-    """Whether a union or an `Annotated` form names `DObject` among its arguments."""
+    """Whether a union, an `Annotated` or a `type` alias names `DObject` inside it."""
+    if isinstance(annotation, TypeAliasType):
+        return names_object(annotation.__value__)
     origin = get_origin(annotation)
     if isinstance(annotation, types.UnionType) or origin is Union:
         return any(map(names_object, get_args(annotation)))
@@ -258,8 +268,12 @@ def _visible_row(
         SCOPE_DEPENDENCY, context, param=param
     )
     query = rows.visible_to(scope)
-    for lookup in lookups:
-        query = query.filter(**lookup)
+    try:
+        for lookup in lookups:
+            query = query.filter(**lookup)
+    except (ValidationError, ValueError, TypeError):
+        # An unsaved or mistyped parent names no row, like a malformed URL key.
+        raise Http404(rows.not_found) from None
     found = next(iter(query.order_by()[:1]), None)
     if found is None:
         raise Http404(rows.not_found)

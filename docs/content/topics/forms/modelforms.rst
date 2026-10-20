@@ -22,7 +22,7 @@ The class is the unit of registration.
 Declaring it is enough to make it reachable by name from any template, and the action name is the ``snake_case`` of the class name.
 
 .. code-block:: python
-   :caption: notes/pages/notes/edit/[slug]/page.py — auto-registered as ``note_edit_form``
+   :caption: notes/pages/notes/edit/[slug]/page.py, auto-registered as ``note_edit_form``
 
    from notes.models import Note
 
@@ -138,7 +138,7 @@ Before and after
 Without ``Meta.instance_from_url``, an edit form loads the article twice and maps each field by hand.
 
 .. code-block:: python
-   :caption: before — manual lookup duplicated across get_initial and on_valid
+   :caption: before, manual lookup duplicated across get_initial and on_valid
 
    from django.http import HttpRequest
 
@@ -171,7 +171,7 @@ Without ``Meta.instance_from_url``, an edit form loads the article twice and map
 Every piece of that plumbing exists only to relocate the instance the page already addressed in its URL.
 
 .. code-block:: python
-   :caption: after — instance loading is a single declarative line
+   :caption: after, instance loading is a single declarative line
 
    class ArticleEditForm(next.forms.ModelForm):
        class Meta:
@@ -195,7 +195,7 @@ On a create page the route has no captured kwarg, so the form renders unbound an
 On an edit page the route captures the kwarg named by ``instance_from_url``, so the form loads the existing row and ``self.save()`` updates it.
 
 .. code-block:: python
-   :caption: notes/forms.py — shared scope, one class for both pages
+   :caption: notes/forms.py, shared scope, one class for both pages
 
    from notes.models import Note
 

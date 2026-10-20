@@ -54,7 +54,7 @@ next.E017 on a page.py that fails to import
 A ``page.py`` raised while importing, so the framework loads it as nothing.
 Its ``render``, ``template``, and ``@context`` declarations never take effect, and a sibling ``template.djx`` can otherwise hide the failure.
 The report names the exception type and message, so fix the named error and the module loads.
-The check imports every routed ``page.py``, so it runs under ``manage.py check --deploy`` rather than on a plain ``manage.py check``.
+The check imports every routed ``page.py`` and runs on a plain ``manage.py check``.
 At request time the same failure raises under ``DEBUG`` or ``STRICT_LOADING``, see :doc:`/content/ref/pages`.
 
 Page answers 404 although its files exist
@@ -63,7 +63,7 @@ Page answers 404 although its files exist
 The ``page.py`` behind the URL raised while importing.
 With ``DEBUG`` and ``STRICT_LOADING`` both off the framework answers 404 for the broken page while ``logger.exception`` records the traceback.
 Read the server log for the ``Could not import page module`` record, or turn on ``DEBUG`` or ``NEXT_FRAMEWORK["STRICT_LOADING"]`` so the request raises with the real cause.
-``uv run python manage.py check --deploy`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message.
+``uv run python manage.py check`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message.
 See :doc:`/content/ref/pages` for the full import-failure contract.
 
 next.E018 on multiple keyless context functions
@@ -180,7 +180,7 @@ next.E084 on a component.py that fails to import
 
 A ``component.py`` raised while importing, so the component renders as an empty string, since the access it would have declared is unknown, and under ``next.conf.fail_loudly`` it raises ``ComponentModuleImportError`` with the import failure as ``__cause__``.
 The report names the exception type and message, so fix the named error and the module loads.
-The check imports every discovered ``component.py``, so it runs under ``manage.py check --deploy`` rather than on a plain ``manage.py check``.
+The check imports every discovered ``component.py`` and runs on a plain ``manage.py check``.
 See :doc:`/content/topics/components` for the closed render.
 
 Component prop does not resolve

@@ -161,6 +161,7 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
     ),
     "next.permissions": frozenset(
         {
+            "DeclarationOutsideModuleError",
             "ObjectPermissionBackend",
             "PermissionAlreadyRegisteredError",
             "UnknownAccessObjectError",

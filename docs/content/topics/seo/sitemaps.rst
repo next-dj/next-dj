@@ -39,6 +39,7 @@ Static routes
 Every route of the tree without a bracket segment is listed automatically, reversed through ``page_reverse`` at render time.
 A route whose static metadata is ``noindex`` is left out, because a sitemap invites the crawler to a page the tag then turns away.
 A route an anonymous visitor cannot reach is left out too, one whose access rule has a requirement and one that the default login closes because it declares nothing and no ``page.public()``, see :ref:`topics-access-default-login`.
+A page whose ``page.py`` chain failed to import is left out as well.
 A route matching a glob in ``exclude`` is left out as well, and a glob matches the whole route, ``drafts/*`` for a subtree and ``admin`` for one page.
 Only ``*`` and ``?`` are wildcards, and brackets are literal because routes spell parameters with them, so ``posts/[slug]`` names that one dynamic route.
 

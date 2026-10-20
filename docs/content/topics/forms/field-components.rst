@@ -189,7 +189,7 @@ Without ``ComponentWidget``, a form file carries a per-file ``INPUT_CLASS`` stri
 Every form that wants the same look copies the constant.
 
 .. code-block:: python
-   :caption: before — the class string lives in the form file
+   :caption: before, the class string lives in the form file
 
    INPUT_CLASS = (
        "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm "
@@ -205,7 +205,7 @@ Every form that wants the same look copies the constant.
        )
 
 .. code-block:: python
-   :caption: after — the field names the shared component
+   :caption: after, the field names the shared component
 
    class ArticleCreateForm(next.forms.Form):
        slug = next.forms.CharField(widget=ComponentWidget("input", placeholder="wiki-slug"))

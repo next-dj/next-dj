@@ -147,7 +147,15 @@ template = "{{ title }}|{{ shout }}"
 """
 
 
+type _GroupRow = DObject[Group]
+type _RowAlias = _GroupRow
+
+
 def _group(group: DObject[Group]) -> Group:
+    return group
+
+
+def _aliased(group: _RowAlias) -> Group:
     return group
 
 
@@ -286,12 +294,24 @@ class TestObjectTarget:
             (DObject[Group], (Group, None)),
             (DObject[Group, "permissions"], (Group, "permissions")),
             (Annotated[DObject[Group], "doc"], (Group, None)),
+            (_RowAlias, (Group, None)),
+            (Annotated[_GroupRow, "doc"], (Group, None)),
             (DObject, None),
             (Group, None),
             (list[Group], None),
             (int, None),
         ],
-        ids=["model", "parent", "annotated", "bare", "model_class", "list", "int"],
+        ids=[
+            "model",
+            "parent",
+            "annotated",
+            "alias",
+            "annotated_alias",
+            "bare",
+            "model_class",
+            "list",
+            "int",
+        ],
     )
     def test_the_target_of_an_annotation(self, annotation, expected) -> None:
         assert object_target(annotation) == expected
@@ -311,6 +331,8 @@ class TestStaticClaim:
             (DObject[Group] | None, True),
             (DObject | None, True),
             (typing_optional(DObject[Group]), True),
+            (_RowAlias, True),
+            (_RowAlias | None, True),
             (int, False),
             (Group, False),
             (list[Group], False),
@@ -332,6 +354,8 @@ class TestStaticClaim:
             "pep604_union",
             "bare_union",
             "typing_optional",
+            "alias",
+            "alias_union",
             "int",
             "model_class",
             "list",
@@ -461,6 +485,12 @@ class TestLookup:
         }
         assert tenant_scope.calls == 1
 
+    def test_an_aliased_marker_fills_the_row_not_the_raw_kwarg(
+        self, tenant_resolver, editors
+    ) -> None:
+        resolved = tenant_resolver.resolve_dependencies(_aliased, group=str(editors.pk))
+        assert resolved == {"group": editors}
+
     @pytest.mark.parametrize("row", ["hidden", "missing"])
     def test_an_unseen_row_answers_404(
         self, tenant_resolver, editors, outsiders, row: str
@@ -566,6 +596,19 @@ class TestParent:
                 _member, group=editors.pk, _context_data={"permissions": None}
             )
         assert tenant_scope.calls == 0
+
+    @pytest.mark.parametrize(
+        "owner",
+        [lambda: Permission(codename="unsaved"), lambda: "abc", object],
+        ids=["unsaved", "malformed", "foreign_type"],
+    )
+    def test_a_parent_naming_no_row_answers_404(
+        self, tenant_resolver, editors, owner: Callable[[], object]
+    ) -> None:
+        with pytest.raises(Http404, match=NO_GROUP):
+            tenant_resolver.resolve_dependencies(
+                _member, group=editors.pk, _context_data={"permissions": owner()}
+            )
 
     def test_a_missing_parent_is_a_wiring_error(self, tenant_resolver, editors) -> None:
         with pytest.raises(UnboundObjectError) as caught:

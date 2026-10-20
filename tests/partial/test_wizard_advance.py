@@ -1,6 +1,11 @@
-import pytest
-from django.http import HttpResponse
+from dataclasses import replace
+from pathlib import Path
 
+import pytest
+from django.core.exceptions import PermissionDenied
+from django.http import Http404, HttpResponse, HttpResponseRedirect
+
+from next.pages.access import page_access
 from next.partial import ZoneRenderResult
 from next.partial.headers import CONTENT_TYPE
 from next.partial.shaping import outcomes as outcomes_module
@@ -85,6 +90,60 @@ class TestWizardAdvanceWithoutPartialSwitch:
         )
         assert response["Content-Type"] != CONTENT_TYPE
         assert "X-Next-Version" not in response
+
+
+def _raise(exc: Exception):
+    def refuse(*args, **kwargs):
+        raise exc
+
+    return refuse
+
+
+@pytest.mark.django_db()
+class TestWizardAdvanceHonoursTheStepRule:
+    """A next step whose declared rule refuses the user falls back to the redirect."""
+
+    @pytest.mark.parametrize(
+        "refusal",
+        [
+            _raise(PermissionDenied()),
+            _raise(Http404()),
+            lambda *args, **kwargs: HttpResponseRedirect("/login/"),
+        ],
+        ids=["forbidden", "hidden", "login"],
+    )
+    def test_a_refused_step_is_a_redirect_not_its_zone(
+        self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch, refusal
+    ) -> None:
+        monkeypatch.setattr(outcomes_module, "refusal", refusal)
+        response = _advance_identity(next_client, zones="wizard-zone")
+        assert response.status_code == 302
+        assert response["Location"] == "/wizard/scope/"
+
+    def test_a_step_url_on_another_page_is_a_redirect_not_its_zone(
+        self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        resolve = outcomes_module._resolve_step_target
+
+        def elsewhere(request, href):
+            _page, kwargs = resolve(request, href)
+            return Path("/elsewhere/page.py"), kwargs
+
+        monkeypatch.setattr(outcomes_module, "_resolve_step_target", elsewhere)
+        response = _advance_identity(next_client, zones="wizard-zone")
+        assert response.status_code == 302
+        assert response["Location"] == "/wizard/scope/"
+
+    def test_a_broken_step_chain_is_a_redirect_not_its_zone(
+        self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def broken(page_path: Path):
+            return replace(page_access(page_path), broken=page_path)
+
+        monkeypatch.setattr(outcomes_module, "page_access", broken)
+        response = _advance_identity(next_client, zones="wizard-zone")
+        assert response.status_code == 302
+        assert response["Location"] == "/wizard/scope/"
 
 
 @pytest.mark.django_db()

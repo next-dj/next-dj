@@ -19,6 +19,7 @@ from next.conf.imports import import_class_cached
 from next.pages.errors import PageModuleImportError
 from next.permissions.access import declarations
 from next.utils import (
+    LAYOUT_TEMPLATE,
     MAX_ANCESTOR_WALK_DEPTH,
     classify_dirs_entries,
     exec_module_file,
@@ -45,8 +46,6 @@ logger = logging.getLogger(__name__)
 _BODY_SLOT = "\x00next-page-body\x00"
 
 PAGE_MODULE: Final = "page.py"
-
-LAYOUT_TEMPLATE: Final = "layout.djx"
 
 
 @dataclass(frozen=True, slots=True)

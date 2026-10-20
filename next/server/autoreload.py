@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, override
 
 from django.utils.autoreload import StatReloader
 
-from next.pages.access import routed
+from next.pages.loaders import has_body
 from next.pages.watch import get_pages_directories_for_watch
 from next.urls.dispatcher import scan_pages_tree
 
@@ -78,16 +78,16 @@ class NextStatReloader(StatReloader):
         self._previous_routes = current
 
     def _collect_routes(self) -> set[tuple[str, Path, bool]]:
-        """Return the routes and whether each one routes, cached while signatures match.
+        """Return the routes and their loader bodies, cached while signatures match.
 
-        A bodyless `page.py` that gains a `template.djx` starts routing without an edit.
+        A body in `page.py` changes with the file, which the `.py` watch restarts on.
         """
         pages_paths = get_pages_directories_for_watch()
         new_signatures = {p: _tree_dir_signature(p) for p in pages_paths}
         if self._cached_routes is not None and new_signatures == self._dir_signatures:
             return self._cached_routes
         routes = {
-            (url_path, file_path.resolve(), routed(file_path))
+            (url_path, file_path.resolve(), has_body(file_path, None))
             for pages_path in pages_paths
             for url_path, file_path in scan_pages_tree(pages_path)
         }

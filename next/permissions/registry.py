@@ -187,6 +187,10 @@ class DeclarationRegistry:
         elif declared is not self._rules.get(file_path, _NOTHING):
             self._store(file_path, declared)
 
+    def executing(self, file_path: Path) -> bool:
+        """Return whether a loader in this thread is executing `file_path` now."""
+        return file_path in self._collecting.rules
+
     def _held(self, file_path: Path) -> _Declared:
         """Return what `file_path` holds now, its execution under way first."""
         collected = self._collecting.rules.get(file_path)

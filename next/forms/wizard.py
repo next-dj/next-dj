@@ -356,6 +356,14 @@ class FormWizard:
         scope_key = (
             type(self).__dict__.get("_storage_scope_key") or type(self).__module__
         )
+        # Each URL a wizard serves, its step aside, keeps a draft of its own.
+        bound = sorted(
+            (name, str(value))
+            for name, value in self.url_kwargs.items()
+            if name != self.url_param
+        )
+        if bound:
+            scope_key = f"{scope_key}|{bound!r}"
         self.storage_id = f"{_storage_scope_hash(scope_key)}:{self.wizard_id}"
         self._backend = wizard_backend_manager.get()
         self._loaded: dict[str, Any] | None = None

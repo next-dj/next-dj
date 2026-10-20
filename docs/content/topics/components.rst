@@ -476,7 +476,7 @@ They are available regardless of ``LAZY_COMPONENT_MODULES``.
 A ``component.py`` whose body raises while it imports closes the component.
 The loader logs the traceback and holds the exception under that file path, and the component renders as an empty string, since the access it would have declared is unknown, and under ``next.conf.fail_loudly`` it raises ``ComponentModuleImportError`` with the import failure as ``__cause__``.
 A declaration made before the failing line would otherwise be lost silently, so no part of the component renders without it.
-The held error is what ``next.E084`` reports, so a broken module that nobody noticed in a rendered page is still named by ``manage.py check --deploy``.
+The held error is what ``next.E084`` reports, so a broken module that nobody noticed in a rendered page is still named by ``manage.py check``.
 
 The ``LAZY_COMPONENT_MODULES`` flag gates the ``DIRS`` bulk import only.
 When the flag is set the framework skips that step and imports a ``component.py`` on first resolve instead.
@@ -716,7 +716,7 @@ The components subsystem contributes Django system checks.
 - ``next.E075`` reports a ``@component.context`` registration bound to a file no component render collects.
   Decorate callables defined in the ``component.py`` itself.
 - ``next.E084`` reports a ``component.py`` that raised while importing, naming the exception type and its message.
-  It is a deployment check and runs under ``manage.py check --deploy`` alone, because it imports every user module a backend holds.
+  It runs on every ``manage.py check`` and imports every user module a backend holds.
   Fix whatever the module body raised, since the components of that module render without their Python context until it imports.
 
 Run them with ``uv run python manage.py check``.

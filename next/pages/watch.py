@@ -12,6 +12,7 @@ from next.backends import backend_entries
 from next.diagnostics import QUIET_PERIOD, BackendReadLog
 from next.ports import router_access_slot
 from next.utils import (
+    LAYOUT_TEMPLATE,
     forget_resolved_trees,
     page_roots_shape_error,
     resolve_base_dir,
@@ -177,7 +178,7 @@ def _djx_paths_for_watch(file_name: str) -> set[Path]:
 
 def get_layout_djx_paths_for_watch() -> set[Path]:
     """Return every `layout.djx` path under page trees."""
-    return _djx_paths_for_watch("layout.djx")
+    return _djx_paths_for_watch(LAYOUT_TEMPLATE)
 
 
 def get_template_djx_paths_for_watch() -> set[Path]:

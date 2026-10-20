@@ -48,7 +48,7 @@ The ``deps``, ``permissions``, and ``signals`` sweeps always run, the way Django
 Steps five to thirteen bind the eight :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
 They also run ahead of the discovery steps so a discovery failure leaves no process behind with a slot still empty.
 Each implementation resolves its manager when a method is called rather than when the slot is bound, so the static manager is still built on first use.
-Step eleven moves ``seo_routes_version`` of ``next.urls.manager``, the counter the lazy urlpatterns key their cache on, so they rebuild their pattern list with the routes of the port step ten bound.
+Step twelve moves ``seo_routes_version`` of ``next.urls.manager``, the counter the lazy urlpatterns key their cache on, so they rebuild their pattern list with the routes of the port step eleven bound.
 
 Public API
 ----------

@@ -24,7 +24,7 @@ The framework also records which file the class was declared in and uses that to
 :doc:`actions` is the canonical reference for name derivation and scope.
 
 .. code-block:: python
-   :caption: page.py — auto-registered as ``article_edit_form``
+   :caption: page.py, auto-registered as ``article_edit_form``
 
    from articles.models import Article
    from django.http import HttpRequest
@@ -60,7 +60,7 @@ A form declared in ``page.py`` or ``component.py`` is page-scoped and keyed to i
 A form declared in any other file is shared, carries a project-wide name, and is reachable from any template.
 
 .. code-block:: python
-   :caption: app/forms.py — auto-registered as ``contact_form`` (shared)
+   :caption: app/forms.py, auto-registered as ``contact_form`` (shared)
 
    from django.core.mail import send_mail
    from django.http import HttpRequest

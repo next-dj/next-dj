@@ -11,10 +11,13 @@ from django.template import Context, Template
 from django.test import RequestFactory, override_settings
 
 from next.components import component
+from next.permissions import DeclarationOutsideModuleError
 from next.permissions.access import (
     _listed_middleware,
     answer,
     check,
+    declarations,
+    declare_public,
     declared,
     declared_files,
     forget_login_default,
@@ -23,6 +26,7 @@ from next.permissions.access import (
     login_middleware,
     login_redirect,
     open_view,
+    require_login,
     require_permission,
     signed_in,
 )
@@ -70,11 +74,14 @@ class _SignedInWithoutPerms:
 
 
 class TestDeclarations:
-    """Every declaration binds to the file that calls it."""
+    """Every declaration binds to the file that calls it, while a loader runs it."""
 
     def test_login_and_permission_bind_to_the_caller(self) -> None:
-        component.login_required()
-        component.permission_required(("auth.view_group", "auth.add_group"), obj="x")
+        with declarations.collecting(_SOURCE):
+            component.login_required()
+            component.permission_required(
+                ("auth.view_group", "auth.add_group"), obj="x"
+            )
 
         assert declared(_SOURCE).requirements == (
             Requirement("login", _SOURCE),
@@ -85,7 +92,8 @@ class TestDeclarations:
         assert declared_files() == (_SOURCE,)
 
     def test_a_list_of_names_is_kept_as_a_tuple(self) -> None:
-        require_permission(_SOURCE, ["auth.view_group"], None)
+        with declarations.collecting(_SOURCE):
+            require_permission(_SOURCE, ["auth.view_group"], None)
 
         assert declared(_SOURCE).requirements[0].perms == ("auth.view_group",)
 
@@ -101,7 +109,7 @@ class TestDeclarations:
         ids=["empty_tuple", "int", "empty_name", "non_str", "empty_str"],
     )
     def test_a_malformed_permission_raises(self, perm, message) -> None:
-        with pytest.raises(TypeError, match=message):
+        with declarations.collecting(_SOURCE), pytest.raises(TypeError, match=message):
             require_permission(_SOURCE, perm, None)
         assert declared(_SOURCE) is OPEN
 
@@ -110,6 +118,22 @@ class TestDeclarations:
         with pytest.raises(TypeError, match="names a context"):
             component.permission_required("auth.view_group", obj=obj)
         assert declared(_SOURCE) is OPEN
+
+    @pytest.mark.parametrize(
+        "declare",
+        [
+            lambda: require_login(_SOURCE),
+            lambda: require_permission(_SOURCE, "auth.view_group", None),
+            lambda: declare_public(_SOURCE),
+            component.login_required,
+        ],
+        ids=["login", "permission", "public", "component"],
+    )
+    def test_a_declaration_no_loader_runs_raises(self, declare) -> None:
+        with pytest.raises(DeclarationOutsideModuleError) as caught:
+            declare()
+        assert caught.value.source == _SOURCE
+        assert declared_files() == ()
 
 
 class TestCheck:

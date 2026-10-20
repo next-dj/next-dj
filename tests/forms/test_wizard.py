@@ -16,6 +16,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.test import RequestFactory, override_settings
 
 from next.forms import Form, ModelForm, PermissionOutcome
+from next.forms.dispatch.wizard import live_cleaned_data
 from next.forms.manager import form_action_manager
 from next.forms.registration import registration_diagnostics
 from next.forms.wizard import (
@@ -658,6 +659,40 @@ class TestWizardHooks:
         plain.save_step("identity", {"name": "needs-detail"})
         expanded = ConditionalWizard(request)
         assert expanded.step_names() == ["identity", "optional", "scope"]
+
+    def test_done_data_skips_a_step_an_edited_answer_dropped(self) -> None:
+        """A draft of a step `get_steps` no longer lists stays out of `done`."""
+
+        class ConditionalWizard(FormWizard):
+            class Meta:
+                steps: ClassVar = [("identity", IdentityStep), ("scope", ScopeStep)]
+
+            def get_steps(self):
+                base = [("identity", IdentityStep), ("scope", ScopeStep)]
+                if self.get_all_cleaned_data().get("name") == "needs-detail":
+                    base.insert(1, ("optional", OptionalStep))
+                return base
+
+        request = _request()
+        wizard = ConditionalWizard(request)
+        wizard.save_step("identity", {"name": "needs-detail"})
+        wizard.save_step("optional", {"detail": "stale"})
+        wizard.save_step("identity", {"name": "plain"})
+        assert live_cleaned_data(ConditionalWizard(request)) == {"name": "plain"}
+
+    def test_each_url_keeps_its_own_draft_whatever_the_step(self) -> None:
+        """Two orders keep two drafts, and the step kwarg names none of them."""
+        request = _request()
+        first = DemoWizard(request, url_kwargs={"order": 1, "step": "identity"})
+        first.save_step("identity", {"name": "Ada"})
+        same = DemoWizard(request, url_kwargs={"order": "1", "step": "scope"})
+        other = DemoWizard(request, url_kwargs={"order": 2, "step": "identity"})
+        assert same.get_all_cleaned_data() == {"name": "Ada"}
+        assert other.get_all_cleaned_data() == {}
+        assert DemoWizard(request).storage_id not in {
+            first.storage_id,
+            other.storage_id,
+        }
 
     def test_get_form_kwargs_default_is_empty(self) -> None:
         """The default `get_form_kwargs` returns an empty mapping."""

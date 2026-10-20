@@ -16,6 +16,7 @@ from django.urls import (
     URLPattern,
     URLResolver,
     get_resolver,
+    get_script_prefix,
     resolve,
 )
 
@@ -255,9 +256,16 @@ def _owned(meta: "ActionMeta", page_path: Path) -> bool:
 
 
 def _match(url: str) -> ResolverMatch | None:
-    """Return what the URLconf resolves the path of `url` to, `None` for a 404."""
+    """Return what the URLconf resolves the path of `url` to, `None` for a 404.
+
+    The path reads with or without its leading slash and the script prefix.
+    """
+    path = "/" + urlsplit(url).path.lstrip("/")
+    prefix = get_script_prefix()
+    if prefix != "/" and path.startswith(prefix):
+        path = "/" + path.removeprefix(prefix)
     try:
-        return resolve(urlsplit(url).path or "/")
+        return resolve(path)
     except Resolver404:
         return None
 

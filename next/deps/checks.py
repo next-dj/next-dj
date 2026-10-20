@@ -279,7 +279,10 @@ def _all_params(sites: _ObjectSites) -> Iterator[_ObjectParam]:
 
 def _unique(messages: Iterable[CheckMessage]) -> list[CheckMessage]:
     """Return `messages` without repeats, since one callable may register many times."""
-    return list({message.msg: message for message in messages}.values())
+    first: dict[str, CheckMessage] = {}
+    for message in messages:
+        first.setdefault(message.msg, message)
+    return list(first.values())
 
 
 def _site(param: _ObjectParam) -> str:

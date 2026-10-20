@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from django.urls import reverse
+
 from next.urls.routes import Route, collect_routes
 from tests.support import (
     ENTRY_ROUTER,
@@ -49,6 +51,26 @@ class TestCollectRoutes:
             ("/crew/", "crew:page_", "blog/pages/page.py"),
             ("/crew/about/", "crew:page_about", "blog/pages/about/page.py"),
         ]
+
+    def test_a_tree_inside_a_namespaced_include_reverses_by_the_full_name(
+        self, tmp_path
+    ) -> None:
+        urlconf = _project(
+            tmp_path,
+            'path("o/", include(([path("blog/", pages("blog"))], "outer"), '
+            'namespace="outer"))',
+        )
+
+        with installed_apps(tmp_path, "wallets", "blog", "audit", urlconf=urlconf):
+            rows = _rows(tmp_path)
+            reversed_about = reverse("outer:blog:page_about")
+
+        assert (
+            "/o/blog/about/",
+            "outer:blog:page_about",
+            "blog/pages/about/page.py",
+        ) in rows
+        assert reversed_about == "/o/blog/about/"
 
     def test_auto_trees_are_listed_only_where_the_framework_is_included(
         self, tmp_path
