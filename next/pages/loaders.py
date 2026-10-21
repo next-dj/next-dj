@@ -508,13 +508,22 @@ def _resolved(path: Path) -> Path:
     return held
 
 
-def _layout_mtime_ns(layout_file: Path) -> int | None:
-    """Return the mtime of a `layout.djx` file, `None` when absent or not a file."""
+def _layout_at(directory: Path, *, linked: bool) -> tuple[Path, int] | None:
+    """Return the `layout.djx` of `directory` by its resolved name, with its mtime.
+
+    Only a link is resolved, since a plain file under a real directory names itself.
+    """
+    layout_file = directory / LAYOUT_TEMPLATE
     try:
-        status = layout_file.stat()
+        status = layout_file.lstat()
+        if stat.S_ISLNK(status.st_mode):
+            linked = True
+            status = layout_file.stat()
     except OSError:
         return None
-    return status.st_mtime_ns if stat.S_ISREG(status.st_mode) else None
+    if not stat.S_ISREG(status.st_mode):
+        return None
+    return (_resolved(layout_file) if linked else layout_file), status.st_mtime_ns
 
 
 def _routed_root(start: Path) -> Path | None:
@@ -541,17 +550,21 @@ def _above_tree(tree_root: Path, room: int) -> tuple[tuple[Path, int], ...]:
     found: list[tuple[Path, int]] = []
     # The filesystem root is the last ancestor and holds no layout.
     for directory in tuple(tree_root.parents)[:-1][:room]:
-        layout_file = directory / LAYOUT_TEMPLATE
-        mtime_ns = _layout_mtime_ns(layout_file)
-        if mtime_ns is not None:
-            found.append((_resolved(layout_file), mtime_ns))
+        layout = _layout_at(directory, linked=False)
+        if layout is not None:
+            found.append(layout)
     layouts = tuple(found)
     _ABOVE_TREE[key] = layouts
     return layouts
 
 
 def _walk(
-    file_path: Path, watched_depth: int, *, cut: bool = True, resolved: bool = False
+    file_path: Path,
+    watched_depth: int,
+    *,
+    cut: bool = True,
+    resolved: bool = False,
+    tree_root: Path | None = None,
 ) -> tuple[list[Path], list[Path], list[int | None]]:
     """Climb the ancestors of `file_path` for layouts, watched directories and mtimes.
 
@@ -563,15 +576,18 @@ def _walk(
     start = file_path.parent if resolved else file_path.absolute().parent
     # Below a symlink the resolved depth does not count the written parents.
     linked = not resolved and _resolved(start) != start
-    tree_root = None if linked else _routed_root(start)
+    if linked:
+        tree_root = None
+    elif tree_root is None:
+        tree_root = _routed_root(start)
     ancestors, above, room = _split_ancestry(start, watched_depth, tree_root)
 
     for depth, current_dir in enumerate(ancestors[:MAX_ANCESTOR_WALK_DEPTH]):
         if depth < watched_depth:
             watched_dirs.append(current_dir)
-        mtime_ns = _layout_mtime_ns(current_dir / LAYOUT_TEMPLATE)
-        if mtime_ns is not None:
-            layout_file = _resolved(current_dir / LAYOUT_TEMPLATE)
+        layout = _layout_at(current_dir, linked=linked)
+        if layout is not None:
+            layout_file, mtime_ns = layout
             layout_files.append(layout_file)
             mtimes.append(mtime_ns)
             if cut and _is_root_layout(layout_file, mtime_ns):
@@ -595,7 +611,7 @@ def _append_shared(
     for shared in shared_layouts():
         if shared in layout_files:
             continue
-        mtime_ns = _layout_mtime_ns(shared)
+        mtime_ns = stat_mtime_ns(shared)
         layout_files.append(shared)
         mtimes.append(mtime_ns)
         if cut and mtime_ns is not None and _is_root_layout(shared, mtime_ns):
@@ -648,9 +664,14 @@ def layout_chain(
     return tuple(_climb(file_path, 0, cut=cut, resolved=resolved)[0])
 
 
-def layout_stamps(file_path: Path) -> tuple[tuple[Path, int | None], ...]:
-    """Return the cut layouts of `file_path` with their stat'd mtimes."""
-    layouts, _, mtimes = _walk(file_path, 0)
+def layout_stamps(
+    file_path: Path, tree_root: Path | None = None
+) -> tuple[tuple[Path, int | None], ...]:
+    """Return the cut layouts of `file_path` with their stat'd mtimes.
+
+    A `tree_root` only says where to hold the tail, so any ancestor yields one chain.
+    """
+    layouts, _, mtimes = _walk(file_path, 0, tree_root=tree_root)
     return tuple(zip(layouts, mtimes, strict=True))
 
 

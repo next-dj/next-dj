@@ -2153,8 +2153,17 @@ class TestLayoutChainCut:
         link = tmp_path / "link"
         link.symlink_to(tmp_path / "real", target_is_directory=True)
 
-        assert layout_chain(link / "page.py", resolved=True) == (layout.resolve(),)
+        assert layout_chain(link / "page.py", resolved=True) == (link / "layout.djx",)
         assert layout_chain(link / "page.py") == (layout.resolve(),)
+
+    def test_a_symlinked_layout_file_is_named_by_its_target(self, tmp_path) -> None:
+        target = tmp_path / "shells" / "site.djx"
+        target.parent.mkdir()
+        target.write_text(_SHELL.format(tag="site"))
+        (tmp_path / "site").mkdir()
+        (tmp_path / "site" / "layout.djx").symlink_to(target)
+
+        assert layout_chain(tmp_path / "site" / "page.py") == (target.resolve(),)
 
     def test_an_unmarked_chain_runs_to_the_top(self, tmp_path) -> None:
         outer = _write_layout(tmp_path, "outer")

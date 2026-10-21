@@ -313,7 +313,7 @@ class AssetDiscovery:
         # Imported before the walk, because the import writes `__pycache__`.
         lists = self._module_lists(resolved)
         directories = self._watched_directories(resolved)
-        stamps = pages_loaders.layout_stamps(file_path)
+        stamps = pages_loaders.layout_stamps(file_path, page_root)
         chain = [layout for layout, _ in stamps]
         directories += _unwatched_layout_directories(chain, directories)
         files: list[FoundAsset] = []
@@ -504,22 +504,35 @@ class AssetDiscovery:
     ) -> tuple[tuple[Path, int | None], ...]:
         """Walk up from the page directory, outermost first, and stat as it goes.
 
-        Inside any page tree every directory is watched, outside only those read.
+        Inside a page tree every directory up to the outermost root is watched.
         """
         watched: list[tuple[Path, int | None]] = []
         current_dir = file_path.parent
+        outer_root = self._outer_page_root(current_dir)
         for depth in range(MAX_ANCESTOR_WALK_DEPTH):
             # Stat first, so a file created in between leaves the plan stale.
             mtime = stat_mtime_ns(current_dir)
-            layout_file = current_dir / LAYOUT_TEMPLATE
             if (
-                depth == 0
-                or self._resolver.find_page_root(layout_file) is not None
-                or layout_file.exists()
+                outer_root is not None
+                or depth == 0
+                or (current_dir / LAYOUT_TEMPLATE).exists()
             ):
                 watched.append((current_dir, mtime))
             parent = current_dir.parent
-            if parent == current_dir:
+            # The outermost root ends the walk, and so does the filesystem root.
+            if current_dir in (outer_root, parent):
                 break
             current_dir = parent
         return tuple(reversed(watched))
+
+    def _outer_page_root(self, directory: Path) -> Path | None:
+        """Return the outermost page root holding the resolved `directory`, or None.
+
+        A layout between nested roots wraps the page, so its directory is watched too.
+        """
+        holding = [
+            root
+            for root, _key in self._resolver.page_roots()
+            if directory.is_relative_to(root)
+        ]
+        return min(holding, key=lambda root: len(root.parts), default=None)

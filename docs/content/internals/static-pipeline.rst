@@ -45,7 +45,7 @@ Five things invalidate a plan.
 - Under ``DEBUG`` each render re-stats the directories the plan was read from and rebuilds when one of them has moved, appeared, or gone away.
   The mtimes are read in nanoseconds and compared for inequality, so a directory restored from an archive with an older timestamp counts as changed too, and one that does not stat at all is recorded as absent rather than as a timestamp.
   For a page those directories are the whole walk from the page directory up to its outermost page root, not only the ones that already hold a ``layout.djx``, so a layout added in between is visible on the next request.
-  Above every root the walk keeps the directories that hold a ``layout.djx``, and the directory of a ``DIRS`` root layout in the chain is watched too, so a ``layout.css`` added beside a shared layout reaches the page without a restart.
+  Above the outermost root only the directories of the layouts in the chain are watched, a ``DIRS`` root layout included, so a ``layout.css`` added beside a shared layout reaches the page without a restart.
   The plan also holds the mtime of every layout file in the cut ``layout_chain`` of the page, so switching a ``{% layout root %}`` marker on or off evicts it.
   For a component they are the component folder and the folder holding its module.
 
