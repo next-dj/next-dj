@@ -19,7 +19,7 @@ _DJANGO_BACKEND = "django.template.backends.django.DjangoTemplates"
 _DJANGO_TAG_PATTERN = r"({%.*?%}|{{.*?}}|{#.*?#})"
 _NEXT_TAG_ALTERNATION = (
     "action_url|asset|breadcrumbs|collect_head|collect_scripts|collect_styles|"
-    "component|consented|form|has_perm|metadata|script|set_slot|slot|template|"
+    "component|consented|form|has_perm|layout|metadata|script|set_slot|slot|template|"
     "use_module|use_script|use_style|zone"
 )
 _WIDENED_TAG_PATTERN = (

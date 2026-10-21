@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import functools
 import logging
 import threading
@@ -29,7 +28,12 @@ from next.utils import (
 )
 
 from .paths import page_path_info
-from .placeholder import PLACEHOLDER_CLOSE, PLACEHOLDER_OPEN, placeholder_spans
+from .placeholder import (
+    PLACEHOLDER_CLOSE,
+    PLACEHOLDER_OPEN,
+    placeholder_spans,
+    scan_root,
+)
 from .watch import get_pages_directories_for_watch
 
 
@@ -468,12 +472,84 @@ class DjxTemplateLoader(TemplateLoader):
         return djx_file if djx_file.exists() else None
 
 
+def _climb(file_path: Path, watched_depth: int) -> tuple[list[Path], list[Path]]:
+    """Climb the ancestors of `file_path` for layouts and watched directories.
+
+    The climb ends at the first root layout, and the directories end with its own.
+    """
+    layout_files: list[Path] = []
+    watched_dirs: list[Path] = []
+    current_dir = file_path.resolve().parent
+
+    for depth in range(MAX_ANCESTOR_WALK_DEPTH):
+        if current_dir == current_dir.parent:
+            break
+        if depth < watched_depth:
+            watched_dirs.append(current_dir)
+        layout_file = current_dir / LAYOUT_TEMPLATE
+        if layout_file.exists():
+            layout_files.append(layout_file)
+            if _is_root_layout(layout_file):
+                return layout_files, watched_dirs
+        current_dir = current_dir.parent
+
+    for shared_layout in shared_layouts():
+        resolved = shared_layout.resolve()
+        if resolved not in layout_files:
+            layout_files.append(resolved)
+            if _is_root_layout(resolved):
+                break
+
+    return layout_files, watched_dirs
+
+
+def layout_chain(file_path: Path) -> tuple[Path, ...]:
+    """Return the layouts that wrap `file_path` from near to far, cut after a root.
+
+    The cut spans the tail of root layouts from `DIRS` too, and paths come resolved.
+    """
+    return tuple(_climb(file_path, 0)[0])
+
+
 def _as_placeholder_fallback(body: str) -> str:
     """Return `body` as the fallback of a paired placeholder.
 
     Only a chain rendered without its ancestor layout ever shows the fallback.
     """
     return f"{PLACEHOLDER_OPEN}{body}{PLACEHOLDER_CLOSE}"
+
+
+_LAYOUT_TEXTS: PageCache[Path, tuple[int, str]] = PageCache()
+
+
+def _layout_text(layout_file: Path) -> str | None:
+    """Return the source of `layout_file`, read again only when its mtime moved.
+
+    A build, its root check and the sources snapshot behind it share one read.
+    """
+    mtime_ns = stat_mtime_ns(layout_file)
+    if mtime_ns is None:
+        return None
+    held = _LAYOUT_TEXTS.get(layout_file)
+    if held is not None and held[0] == mtime_ns:
+        return held[1]
+    try:
+        text = layout_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    _LAYOUT_TEXTS[layout_file] = (mtime_ns, text)
+    return text
+
+
+def forget_layout_texts() -> None:
+    """Drop every held layout source, so a rewrite within one mtime tick is read."""
+    _LAYOUT_TEXTS.clear()
+
+
+def _is_root_layout(layout_file: Path) -> bool:
+    """Return whether `layout_file` reads as a root, an unreadable one is not."""
+    content = _layout_text(layout_file)
+    return content is not None and scan_root(content).is_root
 
 
 class LayoutTemplateLoader:
@@ -484,7 +560,14 @@ class LayoutTemplateLoader:
 
     def can_load(self, file_path: Path) -> bool:
         """Return whether at least one `layout.djx` exists on the path."""
-        return bool(self._find_layout_files(file_path))
+        current_dir = file_path.parent
+        for _ in range(MAX_ANCESTOR_WALK_DEPTH):
+            if current_dir == current_dir.parent:
+                break
+            if (current_dir / LAYOUT_TEMPLATE).exists():
+                return True
+            current_dir = current_dir.parent
+        return bool(shared_layouts())
 
     def compose_skeleton(self, file_path: Path) -> str:
         """Return the layout chain for `file_path` with a slot where the body goes.
@@ -506,8 +589,8 @@ class LayoutTemplateLoader:
         if not layout_files:
             return body
 
-        sibling_layout = (file_path.parent / LAYOUT_TEMPLATE).exists()
-        wrapped = body if sibling_layout else _as_placeholder_fallback(body)
+        sibling = file_path.resolve().parent / LAYOUT_TEMPLATE
+        wrapped = body if sibling.exists() else _as_placeholder_fallback(body)
         return self._compose_layout_hierarchy(wrapped, layout_files)
 
     def layout_sources(self, file_path: Path) -> tuple[list[Path], list[Path]]:
@@ -515,39 +598,11 @@ class LayoutTemplateLoader:
 
         A new `layout.djx` moves only its directory's mtime, so watch directories too.
         """
-        return self._walk_ancestors(file_path, page_tree_depth(file_path.parent))
-
-    def _walk_ancestors(
-        self, file_path: Path, watched_depth: int
-    ) -> tuple[list[Path], list[Path]]:
-        """Climb the ancestors of `file_path` for layouts and watched directories."""
-        layout_files: list[Path] = []
-        watched_dirs: list[Path] = []
-        current_dir = file_path.parent
-
-        for depth in range(MAX_ANCESTOR_WALK_DEPTH):
-            if current_dir == current_dir.parent:
-                break
-            if depth < watched_depth:
-                watched_dirs.append(current_dir)
-            layout_file = current_dir / LAYOUT_TEMPLATE
-            if layout_file.exists():
-                layout_files.append(layout_file)
-            current_dir = current_dir.parent
-
-        for shared_layout in shared_layouts():
-            if shared_layout not in layout_files:
-                layout_files.append(shared_layout)
-
-        return layout_files, watched_dirs
+        return _climb(file_path, page_tree_depth(file_path.parent))
 
     def _find_layout_files(self, file_path: Path) -> list[Path]:
-        """Return `layout.djx` paths from near to far plus global layouts.
-
-        The walk skips the watched directories, which cost a `resolve` no caller reads.
-        """
-        layout_files, _ = self._walk_ancestors(file_path, 0)
-        return layout_files
+        """Return `layout.djx` paths from near to far plus global layouts, root cut."""
+        return list(layout_chain(file_path))
 
     def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
         """Return candidate roots from one router `DIRS` entry (paths only)."""
@@ -563,13 +618,14 @@ class LayoutTemplateLoader:
         result = template_content
 
         for layout_file in layout_files:
-            with contextlib.suppress(OSError, UnicodeDecodeError):
-                layout_content = layout_file.read_text(encoding="utf-8")
-                spans = placeholder_spans(layout_content)
-                if spans:
-                    start, end = spans[0]
-                    # Sliced, since a substitution would interpret escapes in the body.
-                    result = layout_content[:start] + result + layout_content[end:]
+            layout_content = _layout_text(layout_file)
+            if layout_content is None:
+                continue
+            spans = placeholder_spans(layout_content)
+            if spans:
+                start, end = spans[0]
+                # Sliced, since a substitution would interpret escapes in the body.
+                result = layout_content[:start] + result + layout_content[end:]
         return result
 
 

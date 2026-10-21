@@ -1,10 +1,11 @@
-"""The layout placeholder grammar and the scan that locates it in a layout source.
+"""The layout placeholder and root marker grammar, and the scans that locate them.
 
 Composition and the layout checks share these spellings.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from django.template.base import DebugLexer, TokenType
@@ -18,12 +19,23 @@ if TYPE_CHECKING:
 PLACEHOLDER = "{% template %}"
 PLACEHOLDER_OPEN = "{% #template %}"
 PLACEHOLDER_CLOSE = "{% /template %}"
+ROOT_MARKER = "{% layout root %}"
 
 _SINGLE_TAG = "template"
 _OPEN_TAG = "#template"
 _CLOSE_TAG = "/template"
 _COMMENT_TAG = "comment"
 _END_COMMENT_TAG = "endcomment"
+_LOAD_TAG = "load"
+_ROOT_MARKER_WORDS = ["layout", "root"]
+
+
+def _tokens(content: str) -> Iterator[tuple[TokenType, str, int, int]]:
+    """Yield the type, the contents and the bounds of every token Django lexes."""
+    for token in DebugLexer(content).tokenize():
+        # The debug lexer records token bounds that the plain lexer leaves unset.
+        start, end = cast("tuple[int, int]", token.position)
+        yield token.token_type, token.contents, start, end
 
 
 def _block_tags(content: str) -> Iterator[tuple[str, int, int]]:
@@ -31,13 +43,10 @@ def _block_tags(content: str) -> Iterator[tuple[str, int, int]]:
 
     A tag written under `{% verbatim %}` is text to the lexer, so it never comes out.
     """
-    for token in DebugLexer(content).tokenize():
-        if token.token_type is not TokenType.BLOCK:
-            continue
-        head = token.contents.split(maxsplit=1)
-        # The debug lexer records token bounds that the plain lexer leaves unset.
-        start, end = cast("tuple[int, int]", token.position)
-        yield (head[0] if head else ""), start, end
+    for token_type, contents, start, end in _tokens(content):
+        if token_type is TokenType.BLOCK:
+            head = contents.split(maxsplit=1)
+            yield (head[0] if head else ""), start, end
 
 
 def placeholder_spans(content: str) -> list[tuple[int, int]]:
@@ -65,4 +74,51 @@ def placeholder_spans(content: str) -> list[tuple[int, int]]:
     return spans
 
 
-__all__ = ["PLACEHOLDER", "PLACEHOLDER_CLOSE", "PLACEHOLDER_OPEN", "placeholder_spans"]
+@dataclass(frozen=True, slots=True)
+class RootScan:
+    """Where the root markers of a layout stand and whether the layout is a root."""
+
+    is_root: bool
+    markers: tuple[tuple[int, int], ...]
+
+
+def scan_root(content: str) -> RootScan:
+    """Locate the root markers of `content` and decide whether it is a root layout.
+
+    Only `load` tags, comments and blank text may precede the one marker.
+    """
+    markers: list[tuple[int, int]] = []
+    clean_prefix = True
+    first_in_place = False
+    commented = False
+    for token_type, contents, start, end in _tokens(content):
+        words = contents.split()
+        command = words[0] if words else ""
+        is_block = token_type is TokenType.BLOCK
+        if commented:
+            commented = not (is_block and command == _END_COMMENT_TAG)
+        elif token_type is TokenType.TEXT:
+            clean_prefix = clean_prefix and not contents.strip()
+        elif is_block and command == _COMMENT_TAG:
+            commented = True
+        elif is_block and words == _ROOT_MARKER_WORDS:
+            if not markers:
+                first_in_place = clean_prefix
+            markers.append((start, end))
+            clean_prefix = False
+        elif token_type is TokenType.COMMENT or (is_block and command == _LOAD_TAG):
+            pass
+        else:
+            clean_prefix = False
+    return RootScan(first_in_place and len(markers) == 1, tuple(markers))
+
+
+__all__ = [
+    "PLACEHOLDER",
+    "PLACEHOLDER_CLOSE",
+    "PLACEHOLDER_OPEN",
+    "ROOT_MARKER",
+    "RootScan",
+    "placeholder_spans",
+    "scan_root",
+]

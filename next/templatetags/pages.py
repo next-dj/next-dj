@@ -25,6 +25,7 @@ _END_BLOCK_TEMPLATE = ("/template",)
 _SINGLE_TAKES_NO_ARGS = "{% template %} tag takes no arguments"
 _PAIRED_TAKES_NO_ARGS = "{% #template %} tag takes no arguments"
 _METADATA_TAKES_NO_ARGS = "{% metadata %} tag takes no arguments"
+_LAYOUT_FORMS = "{% layout %} tag takes the single argument 'root'"
 _BREADCRUMBS_FORMS = "{% breadcrumbs %} tag takes no arguments or 'as name'"
 _AS_FORM = 2
 
@@ -62,6 +63,24 @@ def do_block_template(parser: Parser, token: Token) -> TemplatePlaceholderNode:
     nodelist = parser.parse(_END_BLOCK_TEMPLATE)
     parser.delete_first_token()
     return TemplatePlaceholderNode(nodelist=nodelist)
+
+
+class RootLayoutNode(Node):
+    """Renders nothing, since the marker only tells composition where to stop."""
+
+    @override
+    def render(self, context: Context) -> str:
+        """Render the empty string."""
+        del context
+        return ""
+
+
+@register.tag(name="layout")
+def do_layout(_parser: Parser, token: Token) -> RootLayoutNode:
+    """Compile ``{% layout root %}``, the marker that makes a layout a chain root."""
+    if token.split_contents()[1:] != ["root"]:
+        raise template.TemplateSyntaxError(_LAYOUT_FORMS)
+    return RootLayoutNode()
 
 
 @register.tag(name="metadata")

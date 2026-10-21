@@ -21,6 +21,7 @@ from next.pages.access import PageDeclarations
 from next.pages.loaders import (
     LayoutTemplateLoader,
     build_registered_loaders,
+    forget_layout_texts,
     load_page_module,
     load_python_module_memo,
     reset_module_memo,
@@ -126,6 +127,7 @@ class Page(PageDeclarations):
         Used for a file rewritten in place, since stale detection needs a changed mtime.
         """
         self._templates.clear()
+        forget_layout_texts()
         clear_page_path_info()
 
     @overload
