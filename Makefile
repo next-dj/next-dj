@@ -84,6 +84,7 @@ BENCH_FLAGS ?= \
 	--benchmark-only \
 	--benchmark-warmup=on \
 	--benchmark-warmup-iterations=1000 \
+	--benchmark-max-time=0.2 \
 	--benchmark-min-rounds=10 \
 	--benchmark-disable-gc \
 	--benchmark-storage=file://./.benchmarks \

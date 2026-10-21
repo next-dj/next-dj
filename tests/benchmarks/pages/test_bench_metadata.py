@@ -118,7 +118,7 @@ _DEEP_SEGMENT = {
     "alternates": {"feeds": [{"url": "/feed.xml", "type": "rss"}]},
     "jsonld": [{"@id": "#org", "@type": "Organization"}, {"@type": "Thing"}],
 }
-_ROTATION = 3000
+_ROTATION = 500
 
 
 def _render(meta: Metadata, request: object) -> str:

@@ -1,0 +1,54 @@
+name: CodSpeed
+
+on:
+  push:
+    branches: [main]
+    paths: &codspeed-paths
+      - "next/**"
+      - "tests/benchmarks/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/codspeed.yml"
+      - ".github/actions/setup-python-uv/**"
+  pull_request:
+    branches: [main]
+    paths: *codspeed-paths
+  workflow_dispatch:
+
+concurrency:
+  group: codspeed-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  codspeed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.13"
+          cache: "true"
+          cache-key-suffix: codspeed-py-3.13
+
+      - name: Sync the CodSpeed group
+        run: uv sync --locked --dev --group codspeed --python 3.13
+
+      - name: Run benchmarks
+        uses: CodSpeedHQ/action@v4
+        with:
+          mode: simulation
+          run: >-
+            uv run --no-sync pytest tests/benchmarks
+            -m perf
+            --codspeed
+            -p no:randomly
+            --no-cov
+            --override-ini=addopts=

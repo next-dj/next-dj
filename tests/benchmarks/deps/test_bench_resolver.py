@@ -133,7 +133,7 @@ class TestBenchDependencyResolver:
     def test_direct_call_baseline(self, benchmark) -> None:
         """Plain call of the two-parameter handler, the floor every resolve adds to."""
         request = build_mock_http_request()
-        benchmark(_handler_simple, request=request, name="default")
+        benchmark(_handler_simple, request, "default")
 
     @pytest.mark.benchmark(group="deps.resolver")
     def test_resolve_simple(self, benchmark) -> None:

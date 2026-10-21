@@ -79,7 +79,7 @@ Tests mirror this layout:
 | `make test-examples` | Each example must have `tests/` or `tests.py`. Runs pytest with coverage per example. |
 | `make test-js` | Vitest unit tests for `next/client/next.ts`. |
 | `uv run pytest tests/ -n auto` | Fast iteration without coverage flags. |
-| `make bench` | Opt-in micro-benchmarks with CI-aligned flags (warmup, min-rounds, gc-disabled, storage under `.benchmarks/`). Override via `BENCH_FLAGS`. See [Benchmarks](#benchmarks). |
+| `make bench` | Opt-in micro-benchmarks with CI-aligned flags (warmup, max-time, min-rounds, gc-disabled, storage under `.benchmarks/`). Override via `BENCH_FLAGS`. See [Benchmarks](#benchmarks). |
 
 ### Lint, types, format
 
@@ -195,17 +195,19 @@ Micro-benchmarks in [tests/benchmarks/](tests/benchmarks/) guard the hot paths i
 
 **Running locally**
 
-- `make bench` runs all benchmarks with the `perf` marker using the same flags as CI (warmup=1000, min-rounds=10, gc disabled, results stored in `.benchmarks/`). For a before/after comparison: `make bench BENCH_EXTRA="--benchmark-save=before"`, apply your change, then `make bench BENCH_EXTRA="--benchmark-save=after --benchmark-compare='*_before'"`. JSON files land under `.benchmarks/`.
+- `make bench` runs all benchmarks with the `perf` marker using the same flags as CI (warmup=1000, max-time=0.2s, min-rounds=10, gc disabled, results stored in `.benchmarks/`). For a before/after comparison: `make bench BENCH_EXTRA="--benchmark-save=before"`, apply your change, then `make bench BENCH_EXTRA="--benchmark-save=after --benchmark-compare='*_before'"`. JSON files land under `.benchmarks/`.
 - Benchmarks are **excluded from `make test`** (ignored via `addopts`) and auto-marked `perf` by [tests/benchmarks/conftest.py](tests/benchmarks/conftest.py), so tests need no decorator of their own.
 - Numbers are **only comparable on the same machine**. Do not cite local deltas in the PR. The CI workflow below does the machine-stable comparison.
 
 **CI integration**
 
-The [Benchmarks workflow](.github/workflows/bench.yml) runs on every PR and every push to `main`:
+The [Benchmarks workflow](.github/workflows/bench.yml) runs on every PR and every push to `main` that touches `next/`, `tests/benchmarks/`, the dependency files or the workflow itself:
 
 - On `main`: writes a baseline into `gh-pages` under `dev/bench/`.
 - On PRs: runs the same benchmarks and posts a comment with side-by-side deltas. A hard gate at `median:99%` (≈×2 of base, the strictest value the flag parser accepts) fails the `bench` job and blocks merge on a detected regression. Put `[skip bench]` in the PR title or commit message to bypass.
 - Uses a single Python/Django version (3.13 / latest) so cross-matrix noise does not pollute comparisons.
+
+The [CodSpeed workflow](.github/workflows/codspeed.yml) runs the same suite on the same triggers under `pytest-codspeed` in simulation mode. It counts instructions in a simulated CPU instead of timing the runner, so results do not depend on the hardware and small regressions show up in its PR report. It needs the `codspeed` dependency group: `uv sync --dev --group codspeed`, then `uv run pytest tests/benchmarks -m perf --codspeed --override-ini=addopts=` to check the suite locally in walltime mode. A benchmark must run under both plugins, so pass the arguments of a `pedantic` call through its `setup` return value, not through `args=` alongside `setup`, and do not pass a `name=` keyword to `benchmark(...)`.
 
 **Adding a benchmark**
 
