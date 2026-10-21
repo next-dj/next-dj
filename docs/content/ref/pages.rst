@@ -126,8 +126,10 @@ It is no ``TemplateLoader``, because the chain supplies a body and this wraps on
 
 ``layout_chain(file_path, *, cut=True, resolved=False)`` returns the layouts that wrap a page file, nearest first, as resolved paths.
 The chain ends after the first root layout and carries the ``DIRS`` roots after the ancestors.
-``cut=False`` keeps the whole ancestry, which is what the layout checks read.
-``resolved=True`` says the path is resolved already and skips the second resolution.
+``cut=False`` keeps the whole ancestry.
+The walk climbs the path as written, so a page in a symlinked folder keeps the layouts of the tree that routes it, and each layout comes back resolved.
+``resolved=True`` says no symlink sits on the path, which skips the check for one.
+A ``layout.djx`` that is a directory and not a file is no layout.
 Composition, the static discovery, and the checks all read this one function, so they agree on which layouts a page has.
 The function is not exported from the top-level ``next`` package.
 
@@ -145,7 +147,7 @@ Placeholder
 Composition and the ``check_layout_templates`` check read the same scan from here, so ``next.W001`` and ``next.W078`` count exactly the placeholders composition would fill.
 ``ROOT_MARKER`` is the canonical ``{% layout root %}`` spelling.
 ``scan_root(content)`` returns a ``RootScan`` for a layout source, whose ``is_root`` tells whether the layout is a root and whose ``markers`` holds the bounds of every marker the lexer reaches.
-A layout is a root when exactly one marker stands after nothing but ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, and blank text.
+A layout is a root when exactly one marker stands after nothing but ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, ASCII whitespace, and a leading byte order mark.
 The scan serves composition and ``next.E168`` alike, so a marker that is misplaced or repeated is never half honored.
 ``opens_html_document(content)`` tells whether a source writes an ``<html`` tag in text outside a ``{% comment %}``, which is what ``next.W133`` reads.
 

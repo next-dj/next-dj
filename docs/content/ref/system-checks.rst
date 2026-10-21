@@ -822,7 +822,7 @@ Errors
        Renaming a key or dropping one of the files clears it, see :ref:`topics-static-name-resolution-colocated`.
      - ``next.static.checks``
    * - ``next.E168``
-     - A ``{% layout root %}`` marker stands after something other than ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, and blank text, or a layout carries the marker more than once.
+     - A ``{% layout root %}`` marker stands after something other than ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, ASCII whitespace, and a leading byte order mark, or a layout carries the marker more than once.
        The framework ignores such a marker, so the layout is no root, and the check fails the project so the marker does not go missing unnoticed.
        Moving the marker to the top of the file and keeping one of them clears it, see :ref:`topics-layouts-root`.
      - ``next.pages.checks.layouts``
@@ -842,7 +842,8 @@ Warnings
    * - ``next.W001``
      - A ``layout.djx`` carries no ``{% template %}`` placeholder, so composition drops the layout and the pages under it render without its markup.
        The paired ``{% #template %}`` form, whose body is a fallback, counts as the placeholder too.
-       The check judges every layout in the uncut ancestry of a scanned page, so it reaches a folder without a page, a ``DIRS`` root, a layout above the page tree, and a layout that a ``{% layout root %}`` cuts away from every chain.
+       The check judges every layout that composition wraps a scanned page in, so it reaches a folder without a page, a ``DIRS`` root, and a layout above the page tree.
+       A layout that a ``{% layout root %}`` cuts away from every chain renders for no page and is not checked.
      - ``next.pages.checks.layouts``
    * - ``next.W002``
      - A directory named by ``PAGES_DIR`` sits beside the working directory, holds pages, and no configured router routes it, so nothing under it is served.
@@ -940,7 +941,7 @@ Warnings
      - A ``layout.djx`` carries more than one ``{% template %}`` placeholder.
        Composition fills the first one and every other renders its own fallback instead of the page.
        It carries its own code rather than sharing ``next.W001``, so silencing one layout mistake never silences the other.
-       It reaches the same layouts as ``next.W001``, cut ones included.
+       It reaches the same layouts as ``next.W001``.
      - ``next.pages.checks.layouts``
    * - ``next.W079``
      - The ``JS_CONTEXT_SERIALIZER`` dotted path cannot be imported.
@@ -1159,7 +1160,7 @@ Warnings
        Moving the root under ``BASE_DIR``, setting ``BASE_DIR``, or giving the ``PageRoot`` a ``key`` clears it, see :ref:`topics-static-name-resolution-colocated`.
      - ``next.static.checks``
    * - ``next.W133``
-     - A ``layout.djx`` writes an ``<html`` element in text outside a ``{% comment %}`` and carries no working ``{% layout root %}`` marker, while a layout further out in its uncut chain exists, so the page renders two documents.
+     - A ``layout.djx`` writes an ``<html`` element in text outside a ``{% comment %}``, a ``{% verbatim %}`` block, and an HTML comment, and carries no working ``{% layout root %}`` marker, while a layout further out in its chain exists, so the page renders two documents.
        When the layout carries a marker that ``next.E168`` rejects, the message points at that error.
        Opening the layout with the marker clears it, see :ref:`topics-layouts-root`.
      - ``next.pages.checks.layouts``
@@ -1169,6 +1170,7 @@ Warnings
      - ``next.pages.checks.layouts``
    * - ``next.W135``
      - A ``layout.djx`` that sits above every page tree and wraps a scanned page has co-located assets, such as a ``layout.css``.
+       A layout that a ``{% layout root %}`` below it cuts away wraps no page and draws no warning.
        The layout wraps the pages, but its files are not served.
        The message names the files.
        Moving the layout into the page tree or the assets to a layout inside it clears it, see :ref:`topics-layouts`.

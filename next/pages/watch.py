@@ -15,7 +15,6 @@ from next.utils import (
     LAYOUT_TEMPLATE,
     forget_resolved_trees,
     page_roots_shape_error,
-    resolve_base_dir,
     resolved_tree,
     template_edits_watched,
 )
@@ -43,12 +42,11 @@ _reads = BackendReadLog(logger)
 
 
 class _BackendsMemo(NamedTuple):
-    """The held routers, and the base directory they were built against.
+    """The held routers, `None` for an incomplete build.
 
-    A base directory change emits no reload, `backends=None` marks an incomplete build.
+    A `BASE_DIR` change reloads the routers, which drops the memo with them.
     """
 
-    base_dir: Path | None
     backends: list[RouterBackend] | None
 
 
@@ -100,16 +98,11 @@ def _page_backends_for_watch() -> list[RouterBackend]:
     """
     if template_edits_watched():
         return _build_page_backends_for_watch()[0]
-    base_dir = resolve_base_dir()
     memo = _state.memo
-    if memo is not None:
-        if memo.base_dir != base_dir:
-            # A BASE_DIR change emits no reload, so routers built on the old one go.
-            _forget_backends()
-        elif memo.backends is not None:
-            return memo.backends
+    if memo is not None and memo.backends is not None:
+        return memo.backends
     backends, complete = _build_page_backends_for_watch()
-    _state.memo = _BackendsMemo(base_dir, backends if complete else None)
+    _state.memo = _BackendsMemo(backends if complete else None)
     return backends
 
 

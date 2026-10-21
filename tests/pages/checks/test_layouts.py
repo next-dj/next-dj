@@ -68,8 +68,21 @@ class TestLayoutAncestry:
         with routed(tmp_path / "site" / "pages"):
             assert check_ids(check_layout_templates()) == [expected]
 
-    def test_a_layout_cut_by_a_root_is_still_checked(self, tmp_path: Path) -> None:
+    def test_a_layout_a_root_cuts_from_every_page_is_not_checked(
+        self, tmp_path: Path
+    ) -> None:
         write_page(tmp_path / "pages", "embed")
+        _layout(tmp_path / "pages", _NO_SLOT)
+        _layout(tmp_path / "pages" / "embed", f"{ROOT_MARKER}{_SHELL}")
+
+        with routed(tmp_path / "pages"):
+            assert check_ids(check_layout_templates()) == []
+
+    def test_a_layout_cut_for_one_page_is_checked_for_another(
+        self, tmp_path: Path
+    ) -> None:
+        write_page(tmp_path / "pages", "embed")
+        write_page(tmp_path / "pages", "home")
         _layout(tmp_path / "pages", _NO_SLOT)
         _layout(tmp_path / "pages" / "embed", f"{ROOT_MARKER}{_SHELL}")
 

@@ -23,6 +23,7 @@ from tests.support import (
     RaisingComponentsRouter,
     RaisingRootsRouter,
     RootPagesRouter,
+    app_snapshot,
     file_router_config_entry,
     importable_dir,
 )
@@ -561,11 +562,8 @@ class TestTheRoutersOutliveOneTick:
         assert info.misses == 1
         assert info.currsize == 1
 
-    def test_a_new_base_dir_is_read_without_a_settings_reload(self, tmp_path) -> None:
-        """A relative `DIRS` entry follows `BASE_DIR`, whose change reloads nothing.
-
-        The routers read the base directory at build, so held ones report the old root.
-        """
+    def test_a_new_base_dir_is_read_through_the_router_reload(self, tmp_path) -> None:
+        """A relative `DIRS` entry follows `BASE_DIR`, whose change reloads the routers."""
         first_base = tmp_path / "a"
         (first_base / "site").mkdir(parents=True)
         second_base = tmp_path / "b"
@@ -579,12 +577,9 @@ class TestTheRoutersOutliveOneTick:
                 first = get_pages_directories_for_watch()
             with override_settings(BASE_DIR=second_base):
                 second = get_pages_directories_for_watch()
-                # The resolutions outlive routers, only a reconfiguration moves a tree.
-                held = resolved_tree.cache_info().currsize
 
         assert first == [(first_base / "site").resolve()]
         assert second == [(second_base / "site").resolve()]
-        assert held == 2
 
     def test_a_router_reload_rebuilds_the_held_routers(self, tmp_path) -> None:
         """A reload from code replaces the routers the URL resolver serves."""
@@ -678,7 +673,7 @@ class TestAWatchingProcessHoldsNoRouter:
         with (
             patch(
                 "next.urls.backends._installed_app_directories",
-                return_value={"shop": app_dir},
+                return_value=app_snapshot({"shop": app_dir}),
             ),
             override_settings(DEBUG=True, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
         ):

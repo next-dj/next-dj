@@ -127,7 +127,10 @@ A page whose body comes from ``render()`` resolves that body per request and cac
    Snapshots the modification time of every file that contributed to the composition, including the page body source and each ancestor ``layout.djx``, and of every directory the layout walk visited.
    The directories are tracked because a ``layout.djx`` that appears or disappears moves no mtime of a file the snapshot already holds.
    Only the directories inside the page tree are tracked, so an unrelated write to a shared parent such as the home directory evicts nothing.
-   The layouts above the tree are held between walks and stat'd again for an edit, so a ``layout.djx`` created above the tree joins the chain after the next reload instead.
+   For a page under nested roots the tracked directories run up to the outermost root, so a ``layout.djx`` created between the two roots evicts the entry.
+   Outside ``DEBUG`` the layouts above the tree are held between walks and stat'd again for an edit, so a ``layout.djx`` created above the tree joins the chain after the next reload.
+   Under ``DEBUG`` every walk probes those directories again, so a new layout above the tree joins the next composition that an edit inside the tree triggers.
+   The directories above the tree stay unwatched, since a write to a shared parent such as the home directory would otherwise evict every entry.
    The watched directories also stop at a root layout, and so do the layout files of the snapshot.
    An edit or a new ``layout.djx`` further out than the root layout therefore evicts nothing, while switching the marker on or off changes the mtime of the layout itself and evicts the entry.
 
@@ -156,8 +159,9 @@ The framework reads each ancestor ``layout.djx`` from disk and replaces its ``{%
 Django's own lexer locates that region, so a placeholder written inside ``{% verbatim %}`` or ``{% comment %}`` is text the composition leaves alone.
 The innermost layout wraps the page body, the outermost layout wraps everything.
 The chain comes from ``layout_chain``, which ends after the first layout that opens with the ``{% layout root %}`` marker, so a root layout is the outermost wrapper of its pages.
-``layout_chain(file_path, cut=False)`` returns the whole ancestry instead, and ``resolved=True`` tells it the path is resolved already.
-The layout checks use the uncut form, see :doc:`/content/ref/system-checks`.
+``layout_chain(file_path, cut=False)`` returns the whole ancestry instead, and ``resolved=True`` tells it no symlink sits on the path.
+The layout checks read the cut chain, so they judge only the layouts some page renders, see :doc:`/content/ref/system-checks`.
+A layout source is decoded as UTF-8 with an optional byte order mark, which is dropped, so a layout saved by an editor that writes one still opens with its marker.
 Composition is string substitution, not Django template inheritance, so no page needs an explicit ``{% extends %}``.
 
 The user-facing rules for layout discovery, the placeholder contract, and the context a segment ``page.py`` passes down live in :doc:`/content/topics/layouts`.

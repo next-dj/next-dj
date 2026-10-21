@@ -22,7 +22,6 @@ from next.pages.loaders import (
     _climb,
     _dirs_inside,
     _is_root_layout,
-    _layout_text,
     _page_roots,
     _routed_root,
     _split_ancestry,
@@ -33,6 +32,7 @@ from next.pages.loaders import (
     has_load_errors,
     last_load_error,
     layout_chain,
+    layout_root_scan,
     layout_stamps,
     load_page_module,
     load_python_module_memo,
@@ -44,6 +44,7 @@ from next.pages.loaders import (
     reset_module_memo,
     serves,
     shared_layouts,
+    template_source,
 )
 from next.pages.placeholder import ROOT_MARKER
 from next.pages.processors import _get_context_processors, _import_context_processor
@@ -126,6 +127,12 @@ class TestDjxTemplateLoader:
         result = djx_template_loader.load_template(page_file)
 
         assert result == expected_result
+
+    def test_a_bom_never_reaches_the_page_body(self, djx_template_loader, tmp_path):
+        """The BOM a Windows editor writes would land mid-document inside a layout."""
+        (tmp_path / "template.djx").write_bytes("\ufeff<h1>x</h1>".encode())
+
+        assert djx_template_loader.load_template(tmp_path / "page.py") == "<h1>x</h1>"
 
     @pytest.mark.parametrize("case", TEMPLATE_PRIORITY_CASES, ids=lambda case: case.id)
     def test_create_url_pattern_template_scenarios(
@@ -713,10 +720,10 @@ class TestLayoutTemplateLoader:
         assert layout_files == [root_layout, outer_layout]
         assert watched_dirs == [page_dir, root]
 
-    def test_the_nearest_page_root_bounds_the_watched_directories(
+    def test_the_outermost_page_root_bounds_the_watched_directories(
         self, tmp_path
     ) -> None:
-        """Two routed trees on one path watch only up to the inner one."""
+        """Two routed trees on one path watch up to the outer one, where layouts wrap."""
         loader = LayoutTemplateLoader()
 
         outer = tmp_path / "site"
@@ -727,7 +734,7 @@ class TestLayoutTemplateLoader:
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
             _, watched_dirs = loader.layout_sources(inner / "page.py")
 
-        assert watched_dirs == [inner]
+        assert watched_dirs == [inner, outer]
 
     def test_the_memoised_page_roots_survive_a_second_walk(self, tmp_path) -> None:
         """The routers are built once, so the second walk reads the memo."""
@@ -2088,16 +2095,36 @@ class TestIsRootLayout:
         assert _is_root_layout(layout, mtime_ns) is True
 
 
+class TestLayoutRootScan:
+    """`layout_root_scan` answers the markers of a layout, `None` for a missing one."""
+
+    def test_a_vanished_layout_has_no_scan(self, tmp_path) -> None:
+        assert layout_root_scan(tmp_path / "layout.djx") is None
+
+    def test_a_marked_layout_scans_as_a_root(self, tmp_path) -> None:
+        scan = layout_root_scan(_write_layout(tmp_path, "html", root=True))
+
+        assert scan is not None
+        assert scan.is_root is True
+
+
 class TestLayoutText:
-    """`_layout_text` answers a layout source and `None` for one that is gone."""
+    """`template_source` answers a layout source and `None` for one that is gone."""
 
     def test_a_vanished_layout_has_no_text(self, tmp_path) -> None:
-        assert _layout_text(tmp_path / "layout.djx") is None
+        assert template_source(tmp_path / "layout.djx") is None
+
+    def test_a_bom_is_dropped_so_the_marker_opens_the_root(self, tmp_path) -> None:
+        layout = tmp_path / "layout.djx"
+        layout.write_bytes(f"\ufeff{ROOT_MARKER}<html>{{% template %}}</html>".encode())
+
+        assert template_source(layout) == f"{ROOT_MARKER}<html>{{% template %}}</html>"
+        assert _root_check(layout) is True
 
     def test_a_present_layout_reads_back(self, tmp_path) -> None:
         layout = _write_layout(tmp_path, "html")
 
-        assert _layout_text(layout) == layout.read_text()
+        assert template_source(layout) == layout.read_text()
 
 
 class TestLayoutChainCut:
@@ -2126,7 +2153,7 @@ class TestLayoutChainCut:
         link = tmp_path / "link"
         link.symlink_to(tmp_path / "real", target_is_directory=True)
 
-        assert layout_chain(link / "page.py", resolved=True) == (link / "layout.djx",)
+        assert layout_chain(link / "page.py", resolved=True) == (layout.resolve(),)
         assert layout_chain(link / "page.py") == (layout.resolve(),)
 
     def test_an_unmarked_chain_runs_to_the_top(self, tmp_path) -> None:
@@ -2359,7 +2386,7 @@ class TestSymlinkedLayouts:
         config = _dirs_config(shared)
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
-            assert shared_layouts() == (shared.resolve() / "layout.djx",)
+            assert shared_layouts() == (layout.resolve(),)
             chain = layout_chain(real / "sub" / "page.py")
             composed = LayoutTemplateLoader().compose_body(
                 "<h1>b</h1>", real / "sub" / "page.py"
@@ -2457,11 +2484,43 @@ class TestLayoutsAboveTheTree:
 
             assert layout_chain(page) == (mid,)
 
-    def test_a_named_tree_root_holds_apart_from_the_routed_ones(self, tree) -> None:
+    def test_a_watching_process_sees_a_layout_added_above_the_tree_at_once(
+        self, tree
+    ) -> None:
+        page = tree / "sub" / "page.py"
+
+        with override_settings(
+            DEBUG=True,
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tree)},
+        ):
+            assert layout_chain(page) == ()
+            mid = _write_layout(tree.parent, "mid")
+
+            assert layout_chain(page) == (mid,)
+
+    def test_a_layout_added_between_nested_roots_shows_while_watching(
+        self, tmp_path
+    ) -> None:
+        outer = tmp_path / "site"
+        inner = outer / "section" / "admin"
+        inner.mkdir(parents=True)
+        page = inner / "page.py"
+        config = default_page_router_config(outer) + default_page_router_config(inner)
+
+        with override_settings(DEBUG=True, NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            assert layout_chain(page) == ()
+            middle = _write_layout(outer / "section", "mid")
+
+            assert layout_chain(page) == (middle.resolve(),)
+
+    def test_the_stamps_hold_the_layouts_above_the_tree(self, tree) -> None:
         mid = _write_layout(tree.parent, "mid")
         page = (tree / "sub" / "page.py").resolve()
 
-        stamps = layout_stamps(page, tree)
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tree)}
+        ):
+            stamps = layout_stamps(page)
 
         assert stamps == ((mid, stat_mtime_ns(mid)),)
 
@@ -2470,7 +2529,10 @@ class TestLayoutsAboveTheTree:
         _write_layout(tree.parent.parent, "top")
         page = (tree / "sub" / "page.py").resolve()
 
-        assert layout_stamps(page, tree) == ((mid, stat_mtime_ns(mid)),)
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tree)}
+        ):
+            assert layout_stamps(page) == ((mid, stat_mtime_ns(mid)),)
 
 
 class TestAncestrySplit:
@@ -2572,10 +2634,10 @@ class TestCanLoadWalk:
         read.assert_not_called()
 
 
-class TestComposeBodyResolvedSibling:
-    """The sibling-layout rule reads the directory the page file really sits in."""
+class TestComposeBodyRoutedSibling:
+    """The layouts and the sibling rule read the folder a page is routed from."""
 
-    def test_a_symlinked_page_with_a_real_sibling_layout_stays_unpaired(
+    def test_a_symlinked_page_file_composes_in_its_routed_folder(
         self, tmp_path
     ) -> None:
         real = tmp_path / "real"
@@ -2583,12 +2645,39 @@ class TestComposeBodyResolvedSibling:
         real_page = real / "page.py"
         real_page.write_text("x = 1")
         leaf = tmp_path / "tree" / "leaf"
-        leaf.mkdir(parents=True)
+        _write_layout(leaf, "leaf")
         (leaf / "page.py").symlink_to(real_page)
 
         composed = LayoutTemplateLoader().compose_body("<h1>b</h1>", leaf / "page.py")
 
-        assert composed == "<own><h1>b</h1></own>"
+        assert composed == "<leaf><h1>b</h1></leaf>"
+
+    def test_a_symlinked_folder_keeps_the_layouts_of_its_tree(self, tmp_path) -> None:
+        site = _write_layout(tmp_path / "site", "site")
+        outside = tmp_path / "ext" / "shared"
+        outside.mkdir(parents=True)
+        (tmp_path / "site" / "shared").symlink_to(outside, target_is_directory=True)
+        page = tmp_path / "site" / "shared" / "page.py"
+
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": default_page_router_config(tmp_path / "site")
+            }
+        ):
+            assert layout_chain(page) == (site,)
+            _, watched = LayoutTemplateLoader().layout_sources(page)
+
+        assert tmp_path / "site" in watched
+
+    def test_a_directory_named_like_a_layout_is_no_layout(self, tmp_path) -> None:
+        outer = _write_layout(tmp_path, "outer")
+        (tmp_path / "leaf" / "layout.djx").mkdir(parents=True)
+        page = tmp_path / "leaf" / "page.py"
+
+        composed = LayoutTemplateLoader().compose_body("<h1>b</h1>", page)
+
+        assert layout_chain(page) == (outer,)
+        assert composed == "<outer>{% #template %}<h1>b</h1>{% /template %}</outer>"
 
     def test_a_body_only_page_under_a_root_pairs_its_fallback(self, tmp_path) -> None:
         _write_layout(tmp_path, "outer")

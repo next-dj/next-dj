@@ -2297,6 +2297,53 @@ class TestAssetDiscoveryRootLayoutCut:
             "/static/next/blog/pages/about.css",
         ]
 
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_a_style_added_beside_a_dirs_root_layout_makes_the_plan_stale(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        base = tmp_path.resolve()
+        app_pages = base / "blog" / "pages"
+        shared = base / "next-site"
+        shared.mkdir()
+        (shared / "layout.djx").write_text("{% template %}")
+        app_pages.mkdir(parents=True)
+        page_path = app_pages / "page.djx"
+        page_path.write_text("")
+        provider = StaticAssetProvider(
+            file_backend, ((app_pages, "blog/pages"), (shared, "site"))
+        )
+        config = [file_router_config_entry(dirs=[shared])]
+        discovery = AssetDiscovery(provider)
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            assert _style_urls(discovery, page_path) == []
+            (shared / "layout.css").write_text("body{}")
+            _bump(shared)
+
+            assert _style_urls(discovery, page_path) == ["/static/next/site/layout.css"]
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_a_style_added_beside_a_layout_between_nested_roots_shows(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        outer = tmp_path.resolve() / "site"
+        inner = outer / "section" / "admin"
+        inner.mkdir(parents=True)
+        (outer / "section" / "layout.djx").write_text("{% template %}")
+        page_path = inner / "page.djx"
+        page_path.write_text("")
+        discovery = AssetDiscovery(
+            StaticAssetProvider(file_backend, ((outer, "site"), (inner, "admin")))
+        )
+        assert _style_urls(discovery, page_path) == []
+
+        (outer / "section" / "layout.css").write_text("body{}")
+        _bump(outer / "section")
+
+        assert _style_urls(discovery, page_path) == [
+            "/static/next/site/section/layout.css"
+        ]
+
     def test_a_page_outside_every_root_keeps_the_fallback_names(
         self, tmp_path: Path, file_backend: StaticBackend
     ) -> None:

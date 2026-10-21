@@ -13,6 +13,7 @@ from next.urls.mount import MountedTree
 from next.utils import PageRoot
 from tests.support import (
     ENTRY_ROUTER,
+    app_snapshot,
     file_router,
     file_router_config_entry,
     installed_apps,
@@ -72,7 +73,7 @@ class TestAutoAssembledAppTrees:
 
         with patch(
             "next.urls.backends._installed_app_directories",
-            return_value={"corp.billing": tmp_path},
+            return_value=app_snapshot({"corp.billing": tmp_path}),
         ):
             (root,) = router.page_roots()
             routed = [str(pattern.pattern) for pattern in router.generate_urls()]

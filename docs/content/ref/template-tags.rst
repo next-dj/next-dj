@@ -284,7 +284,7 @@ Layouts
    Renders nothing.
    Composition stops at this layout, so no ancestor ``layout.djx``, no layout above the page tree root, and no layout of a later ``DIRS`` root wraps the page.
    The single argument is the word ``root``, and any other argument or none raises ``TemplateSyntaxError`` at parse time.
-   Only ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, and blank text may stand before it, and a marker elsewhere or a second marker is ``next.E168`` and has no effect.
+   Only ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, ASCII whitespace, and a leading byte order mark may stand before it, and a marker elsewhere or a second marker is ``next.E168`` and has no effect.
    The tag works in ``layout.djx`` alone, and in a ``template.djx`` or a component template it does nothing and draws ``next.W134``.
    See :ref:`topics-layouts-root`.
 

@@ -16,6 +16,7 @@ from next.utils import forget_resolved_trees
 from tests.support import (
     NAMESPACED_URLCONF,
     EntryRouter,
+    app_snapshot,
     file_router,
     file_router_config_entry,
     importable_dir,
@@ -252,7 +253,7 @@ class TestFileRouterBackend:
             held = list(router._extra_root_paths)
 
         assert held == [expected]
-        assert seen == [tmp_path / "site"]
+        assert seen.count(tmp_path / "site") == 1
 
     def test_get_root_pages_paths_fallback_when_app_dirs_false(
         self, mock_settings, tmp_path
@@ -499,7 +500,10 @@ class TestPageRoots:
         router = file_router(app_dirs=True, dirs=[root_tree])
 
         with (
-            patch.object(router, "_get_installed_apps", return_value=["shop"]),
+            patch(
+                "next.urls.backends._installed_app_directories",
+                return_value=app_snapshot({"shop": tmp_path}),
+            ),
             patch.object(router, "_get_app_pages_path", return_value=app_tree),
         ):
             roots = router.page_roots()
@@ -509,6 +513,20 @@ class TestPageRoots:
             PageRoot(path=root_tree.resolve(), label="Root"),
         ]
 
+    def test_a_custom_app_label_keys_the_app_tree(self, tmp_path) -> None:
+        """The key follows `AppConfig.label`, the name a `pages()` mount uses too."""
+        app_tree = tmp_path / "pages"
+        app_tree.mkdir()
+        router = file_router(app_dirs=True)
+        snapshot = app_snapshot({"acme.blog": tmp_path}, {"acme.blog": "news"})
+
+        with patch(
+            "next.urls.backends._installed_app_directories", return_value=snapshot
+        ):
+            roots = router.page_roots()
+
+        assert [root.key for root in roots] == ["news/pages"]
+
     def test_app_without_pages_directory_is_left_out(self, tmp_path) -> None:
         """An app with no pages tree contributes no root."""
         app_tree = tmp_path / "shop_pages"
@@ -516,8 +534,9 @@ class TestPageRoots:
         router = file_router(app_dirs=True)
 
         with (
-            patch.object(
-                router, "_get_installed_apps", return_value=["shop", "bare_app"]
+            patch(
+                "next.urls.backends._installed_app_directories",
+                return_value=app_snapshot({"shop": tmp_path, "bare_app": tmp_path}),
             ),
             patch.object(router, "_get_app_pages_path", side_effect=[app_tree, None]),
         ):

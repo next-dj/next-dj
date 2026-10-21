@@ -136,6 +136,7 @@ The key of a tree comes from where the tree lives.
 - A ``DIRS`` root outside ``BASE_DIR``, any ``DIRS`` root while ``BASE_DIR`` is unset, and a tree a third-party router reports with no ``key`` have none.
 
 A tree with no key serves no ``layout`` or ``template`` asset, and ``manage.py check`` reports ``next.W132`` for it.
+A hand-written reference to a co-located file therefore carries the key, so ``{% static "next/archive.css" %}`` for a ``DIRS`` root ``site/`` becomes ``next/site/archive.css``, and ``manage.py findstatic`` prints the name a file has now.
 A router backend gives its trees a key through the ``key`` field of ``PageRoot``, see :doc:`/content/ref/urls`.
 When two page roots contain a file, the deepest one names it.
 

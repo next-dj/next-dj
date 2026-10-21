@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from tests.support.apps import (
     AppFactory,
+    app_snapshot,
     installed_apps,
     throwaway_apps,
     write_app,
@@ -358,6 +359,7 @@ __all__ = [
     "_minimal_resolver",
     "_resolver_with_form",
     "action_uid",
+    "app_snapshot",
     "assert_bounded_by_insert_age",
     "bound_dependency",
     "build_mock_http_request",

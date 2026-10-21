@@ -15,7 +15,7 @@ from django.core.checks import (
 from next.checks import NEXT
 from next.checks.common import first_visit, get_router_manager, iter_scanned_page_pairs
 from next.components.sources import get_components_manager
-from next.pages.loaders import layout_chain
+from next.pages.loaders import layout_chain, layout_root_scan, template_source
 from next.pages.placeholder import (
     PLACEHOLDER,
     PLACEHOLDER_OPEN,
@@ -93,18 +93,11 @@ def _stray_marker_warning(source: Path, kind: str) -> CheckMessage:
     )
 
 
-def _read(source: Path) -> str | None:
-    """Return the text of `source`, or `None` when it does not read."""
-    try:
-        return source.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
-
-
 def _check_layout_file(layout_file: Path) -> list[CheckMessage]:
     """Report a `layout.djx` placeholder, root marker and nested document mistakes."""
-    content = _read(layout_file)
-    if content is None:
+    content = template_source(layout_file)
+    root = layout_root_scan(layout_file)
+    if content is None or root is None:
         return []
     messages: list[CheckMessage] = []
     found = len(placeholder_spans(content))
@@ -112,14 +105,13 @@ def _check_layout_file(layout_file: Path) -> list[CheckMessage]:
         messages.append(_missing_placeholder_warning(layout_file))
     elif found > 1:
         messages.append(_repeated_placeholder_warning(layout_file, found))
-    root = scan_root(content)
     misplaced = bool(root.markers) and not root.is_root
     if misplaced:
         messages.append(_misplaced_marker_error(layout_file))
     if (
         not root.is_root
         and opens_html_document(content)
-        and len(layout_chain(layout_file, cut=False)) > 1
+        and len(layout_chain(layout_file)) > 1
     ):
         messages.append(_nested_document_warning(layout_file, misplaced=misplaced))
     return messages
@@ -138,13 +130,13 @@ def _router_pages(router: RouterBackend) -> Iterator[Path]:
 
 
 def iter_layout_ancestry(router_manager: RouterManager) -> Iterator[Path]:
-    """Yield each layout any scanned page sits under once, whatever a root cuts.
+    """Yield once each layout composition wraps a scanned page in, a root ending it.
 
     That covers layouts of folders without a page, `DIRS` roots and any above the tree.
     """
     seen: set[Path] = set()
     for page_path in _scanned_pages(router_manager):
-        for layout_file in layout_chain(page_path, cut=False):
+        for layout_file in layout_chain(page_path):
             if first_visit(layout_file, seen):
                 yield layout_file
 
@@ -178,7 +170,7 @@ def _stray_markers(router_manager: RouterManager) -> Iterator[CheckMessage]:
 
 def _stray_marker_report(source: Path, kind: str) -> Iterator[CheckMessage]:
     """Yield the `next.W134` report when `source` holds a root marker anywhere."""
-    content = _read(source)
+    content = template_source(source)
     if content is not None and scan_root(content).markers:
         yield _stray_marker_warning(source, kind)
 

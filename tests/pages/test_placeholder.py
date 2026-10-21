@@ -21,6 +21,8 @@ class TestScanRoot:
             "{% comment %}{% layout root %}{% endcomment %}",
             "{% comment %}note{% endcomment %}\n",
             "{% load static %}{# note #}\n{% comment %}x{% endcomment %}  ",
+            "\ufeff",
+            "\ufeff\n{% load static %}",
         ],
         ids=[
             "bare",
@@ -32,6 +34,8 @@ class TestScanRoot:
             "comment_block_holding_a_marker",
             "comment_block",
             "mixed_clean_prefix",
+            "bom",
+            "bom_then_load",
         ],
     )
     def test_a_clean_prefix_leaves_the_marker_in_place(self, prefix) -> None:
@@ -53,6 +57,7 @@ class TestScanRoot:
             "{% block a %}{% endblock %}",
             "{% %}",
             "{% template %}",
+            "\u00a0",
         ],
         ids=[
             "doctype",
@@ -63,6 +68,7 @@ class TestScanRoot:
             "other_block",
             "empty_tag",
             "placeholder",
+            "no_break_space",
         ],
     )
     def test_a_dirty_prefix_keeps_the_marker_and_denies_the_root(self, prefix) -> None:
@@ -151,6 +157,11 @@ class TestScanRoot:
 
         assert scan_root(content) == RootScan(True, ((0, len(marker)),))
 
+    def test_a_marker_in_a_comment_django_never_closes_is_no_marker(self) -> None:
+        content = f"{{% comment %}}{{% endcomment x %}}{ROOT_MARKER}{_BODY}"
+
+        assert scan_root(content) == RootScan(False, ())
+
     def test_the_marker_constant_is_a_root_on_its_own(self) -> None:
         assert scan_root(ROOT_MARKER) == RootScan(True, ((0, len(ROOT_MARKER)),))
 
@@ -169,6 +180,10 @@ class TestOpensHtmlDocument:
             "{% comment %}x{% endcomment %}<html>",
             "{% comment %}x{% endcomment %}{% if a %}<html>{% endif %}",
             "{% comment %}{% if a %}{% endcomment %}<html>",
+            "<html{{ attrs }}>{% template %}",
+            '<html{% if rtl %} dir="rtl"{% endif %}>{% template %}',
+            "{% verbatim %}x{% endverbatim %}<html>",
+            "<!-- note --><html>",
         ],
         ids=[
             "plain",
@@ -179,6 +194,10 @@ class TestOpensHtmlDocument:
             "after_a_closed_comment",
             "inside_a_block_after_a_comment",
             "block_tag_inside_a_comment",
+            "attributes_from_a_variable",
+            "attributes_from_a_tag",
+            "after_a_verbatim_block",
+            "after_an_html_comment",
         ],
     )
     def test_an_html_tag_in_text_is_found(self, content) -> None:
@@ -195,6 +214,12 @@ class TestOpensHtmlDocument:
             "{% comment %}{% if a %}<html>{% endif %}{% endcomment %}",
             "{% comment %}\n<html>\n{% endcomment %}<p>x</p>",
             "{# <html> #}<p>x</p>",
+            "<html-like>{% template %}",
+            "<!-- <html> -->{% template %}",
+            "<!-- {{ a }} <html> -->{% template %}",
+            "{% verbatim %}<html>{% endverbatim %}",
+            "{% verbatim snip %}{% endverbatim %}<html>{% endverbatim snip %}",
+            "{% comment %}{% endcomment x %}<html>",
         ],
         ids=[
             "longer_tag_name",
@@ -205,6 +230,12 @@ class TestOpensHtmlDocument:
             "block_tag_inside_a_comment_hides_it",
             "multiline_comment",
             "brace_comment",
+            "hyphenated_tag_name",
+            "html_comment",
+            "html_comment_split_by_a_variable",
+            "verbatim_block",
+            "named_verbatim_block",
+            "comment_django_never_closes",
         ],
     )
     def test_no_html_tag_outside_a_comment_is_not_found(self, content) -> None:

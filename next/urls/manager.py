@@ -162,11 +162,12 @@ def reload_router_settings(**kwargs) -> None:
     urlpatterns.reset()
 
 
-_ROUTED_SETTINGS = frozenset({"INSTALLED_APPS", "ROOT_URLCONF"})
+# `BASE_DIR` places the relative `DIRS` roots and names the static key of each.
+_ROUTED_SETTINGS = frozenset({"BASE_DIR", "INSTALLED_APPS", "ROOT_URLCONF"})
 
 
 def reload_app_routers(*, setting: str, **kwargs) -> None:
-    """Rebuild the routers when the apps or the URLconf behind their page trees move.
+    """Rebuild the routers when the apps, the URLconf or `BASE_DIR` behind them move.
 
     The rebuild bumps the version behind the lazy patterns and clears the URL caches.
     """

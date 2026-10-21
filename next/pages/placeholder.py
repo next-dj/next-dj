@@ -27,9 +27,14 @@ _OPEN_TAG = "#template"
 _CLOSE_TAG = "/template"
 _COMMENT_TAG = "comment"
 _END_COMMENT_TAG = "endcomment"
+_VERBATIM_TAG = "verbatim"
 _LOAD_TAG = "load"
 _ROOT_MARKER_WORDS = ["layout", "root"]
-_HTML_OPEN = re.compile(r"<html(?=[\s>/])", re.IGNORECASE)
+# A tag cut short by `{{` or `{%` still opens the document, `<htmlx>` does not.
+_HTML_OPEN = re.compile(r"<html(?![\w:-])", re.IGNORECASE)
+_HTML_COMMENT_OPEN = "<!--"
+_HTML_COMMENT_CLOSE = "-->"
+_BLANK = " \t\n\r\f\v\ufeff"
 
 
 def _tokens(content: str) -> Iterator[tuple[TokenType, str, int, int]]:
@@ -40,15 +45,28 @@ def _tokens(content: str) -> Iterator[tuple[TokenType, str, int, int]]:
         yield token.token_type, token.contents, start, end
 
 
-def _block_tags(content: str) -> Iterator[tuple[str, int, int]]:
-    """Yield the command and the bounds of every block tag Django lexes in `content`.
+def _command(contents: str) -> str:
+    """Return the first word of a block tag, the name Django dispatches it by."""
+    head = contents.split(maxsplit=1)
+    return head[0] if head else ""
 
-    A tag written under `{% verbatim %}` is text to the lexer, so it never comes out.
+
+def _parsed_tokens(content: str) -> Iterator[tuple[TokenType, str, int, int]]:
+    """Yield every token a parse of `content` reaches, skipping `{% comment %}` blocks.
+
+    Django ends the block only at a bare `endcomment`, so this does too.
     """
-    for token_type, contents, start, end in _tokens(content):
-        if token_type is TokenType.BLOCK:
-            head = contents.split(maxsplit=1)
-            yield (head[0] if head else ""), start, end
+    commented = False
+    for token in _tokens(content):
+        token_type, contents = token[0], token[1]
+        if commented:
+            commented = not (
+                token_type is TokenType.BLOCK and contents == _END_COMMENT_TAG
+            )
+        elif token_type is TokenType.BLOCK and _command(contents) == _COMMENT_TAG:
+            commented = True
+        else:
+            yield token
 
 
 def placeholder_spans(content: str) -> list[tuple[int, int]]:
@@ -58,13 +76,11 @@ def placeholder_spans(content: str) -> list[tuple[int, int]]:
     """
     spans: list[tuple[int, int]] = []
     open_at: int | None = None
-    commented = False
-    for command, start, end in _block_tags(content):
-        if commented:
-            commented = command != _END_COMMENT_TAG
-        elif command == _COMMENT_TAG:
-            commented = True
-        elif open_at is not None:
+    for token_type, contents, start, end in _parsed_tokens(content):
+        if token_type is not TokenType.BLOCK:
+            continue
+        command = _command(contents)
+        if open_at is not None:
             # The fallback runs to the close, and a placeholder in it renders.
             if command == _CLOSE_TAG:
                 spans.append((open_at, end))
@@ -87,24 +103,19 @@ class RootScan:
 def scan_root(content: str) -> RootScan:
     """Locate the root markers of `content` and decide whether it is a root layout.
 
-    Only `load` tags, comments and blank text may precede the one marker.
+    Only `load` tags, comments, ASCII blanks and a BOM may precede the one marker.
     """
     if _ROOT_MARKER_WORDS[0] not in content:
         return RootScan(is_root=False, markers=())
     markers: list[tuple[int, int]] = []
     clean_prefix = True
     first_in_place = False
-    commented = False
-    for token_type, contents, start, end in _tokens(content):
+    for token_type, contents, start, end in _parsed_tokens(content):
         words = contents.split()
         command = words[0] if words else ""
         is_block = token_type is TokenType.BLOCK
-        if commented:
-            commented = not (is_block and command == _END_COMMENT_TAG)
-        elif token_type is TokenType.TEXT:
-            clean_prefix = clean_prefix and not contents.strip()
-        elif is_block and command == _COMMENT_TAG:
-            commented = True
+        if token_type is TokenType.TEXT:
+            clean_prefix = clean_prefix and not contents.strip(_BLANK)
         elif is_block and words == _ROOT_MARKER_WORDS:
             if not markers:
                 first_in_place = clean_prefix
@@ -118,23 +129,49 @@ def scan_root(content: str) -> RootScan:
 
 
 def opens_html_document(content: str) -> bool:
-    """Whether `content` writes an `<html` tag in text outside a `{% comment %}`."""
-    commented = False
-    for token_type, contents, _start, _end in _tokens(content):
+    """Whether `content` writes an `<html` tag a browser reads as the document element.
+
+    Text in a `{% comment %}`, a `{% verbatim %}` block or an HTML comment is skipped.
+    """
+    verbatim: str | None = None
+    in_comment = False
+    for token_type, contents, _start, _end in _parsed_tokens(content):
         if token_type is TokenType.BLOCK:
-            words = contents.split()
-            command = words[0] if words else ""
-            if commented:
-                commented = command != _END_COMMENT_TAG
-            elif command == _COMMENT_TAG:
-                commented = True
-        elif (
-            token_type is TokenType.TEXT
-            and not commented
-            and _HTML_OPEN.search(contents)
-        ):
-            return True
+            if verbatim is None and _command(contents) == _VERBATIM_TAG:
+                verbatim = f"end{contents}"
+            elif contents == verbatim:
+                verbatim = None
+        elif token_type is TokenType.TEXT and verbatim is None:
+            visible, in_comment = _outside_html_comments(
+                contents, in_comment=in_comment
+            )
+            if _HTML_OPEN.search(visible):
+                return True
     return False
+
+
+def _outside_html_comments(text: str, *, in_comment: bool) -> tuple[str, bool]:
+    """Return the part of `text` outside HTML comments and whether one stays open.
+
+    A comment can span tokens, since a variable inside it splits the text.
+    """
+    visible: list[str] = []
+    position = 0
+    while True:
+        if in_comment:
+            close = text.find(_HTML_COMMENT_CLOSE, position)
+            if close < 0:
+                return "".join(visible), True
+            position = close + len(_HTML_COMMENT_CLOSE)
+            in_comment = False
+        else:
+            opening = text.find(_HTML_COMMENT_OPEN, position)
+            if opening < 0:
+                visible.append(text[position:])
+                return "".join(visible), False
+            visible.append(text[position:opening])
+            position = opening + len(_HTML_COMMENT_OPEN)
+            in_comment = True
 
 
 __all__ = [

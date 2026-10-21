@@ -118,7 +118,7 @@ class _InstalledAppsMemo:
 _installed_apps = _InstalledAppsMemo()
 
 
-def _installed_app_directories() -> dict[str, Path]:
+def _installed_app_directories() -> _InstalledApps:
     """Map each installed app's dotted name to its directory.
 
     The registry is read per call, and the map is rebuilt only when its configs change.
@@ -132,7 +132,7 @@ def _installed_app_directories() -> dict[str, Path]:
             "application page tree is reported for this call. Move the read "
             "into or after AppConfig.ready()."
         )
-        return {}
+        return _InstalledApps(())
     held = _installed_apps.held
     if held is None or held.configs != configs:
         held = _installed_apps.held = _InstalledApps(configs)
@@ -217,7 +217,7 @@ class FileRouterBackend(RouterBackend):
         self._root_patterns_cache: list[URLPattern | URLResolver] | None = None
         self._root_pages_paths_cache: list[Path] | None = None
         self._page_roots_cache: (
-            tuple[Mapping[str, Path] | None, UrlconfMounts, list[PageRoot]] | None
+            tuple[_InstalledApps | None, UrlconfMounts, list[PageRoot]] | None
         ) = None
         self._url_parser = default_url_parser
 
@@ -330,19 +330,18 @@ class FileRouterBackend(RouterBackend):
                 yield app_name, path
 
     def _app_roots(
-        self, directories: Mapping[str, Path], claimed: frozenset[tuple[str, str]]
+        self, directories: _InstalledApps, claimed: frozenset[tuple[str, str]]
     ) -> list[PageRoot]:
-        """Return the app trees the auto-assembly routes at the root."""
-        held = _installed_apps.held
-        labels = {} if held is None else held.labels
+        """Return the app trees the auto-assembly routes at the root.
+
+        Labels come from the snapshot that named the trees, so a custom label holds.
+        """
         subdir = Path(self.pages_dir).as_posix()
         return [
             PageRoot(
                 path=path,
                 label=self._tree_label(app_name, self.pages_dir),
-                key=_tree_key(
-                    labels.get(app_name, app_name.rpartition(".")[2]), subdir
-                ),
+                key=_tree_key(directories.labels[app_name], subdir),
             )
             for app_name, path in self._app_trees(directories, claimed)
         ]

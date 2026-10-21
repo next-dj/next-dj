@@ -13,6 +13,7 @@ import next.static.checks as checks_module
 from next.apps.staticfiles import _APP_DIRECTORIES_PATH
 from next.checks import NEXT
 from next.components import FileComponentsBackend
+from next.pages.placeholder import ROOT_MARKER
 from next.static import KindRegistry, ScriptInjectionPolicy, StaticFilesBackend
 from next.static.checks import (
     check_app_directories_finder,
@@ -930,6 +931,15 @@ class TestLayoutAssetsAboveTreesCheck:
     ) -> None:
         tree = self._site(tmp_path)
         (tree.parent / "layout.djx").write_text("{% template %}")
+
+        with override_settings(BASE_DIR=tmp_path), routed(tree):
+            assert check_layout_assets_above_trees() == []
+
+    def test_a_layout_a_root_marker_cuts_off_is_silent(self, tmp_path: Path) -> None:
+        tree = self._site(tmp_path)
+        (tree.parent / "layout.djx").write_text("{% template %}")
+        (tree.parent / "layout.css").write_text("")
+        (tree / "layout.djx").write_text(f"{ROOT_MARKER}{{% template %}}")
 
         with override_settings(BASE_DIR=tmp_path), routed(tree):
             assert check_layout_assets_above_trees() == []

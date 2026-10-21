@@ -116,7 +116,7 @@ def _tree_branches(
     survey = _survey(root, skip_dir_names, action_dirs)
     if survey.filled or survey.reported:
         return survey.branches
-    shared = {layout.resolve() for layout in shared_layouts()}
+    shared = set(shared_layouts())
     own_guard = survey.passing == root / PAGE_MODULE
     if not own_guard and (root / LAYOUT_TEMPLATE).resolve() in shared:
         return survey.branches

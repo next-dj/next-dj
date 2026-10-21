@@ -140,6 +140,7 @@ _SETTINGS_RELOADED: Final[tuple[Callable[..., None], ...]] = (
 # A reload from code keeps the settings, so memos derived from old routers drop.
 _ROUTER_RELOADED: Final[tuple[Callable[..., None], ...]] = (
     forget_watch_state,
+    forget_shared_layouts,
     forget_page_roots,
     forget_manager_page_roots,
     forget_dep_caches,

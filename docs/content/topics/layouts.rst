@@ -111,7 +111,7 @@ Pages elsewhere in the tree compose as before.
 The marker rule
 ~~~~~~~~~~~~~~~
 
-Only ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, and blank text may stand before the marker.
+Only ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, ASCII whitespace, and a leading byte order mark may stand before the marker.
 Any other tag or text before it, or a second marker in the same file, is ``next.E168``, and the framework ignores that marker.
 A marker written under ``{% verbatim %}`` is text to the template lexer and counts as no marker.
 The tag renders nothing and accepts the single argument ``root``, see :doc:`/content/ref/template-tags`.

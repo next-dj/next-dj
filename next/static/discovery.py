@@ -96,6 +96,19 @@ def _directory_mtimes(
     return tuple((directory, stat_mtime_ns(directory)) for directory in directories)
 
 
+def _unwatched_layout_directories(
+    chain: Sequence[Path], watched: tuple[tuple[Path, int | None], ...]
+) -> tuple[tuple[Path, int | None], ...]:
+    """Snapshot the directories of chain layouts the ancestor walk left out.
+
+    A `DIRS` root layout wraps every page without being an ancestor of one.
+    """
+    seen = {directory for directory, _ in watched}
+    return _directory_mtimes(
+        [d for d in dict.fromkeys(layout.parent for layout in chain) if d not in seen]
+    )
+
+
 def _resolved_parent(path: Path) -> Path:
     """Return the resolved directory holding `path`, or its own spelling on OSError."""
     parent = path.parent
@@ -299,9 +312,10 @@ class AssetDiscovery:
         page_root = self._resolver.find_page_root(resolved)
         # Imported before the walk, because the import writes `__pycache__`.
         lists = self._module_lists(resolved)
-        directories = self._watched_directories(resolved, page_root)
-        stamps = pages_loaders.layout_stamps(resolved, page_root)
+        directories = self._watched_directories(resolved)
+        stamps = pages_loaders.layout_stamps(file_path)
         chain = [layout for layout, _ in stamps]
+        directories += _unwatched_layout_directories(chain, directories)
         files: list[FoundAsset] = []
         for layout_file in reversed(chain):
             layout_dir = layout_file.parent
@@ -486,23 +500,26 @@ class AssetDiscovery:
             asset_registered.send(sender=asset, collector=collector, backend=backend)
 
     def _watched_directories(
-        self, file_path: Path, page_root: Path | None
+        self, file_path: Path
     ) -> tuple[tuple[Path, int | None], ...]:
         """Walk up from the page directory, outermost first, and stat as it goes.
 
-        Inside a page tree every directory is watched, outside only those read.
+        Inside any page tree every directory is watched, outside only those read.
         """
         watched: list[tuple[Path, int | None]] = []
-        inside_a_tree = page_root is not None
         current_dir = file_path.parent
         for depth in range(MAX_ANCESTOR_WALK_DEPTH):
             # Stat first, so a file created in between leaves the plan stale.
             mtime = stat_mtime_ns(current_dir)
-            if inside_a_tree or depth == 0 or (current_dir / LAYOUT_TEMPLATE).exists():
+            layout_file = current_dir / LAYOUT_TEMPLATE
+            if (
+                depth == 0
+                or self._resolver.find_page_root(layout_file) is not None
+                or layout_file.exists()
+            ):
                 watched.append((current_dir, mtime))
             parent = current_dir.parent
-            # The tree root ends the walk, and so does the filesystem root.
-            if current_dir in (page_root, parent):
+            if parent == current_dir:
                 break
             current_dir = parent
         return tuple(reversed(watched))
