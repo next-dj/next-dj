@@ -10,6 +10,7 @@ from django.test import override_settings
 
 from next.caches import BoundedCache
 from next.components import ComponentInfo
+from next.pages.placeholder import ROOT_MARKER
 from next.static import (
     AssetDiscovery,
     StaticAsset,
@@ -27,10 +28,12 @@ from tests.support import (
     StaticAssetProvider,
     assert_bounded_by_insert_age,
     component_info,
+    file_router_config_entry,
     page_naming_one_style,
     record_path_calls,
     restored_static_registries,
     static_names_resolved_by,
+    touch_later,
 )
 
 
@@ -2202,3 +2205,150 @@ class TestAssetDiscoveryModuleListNames:
         assert collector.assets_in_slot("styles") == ()
         assert record.reference == "css/x.css"
         assert record.kind == "css"
+
+
+def _layout_with_style(directory: Path, source: str = "") -> Path:
+    """Write a `layout.djx` beside a `layout.css` and return the layout."""
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "layout.css").write_text("body{}")
+    layout = directory / "layout.djx"
+    layout.write_text(source)
+    return layout
+
+
+def _style_urls(discovery: AssetDiscovery, page_path: Path) -> list[str]:
+    collector = StaticCollector()
+    discovery.discover_page_assets(page_path, collector)
+    return [asset.url for asset in collector.assets_in_slot("styles")]
+
+
+class TestAssetDiscoveryRootLayoutCut:
+    """The layouts a page is wrapped in are the ones that contribute assets."""
+
+    @staticmethod
+    def _embedded_page(root: Path, *, marker: bool = True) -> Path:
+        _layout_with_style(root)
+        _layout_with_style(root / "embed", ROOT_MARKER if marker else "")
+        page_path = root / "embed" / "x" / "page.djx"
+        page_path.parent.mkdir()
+        page_path.write_text("")
+        return page_path
+
+    def test_a_layout_cut_by_a_root_marker_contributes_no_asset(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        root = tmp_path.resolve()
+        page_path = self._embedded_page(root)
+        discovery = AssetDiscovery(StaticAssetProvider(file_backend, (root,)))
+
+        assert _style_urls(discovery, page_path) == [
+            "/static/next/site/embed/layout.css"
+        ]
+
+    def test_without_a_marker_both_layouts_contribute_outermost_first(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        root = tmp_path.resolve()
+        page_path = self._embedded_page(root, marker=False)
+        discovery = AssetDiscovery(StaticAssetProvider(file_backend, (root,)))
+
+        assert _style_urls(discovery, page_path) == [
+            "/static/next/site/layout.css",
+            "/static/next/site/embed/layout.css",
+        ]
+
+    def test_a_layout_above_every_root_contributes_no_asset(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        root = tmp_path.resolve() / "site" / "pages"
+        _layout_with_style(root.parent)
+        _layout_with_style(root)
+        page_path = root / "page.djx"
+        page_path.write_text("")
+        discovery = AssetDiscovery(
+            StaticAssetProvider(file_backend, ((root, "site/pages"),))
+        )
+
+        assert _style_urls(discovery, page_path) == [
+            "/static/next/site/pages/layout.css"
+        ]
+
+    def test_a_dirs_root_layout_reaches_an_app_page_under_its_own_key(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        base = tmp_path.resolve()
+        app_pages = base / "blog" / "pages"
+        shared = base / "next-site"
+        _layout_with_style(shared)
+        (app_pages / "about").mkdir(parents=True)
+        (app_pages / "about" / "template.css").write_text("body{}")
+        page_path = app_pages / "about" / "page.djx"
+        page_path.write_text("")
+        provider = StaticAssetProvider(
+            file_backend, ((app_pages, "blog/pages"), (shared, "site"))
+        )
+        config = [file_router_config_entry(dirs=[shared])]
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            urls = _style_urls(AssetDiscovery(provider), page_path)
+
+        assert urls == [
+            "/static/next/site/layout.css",
+            "/static/next/blog/pages/about.css",
+        ]
+
+    def test_a_page_outside_every_root_keeps_the_fallback_names(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        root = tmp_path.resolve()
+        _layout_with_style(root / "section")
+        page_path = root / "section" / "page.djx"
+        page_path.write_text("")
+        discovery = AssetDiscovery(StaticAssetProvider(file_backend, ()))
+
+        assert _style_urls(discovery, page_path) == ["/static/next/section/layout.css"]
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_toggling_a_marker_in_a_chain_layout_makes_the_plan_stale(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        root = tmp_path.resolve()
+        page_path = self._embedded_page(root, marker=False)
+        discovery = AssetDiscovery(StaticAssetProvider(file_backend, (root,)))
+        assert len(_style_urls(discovery, page_path)) == 2
+
+        touch_later(root / "embed" / "layout.djx", ROOT_MARKER)
+
+        assert _style_urls(discovery, page_path) == [
+            "/static/next/site/embed/layout.css"
+        ]
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_an_edit_above_the_cut_keeps_the_plan_fresh(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        root = tmp_path.resolve()
+        page_path = self._embedded_page(root)
+        discovery = AssetDiscovery(StaticAssetProvider(file_backend, (root,)))
+        _style_urls(discovery, page_path)
+        held = discovery._page_plan_cache[page_path]
+
+        touch_later(root / "layout.djx", "<p>edited</p>")
+        _style_urls(discovery, page_path)
+
+        assert discovery._page_plan_cache[page_path] is held
+
+    @pytest.mark.usefixtures("watched_template_edits")
+    def test_the_plan_records_the_mtime_of_each_chain_layout(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        root = tmp_path.resolve()
+        page_path = self._embedded_page(root)
+        discovery = AssetDiscovery(StaticAssetProvider(file_backend, (root,)))
+        _style_urls(discovery, page_path)
+
+        plan = discovery._page_plan_cache[page_path]
+
+        assert [path for path, _mtime in plan.file_mtimes] == [
+            root / "embed" / "layout.djx"
+        ]

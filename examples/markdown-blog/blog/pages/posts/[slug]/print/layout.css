@@ -1,0 +1,40 @@
+.print-sheet {
+  margin: 0 auto;
+  max-width: 42rem;
+  padding: 2rem 1.5rem;
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.6;
+  color: #111;
+  background: #fff;
+}
+
+.print-header {
+  border-bottom: 1px solid #999;
+  margin-bottom: 1.5rem;
+}
+
+.print-header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 2rem;
+}
+
+.print-footer {
+  margin-top: 2rem;
+  font-size: 0.875rem;
+}
+
+@media print {
+  .print-sheet {
+    max-width: none;
+    padding: 0;
+  }
+
+  .print-footer {
+    display: none;
+  }
+
+  .print-body a::after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+  }
+}

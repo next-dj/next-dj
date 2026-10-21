@@ -8,9 +8,10 @@
         {{ poll.question }}
       </h1>
     </div>
-    <p class="shrink-0 text-xs uppercase tracking-wide text-muted-foreground">
-      Poll #{{ poll.pk }}
-    </p>
+    <div class="shrink-0 text-right text-xs uppercase tracking-wide text-muted-foreground">
+      <p>Poll #{{ poll.pk }}</p>
+      <a href="/polls/{{ poll.pk }}/embed/" class="hover:text-foreground">Embed</a>
+    </div>
   </header>
 
   {% template %}

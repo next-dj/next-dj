@@ -21,6 +21,7 @@ from next.static.checks import (
     check_colocated_name_collisions,
     check_inline_asset_bodies_are_loadable,
     check_js_context_serializer,
+    check_layout_assets_above_trees,
     check_nonce_on_shared_pages,
     check_nonce_templates,
     check_page_roots_have_keys,
@@ -214,6 +215,7 @@ class TestChecksRegistered:
             check_nonce_templates,
             check_colocated_name_collisions,
             check_page_roots_have_keys,
+            check_layout_assets_above_trees,
         ],
     )
     def test_registered_under_next_tag(self, check) -> None:
@@ -897,3 +899,49 @@ class TestPageRootsHaveKeysCheck:
 
         with override_settings(BASE_DIR=base), routed(tree):
             assert check_page_roots_have_keys() == []
+
+
+class TestLayoutAssetsAboveTreesCheck:
+    """`next.W135` warns about assets of a layout that sits above every page tree."""
+
+    @staticmethod
+    def _site(base: Path) -> Path:
+        tree = base / "site" / "pages"
+        write_page(tree, "")
+        return tree
+
+    def test_a_layout_above_the_tree_with_files_is_w135(self, tmp_path: Path) -> None:
+        tree = self._site(tmp_path)
+        layout = tree.parent / "layout.djx"
+        layout.write_text("{% template %}")
+        (tree.parent / "layout.css").write_text("")
+        (tree.parent / "layout.js").write_text("")
+
+        with override_settings(BASE_DIR=tmp_path), routed(tree):
+            [warning] = check_layout_assets_above_trees()
+
+        assert isinstance(warning, DjangoWarning)
+        assert warning.id == "next.W135"
+        assert warning.obj == str(layout.resolve())
+        assert "layout.css, layout.js" in warning.msg
+
+    def test_a_layout_above_the_tree_without_files_is_silent(
+        self, tmp_path: Path
+    ) -> None:
+        tree = self._site(tmp_path)
+        (tree.parent / "layout.djx").write_text("{% template %}")
+
+        with override_settings(BASE_DIR=tmp_path), routed(tree):
+            assert check_layout_assets_above_trees() == []
+
+    def test_a_layout_under_a_root_is_skipped(self, tmp_path: Path) -> None:
+        tree = self._site(tmp_path)
+        (tree / "layout.djx").write_text("{% template %}")
+        (tree / "layout.css").write_text("")
+
+        with override_settings(BASE_DIR=tmp_path), routed(tree):
+            assert check_layout_assets_above_trees() == []
+
+    def test_a_failing_router_manager_checks_nothing(self) -> None:
+        with patch("next.static.checks.get_router_manager", return_value=(None, [])):
+            assert check_layout_assets_above_trees() == []

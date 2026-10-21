@@ -117,14 +117,25 @@ The manager already consults ``module.template`` directly, so registering this l
 
 .. autofunction:: next.pages.loaders.in_page_tree
 
-``LayoutTemplateLoader`` composes nested ``layout.djx`` wrappers around the page template, walking every ancestor directory upward from the page, bounded at 64 levels.
+``LayoutTemplateLoader`` composes nested ``layout.djx`` wrappers around the page template, walking every ancestor directory upward from the page, bounded at 64 levels, and then the ``layout.djx`` files of the ``DIRS`` roots.
+The walk ends after the first layout that opens with the ``{% layout root %}`` marker, the ``DIRS`` roots included.
 It is no ``TemplateLoader``, because the chain supplies a body and this wraps one, so it is never registered through ``TEMPLATE_LOADERS``.
 
 .. autoclass:: next.pages.loaders.LayoutTemplateLoader
    :members:
 
+``layout_chain(file_path, *, cut=True, resolved=False)`` returns the layouts that wrap a page file, nearest first, as resolved paths.
+The chain ends after the first root layout and carries the ``DIRS`` roots after the ancestors.
+``cut=False`` keeps the whole ancestry, which is what the layout checks read.
+``resolved=True`` says the path is resolved already and skips the second resolution.
+Composition, the static discovery, and the checks all read this one function, so they agree on which layouts a page has.
+The function is not exported from the top-level ``next`` package.
+
+.. autofunction:: next.pages.loaders.layout_chain
+
 ``LayoutTemplateLoader`` keeps no cache of its own, and composition results live on ``Page``, where ``composed_template_for`` stores the composed source alongside the compiled ``Template``.
-``Page.clear_template_caches`` drops every layer together, and :doc:`/content/internals/page-discovery` describes how ``DEBUG`` decides when the composition is revalidated.
+The layout texts and the root answers that ``layout_chain`` reads are held by mtime, and ``forget_layout_texts`` drops them.
+``Page.clear_template_caches`` drops every layer together and calls it, and :doc:`/content/internals/page-discovery` describes how ``DEBUG`` decides when the composition is revalidated.
 
 Placeholder
 ~~~~~~~~~~~
@@ -132,6 +143,11 @@ Placeholder
 ``next.pages.placeholder`` owns the layout placeholder grammar that :doc:`/content/topics/layouts` teaches.
 ``PLACEHOLDER`` is the canonical ``{% template %}`` spelling, and ``PLACEHOLDER_OPEN`` and ``PLACEHOLDER_CLOSE`` are the paired ``{% #template %}`` and ``{% /template %}`` form that carries a fallback body.
 Composition and the ``check_layout_templates`` check read the same scan from here, so ``next.W001`` and ``next.W078`` count exactly the placeholders composition would fill.
+``ROOT_MARKER`` is the canonical ``{% layout root %}`` spelling.
+``scan_root(content)`` returns a ``RootScan`` for a layout source, whose ``is_root`` tells whether the layout is a root and whose ``markers`` holds the bounds of every marker the lexer reaches.
+A layout is a root when exactly one marker stands after nothing but ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, and blank text.
+The scan serves composition and ``next.E168`` alike, so a marker that is misplaced or repeated is never half honored.
+``opens_html_document(content)`` tells whether a source writes an ``<html`` tag in text outside a ``{% comment %}``, which is what ``next.W133`` reads.
 
 .. automodule:: next.pages.placeholder
    :members:

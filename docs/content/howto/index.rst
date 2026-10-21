@@ -38,6 +38,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`customize-error-pages`
    Replace the default 404 and 500 pages.
 
+:doc:`give-a-section-its-own-document-shell`
+   Cut the layout chain so an embed or print view renders its own document.
+
 .. rubric:: SEO
 
 :doc:`/content/topics/seo/quickstart` covers titles, the head, the sitemap, and the robots file of a new site.
@@ -165,6 +168,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    require-login-on-pages
    internationalize-routes
    customize-error-pages
+   give-a-section-its-own-document-shell
    audit-seo-before-deploy
    cache-pages-on-a-cdn
    move-and-remove-pages

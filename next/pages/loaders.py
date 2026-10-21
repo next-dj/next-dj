@@ -22,6 +22,7 @@ from next.utils import (
     MAX_ANCESTOR_WALK_DEPTH,
     classify_dirs_entries,
     exec_module_file,
+    is_within,
     resolve_base_dir,
     stat_mtime_ns,
     template_edits_watched,
@@ -285,6 +286,7 @@ def reset_module_memo() -> None:
         _MODULE_MEMO.clear()
         _FAILED_PATHS.clear()
         _stamps.clear()
+        _ABOVE_TREE.clear()
         _version.value += 1
         _generation.value += 1
     for file_path in loaded:
@@ -333,6 +335,7 @@ def _page_roots() -> tuple[Path, ...]:
 def forget_page_roots(**kwargs) -> None:
     """Drop the memoised page trees so the next walk asks the routers again."""
     _page_roots.cache_clear()
+    _ABOVE_TREE.clear()
     with _MEMO_WRITE_LOCK:
         _version.value += 1
 
@@ -472,43 +475,153 @@ class DjxTemplateLoader(TemplateLoader):
         return djx_file if djx_file.exists() else None
 
 
-def _climb(file_path: Path, watched_depth: int) -> tuple[list[Path], list[Path]]:
-    """Climb the ancestors of `file_path` for layouts and watched directories.
+_ABOVE_TREE: PageCache[tuple[Path, int], tuple[tuple[Path, int], ...]] = PageCache()
 
-    The climb ends at the first root layout, and the directories end with its own.
+
+def _routed_root(start: Path) -> Path | None:
+    """Return the deepest routed page tree root holding the resolved `start`."""
+    depth = _tree_depth(start)
+    if depth is None:
+        return None
+    return start if depth == 1 else start.parents[depth - 2]
+
+
+def _above_tree(tree_root: Path, room: int) -> tuple[tuple[Path, int], ...]:
+    """Return the layouts above `tree_root` with their mtimes, held between walks.
+
+    A held layout is stat'd again so an edit shows, one added later waits for a reload.
+    """
+    key = (tree_root, room)
+    held = _ABOVE_TREE.get(key)
+    if held is not None and all(stat_mtime_ns(path) == mtime for path, mtime in held):
+        return held
+    found: list[tuple[Path, int]] = []
+    # The filesystem root is the last ancestor and holds no layout.
+    for directory in tuple(tree_root.parents)[:-1][:room]:
+        layout_file = directory / LAYOUT_TEMPLATE
+        mtime_ns = stat_mtime_ns(layout_file)
+        if mtime_ns is not None:
+            found.append((layout_file, mtime_ns))
+    layouts = tuple(found)
+    _ABOVE_TREE[key] = layouts
+    return layouts
+
+
+def _walk(
+    file_path: Path,
+    watched_depth: int,
+    *,
+    cut: bool = True,
+    resolved: bool = False,
+    tree_root: Path | None = None,
+) -> tuple[list[Path], list[Path], list[int | None]]:
+    """Climb the ancestors of `file_path` for layouts, watched directories and mtimes.
+
+    A layout is stat'd once, and the part above the page tree root is held.
     """
     layout_files: list[Path] = []
     watched_dirs: list[Path] = []
-    current_dir = file_path.resolve().parent
+    mtimes: list[int | None] = []
+    start = (file_path if resolved else file_path.resolve()).parent
+    root = tree_root if tree_root is not None else _routed_root(start)
+    ancestors, above, room = _split_ancestry(start, watched_depth, root)
 
-    for depth in range(MAX_ANCESTOR_WALK_DEPTH):
-        if current_dir == current_dir.parent:
-            break
+    for depth, current_dir in enumerate(ancestors[:MAX_ANCESTOR_WALK_DEPTH]):
         if depth < watched_depth:
             watched_dirs.append(current_dir)
         layout_file = current_dir / LAYOUT_TEMPLATE
-        if layout_file.exists():
+        mtime_ns = stat_mtime_ns(layout_file)
+        if mtime_ns is not None:
             layout_files.append(layout_file)
-            if _is_root_layout(layout_file):
-                return layout_files, watched_dirs
-        current_dir = current_dir.parent
+            mtimes.append(mtime_ns)
+            if cut and _is_root_layout(layout_file, mtime_ns):
+                return layout_files, watched_dirs, mtimes
 
+    if above is not None:
+        for layout_file, mtime_ns in _above_tree(above, room):
+            layout_files.append(layout_file)
+            mtimes.append(mtime_ns)
+            if cut and _is_root_layout(layout_file, mtime_ns):
+                return layout_files, watched_dirs, mtimes
+
+    _append_shared(layout_files, mtimes, cut=cut)
+    return layout_files, watched_dirs, mtimes
+
+
+def _append_shared(
+    layout_files: list[Path], mtimes: list[int | None], *, cut: bool
+) -> None:
+    """Append the `DIRS` root layouts not yet in the chain, ending at a root one."""
     for shared_layout in shared_layouts():
-        resolved = shared_layout.resolve()
-        if resolved not in layout_files:
-            layout_files.append(resolved)
-            if _is_root_layout(resolved):
-                break
+        shared = shared_layout.resolve()
+        if shared in layout_files:
+            continue
+        mtime_ns = stat_mtime_ns(shared)
+        layout_files.append(shared)
+        mtimes.append(mtime_ns)
+        if cut and mtime_ns is not None and _is_root_layout(shared, mtime_ns):
+            break
 
-    return layout_files, watched_dirs
+
+def _split_ancestry(
+    start: Path, watched_depth: int, tree_root: Path | None
+) -> tuple[list[Path], Path | None, int]:
+    """Split the ancestry of `start` into the directories to probe and a held tail.
+
+    The tail is the part above `tree_root`, with the room the walk cap leaves it.
+    """
+    inside = _dirs_inside(start, tree_root)
+    room = 0 if inside is None else MAX_ANCESTOR_WALK_DEPTH - inside
+    if inside is None or watched_depth > inside or room <= 0:
+        # The filesystem root is the last ancestor and holds no layout.
+        return [start, *start.parents][:-1], None, 0
+    return [start, *start.parents[: inside - 1]], tree_root, room
 
 
-def layout_chain(file_path: Path) -> tuple[Path, ...]:
+def _dirs_inside(start: Path, tree_root: Path | None) -> int | None:
+    """Return the directories from `start` up to `tree_root`, or `None` outside it."""
+    if tree_root is None or tree_root.parent == tree_root:
+        return None
+    if not is_within(start, tree_root):
+        return None
+    return len(start.parts) - len(tree_root.parts) + 1
+
+
+def _climb(
+    file_path: Path,
+    watched_depth: int,
+    *,
+    cut: bool = True,
+    resolved: bool = False,
+    tree_root: Path | None = None,
+) -> tuple[list[Path], list[Path]]:
+    """Climb the ancestors of `file_path` for layouts and watched directories.
+
+    The climb ends at the first root layout unless `cut` is off.
+    """
+    layouts, watched, _ = _walk(
+        file_path, watched_depth, cut=cut, resolved=resolved, tree_root=tree_root
+    )
+    return layouts, watched
+
+
+def layout_chain(
+    file_path: Path, *, cut: bool = True, resolved: bool = False
+) -> tuple[Path, ...]:
     """Return the layouts that wrap `file_path` from near to far, cut after a root.
 
-    The cut spans the tail of root layouts from `DIRS` too, and paths come resolved.
+    The cut spans the `DIRS` tail too, and `cut=False` keeps the whole ancestry.
+    A path that is `resolved` already skips the second resolution.
     """
-    return tuple(_climb(file_path, 0)[0])
+    return tuple(_climb(file_path, 0, cut=cut, resolved=resolved)[0])
+
+
+def layout_stamps(
+    file_path: Path, tree_root: Path | None
+) -> tuple[tuple[Path, int | None], ...]:
+    """Return the cut layouts of a resolved `file_path` with their stat'd mtimes."""
+    layouts, _, mtimes = _walk(file_path, 0, resolved=True, tree_root=tree_root)
+    return tuple(zip(layouts, mtimes, strict=True))
 
 
 def _as_placeholder_fallback(body: str) -> str:
@@ -520,6 +633,7 @@ def _as_placeholder_fallback(body: str) -> str:
 
 
 _LAYOUT_TEXTS: PageCache[Path, tuple[int, str]] = PageCache()
+_LAYOUT_ROOTS: PageCache[Path, tuple[int, bool]] = PageCache()
 
 
 def _layout_text(layout_file: Path) -> str | None:
@@ -530,6 +644,11 @@ def _layout_text(layout_file: Path) -> str | None:
     mtime_ns = stat_mtime_ns(layout_file)
     if mtime_ns is None:
         return None
+    return _text_at(layout_file, mtime_ns)
+
+
+def _text_at(layout_file: Path, mtime_ns: int) -> str | None:
+    """Return the source of `layout_file` held for `mtime_ns`, reading it on a miss."""
     held = _LAYOUT_TEXTS.get(layout_file)
     if held is not None and held[0] == mtime_ns:
         return held[1]
@@ -544,12 +663,24 @@ def _layout_text(layout_file: Path) -> str | None:
 def forget_layout_texts() -> None:
     """Drop every held layout source, so a rewrite within one mtime tick is read."""
     _LAYOUT_TEXTS.clear()
+    _LAYOUT_ROOTS.clear()
+    _ABOVE_TREE.clear()
 
 
-def _is_root_layout(layout_file: Path) -> bool:
-    """Return whether `layout_file` reads as a root, an unreadable one is not."""
-    content = _layout_text(layout_file)
-    return content is not None and scan_root(content).is_root
+def _is_root_layout(layout_file: Path, mtime_ns: int) -> bool:
+    """Return whether `layout_file` read at `mtime_ns` is a root, unreadable is not.
+
+    The answer is held with the mtime, so an unchanged layout is lexed once.
+    """
+    held = _LAYOUT_ROOTS.get(layout_file)
+    if held is not None and held[0] == mtime_ns:
+        return held[1]
+    content = _text_at(layout_file, mtime_ns)
+    if content is None:
+        return False
+    is_root = scan_root(content).is_root
+    _LAYOUT_ROOTS[layout_file] = (mtime_ns, is_root)
+    return is_root
 
 
 class LayoutTemplateLoader:
@@ -585,11 +716,12 @@ class LayoutTemplateLoader:
 
         A sibling `layout.djx` substitutes `body`, else it is a placeholder fallback.
         """
-        layout_files = self._find_layout_files(file_path)
+        resolved = file_path.resolve()
+        layout_files = self._find_layout_files(resolved, resolved=True)
         if not layout_files:
             return body
 
-        sibling = file_path.resolve().parent / LAYOUT_TEMPLATE
+        sibling = resolved.parent / LAYOUT_TEMPLATE
         wrapped = body if sibling.exists() else _as_placeholder_fallback(body)
         return self._compose_layout_hierarchy(wrapped, layout_files)
 
@@ -600,9 +732,11 @@ class LayoutTemplateLoader:
         """
         return _climb(file_path, page_tree_depth(file_path.parent))
 
-    def _find_layout_files(self, file_path: Path) -> list[Path]:
+    def _find_layout_files(
+        self, file_path: Path, *, resolved: bool = False
+    ) -> list[Path]:
         """Return `layout.djx` paths from near to far plus global layouts, root cut."""
-        return list(layout_chain(file_path))
+        return list(layout_chain(file_path, resolved=resolved))
 
     def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
         """Return candidate roots from one router `DIRS` entry (paths only)."""

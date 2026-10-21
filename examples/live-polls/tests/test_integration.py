@@ -598,3 +598,69 @@ class TestPageMetadata:
         self, next_client: NextClient, poll: Poll, path: str, title: str
     ) -> None:
         assert_metadata(next_client.get(path.format(pk=poll.pk)), title=title)
+
+
+class TestEmbedWidget:
+    """The embed page cuts the layout chain and draws its own document shell."""
+
+    def _embed_html(self, next_client: NextClient, poll: Poll) -> str:
+        response = next_client.get(f"/polls/{poll.pk}/embed/")
+        assert response.status_code == 200
+        return response.content.decode()
+
+    def test_own_shell_renders_once(self, next_client: NextClient, poll: Poll) -> None:
+        body = self._embed_html(next_client, poll)
+        assert body.count("<html") == 1
+        assert body.count("<!DOCTYPE html>") == 1
+        assert body.count("<body") == 1
+
+    def test_studio_shell_and_parent_layouts_are_cut(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        body = self._embed_html(next_client, poll)
+        assert "🗳️ next.dj Live polls" not in body
+        assert "← All polls" not in body
+        assert f"Poll #{poll.pk}" not in body
+        assert "open polls" not in body
+
+    def test_widget_shows_the_poll_and_its_live_wiring(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        body = self._embed_html(next_client, poll)
+        assert poll.question in body
+        assert f'data-poll-chart="{poll.pk}"' in body
+        assert f'data-next-sse="/polls/{poll.pk}/stream/"' in body
+        assert f'href="/polls/{poll.pk}/"' in body
+
+    def test_ancestor_metadata_still_applies(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        response = next_client.get(f"/polls/{poll.pk}/embed/")
+        assert_metadata(response, title=f"{poll.question} (embed) · next.dj polls")
+
+    def test_root_layout_stylesheet_is_served(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        body = self._embed_html(next_client, poll)
+        assert "/embed/layout.css" in body
+
+    def test_detail_page_links_to_the_embed(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        body = _detail_html(next_client, poll)
+        assert f'href="/polls/{poll.pk}/embed/"' in body
+
+    def test_embed_zone_refreshes_through_the_partial_pipeline(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        choice = poll.choices.order_by("pk").first()
+        assert choice is not None
+        response = next_client.post_action(
+            "vote_form",
+            {"poll": poll.pk, "choice": choice.pk},
+            origin=f"/polls/{poll.pk}/embed/",
+            partial=True,
+            zones="poll-results",
+        )
+        assert response.status_code == 200
+        assert envelope_of(response).zone_targets() == ["poll-results"]

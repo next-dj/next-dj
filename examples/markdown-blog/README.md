@@ -11,6 +11,7 @@ The example covers the reading side of the framework: a custom `TemplateLoader` 
 | `/` | Latest posts, one entry per Markdown file under `blog/posts/`, the newest first. |
 | `/posts/welcome/` | A longer post. Headings, lists, breadcrumbs and reading-time meta. |
 | `/posts/hello-world/` | A minimal post with a fenced code block and no `description` of its own. |
+| `/posts/welcome/print/` | A print view of a post under its own root layout, no site chrome, with a print stylesheet. Linked as "Print view" from the post. |
 | `/about/` | Static page. A `template.md` body read by the custom loader, and a `page.py` that only declares metadata. |
 | `/feed.xml` | RSS over every post, advertised in the head of every page. |
 | `/sitemap.xml` | Every route, each post dated by its last edit. |
@@ -309,6 +310,12 @@ rules = [RobotsRule(allow="/")]
 ```
 
 The framework renders the group and appends the `Sitemap:` line itself, absolute on `SITE["URL"]`, so no host is written into a file. `rules` may also be a callable building the groups per request. A static `robots.txt` at the page root is served byte for byte instead, which suits a file handed over by someone else. A site has one source for `/robots.txt`, both files in one root or robots in two roots is an error at check time.
+
+### 14. A print view under its own root layout
+
+[`posts/[slug]/print/layout.djx`](blog/pages/posts/[slug]/print/layout.djx) begins with `{% layout root %}`, so the chain stops there. The site envelope, the posts layout with its breadcrumbs and share button, and the `site/` root layout are all left out, and the layout writes its own `<html>`, `{% metadata %}`, `{% collect_styles %}` and `{% collect_scripts %}`. Its co-located `layout.css` is the print stylesheet and the only one linked. The post stays the same because `article` is an `inherit_context` provider, so the print page reads the parsed post without loading it again.
+
+A callable `@page.metadata` belongs to its own page, so [`print/page.py`](blog/pages/posts/[slug]/print/page.py) titles the sheet from the front matter and marks it `noindex`. The title template from the settings still applies. `sitemap.py` lists the route in `exclude`, which keeps the sitemap check quiet for a dynamic route that is not listed.
 
 ## Gotchas
 

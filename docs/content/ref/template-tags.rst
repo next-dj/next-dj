@@ -278,6 +278,16 @@ Layouts
    Marks the same hole and carries a fallback body, rendered only where composition never reached, such as a layout rendered outside its chain.
    Takes no arguments either, and an argument raises ``TemplateSyntaxError`` at parse time.
 
+.. describe:: {% layout root %}
+
+   Marks the layout as the root of its chain.
+   Renders nothing.
+   Composition stops at this layout, so no ancestor ``layout.djx``, no layout above the page tree root, and no layout of a later ``DIRS`` root wraps the page.
+   The single argument is the word ``root``, and any other argument or none raises ``TemplateSyntaxError`` at parse time.
+   Only ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, and blank text may stand before it, and a marker elsewhere or a second marker is ``next.E168`` and has no effect.
+   The tag works in ``layout.djx`` alone, and in a ``template.djx`` or a component template it does nothing and draws ``next.W134``.
+   See :ref:`topics-layouts-root`.
+
 Composition fills the first placeholder a layout carries and leaves any later one as a real node that renders its own fallback body.
 Django's own lexer finds them, so a placeholder written inside ``{% verbatim %}`` or ``{% comment %}`` is text rather than a hole and neither composition nor the checks count it.
 A ``layout.djx`` carrying no placeholder reports ``next.W001`` during ``manage.py check`` and one carrying several reports ``next.W078``.

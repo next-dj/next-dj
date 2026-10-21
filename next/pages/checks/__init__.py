@@ -11,7 +11,7 @@ from .contexts import (
     check_context_registration_files,
     check_single_keyless_context,
 )
-from .layouts import check_layout_templates
+from .layouts import check_layout_templates, check_root_marker_outside_layouts
 from .loaders import check_template_loaders
 from .metadata import (
     check_metadata_callable_returns_mapping,
@@ -78,6 +78,7 @@ __all__ = [
     "check_pages_structure",
     "check_public_beside_requirements",
     "check_request_in_context",
+    "check_root_marker_outside_layouts",
     "check_shared_page_responses",
     "check_single_keyless_context",
     "check_template_loaders",

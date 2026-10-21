@@ -252,6 +252,10 @@ Terms used throughout the next.dj documentation.
       The tuple of zone names one partial request asks the server to render, carried in the ``X-Next-Zone`` header.
       A full page render carries no batch, which is what tells a page callable that every zone is about to render, see :doc:`/content/topics/context`.
 
+   root layout
+      A ``layout.djx`` that opens with the ``{% layout root %}`` marker.
+      Composition stops at it, so no layout further out wraps the pages below it, see :doc:`/content/topics/layouts`.
+
    layout placeholder
       The ``{% template %}`` opening a ``layout.djx`` leaves for the wrapped body.
       Composition fills the first one a layout carries, and a layout that carries none is dropped whole, see :doc:`/content/topics/layouts`.

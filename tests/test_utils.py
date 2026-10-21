@@ -22,6 +22,7 @@ from next.utils import (
     is_dynamic_trail,
     is_int,
     is_middleware,
+    is_within,
     join_trail,
     load_tree_source,
     middleware_listed,
@@ -52,6 +53,22 @@ class TestStatMtimeNs:
     def test_a_path_that_does_not_stat_reports_nothing(self, tmp_path) -> None:
         """Nothing rather than a sentinel, because no real mtime equals nothing."""
         assert stat_mtime_ns(tmp_path / "never-written") is None
+
+
+class TestIsWithin:
+    """Tests for ``is_within``."""
+
+    def test_a_path_under_the_root_is_within_it(self, tmp_path) -> None:
+        assert is_within(tmp_path / "a" / "b", tmp_path) is True
+
+    def test_the_root_itself_is_within_it(self, tmp_path) -> None:
+        assert is_within(tmp_path, tmp_path) is True
+
+    def test_a_sibling_sharing_a_name_prefix_is_not_within(self, tmp_path) -> None:
+        assert is_within(tmp_path / "site-two", tmp_path / "site") is False
+
+    def test_a_parent_of_the_root_is_not_within_it(self, tmp_path) -> None:
+        assert is_within(tmp_path, tmp_path / "a") is False
 
 
 class TestClassifyDirsEntries:

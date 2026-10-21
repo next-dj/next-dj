@@ -1,0 +1,15 @@
+{% layout root %}
+<!DOCTYPE html>
+<html lang="en">
+{% component "page_head" %}
+<body class="min-h-screen bg-background p-4">
+  <main class="embed-shell mx-auto space-y-3">
+    <h1 class="text-lg font-semibold tracking-tight text-foreground">{{ poll.question }}</h1>
+    {% template %}
+    <p class="text-xs text-muted-foreground">
+      <a href="/polls/{{ poll.pk }}/" target="_top" class="hover:text-foreground">Open the full poll</a>
+    </p>
+  </main>
+  {% collect_scripts %}
+</body>
+</html>

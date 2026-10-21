@@ -40,6 +40,7 @@ from tests.support import (
     NestedRootCase,
     StaticAssetProvider,
     WatchSourcesCase,
+    file_router_config_entry,
     patched_watch_sources,
     restored_static_registries,
 )
@@ -911,3 +912,36 @@ class TestNestedRootsAgree:
             mapping = discover_colocated_static_assets()
 
         assert sorted(mapping) == list(case.expected)
+
+
+class TestDirsRootLayoutAgrees:
+    """A `DIRS` root layout reached from an app page is named alike in both."""
+
+    def test_discovery_and_finders_name_it_under_its_own_key(
+        self, tmp_path: Path, file_backend: StaticBackend
+    ) -> None:
+        base = tmp_path.resolve()
+        app_pages = base / "blog" / "pages"
+        shared = base / "site"
+        (app_pages / "about").mkdir(parents=True)
+        shared.mkdir()
+        (shared / "layout.css").write_text("body{}")
+        layout = shared / "layout.djx"
+        layout.write_text("")
+        page = app_pages / "about" / "page.djx"
+        page.write_text("")
+        roots = [(app_pages, "blog/pages"), (shared, "site")]
+        config = [file_router_config_entry(dirs=[shared])]
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            collector = StaticCollector()
+            AssetDiscovery(
+                StaticAssetProvider(file_backend, tuple(roots))
+            ).discover_page_assets(page, collector)
+        with patched_watch_sources(pages=roots, layouts={layout}):
+            mapping = discover_colocated_static_assets()
+
+        assert [a.url for a in collector.assets_in_slot("styles")] == [
+            "/static/next/site/layout.css"
+        ]
+        assert mapping == {"next/site/layout.css": shared / "layout.css"}

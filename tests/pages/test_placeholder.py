@@ -1,6 +1,6 @@
 import pytest
 
-from next.pages.placeholder import ROOT_MARKER, RootScan, scan_root
+from next.pages.placeholder import ROOT_MARKER, RootScan, opens_html_document, scan_root
 
 
 _BODY = "<html>{% template %}</html>"
@@ -153,3 +153,65 @@ class TestScanRoot:
 
     def test_the_marker_constant_is_a_root_on_its_own(self) -> None:
         assert scan_root(ROOT_MARKER) == RootScan(True, ((0, len(ROOT_MARKER)),))
+
+
+class TestOpensHtmlDocument:
+    """`opens_html_document` finds an `<html` tag in text outside a comment block."""
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "<html>{% template %}</html>",
+            '<HTML lang="en">{% template %}</HTML>',
+            "<html/>",
+            "<html\n>{% template %}",
+            "{% load static %}<html>",
+            "{% comment %}x{% endcomment %}<html>",
+            "{% comment %}x{% endcomment %}{% if a %}<html>{% endif %}",
+            "{% comment %}{% if a %}{% endcomment %}<html>",
+        ],
+        ids=[
+            "plain",
+            "uppercase_with_attribute",
+            "self_closing",
+            "newline_before_close",
+            "after_a_load_tag",
+            "after_a_closed_comment",
+            "inside_a_block_after_a_comment",
+            "block_tag_inside_a_comment",
+        ],
+    )
+    def test_an_html_tag_in_text_is_found(self, content) -> None:
+        assert opens_html_document(content) is True
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "<htmlx>{% template %}",
+            "<main>{% template %}</main>",
+            "no markup at all",
+            "",
+            "{% comment %}<html>{% endcomment %}",
+            "{% comment %}{% if a %}<html>{% endif %}{% endcomment %}",
+            "{% comment %}\n<html>\n{% endcomment %}<p>x</p>",
+            "{# <html> #}<p>x</p>",
+        ],
+        ids=[
+            "longer_tag_name",
+            "other_tag",
+            "plain_text",
+            "empty",
+            "inside_a_comment",
+            "block_tag_inside_a_comment_hides_it",
+            "multiline_comment",
+            "brace_comment",
+        ],
+    )
+    def test_no_html_tag_outside_a_comment_is_not_found(self, content) -> None:
+        assert opens_html_document(content) is False
+
+    def test_an_unclosed_comment_hides_the_rest(self) -> None:
+        assert opens_html_document("{% comment %}<html>") is False
+
+    def test_a_bare_block_tag_opens_nothing(self) -> None:
+        assert opens_html_document("{%  %}<p>x</p>") is False

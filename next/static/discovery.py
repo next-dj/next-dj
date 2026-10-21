@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import posixpath
+from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 from urllib.parse import urlsplit
@@ -18,6 +19,7 @@ from next.pages import loaders as pages_loaders
 from next.utils import (
     LAYOUT_TEMPLATE,
     MAX_ANCESTOR_WALK_DEPTH,
+    is_within,
     resolved_tree,
     stat_mtime_ns,
     template_edits_watched,
@@ -61,13 +63,7 @@ class _AssetPlan(NamedTuple):
     module_assets: tuple[StaticAsset, ...]
     directory_mtimes: tuple[tuple[Path, int | None], ...]
     registries: tuple[int, int, int]
-
-
-class _LayoutWalk(NamedTuple):
-    """The directories holding a layout, and the mtimes of the watched ones."""
-
-    layouts: tuple[Path, ...]
-    mtimes: tuple[tuple[Path, int | None], ...]
+    file_mtimes: tuple[tuple[Path, int | None], ...] = ()
 
 
 def _url_suffix(url: str) -> str:
@@ -303,10 +299,16 @@ class AssetDiscovery:
         page_root = self._resolver.find_page_root(resolved)
         # Imported before the walk, because the import writes `__pycache__`.
         lists = self._module_lists(resolved)
-        walk = self._walk_layouts(resolved, page_root)
+        directories = self._watched_directories(resolved, page_root)
+        stamps = pages_loaders.layout_stamps(resolved, page_root)
+        chain = [layout for layout, _ in stamps]
         files: list[FoundAsset] = []
-        for layout_dir in walk.layouts:
-            name = self._resolver.logical_name_for_layout(layout_dir, page_root)
+        for layout_file in reversed(chain):
+            layout_dir = layout_file.parent
+            layout_root = self._root_of_layout(layout_dir, page_root)
+            if layout_root is None and page_root is not None:
+                continue
+            name = self._resolver.logical_name_for_layout(layout_dir, layout_root)
             if name is not None:
                 files += find_role_files(
                     layout_dir, logical_name=name, role="layout", stems=self._stems
@@ -320,9 +322,19 @@ class AssetDiscovery:
         return _AssetPlan(
             files=tuple(files),
             module_assets=self._module_assets(lists),
-            directory_mtimes=walk.mtimes,
+            directory_mtimes=directories,
             registries=registries,
+            file_mtimes=stamps,
         )
+
+    def _root_of_layout(self, layout_dir: Path, page_root: Path | None) -> Path | None:
+        """Return the deepest page tree root holding the resolved `layout_dir`.
+
+        A directory inside the page's own root shares it, so only others are looked up.
+        """
+        if page_root is not None and is_within(layout_dir, page_root):
+            return page_root
+        return self._resolver.find_page_root(layout_dir / LAYOUT_TEMPLATE)
 
     def _planned[K](
         self,
@@ -352,8 +364,8 @@ class AssetDiscovery:
         if not template_edits_watched():
             return False
         return any(
-            stat_mtime_ns(directory) != mtime
-            for directory, mtime in plan.directory_mtimes
+            stat_mtime_ns(path) != mtime
+            for path, mtime in chain(plan.directory_mtimes, plan.file_mtimes)
         )
 
     def discover_component_assets(
@@ -473,26 +485,24 @@ class AssetDiscovery:
         if collector.add(asset):
             asset_registered.send(sender=asset, collector=collector, backend=backend)
 
-    def _walk_layouts(self, file_path: Path, page_root: Path | None) -> _LayoutWalk:
+    def _watched_directories(
+        self, file_path: Path, page_root: Path | None
+    ) -> tuple[tuple[Path, int | None], ...]:
         """Walk up from the page directory, outermost first, and stat as it goes.
 
         Inside a page tree every directory is watched, outside only those read.
         """
-        layouts: list[Path] = []
         watched: list[tuple[Path, int | None]] = []
         inside_a_tree = page_root is not None
         current_dir = file_path.parent
         for depth in range(MAX_ANCESTOR_WALK_DEPTH):
             # Stat first, so a file created in between leaves the plan stale.
             mtime = stat_mtime_ns(current_dir)
-            holds_layout = (current_dir / LAYOUT_TEMPLATE).exists()
-            if holds_layout:
-                layouts.append(current_dir)
-            if inside_a_tree or holds_layout or depth == 0:
+            if inside_a_tree or depth == 0 or (current_dir / LAYOUT_TEMPLATE).exists():
                 watched.append((current_dir, mtime))
             parent = current_dir.parent
             # The tree root ends the walk, and so does the filesystem root.
             if current_dir in (page_root, parent):
                 break
             current_dir = parent
-        return _LayoutWalk(tuple(reversed(layouts)), tuple(reversed(watched)))
+        return tuple(reversed(watched))

@@ -9,18 +9,26 @@ from django.conf import settings
 from django.contrib.staticfiles import finders
 from django.contrib.staticfiles.finders import AppDirectoriesFinder
 from django.contrib.staticfiles.storage import staticfiles_storage
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import (
+    CheckMessage,
+    Error,
+    Tags,
+    Warning as DjangoWarning,
+    register,
+)
 
 from next.checks import NEXT
-from next.checks.common import import_backend_class
+from next.checks.common import get_router_manager, import_backend_class
 from next.components.sources import iter_serialized_component_context_keys
 from next.conf import import_class_cached, next_framework_settings
+from next.pages.checks.layouts import iter_layout_ancestry
 from next.pages.checks.responses import private_pages_warning
 from next.pages.scan import iter_serialized_page_context_keys
 from next.pages.watch import get_page_root_keys_for_watch
 
 from .assets import default_kinds
 from .backends import DEFAULT_STATIC_BACKEND, StaticBackend, StaticFilesBackend
+from .discovery import PathResolver, default_stems, find_role_files
 from .finders import NextAppDirectoriesFinder, scan_page_tree_assets
 from .nonce import nonce_active
 from .runtime import (
@@ -481,6 +489,36 @@ def check_page_roots_have_keys(*args, **kwargs) -> list[CheckMessage]:
         for root, key in get_page_root_keys_for_watch()
         if key is None
     ]
+
+
+@register(Tags.templates, NEXT)
+def check_layout_assets_above_trees(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about co-located assets of a layout above every page tree (`next.W135`)."""
+    router_manager, _init_errors = get_router_manager()
+    if router_manager is None:
+        return []
+    page_roots = tuple(get_page_root_keys_for_watch())
+    resolver = PathResolver(lambda: page_roots)
+    warnings: list[CheckMessage] = []
+    for layout_file in iter_layout_ancestry(router_manager):
+        if resolver.find_page_root(layout_file) is not None:
+            continue
+        found = find_role_files(
+            layout_file.parent, logical_name="", role="layout", stems=default_stems
+        )
+        if found:
+            names = ", ".join(sorted({asset.source_path.name for asset in found}))
+            warnings.append(
+                DjangoWarning(
+                    f"Layout file {layout_file} sits above every page tree and has "
+                    f"co-located assets ({names}). It still wraps the pages under it, "
+                    "but its assets are not served. Move the layout into a page tree "
+                    "or the assets to a layout inside one.",
+                    obj=str(layout_file),
+                    id="next.W135",
+                )
+            )
+    return warnings
 
 
 @register(NEXT)

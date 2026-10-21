@@ -312,3 +312,52 @@ class TestSitemapAndRobots:
             "",
             "Sitemap: https://blog.example/sitemap.xml",
         ]
+
+
+class TestPrintView:
+    """The print route cuts the layout chain and writes its own document shell."""
+
+    def test_own_shell_renders_once(self, next_client) -> None:
+        body = next_client.get("/posts/welcome/print/").content.decode()
+        assert body.count("<html") == 1
+        assert body.count("<!DOCTYPE html>") == 1
+        assert body.count("<body") == 1
+        assert "<h2>Why Markdown?</h2>" in body
+
+    def test_site_chrome_and_post_layout_are_cut(self, next_client) -> None:
+        body = next_client.get("/posts/welcome/print/").content.decode()
+        assert "next.dj blog</a>" not in body
+        assert "Share" not in body
+        assert 'aria-label="Breadcrumb"' not in body
+        assert "cdn.tailwindcss.com" not in body
+        assert "shared/css/tokens.css" not in body
+
+    def test_the_head_comes_from_ancestor_metadata(self, next_client) -> None:
+        response = next_client.get("/posts/welcome/print/")
+        assert_metadata(
+            response,
+            title="Welcome to the blog · next.dj blog",
+            description=WELCOME_DESCRIPTION,
+            robots="noindex",
+        )
+        assert response.content.decode().count('name="viewport"') == 1
+
+    def test_the_print_stylesheet_is_served(self, next_client) -> None:
+        body = next_client.get("/posts/welcome/print/").content.decode()
+        assert "/print/layout.css" in body
+        assert body.count('rel="stylesheet"') == 1
+
+    def test_the_post_page_links_to_its_print_view(self, next_client) -> None:
+        body = next_client.get("/posts/welcome/").content.decode()
+        assert find_anchor(body, href="/posts/welcome/print/", text="Print view")
+
+    def test_the_print_view_links_back_to_the_post(self, next_client) -> None:
+        body = next_client.get("/posts/welcome/print/").content.decode()
+        assert find_anchor(body, href="/posts/welcome/", text="Back to the post")
+
+    def test_the_print_view_stays_out_of_the_sitemap(self, next_client) -> None:
+        locs = {url.loc for url in parse_sitemap(next_client.get("/sitemap.xml"))}
+        assert not any(loc.endswith("/print/") for loc in locs)
+
+    def test_a_slug_without_a_file_is_not_found(self, next_client) -> None:
+        assert next_client.get("/posts/missing/print/").status_code == 404

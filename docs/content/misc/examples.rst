@@ -35,7 +35,8 @@ The table runs roughly in order of how much it assumes.
      - Publishes Markdown posts through nested layouts, hands serialised values to the browser, feeds a site-wide value through a context processor, and runs a co-located ``component.js`` beside the component that needs it.
        Builds the head from ``DEFAULTS`` down to a per-post ``@page.metadata`` callable with a plain ``BlogPosting`` JSON-LD dict and keywords from the front matter, renders ``{% breadcrumbs %}`` in its nested layouts, names a static social card in ``og.images``, and advertises an RSS feed through ``alternates.feeds``.
        Adds a dated sitemap and a ``robots.py``.
-     - :doc:`/content/topics/layouts`, :doc:`/content/topics/context`, :doc:`/content/topics/static-assets/js-context`, :doc:`/content/topics/seo/metadata`, :doc:`/content/topics/seo/structured-data`, :doc:`/content/topics/seo/breadcrumbs`
+       Serves a print view of each post under a root layout that cuts the site shell.
+     - :doc:`/content/topics/layouts`, :doc:`/content/howto/give-a-section-its-own-document-shell`, :doc:`/content/topics/context`, :doc:`/content/topics/static-assets/js-context`, :doc:`/content/topics/seo/metadata`, :doc:`/content/topics/seo/structured-data`, :doc:`/content/topics/seo/breadcrumbs`
    * - :repo:`feature-flags <tree/main/examples/feature-flags>`
      - Turns features on and off behind a composite guard component, and invalidates the flag cache from signal receivers rather than from the views that read it.
        Titles each panel with a one-line ``metadata`` dict and keeps the admin subtree ``noindex``.
@@ -65,6 +66,7 @@ The table runs roughly in order of how much it assumes.
    * - :repo:`live-polls <tree/main/examples/live-polls>`
      - Streams poll results to every open browser over server-sent events, fanning out from a signal receiver that reads the bound form, with a locally bundled Vue single-file component subscribing through ``EventSource`` and a custom ``.vue`` asset kind.
        Titles the poll list with a ``metadata`` dict and each poll after its question through ``@page.metadata``.
+       Serves each poll as an embeddable widget under a root layout with a document shell of its own.
      - :doc:`/content/topics/partial-rendering/sse`, :doc:`/content/howto/stream-live-updates-with-sse`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/framework-islands`
    * - :repo:`observability <tree/main/examples/observability>`
      - Watches a running project through one receiver per signal group, refreshing a dashboard from polling and lazy zones and a patch verb of its own, with a custom components backend, a custom deduplication strategy, a serializer swapped both globally and per decorator, and an opt-in hashed-manifest profile.

@@ -139,6 +139,11 @@ A tree with no key serves no ``layout`` or ``template`` asset, and ``manage.py c
 A router backend gives its trees a key through the ``key`` field of ``PageRoot``, see :doc:`/content/ref/urls`.
 When two page roots contain a file, the deepest one names it.
 
+A page collects the ``layout`` files of the layouts in its cut chain, see :ref:`topics-layouts-root`.
+Each layout takes its name from the deepest root that holds it, not from the root of the page, so the ``layout.css`` of a ``DIRS`` root reaches a page of an application tree under the key of the ``DIRS`` root.
+A layout under no root, or under a root with no key, serves no asset to a page inside a root.
+A page outside every root keeps the fallback names, which come from the directory name of the layout.
+
 ``template`` role.
    The key, then the directory of the template relative to its page root, and ``index`` for the page root itself.
    A ``template.css`` in ``notes/pages/archive/`` is published as ``next/notes/pages/archive.css``, and one beside the root ``template.djx`` as ``next/notes/pages/index.css``.

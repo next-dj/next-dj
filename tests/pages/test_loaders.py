@@ -20,14 +20,20 @@ from next.pages.loaders import (
     PythonTemplateLoader,
     TemplateLoader,
     _climb,
+    _dirs_inside,
     _is_root_layout,
+    _layout_text,
     _page_roots,
+    _routed_root,
+    _split_ancestry,
     build_registered_loaders,
+    forget_layout_texts,
     forget_page_roots,
     has_body,
     has_load_errors,
     last_load_error,
     layout_chain,
+    layout_stamps,
     load_page_module,
     load_python_module_memo,
     module_generation,
@@ -41,7 +47,7 @@ from next.pages.loaders import (
 )
 from next.pages.placeholder import ROOT_MARKER
 from next.pages.processors import _get_context_processors, _import_context_processor
-from next.utils import MAX_ANCESTOR_WALK_DEPTH
+from next.utils import MAX_ANCESTOR_WALK_DEPTH, stat_mtime_ns
 from tests.support import (
     LAYOUT_CONFIG_CASES,
     PAGES_DIRS_CONFIG_CASES,
@@ -2045,28 +2051,53 @@ def _dirs_config(*roots: Path) -> list[dict[str, object]]:
     return [file_router_config_entry(dirs=list(roots))]
 
 
+def _root_check(layout: Path) -> bool:
+    """Return `_is_root_layout` for `layout` at the mtime it now has."""
+    mtime_ns = stat_mtime_ns(layout)
+    assert mtime_ns is not None
+    return _is_root_layout(layout, mtime_ns)
+
+
 class TestIsRootLayout:
     """`_is_root_layout` reads a layout file and never raises on a bad one."""
 
     def test_a_marked_layout_is_a_root(self, tmp_path) -> None:
-        assert _is_root_layout(_write_layout(tmp_path, "html", root=True)) is True
+        assert _root_check(_write_layout(tmp_path, "html", root=True)) is True
 
     def test_an_unmarked_layout_is_no_root(self, tmp_path) -> None:
-        assert _is_root_layout(_write_layout(tmp_path, "html")) is False
-
-    def test_an_unreadable_layout_is_no_root(self, tmp_path) -> None:
-        assert _is_root_layout(tmp_path / "gone" / "layout.djx") is False
+        assert _root_check(_write_layout(tmp_path, "html")) is False
 
     def test_a_layout_that_is_a_directory_is_no_root(self, tmp_path) -> None:
         (tmp_path / "layout.djx").mkdir()
 
-        assert _is_root_layout(tmp_path / "layout.djx") is False
+        assert _root_check(tmp_path / "layout.djx") is False
 
     def test_an_undecodable_layout_is_no_root(self, tmp_path) -> None:
         layout = tmp_path / "layout.djx"
         layout.write_bytes(b"\xff\xfe" + ROOT_MARKER.encode())
 
-        assert _is_root_layout(layout) is False
+        assert _root_check(layout) is False
+
+    def test_the_answer_is_held_for_an_unchanged_mtime(self, tmp_path) -> None:
+        layout = _write_layout(tmp_path, "html", root=True)
+        mtime_ns = stat_mtime_ns(layout)
+        assert mtime_ns is not None
+        assert _is_root_layout(layout, mtime_ns) is True
+        layout.unlink()
+
+        assert _is_root_layout(layout, mtime_ns) is True
+
+
+class TestLayoutText:
+    """`_layout_text` answers a layout source and `None` for one that is gone."""
+
+    def test_a_vanished_layout_has_no_text(self, tmp_path) -> None:
+        assert _layout_text(tmp_path / "layout.djx") is None
+
+    def test_a_present_layout_reads_back(self, tmp_path) -> None:
+        layout = _write_layout(tmp_path, "html")
+
+        assert _layout_text(layout) == layout.read_text()
 
 
 class TestLayoutChainCut:
@@ -2082,6 +2113,21 @@ class TestLayoutChainCut:
         assert layout_chain(page_file) == (near, embed)
         assert outer not in layout_chain(page_file)
         assert site not in layout_chain(page_file)
+
+    def test_cut_off_keeps_every_layout_up_to_the_top(self, tmp_path) -> None:
+        outer = _write_layout(tmp_path, "outer")
+        embed = _write_layout(tmp_path / "site" / "embed", "embed", root=True)
+        page_file = tmp_path / "site" / "embed" / "page.py"
+
+        assert layout_chain(page_file, cut=False) == (embed, outer)
+
+    def test_a_resolved_path_is_taken_as_it_is(self, tmp_path) -> None:
+        layout = _write_layout(tmp_path / "real", "html")
+        link = tmp_path / "link"
+        link.symlink_to(tmp_path / "real", target_is_directory=True)
+
+        assert layout_chain(link / "page.py", resolved=True) == (link / "layout.djx",)
+        assert layout_chain(link / "page.py") == (layout.resolve(),)
 
     def test_an_unmarked_chain_runs_to_the_top(self, tmp_path) -> None:
         outer = _write_layout(tmp_path, "outer")
@@ -2356,6 +2402,134 @@ class TestClimbLimits:
         assert layout_files == [near]
         assert far not in layout_files
         assert watched_dirs == [deep, deep.parent]
+
+
+class TestLayoutsAboveTheTree:
+    """The layouts above a page tree root are held between walks."""
+
+    @pytest.fixture()
+    def tree(self, tmp_path) -> Path:
+        site = tmp_path / "mid" / "site"
+        (site / "sub").mkdir(parents=True)
+        return site
+
+    def test_an_edit_above_the_tree_shows(self, tree) -> None:
+        mid = _write_layout(tree.parent, "mid")
+        top = _write_layout(tree.parent.parent, "top")
+        page = tree / "sub" / "page.py"
+
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tree)}
+        ):
+            assert layout_chain(page) == (mid, top)
+            touch_later(mid, ROOT_MARKER + _SHELL.format(tag="mid"))
+
+            assert layout_chain(page) == (mid,)
+
+    def test_a_layout_removed_above_the_tree_leaves_the_chain(self, tree) -> None:
+        mid = _write_layout(tree.parent, "mid")
+        page = tree / "sub" / "page.py"
+
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tree)}
+        ):
+            assert layout_chain(page) == (mid,)
+            mid.unlink()
+
+            assert layout_chain(page) == ()
+
+    @pytest.mark.parametrize(
+        "forget", [forget_layout_texts, forget_page_roots, reset_module_memo]
+    )
+    def test_a_layout_added_above_the_tree_joins_once_the_hold_drops(
+        self, tree, forget
+    ) -> None:
+        page = tree / "sub" / "page.py"
+
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tree)}
+        ):
+            assert layout_chain(page) == ()
+            mid = _write_layout(tree.parent, "mid")
+
+            assert layout_chain(page) == ()
+            forget()
+
+            assert layout_chain(page) == (mid,)
+
+    def test_a_named_tree_root_holds_apart_from_the_routed_ones(self, tree) -> None:
+        mid = _write_layout(tree.parent, "mid")
+        page = (tree / "sub" / "page.py").resolve()
+
+        stamps = layout_stamps(page, tree)
+
+        assert stamps == ((mid, stat_mtime_ns(mid)),)
+
+    def test_the_stamps_cut_at_a_root_layout(self, tree) -> None:
+        mid = _write_layout(tree.parent, "mid", root=True)
+        _write_layout(tree.parent.parent, "top")
+        page = (tree / "sub" / "page.py").resolve()
+
+        assert layout_stamps(page, tree) == ((mid, stat_mtime_ns(mid)),)
+
+
+class TestAncestrySplit:
+    """The ancestry splits at the tree root only when that holds something apart."""
+
+    def test_a_routed_tree_root_is_found_from_any_depth_inside(self, tmp_path) -> None:
+        site = tmp_path / "site"
+        (site / "a" / "b").mkdir(parents=True)
+
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(site)}
+        ):
+            assert _routed_root(site) == site
+            assert _routed_root(site / "a" / "b") == site
+            assert _routed_root(tmp_path) is None
+
+    def test_a_directory_outside_the_tree_is_not_inside_it(self, tmp_path) -> None:
+        assert _dirs_inside(tmp_path / "a", tmp_path / "b") is None
+        assert _dirs_inside(tmp_path / "a", None) is None
+
+    def test_a_tree_at_the_filesystem_root_holds_nothing_apart(self) -> None:
+        anchor = Path(Path.cwd().anchor)
+
+        assert _dirs_inside(anchor / "a", anchor) is None
+
+    def test_the_directories_down_to_the_root_are_probed_and_the_rest_held(
+        self, tmp_path
+    ) -> None:
+        start = tmp_path / "a" / "b"
+
+        dirs, above, room = _split_ancestry(start, 0, tmp_path)
+
+        assert dirs == [start, tmp_path / "a", tmp_path]
+        assert above == tmp_path
+        assert room == MAX_ANCESTOR_WALK_DEPTH - 3
+
+    def test_a_watched_depth_past_the_tree_takes_the_whole_ancestry(
+        self, tmp_path
+    ) -> None:
+        start = tmp_path / "a"
+
+        dirs, above, room = _split_ancestry(start, 5, tmp_path)
+
+        assert dirs[:2] == [start, tmp_path]
+        assert len(dirs) > 2
+        assert above is None
+        assert room == 0
+
+    def test_a_tree_deeper_than_the_walk_cap_holds_nothing_apart(
+        self, tmp_path
+    ) -> None:
+        start = tmp_path
+        for index in range(MAX_ANCESTOR_WALK_DEPTH):
+            start = start / f"d{index}"
+
+        _, above, room = _split_ancestry(start, 0, tmp_path)
+
+        assert above is None
+        assert room == 0
 
 
 class TestCanLoadWalk:

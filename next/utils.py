@@ -145,6 +145,14 @@ def stat_mtime_ns(path: Path) -> int | None:
         return None
 
 
+def is_within(path: Path, root: Path) -> bool:
+    """Return whether the resolved `path` is `root` or lies under it, by parts.
+
+    It is far cheaper than `Path.is_relative_to` on a hot path.
+    """
+    return path.parts[: len(root.parts)] == root.parts
+
+
 class _SourceLoader(importlib.machinery.SourceFileLoader):
     """Validate the cached bytecode of a source on its nanosecond mtime.
 

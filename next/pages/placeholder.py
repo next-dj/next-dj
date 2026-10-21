@@ -5,6 +5,7 @@ Composition and the layout checks share these spellings.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -28,6 +29,7 @@ _COMMENT_TAG = "comment"
 _END_COMMENT_TAG = "endcomment"
 _LOAD_TAG = "load"
 _ROOT_MARKER_WORDS = ["layout", "root"]
+_HTML_OPEN = re.compile(r"<html(?=[\s>/])", re.IGNORECASE)
 
 
 def _tokens(content: str) -> Iterator[tuple[TokenType, str, int, int]]:
@@ -87,6 +89,8 @@ def scan_root(content: str) -> RootScan:
 
     Only `load` tags, comments and blank text may precede the one marker.
     """
+    if _ROOT_MARKER_WORDS[0] not in content:
+        return RootScan(is_root=False, markers=())
     markers: list[tuple[int, int]] = []
     clean_prefix = True
     first_in_place = False
@@ -113,12 +117,33 @@ def scan_root(content: str) -> RootScan:
     return RootScan(first_in_place and len(markers) == 1, tuple(markers))
 
 
+def opens_html_document(content: str) -> bool:
+    """Whether `content` writes an `<html` tag in text outside a `{% comment %}`."""
+    commented = False
+    for token_type, contents, _start, _end in _tokens(content):
+        if token_type is TokenType.BLOCK:
+            words = contents.split()
+            command = words[0] if words else ""
+            if commented:
+                commented = command != _END_COMMENT_TAG
+            elif command == _COMMENT_TAG:
+                commented = True
+        elif (
+            token_type is TokenType.TEXT
+            and not commented
+            and _HTML_OPEN.search(contents)
+        ):
+            return True
+    return False
+
+
 __all__ = [
     "PLACEHOLDER",
     "PLACEHOLDER_CLOSE",
     "PLACEHOLDER_OPEN",
     "ROOT_MARKER",
     "RootScan",
+    "opens_html_document",
     "placeholder_spans",
     "scan_root",
 ]
