@@ -959,6 +959,7 @@ testing = [
 [package.dev-dependencies]
 codspeed = [
     { name = "pytest-codspeed" },
+    { name = "pytest-test-groups" },
 ]
 compat = [
     { name = "crispy-bootstrap5" },
@@ -1014,7 +1015,10 @@ requires-dist = [
 provides-extras = ["testing"]
 
 [package.metadata.requires-dev]
-codspeed = [{ name = "pytest-codspeed", specifier = "==5.0.3" }]
+codspeed = [
+    { name = "pytest-codspeed", specifier = "==5.0.3" },
+    { name = "pytest-test-groups", specifier = "==1.2.1" },
+]
 compat = [
     { name = "crispy-bootstrap5", specifier = ">=2024.10" },
     { name = "django-allauth", specifier = ">=65.18" },
@@ -1473,6 +1477,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/01/3b/6a40e1b9d925651e601e056a97f60d8a1daeddeac03d5609be60cb4362ce/pytest_randomly-5.0.0.tar.gz", hash = "sha256:e9c575a5873ef168ddbe340ed9e97ce9edb4492ccc821e4b2ac6bb1f0ed515d2", size = 8542, upload-time = "2026-09-01T22:34:20.441Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/10/b4/47e939285caad9a623d021512912ac08dc92a467ad075d179f43729d2934/pytest_randomly-5.0.0-py3-none-any.whl", hash = "sha256:8a0d4703115c0c25b38b6e129fc16b1947b9643ff26a41bc1d185d7e5a7689c1", size = 8920, upload-time = "2026-09-01T22:34:19.227Z" },
+]
+
+[[package]]
+name = "pytest-test-groups"
+version = "1.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9f/5a/c7874fe15e03d86a1109a3274b57a2473edb8a1dda4a4d27f25d848b6ff5/pytest_test_groups-1.2.1.tar.gz", hash = "sha256:67576b295522fc144b3a42fa1801f50ae962389e984b48bab4336686d09032f1", size = 8137, upload-time = "2025-05-08T16:28:19.627Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/31/ff/7ff0ca5e8051931bf7fb65e31f085f7c0577615bf3a4776fb583cb471800/pytest_test_groups-1.2.1-py3-none-any.whl", hash = "sha256:8c7a016448f9ad347fb69a62f417f0a2358ecbf129fe44bc44ee991918a0bb73", size = 5278, upload-time = "2025-05-08T16:28:18.077Z" },
 ]
 
 [[package]]

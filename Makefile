@@ -1,4 +1,4 @@
-.PHONY: help install test bench test-compat lint format type-check clean build docs docs-lint docs-serve docs-clean docs-linkcheck install-js build-js test-js test-js-coverage lint-js format-js format-js-check type-check-js test-examples test-examples-e2e ci pre-commit-install pre-commit-run dev-setup
+.PHONY: help install test bench bench-codspeed test-compat lint format type-check clean build docs docs-lint docs-serve docs-clean docs-linkcheck install-js build-js test-js test-js-coverage lint-js format-js format-js-check type-check-js test-examples test-examples-e2e ci pre-commit-install pre-commit-run dev-setup
 
 # Allow CI to point at a prebuilt venv's pytest (bypassing `uv run` and its sync step)
 PYTEST ?= uv run pytest
@@ -24,6 +24,7 @@ help: # show this help message
 	@echo "  install         - sync runtime deps + project from uv.lock (no dev group)"
 	@echo "  test            - run tests in parallel with 100% coverage requirement"
 	@echo "  bench           - run performance benchmarks (opt-in, no coverage)"
+	@echo "  bench-codspeed  - run the benchmarks under pytest-codspeed, as the CodSpeed job does"
 	@echo "  test-compat     - run ecosystem compatibility tests (no coverage)"
 	@echo "  test-examples   - run Python + JS tests for examples with coverage"
 	@echo "  test-examples-e2e - run the browser suites for examples that ship one"
@@ -101,6 +102,11 @@ BENCH_EXTRA ?=
 
 bench: # run performance benchmarks (opt-in, no coverage, flags match CI)
 	uv run pytest tests/benchmarks $(BENCH_FLAGS) $(BENCH_EXTRA)
+
+bench-codspeed: # run the benchmarks under pytest-codspeed (walltime off Linux CI)
+	uv run --group codspeed pytest tests/benchmarks -m perf --codspeed \
+		-W "ignore:Simulation instrument ignores rounds:UserWarning" \
+		-p no:randomly --no-cov --override-ini=addopts= $(BENCH_EXTRA)
 
 test-compat:
 	uv run --group compat pytest tests/compat -q --no-cov
