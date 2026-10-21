@@ -34,8 +34,7 @@ register = template.Library()
 def do_form(parser: template.base.Parser, token: template.base.Token) -> FormNode:
     """Block tag accepting an action name plus optional HTML attributes.
 
-    The `validate`, `trigger`, `debounce`, `zone`, and `key` params compile to
-    `data-next-*` attributes, while any other pair stays plain HTML.
+    The `validate`, `trigger`, `debounce`, `zone` and `key` params become `data-next-*`.
     """
     bits = token.split_contents()
     if len(bits) < _MIN_FORM_TAG_BITS:

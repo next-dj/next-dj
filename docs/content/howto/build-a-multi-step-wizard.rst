@@ -25,7 +25,7 @@ Each data step is an ordinary ``ModelForm`` over the target model, and the final
 The wizard lists them in order.
 
 .. code-block:: python
-   :caption: access/views/request/[step]/page.py
+   :caption: access/pages/request/[step]/page.py
 
    from typing import Any
 
@@ -60,8 +60,7 @@ The wizard lists them in order.
            obj = AccessRequest.objects.create(**cleaned_data)
            return HttpResponseRedirect(f"/request/{obj.pk}/audit/")
 
-The captions mirror the repository's ``audit-forms`` example, which configures ``PAGES_DIR`` as ``views``.
-Under the default settings the same files live in ``access/pages/request/[step]/``, see :doc:`/content/ref/settings`.
+The captions mirror the ``access`` application of the repository's ``audit-forms`` example.
 
 Subclassing registers the wizard as the ``access_request_wizard`` action, and the default ``Meta.url_param`` of ``"step"`` matches the ``[step]`` route segment with no extra configuration.
 Every step form subclasses ``django.forms`` directly because a step is not a standalone action and has nothing to register.
@@ -81,7 +80,7 @@ Render the wizard
 The ``{% form %}`` tag publishes ``form`` for the current step and ``wizard`` for navigation.
 
 .. code-block:: jinja
-   :caption: access/views/request/[step]/template.djx
+   :caption: access/pages/request/[step]/template.djx
 
    {% form "access_request_wizard" %}
      {{ form.as_p }}

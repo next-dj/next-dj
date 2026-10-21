@@ -392,6 +392,100 @@ describe("Wire non-envelope navigate-once", () => {
   });
 });
 
+describe("Wire access refusals", () => {
+  const LOGIN = "/accounts/login/?next=/orders/";
+
+  function login(): Response {
+    return envelopeResponse("<html>sign in</html>", {
+      type: "text/html",
+      url: LOGIN,
+      redirected: true,
+    });
+  }
+
+  function refusal(status: number, url: string): Response {
+    return envelopeResponse(`<html>${status}</html>`, {
+      status,
+      type: "text/html",
+      url,
+    });
+  }
+
+  function errors(h: Harness) {
+    return h.dispatched.filter((d) => d.event === "partial:error");
+  }
+
+  it("navigates a zone GET redirected to the login page there, reporting nothing", async () => {
+    const h = makeWire(async () => login());
+    await h.wire.fetch({ url: "/orders/", zone: "list" });
+    expect(h.navigated).toEqual([LOGIN]);
+    expect(h.envelopes).toEqual([]);
+    expect(errors(h)).toEqual([]);
+  });
+
+  it.each([403, 404])(
+    "reports a %i zone GET and then navigates to the refused page",
+    async (status) => {
+      const log: unknown[] = [];
+      const wire = new Wire({
+        fetch: async () => refusal(status, "/orders/"),
+        navigate: (url) => log.push({ navigate: url }),
+        session: memorySession(),
+        dispatch: (event, detail) => log.push({ event, detail }),
+        onEnvelope: (raw) => log.push({ applied: raw }),
+        csrf: { current: () => undefined, ensure: async () => undefined },
+      });
+      await wire.fetch({ url: "/orders/", zone: "list" });
+      expect(log.slice(1)).toEqual([
+        {
+          event: "partial:error",
+          detail: { kind: "http", status, body: `<html>${status}</html>` },
+        },
+        { navigate: "/orders/" },
+      ]);
+    },
+  );
+
+  it("frees the zone queue after a refusal, so the next GET runs", async () => {
+    const h = makeWire(async () => refusal(403, "/orders/"));
+    await h.wire.fetch({ url: "/orders/", zone: "list" });
+    await h.wire.fetch({ url: "/orders/", zone: "list" });
+    expect(h.calls).toHaveLength(2);
+  });
+
+  it("applies a refusal the server answers with an envelope", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE, { status: 403 }));
+    await h.wire.fetch({ url: "/orders/", zone: "list" });
+    expect(h.envelopes).toHaveLength(1);
+    expect(h.navigated).toEqual([]);
+    expect(errors(h)).toEqual([]);
+  });
+
+  it("navigates an action redirected to the login page there and frees the lock", async () => {
+    const h = makeWire(async () => login());
+    await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
+    expect(h.navigated).toEqual([LOGIN]);
+    expect(errors(h)).toEqual([]);
+    await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
+    expect(h.calls).toHaveLength(2);
+  });
+
+  it.each([403, 404])(
+    "reports a %i action without navigating and frees the lock",
+    async (status) => {
+      const h = makeWire(async () => refusal(status, "/_next/form/u1/"));
+      await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
+      expect(h.navigated).toEqual([]);
+      expect(h.envelopes).toEqual([]);
+      expect(errors(h).map((d) => d.detail)).toEqual([
+        { kind: "http", status, body: `<html>${status}</html>` },
+      ]);
+      await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
+      expect(h.calls).toHaveLength(2);
+    },
+  );
+});
+
 describe("Wire mutation lock", () => {
   it("drops a second submit while busy: double click yields one fetch", async () => {
     let resolve!: (r: Response) => void;

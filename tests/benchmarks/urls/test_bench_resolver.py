@@ -37,6 +37,45 @@ def _build_patterns() -> list[URLPattern]:
     return patterns
 
 
+_MOUNT_PREFIX = "wallets/<int:wallet>/"
+
+
+def _build_mounted_patterns() -> list[URLPattern]:
+    """Return a tree under a parametrised segment in each route, then one beside it."""
+    mounted = [
+        path(
+            f"{_MOUNT_PREFIX}sec{i}/page{j}/",
+            _bench_view,
+            name=f"bench_wallets_int_wallet_s{i}_p{j}",
+        )
+        for i in range(_SECTIONS)
+        for j in range(_PAGES)
+    ]
+    return [*mounted, *_build_patterns()]
+
+
+@pytest.fixture(scope="module")
+def mounted_resolver() -> URLResolver:
+    """Return one trie over a tree under a parametrised segment and one beside it."""
+    built = TrieURLResolver(RoutePattern(""), _build_mounted_patterns())
+    with contextlib.suppress(Resolver404):
+        built.resolve("warmup/miss/")
+    return built
+
+
+@pytest.fixture(scope="module")
+def included_resolver() -> URLResolver:
+    """Return a trie included under a prefix with a parameter, as `pages()` mounts."""
+    tree = TrieURLResolver(RoutePattern(""), _build_patterns())
+    built = URLResolver(
+        RoutePattern("", is_endpoint=False),
+        [path("org/<int:org>/audit/", ([tree], "audit", "audit"))],
+    )
+    with contextlib.suppress(Resolver404):
+        built.resolve("warmup/miss/")
+    return built
+
+
 @pytest.fixture(scope="module")
 def route_patterns() -> list[URLPattern]:
     return _build_patterns()
@@ -75,3 +114,29 @@ class TestBenchResolverModes:
                 resolver.resolve("missing/route/")
 
         benchmark(run)
+
+
+class TestBenchMountedResolve:
+    """A route under a parametrised segment against one beside it, through the trie."""
+
+    @pytest.mark.benchmark(group="urls.resolver")
+    def test_mounted_prefix_hit(self, mounted_resolver: URLResolver, benchmark) -> None:
+        benchmark(mounted_resolver.resolve, "wallets/42/sec9/page11/")
+
+    @pytest.mark.benchmark(group="urls.resolver")
+    def test_unprefixed_hit_beside_mount(
+        self, mounted_resolver: URLResolver, benchmark
+    ) -> None:
+        benchmark(mounted_resolver.resolve, "sec9/page11/")
+
+    @pytest.mark.benchmark(group="urls.resolver")
+    def test_unprefixed_dynamic_hit_beside_mount(
+        self, mounted_resolver: URLResolver, benchmark
+    ) -> None:
+        benchmark(mounted_resolver.resolve, "items/12345/")
+
+    @pytest.mark.benchmark(group="urls.resolver")
+    def test_included_tree_static_hit(
+        self, included_resolver: URLResolver, benchmark
+    ) -> None:
+        benchmark(included_resolver.resolve, "org/7/audit/sec9/page11/")

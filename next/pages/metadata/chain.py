@@ -89,9 +89,7 @@ class ChainSource:
 class ChainEntry:
     """The memoised chain of one page with the stamps that validate it.
 
-    A request folds only `tail` over `prefix`. `folded` is set for a static chain.
-    A chain the schema refuses carries the `refusal` and folds the site defaults under
-    `REFUSED_ROBOTS`, so the refusal is memoised like any other chain.
+    A request folds `tail` over `prefix`, and a refused chain carries its `refusal`.
     """
 
     ancestors: AncestorStamps
@@ -256,8 +254,7 @@ def _memoised_entry(registry: PageMetadataRegistry, file_path: Path) -> ChainEnt
 def chain_entry(registry: PageMetadataRegistry, file_path: Path) -> ChainEntry:
     """Return the memoised chain of `file_path`, raising when the schema refuses it.
 
-    A refused chain is walked again, so each call raises a new exception, since a
-    re-raised instance grows its traceback and its notes.
+    A refused chain is walked again, as a re-raised instance grows its traceback.
     """
     entry = _memoised_entry(registry, file_path)
     if entry.refusal is None:
@@ -268,10 +265,7 @@ def chain_entry(registry: PageMetadataRegistry, file_path: Path) -> ChainEntry:
 def contained_chain(registry: PageMetadataRegistry, file_path: Path) -> ChainEntry:
     """Return the memoised chain of `file_path` for a response, containing a refusal.
 
-    A refused chain renders the site defaults under `REFUSED_ROBOTS`. Its refusal
-    raises under `DEBUG` or `STRICT_LOADING`. Otherwise every read marks the render
-    degraded, and the refusal is logged at the `FailureLog` rate. A refused
-    `DEFAULTS` is contained the same way, as `contain_site_refusal` describes.
+    A refusal raises under `DEBUG` or `STRICT_LOADING`, else it degrades the render.
     """
     entry = _memoised_entry(registry, file_path)
     refusal = entry.refusal
@@ -301,8 +295,7 @@ def _contain_refusal(
 def _fresh(refusal: ChainRefusal) -> ChainRefusal:
     """Return a copy of `refusal` with no traceback, so no two raises share state.
 
-    The memoised instance is never raised, since concurrent requests would each
-    rewrite its traceback while a log handler formats it.
+    The memoised instance is never raised, as concurrent raises rewrite its traceback.
     """
     fresh = type(refusal).__new__(type(refusal), *refusal.args)
     vars(fresh).update(vars(refusal))
@@ -394,8 +387,7 @@ def fold_chain(
 ) -> Metadata:
     """Fold the chain of `file_path`, `overlay` standing as the page's own segment.
 
-    The overlay merges over the page's own dict and replaces its callable.
-    A failing callable raises, so the caller decides how to handle the failure.
+    The overlay merges over the page's own dict, and a failing callable raises.
     """
     entry = chain_entry(registry, file_path)
     if overlay is None:

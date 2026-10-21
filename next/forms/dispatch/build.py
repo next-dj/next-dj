@@ -1,11 +1,13 @@
 """Form construction and hook invocation for the form action dispatch pipeline."""
 
 import types
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from django.db.models import Model
 from django.forms.models import BaseModelForm as DjangoBaseModelForm
 
+from next.conf.sentinels import UNSET
+from next.deps import REQUEST_DEP_CACHE_ATTR
 from next.deps.introspect import cached_accepts_var_keyword
 from next.deps.resolver import current_resolver
 from next.forms.origin import url_kwargs_for_request
@@ -17,27 +19,22 @@ if TYPE_CHECKING:
     from django import forms as django_forms
     from django.http import HttpRequest
 
+    from next.forms.base import _FormKwargsHook
+
 
 _FACTORY_TUPLE_LEN = 2
+_DISPATCH_BOUND_KWARGS: Final[tuple[str, ...]] = ("data", "files")
 
 type _DepsState = tuple[dict[str, Any], list[str]]
 
 
-def _build_form(
-    form_class: "type[django_forms.Form]",
-    initial_data: object,
-    *,
-    request: "HttpRequest | None",
-    init_kwargs: dict[str, Any] | None = None,
-) -> "django_forms.Form":
-    """Build a form, bound to POST when `request` is given."""
-    post_data = request.POST if request is not None else None
-    files = request.FILES if request is not None and hasattr(request, "FILES") else None
-    bound = request is not None
-    if init_kwargs:
-        if bound:
-            return form_class(data=post_data, files=files, **init_kwargs)
-        return form_class(**init_kwargs)
+def _action_prefix(action_name: str | None) -> str:
+    """Return the `Action 'name': ` lead of an error message, empty without a name."""
+    return f"Action {action_name!r}: " if action_name else ""
+
+
+def _initial_form_kwargs(form_class: type, initial_data: object) -> dict[str, Any]:
+    """Map a `get_initial` result to the constructor kwargs of its form."""
     if isinstance(initial_data, Model):
         if not issubclass(form_class, DjangoBaseModelForm):
             msg = (
@@ -47,36 +44,21 @@ def _build_form(
                 "next.forms.ModelForm to bind model instances."
             )
             raise TypeError(msg)
-        if bound:
-            return form_class(post_data, files, instance=initial_data)
-        return form_class(instance=initial_data)
-    initial = cast("dict[str, Any] | None", initial_data)
-    if bound:
-        return form_class(post_data, files, initial=initial)
-    return form_class(initial=initial)
+        return {"instance": initial_data}
+    return {"initial": initial_data}
 
 
-def _form_from_initial_data(
+def _construct_form(
     form_class: "type[django_forms.Form]",
-    initial_data: object,
+    form_kwargs: dict[str, Any],
     *,
-    init_kwargs: dict[str, Any] | None = None,
+    request: "HttpRequest | None",
 ) -> "django_forms.Form":
-    """Build an unbound form from `get_initial` result (dict or model instance)."""
-    return _build_form(form_class, initial_data, request=None, init_kwargs=init_kwargs)
-
-
-def _bind_form_for_post(
-    form_class: "type[django_forms.Form]",
-    request: "HttpRequest",
-    initial_data: object,
-    *,
-    init_kwargs: dict[str, Any] | None = None,
-) -> "django_forms.Form":
-    """Return a bound form for POST validation."""
-    return _build_form(
-        form_class, initial_data, request=request, init_kwargs=init_kwargs
-    )
+    """Build a form from complete constructor kwargs, bound to POST for a request."""
+    if request is None:
+        return form_class(**form_kwargs)
+    files = request.FILES if hasattr(request, "FILES") else None
+    return form_class(data=request.POST, files=files, **form_kwargs)
 
 
 def _accepts_var_keyword(func: "Callable[..., Any]") -> bool:
@@ -105,6 +87,31 @@ def _resolve_and_call(
     return hook(**resolved)
 
 
+def _call_on_request_cache(
+    hook: "Callable[..., Any]",
+    request: "HttpRequest",
+    url_kwargs: dict[str, Any],
+    *,
+    deps: _DepsState,
+) -> object:
+    """Call `hook` as `_resolve_and_call` does, its cache hung on `request` meanwhile.
+
+    A request already carrying that cache keeps it, so dispatch hangs nothing twice.
+    """
+    cache = deps[0]
+    previous = getattr(request, REQUEST_DEP_CACHE_ATTR, UNSET)
+    if previous is cache:
+        return _resolve_and_call(hook, request, url_kwargs, deps=deps)
+    setattr(request, REQUEST_DEP_CACHE_ATTR, cache)
+    try:
+        return _resolve_and_call(hook, request, url_kwargs, deps=deps)
+    finally:
+        if previous is UNSET:
+            delattr(request, REQUEST_DEP_CACHE_ATTR)
+        else:
+            setattr(request, REQUEST_DEP_CACHE_ATTR, previous)
+
+
 def _call_get_initial(
     form_class: "type[django_forms.Form]",
     request: "HttpRequest",
@@ -113,16 +120,78 @@ def _call_get_initial(
     deps: _DepsState,
     action_name: str | None = None,
 ) -> object:
-    """Resolve `get_initial` dependencies and call it, feeding url_kwargs to kwargs."""
+    """Resolve `get_initial` dependencies and call it, feeding url_kwargs to kwargs.
+
+    The caller's cache rides on the request, so `instance_from_url` shares its rows.
+    """
     if not hasattr(form_class, "get_initial"):
-        prefix = f"Action {action_name!r}: " if action_name else ""
         msg = (
-            f"{prefix}{form_class.__name__} has no get_initial method. "
-            "Subclass next.forms.Form or next.forms.ModelForm, or define "
-            "a get_initial classmethod."
+            f"{_action_prefix(action_name)}{form_class.__name__} has no get_initial "
+            "method. Subclass next.forms.Form or next.forms.ModelForm, or define a "
+            "get_initial classmethod."
         )
         raise TypeError(msg)
-    return _resolve_and_call(form_class.get_initial, request, url_kwargs, deps=deps)
+    return _call_on_request_cache(
+        form_class.get_initial, request, url_kwargs, deps=deps
+    )
+
+
+def _call_get_form_kwargs(
+    form_class: "type[django_forms.Form]",
+    request: "HttpRequest",
+    url_kwargs: dict[str, Any],
+    *,
+    deps: _DepsState,
+    action_name: str | None = None,
+) -> dict[str, Any]:
+    """Resolve an overridden `get_form_kwargs` and call it, insisting on a dict.
+
+    The caller's cache rides on the request for the call alone, so `super()` shares it.
+    """
+    hook = cast("type[_FormKwargsHook]", form_class).get_form_kwargs
+    raw = _call_on_request_cache(hook, request, url_kwargs, deps=deps)
+    prefix = _action_prefix(action_name)
+    if not isinstance(raw, dict):
+        msg = (
+            f"{prefix}{form_class.__name__}.get_form_kwargs returned "
+            f"{type(raw).__name__}, expected a dict of form constructor kwargs. "
+            "Return a dict, starting from super().get_form_kwargs(request) to "
+            "keep the get_initial defaults."
+        )
+        raise TypeError(msg)
+    for key in _DISPATCH_BOUND_KWARGS:
+        if key in raw:
+            msg = (
+                f"{prefix}{form_class.__name__}.get_form_kwargs returned the "
+                f"{key!r} key. Drop it, the dispatcher passes data and files to "
+                "the bound form itself."
+            )
+            raise TypeError(msg)
+    return cast("dict[str, Any]", raw)
+
+
+def _form_for_class(
+    form_class: "type[django_forms.Form]",
+    request: "HttpRequest",
+    url_kwargs: dict[str, Any],
+    *,
+    deps: _DepsState,
+    bound: bool,
+    action_name: str | None = None,
+) -> "django_forms.Form":
+    """Build the form through an overridden `get_form_kwargs`, else `get_initial`."""
+    target = request if bound else None
+    if getattr(form_class, "_has_get_form_kwargs", False):
+        form_kwargs = _call_get_form_kwargs(
+            form_class, request, url_kwargs, deps=deps, action_name=action_name
+        )
+        return _construct_form(form_class, form_kwargs, request=target)
+    initial_data = _call_get_initial(
+        form_class, request, url_kwargs, deps=deps, action_name=action_name
+    )
+    return _construct_form(
+        form_class, _initial_form_kwargs(form_class, initial_data), request=target
+    )
 
 
 def _resolve_form_class(
@@ -134,17 +203,15 @@ def _resolve_form_class(
 ) -> "tuple[type[django_forms.Form], dict[str, Any]]":
     """Return `(form_class, init_kwargs)` for the dispatch.
 
-    A factory may return a `Form` subclass or `(cls, init_kwargs)`. The latter bypasses
-    `get_initial` and passes `**init_kwargs` to the form constructor.
+    A factory's non-empty `(cls, init_kwargs)` bypasses both hooks into the constructor.
     """
     if isinstance(form_class, type):
         return cast("type[django_forms.Form]", form_class), {}
     if not callable(form_class):
-        prefix = f"Action {action_name!r}: " if action_name else ""
         msg = (
-            f"{prefix}form_class must be a Form subclass or a callable "
-            f"factory, got {form_class!r}. Pass the form class itself or "
-            "a factory that returns one."
+            f"{_action_prefix(action_name)}form_class must be a Form subclass or a "
+            f"callable factory, got {form_class!r}. Pass the form class itself or a "
+            "factory that returns one."
         )
         raise TypeError(msg)
     cache, stack = deps if deps is not None else ({}, [])
@@ -160,11 +227,10 @@ def _resolve_form_class(
                 cast("dict[str, Any]", init_kwargs),
             )
     if not isinstance(produced, type):
-        prefix = f"Action {action_name!r}: " if action_name else ""
         msg = (
-            f"{prefix}form_class factory must return a Form subclass or a "
-            f"(form_class, init_kwargs) tuple, got {produced!r}. Return the "
-            "class itself, not an instance."
+            f"{_action_prefix(action_name)}form_class factory must return a Form "
+            f"subclass or a (form_class, init_kwargs) tuple, got {produced!r}. Return "
+            "the class itself, not an instance."
         )
         raise TypeError(msg)
     return cast("type[django_forms.Form]", produced), {}
@@ -172,25 +238,33 @@ def _resolve_form_class(
 
 def _form_action_context_callable(
     form_class: "type[django_forms.Form] | Callable[..., Any]",
-) -> "Callable[[HttpRequest], types.SimpleNamespace]":
-    """Return a callable building the unbound form namespace for page rendering."""
+) -> "Callable[..., types.SimpleNamespace]":
+    """Return a callable building the unbound form namespace for page rendering.
 
-    def context_func(request: "HttpRequest") -> types.SimpleNamespace:
+    Given the cache of the page render, it reuses every row the page contexts loaded.
+    """
+
+    def context_func(
+        request: "HttpRequest", dep_cache: dict[str, Any] | None = None
+    ) -> types.SimpleNamespace:
         url_kwargs = url_kwargs_for_request(request)
-        dep_cache: dict[str, Any] = {}
+        dep_cache = {} if dep_cache is None else dep_cache
         dep_stack: list[str] = []
         resolved_form_class, init_kwargs = _resolve_form_class(
             form_class, request, url_kwargs, (dep_cache, dep_stack)
         )
         if init_kwargs:
-            form_instance = _form_from_initial_data(
-                resolved_form_class, None, init_kwargs=init_kwargs
+            form_instance = _construct_form(
+                resolved_form_class, init_kwargs, request=None
             )
             return types.SimpleNamespace(form=form_instance)
-        initial_data = _call_get_initial(
-            resolved_form_class, request, url_kwargs, deps=(dep_cache, dep_stack)
+        form_instance = _form_for_class(
+            resolved_form_class,
+            request,
+            url_kwargs,
+            deps=(dep_cache, dep_stack),
+            bound=False,
         )
-        form_instance = _form_from_initial_data(resolved_form_class, initial_data)
         return types.SimpleNamespace(form=form_instance)
 
     return context_func

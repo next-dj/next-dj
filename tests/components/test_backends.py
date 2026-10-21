@@ -646,8 +646,7 @@ class TestModuleLoader:
     def test_empty_shared_cache_is_kept(self, tmp_path: Path) -> None:
         """An empty ``ModuleCache`` handed in stays the loader's cache.
 
-        ``ModuleCache`` defines ``__len__``, so a fresh one is falsy and a
-        truthiness check would silently unshare it from other loaders.
+        It defines ``__len__``, so a truthiness check would unshare it.
         """
         path = tmp_path / "mod.py"
         path.write_text("x = 1\n")

@@ -47,8 +47,7 @@ class PartialProtocolBackend(ABC):
     def deserialize_envelope(self, body: bytes) -> "Envelope":
         """Rebuild one envelope from a response body, the inverse of serializing.
 
-        A reader such as the test client parses a response through the backend that
-        wrote it, so a replaced wire format stays readable on both sides.
+        A reader parses a body through the backend that wrote it.
         """
 
 

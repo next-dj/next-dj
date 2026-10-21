@@ -648,7 +648,7 @@ class TestPageContextRegistrySerialize:
         page_inst = Page()
         path = tmp_path / "page.py"
         page_inst.register_template(path, "{{ title }}<!-- next:scripts -->")
-        page_inst._context_manager.register_context(
+        page_inst.contexts.register_context(
             path, "title", lambda: "Hello", serialize=True
         )
         html = page_inst.render(path)
@@ -706,10 +706,10 @@ class TestPageContextRegistrySerializerOverride:
         page_inst = Page()
         path = tmp_path / "page.py"
         page_inst.register_template(path, "{{ k }}<!-- next:scripts -->")
-        page_inst._context_manager.register_context(
+        page_inst.contexts.register_context(
             path, "k", lambda: "v", serialize=True, serializer=marker
         )
-        page_inst._context_manager.register_context(
+        page_inst.contexts.register_context(
             path, "other", lambda: "plain", serialize=True
         )
         html = page_inst.render(path)

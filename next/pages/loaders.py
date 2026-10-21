@@ -11,13 +11,15 @@ import logging
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, ClassVar, Final, override
 
 from next.caches import PageCache
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
 from next.pages.errors import PageModuleImportError
+from next.permissions.access import declarations
 from next.utils import (
+    LAYOUT_TEMPLATE,
     MAX_ANCESTOR_WALK_DEPTH,
     classify_dirs_entries,
     exec_module_file,
@@ -43,6 +45,8 @@ logger = logging.getLogger(__name__)
 # A token no template source contains, so filling the slot is unambiguous.
 _BODY_SLOT = "\x00next-page-body\x00"
 
+PAGE_MODULE: Final = "page.py"
+
 
 @dataclass(frozen=True, slots=True)
 class _PageLoad:
@@ -60,8 +64,7 @@ _MODULE_MEMO: PageCache[Path, _PageLoad] = PageCache()
 _FAILED_PATHS: set[Path] = set()
 _MEMO_WRITE_LOCK = threading.Lock()
 
-# The mtime of the current load per path, successful or failed. An eviction from the
-# memo keeps it, since re-executing a file at the same mtime changes nothing.
+# Load mtime per path, kept on eviction since a re-exec at that mtime is a no-op.
 _stamps: dict[Path, int] = {}
 
 
@@ -107,7 +110,7 @@ def _load_stamps(loads: Iterable[_PageLoad | None]) -> tuple[int | None, ...]:
 
 @dataclass(frozen=True, slots=True)
 class AncestorStamps:
-    """The `page.py` files above one page, root first, and the load stamps a memo read.
+    """The modules one memo reads, root first, with the load stamps it read them at.
 
     A memo over them rebuilds when one of them reloads, not on a load of another file.
     """
@@ -222,6 +225,7 @@ def _forget(file_path: Path) -> None:
         _FAILED_PATHS.discard(file_path)
         _stamps.pop(file_path, None)
         _generation.value += 1
+    declarations.forget(file_path)
 
 
 def _page_load(file_path: Path) -> _PageLoad | None:
@@ -242,12 +246,12 @@ def _page_load(file_path: Path) -> _PageLoad | None:
 
     cached = _MODULE_MEMO.get(file_path)
     if cached is not None and cached.mtime_ns == mtime_ns:
-        # Not reordered, because this runs up to three times per URL dispatch and the
-        # bound limits memory rather than ranking pages.
+        # Not reordered, since it runs up to three times per dispatch.
         return cached
 
     try:
-        module = _load_python_module(file_path)
+        with declarations.collecting(file_path):
+            module = _load_python_module(file_path)
     except Exception as exc:
         if stat_mtime_ns(file_path) is None:
             # Removed between the stat and the execution, so absent rather than broken.
@@ -273,11 +277,14 @@ def reset_module_memo() -> None:
     A rewrite within the same mtime tick would otherwise return the stale module.
     """
     with _MEMO_WRITE_LOCK:
+        loaded = (*_stamps, *_MODULE_MEMO, *_FAILED_PATHS)
         _MODULE_MEMO.clear()
         _FAILED_PATHS.clear()
         _stamps.clear()
         _version.value += 1
         _generation.value += 1
+    for file_path in loaded:
+        declarations.forget(file_path)
 
 
 def _pages_dirs_for_config(config: dict) -> list[Path]:
@@ -287,8 +294,8 @@ def _pages_dirs_for_config(config: dict) -> list[Path]:
 
 
 @functools.cache
-def _additional_layout_files() -> tuple[Path, ...]:
-    """Return root-level `layout.djx` files from each page backend `DIRS`.
+def shared_layouts() -> tuple[Path, ...]:
+    """Return the root `layout.djx` of each page backend `DIRS`, which wraps every page.
 
     A tuple, so a caller cannot reorder the shared result.
     """
@@ -300,14 +307,14 @@ def _additional_layout_files() -> tuple[Path, ...]:
         for config in configs
         if isinstance(config, dict)
         for directory in _pages_dirs_for_config(config)
-        if directory.exists() and (layout := directory / "layout.djx").exists()
+        if directory.exists() and (layout := directory / LAYOUT_TEMPLATE).exists()
     )
     return tuple(dict.fromkeys(candidates))
 
 
-def forget_additional_layouts(**kwargs) -> None:
+def forget_shared_layouts(**kwargs) -> None:
     """Drop cached root-level `layout.djx` paths on settings reload."""
-    _additional_layout_files.cache_clear()
+    shared_layouts.cache_clear()
 
 
 @functools.cache
@@ -329,21 +336,17 @@ def forget_page_roots(**kwargs) -> None:
 def forget_app_page_roots(*, setting: str, **kwargs) -> None:
     """Drop the memoised page trees when the app list behind them moves.
 
-    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half, and the trees
-    of a router with `APP_DIRS` move with `INSTALLED_APPS`.
+    `settings_reloaded` misses `INSTALLED_APPS`, which the `APP_DIRS` trees follow.
     """
     if setting == "INSTALLED_APPS":
         forget_page_roots()
 
 
-_TREE_DEPTHS: PageCache[Path, tuple[tuple[Path, ...], int]] = PageCache()
+_TREE_DEPTHS: PageCache[Path, tuple[tuple[Path, ...], int | None]] = PageCache()
 
 
-def page_tree_depth(start_dir: Path) -> int:
-    """Return the number of directories from `start_dir` up to its page tree root.
-
-    A directory outside every tree returns the walk cap, memoised per set of trees.
-    """
+def _tree_depth(start_dir: Path) -> int | None:
+    """Return the directories from `start_dir` to its tree root, `None` outside one."""
     roots = _page_roots()
     held = _TREE_DEPTHS.get(start_dir)
     if held is not None and held[0] is roots:
@@ -354,10 +357,25 @@ def page_tree_depth(start_dir: Path) -> int:
         for root in roots
         if resolved.is_relative_to(root)
     ]
-    depths.append(MAX_ANCESTOR_WALK_DEPTH)
-    depth = min(depths)
+    depth = min(depths) if depths else None
     _TREE_DEPTHS[start_dir] = (roots, depth)
     return depth
+
+
+def page_tree_depth(start_dir: Path) -> int:
+    """Return the number of directories from `start_dir` up to its page tree root.
+
+    A directory outside every tree returns the walk cap.
+    """
+    depth = _tree_depth(start_dir)
+    if depth is None:
+        return MAX_ANCESTOR_WALK_DEPTH
+    return min(depth, MAX_ANCESTOR_WALK_DEPTH)
+
+
+def in_page_tree(start_dir: Path) -> bool:
+    """Return whether `start_dir` lies inside a page tree some router routes."""
+    return _tree_depth(start_dir) is not None
 
 
 def _read_string_list(module: types.ModuleType, attr: str) -> list[str]:
@@ -373,8 +391,7 @@ def read_module_string_lists(
 ) -> dict[str, list[str]] | None:
     """Return the named module-level string lists a page-tree module declares.
 
-    `None` tells an absent or broken module apart from one that declares none of the
-    names, and anything but a list of non-empty strings reads as empty.
+    `None` tells an absent or broken module from one declaring none.
     """
     module = load_python_module_memo(file_path)
     if module is None:
@@ -472,8 +489,7 @@ class LayoutTemplateLoader:
     def compose_skeleton(self, file_path: Path) -> str:
         """Return the layout chain for `file_path` with a slot where the body goes.
 
-        The chain depends on the path alone, so a caller with a body that
-        changes per request caches this and fills the slot per request.
+        The chain depends on the path alone, so a per-request body fills a cached slot.
         """
         return self.compose_body(_BODY_SLOT, file_path)
 
@@ -484,22 +500,20 @@ class LayoutTemplateLoader:
     def compose_body(self, body: str, file_path: Path) -> str:
         """Wrap `body` through the ancestor layout chain for `file_path`.
 
-        A sibling `layout.djx` substitutes `body` directly, otherwise `body` becomes
-        the fallback of a paired placeholder the ancestor layout renders in its place.
+        A sibling `layout.djx` substitutes `body`, else it is a placeholder fallback.
         """
         layout_files = self._find_layout_files(file_path)
         if not layout_files:
             return body
 
-        sibling_layout = (file_path.parent / "layout.djx").exists()
+        sibling_layout = (file_path.parent / LAYOUT_TEMPLATE).exists()
         wrapped = body if sibling_layout else _as_placeholder_fallback(body)
         return self._compose_layout_hierarchy(wrapped, layout_files)
 
     def layout_sources(self, file_path: Path) -> tuple[list[Path], list[Path]]:
         """Return the layout files behind `file_path` and the directories watched.
 
-        A `layout.djx` appearing or disappearing moves the mtime of its directory and of
-        no tracked file, so a caller detecting change needs the directories too.
+        A new `layout.djx` moves only its directory's mtime, so watch directories too.
         """
         return self._walk_ancestors(file_path, page_tree_depth(file_path.parent))
 
@@ -516,29 +530,24 @@ class LayoutTemplateLoader:
                 break
             if depth < watched_depth:
                 watched_dirs.append(current_dir)
-            layout_file = current_dir / "layout.djx"
+            layout_file = current_dir / LAYOUT_TEMPLATE
             if layout_file.exists():
                 layout_files.append(layout_file)
             current_dir = current_dir.parent
 
-        for additional_layout in self._get_additional_layout_files():
-            if additional_layout not in layout_files:
-                layout_files.append(additional_layout)
+        for shared_layout in shared_layouts():
+            if shared_layout not in layout_files:
+                layout_files.append(shared_layout)
 
         return layout_files, watched_dirs
 
     def _find_layout_files(self, file_path: Path) -> list[Path]:
         """Return `layout.djx` paths from near to far plus global layouts.
 
-        The walk skips the watched directories, which cost a `resolve` of the page trees
-        and which no caller of this method reads.
+        The walk skips the watched directories, which cost a `resolve` no caller reads.
         """
         layout_files, _ = self._walk_ancestors(file_path, 0)
         return layout_files
-
-    def _get_additional_layout_files(self) -> Sequence[Path]:
-        """Return the memoised root-level `layout.djx` files of every page backend."""
-        return _additional_layout_files()
 
     def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
         """Return candidate roots from one router `DIRS` entry (paths only)."""
@@ -549,8 +558,7 @@ class LayoutTemplateLoader:
     ) -> str:
         """Wrap the content in each layout from the nearest to the outermost.
 
-        Each layout receives the content in its first placeholder, and `next.W078`
-        reports a layout that carries more than one.
+        Each layout gets the content in its first placeholder, see `next.W078`.
         """
         result = template_content
 
@@ -569,8 +577,7 @@ class LayoutTemplateLoader:
 def build_registered_loaders() -> Sequence[TemplateLoader]:
     """Instantiate `TEMPLATE_LOADERS` dotted paths into `TemplateLoader` instances.
 
-    Bad entries are skipped with a debug log rather than raised, since
-    `check_template_loaders` already reports the same misconfiguration to the user.
+    Bad entries are skipped with a debug log, as `check_template_loaders` reports them.
     """
     configured = next_framework_settings.TEMPLATE_LOADERS
     seen: set[type[TemplateLoader]] = set()
@@ -601,3 +608,32 @@ def build_registered_loaders() -> Sequence[TemplateLoader]:
 def forget_registered_loaders(**kwargs) -> None:
     """Drop cached loader instances on settings reload."""
     build_registered_loaders.cache_clear()
+
+
+def has_body(file_path: Path, module: types.ModuleType | None) -> bool:
+    """Return whether `render`, a `template` string, or a loader gives the page a body.
+
+    A `layout.djx` is no body, since it only wraps the body of the page beneath it.
+    """
+    if module is not None:
+        if callable(getattr(module, "render", None)):
+            return True
+        if isinstance(getattr(module, "template", None), str):
+            return True
+    return any(loader.can_load(file_path) for loader in build_registered_loaders())
+
+
+def serves(
+    file_path: Path,
+    module: types.ModuleType | None,
+    error: PageModuleImportError | None,
+) -> bool:
+    """Return whether one load of a `page.py` routes a URL, a broken one for its error.
+
+    A path that never existed is a virtual page, so a loader alone gives it a body.
+    """
+    if error is not None:
+        return True
+    if module is None and file_path.exists():
+        return False
+    return has_body(file_path, module)

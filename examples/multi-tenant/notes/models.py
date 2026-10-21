@@ -1,4 +1,4 @@
-from typing import ClassVar
+from typing import ClassVar, Self
 
 from django.db import models
 
@@ -21,6 +21,12 @@ class Tenant(models.Model):
         return f"{self.name} <{self.slug}>"
 
 
+class NoteQuerySet(models.QuerySet):
+    def visible_to(self, tenant: Tenant | None) -> Self:
+        """Return the notes `tenant` owns, and none at all for a request without one."""
+        return self.filter(tenant=tenant)
+
+
 class Note(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="notes")
     title = models.CharField(max_length=160)
@@ -28,6 +34,8 @@ class Note(models.Model):
     locked = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = NoteQuerySet.as_manager()
 
     class Meta:
         ordering: ClassVar = ["-updated_at"]

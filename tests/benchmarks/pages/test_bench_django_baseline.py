@@ -20,8 +20,7 @@ _CONTEXT = {"title": "Bench"}
 class TestBenchAgainstDjango:
     """One template rendered by plain Django and by the page pipeline.
 
-    The rows price what the framework adds over a bare Django render, which
-    is layout composition, the context registry, and asset discovery.
+    The gap is layout composition, the context registry, and asset discovery.
     """
 
     @pytest.mark.benchmark(group="pages.baseline")

@@ -6,7 +6,7 @@ Static signals
 The static pipeline emits ``asset_registered``, ``collector_finalized``, ``html_injected``, and ``static_backend_loaded`` from ``next.static.signals``.
 
 Import either from ``next.static.signals`` or from the aggregator ``next.signals``.
-Import receiver modules from ``AppConfig.ready`` so receivers exist before the first request.
+Receivers in the ``signals.py`` of an app connect at startup, before the first request, since the framework imports that module from every installed app.
 
 .. contents::
    :local:
@@ -19,7 +19,7 @@ asset_registered
 ~~~~~~~~~~~~~~~~
 
 Fires after a co-located file the backend registered lands in the collector, once per asset per collector.
-An asset the collector deduplicates away, such as the second mount of the same component on one page, emits no signal.
+An asset the collector deduplicates away, such as the second use of the same component on one page, emits no signal.
 The sender is the asset instance.
 The payload carries ``collector`` and ``backend``.
 

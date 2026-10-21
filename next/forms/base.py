@@ -5,7 +5,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Final, override
+from typing import Any, Final, Protocol, cast, override
 
 from django import forms as django_forms
 from django.conf import settings
@@ -19,6 +19,8 @@ from django.shortcuts import get_object_or_404
 
 from next.caches import BoundedCache
 from next.conf import next_framework_settings
+from next.deps import render_dep_cache
+from next.deps.objects import scoped_model, scoped_row
 from next.introspect import defining_file
 
 from .backends import (
@@ -27,7 +29,9 @@ from .backends import (
     _resolved_path_str,
     build_action_guard,
 )
+from .dispatch.build import _initial_form_kwargs, _resolve_and_call
 from .manager import form_action_manager
+from .origin import url_kwargs_for_request
 from .registration import registration_diagnostics
 from .uid import redirect_to_origin
 
@@ -43,15 +47,13 @@ _FRAMEWORK_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 _DJANGO_FORMS_ROOT: Final[Path] = Path(inspect.getfile(django_forms)).resolve().parent
 _FRAMEWORK_ROOT_STR: Final[str] = str(_FRAMEWORK_ROOT)
 _FRAMEWORK_ROOT_PREFIX: Final[str] = _root_prefix(_FRAMEWORK_ROOT_STR)
-# A class attributed to either root was built by type() inside foreign code,
-# so only the stack names the file that asked for it.
+# A type()-built class in foreign code lands on a root, so only the stack names it.
 _FOREIGN_ROOTS: Final[tuple[tuple[str, str], ...]] = (
     (str(_DJANGO_FORMS_ROOT), _root_prefix(str(_DJANGO_FORMS_ROOT))),
     (_FRAMEWORK_ROOT_STR, _FRAMEWORK_ROOT_PREFIX),
 )
 
-# Both roots are process constants, so a per-path answer can never go stale.
-# The BASE_DIR decision stays uncached because settings repoint it.
+# Both roots are constants, but settings repoint BASE_DIR so that stays uncached.
 _foreign_file_cache: BoundedCache[str, bool] = BoundedCache()
 
 # HttpResponseRedirect subclasses HttpResponse, so a login redirect needs no arm.
@@ -170,8 +172,7 @@ def _find_frame_outside() -> str:
 def _module_declared_file(cls: type) -> str | None:
     """Return the file of the module that still binds cls under its own name.
 
-    The file router execs every `page.py` under one throwaway module name, so a module a
-    project imports under that name must not answer for a class it never declared.
+    A module imported under the router's throwaway `page.py` name must not answer.
     """
     module = sys.modules.get(getattr(cls, "__module__", "") or "")
     if module is None or getattr(module, cls.__name__, None) is not cls:
@@ -179,16 +180,14 @@ def _module_declared_file(cls: type) -> str | None:
     try:
         return str(defining_file(cls))
     except (OSError, TypeError):
-        # A module without __file__, such as one built for an interactive
-        # session, names no file for the classes declared in it.
+        # A module without __file__, such as an interactive one, names no file.
         return None
 
 
 def _definition_file_of(cls: type) -> str:
     """Return the file where cls was declared, empty when no frame names one.
 
-    `__init_subclass__` runs while the declaring frame is still on the stack, so the
-    walk answers wherever the module cannot, and a foreign file never survives it.
+    `__init_subclass__` runs with the declaring frame on the stack, so the walk works.
     """
     file_path = _module_declared_file(cls)
     if file_path is None or _is_foreign_file(file_path):
@@ -333,7 +332,45 @@ class _PermissionHooks:
         return None
 
 
-class BaseForm(_PermissionHooks, DjangoBaseForm):
+class _InitialSource(Protocol):
+    """A form class exposing the DI-resolved `get_initial` classmethod."""
+
+    @classmethod
+    def get_initial(cls) -> object: ...
+
+
+class _FormKwargsHook:
+    """Opt-in DI-resolved constructor kwargs hook shared by both form bases.
+
+    The presence flag keeps a form without the override on the `get_initial` path.
+    """
+
+    _has_get_form_kwargs: bool = False
+
+    @override
+    def __init_subclass__(cls, **kwargs) -> None:
+        """Stamp the per-subclass hook-presence flag via __func__ identity."""
+        super().__init_subclass__(**kwargs)
+        cls._has_get_form_kwargs = _stamp_hook_flag(
+            _FormKwargsHook.get_form_kwargs, cls.get_form_kwargs
+        )
+
+    @classmethod
+    def get_form_kwargs(cls, request: HttpRequest) -> dict[str, Any]:
+        """Return the constructor kwargs, data and files aside, built from get_initial.
+
+        It resolves `get_initial` in the cache its caller hangs on the request.
+        """
+        initial_data = _resolve_and_call(
+            cast("type[_InitialSource]", cls).get_initial,
+            request,
+            url_kwargs_for_request(request),
+            deps=(render_dep_cache(request), []),
+        )
+        return _initial_form_kwargs(cls, initial_data)
+
+
+class BaseForm(_FormKwargsHook, _PermissionHooks, DjangoBaseForm):
     """Custom `BaseForm` extended with `get_initial` and `on_valid`."""
 
     default_renderer = _div_form_renderer
@@ -362,7 +399,7 @@ class BaseForm(_PermissionHooks, DjangoBaseForm):
         return redirect_to_origin(request)
 
 
-class BaseModelForm(_PermissionHooks, DjangoBaseModelForm):
+class BaseModelForm(_FormKwargsHook, _PermissionHooks, DjangoBaseModelForm):
     """Custom `BaseModelForm` with `get_initial` and `on_valid` support."""
 
     default_renderer = _div_form_renderer
@@ -375,8 +412,13 @@ class BaseModelForm(_PermissionHooks, DjangoBaseModelForm):
         _validate_instance_from_url(cls, is_model_form=True)
 
     @classmethod
-    def get_initial(cls, **url_kwargs) -> dict[str, Any] | Model:
-        """Return a model instance loaded from the URL, or an empty dict."""
+    def get_initial(
+        cls, request: HttpRequest | None = None, **url_kwargs
+    ) -> dict[str, Any] | Model:
+        """Return a model instance loaded from the URL, or an empty dict.
+
+        A `visible_to` manager and a `scope` make it load as `DObject` does.
+        """
         spec = getattr(getattr(cls, "Meta", None), "instance_from_url", None)
         if not spec:
             return {}
@@ -384,6 +426,8 @@ class BaseModelForm(_PermissionHooks, DjangoBaseModelForm):
         if lookup is None:
             return {}
         model: type[Model] = cls._meta.model
+        if scoped_model(model):
+            return scoped_row(model, lookup, request)
         return get_object_or_404(model, **lookup)
 
     def get_success_message(self, cleaned_data: dict[str, Any]) -> str:

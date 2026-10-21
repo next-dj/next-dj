@@ -3,8 +3,9 @@
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
+from django.db.models import Model
 from django.http import (
     HttpResponse,
     HttpResponseBadRequest,
@@ -12,7 +13,7 @@ from django.http import (
     HttpResponseRedirect,
 )
 
-from next.deps import REQUEST_DEP_CACHE_ATTR
+from next.deps import REQUEST_DEP_CACHE_ATTR, UnboundObjectError
 from next.deps.resolver import current_resolver
 from next.forms.origin import resolve_origin
 from next.forms.signals import (
@@ -21,13 +22,19 @@ from next.forms.signals import (
     wizard_completed,
     wizard_step_submitted,
 )
+from next.permissions.markers import OPEN
 
-from .build import _bind_form_for_post, _call_get_initial, _resolve_form_class
+from .build import _construct_form, _form_for_class, _resolve_form_class
 from .permissions import (
+    _branch,
     _check_access,
     _check_page_access,
+    _check_tree_access,
     _enforce_object_permissions,
+    _enforce_registered_permissions,
     _enforce_view_permissions,
+    _object_permissions,
+    guard_rule,
 )
 from .responses import (
     _HTTP_ERROR_FLOOR,
@@ -51,6 +58,7 @@ if TYPE_CHECKING:
     from next.forms.base import BaseForm as NextBaseForm
     from next.forms.origin import OriginMatch
     from next.forms.wizard import FormWizard
+    from next.permissions.markers import AccessRule
 
 
 logger = logging.getLogger(__name__)
@@ -59,12 +67,10 @@ logger = logging.getLogger(__name__)
 class FormActionDispatch:
     """Shared POST pipeline and response shaping for backends.
 
-    It sends `action_dispatched`, `form_validation_failed` and `form_access_denied` with
-    itself as the sender, and the wizard signals with the wizard class.
+    Sends its signals with itself as sender and the wizard signals with the wizard.
     """
 
-    # The documented address a custom backend that drives the pipeline by
-    # hand calls, so the alias is part of the public surface.
+    # Documented address for custom backends driving the pipeline, so it is public.
     ensure_http_response = staticmethod(ensure_http_response)
 
     @staticmethod
@@ -76,41 +82,71 @@ class FormActionDispatch:
     ) -> "HttpResponseBase":
         """Validate the form, run the handler, or re-render errors.
 
-        The posted origin page authorizes the request before anything renders it, so a
-        submission never reaches a page body the requester would be refused on a visit.
+        The posted origin page authorizes the request before anything renders it.
         """
-        handler = meta.get("handler")
-        form_class = meta.get("form_class")
-        wizard_class = meta.get("wizard_class")
-
         if request.method != "POST":
             return HttpResponseNotAllowed(["POST"])
 
+        try:
+            return FormActionDispatch._admitted(backend, request, action_name, meta)
+        except UnboundObjectError as exc:
+            if exc.parent:
+                raise
+            logger.warning(
+                "action %r received an origin without the URL kwarg %r",
+                action_name,
+                exc.key,
+            )
+            return HttpResponseBadRequest(
+                f"Action {action_name!r} needs a URL kwarg the origin lacks."
+            )
+
+    @staticmethod
+    def _admitted(
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        action_name: str,
+        meta: "ActionMeta",
+    ) -> "HttpResponseBase":
+        """Route the action once the page tree, its guard and the origin admit it."""
         origin_match = resolve_origin(request)
+        dep_cache: dict[str, Any] = {}
+        guard = guard_rule(meta)
         refusal = FormActionDispatch._refuse_access(
-            request, meta, origin_match, action_name
+            request, meta, origin_match, action_name, dep_cache, guard=guard
         )
         if refusal is not None:
             return refusal
-
         state = _DispatchState(
             url_kwargs=dict(origin_match.url_kwargs) if origin_match else {},
-            dep_cache={},
+            dep_cache=dep_cache,
             dep_stack=[],
             uid=meta.get("uid"),
             origin_match=origin_match,
+            guard=guard,
         )
         setattr(request, REQUEST_DEP_CACHE_ATTR, state.dep_cache)
+        return FormActionDispatch._route(backend, request, action_name, meta, state)
 
-        if wizard_class is not None:
+    @staticmethod
+    def _route(
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        action_name: str,
+        meta: "ActionMeta",
+        state: "_DispatchState",
+    ) -> "HttpResponseBase":
+        """Run the wizard, handler-only or form branch the action declares."""
+        branch = _branch(meta)
+        if branch == "wizard":
+            wizard_class = cast("type[FormWizard]", meta.get("wizard_class"))
             return _dispatch_wizard(backend, request, action_name, wizard_class, state)
-
-        if form_class is None and handler is not None:
+        if branch == "handler":
+            handler = cast("Callable[..., Any]", meta.get("handler"))
             return FormActionDispatch._dispatch_handler_only(
                 backend, handler, request, action_name, state
             )
-
-        if form_class is not None:
+        if branch == "form":
             return FormActionDispatch._dispatch_form_class(
                 backend, request, action_name, meta, state
             )
@@ -131,16 +167,28 @@ class FormActionDispatch:
         meta: "ActionMeta",
         origin_match: "OriginMatch | None",
         action_name: str,
+        dep_cache: dict[str, Any],
+        *,
+        guard: "AccessRule",
     ) -> "HttpResponseBase | None":
-        """Return the denial of the action guard or of the origin page, or None.
+        """Return the denial of the page tree, the action guard or the origin page.
 
-        The action's guard answers first, it is cheaper and names the origin it denies.
+        The rule of the owner and of the origin page answers before the guard of `Meta`.
         """
-        guard = meta.get("guard")
-        if guard is not None:
-            denial = _check_access(request, guard)
-            if denial is not None:
-                return denial
+        denial = _check_tree_access(
+            request,
+            meta.get("file_path"),
+            origin_match,
+            dep_cache,
+            action_name=action_name,
+            uid=meta.get("uid"),
+            sender=_DispatchState.signal_sender,
+        )
+        if denial is not None:
+            return denial
+        denial = _check_access(request, guard)
+        if denial is not None:
+            return denial
         return _check_page_access(
             request,
             origin_match,
@@ -175,6 +223,7 @@ class FormActionDispatch:
             handler=meta.get("handler"),
             form_class=resolved_form_class,
             init_kwargs=init_kwargs,
+            object_permissions=_object_permissions(state.guard),
         )
         return FormActionDispatch._dispatch_with_form(backend, request, params, state)
 
@@ -216,18 +265,21 @@ class FormActionDispatch:
         state: "_DispatchState",
     ) -> HttpResponse:
         if params.init_kwargs:
-            form = _bind_form_for_post(
-                params.form_class, request, None, init_kwargs=params.init_kwargs
+            form = _construct_form(
+                params.form_class, params.init_kwargs, request=request
             )
         else:
-            initial_data = _call_get_initial(
+            form = _form_for_class(
                 params.form_class,
                 request,
                 state.url_kwargs,
                 deps=(state.dep_cache, state.dep_stack),
+                bound=True,
                 action_name=params.action_name,
             )
-            form = _bind_form_for_post(params.form_class, request, initial_data)
+        _enforce_registered_permissions(
+            form, request, params.action_name, params.object_permissions, state
+        )
         denial = _enforce_object_permissions(form, request, params.action_name, state)
         if denial is not None:
             return denial
@@ -238,6 +290,7 @@ class FormActionDispatch:
             return validated
         if not form.is_valid():
             state.emit_form_validation_failed(request, params.action_name, form)
+            state.forget_row(getattr(form, "instance", None))
             return backend.shape_response(
                 request,
                 ActionOutcome(
@@ -301,8 +354,7 @@ class FormActionDispatch:
     ) -> HttpResponse:
         """Build the default envelope for one pipeline outcome.
 
-        Invalid submissions re-render the origin page with HTTP 200 and the
-        `X-Next-Form`/`X-Next-Action` headers, wizard advances redirect.
+        Invalid ones re-render the origin with HTTP 200, wizard advances redirect.
         """
         if outcome.kind == ActionOutcomeKind.INVALID:
             if outcome.page_path is None:
@@ -343,6 +395,7 @@ class _DispatchState:
     dep_stack: list[str]
     uid: str | None = None
     origin_match: "OriginMatch | None" = None
+    guard: "AccessRule" = OPEN
 
     @property
     def page_path(self) -> "Path | None":
@@ -353,6 +406,17 @@ class _DispatchState:
     def origin(self) -> str | None:
         """Return the validated origin URL path, if the origin resolved."""
         return self.origin_match.origin if self.origin_match else None
+
+    def forget_row(self, row: object) -> None:
+        """Drop every cache entry holding `row`, so the re-render loads it afresh.
+
+        A failed `ModelForm` still writes posted values into the row the contexts read.
+        """
+        if not isinstance(row, Model):
+            return
+        stale = [key for key, value in self.dep_cache.items() if value is row]
+        for key in stale:
+            del self.dep_cache[key]
 
     def emit_action_dispatched(
         self,
@@ -431,6 +495,7 @@ class _FormDispatchParams:
     handler: "Callable[..., Any] | None"
     form_class: "type[django_forms.Form]"
     init_kwargs: dict[str, Any] = field(default_factory=dict)
+    object_permissions: tuple[str, ...] = ()
 
 
 __all__ = ["FormActionDispatch"]

@@ -1,6 +1,11 @@
-import pytest
-from django.http import HttpResponse
+from dataclasses import replace
+from pathlib import Path
 
+import pytest
+from django.core.exceptions import PermissionDenied
+from django.http import Http404, HttpResponse, HttpResponseRedirect
+
+from next.pages.access import page_access
 from next.partial import ZoneRenderResult
 from next.partial.headers import CONTENT_TYPE
 from next.partial.shaping import outcomes as outcomes_module
@@ -87,6 +92,60 @@ class TestWizardAdvanceWithoutPartialSwitch:
         assert "X-Next-Version" not in response
 
 
+def _raise(exc: Exception):
+    def refuse(*args, **kwargs):
+        raise exc
+
+    return refuse
+
+
+@pytest.mark.django_db()
+class TestWizardAdvanceHonoursTheStepRule:
+    """A next step whose declared rule refuses the user falls back to the redirect."""
+
+    @pytest.mark.parametrize(
+        "refusal",
+        [
+            _raise(PermissionDenied()),
+            _raise(Http404()),
+            lambda *args, **kwargs: HttpResponseRedirect("/login/"),
+        ],
+        ids=["forbidden", "hidden", "login"],
+    )
+    def test_a_refused_step_is_a_redirect_not_its_zone(
+        self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch, refusal
+    ) -> None:
+        monkeypatch.setattr(outcomes_module, "refusal", refusal)
+        response = _advance_identity(next_client, zones="wizard-zone")
+        assert response.status_code == 302
+        assert response["Location"] == "/wizard/scope/"
+
+    def test_a_step_url_on_another_page_is_a_redirect_not_its_zone(
+        self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        resolve = outcomes_module._resolve_step_target
+
+        def elsewhere(request, href):
+            _page, kwargs = resolve(request, href)
+            return Path("/elsewhere/page.py"), kwargs
+
+        monkeypatch.setattr(outcomes_module, "_resolve_step_target", elsewhere)
+        response = _advance_identity(next_client, zones="wizard-zone")
+        assert response.status_code == 302
+        assert response["Location"] == "/wizard/scope/"
+
+    def test_a_broken_step_chain_is_a_redirect_not_its_zone(
+        self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def broken(page_path: Path):
+            return replace(page_access(page_path), broken=page_path)
+
+        monkeypatch.setattr(outcomes_module, "page_access", broken)
+        response = _advance_identity(next_client, zones="wizard-zone")
+        assert response.status_code == 302
+        assert response["Location"] == "/wizard/scope/"
+
+
 @pytest.mark.django_db()
 class TestWizardAdvanceRendersZoneNotPageView:
     """The advance renders only the next step zone, never the step page view."""
@@ -112,15 +171,13 @@ class TestWizardAdvanceRendersZoneNotPageView:
 class TestWizardAdvanceCsrfMeta:
     """A token rotation on a step advance stamps the CSRF meta on the morph.
 
-    The advance reads the rotation flag before minting the next step's
-    token, so a mid-wizard login and the step swap share one envelope.
+    The advance reads the rotation flag before minting the next step's token.
     """
 
     def test_rotation_on_advance_stamps_csrf(
         self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # The submit request rotated its token, modelled by forcing the flag
-        # the shaper reads before any step re-render mints a fresh one.
+        # The submit rotated its token, modelled by forcing the flag the shaper reads.
         monkeypatch.setattr(outcomes_module, "_csrf_rotated", lambda _request: True)
         response = _advance_identity(next_client, zones="wizard-zone")
         envelope = envelope_of(response).data
@@ -138,8 +195,7 @@ class TestWizardAdvanceCsrfMeta:
 class TestWizardInvalidStepZoneMorph:
     """An invalid wizard step morphs the bound form with errors into the zone.
 
-    The bound form carries the submitted value into the zone body, so the error
-    state renders rather than an empty unbound step.
+    The bound form carries the submitted value, so the error state renders.
     """
 
     def test_invalid_step_zone_carries_bound_submitted_value(
@@ -192,8 +248,7 @@ class TestWizardAdvanceShipsZoneAssetsAndContext:
 class TestWizardAdvanceWholePage:
     """A wizard advance with no zone extract-morphs the next step form.
 
-    Without a named zone the advance re-renders the whole next step page and trims the
-    form out by uid, so the envelope is never an empty 204.
+    Without a named zone the whole next step page is re-rendered, never an empty 204.
     """
 
     @pytest.fixture()
@@ -228,8 +283,7 @@ class TestWizardAdvanceWholePage:
 class TestWizardAdvanceStorageBudget:
     """One round trip to wizard storage per advanced step.
 
-    A failing assertion means the advance grew a storage round-trip: one
-    save for the draft, one load for the prefilled next step, nothing more.
+    A failure means the advance grew a round trip beyond one save and one load.
     """
 
     def test_partial_advance_pays_one_save_and_one_load(

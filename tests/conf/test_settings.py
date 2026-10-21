@@ -647,8 +647,7 @@ class TestMergedSettingsAreImmutable:
         """A cyclic user value surfaces as ImproperlyConfigured, not RecursionError."""
         cyclic: list[Any] = []
         cyclic.append(cyclic)
-        # The merge runs on the first read of the value, which is either the
-        # reload the settings change triggers or the attribute access below.
+        # The merge runs on the first read, in the reload or in the access below.
         with (
             pytest.raises(ImproperlyConfigured, match="self-referential"),
             override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": cyclic}),

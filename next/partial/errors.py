@@ -10,8 +10,7 @@ if TYPE_CHECKING:
 class UnknownZoneError(LookupError):
     """Raised when a partial request names a zone the page does not declare.
 
-    The unified view turns this into a 400 before any zone renders, and the message
-    names the declared zones so a typo points at what is available.
+    The unified view turns it into a 400 whose message names the declared zones.
     """
 
     def __init__(self, zone_name: str, declared: tuple[str, ...] = ()) -> None:
@@ -44,8 +43,7 @@ class UnknownPatchOpError(LookupError):
 class ReservedPatchKeyError(ValueError):
     """Raised when a custom op payload names a structural wire key.
 
-    The `op`, `target`, and `html` keys carry the patch structure, so a
-    payload that names one of them is refused rather than overwriting it.
+    The `op`, `target`, and `html` keys carry the patch structure.
     """
 
     def __init__(self, op: str, reserved: frozenset[str]) -> None:
@@ -62,8 +60,7 @@ class ReservedPatchKeyError(ValueError):
 class BuiltinPatchOpError(ValueError):
     """Raised when `register_patch_op` or the generic `op()` channel names a built-in.
 
-    A built-in verb owns typed wire keys, so it travels only through its typed
-    builder method, and the client applies it before any custom handler.
+    A built-in verb owns typed wire keys and travels only through its typed builder.
     """
 
     def __init__(self, name: str) -> None:
@@ -78,8 +75,7 @@ class BuiltinPatchOpError(ValueError):
 class ReservedEventNameError(ValueError):
     """Raised when `event()` names a framework-owned client-bus event.
 
-    The `ready`/`context-updated` events and the `partial:`/`next:` prefixes are
-    runtime-owned, refused here rather than letting an app event forge one.
+    Events `ready`, `context-updated` and prefixes `partial:`/`next:` are reserved.
     """
 
     def __init__(self, name: str) -> None:
@@ -94,8 +90,7 @@ class ReservedEventNameError(ValueError):
 class ForeignPageNotAuthorizedError(PermissionError):
     """Raised when a zone morph names a page that denies the request.
 
-    A page whose own view never ran, whether named by the handler or by the posted
-    origin, renders a zone only once its body resolution authorizes the request.
+    A page whose own view never ran renders a zone only after authorizing the request.
     """
 
     def __init__(self, page_path: "Path", status_code: int) -> None:
@@ -113,8 +108,7 @@ class ForeignPageNotAuthorizedError(PermissionError):
 class DynamicForeignPageError(ValueError):
     """Raised when an OOB morph names a foreign page with a `render()` body.
 
-    A `render()` body never reaches the composed-template cache, so it has no compiled
-    source for a standalone zone morph. The OOB view branch refuses the same shape.
+    A `render()` body never reaches the composed-template cache, so it has no source.
     """
 
     def __init__(self, page_path: "Path") -> None:
@@ -130,8 +124,7 @@ class DynamicForeignPageError(ValueError):
 class UnknownContextNameError(LookupError):
     """Raised when `context()` names a value that is not a serialize provider.
 
-    Only the names of registered `serialize=True` providers may travel in a context
-    patch, so an arbitrary mapping is refused rather than serialized blind.
+    Only names of registered `serialize=True` providers may travel in a context patch.
     """
 
     def __init__(self, name: str, available: tuple[str, ...] = ()) -> None:
@@ -152,8 +145,7 @@ class UnknownContextNameError(LookupError):
 class ReservedContextKeyError(ValueError):
     """Raised when `context()` names a key the init payload owns.
 
-    A full render keeps a reserved key for the framework, so a context patch naming one
-    would leave the client store disagreeing with the page it patches.
+    Such a patch would leave the client store disagreeing with the page it patches.
     """
 
     def __init__(self, reserved: frozenset[str]) -> None:
@@ -184,8 +176,7 @@ class UnknownDedupeError(ValueError):
 class CrossSiteHrefError(ValueError):
     """Raised when a builder href sink names a cross-site URL.
 
-    These sinks author an in-app navigation, so a cross-site href is refused at the
-    builder, and `redirect(external=True)` carries a deliberate external destination.
+    In-app sinks refuse it, and `redirect(external=True)` is the deliberate escape.
     """
 
     def __init__(self, href: str) -> None:

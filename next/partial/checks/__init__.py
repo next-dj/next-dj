@@ -21,6 +21,7 @@ from .codes import (
     E_OP_BAD_NAME,
     E_ZONE_IN_COMPONENT,
     E_ZONE_IN_FOR,
+    E_ZONE_IN_HAS_PERM,
     E_ZONE_IN_IF,
     W_ASSET_VERSION_FROZEN,
     W_FORM_BACKEND_NOT_AWARE,
@@ -39,6 +40,7 @@ from .zones import (
     check_no_zone_in_component,
     check_with_directly_over_zone,
     check_zone_name_is_slug,
+    check_zone_not_in_has_perm,
     check_zone_not_in_if,
     check_zone_not_in_loop,
 )
@@ -55,6 +57,7 @@ __all__ = [
     "E_OP_BAD_NAME",
     "E_ZONE_IN_COMPONENT",
     "E_ZONE_IN_FOR",
+    "E_ZONE_IN_HAS_PERM",
     "E_ZONE_IN_IF",
     "W_ASSET_VERSION_FROZEN",
     "W_FORM_BACKEND_NOT_AWARE",
@@ -77,6 +80,7 @@ __all__ = [
     "check_single_partial_backend",
     "check_with_directly_over_zone",
     "check_zone_name_is_slug",
+    "check_zone_not_in_has_perm",
     "check_zone_not_in_if",
     "check_zone_not_in_loop",
 ]

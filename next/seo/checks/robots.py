@@ -17,11 +17,12 @@ from django.urls.converters import get_converters
 
 from next.checks import NEXT, SEO
 from next.seo.robots import declared_rules, robots_candidates, rule_pattern
-from next.seo.sitemaps import SitemapOptions, listed_trails
+from next.seo.sitemaps import SitemapOptions, listed_trails, static_trails
 from next.site.config import indexable_without_request
 from next.urls.errors import URLParameterError
 from next.urls.parser import default_url_parser
 from next.urls.reverse import page_reverse
+from next.utils import UNMOUNTED, PageRoot
 
 from .roots import (
     checked_noindex,
@@ -124,9 +125,9 @@ def check_seo_text_files(*args, **kwargs) -> list[CheckMessage]:
     return messages
 
 
-def _reverse(trail: str, kwargs: dict[str, Any]) -> str | None:
+def _reverse(root: PageRoot, trail: str, kwargs: dict[str, Any]) -> str | None:
     try:
-        return page_reverse(trail, **kwargs)
+        return page_reverse(trail, namespace=root.namespace, **kwargs)
     except NoReverseMatch:
         return None
 
@@ -153,12 +154,12 @@ def _placeholder(converter_name: str) -> tuple[object, str] | None:
     return None
 
 
-def route_path(trail: str) -> str | None:
+def route_path(trail: str, root: PageRoot = UNMOUNTED) -> str | None:
     """Return the URL path of `trail` up to its first parameter, `None` if unknown.
 
-    Placeholder values fill the parameters, so a dynamic trail reverses on its own.
+    Placeholder values fill the parameters, those of the include over `root` too.
     """
-    route = _route(trail)
+    route = _route(root.route_trail(trail))
     if route is None:
         return None
     kwargs: dict[str, Any] = {}
@@ -169,7 +170,7 @@ def route_path(trail: str) -> str | None:
             return None
         kwargs[match["name"]], text = placeholder
         filled = filled.replace(match[0], text, 1)
-    url = _reverse(trail, kwargs)
+    url = _reverse(root, trail, kwargs)
     if url is None or not url.endswith(filled):
         return None
     return url[: len(url) - len(filled)] + route.split("<", 1)[0]
@@ -179,7 +180,7 @@ def route_paths(root: SeoRoot) -> dict[str, str]:
     """Return the URL path of every trail, a dynamic one up to its first parameter."""
     paths: dict[str, str] = {}
     for trail in root.trails:
-        path = route_path(trail)
+        path = route_path(trail, root.root)
         if path is not None:
             paths[trail] = path
     return paths
@@ -188,7 +189,11 @@ def route_paths(root: SeoRoot) -> dict[str, str]:
 def _sitemap_paths(root: SeoRoot, module: types.ModuleType) -> set[str]:
     """Return the URL paths the sitemap of `root` lists."""
     exclude = SitemapOptions.read(module).exclude
-    listed = set(listed_trails(root.trails, exclude, noindex=checked_noindex))
+    listed = set(
+        static_trails(
+            root.root, listed_trails(root.trails, exclude, noindex=checked_noindex)
+        )
+    )
     listed |= items_trails(root)
     return {path for trail, path in route_paths(root).items() if trail in listed}
 

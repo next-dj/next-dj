@@ -19,7 +19,7 @@ _DJANGO_BACKEND = "django.template.backends.django.DjangoTemplates"
 _DJANGO_TAG_PATTERN = r"({%.*?%}|{{.*?}}|{#.*?#})"
 _NEXT_TAG_ALTERNATION = (
     "action_url|asset|breadcrumbs|collect_head|collect_scripts|collect_styles|"
-    "component|consented|form|metadata|script|set_slot|slot|template|"
+    "component|consented|form|has_perm|metadata|script|set_slot|slot|template|"
     "use_module|use_script|use_style|zone"
 )
 _WIDENED_TAG_PATTERN = (
@@ -221,8 +221,7 @@ class TestBuiltinsFollowAnOverride:
     def test_builtins_reach_engines_read_before_the_install(self) -> None:
         """A handler that already read `TEMPLATES` is dropped, so it reads again."""
         with override_settings(TEMPLATES=[_django_engine()]):
-            # A plain write emits no `setting_changed`, so the handler below
-            # reads the engines an app readied before next-dj would have read.
+            # A plain write emits no `setting_changed`, so the handler reads old ones.
             settings.TEMPLATES = [_django_engine()]
             assert engines.templates["django"]["OPTIONS"]["builtins"] == []
 

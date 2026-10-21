@@ -22,7 +22,7 @@ The class is the unit of registration.
 Declaring it is enough to make it reachable by name from any template, and the action name is the ``snake_case`` of the class name.
 
 .. code-block:: python
-   :caption: notes/pages/notes/edit/[slug]/page.py — auto-registered as ``note_edit_form``
+   :caption: notes/pages/notes/edit/[slug]/page.py, auto-registered as ``note_edit_form``
 
    from notes.models import Note
 
@@ -58,7 +58,7 @@ A string names a URL kwarg that doubles as the model lookup field.
            fields = ["slug", "title", "body"]
            instance_from_url = "slug"
 
-On a page whose route captures ``slug``, the default ``get_initial`` runs ``get_object_or_404(Note, slug=<captured value>)`` and binds the result as the form instance.
+On a page whose route captures ``slug``, the default ``get_initial`` loads the ``Note`` whose ``slug`` is the captured value and binds it as the form instance.
 
 Dict form
 ~~~~~~~~~
@@ -74,7 +74,7 @@ A dict maps a URL kwarg name to a different model lookup field for the case wher
            fields = ["slug", "title", "body"]
            instance_from_url = {"id": "pk"}
 
-Here the route captures ``id`` and the form loads the instance with ``get_object_or_404(Note, pk=<captured value>)``.
+Here the route captures ``id`` and the form loads the ``Note`` whose ``pk`` is the captured value.
 The dict key is the URL kwarg name and the value is the model field used in the lookup.
 
 The value may also traverse a relation with the usual double-underscore lookup, so ``{"author_slug": "author__slug"}`` finds the row through its related model.
@@ -89,36 +89,48 @@ A missing URL kwarg yields an unbound form.
 On a create page with no ``[slug]`` segment, the captured kwarg is absent, ``get_initial`` returns an empty dict, and the form renders fresh.
 
 A not-found object yields a 404.
-When the kwarg is present but no row matches, :func:`~django.shortcuts.get_object_or_404` raises ``Http404`` and the request returns the standard 404 response.
+When the kwarg is present but no row matches, the lookup raises ``Http404`` and the request returns the standard 404 response.
 
 The field named by ``instance_from_url`` should be unique.
-:func:`~django.shortcuts.get_object_or_404` turns only the not-found case into a 404, so a lookup matching several rows surfaces as a server error instead.
+A scoped lookup takes the first matching row, and an unscoped one runs :func:`~django.shortcuts.get_object_or_404`, which turns only the not-found case into a 404, so a lookup matching several rows surfaces as a server error there.
 
-Ownership is not scoped by default
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Scoping the lookup
+~~~~~~~~~~~~~~~~~~
+
+The lookup reads through ``visible_to(scope)`` as ``DObject`` does once both halves exist, a ``visible_to`` on the default manager of the model and a ``scope`` dependency the project registers, see :ref:`topics-di-dobject`.
+A row the scope cannot see then answers 404 exactly like a missing one, and a lookup by the primary key shares the row a ``DObject`` of the same render loaded.
+An override that reaches the default through ``super()`` passes the request on, as ``super().get_initial(request, **url_kwargs)``, since the scope resolves from it and a call without it raises ``TypeError``.
 
 .. warning::
 
-   The default ``get_initial`` runs an unscoped ``get_object_or_404(model, slug=<value>)``.
-   The lookup value comes from the URL, and on a POST it is recovered by resolving the hidden ``_next_form_origin`` path that the browser sends.
-   Either source is user-controlled, so any user who can reach the action can load and save a row they do not own by supplying a different value.
-   This is an insecure direct object reference.
+   Without both halves the default ``get_initial`` runs an unscoped :func:`~django.shortcuts.get_object_or_404` on a value that the URL, or on a POST the hidden ``_next_form_origin`` path, supplies, so any user who reaches the action can load and save a row they do not own by sending another value.
 
-   Scope the lookup to the current user or tenant.
-   Override ``get_initial`` with a scoped query.
+A form can also load the row through ``DObject`` in ``get_form_kwargs``.
+``DObject`` reads the row through ``visible_to(scope)`` and answers 404 for a row the scope cannot see, see :ref:`topics-di-dobject`.
+It looks the row up by primary key, so the route captures the key under the name of the parameter.
 
-   .. code-block:: python
-      :caption: ownership-scoped get_initial
+.. code-block:: python
+   :caption: notes/pages/notes/[int:note]/edit/page.py
 
-      @classmethod
-      def get_initial(cls, request: HttpRequest, slug: str | None = None):
-          if slug is None:
-              return {}
-          return get_object_or_404(Note, slug=slug, owner=request.user)
+   from django.http import HttpRequest
+   from notes.models import Note
 
-   The extra ``owner=request.user`` term turns another user's slug into a 404 instead of an editable instance.
-   If the lookup cannot carry the scope, verify ownership in ``on_valid`` before ``self.save()``.
-   See :doc:`/content/security/di-and-untrusted-input` for the untrusted-input rules and :doc:`/content/security/overview` for object-level authorization.
+   import next.forms
+   from next.deps import DObject
+
+   class NoteEditForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["slug", "title", "body"]
+
+       @classmethod
+       def get_form_kwargs(cls, request: HttpRequest, note: DObject[Note]) -> dict:
+           return {"instance": note}
+
+The form declares no ``instance_from_url``, because the hook supplies the instance on the GET render and on the POST alike.
+A create page captures no ``note`` kwarg, so it keeps a form of its own, see :ref:`separate create and edit forms <topics-forms-modelforms-separate>`.
+``instance_from_url`` covers a lookup by another field under the same scope.
+See :doc:`/content/security/di-and-untrusted-input` for the untrusted-input rules and :doc:`/content/security/overview` for object-level authorization.
 
 Before and after
 ----------------
@@ -126,7 +138,7 @@ Before and after
 Without ``Meta.instance_from_url``, an edit form loads the article twice and maps each field by hand.
 
 .. code-block:: python
-   :caption: before — manual lookup duplicated across get_initial and on_valid
+   :caption: before, manual lookup duplicated across get_initial and on_valid
 
    from django.http import HttpRequest
 
@@ -159,7 +171,7 @@ Without ``Meta.instance_from_url``, an edit form loads the article twice and map
 Every piece of that plumbing exists only to relocate the instance the page already addressed in its URL.
 
 .. code-block:: python
-   :caption: after — instance loading is a single declarative line
+   :caption: after, instance loading is a single declarative line
 
    class ArticleEditForm(next.forms.ModelForm):
        class Meta:
@@ -183,7 +195,7 @@ On a create page the route has no captured kwarg, so the form renders unbound an
 On an edit page the route captures the kwarg named by ``instance_from_url``, so the form loads the existing row and ``self.save()`` updates it.
 
 .. code-block:: python
-   :caption: notes/forms.py — shared scope, one class for both pages
+   :caption: notes/forms.py, shared scope, one class for both pages
 
    from notes.models import Note
 
@@ -202,10 +214,33 @@ A page-scoped class works differently.
 Declaring a copy in each ``page.py`` keeps the shared action name, but every per-file registration gets its own action URL.
 See :doc:`actions` for the scope derivation and the UID rules.
 
+.. _topics-forms-modelforms-separate:
+
 Separate create and edit forms are an option, and the repository examples take that route, see :doc:`/content/misc/examples`.
 The wiki example's create page declares a plain ``ArticleCreateForm`` while its edit page keeps the ``ArticleEditForm`` ModelForm.
 The multi-tenant example's create page likewise declares its own ``NoteCreateForm`` apart from the edit form.
-Split the two when the create and edit fields diverge, when validation differs, or when the rows must be scoped to something the URL does not carry.
+Split the two when the create and edit fields diverge, when validation differs, or when the edit form loads its row through ``DObject``, which needs the kwarg on every page the form serves.
+In a project whose scope is the user, the create form hands the owner to the new row from its own ``get_form_kwargs``.
+
+.. code-block:: python
+   :caption: notes/forms.py
+
+   from notes.models import Note
+
+   import next.forms
+   from next import Depends
+
+   class NoteCreateForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["slug", "title", "body"]
+           login_required = True
+
+       @classmethod
+       def get_form_kwargs(cls, scope=Depends("scope")) -> dict:
+           return {"instance": Note(owner=scope)}
+
+``self.save()`` in the default ``on_valid`` then inserts the row with its owner already set.
 
 Handling submissions
 --------------------
@@ -215,8 +250,8 @@ Override it only when the redirect target differs or extra logic must run after 
 
 .. warning::
 
-   The action endpoint requires no authentication by default, so any visitor who can POST to it reaches ``on_valid`` and ``self.save()``.
-   Check ``request.user.is_authenticated`` and the row's ownership in ``on_valid`` before saving, especially when ``instance_from_url`` loads the instance from a user-controlled value.
+   An action answers to the access of its page, the ``inherit=True`` declarations of every ``page.py`` above included, and an action nothing guards lets any visitor who can POST to it reach ``on_valid`` and ``self.save()``, which ``next.W129`` reports in a project that declares access, see :doc:`/content/security/actions`.
+   Check the row's ownership before saving, especially when ``instance_from_url`` loads the instance unscoped from a user-controlled value.
    The ``has_object_permission`` hook is the first-class place for that check, since it runs after binding with ``self.instance`` set to the loaded row, see :ref:`topics-forms-actions-dynamic-guards` and the :ref:`howto-enforce-object-level-permissions` recipe.
    See :doc:`/content/security/overview` for access control and :doc:`/content/howto/require-login-on-pages` for a project-wide login requirement.
 
@@ -243,15 +278,15 @@ Call ``self.save_m2m()`` after ``note.save()`` when the model has many-to-many f
 Custom get_initial escape hatch
 -------------------------------
 
-Define ``get_initial`` only when the lookup the page needs cannot be expressed by ``instance_from_url``, for example a tenant-scoped query.
+Define ``get_initial`` only when the lookup the page needs cannot be expressed by ``instance_from_url`` or ``DObject``, for example one that filters on more than the URL kwargs.
 
 .. code-block:: python
 
-   from django.http import HttpRequest
    from django.shortcuts import get_object_or_404
-   from notes.access import get_active_tenant
+   from notes.models import Note
 
-   from next.urls import DUrl
+   import next.forms
+   from next import Depends
 
    class NoteEditForm(next.forms.ModelForm):
        class Meta:
@@ -259,13 +294,13 @@ Define ``get_initial`` only when the lookup the page needs cannot be expressed b
            fields = ["title", "body"]
 
        @classmethod
-       def get_initial(cls, request: HttpRequest, note_id: DUrl["id", int]):
-           tenant = get_active_tenant(request)
-           if tenant is None or note_id is None:
+       def get_initial(cls, slug: str | None = None, scope=Depends("scope")):
+           if slug is None:
                return {}
-           return get_object_or_404(Note, pk=note_id, tenant=tenant)
+           notes = Note.objects.visible_to(scope).filter(archived=False)
+           return get_object_or_404(notes, slug=slug)
 
-The ``get_active_tenant`` helper reads the tenant the middleware attached to the request, so the lookup stays scoped to the active tenant.
+The ``scope`` dependency answers the same value ``DObject`` passes to ``visible_to``, so the lookup sees only the rows the scope may see.
 Declare ``get_initial`` as a ``classmethod`` with a DI-friendly signature.
 The framework resolves ``request`` and captured URL parameters as keyword arguments.
 Return a model instance to bind an existing row for editing, or a dict to seed an unbound form.

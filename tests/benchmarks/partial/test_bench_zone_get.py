@@ -70,8 +70,7 @@ def _zone_view(
 def _manifest_storage(root: Path) -> Iterator[None]:
     """Point staticfiles at a manifest storage carrying an unhashed manifest.
 
-    An empty recorded hash is what sends `asset_version` down the hashing
-    branch, which every partial response pays before it renders anything.
+    An empty recorded hash sends `asset_version` down the hashing branch.
     """
     static_root = root / "static_root"
     static_root.mkdir()

@@ -1,8 +1,21 @@
-from __future__ import annotations
+from typing import ClassVar, Self
 
-from typing import ClassVar
-
+from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 from django.db import models
+
+
+class BoardQuerySet(models.QuerySet):
+    def visible_to(self, user: AbstractBaseUser | AnonymousUser) -> Self:
+        """Return every board, since the demo has no accounts to narrow them by."""
+        return self.all()
+
+    def active(self) -> Self:
+        """Return the boards still in use, newest first."""
+        return self.filter(archived=False).order_by("-created_at")
+
+    def archived(self) -> Self:
+        """Return the boards taken out of the index."""
+        return self.filter(archived=True)
 
 
 class Board(models.Model):
@@ -13,12 +26,19 @@ class Board(models.Model):
     archived = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    objects = BoardQuerySet.as_manager()
+
     class Meta:
         ordering: ClassVar = ["-created_at"]
 
     def __str__(self) -> str:
         """Return the human-readable board title."""
         return self.title
+
+    def card(self, pk: int | str) -> "Card | None":
+        """Return the card `pk` names when it sits on this board, with its column."""
+        cards = Card.objects.select_related("column").filter(column__board=self)
+        return cards.filter(pk=pk).first()
 
 
 class Column(models.Model):
@@ -52,10 +72,7 @@ class Card(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        # Position uniqueness inside a column is maintained by move_card
-        # and create_card under select_for_update. SQLite does not
-        # support deferrable UNIQUE constraints, so the invariant lives
-        # at the application layer rather than in the schema.
+        # SQLite lacks deferrable UNIQUE, so services keep positions unique by a lock.
         ordering: ClassVar = ["position", "id"]
 
     def __str__(self) -> str:

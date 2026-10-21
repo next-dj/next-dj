@@ -1,7 +1,6 @@
 """Aggregate system-check registration for all `next-dj` subpackages.
 
-Importing a helper loads every subpackage's `checks` module and so triggers its
-`@register` side effects. Re-exports resolve lazily to break the cycle back here.
+Re-exports resolve lazily to break the import cycle back here.
 """
 
 from __future__ import annotations
@@ -40,11 +39,23 @@ if TYPE_CHECKING:
         check_consent_cookie_secure,
         check_consent_settings,
     )
+    from next.deps.checks import (
+        check_object_component_contexts,
+        check_object_declarations,
+        check_object_form_parents,
+        check_object_hints,
+        check_object_managers,
+        check_object_page_bindings,
+        check_object_scope,
+    )
     from next.forms.checks import (
         check_action_applied_to_class,
         check_action_guard_permissions,
+        check_component_action_objects,
         check_component_widget_components,
         check_component_widget_field_types,
+        check_declarations_without_page,
+        check_empty_branches,
         check_form_action_backends_configuration,
         check_form_action_collisions,
         check_form_anchor_files,
@@ -55,6 +66,7 @@ if TYPE_CHECKING:
         check_instance_from_url_on_non_model_form,
         check_instance_from_url_unknown_field,
         check_invalid_form_meta_scope,
+        check_public_actions,
         check_shared_action_name_collisions,
         check_shared_page_forms,
         check_success_message_framework,
@@ -72,6 +84,7 @@ if TYPE_CHECKING:
         check_csrf_delivery,
         check_csrf_endpoint_reversible,
         check_csrf_in_session,
+        check_declaring_modules,
         check_layout_templates,
         check_metadata_callable_returns_mapping,
         check_metadata_enum_values,
@@ -91,6 +104,7 @@ if TYPE_CHECKING:
         check_page_module_imports,
         check_page_response_declarations,
         check_pages_structure,
+        check_public_beside_requirements,
         check_request_in_context,
         check_shared_page_responses,
         check_single_keyless_context,
@@ -113,8 +127,16 @@ if TYPE_CHECKING:
         check_single_partial_backend,
         check_with_directly_over_zone,
         check_zone_name_is_slug,
+        check_zone_not_in_has_perm,
         check_zone_not_in_if,
         check_zone_not_in_loop,
+    )
+    from next.permissions.checks import (
+        check_login_required_auth,
+        check_login_required_setting,
+        check_permission_backend,
+        check_permission_predicates,
+        check_permissions_known,
     )
     from next.scripts.checks import (
         check_consented_categories,
@@ -196,11 +218,23 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_consent_cookie_secure",
         "check_consent_settings",
     ),
+    "next.deps.checks": (
+        "check_object_component_contexts",
+        "check_object_declarations",
+        "check_object_form_parents",
+        "check_object_hints",
+        "check_object_managers",
+        "check_object_page_bindings",
+        "check_object_scope",
+    ),
     "next.forms.checks": (
         "check_action_applied_to_class",
         "check_action_guard_permissions",
+        "check_component_action_objects",
         "check_component_widget_components",
         "check_component_widget_field_types",
+        "check_declarations_without_page",
+        "check_empty_branches",
         "check_form_action_backends_configuration",
         "check_form_action_collisions",
         "check_form_anchor_files",
@@ -211,6 +245,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_instance_from_url_on_non_model_form",
         "check_instance_from_url_unknown_field",
         "check_invalid_form_meta_scope",
+        "check_public_actions",
         "check_shared_action_name_collisions",
         "check_shared_page_forms",
         "check_success_message_framework",
@@ -228,6 +263,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_csrf_delivery",
         "check_csrf_endpoint_reversible",
         "check_csrf_in_session",
+        "check_declaring_modules",
         "check_layout_templates",
         "check_metadata_callable_returns_mapping",
         "check_metadata_enum_values",
@@ -247,6 +283,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_page_module_imports",
         "check_page_response_declarations",
         "check_pages_structure",
+        "check_public_beside_requirements",
         "check_request_in_context",
         "check_shared_page_responses",
         "check_single_keyless_context",
@@ -269,8 +306,16 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_single_partial_backend",
         "check_with_directly_over_zone",
         "check_zone_name_is_slug",
+        "check_zone_not_in_has_perm",
         "check_zone_not_in_if",
         "check_zone_not_in_loop",
+    ),
+    "next.permissions.checks": (
+        "check_login_required_auth",
+        "check_login_required_setting",
+        "check_permission_backend",
+        "check_permission_predicates",
+        "check_permissions_known",
     ),
     "next.scripts.checks": (
         "check_consented_categories",
@@ -344,6 +389,7 @@ __all__ = [
     "check_asset_renderers",
     "check_asset_version_moves_between_deploys",
     "check_builtin_tag_libraries_complete",
+    "check_component_action_objects",
     "check_component_context_registration_files",
     "check_component_module_imports",
     "check_component_py_no_pages_context",
@@ -367,9 +413,12 @@ __all__ = [
     "check_csrf_endpoint_reversible",
     "check_csrf_in_session",
     "check_custom_patch_ops_well_formed",
+    "check_declarations_without_page",
+    "check_declaring_modules",
     "check_django_templates_backend_present",
     "check_duplicate_component_names",
     "check_duplicate_zone_names",
+    "check_empty_branches",
     "check_form_action_backends_configuration",
     "check_form_action_collisions",
     "check_form_anchor_files",
@@ -387,6 +436,8 @@ __all__ = [
     "check_js_context_serializer",
     "check_layout_templates",
     "check_lazy_zone_has_placeholder",
+    "check_login_required_auth",
+    "check_login_required_setting",
     "check_manifest_version_has_manifest_storage",
     "check_metadata_callable_returns_mapping",
     "check_metadata_enum_values",
@@ -408,6 +459,13 @@ __all__ = [
     "check_no_zone_in_component",
     "check_nonce_on_shared_pages",
     "check_nonce_templates",
+    "check_object_component_contexts",
+    "check_object_declarations",
+    "check_object_form_parents",
+    "check_object_hints",
+    "check_object_managers",
+    "check_object_page_bindings",
+    "check_object_scope",
     "check_page_functions",
     "check_page_metadata_shape",
     "check_page_module_imports",
@@ -415,6 +473,11 @@ __all__ = [
     "check_pages_structure",
     "check_partial_backend_names_a_path",
     "check_partial_backends_is_a_list",
+    "check_permission_backend",
+    "check_permission_predicates",
+    "check_permissions_known",
+    "check_public_actions",
+    "check_public_beside_requirements",
     "check_repeated_form_has_key",
     "check_request_in_context",
     "check_reserved_js_context_keys",
@@ -467,6 +530,7 @@ __all__ = [
     "check_wizard_step_file_fields",
     "check_wizard_url_param_route",
     "check_zone_name_is_slug",
+    "check_zone_not_in_has_perm",
     "check_zone_not_in_if",
     "check_zone_not_in_loop",
     "register_all",
@@ -486,11 +550,9 @@ def register_all() -> None:
 def reset_check_caches() -> None:
     """Drop every per-run check cache so the next run rebuilds from disk.
 
-    Tests that mutate the page or component tree in place need this, since the caches
-    otherwise freeze the scanned state for the process lifetime.
+    Tests that mutate the page or component tree in place need this.
     """
-    # Reached by name because each of these pulls in an area package that imports
-    # its own `checks` module, and that module imports `NEXT` back from here.
+    # Reached by name because each pulls in an area whose `checks` imports `NEXT` here.
     importlib.import_module("next.discovery").reset_router_manager_cache()
     importlib.import_module("next.checks.common").forget_run_memos()
     sources = importlib.import_module("next.components.sources")

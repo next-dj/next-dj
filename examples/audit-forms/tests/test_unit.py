@@ -5,18 +5,25 @@ from types import ModuleType
 
 import pytest
 from access.backends import _safe_form_payload, _step_from_origin
+from access.forms import POLICY_FIELD, AcknowledgedStep
 from access.models import AccessRequest, AuditEntry
-from access.policy import POLICY_FIELD, AcknowledgedStep
-from access.receivers import _on_form_access_denied
+from access.signals import _on_form_access_denied
 from django.contrib.sessions.backends.db import SessionStore
+from django.db import connection, transaction
 from django.http import HttpRequest, QueryDict
+
+from next.forms.signals import (
+    action_dispatched,
+    form_access_denied,
+    form_validation_failed,
+)
 
 
 pytestmark = pytest.mark.django_db
 
 
 EXAMPLE_ROOT = Path(__file__).resolve().parent.parent
-VIEWS_ROOT = EXAMPLE_ROOT / "access" / "views"
+PAGES_ROOT = EXAMPLE_ROOT / "access" / "pages"
 
 
 def _load(path: Path, name: str) -> ModuleType:
@@ -28,19 +35,19 @@ def _load(path: Path, name: str) -> ModuleType:
     return module
 
 
-_step_page = _load(VIEWS_ROOT / "request" / "[step]" / "page.py", "audit_step_page")
+_step_page = _load(PAGES_ROOT / "request" / "[step]" / "page.py", "audit_step_page")
 _progress = _load(
-    VIEWS_ROOT / "request" / "[step]" / "_blocks" / "progress_bar" / "component.py",
+    PAGES_ROOT / "request" / "[step]" / "_components" / "progress_bar" / "component.py",
     "audit_progress_bar",
 )
 _audit_row = _load(
-    VIEWS_ROOT / "_blocks" / "audit_row" / "component.py", "audit_audit_row"
+    PAGES_ROOT / "_components" / "audit_row" / "component.py", "audit_audit_row"
 )
 _step_section = _load(
-    VIEWS_ROOT / "request" / "[step]" / "_blocks" / "step_section" / "component.py",
+    PAGES_ROOT / "request" / "[step]" / "_components" / "step_section" / "component.py",
     "audit_step_section",
 )
-_admin_audit = _load(VIEWS_ROOT / "admin" / "audit" / "page.py", "audit_admin_audit")
+_admin_audit = _load(PAGES_ROOT / "admin" / "audit" / "page.py", "audit_admin_audit")
 
 
 def _audit_request(*, zone: str | None, kind: str = "") -> HttpRequest:
@@ -277,10 +284,13 @@ class TestWizardPermissionHook:
 class TestAccessDeniedReceiver:
     """`_on_form_access_denied` records the denial layer and reason."""
 
-    def test_receiver_stores_layer_and_reason(self) -> None:
-        _on_form_access_denied(
-            action_name="access_request_wizard", layer="view", reason="denied"
-        )
+    def test_receiver_stores_layer_and_reason(
+        self, django_capture_on_commit_callbacks
+    ) -> None:
+        with django_capture_on_commit_callbacks(execute=True):
+            _on_form_access_denied(
+                action_name="access_request_wizard", layer="view", reason="denied"
+            )
         row = AuditEntry.objects.get(kind=AuditEntry.KIND_ACCESS_DENIED)
         assert row.source == AuditEntry.SOURCE_SIGNAL
         assert row.access_layer == "view"
@@ -295,6 +305,70 @@ class TestAccessDeniedReceiver:
         )
         entry.created_at = datetime(2026, 4, 25, 12, 30, 0, tzinfo=UTC)
         assert "signal/access_denied" in str(entry)
+
+
+SIGNAL_SENDS = [
+    pytest.param(
+        action_dispatched,
+        {"duration_ms": 1.5, "response_status": 303},
+        AuditEntry.KIND_DISPATCHED,
+        id="dispatched",
+    ),
+    pytest.param(
+        form_validation_failed,
+        {"error_count": 1, "field_names": ("email",)},
+        AuditEntry.KIND_VALIDATION_FAILED,
+        id="validation_failed",
+    ),
+    pytest.param(
+        form_access_denied,
+        {"layer": "view", "reason": "denied"},
+        AuditEntry.KIND_ACCESS_DENIED,
+        id="access_denied",
+    ),
+]
+
+
+class RollbackError(Exception):
+    pass
+
+
+def _send_then_roll_back(signal, payload: dict[str, object]) -> None:
+    with transaction.atomic():
+        queued = len(connection.run_on_commit)
+        signal.send(sender=AuditEntry, action_name="access_request_wizard", **payload)
+        assert not AuditEntry.objects.exists()
+        assert len(connection.run_on_commit) == queued + 1
+        raise RollbackError
+
+
+class TestSignalChannelWaitsForTheCommit:
+    """Signal rows land once the sender's transaction commits, never on rollback."""
+
+    @pytest.mark.parametrize(("signal", "payload", "kind"), SIGNAL_SENDS)
+    def test_the_row_lands_once_the_transaction_commits(
+        self, django_capture_on_commit_callbacks, signal, payload, kind
+    ) -> None:
+        with django_capture_on_commit_callbacks(execute=True) as callbacks:
+            signal.send(
+                sender=AuditEntry, action_name="access_request_wizard", **payload
+            )
+            assert not AuditEntry.objects.filter(kind=kind).exists()
+        assert len(callbacks) == 1
+        row = AuditEntry.objects.get(kind=kind)
+        assert row.source == AuditEntry.SOURCE_SIGNAL
+
+    @pytest.mark.parametrize(("signal", "payload", "kind"), SIGNAL_SENDS)
+    def test_a_rolled_back_transaction_records_nothing(
+        self, django_capture_on_commit_callbacks, signal, payload, kind
+    ) -> None:
+        with (
+            django_capture_on_commit_callbacks(execute=True) as callbacks,
+            pytest.raises(RollbackError),
+        ):
+            _send_then_roll_back(signal, payload)
+        assert callbacks == []
+        assert not AuditEntry.objects.exists()
 
 
 class TestProgressBarSteps:

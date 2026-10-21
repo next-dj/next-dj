@@ -59,13 +59,13 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 .. rubric:: Subsystems
 
 :doc:`pages`
-   ``next.pages`` for page modules, layouts, context, and template loaders.
+   ``next.pages`` for page modules, page access, layouts, context, and template loaders.
 
 :doc:`components`
    ``next.components`` for component discovery and rendering.
 
 :doc:`urls`
-   ``next.urls`` for the file router, URL reverse helpers, and dispatcher.
+   ``next.urls`` for the file router, ``pages()``, URL reverse helpers, and dispatcher.
 
 :doc:`forms`
    ``next.forms`` for form actions, dispatch, formsets, and frozen specs.
@@ -92,7 +92,10 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    ``next.scripts`` and ``next.consent`` for third-party scripts and consent.
 
 :doc:`deps`
-   ``next.deps`` for the dependency resolver and providers.
+   ``next.deps`` for the dependency resolver, providers, and ``DObject``.
+
+:doc:`permissions`
+   ``next.permissions`` for object permission predicates and the authentication backend that answers them.
 
 :doc:`conf`
    ``next.conf`` for settings loading and the ``extend_default_backend`` helper.
@@ -138,7 +141,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    Django system checks that the framework contributes.
 
 :doc:`management`
-   The ``showmetadata`` management command.
+   The ``routes``, ``permissions``, and ``showmetadata`` management commands.
 
 .. rubric:: Templates and decorators
 
@@ -164,6 +167,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    csrf
    scripts
    deps
+   permissions
    conf
    server
    signals

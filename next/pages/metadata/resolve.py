@@ -344,8 +344,7 @@ def _first(value: Text | None, fallback: Text | None) -> Text | None:
 def og_locale(language: str | None) -> str | None:
     """Return the `ll_CC` Open Graph locale of a language code, `None` without one.
 
-    A code without a region takes the one `locale.normalize` names, `en` as `en_US`,
-    unless `OG_LOCALES` holds the one Facebook reads instead.
+    A code without a region takes the `locale.normalize` one unless `OG_LOCALES` sets.
     """
     if not language:
         return None
@@ -518,8 +517,24 @@ def forget_crumb_routes(**kwargs: object) -> None:
     _crumb_route.cache_clear()
 
 
+def _outer_kwargs(match: ResolverMatch, template: str) -> dict[str, object]:
+    """Return the kwargs the URLconf captures around the page tree of `match`.
+
+    A file router marks each page view with the trail it is routed by in its tree.
+    """
+    trail: object = getattr(match.func, "next_route_trail", None)
+    if not isinstance(trail, str):
+        return {}
+    _name, own = _crumb_route(trail, template)
+    return {key: value for key, value in match.kwargs.items() if key not in own}
+
+
 def _crumb_url(
-    trail: str, match: ResolverMatch, template: str, urlconf: str | None
+    trail: str,
+    match: ResolverMatch,
+    template: str,
+    urlconf: str | None,
+    outer: Mapping[str, object],
 ) -> str | None:
     """Reverse the page of `trail` with the URL kwargs of the current match."""
     name, parameters = _crumb_route(trail, template)
@@ -527,7 +542,7 @@ def _crumb_url(
     if any(key not in given for key in parameters):
         return None
     viewname = f"{match.namespace}:{name}" if match.namespace else name
-    kwargs = {key: given[key] for key in parameters}
+    kwargs = {**outer, **{key: given[key] for key in parameters}}
     try:
         return reverse(viewname, urlconf=urlconf, kwargs=kwargs or None)
     except NoReverseMatch:
@@ -545,9 +560,10 @@ def _linked_crumbs(
         return tuple(Breadcrumb(crumb.label, None) for crumb in crumbs)
     template = next_framework_settings.URL_NAME_TEMPLATE
     own = escape_uri_path(path)
+    outer = _outer_kwargs(match, template)
     linked: list[Breadcrumb] = []
     for crumb in crumbs:
-        url = _crumb_url(crumb.trail, match, template, urlconf)
+        url = _crumb_url(crumb.trail, match, template, urlconf, outer)
         linked.append(
             Breadcrumb(crumb.label, url, current=url is not None and url == own)
         )

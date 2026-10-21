@@ -142,8 +142,7 @@ class TestEveryBackendFamilyAnnouncesItsLoad:
 class TestAssetRegisteredStaysUncached:
     """`asset_registered` sends the `StaticAsset` itself, which has no `__weakref__`.
 
-    Flipping the signal to `use_caching=True` turns every discovery emission into a
-    `TypeError`, so the exclusion is pinned by the send rather than by the flag alone.
+    `use_caching=True` would turn every discovery emission into a `TypeError`.
     """
 
     def test_static_asset_cannot_be_weak_referenced(self) -> None:
@@ -162,8 +161,7 @@ class TestAssetRegisteredStaysUncached:
 class TestCollectorFinalizedStaysUncached:
     """`collector_finalized` sends a collector built for one render.
 
-    The sender is weak-referenceable, so caching would not raise. It would only add a
-    dictionary write per render behind an entry no later send can ever read.
+    Caching would not raise but would add a dictionary write no later send reads.
     """
 
     def test_each_render_gets_its_own_collector(self) -> None:
@@ -179,8 +177,7 @@ class TestCollectorFinalizedStaysUncached:
 class TestCachedSignalSenderContract:
     """Django reads the sender cache before it looks at the receiver list.
 
-    Even the `None` default of a bare `has_listeners()` needs a weak-referenceable
-    sender, so every core guard passes the sender its send uses.
+    Even a bare `has_listeners()` needs a weak-referenceable sender, so guards pass it.
     """
 
     def test_has_listeners_without_a_sender_raises_on_a_cached_signal(self) -> None:

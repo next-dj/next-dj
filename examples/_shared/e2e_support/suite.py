@@ -27,11 +27,7 @@ PLUGIN_NOT_LOADED = (
 
 
 def ignore_browser_suite(config: pytest.Config) -> bool | None:
-    """Report whether the browser suite has to be skipped, and say why out loud.
-
-    Skipping rather than erroring lets a bare `pytest` still run the integration tests
-    next door, and the warning names the reason instead of leaving an empty directory.
-    """
+    """Skip the browser suite with a warning so bare `pytest` still runs the rest."""
     if config.pluginmanager.has_plugin(BROWSER_PLUGIN):
         return None
     missing_stack = importlib.util.find_spec("playwright") is None
@@ -48,9 +44,5 @@ def base_url(live_server: LiveServer) -> str:
 
 @pytest.fixture(scope="session")
 def browser_context_args(browser_context_args: dict[str, object]) -> dict[str, object]:
-    """Pin everything that would otherwise drift between machines.
-
-    Lives here, not in the browser plugin, because `-p` registers that plugin during
-    preparse, before pytest-playwright's own fixture of the same name can shadow it.
-    """
+    """Pin everything that would otherwise drift between machines."""
     return {**browser_context_args, **CONTEXT_ARGS}

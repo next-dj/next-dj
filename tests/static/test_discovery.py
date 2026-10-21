@@ -298,8 +298,7 @@ class TestAssetDiscoveryModuleLists:
             discovery.discover_page_assets(page_path, StaticCollector())
 
             page_path.write_text('styles = ["https://c.example/changed.css"]\n')
-            # Rewriting a file moves neither its own directory's mtime past the
-            # snapshot nor the file past the mtime the module memo keyed on.
+            # A rewrite moves neither the directory mtime nor the file past the memo.
             _bump(page_path)
             _bump(page_dir)
 
@@ -415,8 +414,7 @@ class TestAssetDiscoveryPagePlanCache:
         discovery = AssetDiscovery(provider)
         with override_settings(DEBUG=True):
             discovery.discover_page_assets(page_path, StaticCollector())
-            # The layout directory above keeps its mtime, so the walk reaches
-            # the page directory and finds it gone rather than merely moved.
+            # The layout directory keeps its mtime, so the walk finds the page gone.
             held = tmp_path.stat().st_mtime
             shutil.rmtree(page_path.parent)
             os.utime(tmp_path, (held, held))
@@ -646,8 +644,7 @@ class _FailingBackend(StaticFilesBackend):
 class _LeakingResolveBackend(RecordingStaticBackend):
     """Third-party shape that lets a raw storage error out of `resolve_url`.
 
-    The bundled backend converts a manifest miss, so only a backend like this one
-    reaches the drop-and-log arm the module-list reader keeps for it.
+    The bundled backend converts a manifest miss, so only this hits the drop arm.
     """
 
     def __init__(self, error: type[Exception]) -> None:
@@ -678,8 +675,7 @@ class _CountingResolveBackend(RecordingStaticBackend):
 class _ManifestBackend(RecordingStaticBackend):
     """Serves built URLs once a manifest exists, and the default URL until then.
 
-    Models the manifest-driven backend of the how-to guide, whose URLs change as soon
-    as an asset build finishes under a running process.
+    Models the how-to guide's manifest backend, whose URLs change once a build finishes.
     """
 
     def __init__(self, manifest: Path) -> None:
@@ -1096,8 +1092,7 @@ class TestAssetDiscoveryRegistryGeneration:
     ) -> None:
         """The generation is read before the probe, as the mtime snapshot is.
 
-        A registration landing while the plan is built would otherwise be baked
-        into it as already seen, and the file it names would stay invisible.
+        A registration landing during the build would be baked in as seen.
         """
         page_path = tmp_path / "page.djx"
         page_path.write_text("")

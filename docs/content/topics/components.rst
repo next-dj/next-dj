@@ -393,6 +393,21 @@ A keyed ``@component.context`` serializes its return value under the given key.
 
 An unkeyed callable merges its dict into the component scope, and the names that merge may not take over are covered under :ref:`components-merge-guard`.
 
+Component access
+----------------
+
+A ``component.py`` declares who may see the component with ``component.login_required()`` and ``component.permission_required(perm, *, obj=None)``, where ``obj`` names a prop or a ``@component.context`` value.
+
+.. code-block:: python
+   :caption: notes/pages/_components/admin_toolbar/component.py
+
+   from next import component
+
+   component.permission_required("notes.moderate_note")
+
+A declaration binds that component alone, with no ``inherit`` and no ``public()``, and a refused request renders the component as an empty string, with no redirect and no 403.
+A component without declarations follows the page or the zone it renders in, see :ref:`topics-permissions-tree`.
+
 Co-located static assets
 ------------------------
 
@@ -458,10 +473,10 @@ Page-tree ``component.py`` modules follow a different path.
 The URL router walks each page tree and ``register_components_folder_from_router_walk`` imports every ``component.py`` it registers inline.
 They are available regardless of ``LAZY_COMPONENT_MODULES``.
 
-A ``component.py`` whose body raises while it imports does not fail the render.
-The loader logs the traceback, holds the exception under that file path, and hands the renderer nothing, which degrades the component to its bare ``component.djx`` template.
-Every ``@component.context`` of that module therefore stays out of the body, and a template rendering a key one of them published prints the empty string instead.
-The held error is what ``next.E084`` reports, so a broken module that nobody noticed in a rendered page is still named by ``manage.py check --deploy``.
+A ``component.py`` whose body raises while it imports closes the component.
+The loader logs the traceback and holds the exception under that file path, and the component renders as an empty string, since the access it would have declared is unknown, and under ``next.conf.fail_loudly`` it raises ``ComponentModuleImportError`` with the import failure as ``__cause__``.
+A declaration made before the failing line would otherwise be lost silently, so no part of the component renders without it.
+The held error is what ``next.E084`` reports, so a broken module that nobody noticed in a rendered page is still named by ``manage.py check``.
 
 The ``LAZY_COMPONENT_MODULES`` flag gates the ``DIRS`` bulk import only.
 When the flag is set the framework skips that step and imports a ``component.py`` on first resolve instead.
@@ -701,7 +716,7 @@ The components subsystem contributes Django system checks.
 - ``next.E075`` reports a ``@component.context`` registration bound to a file no component render collects.
   Decorate callables defined in the ``component.py`` itself.
 - ``next.E084`` reports a ``component.py`` that raised while importing, naming the exception type and its message.
-  It is a deployment check and runs under ``manage.py check --deploy`` alone, because it imports every user module a backend holds.
+  It runs on every ``manage.py check`` and imports every user module a backend holds.
   Fix whatever the module body raised, since the components of that module render without their Python context until it imports.
 
 Run them with ``uv run python manage.py check``.

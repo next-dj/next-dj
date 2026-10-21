@@ -285,14 +285,14 @@ The same patch envelope rides Server-Sent Events, the fan-out carries no foreign
 The stream page is a neighbour of the vote page and uses the page render escape hatch.
 
 .. code-block:: python
-   :caption: polls/screens/polls/[int:id]/stream/page.py
+   :caption: polls/pages/polls/[int:id]/stream/page.py
 
    from collections.abc import Iterator
 
    from django.http import HttpRequest
    from polls.broker import broker
+   from polls.deps import DPoll
    from polls.models import Poll
-   from polls.providers import DPoll
 
    from next.partial import Patches, PatchEventStream
 
@@ -369,7 +369,7 @@ The opening link names a layer and the zone to refresh on accept.
 The list is a zone.
 
 .. code-block:: jinja
-   :caption: views/template.djx
+   :caption: access/pages/template.djx
 
    <a href="{% url 'next:page_request_step' step='identity' %}"
       data-next-layer="access-wizard" data-next-accepted="request-list">

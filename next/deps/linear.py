@@ -1,8 +1,4 @@
-"""Reference resolver that fills parameters without a compiled plan.
-
-Nothing else re-derives what a compiled plan trusts blindly from providers, so this
-resolver is kept as the second opinion the plan is checked against.
-"""
+"""Reference resolver that fills parameters without a compiled plan."""
 
 from __future__ import annotations
 
@@ -31,15 +27,13 @@ type _FillTarget = tuple[str, inspect.Parameter, object]
 class LinearDependencyResolver(DependencyResolver):
     """Fill each parameter from the first provider whose `can_handle` claims it.
 
-    Selectable via `NEXT_FRAMEWORK["DEPENDENCY_RESOLVER"]`, it picks providers
-    independently of `compile_plan`, at the cost of a full walk per parameter.
+    Selectable via `NEXT_FRAMEWORK["DEPENDENCY_RESOLVER"]`, at a full walk each.
     """
 
     def _fill_targets(self, func: Callable[..., Any]) -> tuple[_FillTarget, ...]:
         """Return the parameters of `func` to fill, prepared the way a compile does.
 
-        Unresolved hints leave the raw annotations in place, so a name only a later
-        import defines is picked up on the next resolve rather than frozen out.
+        Unresolved hints keep the raw annotations, so a later import is picked up.
         """
         try:
             signature = cached_signature(func)

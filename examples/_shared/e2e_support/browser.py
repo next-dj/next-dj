@@ -25,8 +25,7 @@ CDN_URL_PATTERN = re.compile(
     r"^https://(?:cdn\.tailwindcss\.com|cdn\.jsdelivr\.net|unpkg\.com)(?:/|$)"
 )
 
-# Play CDN compiles Tailwind in the browser and every navigation refetches ~400 KB,
-# so the bytes are cached on disk once per machine rather than per xdist worker.
+# Play CDN refetches ~400 KB per navigation, so bytes are cached once per machine.
 CDN_CACHE_DIR = pathlib.Path(tempfile.gettempdir()) / "next-dj-e2e-cdn"
 
 IGNORED_CONSOLE = (
@@ -90,11 +89,7 @@ EVENT_BRIDGE = """
 
 
 def pytest_configure() -> None:
-    """Let the suite reach the ORM from the thread playwright parks its loop in.
-
-    Django's async guard fires on ORM calls from that greenlet, so this lives in
-    the plugin rather than a conftest to stay armed for every suite that loads it.
-    """
+    """Let the suite reach the ORM from the thread playwright parks its loop in."""
     os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "1")
 
 
@@ -157,11 +152,7 @@ class PageProbe:
         page.remove_listener("requestfailed", self.on_request_failed)
 
     def flush(self) -> None:
-        """Round-trip to the browser so late events land before the noise is read.
-
-        Playwright delivers protocol events while the sync API waits on a call, so a
-        message the last statement of a test logged needs one more call to arrive.
-        """
+        """Round-trip to the browser so late events land before the noise is read."""
         if self.page is None or self.page.is_closed():
             return
         with suppress(Error):
@@ -179,11 +170,7 @@ class PageProbe:
     def partial_requests(
         self, zone: str | None = None, *, since: int = 0
     ) -> list[Response]:
-        """Return responses the runtime stamped as partial, optionally one zone.
-
-        A batched trigger sends every target in one comma-separated header, so a
-        zone matches when it appears in that list rather than equalling it.
-        """
+        """Return responses the runtime stamped as partial, optionally one zone."""
         matched = []
         for response in self.responses[since:]:
             headers = response.request.headers
@@ -219,8 +206,7 @@ def _serve_from_cache(route: Route) -> None:
             route.fulfill(response=fetched)
             return
         CDN_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        # Another xdist worker may be writing the same asset, so publish atomically
-        # under a name no concurrent process on this machine can pick as well.
+        # Another xdist worker may write the same asset, so publish atomically.
         staging = path.with_suffix(f"{path.suffix}.{os.getpid()}.{uuid.uuid4().hex}")
         staging.write_bytes(fetched.body())
         staging.replace(path)
@@ -228,22 +214,14 @@ def _serve_from_cache(route: Route) -> None:
 
 
 def _test_failed(request: pytest.FixtureRequest) -> bool:
-    """Report whether the call phase failed, the way pytest-playwright reads it.
-
-    The report attribute is missing when the test never reached its call phase,
-    which counts as a failure so the artefacts survive.
-    """
+    """Report whether the call phase failed, counting a missing report as failed."""
     report = getattr(request.node, "rep_call", None)
     return report is None or bool(report.failed)
 
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_call(item: pytest.Item) -> Generator[None, object, object]:
-    """Fail the call phase, not the teardown, on the noise the probe collected.
-
-    pytest-playwright keeps the retain-on-failure trace, video and screenshot only when
-    `rep_call` failed, so a failure raised in teardown deletes its own evidence.
-    """
+    """Fail the call phase on collected noise so failure artefacts are kept."""
     outcome = yield
     probe = item.stash.get(PROBE_KEY, None)
     if probe is None:
@@ -283,9 +261,7 @@ def next_probe(request: pytest.FixtureRequest) -> Iterator[PageProbe]:
         _settle(page)
     page.context.unroute_all(behavior="ignoreErrors")
     if not failed:
-        # Closing here releases any SSE stream still parked in a server thread. A
-        # failed test keeps its page open instead, because pytest-playwright shoots
-        # the failure screenshot off `context.pages` when the context tears down.
+        # A failed test keeps its page open for the failure screenshot.
         page.close()
 
 
@@ -325,11 +301,7 @@ def applied_count(page: Page) -> int:
 
 
 def wait_for_apply(page: Page, since: int, timeout: int = 10_000) -> None:
-    """Block until one more patch lands than the caller already saw.
-
-    A response is not enough because the applicator holds its operations behind
-    the CSS gate until the stylesheets of the patch have loaded.
-    """
+    """Block until one more patch lands than the caller already saw."""
     page.wait_for_function(
         "(seen) => (window.__nextEvents ?? [])"
         ".filter((entry) => entry.name === 'partial:applied').length > seen",
@@ -365,11 +337,7 @@ def request_baseline(page: Page, probe: PageProbe) -> RequestBaseline:
 def expect_no_partial_request(
     page: Page, probe: PageProbe, since: RequestBaseline = PAGE_START
 ) -> None:
-    """Fail unless the interaction since the baseline left the server untouched.
-
-    The runtime records `partial:before-request` before the triggering call returns,
-    so the response-count check alone would still pass while a request is in flight.
-    """
+    """Fail unless the interaction since the baseline left the server untouched."""
     sent = _requested_count(page) - since.sent
     if sent > 0:
         pytest.fail(f"the runtime sent {sent} partial request(s), expected none")

@@ -22,11 +22,7 @@ class StaticAssetNotFoundError(RuntimeError):
 
 
 class StaticAssetTraversalError(SuspiciousFileOperation):
-    """Raised when an asset reference walks above the staticfiles root.
-
-    Django reads the base class as a bad request, which is what a stored or
-    user-supplied reference leaving the static tree deserves.
-    """
+    """Raised when an asset reference walks above the staticfiles root."""
 
     def __init__(self, reference: str) -> None:
         """Store the offending reference and build the message naming the rule."""

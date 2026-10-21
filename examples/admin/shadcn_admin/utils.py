@@ -1,6 +1,7 @@
 from django.apps import apps
 from django.contrib import admin
 from django.contrib.admin.options import ModelAdmin
+from django.core.exceptions import PermissionDenied
 from django.db.models import Model
 from django.http import Http404, HttpRequest
 
@@ -8,7 +9,6 @@ from next.urls import page_reverse
 
 
 # Literals, because a lazy reverse cannot answer the per-request `startswith`.
-ADMIN_PREFIX = "/admin/"
 LOGIN_URL = "/admin/login/"
 LOGOUT_URL = "/admin/logout/"
 
@@ -22,8 +22,7 @@ def resolve_model_admin(
     except LookupError as exc:
         msg = str(exc)
         raise Http404(msg) from exc
-    # admin.site._registry is Django-internal but unavoidable for an
-    # admin-style enumeration. No public API exposes the registered map.
+    # No public API exposes the registered map.
     model_admin = admin.site._registry.get(model)
     if model_admin is None:
         msg = f"Model {app_label}.{model_name} is not registered with admin."
@@ -34,23 +33,20 @@ def resolve_model_admin(
 def resolve_object_or_404(
     request: HttpRequest, app_label: str, model_name: str, pk: int
 ) -> tuple[type[Model], ModelAdmin, Model]:
-    """Like `resolve_model_admin` but also fetch the object, 404 when it is missing."""
+    """Fetch the object the user may view, 404 when it is missing, 403 when hidden."""
     model, model_admin = resolve_model_admin(app_label, model_name)
     obj = model_admin.get_object(request, pk)
     if obj is None:
         msg = f"Object {app_label}.{model_name} with pk={pk} not found."
         raise Http404(msg)
+    if not model_admin.has_view_or_change_permission(request, obj):
+        raise PermissionDenied
     return model, model_admin, obj
 
 
 def dashboard_url() -> str:
     """URL of the admin dashboard (`/admin/`)."""
     return page_reverse()
-
-
-def login_url() -> str:
-    """URL of the login page."""
-    return page_reverse("login")
 
 
 def logout_url() -> str:

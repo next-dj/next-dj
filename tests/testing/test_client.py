@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import override
 
 import pytest
@@ -12,10 +13,10 @@ from next.testing import (
     override_next_settings,
 )
 from tests.forms import actions
+from tests.support import TWIN_ACTION
 
 
-# `actions` registers the baseline form actions on import. Bind it so the
-# module survives unused-import cleanup whatever the collection order is.
+# Importing `actions` registers the baseline form actions, so keep it bound.
 _BASELINE_ACTIONS = actions
 
 
@@ -29,6 +30,24 @@ class ReversedJsonBackend(JsonPartialProtocolBackend):
     @override
     def deserialize_envelope(self, body: bytes) -> Envelope:
         return super().deserialize_envelope(body[::-1])
+
+
+class TestNextClientByPage:
+    """`page` routes a shared action name to the page the test means."""
+
+    @pytest.mark.parametrize("label", ["create", "edit"])
+    def test_post_action_reaches_the_named_page(self, twins: Path, label: str) -> None:
+        response = NextClient().post_action(TWIN_ACTION, page=twins / label)
+        assert response.content == label.encode()
+
+    def test_get_action_url_names_the_page_of_post_action(self, twins: Path) -> None:
+        client = NextClient()
+        url = client.get_action_url(TWIN_ACTION, page=twins / "edit")
+        assert client.post(url).content == b"edit"
+
+    def test_a_bare_name_is_refused(self, twins: Path) -> None:
+        with pytest.raises(LookupError, match="several files"):
+            NextClient().post_action(TWIN_ACTION)
 
 
 class TestNextClient:
@@ -169,8 +188,7 @@ class TestEnvelopeHelpers:
         envelope = envelope_of(NextClient().get_zones("/zoned/", ("alpha", "beta")))
         assert isinstance(envelope, PartialEnvelope)
         assert envelope.version == "0"
-        # The zoned page registers a serialize=True provider, so the batch
-        # ends with the context op carrying its js-context delta.
+        # The zoned page registers a serialize=True provider, so a context op ends it.
         assert envelope.op_verbs() == ["morph", "morph", "context"]
         assert envelope.targets() == [{"zone": "alpha"}, {"zone": "beta"}, None]
 

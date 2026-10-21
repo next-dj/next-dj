@@ -8,15 +8,19 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
 from urllib.parse import urljoin, urlsplit
 
+from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
 from django.utils.functional import Promise
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.safestring import SafeData
 
+from next.deps import render_dep_cache
 from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog, type_name
 from next.forms.origin import resolve_origin, resolve_url_to_page
-from next.forms.uid import redirect_or_fallback, validated_origin_path
+from next.forms.uid import validated_origin_path
 from next.pages import page as page_manager
+from next.pages.access import page_access, refusal
+from next.pages.loaders import last_load_error
 from next.pages.metadata import resolve_metadata
 from next.pages.metadata.fold import fold_metadata
 from next.pages.metadata.normalize import normalize_metadata
@@ -27,6 +31,7 @@ from next.static.assets import default_kinds
 from next.static.manager import default_manager
 from next.static.runtime import RESERVED_PAYLOAD_KEYS
 from next.static.serializers import resolve_serializer
+from next.utils import redirect_or_fallback
 
 from . import keys
 from .envelope import Asset, Envelope, FormMeta, Patch
@@ -74,6 +79,7 @@ _META_PASSES: tuple[type[BaseException], ...] = (
 )
 
 _SEE_OTHER = 303
+_FORBIDDEN = 403
 _NO_STORE = "private, no-store"
 _META_SOURCE = "Patches.meta"
 
@@ -140,11 +146,31 @@ def _is_reserved_event(name: str) -> bool:
     return name in _RESERVED_EVENT_NAMES or name.startswith(_RESERVED_EVENT_PREFIXES)
 
 
+def _refuse_access(
+    page_path: "Path", request: HttpRequest, url_kwargs: "Mapping[str, Any]"
+) -> None:
+    """Raise when the rule of `page_path` refuses `request`, as its own view would.
+
+    A broken `page.py` of its chain raises its import failure, not a 404 of the caller.
+    """
+    broken = page_access(page_path).broken
+    error = None if broken is None else last_load_error(broken)
+    if error is not None:
+        raise error
+    try:
+        redirect = refusal(
+            page_path, request, dict(url_kwargs), render_dep_cache(request)
+        )
+    except PermissionDenied:
+        raise ForeignPageNotAuthorizedError(page_path, _FORBIDDEN) from None
+    if redirect is not None:
+        raise ForeignPageNotAuthorizedError(page_path, redirect.status_code)
+
+
 class Patches:
     """Request-bound builder of a patch envelope.
 
-    The origin page resolves lazily, so a `morph(zone=...)` renders against the page
-    that owns the request, and `versioned` serves paths that already hold the version.
+    The origin page resolves lazily, so `morph(zone=...)` renders against it.
     """
 
     def __init__(
@@ -156,8 +182,7 @@ class Patches:
     ) -> None:
         """Start an empty builder bound to the request, or to no request at all.
 
-        `version` pins the asset version literally instead of resolving it. `echo_of`
-        carries the originating request id so an SSE subscriber can suppress its echo.
+        `version` pins the asset version, `echo_of` lets an SSE subscriber skip it.
         """
         self._request = request
         self._version = asset_version() if version is None else version
@@ -181,8 +206,7 @@ class Patches:
     ) -> "Patches":
         """Start an empty builder stamped with a literal version.
 
-        Used by paths that already hold the version and render their own HTML. Pass
-        `request` when available so asset URLs stay scoped per request.
+        For paths that already hold the version, `request` scopes asset URLs.
         """
         return cls(request, version=version, echo_of=echo_of)
 
@@ -224,8 +248,7 @@ class Patches:
     ) -> "Patches":
         """Morph a target into HTML, the default verb.
 
-        A thin facade over the typed per-verb morph methods. A keyword belonging to
-        another route raises here rather than being silently dropped.
+        A keyword belonging to another route raises rather than being dropped.
         """
         if zone is not None and page is not None:
             self._refuse(_FOREIGN_ZONE_UNUSED, target, html, form, overrides)
@@ -269,8 +292,7 @@ class Patches:
     ) -> "Patches":
         """Render the named zone of the origin page and morph it in place.
 
-        The origin is a posted value and its view never ran, so the page it names
-        authorizes the request first, exactly as a foreign page does.
+        The origin is a posted value whose view never ran, so its page authorizes first.
         """
         self._authorize_origin()
         result = self._render_zone(zone, overrides)
@@ -287,13 +309,13 @@ class Patches:
     ) -> "Patches":
         """Render a zone of a foreign page out of band, re-running its guards.
 
-        The foreign page's body resolution runs first, so a redirect or denial raises
-        instead of morphing an empty body. A `render()` body is refused the same way.
+        A redirect or denial raises instead of morphing an empty body.
         """
         request = self._require_request()
         foreign_path = self._foreign_page_path(page)
         kwargs = dict(url_kwargs or {})
         visit_url = page if isinstance(page, str) else None
+        _refuse_access(foreign_path, request, kwargs)
         denial, dynamic = self._foreign_authorization(
             foreign_path, request, kwargs, visit_url
         )
@@ -329,9 +351,7 @@ class Patches:
     ) -> "tuple[HttpResponseBase | None, bool]":
         """Re-run the foreign page's body resolution once for guard and kind.
 
-        The short-circuit response and the dynamic-body flag come from one resolution,
-        so the foreign `render()` runs exactly once. A page named by URL is authorized
-        against a visit of it, a page named by file path carries no URL to present.
+        A page named by URL is authorized against a visit, one named by path has no URL.
         """
         return page_manager.authorization_outcome(
             foreign_path, request, visit_url, url_kwargs
@@ -397,8 +417,7 @@ class Patches:
     def context(self, **names) -> "Patches":
         """Merge named serialize provider values into the client context.
 
-        A reserved init-payload key raises `ReservedContextKeyError` whether or not the
-        origin page registered it, so the refusal never depends on the collision check.
+        A reserved init-payload key raises whether or not the origin page registered it.
         """
         reserved = RESERVED_PAYLOAD_KEYS & names.keys()
         if reserved:
@@ -416,8 +435,7 @@ class Patches:
     def _add_context(self, data: "Mapping[str, Any]") -> "Patches":
         """Record a context patch from already wire-ready provider values.
 
-        The caller owns serialization, used by the zone-GET path where the
-        collector already gathered and encoded the js-context.
+        The caller owns serialization, as the zone-GET path does through the collector.
         """
         self._ops.append(Patch(op="context", extras={"data": dict(data)}))
         return self
@@ -444,8 +462,7 @@ class Patches:
     ) -> "Patches":
         """Close the top layer with an accept result or a dismissal.
 
-        A dismissal sets the boolean `dismiss` flag and carries the reason text under
-        `reason`, rather than overloading `dismiss` with the string.
+        A dismissal sets the boolean `dismiss` flag and carries the text under `reason`.
         """
         extras: dict[str, Any] = {}
         if result is not None:
@@ -502,13 +519,7 @@ class Patches:
     def meta(self, metadata: "Text | MetadataDict") -> "Patches":
         """Queue a head update that folds `metadata` over the origin page as its own.
 
-        A text value sets the title only. The operation carries the title, the
-        description, the canonical and the robots. The origin chain folds and resolves
-        against a GET visit of the address the head describes, which is the last URL
-        operation queued so far or the origin. Without an origin page the value folds
-        over the site `DEFAULTS` alone and an unset field is left out, so the client
-        keeps the tag it has. A malformed `metadata` raises. A failing inherited
-        callable is logged at the `FailureLog` rate and drops this operation only.
+        A text value sets the title only. Without an origin it folds over `DEFAULTS`.
         """
         raw = {"title": metadata} if isinstance(metadata, str | Promise) else metadata
         segment = normalize_metadata(raw, source=_META_SOURCE)
@@ -548,8 +559,7 @@ class Patches:
     ) -> "Metadata | None":
         """Fold the origin chain under `segment`, or None when an inherited one failed.
 
-        The inherited callables read `visit`, the request the origin view would see.
-        The failure is logged per page and exception type at the `FailureLog` rate.
+        Inherited callables read the origin view's `visit`, failures log as `FailureLog`
         """
         with _failures.guard(
             page_path,
@@ -577,8 +587,7 @@ class Patches:
     def redirect(self, href: str, *, external: bool = False) -> "Patches":
         """Drive a full client navigation to a server-authored href.
 
-        An internal href must be same-site. `external=True` bypasses that for a
-        server-authored destination, never user input, or it opens a redirect.
+        An internal href must be same-site, and `external=True` never takes user input.
         """
         if external:
             self._ops.append(Patch(op="visit", extras={"href": href, "external": True}))
@@ -591,8 +600,7 @@ class Patches:
     def op(self, name: str, **payload) -> "Patches":
         """Emit a custom verb registered through `register_patch_op`.
 
-        A built-in verb is refused so it travels only through its typed
-        method, which owns the verb's wire keys, never as a raw payload.
+        A built-in verb is refused because its typed method owns the wire keys.
         """
         if name in BUILTIN_OPS:
             raise BuiltinPatchOpError(name)
@@ -604,8 +612,7 @@ class Patches:
     def add_asset(self, kind: str, url: str, *, inline: str | None = None) -> "Patches":
         """Record an authored asset reference in the envelope manifest.
 
-        The reference passes the resolution a full render gives it, so a backend
-        mapping names to build outputs answers the same on either path.
+        It passes the resolution a full render gives it, so both paths answer the same.
         """
         return self._record_asset(
             kind, default_manager.resolve_url(url) if url else url, inline=inline
@@ -729,6 +736,7 @@ class Patches:
         if self._origin_authorized:
             return
         page_path = self._resolve_page_path()
+        _refuse_access(page_path, self._require_request(), self._origin_url_kwargs())
         match = self._origin_match()
         denial, _dynamic = page_manager.authorization_outcome(
             page_path,
@@ -756,8 +764,7 @@ class Patches:
     def _origin_render_context(self) -> dict[str, object]:
         """Return the origin page render context, built once per builder.
 
-        Memoised because `context()` and `morph(zone=...)` both resolve it, and a fresh
-        copy is handed out since consumers mutate the mapping.
+        Memoised for `context()` and `morph(zone=...)`, copied as consumers mutate it.
         """
         if self._render_context is None:
             # Pinned so mypy does not read the url kwarg splat as the zone batch.
@@ -790,8 +797,7 @@ class Patches:
     def _collect_zone_assets(self, result: "ZoneRenderResult") -> "Patches":
         """Record the URL-form and inline-form assets a zone body collected.
 
-        The collector already holds resolved URLs, so they are recorded rather than
-        resolved again, and the js-context delta stays with the builder verbs.
+        The collector already holds resolved URLs, so they are not resolved again.
         """
         for kind, body in result.inline_assets():
             self._record_asset(kind, "", inline=body)
@@ -802,8 +808,7 @@ class Patches:
     def absorb_zone_result(self, result: "ZoneRenderResult") -> "Patches":
         """Record a zone render's assets and js-context delta.
 
-        A reserved init-payload key is dropped rather than raised, since the delta is a
-        render by-product rather than a handler naming the key.
+        A reserved init-payload key is dropped, not raised, as the delta is no handler.
         """
         self._collect_zone_assets(result)
         delta = {
@@ -837,8 +842,7 @@ class Patches:
     def _require_same_site(self, href: str) -> str:
         """Return `href` if it is same-site, else raise for the caller bug.
 
-        Used by the in-app navigation sinks where a cross-site href is a
-        caller mistake rather than the no-runtime defense-in-depth fallback.
+        For in-app navigation sinks, where a cross-site href is a caller mistake.
         """
         if self._is_same_site(href):
             return href
@@ -848,8 +852,7 @@ class Patches:
 class PatchResponse(HttpResponse):
     """HTTP response that carries a serialized patch envelope.
 
-    It is sent with `Cache-Control: private, no-store`, since many CDNs ignore `Vary`
-    and would serve a stored envelope in place of the page.
+    Sent `Cache-Control: private, no-store` since many CDNs ignore `Vary`.
     """
 
     def __init__(

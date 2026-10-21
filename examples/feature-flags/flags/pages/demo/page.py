@@ -1,0 +1,22 @@
+from flags.services import flags_named
+
+from next import context
+from next.pages import MetadataDict
+
+
+metadata: MetadataDict = {"title": "Guard demo"}
+
+DEMO_FLAG_NAMES = ("beta_checkout", "dark_sidebar", "ai_suggestions")
+
+
+@context("demo_flags")
+def demo_flags() -> list[dict[str, object]]:
+    known = flags_named(DEMO_FLAG_NAMES)
+    return [
+        {
+            "name": name,
+            "label": getattr(known.get(name), "label", name.replace("_", " ").title()),
+            "enabled": getattr(known.get(name), "enabled", False),
+        }
+        for name in DEMO_FLAG_NAMES
+    ]

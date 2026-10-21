@@ -18,7 +18,7 @@ from next.components.sources import get_components_manager
 from next.pages.checks.composed import iter_composed_pages
 from next.pages.loaders import load_page_module
 from next.pages.metadata.nodes import MetadataNode
-from next.pages.paths import page_path_info
+from next.pages.paths import page_template_path
 
 from .pages import loaded_metadata_pages
 
@@ -31,11 +31,6 @@ _MAX_DEPTH: Final = 8
 
 type _Memo = dict[Path | str, bool | None]
 type NodeTest = Callable[[NodeList], bool]
-
-
-def page_template_path(page_path: Path) -> Path:
-    """Return the template a component tag of the page resolves against."""
-    return Path(page_path_info(page_path).template_path).resolve()
 
 
 def renders_itself(page_path: Path) -> bool:

@@ -16,6 +16,7 @@ Sections
 Each page root with a ``sitemap.py`` is one section, served at ``/sitemap-<section>.xml``.
 The name is the ``section`` attribute of the file when it declares one, else the label of the innermost installed application whose directory holds the root, else the slugified directory name.
 Two trees that would take one name each declare a ``section`` of their own, and the checks warn until they do.
+A tree a URLconf includes twice through ``pages()`` is still one section, which lists the URLs of the include the URLconf names first, see :ref:`topics-file-router-trees`.
 
 ``@sitemap.items(..., section="products")`` moves the URLs of one route into a section of their own, so a large catalog pages separately from the static pages.
 
@@ -124,9 +125,9 @@ Under ``DEBUG`` every SEO route first checks the source files at the top of each
 Mounting at the host root
 -------------------------
 
-Crawlers read ``/robots.txt`` and ``/sitemap.xml`` at the root of the host, and ``include("next.urls")`` mounts both on its own, so a router at the root of the URLconf needs nothing more.
+Crawlers read ``/robots.txt`` and ``/sitemap.xml`` at the root of the host, and ``include("next.urls")`` serves both on its own, so a router at the root of the URLconf needs nothing more.
 A router under a prefix, or inside :func:`~django.conf.urls.i18n.i18n_patterns`, takes the routes with it, and ``manage.py check`` reports the addresses the host root no longer resolves.
-``next.seo.urls`` then mounts the same routes at the root, under the ``next_seo`` namespace.
+``next.seo.urls`` then serves the same routes at the root, under the ``next_seo`` namespace.
 
 .. code-block:: python
    :caption: config/urls.py
@@ -140,8 +141,8 @@ A router under a prefix, or inside :func:`~django.conf.urls.i18n.i18n_patterns`,
    ]
 
 Both includes list only the routes whose source exists, so a project view mounted below keeps answering the addresses the framework does not serve.
-The copies ``include("next.urls")`` mounts under a prefix answer 404 once ``next.seo.urls`` serves the host root, so each document has one address.
-The views behind the routes are no public API, and ``next.seo.urls`` is the one way to mount them anywhere else.
+The copies ``include("next.urls")`` serves under a prefix answer 404 once ``next.seo.urls`` serves the host root, so each document has one address.
+The views behind the routes are no public API, and ``next.seo.urls`` is the one way to serve them anywhere else.
 Every SEO route answers ``GET`` and ``HEAD`` alone, and a miss answers a plain-text 404 rather than the project's 404 page, its body ``Not found`` unless ``DEBUG`` is on, which names the reason, a broken source file among them.
 A page directory named after a served address, or a urlpattern ahead of the include on it, shadows the route, and the checks report it.
 

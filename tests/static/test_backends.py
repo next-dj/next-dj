@@ -393,8 +393,7 @@ class TestUrlMemoKeySpaces:
 class TestStaticNamesResolvedBy:
     """The storage stand-in outlives a settings override nested inside its block.
 
-    Patched on the class, because `STATIC_URL` rebuilds the lazy storage handle and
-    an instance patch would vanish with the instance it was installed on.
+    Patched on the class, since a `STATIC_URL` override drops instance patches.
     """
 
     def test_an_override_inside_the_block_keeps_the_mapping(self) -> None:

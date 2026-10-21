@@ -19,7 +19,10 @@ Read the topic that matches the part you are touching, then jump to the referenc
    Page modules, body sources, render functions, template loaders.
 
 :doc:`layouts`
-   Layout discovery, composition, layout level context.
+   Layout discovery and composition of the ``layout.djx`` chain.
+
+:doc:`access`
+   The access a ``page.py`` declares for its page and its subtree, the default login, and ``public()``.
 
 :doc:`context`
    ``@context`` and ``@component.context`` patterns and inheritance.
@@ -52,6 +55,9 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`dependency-injection`
    Markers, providers, the resolver, request scoped cache.
 
+:doc:`permissions`
+   Object permissions in ``permissions.py``, the backend, the ``{% has_perm %}`` tag, and form guards.
+
 :doc:`signals`
    Every signal emitted by the framework, with payload tables.
 
@@ -64,7 +70,10 @@ Read the topic that matches the part you are touching, then jump to the referenc
 .. rubric:: Project layout
 
 :doc:`project-layout`
-   Recommended single project tree and settings.
+   Application composition, the page tree as delivery, project sizes, and settings.
+
+:doc:`application-layout`
+   Where models, querysets, services, and signals hold the logic of an application.
 
 :doc:`multi-project`
    Shared UI kit and per project page DIRS.
@@ -77,6 +86,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
    url-reversing
    pages
    layouts
+   access
    context
    components
    seo/index
@@ -86,10 +96,12 @@ Read the topic that matches the part you are touching, then jump to the referenc
    static-assets/index
    partial-rendering/index
    dependency-injection
+   permissions
    signals
    testing
    extending
    project-layout
+   application-layout
    multi-project
 
 .. seealso::

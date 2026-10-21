@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 
@@ -37,3 +38,11 @@ def capture_metadata_registered() -> Generator[SignalRecorder, None, None]:
     """Record ``metadata_registered`` emissions."""
     with capture_signals(metadata_registered) as recorder:
         yield recorder
+
+
+@pytest.fixture()
+def root(tmp_path: Path) -> Path:
+    """Return an empty `pages` directory, the root of a page tree under test."""
+    directory = tmp_path / "pages"
+    directory.mkdir()
+    return directory

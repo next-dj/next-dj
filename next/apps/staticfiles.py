@@ -17,7 +17,6 @@ def install() -> None:
     """Wire the staticfiles finders and register the framework's built-in asset kinds.
 
     Both steps are idempotent, so a settings reload or a re-entrant `ready` is safe.
-    A list naming the stock finder beside the framework one collapses to one entry.
     """
     configured: list[object] = []
     for path in getattr(settings, "STATICFILES_FINDERS", []):

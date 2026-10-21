@@ -1,3 +1,4 @@
+import copy
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -6,7 +7,7 @@ from typing import Any
 from django import forms as django_forms
 from django.contrib import messages
 from django.contrib.admin.options import InlineModelAdmin, ModelAdmin
-from django.contrib.auth import logout
+from django.contrib.auth import get_permission_codename, logout
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Model, QuerySet
 from django.forms.models import BaseInlineFormSet
@@ -20,17 +21,17 @@ from django.http import (
 from fragments import render_fragment
 
 from next import Depends, action
-from next.deps import resolver
 from next.forms import BaseModelForm, cleanup_extra_initial, form_spec
 from next.partial import Patches, is_partial_request
 from shadcn_admin import utils
+from shadcn_admin.admin import ParentRowPermissions
 
 
 _LOG_CHANGE_MESSAGE = "Changed via shadcn-admin form"
 
 _CHANGE_TEMPLATE_PATH = (
     Path(__file__).resolve().parent
-    / "surfaces"
+    / "pages"
     / "[str:app_label]"
     / "[str:model_name]"
     / "[int:pk]"
@@ -49,6 +50,7 @@ class AdminFormSpec:
     model: type[Model]
     model_admin: ModelAdmin
     instance: Model | None
+    stored: Model | None
 
     @classmethod
     def resolve(
@@ -61,6 +63,8 @@ class AdminFormSpec:
         """Look up `(model, ModelAdmin, instance)` once and freeze them into a spec."""
         if pk is None:
             model, model_admin = utils.resolve_model_admin(app_label, model_name)
+            if not model_admin.has_add_permission(request):
+                raise PermissionDenied
             instance: Model | None = None
         else:
             model, model_admin, instance = utils.resolve_object_or_404(
@@ -73,6 +77,7 @@ class AdminFormSpec:
             model=model,
             model_admin=model_admin,
             instance=instance,
+            stored=copy.copy(instance),
         )
 
     @property
@@ -84,8 +89,7 @@ class AdminFormSpec:
     def auto_id(self) -> str:
         """Id template namespacing the main form's fields by model.
 
-        A server-opened layer drops one change view's markup into another's document,
-        so a bare `id_%s` would repeat `id_title` and steal the outer form's labels.
+        A layer opened over another change view would otherwise repeat `id_title`.
         """
         return f"id_{self.model_name}_%s"
 
@@ -142,6 +146,21 @@ class RelatedRow:
 
 
 @dataclass(frozen=True, slots=True)
+class InlineRights:
+    """What the `{% has_perm %}` tags of one inline ask, and whether they pass a row."""
+
+    change_perm: str
+    add_perm: str
+    parent: Model | None
+    row_rules: bool
+
+
+def _perm(verb: str, model: type[Model]) -> str:
+    opts = model._meta
+    return f"{opts.app_label}.{get_permission_codename(verb, opts)}"
+
+
+@dataclass(frozen=True, slots=True)
 class RelatedSection:
     """One inline's live editing block: keyed rows plus a single add form."""
 
@@ -153,6 +172,7 @@ class RelatedSection:
     add_fields: tuple[Any, ...]
     add_errors: tuple[str, ...]
     count: int
+    rights: InlineRights
 
 
 def _row_form_class(
@@ -160,8 +180,7 @@ def _row_form_class(
 ) -> type[django_forms.ModelForm]:
     """Wrap a row form so the model checks still see the link to the parent.
 
-    A keyed row form never renders the parent key, so Django excludes it and skips every
-    check naming it, letting a duplicate reach the database as an `IntegrityError`.
+    Without the parent key a duplicate reaches the database as an `IntegrityError`.
     """
 
     class InlineRowForm(base):  # type: ignore[misc, valid-type]
@@ -267,6 +286,19 @@ class AdminInlineSpec:
         InlineRowForm.__name__ = f"Inline{base.__name__}"
         return InlineRowForm
 
+    @property
+    def rights(self) -> InlineRights:
+        """Name the permissions this inline's hooks ask, row-level for parent rules."""
+        if isinstance(self.inline, ParentRowPermissions):
+            perm = _perm("change", self.inline.parent_model)
+            return InlineRights(perm, perm, self.spec.instance, row_rules=True)
+        return InlineRights(
+            _perm("change", self.inline.model),
+            _perm("add", self.inline.model),
+            self.spec.instance,
+            row_rules=False,
+        )
+
     def has_change_permission(self) -> bool:
         """Return whether the request may edit this inline's rows."""
         return self.inline.has_change_permission(self.spec.request, self.spec.instance)
@@ -276,10 +308,9 @@ class AdminInlineSpec:
         return self.inline.has_add_permission(self.spec.request, self.spec.instance)
 
     def _auto_id(self, instance: Model) -> str:
-        """Return the id template that keeps every row's fields addressable.
+        """Return the id template that keeps every row's `id_title` unique.
 
-        A keyed row form posts under plain field names, so a `prefix=` would break the
-        handlers, and namespacing only the id keeps every row's `id_title` unique.
+        A `prefix=` would change the posted field names the handlers read.
         """
         suffix = instance.pk if instance.pk is not None else "add"
         return f"id_{self.token}_{suffix}_%s"
@@ -319,15 +350,12 @@ class AdminInlineSpec:
             add_fields=add_spec.sections[0].fields,
             add_errors=add_spec.non_field_errors,
             count=len(rows),
+            rights=self.rights,
         )
 
 
 def _build_form_class(spec: AdminFormSpec) -> type[django_forms.Form]:
-    """Wrap `ModelAdmin.get_form` so inline-formset errors surface on the main form.
-
-    `clean()` rebuilds the inline formsets against the same POST and raises when a
-    row is broken, so the dispatcher re-renders the origin page with the row errors.
-    """
+    """Wrap `ModelAdmin.get_form` so inline-formset errors surface on the main form."""
     base = spec.model_admin.get_form(spec.request, spec.instance, change=spec.is_change)
 
     class AdminForm(base, BaseModelForm):  # type: ignore[misc, valid-type]
@@ -350,18 +378,6 @@ def _build_form_class(spec: AdminFormSpec) -> type[django_forms.Form]:
 
     AdminForm.__name__ = f"Admin{base.__name__}"
     return AdminForm
-
-
-@resolver.dependency("admin_spec")
-def admin_spec(
-    request: HttpRequest, app_label: str, model_name: str, pk: int | None = None
-) -> AdminFormSpec:
-    """Resolve `(model, ModelAdmin, instance)` once per dispatch.
-
-    Named so `Depends("admin_spec")` shares one resolution across the factory,
-    `get_initial`, the action handler, and any re-render context in the same POST.
-    """
-    return AdminFormSpec.resolve(request, app_label, model_name, pk=pk)
 
 
 def admin_add_form_factory(
@@ -415,9 +431,10 @@ def _redirect_after_save(spec: AdminFormSpec, obj: Model) -> HttpResponseRedirec
 def handle_add(
     form: django_forms.ModelForm, spec: AdminFormSpec = Depends("admin_spec")
 ) -> HttpResponse:
-    """Save a new object and its inline formsets, then redirect."""
-    if not spec.model_admin.has_add_permission(spec.request):
-        raise PermissionDenied
+    """Save a new object and its inline formsets, then redirect.
+
+    `AdminFormSpec.resolve` has already refused a user without the add right.
+    """
     return _persist(form, spec, change=False)
 
 
@@ -426,7 +443,7 @@ def handle_change(
     form: django_forms.ModelForm, spec: AdminFormSpec = Depends("admin_spec")
 ) -> HttpResponse:
     """Persist main form and inline formsets via `ModelAdmin.save_model`."""
-    if not spec.model_admin.has_change_permission(spec.request, spec.instance):
+    if not spec.model_admin.has_change_permission(spec.request, spec.stored):
         raise PermissionDenied
     return _persist(form, spec, change=True)
 
@@ -459,6 +476,7 @@ def _render_inline_row(inline: AdminInlineSpec, obj: Model) -> str:
         inline.spec.request,
         row=inline._row(obj, None),
         token=inline.token,
+        rights=inline.rights,
     )
 
 
@@ -512,11 +530,7 @@ def handle_inline_add(
     form: django_forms.ModelForm,
     spec: AdminFormSpec = Depends("admin_spec"),
 ) -> HttpResponse:
-    """Create one inline row and open its own editor in a result layer.
-
-    A live runtime opens the new row's `record` zone in a result layer for immediate
-    detail edits, then refreshes the parent's row-count badge in place.
-    """
+    """Create one inline row, open its editor in a layer and refresh the row count."""
     inline = AdminInlineSpec.for_request(spec)
     if not inline.has_add_permission():
         raise PermissionDenied
@@ -538,11 +552,7 @@ def handle_inline_add(
 
 @action("admin:discard", login_required=True)
 def handle_discard(request: HttpRequest) -> HttpResponse:
-    """Dismiss the editor layer server-side, carrying a discard reason.
-
-    Closing as a rejection rather than a `layer_close(result=...)` accept fires
-    `partial:layer-dismissed` and skips accept side effects.
-    """
+    """Dismiss the editor layer as a rejection so accept side effects are skipped."""
     if not is_partial_request(request):
         return HttpResponseRedirect(utils.dashboard_url())
     return Patches(request).layer_close(dismiss="discarded").response()

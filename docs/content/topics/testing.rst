@@ -116,7 +116,7 @@ The plugin is named explicitly rather than shipped as a ``pytest11`` entry point
    DJANGO_SETTINGS_MODULE = config.settings
    pythonpath = .
    addopts = -p next.testing.plugin
-   next_pages = myapp/routes
+   next_pages = myapp/pages
    next_clear_cache = true
 
 That file is the recommended starting point for a new suite, and the options it sets are described below.
@@ -155,7 +155,7 @@ Each one is inert by default, so a suite that loads the plugin and sets none of 
    addopts = -p next.testing.plugin
    next_pages =
        root_pages
-       notes/workspaces
+       notes/pages
    next_components = true
    next_clear_cache = true
 
@@ -283,9 +283,36 @@ Eager page loading
 It returns the list of imported ``page.py`` paths and raises ``FileNotFoundError`` when the directory does not exist.
 A repeated call for the same directory returns an empty list, because the loader memoises per absolute directory.
 Use it when a test suite does not go through the full request cycle and must trigger ``@context`` and ``@action`` side-effects manually.
+Each file runs through the loader a request uses, so a page imported here never executes a second time as another module, and a page that fails to import raises ``PageModuleImportError`` from ``next.pages`` during setup.
 ``clear_loaded_dirs()`` drops the per-directory memoisation so a later ``eager_load_pages`` call re-imports.
 It is intended for self-tests of the loader and for the rare case of rewritten ``page.py`` files within one session.
 A normal test suite does not call it, since each pytest session starts a fresh interpreter.
+
+.. _topics-testing-urlconf:
+
+Switching the URLconf
+~~~~~~~~~~~~~~~~~~~~~
+
+The routes of ``include("next.urls")`` leave out every tree the root URLconf places through ``pages()``, and they are cached until the routers reload.
+:func:`~django.test.override_settings` with ``ROOT_URLCONF`` sends ``setting_changed``, which reloads the routers on entry and again on exit, so the test sees the routes of the URLconf it names.
+
+pytest-django's ``@pytest.mark.urls`` assigns ``ROOT_URLCONF`` without that signal, before the test and again after it.
+``next.urls`` then keeps the routes built for the previous URLconf.
+A tree the previous URLconf placed through ``pages()`` stays out of ``next.urls`` and answers nowhere, and a tree the new URLconf places answers under its new prefix and under its old route as well.
+A test that switches to a URLconf with ``pages()`` includes, or away from one, therefore uses ``override_settings``.
+
+.. code-block:: python
+   :caption: tests/test_staff.py
+
+   from django.test import override_settings
+
+   from next.testing import NextClient
+
+   @override_settings(ROOT_URLCONF="tests.staff_urls")
+   def test_staff_log(next_client: NextClient) -> None:
+       assert next_client.get("/staff/log/").status_code == 200
+
+Code that assigns ``ROOT_URLCONF`` directly calls ``router_manager.reload()`` from ``next.urls`` after each assignment, the one that restores the old value included.
 
 NextClient
 ----------
@@ -332,6 +359,30 @@ A value already present in ``data`` under ``_next_form_origin`` wins over the ke
 ``NextClient.get_action_url`` returns the dispatch URL without posting, for tests that need the URL itself.
 Both methods resolve the name through ``resolve_action_url`` from ``next.testing.actions``.
 An unknown name raises ``FormActionNotFoundError`` from ``next.forms``.
+
+An action declared in a ``page.py`` belongs to that page, so a create page and an edit page may both name theirs ``wallet_form``.
+The ``page`` keyword of both methods names the ``page.py`` the test means, or the directory that holds it.
+
+.. code-block:: python
+   :caption: tests/test_wallet_edit.py
+
+   from next.testing import NextClient
+
+   EDIT = "budget/pages/wallets/[int:wallet]/edit"
+
+   def test_rename(db, wallet) -> None:
+       response = NextClient().post_action(
+           "wallet_form",
+           {"name": "Cash"},
+           origin=f"/wallets/{wallet.pk}/edit/",
+           page=EDIT,
+       )
+       assert response.status_code == 302
+
+Without ``page`` a name that several files declare raises ``LookupError`` listing each of them, rather than posting to whichever page was imported first.
+Only a page-scoped name is checked this way, since a shared name is one per project.
+A relative path resolves against ``BASE_DIR``, the root ``manage.py routes`` and ``manage.py permissions`` print their paths from, so a path copied from either table works as is.
+An absolute path is used as is, and without ``BASE_DIR`` a relative path resolves against the working directory.
 
 Partial requests
 ~~~~~~~~~~~~~~~~
@@ -788,8 +839,9 @@ Pytest can run ``manage.py check`` as part of the suite.
 ``call_command("check")`` on its own raises only when a check reports an error, so a framework warning such as a shadowed component name passes silently.
 A suite that wants the warnings gated too passes ``fail_level="WARNING"``.
 
-Nine framework checks are registered with ``deploy=True`` and stay out of that run, three because each one imports or compiles the whole page tree, two because they describe every development checkout, and four because they are the opt-in SEO audits.
-A test suite is the cheapest place to pay that cost, so a second call turns them on.
+That run already reports ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
+Six framework checks are registered with ``deploy=True`` and stay out of it, because each describes a deployment rather than a development checkout.
+A second call turns them on.
 
 .. code-block:: python
    :caption: deployment check test
@@ -799,9 +851,7 @@ A test suite is the cheapest place to pay that cost, so a second call turns them
    def test_deploy_checks_pass() -> None:
        call_command("check", deploy=True, fail_level="WARNING", verbosity=0)
 
-That run adds ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
-All three are failures a request would otherwise surface as a 404, a stripped body, or a 500.
-It also adds ``next.W083`` and the site checks, ``next.W110``, ``next.W111``, and ``next.W122``, so a suite that gates on ``fail_level="WARNING"`` runs against settings that name ``SITE["URL"]``, see :doc:`seo/auditing`.
+That run adds ``next.W083`` and the site checks, ``next.W110``, ``next.W111``, and ``next.W122``, so a suite that gates on ``fail_level="WARNING"`` runs against settings that name ``SITE["URL"]``, see :doc:`seo/auditing`.
 See :ref:`ref-system-checks` for the full catalog.
 
 See also

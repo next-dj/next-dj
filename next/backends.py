@@ -26,8 +26,7 @@ from next.errors import (
 
 logger = logging.getLogger(__name__)
 
-# A family root is a class, but an abstract one cannot pass as `type[T]`, so it is
-# typed by its constructor signature and `_root_class` narrows it back.
+# An abstract family root cannot pass as `type[T]`, so `_root_class` narrows it back.
 type BackendRoot[T] = Callable[..., T]
 
 
@@ -48,8 +47,7 @@ def resolve_backend_class[T](
     if not (isinstance(klass, type) and issubclass(klass, root)):
         raise BackendNotSubclassError(dotted, root.__name__)
     if inspect.isabstract(klass):
-        # The abstract family roots are what a settings entry most likely names
-        # by mistake, and instantiating one answers a TypeError no caller reads.
+        # A settings entry most likely names an abstract root by mistake.
         raise AbstractBackendError(dotted)
     return klass
 
@@ -92,11 +90,7 @@ def resolve_setting_class[T](
 
 
 def instantiate_backend[T](klass: type[T], config: Mapping[str, Any]) -> T:
-    """Build one backend from its config entry.
-
-    Every backend family takes the whole entry as its single argument, a contract
-    `type[T]` cannot express, so the class is called through a factory signature.
-    """
+    """Build one backend from the config entry its family takes as one argument."""
     factory = cast("Callable[[Mapping[str, Any]], T]", klass)
     return factory(config)
 
@@ -118,8 +112,7 @@ def load_backends[T](
 ) -> list[T]:
     """Instantiate every configured backend, skipping the misconfigured entries.
 
-    A bad dotted path or an `ImproperlyConfigured` backend costs only its own entry, so
-    the site keeps serving. Anything else a constructor raises is a bug and propagates.
+    Anything but a bad path or `ImproperlyConfigured` is a bug and propagates.
     """
     name = _root_class(base).__name__
     backends: list[T] = []
@@ -141,11 +134,7 @@ def load_backends[T](
 
 
 class BackendListManager[T](ABC):
-    """Holds a settings-driven backend list, loaded on the first access after a reset.
-
-    `reload` is the subclass's own read of its settings key, and `_mark_loaded` is
-    where a family says whether an empty result counts as a load at all.
-    """
+    """Holds a settings-driven backend list, loaded on first access."""
 
     def __init__(self, backends: Iterable[T] | None = None) -> None:
         """Take an explicit list, or leave the settings read to the first access."""
@@ -158,11 +147,7 @@ class BackendListManager[T](ABC):
         """Rebuild the backend list from the current `NEXT_FRAMEWORK` settings."""
 
     def _ensure_backends(self) -> None:
-        """Load the backends once, on the first access after a reset.
-
-        A settings reload drops the flag at runtime, so the load is double-checked
-        under a lock rather than left as a check-then-act two threads both win.
-        """
+        """Load the backends once, double-checked under a lock."""
         if self._loaded:
             return
         with self._lock:
@@ -170,19 +155,14 @@ class BackendListManager[T](ABC):
                 self.reload()
 
     def _mark_loaded(self, *, retry_when_empty: bool = False) -> None:
-        """Record the load, leaving the flag down where an empty list is no result.
-
-        A family that reads an empty load as a broken configuration rereads the
-        settings on the next access rather than serving nothing for good.
-        """
+        """Record the load, unless an empty list counts as none."""
         self._loaded = bool(self._backends) or not retry_when_empty
 
 
 class SingleBackendManager[T]:
     """Instantiates the single backend named by one framework settings key.
 
-    A misconfigured entry raises out of `get()` rather than being logged and skipped,
-    because a family with one backend has nothing to fall back to.
+    A misconfigured entry raises out of `get()` since there is no other to fall back to.
     """
 
     def __init__(
@@ -226,11 +206,7 @@ class SingleBackendManager[T]:
         return self._backend
 
     def reset(self) -> None:
-        """Drop the cached backend so the next `get()` rereads settings.
-
-        Invalidation only. The rebuild waits for a caller that asks for the backend, so
-        a settings reload nobody follows up on costs nothing.
-        """
+        """Drop the cached backend so the next `get()` rereads settings."""
         self.__dict__.pop("_backend", None)
 
 

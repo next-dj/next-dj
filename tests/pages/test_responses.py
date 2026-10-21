@@ -349,8 +349,7 @@ class TestPageCache:
         assert "Content-Security-Policy" not in response
 
     def test_a_degraded_render_keeps_every_cache_away(self, tmp_path) -> None:
-        # The failing callable may have held a noindex, so the page that lacks
-        # it must not sit in a CDN for its declared lifetime.
+        # The failing callable may have held a noindex, so the page must not be cached.
         source = (
             "from next.pages import page\n"
             'template = "x"\n'

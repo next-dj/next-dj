@@ -40,11 +40,7 @@ class TestBenchSettingsMerge:
 
     @pytest.mark.benchmark(group="conf.settings")
     def test_merge_with_user_form_action_backends(self, benchmark) -> None:
-        """Cost of merging a user-provided ``FORM_ACTION_BACKENDS`` list.
-
-        Mirrors the existing per-key benches and quantifies the merge
-        overhead added by the new top-level setting.
-        """
+        """Cost of merging a user-provided ``FORM_ACTION_BACKENDS`` list."""
         user_dict = {
             "FORM_ACTION_BACKENDS": [
                 {"BACKEND": "myapp.backends.AuditedBackend", "OPTIONS": {}},

@@ -7,8 +7,7 @@ from next.testing import NextClient, envelope_of
 class TestOneZoneRenderPerInvalidPost:
     """A partial invalid POST renders the failed form's zone exactly once.
 
-    A failing assertion here means a change started rendering the zone
-    body more than once for one POST, paying twice for the same HTML.
+    A failure means the zone body was rendered more than once for one POST.
     """
 
     def test_zone_body_renders_once(self, next_client: NextClient) -> None:

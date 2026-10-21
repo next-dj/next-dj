@@ -78,8 +78,7 @@ def is_url_literal(value: str) -> bool:
 def url_origin(value: str) -> tuple[str, str] | None:
     """Return the scheme and the host of an http or https origin, else `None`.
 
-    A path, a query, a fragment or credentials would appear in every URL built on the
-    origin, so each is rejected, as are a host Django rejects and an invalid port.
+    A path, query, fragment or credentials would leak into every built URL.
     """
     try:
         parts = urlsplit(value)
@@ -237,8 +236,7 @@ def site_origin(request: HttpRequest | None) -> tuple[str, str]:
 def site_indexable(request: HttpRequest | None = None) -> bool:
     """Whether search engines may index the site, the answer every robots output reads.
 
-    A callable is called once per request, its answer held on the request. One that
-    raises closes the site for the request, so a failure never opens a preview host.
+    A callable is called once per request, and one that raises closes the site.
     """
     rule = site_config().indexable
     if rule is None:
@@ -259,8 +257,7 @@ def _answered_indexable(
 ) -> bool:
     """Return the answer of a callable `INDEXABLE`, `False` when it raises.
 
-    It also runs in `RobotsHeaderMiddleware`, outside any view, so an intended
-    exception such as `Http404` is contained like any other.
+    It also runs in `RobotsHeaderMiddleware`, so even an `Http404` is contained.
     """
     with _failures.guard(
         "INDEXABLE",

@@ -42,6 +42,10 @@ The concat's cache token reads ``seo_routes_version`` in ``next.urls.manager``, 
 ``PageScripts`` answers the head tags and the reserved payload entries, ``$scripts`` and ``$consent``, the third-party scripts add to one render.
 ``next.scripts`` reads the static manager to resolve a script's ``src``, so the injector of ``next.static`` reads ``page_scripts_slot`` through ``peek`` rather than importing it back.
 
+``ActionOwners`` answers the ``page.py`` of every directory whose files declare an ``@action``, the file whose rule such an action answers to.
+The forms area imports ``next.pages``, so the body-source check ``next.E012`` reads ``action_owners_slot`` rather than importing ``next.forms`` back, and a ``page.py`` with no body that serves an action passes.
+``next.E166`` and ``next.W128`` read the same slot, so a replaced binding moves all three checks together.
+
 ``FormRoutes`` answers the URL patterns of every form backend.
 The forms area imports ``next.pages``, which loads the URL checks, so those checks read ``form_routes_slot`` rather than importing ``next.forms.manager`` back.
 
@@ -61,6 +65,9 @@ Every implementation lives in the ``ports`` module of its area, save ``FormRoute
    * - Port
      - Implementation
      - Slot
+   * - ``ActionOwners``
+     - ``next.forms.ports.ActionOwnersImpl``
+     - ``action_owners_slot``
    * - ``FormRoutes``
      - ``next.forms.manager.form_action_manager``
      - ``form_routes_slot``
@@ -83,7 +90,7 @@ Every implementation lives in the ``ports`` module of its area, save ``FormRoute
      - ``next.scripts.ports.PageScriptsImpl``
      - ``page_scripts_slot``
 
-``next.apps`` binds all seven in ``NextFrameworkConfig.ready()``, ahead of every step that imports user code.
+``next.apps`` binds all eight in ``NextFrameworkConfig.ready()``, ahead of every step that imports user code.
 A project that replaces one subclasses the shipped implementation and calls ``set`` on the slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since the slot holds one implementation and the last binding wins.
 
 Public API

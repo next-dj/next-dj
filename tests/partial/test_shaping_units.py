@@ -233,8 +233,7 @@ class TestCsrfRotation:
 class TestCsrfRotationFlagCanary:
     """Django still sets the private rotation marker `_csrf_rotated` reads.
 
-    A Django rename of this private key would silently break rotation, so
-    this pins the name to what the live middleware actually sets.
+    A Django rename of this private key would silently break rotation.
     """
 
     def test_rotate_token_sets_the_named_meta_flag(self) -> None:

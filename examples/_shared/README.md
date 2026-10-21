@@ -54,7 +54,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
-            "COMPONENTS_DIR": "_widgets",
+            "COMPONENTS_DIR": "_components",
         }
     ],
 }
@@ -70,7 +70,7 @@ The kit also ships two plain Python modules, and `markdown_preview/component.py`
 
 The `markdown_preview` component is the one place the live Markdown preview behaviour lives. Its `component.djx` draws a labelled pane, its `component.py` turns the `source` prop into safe HTML through the shared [`markup.py`](markup.py) helper and declares the `marked` CDN under `scripts`, and its co-located `component.mjs` keeps the pane in sync with its control. No page template calls it. The `markdown_textarea` composite does: it renders the plain `textarea` primitive with `markdown_source=True` and the pane right under it, so `ComponentWidget("markdown_textarea", rows=12)` is a whole Markdown editor while `textarea` stays a control that knows nothing about Markdown. The framework auto-discovers the co-located `component.mjs` (emitted as `<script type="module">`) and `component.css` from inside that widget render and dedupes them into the page slots, so no manual static path is needed. The script registers through `Next.partial.onMount("[data-markdown-preview]", ...)` and binds to the `data-markdown-source` control before the pane, falling back to the nearest one in the pane's parent and then in the form, so two Markdown fields in one form each drive their own pane without hardcoding a field name. It remembers the pairing in a `WeakMap` rather than in a data attribute, because a morph drops an attribute the server markup does not carry and the mount pass would then wire a second listener onto the same control.
 
-Each example houses the shared HTML envelope in a project-level page root listed under `PAGE_BACKENDS["DIRS"]`: `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/` depending on the project. The dir contains a single `layout.djx` (and optionally `_<components-dir>/` for project-shared components) that wraps every page rendered by the per-app `PAGES_DIR` tree:
+Each example houses the shared HTML envelope in a project-level page root listed under `PAGE_BACKENDS["DIRS"]`: `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/` depending on the project. The dir contains a single `layout.djx` (and optionally a `_components/` folder for project-shared components) that wraps every page rendered by the per-app `pages/` trees:
 
 ```django
 <!DOCTYPE html>
@@ -98,7 +98,7 @@ NEXT_FRAMEWORK = {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "site")],   # owns layout.djx
-            "PAGES_DIR": "screens",
+            "PAGES_DIR": "pages",
             ...
         },
     ],
@@ -107,15 +107,15 @@ NEXT_FRAMEWORK = {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [
                 str(SHARED_DIR / "_components"),
-                str(BASE_DIR / "site" / "_parts"),  # project-shared components
+                str(BASE_DIR / "site" / "_components"),  # project-shared components
             ],
-            "COMPONENTS_DIR": "_parts",
+            "COMPONENTS_DIR": "_components",
         },
     ],
 }
 ```
 
-The page backend entry makes the file router walk `site/` and treat its `layout.djx` as the outermost wrapper. The matching component backend entry registers `site/_parts/` as a root-scope component source so a `site_footer` (or any other one-off component shared across the whole project) resolves from every template. The [`markdown-blog`](../markdown-blog/) example wires both, and [`multi-tenant`](../multi-tenant/) uses the same pattern with its `root_pages/` and `root_blocks/` directories.
+The page backend entry makes the file router walk `site/` and treat its `layout.djx` as the outermost wrapper. The matching component backend entry registers `site/_components/` as a root-scope component source so a `site_footer` (or any other one-off component shared across the whole project) resolves from every template. The [`markdown-blog`](../markdown-blog/) example wires both, and [`multi-tenant`](../multi-tenant/) uses the same pattern with its `root_pages/` and `root_blocks/` directories.
 
 ## Design tokens and Tailwind config
 

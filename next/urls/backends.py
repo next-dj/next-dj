@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, Protocol, cast, override
 
 from django.apps import apps
 from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
@@ -18,24 +18,28 @@ from next.utils import PageRoot, classify_dirs_entries, resolve_base_dir, resolv
 from .dispatcher import FilesystemTreeDispatcher
 from .parser import default_url_parser
 from .signals import route_registered
+from .urlconf import urlconf_mounts
 
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
 
+    from django.apps import AppConfig
     from django.urls import URLPattern, URLResolver
+
+    from .urlconf import MountPoint, UrlconfMounts
 
 
 logger = logging.getLogger(__name__)
 
-# Django's own apps and the framework package hold no project pages, and the
-# framework ships a `next/pages` package that otherwise reads as a page tree.
+# Django's own apps and the framework's `next/pages` package hold no project pages.
 _NON_PAGE_APP_ROOTS = ("django", "next")
 
-# The keys a file router entry carries beside BACKEND, read here and validated by
-# the checks. They have no defaults, because a partial entry is a settings mistake
-# the checks name rather than a shorthand.
 FILE_ROUTER_CONFIG_KEYS = ("PAGES_DIR", "APP_DIRS", "OPTIONS", "DIRS")
+"""The keys a file router entry carries beside BACKEND, OPTIONS and DIRS optional."""
+
+_REQUIRED_CONFIG_KEYS = ("PAGES_DIR", "APP_DIRS")
+"""The keys an entry cannot leave out, since a partial entry is a settings mistake."""
 
 
 def _is_framework_app(app_name: str) -> bool:
@@ -46,23 +50,61 @@ def _is_framework_app(app_name: str) -> bool:
     )
 
 
+def is_plain_subdir(name: str) -> bool:
+    """Whether `name` is one plain directory name, so a claim on it compares exactly."""
+    return name not in {"", ".", ".."} and "/" not in name and "\\" not in name
+
+
+class _InstalledApps(dict[str, Path]):
+    """Each installed app's directory by dotted name, built once per registry snapshot.
+
+    A stable map lets `page_roots` keep its answer until the registry changes.
+    """
+
+    __slots__ = ("configs",)
+
+    def __init__(self, configs: tuple[AppConfig, ...]) -> None:
+        """Read the directory of every app."""
+        super().__init__((config.name, Path(config.path)) for config in configs)
+        self.configs = configs
+
+
+class _InstalledAppsMemo:
+    """The snapshot of the app registry the last read built."""
+
+    def __init__(self) -> None:
+        """Start with no snapshot."""
+        self.held: _InstalledApps | None = None
+
+
+_installed_apps = _InstalledAppsMemo()
+
+
 def _installed_app_directories() -> dict[str, Path]:
     """Map each installed app's dotted name to its directory.
 
-    Read live on every call, because `INSTALLED_APPS` changes without a settings reload.
+    The registry is read per call, and the map is rebuilt only when its configs change.
     """
     try:
-        configs = apps.get_app_configs()
+        configs = tuple(apps.get_app_configs())
     except AppRegistryNotReady:
-        # Answering keeps a caller reached during app loading alive, but the
-        # answer reads as "this project has no app pages", so it is named.
+        # A caller reached during app loading is told "no app pages".
         logger.warning(
             "the app registry was read before Django populated it, so no "
             "application page tree is reported for this call. Move the read "
             "into or after AppConfig.ready()."
         )
         return {}
-    return {config.name: Path(config.path) for config in configs}
+    held = _installed_apps.held
+    if held is None or held.configs != configs:
+        held = _installed_apps.held = _InstalledApps(configs)
+    return held
+
+
+class _RoutedView(Protocol):
+    """A page view that knows the trail it was routed by inside its tree."""
+
+    next_route_trail: str
 
 
 class RouterBackend(ABC):
@@ -78,24 +120,21 @@ class RouterBackend(ABC):
     def page_roots(self) -> list[PageRoot]:
         """Labelled page trees this backend routes, for system checks to walk.
 
-        A backend that routes from somewhere else reports none, which leaves it
-        out of every page-tree check and out of the development watcher.
+        A backend routing from elsewhere reports none, so checks and watcher skip it.
         """
         return []
 
     def components_folder_name(self) -> str | None:
         """Folder name this backend registers components from while it walks.
 
-        A backend that registers no component folder answers None, and the
-        development watcher then watches no component glob under its trees.
+        No component folder answers None, so no component glob is watched.
         """
         return None
 
     def skip_dir_names(self) -> frozenset[str]:
         """Directory names this backend's own walk of its trees refuses to enter.
 
-        The checks walk with the same set, so a directory this backend routes
-        nothing from is a directory they report nothing from either.
+        The checks walk with the same set, so they skip those directories too.
         """
         return frozenset()
 
@@ -119,34 +158,38 @@ class FileRouterBackend(RouterBackend):
     def __init__(self, config: Mapping[str, Any]) -> None:
         """Read the pages dir, the extra roots, and the narrowed OPTIONS off the entry.
 
-        A subclass renaming the component folder overrides
-        `_resolve_components_folder_name`, which is read here and nowhere else.
+        A subclass renaming the component folder overrides its resolver method.
         """
         self._require_config_keys(config)
         self.pages_dir = str(config["PAGES_DIR"])
         self.app_dirs = bool(config["APP_DIRS"])
-        self.options = _narrow_file_router_options(config["OPTIONS"])
+        self.options = _narrow_file_router_options(config.get("OPTIONS"))
 
         components_dir = self._resolve_components_folder_name()
         # Already resolved, because the classification probes what it keeps.
-        roots, segment_names = classify_dirs_entries(config["DIRS"], resolve_base_dir())
+        roots, segment_names = classify_dirs_entries(
+            config.get("DIRS", []), resolve_base_dir()
+        )
         self._extra_root_paths = roots
         self._skip_dir_names = frozenset({components_dir, *segment_names})
         self._components_folder_name = components_dir
 
-        self._patterns_cache: dict[str, list[URLPattern | URLResolver]] = {}
         self._app_pages_path_cache: dict[str, tuple[Path, Path | None]] = {}
+        self._tree_patterns_cache: dict[Path, list[URLPattern | URLResolver]] = {}
         self._root_patterns_cache: list[URLPattern | URLResolver] | None = None
         self._root_pages_paths_cache: list[Path] | None = None
+        self._page_roots_cache: (
+            tuple[Mapping[str, Path] | None, UrlconfMounts, list[PageRoot]] | None
+        ) = None
         self._url_parser = default_url_parser
 
     @classmethod
     def _require_config_keys(cls, config: Mapping[str, Any]) -> None:
         """Refuse an entry that leaves out one of the keys a file router reads."""
-        for required in FILE_ROUTER_CONFIG_KEYS:
+        for required in _REQUIRED_CONFIG_KEYS:
             if required not in config:
                 rest = ", ".join(
-                    key for key in FILE_ROUTER_CONFIG_KEYS if key != required
+                    key for key in _REQUIRED_CONFIG_KEYS if key != required
                 )
                 msg = (
                     f"A {cls.__name__} entry needs {required!r} alongside "
@@ -195,26 +238,74 @@ class FileRouterBackend(RouterBackend):
         urls.extend(self._generate_root_urls())
         return urls
 
+    def generate_tree_urls(self, tree: Path) -> list[URLPattern | URLResolver]:
+        """Return the patterns of a tree a URLconf mounts through `pages()`.
+
+        The routes stay relative to the tree, since Django joins in the outer prefix.
+        """
+        return list(self._tree_urls(tree))
+
     @override
     def page_roots(self) -> list[PageRoot]:
-        """Report the app trees and root trees this router serves from.
+        """Report the app trees, the root trees and the trees a URLconf mounts.
 
-        The app reads share one snapshot, because the finder and the reloader ask often.
+        Kept per app snapshot and URLconf walk, since the finder and reloader ask often.
         """
-        roots: list[PageRoot] = []
-        if self.app_dirs:
-            directories = _installed_app_directories()
-            roots.extend(
-                PageRoot(path=app_path, label=f"App '{app_name}'")
-                for app_name in self._get_installed_apps(directories)
-                if (app_path := self._get_app_pages_path(app_name, directories))
-                is not None
-            )
+        mounts = urlconf_mounts()
+        directories = _installed_app_directories() if self.app_dirs else None
+        held = self._page_roots_cache
+        if held is not None and held[0] is directories and held[1] is mounts:
+            return list(held[2])
+        roots = (
+            [] if directories is None else self._app_roots(directories, mounts.claimed)
+        )
         roots.extend(
             PageRoot(path=path, label="Root" if index == 0 else f"Root ({path})")
             for index, path in enumerate(self._get_root_pages_paths())
         )
-        return roots
+        roots.extend(self._mounted_root(point) for point in mounts.points)
+        self._page_roots_cache = (directories, mounts, roots)
+        return list(roots)
+
+    def _tree_label(self, app_name: str, subdir: str) -> str:
+        """Return the label a report names one app tree by."""
+        if subdir == self.pages_dir:
+            return f"App '{app_name}'"
+        return f"App '{app_name}' ({subdir})"
+
+    def _app_trees(
+        self, directories: Mapping[str, Path], claimed: frozenset[tuple[str, str]]
+    ) -> Generator[tuple[str, Path], None, None]:
+        """Yield `(app, path)` per app tree the auto-assembly routes at the root.
+
+        A tree a `pages()` include claims is left to the URLconf that mounts it.
+        """
+        for app_name in self._get_installed_apps(directories):
+            if (app_name, self.pages_dir) in claimed:
+                continue
+            path = self._get_app_pages_path(app_name, directories)
+            if path is not None:
+                yield app_name, path
+
+    def _app_roots(
+        self, directories: Mapping[str, Path], claimed: frozenset[tuple[str, str]]
+    ) -> list[PageRoot]:
+        """Return the app trees the auto-assembly routes at the root."""
+        return [
+            PageRoot(path=path, label=self._tree_label(app_name, self.pages_dir))
+            for app_name, path in self._app_trees(directories, claimed)
+        ]
+
+    def _mounted_root(self, point: MountPoint) -> PageRoot:
+        """Return the page tree a `pages()` include of the URLconf mounts."""
+        mount = point.mount
+        return PageRoot(
+            path=mount.path,
+            label=self._tree_label(mount.name, mount.subdir),
+            prefix=point.prefix,
+            namespace=point.namespace,
+            trail=point.trail,
+        )
 
     def _generate_app_urls(self) -> list[URLPattern | URLResolver]:
         """Return patterns from each installed app's `pages_dir` tree.
@@ -222,11 +313,20 @@ class FileRouterBackend(RouterBackend):
         One snapshot serves the pass, because reading it per app name rebuilds the map.
         """
         directories = _installed_app_directories()
+        claimed = urlconf_mounts().claimed
         urls: list[URLPattern | URLResolver] = []
-        for app_name in self._get_installed_apps(directories):
-            if patterns := self._generate_urls_for_app(app_name, directories):
-                urls.extend(patterns)
+        for _app, path in self._app_trees(directories, claimed):
+            urls.extend(self._tree_urls(path))
         return urls
+
+    def _tree_urls(self, tree: Path) -> list[URLPattern | URLResolver]:
+        """Return the cached patterns of one tree, scanning it on first use."""
+        patterns = self._tree_patterns_cache.get(tree)
+        if patterns is None:
+            patterns = self._tree_patterns_cache[tree] = list(
+                self._generate_patterns_from_directory(tree)
+            )
+        return patterns
 
     def _generate_root_urls(self) -> list[URLPattern | URLResolver]:
         """Return cached patterns from each configured root pages directory.
@@ -256,14 +356,12 @@ class FileRouterBackend(RouterBackend):
     ) -> Path | None:
         """Return `<app>/pages_dir` when that directory exists.
 
-        Memoised per app directory, so a static lookup pays no probe per call. The memo
-        dies with this router, which the watch layer rebuilds per read.
+        Memoised per app directory and dropped with this router.
         """
         app_path = directories.get(app_name)
         if app_path is None:
             return None
-        # The directory sits beside the answer rather than in the key, because
-        # this runs per static lookup and a `str` key hashes cheaper.
+        # The directory sits beside the answer as a `str` key hashes cheaper.
         cached = self._app_pages_path_cache.get(app_name)
         if cached is not None and cached[0] == app_path:
             return cached[1]
@@ -275,8 +373,7 @@ class FileRouterBackend(RouterBackend):
     def _get_root_pages_paths(self) -> list[Path]:
         """Return paths from `DIRS` plus optional `BASE_DIR` / `pages_dir`.
 
-        Memoised per instance, because the roots belong to this router's configuration
-        and every reader asks per call. A copy goes back, so appending moves no root.
+        Memoised per instance and a copy goes back, so appending moves no root.
         """
         if self._root_pages_paths_cache is None:
             result = [p for p in self._extra_root_paths if p.exists()]
@@ -289,32 +386,33 @@ class FileRouterBackend(RouterBackend):
             self._root_pages_paths_cache = result
         return list(self._root_pages_paths_cache)
 
-    def _generate_urls_for_app(
-        self, app_name: str, directories: Mapping[str, Path]
-    ) -> list[URLPattern | URLResolver]:
-        """Return cached patterns for one app, scanning on first use."""
-        if app_name in self._patterns_cache:
-            return self._patterns_cache[app_name]
-        if pages_path := self._get_app_pages_path(app_name, directories):
-            patterns: list[URLPattern | URLResolver] = list(
-                self._generate_patterns_from_directory(pages_path)
-            )
-            self._patterns_cache[app_name] = patterns
-            return patterns
-        return []
-
     def _generate_patterns_from_directory(
         self, pages_path: Path
     ) -> Generator[URLPattern, None, None]:
-        """Yield one `URLPattern` per discovered page under `pages_path`."""
+        """Yield one `URLPattern` per discovered page under `pages_path`.
+
+        Each view keeps its trail, so its crumbs reverse under any outer include.
+        """
         for url_path, file_path in self._scan_pages_directory(pages_path):
-            if pattern := page.create_url_pattern(
-                url_path, file_path, self._url_parser
-            ):
+            if pattern := self._page_pattern(url_path, file_path):
+                cast("_RoutedView", pattern.callback).next_route_trail = url_path
                 route_registered.send(
                     sender=FileRouterBackend, url_path=url_path, file_path=file_path
                 )
                 yield pattern
+
+    def _page_pattern(self, trail: str, file_path: Path) -> URLPattern | None:
+        """Return the pattern of one page, `None` for a trail the parser refuses.
+
+        A refused page stays unrouted rather than abort the URLconf, so the checks run.
+        """
+        try:
+            return page.create_url_pattern(trail, file_path, self._url_parser)
+        except self._url_parser.parameter_error as exc:
+            logger.warning(
+                "%s The page is not routed, and manage.py check reports it.", exc
+            )
+            return None
 
     def _scan_pages_directory(
         self, pages_path: Path, *, register_components: bool = True
@@ -331,8 +429,7 @@ class FileRouterBackend(RouterBackend):
 class RouterFactory:
     """Build one `RouterBackend` from one `PAGE_BACKENDS` entry.
 
-    `RouterManager` loads the whole list through `next.backends`. This is the
-    single-entry build the router access port hands the development watcher.
+    `RouterManager` loads the list through `next.backends`, this is the watcher's build.
     """
 
     @classmethod

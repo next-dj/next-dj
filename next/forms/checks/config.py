@@ -134,8 +134,7 @@ def check_form_anchor_files(*args, **kwargs) -> list[CheckMessage]:
     if value is None:
         return []
     key = _FORM_ANCHOR_FILES_SETTINGS_KEY
-    # Only a list round-trips through the settings merge, so tuples and sets
-    # are rejected here instead of silently falling back to the defaults.
+    # Only a list round-trips the settings merge, so tuples and sets are rejected here.
     if not isinstance(value, list):
         return [
             Error(

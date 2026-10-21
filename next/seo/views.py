@@ -19,6 +19,7 @@ from django.views.decorators.cache import cache_page
 from django.views.decorators.http import require_safe
 
 from next.diagnostics import FailureLog
+from next.permissions.access import open_view
 from next.site import site_indexable
 from next.site.config import site_closed_to_crawlers, site_url_failed
 from next.site.headers import site_robots
@@ -234,9 +235,7 @@ def _file_response(source: TextFile) -> HttpResponse:
 def _robots(request: HttpRequest) -> HttpResponse:
     """Return the declared robots, or the fixed permissive document on a closed site.
 
-    The permissive document lets crawlers read each noindex tag, and a site that only
-    `DEBUG` closes serves its own rules. A `robots.py` that failed to import answers
-    503, since crawlers read a 404 as allowing everything.
+    A `robots.py` that failed to import answers 503, as a 404 reads as allow-all.
     """
     if _is_prefixed_copy(request):
         return _not_found(_PREFIXED_COPY)
@@ -278,10 +277,7 @@ class _Wrapping(NamedTuple):
 class _CachedView:
     """A view wrapped in `cache_page` when its source declares a cache.
 
-    The wrapper is rebuilt per manager version. The key prefix holds the source
-    fingerprint, so a copy cached before an edit is never served, and the request
-    indexability, so a closed request never reads the copy of an open one. The
-    indexability is read only when a copy is stored.
+    The key prefix holds the source fingerprint and the request indexability.
     """
 
     __slots__ = ("control", "held", "view")
@@ -355,8 +351,7 @@ type _Route[**P] = Callable[Concatenate[HttpRequest, P], HttpResponse]
 def _seo_view[**P](route: str) -> Callable[[_Route[P]], _Route[P]]:
     """Restrict an SEO view to `GET` and `HEAD`, with a plain 404 and a 503 on failure.
 
-    The view and its template run project code, so the response is rendered inside the
-    guard. A 503 asks crawlers to retry, while a 500 reads as a failing site.
+    Crawlers must reach it, so it stays open under `LoginRequiredMiddleware`.
     """
 
     def decorate(view: _Route[P]) -> _Route[P]:
@@ -382,7 +377,7 @@ def _seo_view[**P](route: str) -> Callable[[_Route[P]], _Route[P]]:
                 return _not_found(_NOT_FOUND)
             return _unavailable()
 
-        return site_robots(require_safe(answer))
+        return open_view(site_robots(require_safe(answer)))
 
     return decorate
 

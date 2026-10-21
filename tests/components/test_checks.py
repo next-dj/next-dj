@@ -446,8 +446,7 @@ class TestPageTreeComponentsReachTheChecks:
         }
 
     def test_the_next_tag_run_reports_the_misattribution(self, tmp_path: Path) -> None:
-        # The `next` tag excludes Django's URL check, so nothing walks the page
-        # tree during this run and the check has to find the folder itself.
+        # The `next` tag excludes Django's URL check, so the check finds the folder.
         pages = self._write_project(tmp_path)
         register_all()
 
@@ -517,8 +516,7 @@ class TestPageTreeComponentsReachTheChecks:
         assert [m.obj for m in e021] == [str(module_path)]
 
     def test_a_duplicate_name_under_a_page_tree_is_e020(self, tmp_path: Path) -> None:
-        # `card.djx` and `card/component.djx` sit in one `_components` folder,
-        # so both carry the same scope and only order decides which renders.
+        # `card.djx` and `card/component.djx` share a scope, so order picks the render.
         pages = self._write_project(tmp_path)
         (pages / "_components" / "card.djx").write_text("<p>other card</p>\n")
         register_all()
@@ -537,8 +535,7 @@ class TestPageTreeComponentsReachTheChecks:
     def test_the_store_the_checks_read_claims_the_folder_once(
         self, tmp_path: Path
     ) -> None:
-        # One walk feeds the per-run store, so a check asking twice sees each
-        # component once and the live manager keeps whatever it already held.
+        # One walk feeds the per-run store, so a repeat sees each component once.
         pages = self._write_project(tmp_path)
 
         with (

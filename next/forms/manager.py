@@ -2,13 +2,13 @@
 
 import itertools
 import types
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, override
 
 from django.core.exceptions import ImproperlyConfigured
 
 from next.backends import BackendListManager, backend_entries, load_backends
 
-from .backends import FormActionBackend
+from .backends import FormActionBackend, declaring_files
 from .dispatch.build import _form_action_context_callable
 from .errors import FormActionNotFoundError
 from .origin import url_kwargs_for_request
@@ -44,8 +44,7 @@ class FormActionManager(BackendListManager[FormActionBackend]):
     def version(self) -> int:
         """Cache token for the lazy urlpatterns concat, moved by every registration.
 
-        Registrations that bypass the manager and hit a backend directly are not
-        tracked, and the token is drawn process-wide so no two managers share one.
+        Direct backend registrations are not tracked and the token is process-wide.
         """
         return self._version
 
@@ -67,8 +66,7 @@ class FormActionManager(BackendListManager[FormActionBackend]):
     def reload(self) -> None:
         """Rebuild the backends from the current `NEXT_FRAMEWORK` settings.
 
-        The actions registered on the old backends go with them, so a caller that swaps
-        `FORM_ACTION_BACKENDS` live must let the forms register again.
+        Actions on the old backends go with them, so forms must register again.
         """
         configs = backend_entries("FORM_ACTION_BACKENDS")
         self._bump()
@@ -76,9 +74,7 @@ class FormActionManager(BackendListManager[FormActionBackend]):
         self._backends = load_backends(
             configs, base=FormActionBackend, signal=form_backend_loaded
         )
-        # An empty load is a broken config, not a result, so the next access
-        # rereads settings. A settings_reloaded receiver cannot do that instead,
-        # because dropping the backends drops their actions.
+        # An empty load is a broken config, so the next access rereads settings.
         self._mark_loaded(retry_when_empty=bool(configs))
 
     def _require_backends(self) -> None:
@@ -120,8 +116,7 @@ class FormActionManager(BackendListManager[FormActionBackend]):
     def snapshot_actions(self) -> "ActionsSnapshot":
         """Capture the actions of every backend for a later `restore_actions`.
 
-        Each token travels back to the backend that minted it, so a list that
-        changed in between restores the backends it still holds.
+        Each token returns to the backend that minted it.
         """
         self._ensure_backends()
         return tuple((backend, backend.snapshot()) for backend in self._backends)
@@ -129,8 +124,7 @@ class FormActionManager(BackendListManager[FormActionBackend]):
     def restore_actions(self, snapshot: "ActionsSnapshot") -> None:
         """Put the captured actions back, moving `version` as a registration does.
 
-        A rollback changes what is registered, so a cache keyed on the token
-        has to see it exactly as it sees a registration.
+        A rollback changes what is registered, so token-keyed caches must see it.
         """
         for backend, state in snapshot:
             backend.restore(state)
@@ -139,8 +133,7 @@ class FormActionManager(BackendListManager[FormActionBackend]):
     def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
         """Return the reverse URL from the first backend that knows `action_name`.
 
-        One backend or several, the refusal a caller sees is the one composed here,
-        so the shape of the failure never follows the length of the settings list.
+        The refusal is composed here, so it never depends on the backend count.
         """
         self._require_backends()
         backends = self._backends
@@ -160,6 +153,7 @@ class FormActionManager(BackendListManager[FormActionBackend]):
                 meta["name"] for backend in backends for meta in backend.iter_actions()
             ],
             registry_empty=registry_empty,
+            declared_in=lambda: declaring_files(backends, action_name),
         )
 
     def get_action_meta(
@@ -191,6 +185,7 @@ class FormActionManager(BackendListManager[FormActionBackend]):
             page_path=page_path,
             candidates=tuple(known),
             registry_empty=not known,
+            declared_in=lambda: declaring_files(self.backends, action_name),
         )
 
     @property
@@ -213,8 +208,7 @@ def resolve_component_anchor(
 ) -> "ActionMeta | None":
     """Return the action meta registered exactly under the component anchor.
 
-    An exact anchor hit carries page scope, which tells it apart from the
-    path-independent shared fallback a scoped lookup may return.
+    An exact hit carries page scope, unlike the shared fallback of a scoped lookup.
     """
     meta = form_action_manager.get_action_meta(action_name, page_path=component_path)
     if meta is not None and meta.get("scope") == "page":
@@ -233,7 +227,7 @@ def build_form_namespace_for_action(
 
 
 def _build_form_namespace_from_meta(
-    meta: "ActionMeta", request: "HttpRequest"
+    meta: "ActionMeta", request: "HttpRequest", dep_cache: dict[str, Any] | None = None
 ) -> types.SimpleNamespace | None:
     """Build the form namespace for already-resolved action meta."""
     wizard_class = meta.get("wizard_class")
@@ -244,7 +238,7 @@ def _build_form_namespace_from_meta(
     fc = meta.get("form_class")
     if fc is None:
         return None
-    return _form_action_context_callable(fc)(request)
+    return _form_action_context_callable(fc)(request, dep_cache)
 
 
 __all__ = [

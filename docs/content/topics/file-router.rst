@@ -23,7 +23,7 @@ Renaming a directory renames the URL and its computed URL name.
 Removing a directory removes the URL.
 
 The name of the page root itself is the ``PAGES_DIR`` value of the backend entry, so it is whatever a project sets it to.
-The examples on this page use ``routes`` while the tutorial and the shipped default use ``pages``, and nothing below depends on which name a project picks.
+The examples on this page use ``pages``, the shipped default, and nothing below depends on which name a project picks.
 
 When to use the file router
 ---------------------------
@@ -42,28 +42,28 @@ The router recognises four directory shapes.
 
 Plain segment.
    A directory name without brackets becomes a static URL segment.
-   ``routes/blog/page.py`` answers ``/blog/``.
+   ``pages/blog/page.py`` answers ``/blog/``.
 
 Captured segment.
    A directory wrapped in single brackets becomes a captured URL parameter.
-   ``routes/posts/[slug]/page.py`` answers ``/posts/<str:slug>/``.
+   ``pages/posts/[slug]/page.py`` answers ``/posts/<str:slug>/``.
 
 Typed captured segment.
    A captured directory with a converter prefix sets the Django path converter.
-   ``routes/posts/[int:post_id]/page.py`` answers ``/posts/<int:post_id>/``.
+   ``pages/posts/[int:post_id]/page.py`` answers ``/posts/<int:post_id>/``.
 
 Wildcard segment.
    A directory wrapped in double brackets becomes a ``path`` converter that swallows multiple URL segments.
-   ``routes/api/[[suffix]]/page.py`` answers ``/api/<path:suffix>/``.
+   ``pages/api/[[suffix]]/page.py`` answers ``/api/<path:suffix>/``.
    A route holds at most one wildcard segment.
-   A second ``[[name]]`` anywhere in the same trail raises ``DuplicateURLParameterError`` at router build and reports :ref:`next.E028 <ref-system-checks>` at check time, whatever the two names are.
+   A second ``[[name]]`` anywhere in the same trail leaves that page unrouted and reports :ref:`next.E028 <ref-system-checks>` at check time, whatever the two names are.
 
 The following layout shows the four shapes together.
 
 .. code-block:: text
-   :caption: routes tree
+   :caption: pages tree
 
-   routes/
+   pages/
      page.py                       /
      blog/
        page.py                     /blog/
@@ -114,14 +114,17 @@ Captured values reach Python through markers.
 ``DUrl[T]`` parses the captured value into the requested type and provides it to context functions and action handlers.
 
 Hyphens in directory names are normalised to underscores in the generated URL parameter and URL name.
-A ``routes/[my-id]/page.py`` route becomes the Django parameter ``<str:my_id>``, the resolver provides it as ``my_id``, and the URL name registers as ``next:page_my_id``.
+A ``pages/[my-id]/page.py`` route becomes the Django parameter ``<str:my_id>``, the resolver provides it as ``my_id``, and the URL name registers as ``next:page_my_id``.
 Name your directories without hyphens when you want the parameter name and the directory name to match exactly.
-A directory name that is no Python identifier after that normalisation, such as ``[2fa]`` or ``[user.id]``, raises ``InvalidURLParameterError`` at router build.
+A directory name that is no Python identifier after that normalisation, such as ``[2fa]`` or ``[user.id]``, is refused with ``InvalidURLParameterError``.
 ``manage.py check`` reports it twice, as :ref:`next.E008 <ref-system-checks>` from the structural walk that reads the directory name and as :ref:`next.E082 <ref-system-checks>` from the pattern walk that tries to turn the route into a Django path.
-Both that refusal and ``DuplicateURLParameterError`` name the offending ``page.py`` alongside the route.
+
+The router does not abort on a refused route.
+It logs a warning through the ``next.urls.backends`` logger that names the route and the offending ``page.py``, leaves that one page unrouted so it answers 404, and routes every other page.
+The same holds for a repeated parameter name, refused with ``DuplicateURLParameterError``, so ``manage.py check`` runs and reports each refused page instead of failing on the URLconf.
 
 .. code-block:: python
-   :caption: routes/posts/[int:post_id]/page.py
+   :caption: pages/posts/[int:post_id]/page.py
 
    from notes.models import Note
 
@@ -143,9 +146,9 @@ A directory that contains a ``template.djx`` without a ``page.py`` still becomes
 The router renders the template directly without invoking a Python page module.
 
 .. code-block:: text
-   :caption: routes tree
+   :caption: pages tree
 
-   routes/
+   pages/
      about/
        template.djx                /about/
      legal/
@@ -154,6 +157,11 @@ The router renders the template directly without invoking a Python page module.
 
 Virtual routes are useful for marketing pages, static content, and quick mockups.
 A virtual route can still receive layout wrapping from any ancestor ``layout.djx``.
+
+A directory routes nothing until a page sits in it or below it, a ``page.py`` with a body or a ``template.djx``.
+``manage.py check`` warns with ``next.W128`` about the outermost directory with no page and no action at any depth, one message for ``pages/a/`` however deep its empty subdirectories go.
+The message names what the branch holds in vain, a ``layout.djx`` that wraps no page or a ``page.py`` without a body whose ``inherit=True`` access guards no page, or opens none for ``public(inherit=True)``, or whose ``inherit_context=True`` context reaches no page.
+A private ``_name/`` directory and the ``COMPONENTS_DIR`` folder hold no pages, so they leave the branch empty.
 
 Every view the router generates, virtual routes included, carries a ``next_page_path`` attribute naming the page source.
 The form dispatcher reads it when it resolves a posted origin back to the page that should re-render after a validation failure, see :doc:`/content/topics/forms/validation-rerender`.
@@ -171,19 +179,21 @@ Captured segments contribute their parameter name without the brackets.
 
    * - File
      - URL name
-   * - ``routes/page.py``
+   * - ``pages/page.py``
      - ``next:page_``
-   * - ``routes/blog/page.py``
+   * - ``pages/blog/page.py``
      - ``next:page_blog``
-   * - ``routes/posts/[slug]/page.py``
+   * - ``pages/posts/[slug]/page.py``
      - ``next:page_posts_slug``
-   * - ``routes/posts/[int:post_id]/page.py``
+   * - ``pages/posts/[int:post_id]/page.py``
      - ``next:page_posts_int_post_id``
-   * - ``routes/api/[[suffix]]/page.py``
+   * - ``pages/api/[[suffix]]/page.py``
      - ``next:page_api_suffix``
 
 The trailing underscore on the root page name is intentional.
 ``reverse('next:page_')`` resolves the root page.
+
+A tree a URLconf places through ``pages()`` names its pages in a namespace of its own and without the prefix, see `Placing application trees`_.
 
 A typed captured segment keeps its converter label in the URL name.
 ``[int:post_id]`` becomes ``posts_int_post_id``, not ``posts_post_id``, because the name is computed from the raw segment text.
@@ -199,7 +209,7 @@ Set it to change the prefix for every file-routed page at once.
        "URL_NAME_TEMPLATE": "route_{name}",
    }
 
-With this value ``routes/blog/page.py`` registers as ``next:route_blog``.
+With this value ``pages/blog/page.py`` registers as ``next:route_blog``.
 The placeholder ``{name}`` must appear in the template so each page still gets a distinct name.
 
 Reverse them through the standard ``{% url %}`` tag or with ``page_reverse``.
@@ -220,8 +230,8 @@ App directories.
    The scanned directory is the one the registry reports for the application, so an ``AppConfig`` that declares its own ``path`` moves the scan with it, and an application shipped as a namespace package is scanned like any other.
    Django's own applications and ``next`` itself are never scanned, so the packages they ship cannot contribute routes.
 
-   A directory reachable both as an application tree and through ``DIRS`` is routed twice, once under each mount, which the ``next.E015`` system check reports as a URL pattern conflict.
-   The page checks report each file once, however many mounts reach it.
+   A directory reachable both as an application tree and through ``DIRS`` is routed twice, once under each root, which the ``next.E015`` system check reports as a URL pattern conflict.
+   The page checks report each file once, however many roots reach it.
 
 Project directories.
    The ``DIRS`` list adds absolute or project-relative paths to the scan.
@@ -241,7 +251,6 @@ Fallback root.
                "APP_DIRS": False,
                "DIRS": [],
                "PAGES_DIR": "pages",
-               "OPTIONS": {"context_processors": []},
            }
        ]
    }
@@ -249,7 +258,7 @@ Fallback root.
 With this configuration the router serves every page under ``<BASE_DIR>/pages/``.
 
 You can use both sources at once.
-URL patterns are built in this order, first from application directories then from each entry in ``DIRS``.
+URL patterns are built in this order, first from application directories then from each entry in ``DIRS``, and a tree that ``pages()`` places under a prefix leads both, as *Route order across trees* below describes.
 If two routes convert to exactly the same Django path string the system check ``next.E015`` reports the conflict, whether they come from one tree or several.
 The comparison is string equality after bracket conversion, so semantic overlap between typed converters stays silent, and ``posts/[int:id]`` next to ``posts/[id]`` is not reported.
 
@@ -266,7 +275,7 @@ The comparison is string equality after bracket conversion, so semantic overlap 
                "BACKEND": "next.urls.FileRouterBackend",
                "APP_DIRS": True,
                "DIRS": [str(BASE_DIR / "chrome")],
-               "PAGES_DIR": "routes",
+               "PAGES_DIR": "pages",
                "OPTIONS": {
                    "context_processors": [
                        "myapp.context_processors.global_context",
@@ -290,9 +299,9 @@ Path entry.
    The router walks this directory as an additional page root alongside the application directories.
 
 Segment entry.
-   A plain string such as ``"api"`` or ``"_internal"`` that does not resolve to an existing directory.
+   A plain string such as ``"api"`` or ``"drafts"`` that does not resolve to an existing directory.
    The router adds it to the set of directory names it skips during the file walk, preventing those directories from becoming URL segments.
-   This is an alternative to the automatic ``_components`` skip that comes from ``COMPONENT_BACKENDS``.
+   A name that starts with an underscore needs no entry, because such a directory is private already, see *Private folders* below.
 
 .. code-block:: python
    :caption: skipping a directory by name
@@ -301,24 +310,101 @@ Segment entry.
        "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "DIRS": ["_drafts"],
+               "DIRS": ["drafts"],
                "APP_DIRS": True,
-               "PAGES_DIR": "routes",
-               "OPTIONS": {"context_processors": []},
+               "PAGES_DIR": "pages",
            }
        ]
    }
 
-In the example above, any directory named ``_drafts`` under any application's page root is silently skipped.
+In the example above, any directory named ``drafts`` under any application's page root is silently skipped.
 No URL is registered for it and the file walk does not descend into it.
 
-Components folder skipping
---------------------------
+.. _topics-file-router-trees:
 
-The router shares its file walk with the components backend.
-The name set in the first ``COMPONENT_BACKENDS`` entry under ``COMPONENTS_DIR`` becomes a directory that the router does not enter.
-The default is ``_components``.
-Only that exact name is skipped, not every directory that starts with an underscore.
+Placing application trees
+-------------------------
+
+An application page tree routes at one of two places.
+
+Root.
+   By default the ``PAGES_DIR`` tree of every installed application routes from the point where the root URLconf includes ``next.urls``, so the first directory of the tree is the first URL segment.
+
+URLconf.
+   The project places one tree anywhere in a ``urls.py`` through ``pages()``, and that tree leaves ``next.urls``.
+
+``manage.py routes`` prints the result, one row per routed page with its URL, name, file, and access, see :doc:`/content/ref/management`.
+
+The pages() include
+~~~~~~~~~~~~~~~~~~~
+
+``pages()`` from ``next.urls`` returns what :func:`~django.urls.include` returns, so :func:`~django.urls.path` places one application tree under any route of the project.
+
+.. code-block:: python
+   :caption: config/urls.py
+
+   from django.urls import include, path
+
+   from next.urls import pages
+
+   urlpatterns = [
+       path("staff/", pages("audit")),
+       path("staff/history/", pages("audit", "history", namespace="audit_history")),
+       path("", include("next.urls")),
+   ]
+
+The first argument is the label or the dotted name of an installed application, and the optional second names one of its subdirectories as one plain directory name.
+Without it ``pages()`` places the ``PAGES_DIR`` tree of the application, with ``PAGES_DIR`` read from the first file router of ``PAGE_BACKENDS``.
+A subdirectory other than ``PAGES_DIR``, such as ``history/`` above, routes only through a ``pages()`` include.
+Both arguments resolve while the URLconf imports, the way ``include()`` fails on a missing module.
+An unknown application raises ``LookupError``, and a subdirectory that is missing, holds a separator, or is ``""``, ``"."``, or ``".."`` raises ``ImproperlyConfigured``.
+
+.. code-block:: text
+   :caption: audit application
+
+   audit/
+     apps.py
+     pages/
+       page.py                     /staff/
+       log/
+         page.py                   /staff/log/
+     history/
+       page.py                     /staff/history/
+
+A converter in the route above ``pages()`` reaches every page of the tree as a URL kwarg, as it does for any :func:`~django.urls.include`, through a plain parameter or ``DUrl``.
+A page directory that captures a name the route already captures, such as ``history/[int:wallet]/`` under ``path("w/<int:wallet>/", pages(...))``, makes one value overwrite the other, and the checks report :ref:`next.E152 <ref-system-checks>`, naming the page and the include.
+
+The pages of a ``pages()`` tree register in a namespace named after the application label, without the outer prefix.
+``page_reverse("", namespace="audit")`` answers ``/staff/`` and ``{% url "audit:page_log" %}`` answers ``/staff/log/``.
+A second tree of the same application needs a namespace of its own, which the ``namespace`` keyword sets, as ``audit_history`` does above.
+A layout, a context, an access declaration, or a breadcrumb of one tree never reaches the pages of another, see :ref:`topics-access-tree-boundary` and :doc:`/content/topics/seo/breadcrumbs`.
+
+One tree may be included twice, each include under a namespace of its own, such as ``pages("audit", namespace="one")`` under ``one/`` and ``pages("audit", namespace="two")`` under ``two/``.
+Its pages then answer under both prefixes, while the sitemap lists the tree as one section, built from the include the URLconf lists first, so only the URLs under ``one/`` appear in it.
+The checks ``next.W126``, ``next.E154``, and ``next.E162`` judge such a tree by that first include alone, its route and the kwargs it captures.
+
+The router finds every ``pages()`` include by walking the URLconf ``ROOT_URLCONF`` names, nested ``include()`` calls included, so an include in a module that URLconf does not reach takes no tree out of ``next.urls``.
+Under :func:`~django.conf.urls.i18n.i18n_patterns` the walk reads the language prefix in ``LANGUAGE_CODE``, so the routes it records, and the URLs ``manage.py routes`` prints, carry the prefix of that language.
+The routes of ``include("next.urls")`` follow a new ``ROOT_URLCONF`` only once the routers reload, which :func:`~django.test.override_settings` triggers and pytest-django's ``@pytest.mark.urls`` does not, see :ref:`topics-testing-urlconf`.
+
+Route order across trees
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Inside ``next.urls`` the application trees route first, in ``INSTALLED_APPS`` order, then the ``DIRS`` roots.
+A ``pages()`` tree routes where its URLconf lists it, under Django's first-match rule, so a ``[slug]`` or ``[[rest]]`` page at the root of ``next.urls`` never shadows a tree a ``pages()`` include placed above it.
+
+.. _topics-file-router-private-folders:
+
+Private folders
+---------------
+
+A directory whose name starts with an underscore is private.
+The router never enters it, so nothing below it becomes a URL, and the page checks skip it too.
+``pages/_drafts/page.py`` routes nowhere, and a private folder at any depth keeps its whole subtree out of the URL map.
+
+The default components folder ``_components`` is one such directory, and the router registers it as a component root while it skips it as a route.
+The router shares its file walk with the components backend, and the folder name comes from ``COMPONENTS_DIR`` on the first ``COMPONENT_BACKENDS`` entry.
+A ``COMPONENTS_DIR`` without a leading underscore is skipped as a route all the same, by its exact name.
 
 A ``COMPONENT_BACKENDS`` list that is empty, or whose first entry carries no ``COMPONENTS_DIR``, leaves the router with no name to skip, and every file-router entry then refuses to build.
 The manager logs that refusal and skips the entry, so the symptom is a project that serves no file-routed page at all.
@@ -336,17 +422,13 @@ Each backend can read from a different directory, register a different ``PAGES_D
        "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "DIRS": [],
                "APP_DIRS": True,
-               "PAGES_DIR": "routes",
-               "OPTIONS": {"context_processors": []},
+               "PAGES_DIR": "pages",
            },
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "DIRS": [],
                "APP_DIRS": True,
-               "PAGES_DIR": "admin_routes",
-               "OPTIONS": {"context_processors": []},
+               "PAGES_DIR": "admin_pages",
            }
        ]
    }
@@ -362,7 +444,7 @@ Route order
 Within one tree a static directory always routes before a parameter sibling, and a parameter sibling before a catch-all.
 ``pages/blog/about/`` therefore answers ``/blog/about/`` even though ``pages/blog/[slug]/`` matches that path too.
 Among siblings of the same kind the more specific one routes first, ``post-[id]`` before ``[slug]`` and ``[int:id]`` before ``[str:key]``, and the name decides the rest, so the order is the same on every file system.
-The framework endpoints under ``/_next/`` route ahead of every page, so a root ``[[rest]]`` page cannot swallow them.
+Inside ``next.urls`` the framework endpoints under ``/_next/`` route ahead of every page, so a root ``[[rest]]`` page of ``next.urls`` cannot swallow them, while a ``pages()`` tree listed above the include can, which ``next.E149`` reports.
 See :doc:`/content/internals/url-router` for the complete rule.
 
 Resolution performance
@@ -380,7 +462,7 @@ Common patterns
 Single page application root
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A single ``routes/page.py`` registers the empty path ``/``.
+A single ``pages/page.py`` registers the empty path ``/``.
 The router treats it as the default URL for the project.
 
 Static content section
@@ -406,8 +488,8 @@ Each invocation then emits a ``router_reloaded`` signal with the manager class a
 A receiver of that signal that rebuilds again calls ``router_manager.reload(notify=False)``, which skips ``router_backend_loaded``, the URL-cache clear, and ``router_reloaded``, so the receiver does not re-enter itself.
 
 A reload also happens without an explicit call.
-The framework holds a :data:`~django.test.signals.setting_changed` receiver that reloads every router when ``INSTALLED_APPS`` moves, because a file router caches its patterns per application name.
-A test that swaps the application list with :func:`~django.test.override_settings` therefore gets the routes of the swapped list rather than the ones built before it.
+The framework holds a :data:`~django.test.signals.setting_changed` receiver that reloads every router when ``INSTALLED_APPS`` or ``ROOT_URLCONF`` moves, because a file router caches its patterns per application name and reads its ``pages()`` includes from the root URLconf.
+A test that swaps the application list or the URLconf with :func:`~django.test.override_settings` therefore gets the routes of the swapped value rather than the ones built before it.
 See :doc:`/content/internals/url-router` for the full reload order and :doc:`/content/ref/signals` for the signal payloads.
 
 Rebuilding drops the cached patterns, so the next request walks every page tree configured in ``PAGE_BACKENDS`` again.
@@ -422,11 +504,14 @@ The router contributes Django system checks that validate the configuration at s
 
 - ``check_next_pages_configuration`` validates the ``NEXT_FRAMEWORK`` structure and each backend entry.
 - ``check_pages_structure`` validates directory naming, captured parameter syntax, and the presence of ``page.py`` or ``template.djx``.
-- ``check_page_functions`` reports :ref:`next.E012 <ref-system-checks>` when a directory has no render function, no template attribute, no loader-backed source, and no sibling ``layout.djx``.
+- ``check_page_functions`` reports :ref:`next.E012 <ref-system-checks>` when a ``page.py`` that declares no access has no render function, no template attribute, and no loader-backed source, a ``layout.djx`` beside or above it counting for none.
 - ``check_url_patterns`` reports two routes that convert to exactly the same Django path string, whether they come from one tree or several (:ref:`next.E015 <ref-system-checks>`).
+  It compares full routes, the prefixes of ``pages()`` includes too, so two trees placed onto the same URL are reported as well.
   The comparison is string equality after bracket conversion, so ``posts/[int:id]`` next to ``posts/[id]`` is not reported.
   While collecting patterns it also reports a route that repeats a captured parameter name (:ref:`next.E028 <ref-system-checks>`), listing every conflicting name, so parameter duplicates surface from every scanned tree.
+  A page that repeats a name the ``pages()`` prefix of its tree captures reports :ref:`next.E152 <ref-system-checks>` instead.
 - ``check_reverse_name_collisions`` fails when two distinct routes collapse to the same reverse URL name after separator normalisation, such as ``foo-bar`` next to ``foo_bar`` (:ref:`next.E039 <ref-system-checks>`).
+  Names collide only within one namespace, so the pages of a ``pages()`` tree are compared with each other and not with ``next``.
 
 Run them through ``uv run python manage.py check``.
 A clean exit confirms that every page resolves and every name is unique.
@@ -461,6 +546,9 @@ See also
 
    :doc:`url-reversing` for building URLs in Python and templates.
    :doc:`/content/howto/add-a-page` for a one page recipe.
+   :doc:`/content/howto/serve-an-application-under-a-prefix` for a tree under a prefix.
+   :doc:`project-layout` for the files of an application and the trees of a growing project.
+   :doc:`access` for the access a ``page.py`` declares over a directory of a tree.
    :doc:`/content/howto/reload-routes-from-code` for hot reload mechanics.
    :doc:`/content/internals/url-router` for the parser, dispatcher, and signal flow.
    :doc:`/content/ref/urls` for the public API.

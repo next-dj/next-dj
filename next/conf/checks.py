@@ -72,8 +72,7 @@ _SILENCE_HINT = (
 def check_next_framework_value_types(*args, **kwargs) -> list[CheckMessage]:
     """Report `NEXT_FRAMEWORK` values whose type the merge would silently drop.
 
-    A non-dict `NEXT_FRAMEWORK` skips the per-key probes and carries its own id, so
-    silencing one mistyped key never silences "the whole setting is ignored".
+    A non-dict `NEXT_FRAMEWORK` skips the per-key probes and carries its own id.
     """
     raw = getattr(settings, USER_SETTING, None)
     if raw is None:

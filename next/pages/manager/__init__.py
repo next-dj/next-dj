@@ -17,6 +17,7 @@ from next.conf import next_framework_settings
 from next.deps.cache import render_dep_cache
 from next.deps.resolver import current_resolver
 from next.introspect import declared_file, registering_file
+from next.pages.access import PageDeclarations
 from next.pages.loaders import (
     LayoutTemplateLoader,
     build_registered_loaders,
@@ -43,6 +44,7 @@ from next.pages.signals import page_rendered, template_loaded
 from next.pages.visits import visit_request
 from next.ports import static_assets_slot
 from next.seeding import (
+    DEP_CACHE_KEY,
     JS_CONTEXT_KEY,
     JS_SERIALIZERS_KEY,
     METADATA_KEY,
@@ -79,8 +81,7 @@ logger = logging.getLogger(__name__)
 class _BodyResolution:
     """The per-request outcome of `Page._resolve_page_body`.
 
-    `http_response` is typed `HttpResponseBase` so a streaming response passes through
-    unchanged, and a `dynamic` string body has no compiled source to render a zone.
+    `http_response` may stream, and a `dynamic` body has no source to render a zone.
     """
 
     body: str | None = None
@@ -88,8 +89,11 @@ class _BodyResolution:
     dynamic: bool = False
 
 
-class Page:
-    """Coordinate template loading, context, layouts, rendering, and URL wiring."""
+class Page(PageDeclarations):
+    """Coordinate template loading, context, layouts, rendering, and URL wiring.
+
+    Its access declarations bind its own page, and the pages below under `inherit=True`.
+    """
 
     def __init__(self) -> None:
         """Initialise fresh registries and the layout loader.
@@ -101,11 +105,15 @@ class Page:
         self._context_manager = PageContextRegistry()
         self._metadata_registry = PageMetadataRegistry()
 
+    @property
+    def contexts(self) -> PageContextRegistry:
+        """Return the registry of every `@context`, read by the checks and the tools."""
+        return self._context_manager
+
     def register_template(self, file_path: Path, template_str: str) -> None:
         """Store rendered template source for `file_path`.
 
-        The compiled template and the memoised path facts are dropped with it, so every
-        layer keyed by the page path is invalidated together.
+        The compiled template and path facts go with it, invalidating every layer.
         """
         self._templates.composed[file_path] = template_str
         self._templates.compiled.pop(file_path)
@@ -143,8 +151,7 @@ class Page:
     ) -> Callable[..., Any]:
         """Register a keyed or dict-merge `@context` for the file declaring `func`.
 
-        `serialize=True` publishes the value on `window.Next.context`, `serializer=`
-        overrides `JS_CONTEXT_SERIALIZER`, and `zone=` binds the callable to one zone.
+        `serialize=True` publishes to the client, `zone=` binds one zone.
         """
         registered_from = registering_file()
 
@@ -210,8 +217,7 @@ class Page:
     def static_metadata(self, file_path: Path) -> StaticMetadata:
         """Return the metadata of `file_path` readable without a request.
 
-        A chain the schema refuses reads as the site defaults under `noindex`, and the
-        refusal is contained as `contained_chain` describes.
+        A chain the schema refuses reads as site defaults under `noindex`.
         """
         return static_metadata(self._metadata_registry, file_path)
 
@@ -248,8 +254,7 @@ class Page:
     ) -> dict[str, object]:
         """Build the full render context dict used by `render`.
 
-        `JS_CONTEXT_KEY` carries the `serialize=True` subset, which `render` pops for
-        the `StaticCollector`. A `_requested_zones` batch stays out of the dict.
+        `JS_CONTEXT_KEY` carries the `serialize=True` subset, which `render` pops.
         """
         return self._render_context(
             file_path, request, kwargs, _requested_zones, render_dep_cache(request)
@@ -284,6 +289,7 @@ class Page:
         context_data[METADATA_KEY] = MetadataThunk(
             self._metadata_registry, file_path, request, url_kwargs, dep_cache
         )
+        context_data[DEP_CACHE_KEY] = dep_cache
 
         if request is not None:
             context_data[REQUEST_KEY] = request
@@ -332,7 +338,6 @@ class Page:
     ) -> _BodyResolution:
         """Resolve the page body per-request.
 
-        The order is `render()`, the `template` attribute, the loader chain, then empty.
         An `HttpResponseBase` from `render()` bypasses the layout and static pipelines.
         """
         if module is not None:
@@ -376,8 +381,7 @@ class Page:
     ) -> tuple[str, StaticCollector]:
         """Render `template` and inject collected static assets.
 
-        `template` is either a precompiled `Template` or raw source parsed here. The
-        collector comes back with the HTML, so telemetry needs no second render.
+        The collector returns with the HTML, so telemetry needs no second render.
         """
         collector = seed_collector(file_path, context_data)
         compiled = template if isinstance(template, Template) else Template(template)
@@ -425,8 +429,7 @@ class Page:
     ) -> str:
         """Compose `body` through layouts and render.
 
-        Only the layout skeleton is cached, so a dynamic body produced by
-        `render()` never reaches the template registry.
+        Only the layout skeleton is cached, so a `render()` body skips the registry.
         """
         start = time.perf_counter()
         skeleton = self._layout_skeleton_for(file_path)
@@ -450,8 +453,7 @@ class Page:
     def composed_template_for(self, file_path: Path) -> Template:
         """Return the compiled composed template for the static body.
 
-        Both caches are keyed by the page and become stale together. The source is held
-        in a local, because the bound may evict it between two reads.
+        The source is held in a local, because the bound may evict it between two reads.
         """
         templates = self._templates
         composed = templates.composed.get(file_path)
@@ -476,8 +478,7 @@ class Page:
     ) -> str:
         """Render the page with Django `Template` and the static collector.
 
-        The body comes from the `template` attribute or a file-based loader and is
-        composed through the layout chain, so a direct caller never invokes `render()`.
+        The body comes from `template` or a loader, so `render()` is never invoked here.
         """
         start = time.perf_counter()
         template = self.composed_template_for(file_path)
@@ -492,16 +493,11 @@ class Page:
     ) -> tuple[HttpResponseBase | None, bool]:
         """Resolve a page body once, returning its short-circuit response and its kind.
 
-        `render()` runs with the same injection as the unified view, against a copy of
-        the request that presents a GET visit of `visit_url`, so a guard that reads the
-        request behaves as it would on a visit. A caller that knows no URL for the page
-        passes `None` and keeps the current path. A page without a `render()` authorizes
-        every caller, as its static view does, and loads no body.
+        `render()` sees a GET visit of `visit_url`, a page without it authorizes anyone.
         """
         module, error = load_page_module(file_path)
         if error is not None:
-            # Not Http404, since a 404 would refer to the caller URL rather than the
-            # morph target, and continuing would bypass the guards of the page.
+            # Not Http404, since it names the caller URL, and continuing skips guards.
             raise error
         render_func = getattr(module, "render", None) if module is not None else None
         if not callable(render_func):
@@ -549,8 +545,7 @@ context = page.context
 def reset_context_registry() -> None:
     """Clear the shared page-context registry for a from-disk rebuild.
 
-    The check-cache reset pairs this with the module memo so a re-executed
-    `page.py` repopulates the registry from its current source.
+    Paired with the module memo reset so a re-executed `page.py` repopulates it.
     """
     page._context_manager.reset()
 

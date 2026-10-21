@@ -22,16 +22,14 @@ def page_reverse(
     return reverse(f"{namespace}:{full_name}", kwargs=kwargs or None)
 
 
-# Lazy variant for values evaluated at class-definition time, before the
-# URLconf is ready, such as `Meta.success_url` on form classes.
+# Lazy variant for values read before the URLconf is ready, like `Meta.success_url`.
 page_reverse_lazy = lazy(page_reverse, str)
 
 
 def with_query(base: str, **overrides) -> str:
     """Return `base` with its query string updated by `overrides`.
 
-    A `None` or empty list/tuple value drops its key, a non-empty list or
-    tuple sets a multi-valued key, and anything else sets a single value.
+    A `None` or empty list drops its key and a non-empty one sets a multi-value key.
     """
     parts = urlsplit(base)
     params = parse_qsl(parts.query, keep_blank_values=True)

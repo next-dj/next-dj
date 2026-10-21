@@ -13,11 +13,29 @@ from next.forms.backends import FormActionBackend, RegistryFormActionBackend
 from next.pages.manager import page
 from next.partial import checks
 from next.partial.registry import register_patch_op
+from tests.pages.checks.metadata.trees import (
+    component_template,
+    framework,
+    layout_root,
+    templated_page,
+)
 from tests.support import (
     PARTIAL_ROUTER_MANAGER_TARGETS,
     RootPagesRouter,
     patch_checks_router_manager_with_routers,
     patched_router_manager,
+)
+from tests.support.guards import (
+    CHILDREN_BODY,
+    GUARDED_CHILDREN,
+    GUARDED_SET_SLOT,
+    GUARDED_SLOT_VARIABLE,
+    NESTED_COMPONENT_BODY,
+    PERM,
+    PLAIN_COMPONENT,
+    SECRET_ZONE,
+    fill_slot,
+    wrap,
 )
 
 
@@ -37,8 +55,7 @@ def _scanned_root(root: Path) -> Iterator[None]:
 def _context_pages(*pages: tuple[Path, str, str]) -> Iterator[None]:
     """Point the page-scanning checks at real on-disk page directories.
 
-    Real imports and compiles match production, so a zone tag and a `@context`
-    registration are recorded the same way as in a live process.
+    Real imports and compiles record zone tags and `@context` as a live process does.
     """
     root = pages[0][0].parent.parent
     for page_file, source, body in pages:
@@ -118,6 +135,27 @@ class TestZoneInLoopCheck:
             ids = [m.id for m in checks.check_zone_not_in_loop()]
         assert ids == [checks.E_ZONE_IN_FOR]
 
+    def test_a_zone_nested_in_a_zone_under_for(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "loop_nested")
+        body = (
+            "{% for item in items %}"
+            '{% zone "outer" %}{% zone "inner" %}<p>{{ item }}</p>{% endzone %}'
+            "{% endzone %}{% endfor %}"
+        )
+        with _composed_pages((page_file, body)):
+            messages = checks.check_zone_not_in_loop()
+        assert [m.id for m in messages] == [checks.E_ZONE_IN_FOR] * 2
+        assert [m.msg.split('"')[1] for m in messages] == ["outer", "inner"]
+
+    def test_a_loop_inside_a_zone_is_silent(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "loop_inside")
+        body = (
+            '{% zone "outer" %}{% for item in items %}{{ item }}{% endfor %}'
+            '{% zone "inner" %}x{% endzone %}{% endzone %}'
+        )
+        with _composed_pages((page_file, body)):
+            assert checks.check_zone_not_in_loop() == []
+
     def test_zone_outside_loop_is_silent(self, tmp_path: Path) -> None:
         page_file = _page_dir(tmp_path, "no_loop")
         body = '{% zone "row" %}<p>{{ a }}</p>{% endzone %}'
@@ -146,11 +184,214 @@ class TestZoneInIfCheck:
             ids = [m.id for m in checks.check_zone_not_in_if()]
         assert ids == [checks.E_ZONE_IN_IF]
 
+    def test_a_zone_nested_in_a_zone_under_if(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "if_nested")
+        body = (
+            '{% zone "outer" %}{% if cond %}{% zone "inner" %}<p>{{ a }}</p>'
+            "{% endzone %}{% endif %}{% endzone %}"
+        )
+        with _composed_pages((page_file, body)):
+            messages = checks.check_zone_not_in_if()
+        assert [m.id for m in messages] == [checks.E_ZONE_IN_IF]
+        assert '"inner"' in messages[0].msg
+
+    def test_two_zones_deep_under_if(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "if_deep")
+        body = (
+            '{% if cond %}{% zone "outer" %}{% zone "inner" %}x{% endzone %}'
+            "{% endzone %}{% endif %}"
+        )
+        with _composed_pages((page_file, body)):
+            messages = checks.check_zone_not_in_if()
+        assert [m.msg.split('"')[1] for m in messages] == ["outer", "inner"]
+
     def test_zone_outside_if_is_silent(self, tmp_path: Path) -> None:
         page_file = _page_dir(tmp_path, "no_if")
         body = '{% zone "guard" %}{% if cond %}<p>{{ a }}</p>{% endif %}{% endzone %}'
         with _composed_pages((page_file, body)):
             assert checks.check_zone_not_in_if() == []
+
+    @pytest.mark.usefixtures("guard_tags")
+    def test_a_tag_the_check_cannot_read(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "staffonly")
+        body = (
+            '{% load guard_tags %}{% staffonly %}{% zone "outer" %}'
+            '{% zone "inner" %}x{% endzone %}{% endzone %}{% endstaffonly %}'
+        )
+        with _composed_pages((page_file, body)):
+            messages = checks.check_zone_not_in_if()
+        assert [m.id for m in messages] == [checks.E_ZONE_IN_IF] * 2
+        assert all("inside a {% staffonly %} block" in m.msg for m in messages)
+
+    def test_a_django_block_tag_is_silent(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "spaceless")
+        body = '{% spaceless %}{% zone "guard" %}x{% endzone %}{% endspaceless %}'
+        with _composed_pages((page_file, body)):
+            assert checks.check_zone_not_in_if() == []
+
+
+class TestZoneInHasPermCheck:
+    """`next.E161` fires for a zone a `{% has_perm %}` holds, in either branch."""
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param(
+                "{% has_perm 'blog.change_post' %}"
+                '{% zone "guard" %}<p>{{ a }}</p>{% endzone %}'
+                "{% endhas_perm %}",
+                id="granted-branch",
+            ),
+            pytest.param(
+                "{% has_perm 'blog.change_post' post %}plain{% else %}"
+                '{% zone "guard" %}<p>{{ a }}</p>{% endzone %}'
+                "{% endhas_perm %}",
+                id="else-branch",
+            ),
+        ],
+    )
+    def test_zone_in_has_perm(self, tmp_path: Path, body: str) -> None:
+        page_file = _page_dir(tmp_path, "perm")
+        with _composed_pages((page_file, body)):
+            (message,) = checks.check_zone_not_in_has_perm()
+        assert message.id == checks.E_ZONE_IN_HAS_PERM
+        assert message.obj == str(page_file)
+        assert message.msg == (
+            f'Zone "guard" in {page_file} is nested inside a {{% has_perm %}} block. '
+            "A standalone zone render does not ask the permission, so a partial "
+            "request for the zone is refused with a 400. Ask the permission inside "
+            "the zone body instead."
+        )
+
+    def test_zone_outside_has_perm_is_silent(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "no_perm")
+        body = (
+            '{% zone "guard" %}'
+            "{% has_perm 'blog.change_post' %}<p>{{ a }}</p>{% endhas_perm %}"
+            "{% endzone %}"
+        )
+        with _composed_pages((page_file, body)):
+            assert checks.check_zone_not_in_has_perm() == []
+
+    def test_a_zone_nested_in_a_zone_under_has_perm(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "perm_nested")
+        body = (
+            '{% zone "outer" %}{% has_perm "blog.change_post" %}'
+            '{% zone "inner" %}<p>{{ a }}</p>{% endzone %}'
+            "{% endhas_perm %}{% endzone %}"
+        )
+        with _composed_pages((page_file, body)):
+            messages = checks.check_zone_not_in_has_perm()
+        assert [m.id for m in messages] == [checks.E_ZONE_IN_HAS_PERM]
+        assert messages[0].msg.split('"')[1] == "inner"
+
+    def test_the_code_is_e161(self) -> None:
+        assert checks.E_ZONE_IN_HAS_PERM == "next.E161"
+
+
+class TestZoneInGuardedComponentPart:
+    """`next.E161` fires for a zone in the body of a component that guards it."""
+
+    @pytest.fixture()
+    def pages(self, tmp_path: Path) -> Path:
+        return layout_root(tmp_path)
+
+    def _messages(self, pages: Path, component: str | None, body: str) -> list:
+        if component is not None:
+            component_template(pages, "guarded", component)
+        component_template(pages, "plain", PLAIN_COMPONENT)
+        templated_page(pages / "hello", "x = 1\n", body)
+        with override_settings(NEXT_FRAMEWORK=framework(pages)):
+            return checks.check_zone_not_in_has_perm()
+
+    @pytest.mark.parametrize(
+        ("component", "body"),
+        [
+            pytest.param(GUARDED_SET_SLOT, fill_slot("content"), id="guarded-slot"),
+            pytest.param(GUARDED_SET_SLOT, fill_slot("aside"), id="any-slot"),
+            pytest.param(
+                GUARDED_SLOT_VARIABLE, fill_slot("content"), id="slot-variable"
+            ),
+            pytest.param(GUARDED_CHILDREN, CHILDREN_BODY, id="children"),
+            pytest.param(
+                GUARDED_SET_SLOT, CHILDREN_BODY, id="children-of-a-slot-guard"
+            ),
+            pytest.param(
+                GUARDED_SET_SLOT, NESTED_COMPONENT_BODY, id="nested-component"
+            ),
+            pytest.param(None, fill_slot("content"), id="unresolved-component"),
+            pytest.param("{% has_perm %}", fill_slot("content"), id="uncompilable"),
+        ],
+    )
+    def test_a_zone_in_a_guarding_component_errors(
+        self, pages: Path, component: str | None, body: str
+    ) -> None:
+        messages = self._messages(pages, component, body)
+        page_file = pages / "hello" / "page.py"
+        assert [m.id for m in messages] == [checks.E_ZONE_IN_HAS_PERM]
+        assert messages[0].msg.startswith(
+            f'Zone "cz" in {page_file} sits in the body of the component "guarded", '
+            "which has a component.py, or whose template reaches a {% has_perm %} "
+            "block, a condition around its body or a reference the check cannot "
+            "follow."
+        )
+        assert messages[0].obj == str(page_file)
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param(wrap("plain"), id="plain-children"),
+            pytest.param(fill_slot("aside", component="plain"), id="plain-slot"),
+            pytest.param(SECRET_ZONE + wrap("guarded", "x"), id="beside-the-component"),
+        ],
+    )
+    def test_a_zone_outside_a_guarding_component_is_silent(
+        self, pages: Path, body: str
+    ) -> None:
+        assert self._messages(pages, GUARDED_CHILDREN, body) == []
+
+    @pytest.mark.usefixtures("guard_tags")
+    @pytest.mark.parametrize(
+        ("component", "codes"),
+        [
+            pytest.param(
+                '{% use_style "card.css" %}<div>{{ children }}</div>', [], id="next"
+            ),
+            pytest.param(
+                "{% load guard_tags %}{% peek %}<div>{{ children }}</div>",
+                [checks.E_ZONE_IN_HAS_PERM],
+                id="third-party",
+            ),
+        ],
+    )
+    def test_a_context_tag_in_the_component(
+        self, pages: Path, component: str, codes: list[str]
+    ) -> None:
+        messages = self._messages(pages, component, CHILDREN_BODY)
+        assert [m.id for m in messages] == codes
+
+    def test_a_component_with_a_module_guards(self, pages: Path) -> None:
+        folder = pages / "_components" / "guarded"
+        folder.mkdir(parents=True)
+        (folder / "component.py").write_text("x = 1\n")
+        messages = self._messages(pages, None, CHILDREN_BODY)
+        assert [m.id for m in messages] == [checks.E_ZONE_IN_HAS_PERM]
+
+    def test_a_repeated_zone_is_named_once(self, pages: Path) -> None:
+        body = fill_slot("content") + fill_slot("content")
+        messages = self._messages(pages, GUARDED_SET_SLOT, body)
+        assert [m.id for m in messages] == [checks.E_ZONE_IN_HAS_PERM]
+
+    def test_a_page_block_beside_the_component_is_named_first(
+        self, pages: Path
+    ) -> None:
+        body = f'{{% has_perm "{PERM}" %}}{SECRET_ZONE}{{% endhas_perm %}}' + (
+            CHILDREN_BODY
+        )
+        messages = self._messages(pages, GUARDED_CHILDREN, body)
+        assert [m.id for m in messages] == [checks.E_ZONE_IN_HAS_PERM] * 2
+        assert "inside a {% has_perm %} block" in messages[0].msg
+        assert 'the component "guarded"' in messages[1].msg
 
 
 class TestLazyPlaceholderCheck:
@@ -212,17 +453,11 @@ class TestComposedTemplateCompileCheck:
         assert [m.obj for m in messages] == [str(page_file)]
 
 
-class TestComposedTemplateCompileIsDeployOnly:
-    """`next.E072` compiles the whole tree, so only `check --deploy` runs it."""
+class TestComposedTemplateCompileRunsOnCheck:
+    """`next.E072` runs on a plain `check`, as the other checks compile the tree too."""
 
-    def test_absent_from_the_default_registry(self) -> None:
-        assert (
-            checks.check_composed_templates_compile not in check_registry.get_checks()
-        )
-
-    def test_present_once_deployment_checks_are_asked_for(self) -> None:
-        registered = check_registry.get_checks(include_deployment_checks=True)
-        assert checks.check_composed_templates_compile in registered
+    def test_present_in_the_default_registry(self) -> None:
+        assert checks.check_composed_templates_compile in check_registry.get_checks()
 
 
 class TestWithOverZoneCheck:
@@ -266,43 +501,38 @@ class TestContextZoneNameCheck:
         assert "Declared zones: 'table'." in messages[0].msg
         assert messages[0].obj == str(page_file)
 
-    def test_declared_zone_is_silent(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("decorator", "body"),
+        [
+            pytest.param(
+                "'rows', zone='table'",
+                '{% zone "table" %}<p>{{ rows }}</p>{% endzone %}',
+                id="declared",
+            ),
+            pytest.param(
+                "'rows', zone='inner'",
+                '{% zone "outer" %}<p>{{ rows }}</p>'
+                '{% zone "inner" %}<b>{{ rows }}</b>{% endzone %}'
+                "{% endzone %}",
+                id="nested",
+            ),
+            pytest.param(
+                "'rows'",
+                '{% zone "table" %}<p>{{ rows }}</p>{% endzone %}',
+                id="no-zone",
+            ),
+        ],
+    )
+    def test_declared_zone_is_silent(
+        self, tmp_path: Path, decorator: str, body: str
+    ) -> None:
         page_file = _page_dir(tmp_path, "zone_ok")
         source = (
             "from next.pages import page\n\n"
-            "@page.context('rows', zone='table')\n"
+            f"@page.context({decorator})\n"
             "def rows():\n"
             "    return []\n"
         )
-        body = '{% zone "table" %}<p>{{ rows }}</p>{% endzone %}'
-        with _context_pages((page_file, source, body)):
-            assert checks.check_context_zone_names_exist() == []
-
-    def test_nested_zone_counts_as_declared(self, tmp_path: Path) -> None:
-        page_file = _page_dir(tmp_path, "zone_nested")
-        source = (
-            "from next.pages import page\n\n"
-            "@page.context('rows', zone='inner')\n"
-            "def rows():\n"
-            "    return []\n"
-        )
-        body = (
-            '{% zone "outer" %}<p>{{ rows }}</p>'
-            '{% zone "inner" %}<b>{{ rows }}</b>{% endzone %}'
-            "{% endzone %}"
-        )
-        with _context_pages((page_file, source, body)):
-            assert checks.check_context_zone_names_exist() == []
-
-    def test_context_without_a_zone_is_silent(self, tmp_path: Path) -> None:
-        page_file = _page_dir(tmp_path, "zone_less")
-        source = (
-            "from next.pages import page\n\n"
-            "@page.context('rows')\n"
-            "def rows():\n"
-            "    return []\n"
-        )
-        body = '{% zone "table" %}<p>{{ rows }}</p>{% endzone %}'
         with _context_pages((page_file, source, body)):
             assert checks.check_context_zone_names_exist() == []
 
@@ -477,8 +707,7 @@ class TestFormBackendPartialAwareCheck:
             assert checks.check_form_backend_partial_aware() == []
 
     def test_inherited_shape_response_is_silent(self) -> None:
-        # a subclass that does not override shape_response inherits the
-        # partial-aware base method, so the check stays quiet
+        # a subclass without its own shape_response inherits the partial-aware base
         assert _PartialUnawareBackend.shape_response is not (
             FormActionBackend.shape_response
         )
@@ -517,8 +746,7 @@ class TestManifestVersionStorageCheck:
             assert checks.check_manifest_version_has_manifest_storage() == []
 
     def test_stock_project_is_silent(self) -> None:
-        # a project on the framework defaults never asked for the manifest, so the
-        # plain storage of a fresh startproject contradicts nothing
+        # a project on the framework defaults never asked for the manifest storage
         with override_settings(
             NEXT_FRAMEWORK={}, STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}
         ):
@@ -576,8 +804,7 @@ class TestAssetVersionMovesBetweenDeploysCheck:
         ids=["pinned_tag", "manifest_sentinel"],
     )
     def test_a_named_version_is_silent(self, options: dict[str, object]) -> None:
-        # A pinned tag is moved by hand and the sentinel is reported as next.W069,
-        # so neither case gets a second warning about the same decision.
+        # A pinned tag is moved by hand and the sentinel is reported as next.W069.
         with _partial_options(options):
             assert checks.check_asset_version_moves_between_deploys() == []
 
@@ -723,6 +950,7 @@ class TestChecksSilentOnValidComposite:
             assert checks.check_zone_name_is_slug() == []
             assert checks.check_zone_not_in_loop() == []
             assert checks.check_zone_not_in_if() == []
+            assert checks.check_zone_not_in_has_perm() == []
             assert checks.check_lazy_zone_has_placeholder() == []
             assert checks.check_with_directly_over_zone() == []
 

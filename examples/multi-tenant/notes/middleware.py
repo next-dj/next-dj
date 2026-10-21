@@ -25,6 +25,11 @@ MISSING_TENANT_DEBUG_HINT = " In DEBUG you may also pass ?tenant=<slug> for a de
 UNKNOWN_TENANT_BODY = "Unknown tenant."
 
 
+def get_active_tenant(request: HttpRequest) -> Tenant | None:
+    """Return the tenant `TenantMiddleware` attached to `request`, if any."""
+    return getattr(request, "tenant", None)
+
+
 def is_debug_fallback_enabled() -> bool:
     """Return whether the DEBUG-only query/cookie fallbacks are active."""
     return bool(settings.DEBUG)
@@ -33,8 +38,7 @@ def is_debug_fallback_enabled() -> bool:
 class TenantMiddleware:
     """Resolve the active tenant for every request out of the `X-Tenant` header.
 
-    Safe only behind a reverse proxy that is the sole route in, derives the slug
-    itself, and always overwrites rather than fills in a client-supplied header.
+    Safe only behind a reverse proxy that derives the slug and overwrites the header.
     """
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
@@ -52,8 +56,7 @@ class TenantMiddleware:
         try:
             tenant = Tenant.objects.get(slug=slug)
         except Tenant.DoesNotExist:
-            # The body never repeats the submitted slug. A reflected value enumerates
-            # tenant names for an attacker and, in an HTML response, is an XSS sink.
+            # The body never repeats the slug, a reflected value is an XSS sink.
             response = HttpResponse(UNKNOWN_TENANT_BODY, status=404)
             if slug_came_from_cookie:
                 response.delete_cookie(COOKIE_NAME)
@@ -61,8 +64,7 @@ class TenantMiddleware:
 
         if debug_query:
             response = HttpResponseRedirect(_strip_tenant_query(request))
-            # No `secure=True`, because the fallback that writes this cookie runs only
-            # under DEBUG, where the demo is served over plain HTTP.
+            # No `secure=True`, this fallback runs only under DEBUG over plain HTTP.
             response.set_cookie(COOKIE_NAME, slug, httponly=True, samesite="Lax")
             return response
 
@@ -100,8 +102,7 @@ def _resolve_tenant_slug(request: HttpRequest) -> tuple[str | None, bool, bool]:
 def _strip_tenant_query(request: HttpRequest) -> str:
     """Return the request path with the `tenant` query parameter removed.
 
-    A path the client sent as `//host/...` is a protocol-relative URL in a `Location`
-    header, so the target passes the same vetting Django's own `LoginView` applies.
+    A `//host/...` path is vetted the way Django's own `LoginView` vets a redirect.
     """
     remaining = request.GET.copy()
     remaining.pop(QUERY_PARAM, None)

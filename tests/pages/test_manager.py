@@ -42,7 +42,7 @@ class TestPage:
     def test_init(self, page_instance) -> None:
         """A fresh ``Page`` starts with empty registries and its own layout loader."""
         assert not page_instance._templates.composed
-        assert isinstance(page_instance._context_manager, PageContextRegistry)
+        assert isinstance(page_instance.contexts, PageContextRegistry)
         assert isinstance(page_instance._layout_loader, LayoutTemplateLoader)
 
     def test_register_template_direct(self, page_instance) -> None:
@@ -124,7 +124,7 @@ class TestPage:
 
             func = get_context_data_bare
 
-        registry = page_instance._context_manager._context_registry
+        registry = page_instance.contexts._context_registry
         assert Path(__file__) in registry
         assert expected_key in registry[Path(__file__)]
         entry = registry[Path(__file__)][expected_key]
@@ -139,7 +139,7 @@ class TestPage:
         def get_inherited_value() -> str:
             return "inherited_value"
 
-        registry = page_instance._context_manager._context_registry
+        registry = page_instance.contexts._context_registry
         assert Path(__file__) in registry
         assert "inherited_key" in registry[Path(__file__)]
         entry = registry[Path(__file__)]["inherited_key"]
@@ -154,7 +154,7 @@ class TestPage:
         def get_context_data():
             return {"key1": "value1", "key2": "value2"}
 
-        registry = page_instance._context_manager._context_registry
+        registry = page_instance.contexts._context_registry
         assert Path(__file__) in registry
         assert None in registry[Path(__file__)]
         entry = registry[Path(__file__)][None]
@@ -169,7 +169,7 @@ class TestPage:
         """``render`` merges the registered context functions with the caller kwargs."""
         page_instance.register_template(test_file_path, case.template)
         for key, func in case.context.items():
-            page_instance._context_manager.register_context(test_file_path, key, func)
+            page_instance.contexts.register_context(test_file_path, key, func)
 
         assert page_instance.render(test_file_path, **case.kwargs) == case.expected
 
@@ -178,16 +178,12 @@ class TestPage:
         file1 = Path("/test/path/page1.py")
         template1 = "Page 1: {{ title }}"
         page_instance.register_template(file1, template1)
-        page_instance._context_manager.register_context(
-            file1, "title", lambda: "First Page"
-        )
+        page_instance.contexts.register_context(file1, "title", lambda: "First Page")
 
         file2 = Path("/test/path/page2.py")
         template2 = "Page 2: {{ title }}"
         page_instance.register_template(file2, template2)
-        page_instance._context_manager.register_context(
-            file2, "title", lambda: "Second Page"
-        )
+        page_instance.contexts.register_context(file2, "title", lambda: "Second Page")
 
         result1 = page_instance.render(file1)
         result2 = page_instance.render(file2)
@@ -215,7 +211,7 @@ class TestPage:
         def layout_func() -> str:
             return "inherited_value"
 
-        page_instance._context_manager.register_context(
+        page_instance.contexts.register_context(
             page_file, "inherited_var", layout_func, inherit_context=True
         )
 
@@ -245,14 +241,14 @@ class TestPage:
         def layout_func() -> str:
             return "layout_value"
 
-        page_instance._context_manager.register_context(
+        page_instance.contexts.register_context(
             page_file, "var", layout_func, inherit_context=True
         )
 
         def child_func() -> str:
             return "child_value"
 
-        page_instance._context_manager.register_context(
+        page_instance.contexts.register_context(
             child_page_file, "var", child_func, inherit_context=False
         )
 
@@ -264,15 +260,12 @@ class TestPage:
         self, page_instance, test_file_path
     ) -> None:
         """Registering a key creates the per-file entry without pre-seeding it."""
-        page_instance._context_manager.register_context(
+        page_instance.contexts.register_context(
             test_file_path, "test_key", lambda: "test_value"
         )
 
-        assert test_file_path in page_instance._context_manager._context_registry
-        assert (
-            "test_key"
-            in page_instance._context_manager._context_registry[test_file_path]
-        )
+        assert test_file_path in page_instance.contexts._context_registry
+        assert "test_key" in page_instance.contexts._context_registry[test_file_path]
 
 
 class TestPageHasTemplateAndLazyRender:
@@ -391,31 +384,30 @@ class TestGlobalPageInstance:
     def clear_global_state(self):
         """Give each test a clean global page state, then restore the baseline.
 
-        The global `page` singleton holds providers registered at URL-conf build time,
-        so a bare clear would leave a later render on the same xdist worker with none.
+        The global `page` holds URL-conf-time providers a bare clear would drop.
         """
         template_snapshot = {
             path: page._templates.composed[path] for path in page._templates.composed
         }
         context_snapshot = {
             path: dict(entries)
-            for path, entries in page._context_manager._context_registry.items()
+            for path, entries in page.contexts._context_registry.items()
         }
         page._templates.composed.clear()
-        page._context_manager._context_registry.clear()
+        page.contexts._context_registry.clear()
         yield
         page._templates.composed.clear()
         for path, source in template_snapshot.items():
             page._templates.composed[path] = source
-        page._context_manager._context_registry.clear()
-        page._context_manager._context_registry.update(context_snapshot)
+        page.contexts._context_registry.clear()
+        page.contexts._context_registry.update(context_snapshot)
 
     def test_global_page_instance(self) -> None:
         """The exported ``page`` is a ``Page`` carrying the same registries."""
         assert page is not None
         assert isinstance(page, Page)
         assert not page._templates.composed
-        assert not page._context_manager._context_registry
+        assert not page.contexts._context_registry
 
     def test_context_alias(self) -> None:
         """The exported ``context`` is the singleton's own bound decorator."""
@@ -436,7 +428,7 @@ class TestGlobalPageInstance:
         def get_global_value() -> str:
             return "global_value"
 
-        registry = page._context_manager._context_registry
+        registry = page.contexts._context_registry
         assert Path(__file__) in registry
         assert "global_key" in registry[Path(__file__)]
 
@@ -458,7 +450,7 @@ class TestGlobalPageInstance:
         def test_function() -> str:
             return "test_value"
 
-        registry = page._context_manager._context_registry
+        registry = page.contexts._context_registry
         assert Path(__file__) in registry
         assert "test_key" in registry[Path(__file__)]
         entry = registry[Path(__file__)]["test_key"]
@@ -487,7 +479,7 @@ class TestGlobalPageInstance:
         assert spec.loader is not None
         spec.loader.exec_module(importlib.util.module_from_spec(spec))
 
-        registry = page._context_manager._context_registry
+        registry = page.contexts._context_registry
         assert script in registry
         assert "from_page_module" in registry[script]
         assert "from_page_module" not in registry.get(Path(__file__), {})
@@ -504,7 +496,7 @@ class TestContextMisattribution:
         def declared_here() -> str:
             return "value"
 
-        assert instance._context_manager.misattributed() == ()
+        assert instance.contexts.misattributed() == ()
 
     def test_helper_from_another_module_is_recorded_once(self) -> None:
         """Decorating an imported helper records the pair of files it spans."""
@@ -513,7 +505,7 @@ class TestContextMisattribution:
         instance.context("greeting")(handler_declared_here)
         instance.context("greeting_again")(handler_declared_here)
 
-        records = instance._context_manager.misattributed()
+        records = instance.contexts.misattributed()
         assert [(r.registered_from, r.declared_in, r.name) for r in records] == [
             (Path(__file__), Path(attribution.__file__), "handler_declared_here")
         ]
@@ -523,9 +515,9 @@ class TestContextMisattribution:
         instance = Page()
         instance.context("greeting")(handler_declared_here)
 
-        instance._context_manager.reset()
+        instance.contexts.reset()
 
-        assert instance._context_manager.misattributed() == ()
+        assert instance.contexts.misattributed() == ()
 
 
 class TestFitPageCaches:
@@ -901,8 +893,7 @@ class TestBrokenPageImportView:
     def test_broken_page_traceback_does_not_grow_across_requests(
         self, page_instance, tmp_path, url_parser
     ) -> None:
-        # Re-raising one stored instance would append the raise chain to its
-        # traceback on every request and pin request frame locals alive.
+        # Re-raising a stored instance grows its traceback and pins request frames.
         _page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
         with override_settings(DEBUG=True):
             with pytest.raises(PageModuleImportError) as first:
@@ -973,6 +964,28 @@ class TestBrokenPageImportView:
         assert response.status_code == 200
         assert b"<p>revived</p>" in response.content
 
+    @pytest.mark.parametrize(
+        "fixed",
+        [
+            "from next.pages import page\n",
+            "from next.pages import page\n\npage.login_required()\n",
+            "from next.pages import page\n\npage.login_required(inherit=True)\n",
+        ],
+        ids=["bare", "own", "inherit"],
+    )
+    def test_a_fix_without_a_body_answers_404(
+        self, page_instance, tmp_path, url_parser, fixed
+    ) -> None:
+        (tmp_path / "layout.djx").write_text("<main>{% template %}</main>")
+        page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
+
+        stamp = page_file.stat().st_mtime + 10
+        page_file.write_text(fixed)
+        os.utime(page_file, (stamp, stamp))
+
+        with pytest.raises(Http404):
+            pattern.callback(build_page_request())
+
     def test_page_broken_after_build_raises_under_debug(
         self, page_instance, tmp_path, url_parser
     ) -> None:
@@ -986,8 +999,7 @@ class TestBrokenPageImportView:
         stamp = page_file.stat().st_mtime + 10
         page_file.write_text(_BROKEN_SYNTAX)
         os.utime(page_file, (stamp, stamp))
-        # Another subsystem's reload records the failure, as static
-        # discovery or a checks pass would on a real deployment.
+        # Another subsystem's reload records the failure, as static discovery would.
         assert load_python_module_memo(page_file) is None
 
         with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):

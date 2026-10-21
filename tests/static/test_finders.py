@@ -458,8 +458,7 @@ class TestMappedSourceStorage:
 class TestMalformedRouterSurvival:
     """The static paths read routers through the guard, so a wrong shape is inert.
 
-    The watch helpers are not mocked, so the test runs the real discovery against a
-    backend that returns bare paths instead of `PageRoot` entries.
+    Real discovery runs against a backend returning bare paths instead of `PageRoot`.
     """
 
     @contextmanager
@@ -500,8 +499,7 @@ class TestMalformedRouterSurvival:
                 "collectstatic", "--noinput", "--dry-run", "--ignore=*.py", stdout=out
             )
 
-        # The run completes, and the malformed backend contributes none of the
-        # co-located assets sitting in the tree it failed to report.
+        # The run completes and the malformed backend contributes no co-located assets.
         assert "template.css" not in out.getvalue()
 
 

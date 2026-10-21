@@ -52,8 +52,7 @@ class TestBenchCompositeRender:
     def test_render_end_to_end(self, tmp_path: Path, benchmark) -> None:
         """The whole composite render, from reading the template to the output.
 
-        Disk and template compilation dominate this number, so it tracks the
-        render as a whole rather than any single step of it.
+        Disk and template compilation dominate, so it tracks the render as a whole.
         """
         info = _build_composite_component(tmp_path)
         module_loader = ModuleLoader()
@@ -61,8 +60,7 @@ class TestBenchCompositeRender:
             module_loader, ComponentTemplateLoader(module_loader)
         )
         context = {"title": "Hi", COMPONENT_PROPS_CONTEXT_KEY: frozenset({"title"})}
-        # The first render imports component.py and registers its context
-        # function, which must not happen once per warmup iteration.
+        # The first render imports component.py once, not once per warmup iteration.
         renderer.render(info, context, None)
 
         benchmark(renderer.render, info, context, None)
@@ -114,8 +112,7 @@ def _build_plain_composite(root: Path) -> ComponentInfo:
 class TestBenchWarmRender:
     """Renders paying only what a warm production render pays.
 
-    The compiled template is cached and every module is imported before the
-    first timed call, so the rows price the render path itself.
+    Template and imports are warm before the first timed call.
     """
 
     @pytest.mark.benchmark(group="components.render")

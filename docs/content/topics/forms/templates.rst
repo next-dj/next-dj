@@ -124,7 +124,7 @@ The ``form`` variable
 Inside the block body the variable ``form`` holds the form instance.
 
 Initial render (GET).
-   The framework calls ``get_initial`` through the dependency resolver, constructs an unbound form from the returned data or instance, and publishes it as ``form``.
+   The framework calls ``get_form_kwargs`` through the dependency resolver when the class overrides it and ``get_initial`` otherwise, constructs an unbound form from the result, and publishes it as ``form``.
 
 Re-rendered page after a failing POST.
    The variable is the bound form with validation errors attached.

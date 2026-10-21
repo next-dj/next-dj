@@ -174,8 +174,7 @@ class TestAddAssetResolvesLoad:
 class TestAddAssetFollowsTheBackendRewrite:
     """A hand-written asset reaches the client through the same hook a page does.
 
-    The envelope ships bare URLs the client inserts itself, so a manifest built
-    around the hook would hand a rewriting deployment an unresolvable URL.
+    The client inserts bare URLs itself, so a manifest skipping the hook breaks them.
     """
 
     def test_a_url_passes_through_the_backend_hook(self, monkeypatch) -> None:
@@ -245,8 +244,7 @@ class TestAddAssetResolvesTheReference:
 class TestManifestBackendAnswersTheSameOnBothPaths:
     """A backend mapping names to build outputs agrees across page and patch.
 
-    The build URL is no staticfiles name, so a second pass through the manifest
-    would quietly fall back to storage and hand the client a different URL.
+    The build URL is no staticfiles name, so a second manifest pass would change it.
     """
 
     def test_a_patch_asset_carries_the_build_url_the_page_carries(self) -> None:

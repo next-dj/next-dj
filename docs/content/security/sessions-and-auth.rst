@@ -20,13 +20,17 @@ Session rotation follows from that.
 The framework never calls :func:`django.contrib.auth.login` or :func:`django.contrib.auth.logout`, so the key cycling those two perform against session fixation stays in project code that calls them.
 A login rendered through a form action is an ordinary handler calling the ordinary helper.
 
-The action guard is the one place the framework reads the user itself.
+The framework reads the user itself in two places, the access rule of the page tree and the action guard.
+A ``login_required()`` or ``permission_required()`` that a ``page.py`` declares tests ``request.user.is_authenticated`` and ``user.has_perm`` before the page, its actions, and its zones run, and it redirects an anonymous visitor to ``LOGIN_URL`` with the full path as ``next``, see :ref:`topics-permissions-tree`.
+The same declaration in a ``component.py`` hides the component from a refused user, which renders it as an empty string with no redirect.
+``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware`` asks the same login of every page, action, and zone that declares nothing, see :ref:`topics-access-default-login`.
 ``Meta.login_required`` and ``Meta.permission_required`` test ``request.user.is_authenticated`` and ``user.has_perms`` before any POST data reaches a handler, and an anonymous caller gets a 302 to ``LOGIN_URL`` carrying the validated origin path as ``next``, see :ref:`topics-forms-actions-guards`.
 ``manage.py check`` reports ``next.W060`` when an action declares ``permission_required`` while ``django.contrib.auth`` is out of ``INSTALLED_APPS``, because the guard cannot resolve a permission without it.
 
-Beyond that guard the framework runs project code that reads the user on its behalf.
+Beyond those checks the framework runs project code that reads the user on its behalf.
 A submission is authorized by the page its origin names, which means that page's ``render()`` runs on the POST and whatever identity check it performs decides the answer, see :doc:`/content/topics/pages`.
 The dynamic ``check_permissions`` and ``has_object_permission`` hooks read the user the same way, from application code the dispatcher calls.
+A permission registered in a ``permissions.py`` runs its predicate on the user and the bound row, through ``ObjectPermissionBackend`` in ``AUTHENTICATION_BACKENDS``, see :doc:`/content/topics/permissions`.
 
 Where the framework writes to the session
 -----------------------------------------
@@ -65,7 +69,7 @@ Every one of these is a stock Django setting, and ``manage.py check --deploy`` r
 - ``SESSION_COOKIE_SAMESITE`` decides whether a cross-site navigation carries the session, with ``"Lax"`` as the Django default and ``"Strict"`` as the tighter option.
 - ``SESSION_COOKIE_AGE`` and ``SESSION_EXPIRE_AT_BROWSER_CLOSE`` bound how long a session and any wizard draft inside it survive.
 - ``SESSION_ENGINE`` selects where the session lives, and a wizard argues for a server-side engine as described above.
-- ``LOGIN_URL`` is where a guarded action redirects an anonymous caller, so it points at a real view.
+- ``LOGIN_URL`` is where a guarded page or action redirects an anonymous caller, so it points at a real view, and under the default login that view is public.
 
 See Django's :doc:`session documentation <django:topics/http/sessions>` for the engines and :doc:`its deployment checklist <django:howto/deployment/checklist>` for the values a production run expects.
 
@@ -77,4 +81,5 @@ See also
    :doc:`csrf-and-forms` for the token flow and the cookie flags.
    :doc:`/content/topics/forms/wizard-backend` for the draft-persistence contract.
    :doc:`/content/howto/require-login-on-pages` for a project-wide login requirement.
+   :doc:`actions` for the rule a form action answers to.
    :doc:`overview` for the broader security picture.

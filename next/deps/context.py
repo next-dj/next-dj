@@ -1,8 +1,4 @@
-"""Resolution-context snapshot passed to providers during DI resolution.
-
-`RESERVED_KEYS` lists the kwarg names that `DependencyResolver` treats as fixed
-inputs rather than URL kwargs, and that the name-based providers refuse.
-"""
+"""Resolution-context snapshot passed to providers during DI resolution."""
 
 from __future__ import annotations
 
@@ -27,8 +23,7 @@ RESERVED_KEYS: Final[frozenset[str]] = frozenset(
 class ResolutionContext:
     """Per-call snapshot of the inputs available during dependency resolution.
 
-    Not frozen, because a frozen `__init__` is measurably slower on every resolve and
-    the mutable `stack` and `cache` already make the guarantee hollow.
+    Not frozen, as a frozen `__init__` is slower on every resolve.
     """
 
     request: HttpRequest | None

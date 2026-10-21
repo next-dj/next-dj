@@ -97,7 +97,7 @@ Every signal the framework emits is listed below with the subsystem that emits i
      - After the wizard ``done`` method returns a response below HTTP 400 for the final step.
    * - ``form_access_denied``
      - Forms
-     - When the origin page or a dynamic permission hook denies a request, never on the static guard path.
+     - When the access rule of the page tree, the origin page, a dynamic permission hook, or a registered permission on the bound form denies a request, never on the static guard path.
    * - ``form_backend_loaded``
      - Forms
      - After a form action backend is created from its configuration entry.
@@ -161,25 +161,16 @@ The partial-rendering stream signals appear in context in :doc:`/content/topics/
 Receiver patterns
 -----------------
 
-Connect once at startup.
+Receivers live in the ``signals.py`` of an application.
+At startup the ``next`` application imports that module from every installed application, after every ``deps.py`` and ``forms.py``, so the receivers connect once with no ``AppConfig.ready`` code.
+:doc:`application-layout` covers when an application declares a signal of its own.
 
-Django's app registry is not fully initialised at module import time, so the receiver import lives inside ``ready`` rather than at module level.
+The sweep covers third-party applications as well, the way Django's admin imports every ``admin.py``, so a package whose ``signals.py`` should load only behind a switch of its own keeps its receivers in a module of another name and connects them from its ``AppConfig.ready``.
 
-.. code-block:: python
-   :caption: notes/apps.py
-
-   from django.apps import AppConfig
-
-   class NotesConfig(AppConfig):
-       name = "notes"
-
-       def ready(self) -> None:
-           from notes import receivers  # noqa: F401
-
-Use ``django.dispatch.receiver`` to connect a callable to a signal.
+Django's :func:`~django.dispatch.receiver` connects a callable to a signal.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    import logging
 
@@ -195,6 +186,37 @@ Use ``django.dispatch.receiver`` to connect a callable to a signal.
 
 Several receivers can connect to one signal and they run in connection order.
 
+Waiting for the commit
+~~~~~~~~~~~~~~~~~~~~~~
+
+A receiver runs inside whatever transaction the sender has open.
+A receiver that sends mail, queues a task, or calls another service schedules that work with :func:`~django.db.transaction.on_commit`, so it never outlives a rolled-back change.
+
+.. code-block:: python
+   :caption: notes/signals.py
+
+   from functools import partial
+
+   from django.db import transaction
+   from django.db.models.signals import post_save
+   from django.dispatch import receiver
+   from notes.models import Note
+   from notes.services import reindex_note
+
+   @receiver(post_save, sender=Note)
+   def reindex(sender, instance, using, **kwargs) -> None:
+       transaction.on_commit(partial(reindex_note, instance), using=using)
+
+The call waits for the commit of the outermost transaction and never runs when the transaction rolls back, and a rolled-back savepoint drops only the calls scheduled inside it.
+Outside a transaction, in autocommit, it runs at once.
+The save, delete, and many-to-many model signals send the database alias as ``using``, and passing it on makes the hook wait on that database rather than on the default one.
+Inside a transaction the hook runs after ``send`` has returned, so its return value never reaches the caller and an exception it raises surfaces at the commit, while in autocommit it runs and raises inside ``send``.
+
+:func:`~django.db.transaction.on_commit` keeps the hook in the memory of the process until the commit.
+A process that dies between the commit and the hook, or a hook that raises, leaves the change stored and the reaction undone, and nothing retries it.
+That is an acceptable trade for a reaction that can be rebuilt, such as a cache entry or a search index.
+A reaction that may not be lost belongs in an outbox row written inside the same transaction, which a separate process delivers at least once.
+
 Failure contract
 ~~~~~~~~~~~~~~~~
 
@@ -207,7 +229,7 @@ Guard the receiver body against this.
 A receiver is an observation point, and its failure should cost an observation rather than a response, so wrap the work in ``try`` and log what it raised instead of letting it out.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    import logging
 
@@ -236,7 +258,7 @@ Call ``signal.disconnect(receiver)`` when a receiver should stop firing.
 The same ``dispatch_uid`` passed to ``connect`` can be supplied to ``disconnect`` so a receiver wired by string identifier can also be removed by that identifier.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    import logging
 

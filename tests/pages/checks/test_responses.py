@@ -101,7 +101,7 @@ class TestCsrfDelivery:
 class TestSharedPages:
     """`next.W113` and `next.W114` warn about a page a CDN may hold."""
 
-    def test_a_csrf_token_tag_is_w122(self, tmp_path) -> None:
+    def test_a_csrf_token_tag_is_w113(self, tmp_path) -> None:
         source = "template = '{% csrf_token %}'\ncache = {'s_maxage': 60}\n"
         with routed(_tree(tmp_path, source)):
             assert check_ids(check_shared_page_responses()) == ["next.W113"]
@@ -113,7 +113,7 @@ class TestSharedPages:
         assert warning.id == "next.W113"
         assert "page.py (callable cache) declares" in warning.msg
 
-    def test_locale_middleware_outside_i18n_patterns_is_w123(self, tmp_path) -> None:
+    def test_locale_middleware_outside_i18n_patterns_is_w114(self, tmp_path) -> None:
         with (
             routed(_tree(tmp_path, "template = 'x'\ncache = 60\n")),
             override_settings(**LOCALE),
@@ -145,7 +145,7 @@ class TestCsrfInSession:
         with routed(_pages(tmp_path, "cache = 60\n")):
             assert check_csrf_in_session() == []
 
-    def test_csrf_in_the_session_is_w131(self, tmp_path) -> None:
+    def test_csrf_in_the_session_is_w121(self, tmp_path) -> None:
         with (
             routed(_pages(tmp_path, "cache = {'s_maxage': 60}\n")),
             override_settings(CSRF_USE_SESSIONS=True),
@@ -210,7 +210,7 @@ class TestConditionalGetOrder:
         ):
             assert check_conditional_get_order() == []
 
-    def test_a_cookie_middleware_above_it_is_w134(self, tmp_path) -> None:
+    def test_a_cookie_middleware_above_it_is_w124(self, tmp_path) -> None:
         with (
             routed(_pages(tmp_path, "cache = 60\n")),
             override_settings(MIDDLEWARE=[SECURITY, SESSIONS, CONDITIONAL]),
@@ -259,8 +259,7 @@ class TestConditionalGetOrder:
         ids=["below_a_cookie", "above_update_cache"],
     )
     def test_the_guard_further_down_does_not(self, tmp_path, middleware) -> None:
-        # Above `UpdateCacheMiddleware` the guard runs after the public copy is
-        # stored, so the cache replays the cookie to everyone.
+        # Above `UpdateCacheMiddleware` the guard runs late, so the cache replays it.
         with (
             routed(_pages(tmp_path, "cache = 60\n")),
             override_settings(MIDDLEWARE=middleware),

@@ -9,6 +9,7 @@ from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning, reg
 from next.checks import NEXT
 from next.checks.common import first_visit, get_router_manager, iter_scanned_page_pairs
 from next.pages.placeholder import PLACEHOLDER, PLACEHOLDER_OPEN, placeholder_spans
+from next.utils import LAYOUT_TEMPLATE
 
 
 if TYPE_CHECKING:
@@ -64,7 +65,7 @@ def check_layout_templates(*args, **kwargs) -> list[CheckMessage]:
     seen: set[Path] = set()
     for router in router_manager.backends:
         for _url_path, page_path in iter_scanned_page_pairs(router):
-            layout_file = page_path.parent / "layout.djx"
+            layout_file = page_path.parent / LAYOUT_TEMPLATE
             if not layout_file.exists() or not first_visit(layout_file, seen):
                 continue
 

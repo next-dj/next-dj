@@ -154,7 +154,7 @@ See :doc:`/content/ref/system-checks` for the full catalog.
 
 The run reports nothing about the page tree.
 Any message it does print names the file it read and the fix it wants.
-Add ``--deploy`` to the same command to run the three checks that import every ``page.py`` and ``component.py`` and compile every composed template.
+The same command imports every ``page.py`` and ``component.py`` and compiles every composed template.
 
 Checkpoint
 ----------
@@ -182,8 +182,8 @@ Page module is not discovered.
    Confirm that ``NEXT_FRAMEWORK["PAGE_BACKENDS"][0]["APP_DIRS"]`` is ``True``.
 
 The page module raises while importing.
-   A ``page.py`` that fails to import leaves its directory unrouted, and a plain ``manage.py check`` never opens the module.
-   Run ``uv run python manage.py check --deploy``, which imports every page module and reports the failure as ``next.E017``, naming the module path and the exception that stopped it.
+   A ``page.py`` that fails to import leaves its directory unrouted, and the failure is easy to miss.
+   Run ``uv run python manage.py check``, which imports every page module and reports the failure as ``next.E017``, naming the module path and the exception that stopped it.
 
 Template renders without the notes loop.
    Make sure ``notes/pages/template.djx`` sits next to ``notes/pages/page.py``.

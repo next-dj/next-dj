@@ -1,22 +1,35 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from typing import TYPE_CHECKING
 
 import pytest
 from django import forms
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, QueryDict
+from django.test import RequestFactory
 
 from next.forms import Form
 from next.forms.backends import ActionRegistration, RegistryFormActionBackend
 from next.forms.dispatch import FormActionDispatch
+from next.forms.dispatch.build import _form_action_context_callable
+from next.forms.dispatch.permissions import _trees
 from next.forms.dispatch.responses import _normalize_handler_response
 from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
     filter_reserved_url_kwargs,
     resolve_origin,
 )
-from next.forms.uid import validated_origin_path
+from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
+from next.pages.access import forget_page_access
+from tests.benchmarks.factories import STAND_IN_PK
+from tests.support import PermissionHolder, QuietHolder, routed
+from tests.support.access import write_guard
 from tests.support.helpers import build_mock_http_request
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from next.forms.backends import ActionMeta
 
 
 class _RedirectDuck:
@@ -118,10 +131,12 @@ class TestBenchDispatchEndToEnd:
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None
-        post = MagicMock()
-        post.items.return_value = [("name", "bench")]
+        post = QueryDict("name=bench")
         request = build_mock_http_request(method="POST", POST=post, FILES=None)
-        benchmark(FormActionDispatch.dispatch, backend, request, "bench_action", meta)
+        response = benchmark(
+            FormActionDispatch.dispatch, backend, request, "bench_action", meta
+        )
+        assert isinstance(response, HttpResponseRedirect)
 
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_dispatch_invalid_form(self, benchmark) -> None:
@@ -139,17 +154,18 @@ class TestBenchDispatchEndToEnd:
         meta = backend.get_meta("bench_action")
         assert meta is not None
         # The required name is missing, so the dispatch takes the error path.
-        post = MagicMock()
-        post.items.return_value = []
+        post = QueryDict()
         request = build_mock_http_request(method="POST", POST=post, FILES=None)
-        benchmark(FormActionDispatch.dispatch, backend, request, "bench_action", meta)
+        response = benchmark(
+            FormActionDispatch.dispatch, backend, request, "bench_action", meta
+        )
+        assert not isinstance(response, HttpResponseRedirect)
 
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_dispatch_unguarded_form_no_hook_overhead(self, benchmark) -> None:
         """A no-hook form pays no permission-hook resolve on the dispatch path.
 
-        Pins the zero-overhead promise: an undeclared check_permissions or
-        has_object_permission costs two ClassVar reads, never a resolver call.
+        Undeclared hooks cost two ClassVar reads, never a resolver call.
         """
         backend = RegistryFormActionBackend()
         backend.register_action(
@@ -165,10 +181,12 @@ class TestBenchDispatchEndToEnd:
         assert meta is not None
         assert _BenchForm._has_check_permissions is False
         assert _BenchForm._has_object_permission is False
-        post = MagicMock()
-        post.items.return_value = [("name", "bench")]
+        post = QueryDict("name=bench")
         request = build_mock_http_request(method="POST", POST=post, FILES=None)
-        benchmark(FormActionDispatch.dispatch, backend, request, "bench_action", meta)
+        response = benchmark(
+            FormActionDispatch.dispatch, backend, request, "bench_action", meta
+        )
+        assert isinstance(response, HttpResponseRedirect)
 
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_dispatch_through_subclassed_backend(self, benchmark) -> None:
@@ -193,7 +211,161 @@ class TestBenchDispatchEndToEnd:
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None
-        post = MagicMock()
-        post.items.return_value = [("name", "bench")]
+        post = QueryDict("name=bench")
         request = build_mock_http_request(method="POST", POST=post, FILES=None)
-        benchmark(FormActionDispatch.dispatch, backend, request, "bench_action", meta)
+        response = benchmark(
+            FormActionDispatch.dispatch, backend, request, "bench_action", meta
+        )
+        assert isinstance(response, HttpResponseRedirect)
+
+
+_BUILD_KWARGS: dict[str, object] = {"prefix": "bench", "initial": {"name": "bench"}}
+
+
+class _KwargsHookBenchForm(Form):
+    """The bench form again, its constructor kwargs coming from the hook."""
+
+    name = forms.CharField(max_length=32)
+
+    @classmethod
+    def get_form_kwargs(cls, request: HttpRequest) -> dict[str, object]:
+        return dict(_BUILD_KWARGS)
+
+
+def _bench_form_factory() -> tuple[type[Form], dict[str, object]]:
+    return _BenchForm, dict(_BUILD_KWARGS)
+
+
+class TestBenchFormBuild:
+    """One render-time form build per round, through each constructor kwargs source.
+
+    Both builds yield the same prefixed form, so the two numbers compare evenly.
+    """
+
+    @pytest.mark.benchmark(group="forms.build")
+    def test_build_through_get_form_kwargs(self, benchmark) -> None:
+        build = _form_action_context_callable(_KwargsHookBenchForm)
+        request = build_mock_http_request(method="GET")
+        namespace = benchmark(build, request)
+        assert namespace.form.prefix == "bench"
+        assert namespace.form.initial == {"name": "bench"}
+
+    @pytest.mark.benchmark(group="forms.build")
+    def test_build_through_factory_function(self, benchmark) -> None:
+        build = _form_action_context_callable(_bench_form_factory)
+        request = build_mock_http_request(method="GET")
+        namespace = benchmark(build, request)
+        assert namespace.form.prefix == "bench"
+        assert namespace.form.initial == {"name": "bench"}
+
+    @pytest.mark.benchmark(group="forms.build")
+    def test_build_through_get_initial(self, benchmark) -> None:
+        """The form without the hook override keeps the plain `get_initial` path."""
+        build = _form_action_context_callable(_BenchForm)
+        request = build_mock_http_request(method="GET")
+        assert _BenchForm._has_get_form_kwargs is False
+        namespace = benchmark(build, request)
+        assert namespace.form.initial == {}
+
+
+_TREE_GUARD = "page.login_required(inherit=True)\n"
+_TREE_PAGES = {
+    "open": "x = 1\n",
+    "guarded": (
+        'from next.pages import page\n\npage.permission_required("auth.change_user")\n'
+    ),
+    "guarded-object": (
+        "from django.contrib.auth.models import Group\n\n"
+        "from next.deps import DObject\n"
+        "from next.pages import page\n\n"
+        'page.permission_required("auth.change_user", obj=DObject[Group])\n'
+    ),
+}
+
+
+def _tree_action(
+    root: Path, shape: str
+) -> tuple[RegistryFormActionBackend, ActionMeta]:
+    """Register the bench action as declared by a `page.py` of a routed tree.
+
+    Every shape but `open` adds a `page.py` requiring a login above the page.
+    """
+    directory = root / "guarded" / "[int:group]"
+    directory.mkdir(parents=True)
+    if shape != "open":
+        write_guard(root, _TREE_GUARD)
+    page_file = directory / "page.py"
+    page_file.write_text(_TREE_PAGES[shape])
+    (directory / "template.djx").write_text("<p>bench</p>\n")
+    backend = RegistryFormActionBackend()
+    backend.register_action(
+        ActionRegistration(
+            name="bench_action",
+            file_path=str(page_file),
+            scope="shared",
+            handler=_ok_handler,
+            form_class=_BenchForm,
+        )
+    )
+    meta = backend.get_meta("bench_action")
+    assert meta is not None
+    return backend, meta
+
+
+def _tree_post(origin: str) -> HttpRequest:
+    """Return the bench POST of a valid form submitted from `origin`."""
+    return RequestFactory().post(
+        "/_next/form/bench/", {"name": "bench", ORIGIN_FIELD_NAME: origin}
+    )
+
+
+@pytest.mark.usefixtures("stand_in_scope")
+class TestBenchDispatchUnderTreeAccess:
+    """A valid dispatch of an action whose `page.py` sits under a page tree rule."""
+
+    @pytest.mark.parametrize("shape", list(_TREE_PAGES))
+    @pytest.mark.benchmark(group="forms.dispatch.access")
+    def test_dispatch_under_the_owner_rule(
+        self, tmp_path: Path, shape: str, benchmark
+    ) -> None:
+        root = tmp_path / "pages"
+        backend, meta = _tree_action(root, shape)
+        request = _tree_post(f"/guarded/{STAND_IN_PK}/")
+        request.user = PermissionHolder("auth.change_user")
+        with routed(root):
+            response = FormActionDispatch.dispatch(
+                backend, request, "bench_action", meta
+            )
+            assert resolve_origin(request) is not None
+            assert isinstance(response, HttpResponseRedirect)
+            assert response.url == "/"
+            assert bool(request.user.asked) is (shape != "open")
+            request.user = QuietHolder("auth.change_user")
+            benchmark(
+                FormActionDispatch.dispatch, backend, request, "bench_action", meta
+            )
+
+    @pytest.mark.benchmark(group="forms.dispatch.access")
+    def test_dispatch_after_the_rules_drop(self, tmp_path: Path, benchmark) -> None:
+        """The first dispatch after a reload, which joins the rules over it again."""
+        root = tmp_path / "pages"
+        backend, meta = _tree_action(root, "guarded-object")
+        request = _tree_post(f"/guarded/{STAND_IN_PK}/")
+        request.user = QuietHolder("auth.change_user")
+
+        def forget() -> None:
+            forget_page_access()
+            _trees.clear()
+
+        with routed(root):
+            response = FormActionDispatch.dispatch(
+                backend, request, "bench_action", meta
+            )
+            assert isinstance(response, HttpResponseRedirect)
+            benchmark.pedantic(
+                FormActionDispatch.dispatch,
+                args=(backend, request, "bench_action", meta),
+                setup=forget,
+                rounds=200,
+                iterations=1,
+            )

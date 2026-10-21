@@ -7,50 +7,34 @@ Problem
 -------
 
 Every page under the file router must be visible only to authenticated users, and anonymous visitors should land on the login page.
+A few pages, the login page first among them, stay open to everyone.
 
 Solution
 --------
 
-The file router mounts as a single :func:`~django.urls.include` in the root URLconf, so it has no per-view decorator surface.
-Guard the routes with project :doc:`middleware <django:topics/http/middleware>` that checks :attr:`request.user.is_authenticated <django:django.contrib.auth.models.User.is_authenticated>`.
-It redirects anonymous requests.
-A page or component callable that needs the user reads it back through the request.
+Set ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` to ``True``, or list Django's :class:`~django.contrib.auth.middleware.LoginRequiredMiddleware` in ``MIDDLEWARE``.
+Either one closes every page, action, and zone request whose rule declares nothing.
+A page that anyone may visit declares ``page.public()``, and a section that stays closed whatever the settings say declares ``page.login_required(inherit=True)`` in the ``page.py`` of its directory.
 
 Walkthrough
 -----------
 
-Write the guard middleware
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Turn the default login on
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The middleware lets the login page and static assets through, and redirects every other anonymous request to the login URL with a ``next`` parameter.
+A project whose pages all live in page trees turns on the key.
 
 .. code-block:: python
-   :caption: notes/middleware.py
+   :caption: config/settings.py
 
-   from django.conf import settings
-   from django.shortcuts import redirect
-   from django.urls import reverse
+   NEXT_FRAMEWORK = {
+       "LOGIN_REQUIRED": True,
+   }
 
-   class LoginRequiredMiddleware:
-       def __init__(self, get_response):
-           self._get_response = get_response
+   LOGIN_URL = "/login/"
 
-       def __call__(self, request):
-           if request.user.is_authenticated:
-               return self._get_response(request)
-           login_url = reverse("login")
-           if request.path.startswith((login_url, settings.STATIC_URL)):
-               return self._get_response(request)
-           return redirect(f"{login_url}?next={request.path}")
-
-Place the middleware after :class:`~django.contrib.auth.middleware.AuthenticationMiddleware` so ``request.user`` is populated when the guard runs.
-
-The guard above covers every path, which is what makes it complete.
-A middleware narrowed to the page prefix, such as one that returns early unless ``request.path`` starts with ``/notes/``, silently loses the dispatch endpoint at ``/_next/form/<uid>/``, which is where a form POST lands and which sits outside the page URL space entirely, so a narrowed guard leaves every action reachable by an anonymous POST.
-Keep the guard path-wide, or add ``/_next/`` to whatever prefix set it matches, and declare the requirement on the action as well.
-
-Use :func:`~next.urls.reverse.page_reverse` instead of a hard-coded path when redirecting to a file-routed login page.
-See :doc:`/content/topics/url-reversing` for the full reversing surface.
+The key closes the page trees and nothing else.
+A project that also routes Django views of its own lists the middleware instead, after :class:`~django.contrib.auth.middleware.AuthenticationMiddleware`, so ``request.user`` exists when it runs and the views outside the trees close as well.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -62,14 +46,67 @@ See :doc:`/content/topics/url-reversing` for the full reversing surface.
        "django.middleware.csrf.CsrfViewMiddleware",
        "django.contrib.auth.middleware.AuthenticationMiddleware",
        "django.contrib.messages.middleware.MessageMiddleware",
+       "django.contrib.auth.middleware.LoginRequiredMiddleware",
        "django.middleware.clickjacking.XFrameOptionsMiddleware",
-       "notes.middleware.LoginRequiredMiddleware",
    ]
 
-Wire the login route
+The pages answer alike in both modes.
+An anonymous request for any page is redirected to ``LOGIN_URL`` with the full path as ``next``, or to the URL and the field a listed subclass of the middleware names.
+A zone request travels the URL of its page, so it meets the same redirect, and the client runtime follows it with a full navigation.
+Under the key alone a view of the project closes with :func:`~django.contrib.auth.decorators.login_required` on the view, see :ref:`topics-access-default-login`.
+
+The action endpoint ``/_next/form/<uid>/``, the CSRF endpoint ``/_next/csrf/``, ``sitemap.xml``, and ``robots.txt`` stay open to the middleware, and an action is still closed, because the dispatcher requires a login for an action unless the rule of the page of its directory is public and its origin is public too.
+
+Open the public pages
 ~~~~~~~~~~~~~~~~~~~~~
 
-Mount Django's :doc:`auth views <django:topics/auth/default>` before the file router include so ``/login/`` resolves before the router claims the path.
+A page that anyone may visit declares ``page.public()`` at module level of its ``page.py``.
+
+.. code-block:: python
+   :caption: notes/pages/about/page.py
+
+   from next import page
+
+   page.public()
+
+The framework asks no login of that page under the key.
+The actions of the same ``page.py`` posted from it stay open as well, so a login page built as a page of the tree declares ``page.public()`` and its form keeps working for anonymous visitors.
+``page.public(inherit=True)`` opens every page below the directory the same way, such as a whole ``auth/`` section of sign-in, sign-up, and password-reset pages.
+Keep ``LOGIN_URL`` on a public page or on Django's :class:`~django.contrib.auth.views.LoginView`, which Django marks public itself, since a closed login page redirects to itself forever.
+``page.public()`` also lifts what every ``page.py`` above requires, and ``manage.py permissions`` names the file of such a lift, see :ref:`topics-access`.
+
+A directory that holds no page of its own, such as ``auth/`` with a ``layout.djx`` and the pages in its subdirectories, takes a ``page.py`` with the declaration alone.
+It routes no URL and binds the pages below it, see :ref:`topics-access-declaring-page`.
+
+.. code-block:: python
+   :caption: accounts/pages/auth/page.py
+
+   from next import page
+
+   page.public(inherit=True)
+
+Close a section in code
+~~~~~~~~~~~~~~~~~~~~~~~
+
+A ``page.py`` closes its directory and every page below it with ``inherit=True``, independent of the settings.
+
+.. code-block:: python
+   :caption: notes/pages/notes/page.py
+
+   from next import page
+
+   page.login_required(inherit=True)
+   page.permission_required("notes.view_note", inherit=True)
+
+Every page under ``notes/``, every action declared there, and every zone request of those pages now requires a logged-in user who holds ``notes.view_note``.
+An anonymous visitor is redirected to ``LOGIN_URL``, and a user without the permission gets HTTP 403.
+A branded 403 page needs a ``403.html`` template or a ``handler403`` in the root URLconf, see :doc:`/content/howto/customize-error-pages`.
+A tree that a ``pages()`` include places under a prefix of this one inherits nothing of it, so it declares its own, see :ref:`topics-access-tree-boundary`.
+
+Wire the login route
+~~~~~~~~~~~~~~~~~~~~
+
+Mount Django's :doc:`auth views <django:topics/auth/default>` before the file router include so ``/login/`` resolves before the router claims the path, or route the login through a public page as shown above.
 
 .. code-block:: python
    :caption: config/urls.py
@@ -83,10 +120,12 @@ Mount Django's :doc:`auth views <django:topics/auth/default>` before the file ro
        path("", include("next.urls")),
    ]
 
+Use :func:`~next.urls.reverse.page_reverse` instead of a hard-coded path when ``LOGIN_URL`` names a file-routed page, see :doc:`/content/topics/url-reversing`.
+
 Read the user in a page
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Past the guard every request carries an authenticated user.
+Past the default login every request to a closed page carries an authenticated user.
 A ``@context`` callable asks for the request by annotation and reads ``request.user``.
 
 .. code-block:: python
@@ -98,44 +137,16 @@ A ``@context`` callable asks for the request by annotation and reads ``request.u
 
    @context("greeting")
    def greeting(request: HttpRequest) -> str:
-       """Return a greeting for the signed-in user."""
        return f"Signed in as {request.user.get_username()}"
 
-Guard one page without middleware
+Actions declared outside the tree
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When only a few pages need protection, skip the middleware and raise :exc:`~django.core.exceptions.PermissionDenied` from the page itself.
-Exceptions raised inside a ``@context`` callable propagate to Django's request stack unchanged, so :exc:`~django.core.exceptions.PermissionDenied` and :exc:`~django.http.Http404` reach the resolver.
-Only context-processor failures are swallowed.
-Django renders the ``403`` handler for an anonymous request.
-A branded 403 page needs a ``403.html`` template or a ``handler403`` in the root URLconf, see :doc:`/content/howto/customize-error-pages`.
+An action declared in a ``page.py`` or in another file of a page tree answers to the access of the page in its directory, whatever origin the submission names.
+A shared form in an ``app/forms.py`` belongs to no tree, so under the default login it requires a login at any origin, and without it the form answers to the page it is posted from, so it declares its own guard when it must stay closed either way.
 
 .. code-block:: python
-   :caption: notes/pages/admin-notes/page.py
-
-   from django.core.exceptions import PermissionDenied
-   from django.http import HttpRequest
-
-   from next import context
-
-   @context("notes")
-   def notes(request: HttpRequest) -> list:
-       """Return staff-only notes or deny access."""
-       if not request.user.is_staff:
-           raise PermissionDenied
-       return list(request.user.note_set.all())
-
-Guard form actions
-~~~~~~~~~~~~~~~~~~
-
-Form actions dispatch at ``/_next/form/<uid>/``, outside the page URL space.
-The global middleware above still covers them because it gates every request path.
-A project that protects pages selectively declares the requirement on the action itself.
-Use ``Meta.login_required`` and ``Meta.permission_required`` on the form class, or the same keywords on ``@action``.
-The page the submission names authorizes the request as well, so a ``render()`` that redirects an anonymous visitor redirects the POST with the same response, see :doc:`/content/topics/pages`.
-
-.. code-block:: python
-   :caption: notes/pages/admin-notes/page.py
+   :caption: notes/forms.py
 
    from notes.models import Note
 
@@ -149,30 +160,31 @@ The page the submission names authorizes the request as well, so a ``render()`` 
            permission_required = "notes.change_note"
 
 An anonymous POST redirects to ``LOGIN_URL`` with ``next`` set to the origin page, and an authenticated user missing the permission gets HTTP 403.
-The guard protects the mutation, not the markup.
-A GET still renders the page and its form, so hide the form in the template when anonymous visitors should not see it.
-See :ref:`topics-forms-actions-guards` for the full semantics, including guard inheritance.
-For a per-request decision that the static keys cannot express, such as owner-only edits, override ``check_permissions`` or ``has_object_permission`` on the form class.
-See :ref:`topics-forms-actions-dynamic-guards` for those hooks.
+See :doc:`/content/security/actions` for the owner rule and :ref:`topics-forms-actions-guards` for the guard semantics.
+For owner-only edits, register the rule as a predicate in ``permissions.py`` and name it in ``Meta.permission_required``, see :doc:`/content/howto/enforce-object-level-permissions`.
 
 Verification
 ------------
 
-Start the server and request a protected page while signed out.
+List the access of every page, then request a closed page while signed out.
 
 .. code-block:: bash
    :caption: shell
 
+   uv run python manage.py permissions
    uv run python manage.py runserver
 
-Visiting ``/notes/`` while anonymous redirects to ``/login/?next=/notes/``.
-After signing in the same path renders the page and the greeting names the user.
+The table shows ``login (default)`` for a page the default login closes, with ``LOGIN_REQUIRED`` or the class name of the middleware as the source, ``public`` for the login page, and the requirements of ``notes/pages/notes/page.py`` with that file as their source for every page below it.
+Its ``view`` rows list the Django views of the URLconf, ``public`` for each one marked :func:`~django.contrib.auth.decorators.login_not_required`, ``login (middleware)`` for one the middleware closes, and ``per action`` for the action endpoint, whose rule the ``action`` rows show, so the table also answers which views an anonymous user reaches.
+Visiting ``/notes/`` while anonymous redirects to ``/login/?next=/notes/``, and after signing in the same path renders the page and the greeting names the user.
 
 See also
 --------
 
 .. seealso::
 
+   :ref:`topics-permissions-tree` for the declarations and the order of the check.
+   :doc:`/content/topics/access` for the ``page.py`` chain, ``inherit=True``, and the lift of ``public()``.
    :doc:`/content/topics/dependency-injection` for reading the request in callables.
    :doc:`/content/howto/integrate-django-admin` for mounting Django views beside the router.
    :doc:`/content/howto/customize-error-pages` for a custom ``403`` template.

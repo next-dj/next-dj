@@ -34,7 +34,7 @@ Report only trees the backend actually serves from, because the same list is wha
 ``skip_dir_names`` names the directories the backend's own walk refuses to enter, an empty set for a backend that refuses none.
 
 The checks walk the reported trees themselves rather than asking the backend to walk them, so ``page_roots`` is the whole contract for being checked.
-A backend that reports a tree is reached by every page check, from the structural ones to the partial zone checks and the deployment-only ``next.E017``.
+A backend that reports a tree is reached by every page check, from the structural ones to the partial zone checks and ``next.E017``.
 The names that walk refuses to enter are the folder ``components_folder_name`` returns plus the names ``skip_dir_names`` returns.
 Both come from the backend under check rather than from the settings, so one entry's ``DIRS`` never blinds the checks to another entry's trees.
 ``FileRouterBackend`` answers with the skip set it built from its own ``DIRS``, the entries that name no existing directory.
@@ -86,7 +86,7 @@ Reuse the file route view
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The database URLs do not need their own view.
-A file route at ``wiki/routes/wiki/[slug]/page.py`` already renders an article from a captured ``slug``.
+A file route at ``wiki/pages/wiki/[slug]/page.py`` already renders an article from a captured ``slug``.
 Locate that catchall :doc:`URLPattern <django:ref/urls>` by its reverse name and reuse its callback.
 
 .. code-block:: python
@@ -154,7 +154,7 @@ The framework imports the class and hands the whole entry to its constructor, so
                "BACKEND": "wiki.backends.HybridRouterBackend",
                "APP_DIRS": True,
                "DIRS": [str(BASE_DIR / "shell")],
-               "PAGES_DIR": "routes",
+               "PAGES_DIR": "pages",
                "OPTIONS": {
                    "context_processors": [
                        "django.template.context_processors.request",
@@ -189,7 +189,7 @@ Reload when the table changes
 Connect a receiver to ``post_save`` and ``post_delete`` and call ``router_manager.reload()``.
 
 .. code-block:: python
-   :caption: wiki/receivers.py
+   :caption: wiki/signals.py
 
    from django.db.models.signals import post_delete, post_save
    from django.dispatch import receiver

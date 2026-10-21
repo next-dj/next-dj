@@ -1,7 +1,6 @@
 """One-level merge of the user `NEXT_FRAMEWORK` mapping over framework defaults.
 
-A user value replaces the default for its key whole rather than blending, and a
-mistyped value is dropped here and reported instead by the configuration checks.
+A user value replaces the default whole, and a mistyped one is dropped and checked.
 """
 
 from __future__ import annotations
@@ -46,6 +45,7 @@ BOOL_KEYS: Final[frozenset[str]] = frozenset(
     {
         "STRICT_CONTEXT",
         "STRICT_LOADING",
+        "LOGIN_REQUIRED",
         "LAZY_COMPONENT_MODULES",
         "FORM_AUTODISCOVER",
         "STATIC_DISCOVERY_CACHE",

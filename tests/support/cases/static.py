@@ -9,8 +9,7 @@ from tests.support.backends import PROJECT_APP_DIRECTORIES_FINDER
 class StaticNameCase:
     """One reference the name reader takes, pinned to the verdict it must give.
 
-    `expected` says the reference is an authored name rather than a ready URL, and
-    `name` is the normalised lookup key, unset for a URL and for a traversal.
+    `expected` says it is an authored name, `name` the lookup key, unset for URLs.
     """
 
     id: str

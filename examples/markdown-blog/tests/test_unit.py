@@ -2,11 +2,11 @@ import datetime
 from pathlib import Path
 
 import pytest
-from blog import receivers
+from blog import signals
 from blog.loaders import MarkdownTemplateLoader
 from blog.markdown_template import render_markdown
 from blog.posts import Post, all_posts, load_post, parse_post, reading_minutes
-from blog.receivers import _detect_source, loader_hits
+from blog.signals import _detect_source, loader_hits
 from django.http import Http404
 
 from next.pages import Page
@@ -156,12 +156,12 @@ class TestMarkdownTemplateLoader:
         assert MarkdownTemplateLoader().source_path(tmp_path / "page.py") is None
 
 
-class TestReceivers:
-    """`blog.receivers` observes the `template_loaded` signal."""
+class TestSignals:
+    """`blog.signals` observes the `template_loaded` signal."""
 
     def setup_method(self) -> None:
         """Clear the loader hits map before each test."""
-        receivers._loader_hits.clear()
+        signals._loader_hits.clear()
 
     @pytest.mark.parametrize(
         ("siblings", "expected"),

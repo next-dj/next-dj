@@ -5,7 +5,7 @@ Form signals
 
 The forms subsystem emits ``action_registered``, ``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``, ``form_backend_loaded``, and ``wizard_backend_loaded`` from ``next.forms.signals``.
 All eight import equivalently from the owning module or from the aggregator ``next.signals``.
-Register receiver imports from ``AppConfig.ready`` so receivers exist before the first request.
+Receivers in the ``signals.py`` of an app connect at startup, before the first request.
 
 Every dispatch-time signal (``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``) carries two shared keyword arguments.
 ``uid`` is the registry identity of the action, the same value the dispatch URL and the ``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores no uid in its meta.
@@ -19,19 +19,7 @@ Read what you need from it inside the receiver and do not retain the object past
 Connecting receivers
 --------------------
 
-Receivers live in a module that Django does not import on its own.
-Import that module from ``AppConfig.ready`` so every receiver is connected before the first request.
-
-.. code-block:: python
-   :caption: notes/apps.py
-
-   from django.apps import AppConfig
-
-   class NotesConfig(AppConfig):
-       name = "notes"
-
-       def ready(self) -> None:
-           from notes import receivers  # noqa: F401, PLC0415
+Receivers live in ``signals.py``, which the ``next`` application imports from every installed app at startup, so every receiver is connected before the first request, see :doc:`/content/ref/settings`.
 
 .. _topics-forms-signals-action-registered:
 
@@ -50,7 +38,7 @@ Exactly one of ``handler``, ``form_class``, or ``wizard_class`` identifies the r
 ``scope`` is ``"page"`` for anchor-file declarations (``page.py``, ``component.py``) and ``"shared"`` for all other files.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    import logging
 
@@ -108,7 +96,7 @@ The payload carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwarg
 A receiver that needs request data reads it from ``request`` directly or from ``dep_cache``, without keeping a reference after it returns.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    from django.dispatch import receiver
 
@@ -153,7 +141,7 @@ The payload carries ``action_name``, ``uid``, ``request``, ``error_count``, and 
 The dispatcher only builds the payload and sends the signal when at least one receiver is connected, so an unused signal costs nothing.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    from django.dispatch import receiver
 
@@ -186,7 +174,7 @@ The payload carries ``step``, ``cleaned_data``, ``uid``, and ``request``.
 ``cleaned_data`` is a copy of the validated cleaned data for that step.
 
 .. code-block:: python
-   :caption: access/receivers.py
+   :caption: access/signals.py
 
    import logging
 
@@ -216,7 +204,7 @@ The payload carries ``cleaned_data``, ``uid``, and ``request``.
 ``cleaned_data`` is the merged mapping passed to ``done``, flattening the keys of every step form.
 
 .. code-block:: python
-   :caption: access/receivers.py
+   :caption: access/signals.py
 
    from django.dispatch import receiver
 
@@ -234,19 +222,19 @@ An error response from ``done``, status 400 or above, skips the signal and keeps
 form_access_denied
 ------------------
 
-Fires when the origin page or a dynamic permission hook denies a request, never on the static ``ActionGuard`` path.
+Fires when the access rule of the page tree, the origin page, a dynamic permission hook, or a registered permission checked on the bound form denies a request, never on the static ``ActionGuard`` path and never for a login redirect.
 The sender is ``FormActionDispatch``.
 See :ref:`topics-forms-actions-dynamic-guards` for the hooks themselves and :doc:`/content/topics/pages` for the page-level check.
 
 The payload carries ``action_name``, ``uid``, ``request``, ``layer``, and ``reason``.
-``layer`` is ``"page"`` when the ``render()`` of the origin page answered the submission with a response, ``"view"`` for a ``check_permissions`` denial, or ``"object"`` for a ``has_object_permission`` denial.
-``reason`` is ``"raised"`` when a hook raised :exc:`~django.core.exceptions.PermissionDenied`, ``"denied"`` when it returned ``False``, or ``"response"`` when it returned an ``HttpResponse`` short-circuit.
-A ``"page"`` denial is always ``"response"``, because a page refuses by returning one.
+``layer`` is ``"page"`` when the access rule of the page tree refused the user or the ``render()`` of the origin page answered the submission with a response, ``"view"`` for a ``check_permissions`` denial, or ``"object"`` for a ``has_object_permission`` denial or a registered ``Meta.permission_required`` permission refused on the bound form, see :ref:`topics-permissions`.
+``reason`` is ``"raised"`` when a hook raised :exc:`~django.core.exceptions.PermissionDenied`, ``"denied"`` when it returned ``False`` or a registered permission was refused, or ``"response"`` when it returned an ``HttpResponse`` short-circuit.
+A ``"page"`` denial is ``"denied"`` for a refused access rule and ``"response"`` for a ``render()`` that answered, see :ref:`topics-permissions-tree`.
 
 The dispatcher builds the payload and sends the signal only when at least one receiver is connected, so an audit receiver adds no cost to an allowed request.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    import logging
 
@@ -284,7 +272,7 @@ The payload carries ``config`` and ``instance``.
 The signal fires at load time, outside any request, so it carries neither ``uid`` nor ``request``.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    import logging
 
@@ -314,7 +302,7 @@ It fires on first use and again after a settings reload drops the cached instanc
 The signal fires at load time, outside any request, so it carries neither ``uid`` nor ``request``.
 
 .. code-block:: python
-   :caption: access/receivers.py
+   :caption: access/signals.py
 
    from django.dispatch import receiver
 

@@ -16,12 +16,11 @@ if TYPE_CHECKING:
 class ViteManifestBackend(StaticFilesBackend):
     """Dev/prod-aware backend for Vite-bundled co-located Vue assets.
 
-    With DEV_ORIGIN set, `.vue` assets resolve to the Vite dev server for HMR through
-    `@vitejs/plugin-vue`, otherwise the manifest gives the hashed built output.
+    With DEV_ORIGIN set, `.vue` assets use the Vite dev server, else the manifest.
     """
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
-        """Initialise from OPTIONS: DEV_ORIGIN, VITE_ROOT, MANIFEST_PATH."""
+        """Initialise from the OPTIONS keys DEV_ORIGIN, VITE_ROOT, and MANIFEST_PATH."""
         super().__init__(config)
         opts = dict(self._config.get("OPTIONS") or {})
         self._dev_origin: str = opts.get("DEV_ORIGIN", "")

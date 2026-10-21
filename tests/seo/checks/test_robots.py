@@ -17,9 +17,12 @@ from tests.support import (
     POSTS_ITEMS,
     PREFIXED_URLCONF,
     check_ids,
+    installed_apps,
     routed,
+    write_app,
     write_page,
     write_tree,
+    write_urlconf,
 )
 
 
@@ -308,3 +311,61 @@ class TestRoutePaths:
     def test_a_reverse_under_another_route_is_skipped(self, tmp_path: Path) -> None:
         with patch("next.seo.checks.robots.page_reverse", return_value="/elsewhere/"):
             assert _paths(tmp_path, "about") == {}
+
+
+def _mounted_project(root: Path, robots: str) -> str:
+    write_app(root, "shop", {"pages": ("", "about")})
+    write_app(root, "wallets", {"pages": ("", "about", "ops/[int:pk]")})
+    write_app(root, "audit", {"pages": ("", "log")})
+    for app in ("shop", "wallets", "audit"):
+        (root / app / "pages" / "sitemap.py").write_text("")
+    (root / "audit" / "pages" / "robots.py").write_text(robots)
+    return write_urlconf(
+        root,
+        "robots_urls",
+        'path("", include("next.urls"))',
+        'path("shop/", pages("shop"))',
+        'path("w/<int:wallet>/", pages("wallets"))',
+        'path("audit/", pages("audit"))',
+        'path("", include("next.seo.urls"))',
+    )
+
+
+class TestMountedTreeRobots:
+    """The robots checks place every route of a `pages()` tree under its prefix."""
+
+    def test_the_route_paths_carry_the_prefix(self, tmp_path: Path) -> None:
+        urlconf = _mounted_project(tmp_path, "")
+
+        with installed_apps(tmp_path, "shop", "wallets", "audit", urlconf=urlconf):
+            paths = {
+                root.root.namespace: route_paths(root) for root in loaded_seo_roots()
+            }
+
+        assert paths == {
+            "shop": {"": "/shop/", "about": "/shop/about/"},
+            "wallets": {"": "/w/", "about": "/w/", "ops/[int:pk]": "/w/"},
+            "audit": {"": "/audit/", "log": "/audit/log/"},
+        }
+
+    @pytest.mark.parametrize(
+        ("disallowed", "warned"),
+        [
+            ("/shop/about/", ["/shop/about/"]),
+            ("/audit/log/", ["/audit/log/"]),
+            ("/about/", []),
+            ("/w/", []),
+        ],
+        ids=["static_prefix", "pages_include", "unprefixed_path", "parameter_prefix"],
+    )
+    def test_a_disallow_over_a_listed_included_route(
+        self, tmp_path: Path, disallowed: str, warned: list[str]
+    ) -> None:
+        urlconf = _mounted_project(tmp_path, _disallow(disallowed))
+
+        with installed_apps(tmp_path, "shop", "wallets", "audit", urlconf=urlconf):
+            messages = check_robots_disallow()
+
+        assert check_ids(messages) == ["next.W095"] * len(warned)
+        for message, url in zip(messages, warned, strict=True):
+            assert f"which covers {url}" in message.msg

@@ -22,8 +22,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
 
-# A view raises these to answer 400, 403 or 404, and Django converts each into its own
-# response and log entry, so a containment must let them propagate.
+# Django answers each of these with its own response and log entry, so let them out.
 INTENDED_EXCEPTIONS: tuple[type[BaseException], ...] = (
     Http404,
     PermissionDenied,
@@ -224,11 +223,7 @@ class FailureLog:
             return suppressed
 
     def first_failure(self, *key: Hashable) -> bool:
-        """Return whether a failure under `key` is logged now, recording the occurrence.
-
-        It answers `True` for the first occurrence and for the first one after each
-        quiet period, so a caller that logs on its own logs at the same rate.
-        """
+        """Return whether a failure under `key` is logged now, recording it."""
         return self._due(key) is not None
 
     def _log(
@@ -262,8 +257,7 @@ class FailureLog:
     ) -> Guard:
         """Return the boundary that contains a failure of its block under `key`.
 
-        Django answers an intended exception only when a view raises it, so a call site
-        outside any view passes `pass_through=()`.
+        A call site outside any view passes `pass_through=()`.
         """
         return Guard(self, (key,), message, args, catch, pass_through, detail)
 

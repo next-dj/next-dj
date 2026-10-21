@@ -100,8 +100,7 @@ class TestBenchStaticManagerInject:
 
 
 class TestBenchReservedPayload:
-    # Both cases inject without a request, so minting a CSRF token does not
-    # swamp the reserved-key branch this pair is meant to expose.
+    # No request, so minting a CSRF token cannot swamp the reserved-key branch.
 
     @pytest.mark.benchmark(group="static.manager")
     def test_inject_debug_on(self, benchmark) -> None:

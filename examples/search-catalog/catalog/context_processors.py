@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
-from .providers import parse_filters
+from .deps import parse_filters
 
 
 if TYPE_CHECKING:
@@ -13,8 +13,7 @@ if TYPE_CHECKING:
 def active_filters(request: HttpRequest) -> dict[str, Any]:
     """Expose active-filter chips with a precomputed drop URL each.
 
-    The `drop_url` reproduces the current query string with that one pair removed, so a
-    template renders `<a href="?{{ chip.drop_url }}">` without building the URL itself.
+    The `drop_url` is the current query string minus that pair, ready for an `<a href>`.
     """
     f = parse_filters(request)
     items: list[tuple[str, str]] = [

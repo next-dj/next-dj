@@ -60,8 +60,7 @@ type _MediaGroup = tuple[str, tuple[_Media, ...], tuple[str, ...]]
 def dump_jsonld(obj: object) -> SafeString:
     """Return `obj` as JSON-LD script content, with `<`, `>` and `&` escaped.
 
-    The escapes keep `</script>` and `<!--` in a value from ending the script.
-    `manage.py check` serialises a declared node through this same call.
+    The escapes keep `</script>` and `<!--` from ending the script.
     """
     text = json.dumps(obj, cls=DjangoJSONEncoder, allow_nan=False)
     return SafeString(text.translate(_JSONLD_ESCAPES))
@@ -93,8 +92,7 @@ class MetadataRenderer(ABC):
 class HtmlMetadataRenderer(MetadataRenderer):
     """Render the head tags section by section, every value escaped.
 
-    A subclass reorders or extends `sections` and overrides the `render_*` hooks.
-    The hooks are bound on the first render, so `sections` is read once per instance.
+    A subclass reorders `sections` or overrides `render_*` hooks, bound at first render.
     """
 
     sections: ClassVar[tuple[str, ...]] = (
@@ -376,8 +374,7 @@ class HtmlMetadataRenderer(MetadataRenderer):
 def configured_renderer_class() -> type[MetadataRenderer]:
     """Return the class named by `NEXT_FRAMEWORK["METADATA"]["RENDERER"]`.
 
-    A path that does not import or names no concrete renderer raises
-    `ImproperlyConfigured`, which `next.E107` reports before a page renders.
+    A bad path or non-renderer raises `ImproperlyConfigured`, which `next.E107` reports.
     """
     return resolve_setting_class(
         "RENDERER",
@@ -391,10 +388,7 @@ def configured_renderer_class() -> type[MetadataRenderer]:
 def metadata_renderer() -> MetadataRenderer:
     """Return the renderer `METADATA["RENDERER"]` names, built once per reload.
 
-    A renderer that cannot be resolved or built is replaced by `HtmlMetadataRenderer`
-    and logged, so a wrong path does not fail every page. It raises under `DEBUG`.
-    Every render that uses the replacement is degraded, not only the one that built
-    it, and the failure is logged again at the `FailureLog` rate.
+    A failing renderer falls back to `HtmlMetadataRenderer`, raising under `DEBUG`.
     """
     renderer, failed = _built_renderer()
     if failed:

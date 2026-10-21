@@ -75,8 +75,7 @@ def _post_step(client, action: str, step: str, data: dict):
 class TestWizardStorageRoundTripBudgets:
     """Deterministic storage budgets for the wizard dispatch hot paths.
 
-    A failing assertion means a change added a storage round-trip to a wizard POST, so
-    raise a budget only for a feature that needs the extra operation.
+    A failure means a change added a storage round-trip to a wizard POST.
     """
 
     def test_mid_step_submit_budget(
@@ -100,8 +99,7 @@ class TestWizardStorageRoundTripBudgets:
         assert resp.status_code == 302
         assert resp.url == "/thanks/"
         assert counting_wizard_backend.saves == 1
-        # Exact count today: 1, the completion gate and the merged
-        # cleaned data share a single load through the request memo.
+        # Exact count today: the completion gate and merged cleaned data share one load.
         assert counting_wizard_backend.loads == 1
         assert counting_wizard_backend.clears == 1
 
@@ -126,8 +124,7 @@ class TestWizardStorageRoundTripBudgets:
         assert resp.status_code == 302
         assert resp.url == "/request/scope/"
         assert counting_wizard_backend.saves == 1
-        # Exact count today: 1, the write-through after save keeps the
-        # post-save get_steps re-evaluation off the backend.
+        # Exact count today: the write-through after save keeps get_steps off storage.
         assert counting_wizard_backend.loads == 1
         assert counting_wizard_backend.clears == 0
 
@@ -197,8 +194,7 @@ class _UnguardedBudgetForm(Form):
 class TestPermissionHookResolveBudgets:
     """Deterministic resolve-call budgets for the permission-hook dispatch path.
 
-    A failing assertion here means an absent hook started costing a resolver
-    call, or a shared provider stopped reusing the per-request cache.
+    A failure means an absent hook costs a resolver call or a provider skips the cache.
     """
 
     def _dispatch_counting(self, form_class, mock_http_request, monkeypatch):

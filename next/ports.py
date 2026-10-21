@@ -8,7 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping
+    from collections.abc import Callable, Collection, Iterator, Mapping
     from pathlib import Path
 
     from django.forms import BaseForm, BaseFormSet
@@ -25,11 +25,7 @@ if TYPE_CHECKING:
 
 
 class PortSlot[T]:
-    """Holds the one implementation of a port composed at app startup.
-
-    The binding is static, so unlike a settings-driven backend manager a
-    slot never rebinds itself once the app is ready.
-    """
+    """Holds the port implementation `AppConfig.ready` binds, which a test may swap."""
 
     __slots__ = ("_impl", "_subject")
 
@@ -61,11 +57,7 @@ class PortSlot[T]:
 
 
 class PartialShaper(Protocol):
-    """Shapes page and form responses for partial requests.
-
-    The caller decides through `intent` whether a request is partial, and that
-    intent is passed as an argument so no shape method re-reads the request.
-    """
+    """Shapes page and form responses for partial requests."""
 
     def intent(self, request: HttpRequest) -> PartialIntent:
         """Return what the request headers ask for."""
@@ -104,19 +96,25 @@ class PartialShaper(Protocol):
         ...
 
     def set_vary(self, response: HttpResponse) -> None:
-        """Declare the partial request headers `response` was negotiated on.
+        """Declare the partial request headers `response` was negotiated on."""
+        ...
 
-        A full page and a zone envelope answer the same URL, so a shared cache
-        needs the same `Vary` set on both or it serves one where the other belongs.
-        """
+
+class ActionOwners(Protocol):
+    """The `page.py` files an `@action` of their directory answers to.
+
+    `next.forms` imports `next.pages`, so the page checks read the actions through this.
+    """
+
+    def page_files(self) -> Collection[Path]:
+        """Return the `page.py` path of each directory whose files declare an action."""
         ...
 
 
 class PageScan(Protocol):
     """The page-tree scan the checks and the discovery helpers run.
 
-    `next.pages.scan` reads the router manager from `next.discovery`, so the scan
-    is reached through the port rather than through an import that closes the loop.
+    `next.pages.scan` imports `next.discovery`, so discovery reaches the scan here.
     """
 
     def load_scanned_page_modules(
@@ -220,6 +218,7 @@ class PageScripts(Protocol):
         ...
 
 
+action_owners_slot = PortSlot["ActionOwners"]("action owners port")
 form_routes_slot = PortSlot["FormRoutes"]("form routes port")
 page_scan_slot = PortSlot["PageScan"]("page scan port")
 partial_shaper_slot = PortSlot["PartialShaper"]("partial shaper")
@@ -230,6 +229,7 @@ static_assets_slot = PortSlot["StaticAssets"]("static assets port")
 
 
 __all__ = [
+    "ActionOwners",
     "FormRoutes",
     "PageScan",
     "PageScripts",
@@ -238,6 +238,7 @@ __all__ = [
     "RouterAccess",
     "SeoRoutes",
     "StaticAssets",
+    "action_owners_slot",
     "form_routes_slot",
     "page_scan_slot",
     "page_scripts_slot",

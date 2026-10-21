@@ -1,7 +1,6 @@
 """Merged view of `settings.NEXT_FRAMEWORK` with framework defaults.
 
 The merge runs on first access and caches until `reload()` emits `settings_reloaded`.
-The `setting_changed` receiver reloads the singleton this module owns.
 """
 
 from __future__ import annotations
@@ -33,7 +32,6 @@ class NextFrameworkSettings:
         """Drop merge and import caches and emit the reload signal.
 
         Package-level managers listen to `settings_reloaded` and reset their own state.
-        This method only clears caches owned by the settings object itself.
         """
         self._merged_cache = None
         self._attr_value_cache.clear()
@@ -56,8 +54,7 @@ class NextFrameworkSettings:
     def __getattr__(self, attr: str) -> Any:
         """Return merged values for keys declared in `DEFAULTS`.
 
-        `DEFAULTS` is open for third-party keys, so no narrower return type fits, and
-        `Any` lets each read site re-validate the shape it needs.
+        `DEFAULTS` is open for third-party keys, so only `Any` fits as the return type.
         """
         if attr in self._attr_value_cache:
             return self._attr_value_cache[attr]
@@ -90,8 +87,7 @@ next_framework_settings: NextFrameworkSettings = NextFrameworkSettings()
 def fail_loudly() -> bool:
     """Whether a load failure is raised at its caller rather than logged away.
 
-    Every fail-loud path reads this one predicate, so `STRICT_LOADING` and
-    `DEBUG` cannot drift apart between the page loader and the component tag.
+    Every fail-loud path reads this one predicate so `STRICT_LOADING` and `DEBUG` agree.
     """
     return bool(next_framework_settings.STRICT_LOADING or settings.DEBUG)
 

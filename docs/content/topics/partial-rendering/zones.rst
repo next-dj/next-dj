@@ -188,6 +188,12 @@ A few placements break a standalone zone render, and a system check catches each
 
 A zone name must be unique within a page's composed template, the layout chain plus the page template.
 A zone may not sit inside a ``{% for %}`` or a ``{% if %}``, because a standalone render does not see loop variables or the condition that gated the block.
+The rule holds at any depth, so a zone nested in another zone under the loop or the condition is reported too (``next.E062``, ``next.E063``).
+A zone inside a ``{% has_perm %}`` block of the page, the ``else`` branch included, may not render on its own, because a standalone render does not ask the permission again (``next.E161``).
+A zone in the body of a component, any slot or the children, may not render on its own when the component decides whether that part shows (``next.E161``).
+A zone under a block tag from a module outside ``django.`` and ``next.`` is refused the same way, because such a tag may hide its body in code the analysis cannot read, and ``next.E063`` reports it with the tag it sits in.
+At runtime every zone these rules report counts as undeclared for every user, so a standalone request answers 400 ``unknown zone`` and ``Patches.morph_zone`` raises ``UnknownZoneError``.
+The rule is that a permission decision lives inside the zone, and :ref:`topics-permissions-zones` describes when a component decides and when the analysis runs again.
 A zone may not sit directly inside a ``{% with %}`` either, because the with-bindings are not visible to a standalone zone render.
 This one is the warning ``next.W067`` rather than an error, so move the bindings into a context provider or inside the zone body.
 A ``lazy=`` zone needs a ``{% placeholder %}`` branch that holds something, and a branch of whitespace alone still earns ``next.E064``, because the check reads the significant nodes of the branch rather than its presence.

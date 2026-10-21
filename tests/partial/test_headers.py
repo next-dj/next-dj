@@ -54,8 +54,7 @@ class TestPartialIntentParsing:
         assert partial_intent(request).zones == ()
 
     def test_an_empty_segment_between_names_is_dropped(self) -> None:
-        # a client joining an empty zone slot leaves a bare comma, and keeping the
-        # empty name would send the zone registry looking up ""
+        # a bare comma from an empty zone slot must not look up the zone ""
         request = _request_with_headers(
             **{"X-Next-Request": "1", "X-Next-Zone": "a,,b"}
         )

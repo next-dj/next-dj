@@ -230,9 +230,7 @@ def check_csrf_in_session(*args, **kwargs) -> list[CheckMessage]:
 def _guarded(middleware: list[object]) -> bool:
     """Whether `SharedCacheGuardMiddleware` sees every response a cookie is set on.
 
-    Only `UpdateCacheMiddleware` may be listed above it, so the copy that middleware
-    stores is the private one. Listed above `UpdateCacheMiddleware`, the guard runs
-    after the public copy is already stored.
+    Only `UpdateCacheMiddleware` may sit above it, else the public copy is stored first.
     """
     index = _middleware_index(middleware, _CACHE_GUARD)
     if index is None:
@@ -247,8 +245,7 @@ def _guarded(middleware: list[object]) -> bool:
 def check_conditional_get_order(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a cookie may be set on a shared 304 (`next.W124`).
 
-    `ConditionalGetMiddleware` copies the cache of a shared page onto the 304 it
-    builds, so a cookie that an outer middleware sets later is sent on a public 304.
+    `ConditionalGetMiddleware` copies a shared cache onto the 304 it builds.
     """
     middleware = list(getattr(settings, "MIDDLEWARE", None) or ())
     position = _middleware_index(middleware, _CONDITIONAL_GET)

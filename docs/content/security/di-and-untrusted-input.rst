@@ -52,7 +52,9 @@ Always validate the string before passing it into ORM lookups or external servic
 The ``is_public`` filter prevents an attacker from reading a private note by guessing the slug.
 
 The same scoping rule applies to the ModelForm ``Meta.instance_from_url`` key.
-Its default ``get_initial`` runs an unscoped ``get_object_or_404(model, slug=<value>)``, so a form that edits a per-user row must override ``get_initial`` with a scoped query such as ``get_object_or_404(Note, slug=slug, owner=request.user)``.
+Its default ``get_initial`` reads through ``visible_to(scope)`` once the default manager of the model defines ``visible_to`` and the project registers ``scope``, so a row the scope cannot see answers 404, see :ref:`topics-di-dobject`.
+Without both it runs an unscoped ``get_object_or_404(model, slug=<value>)``, and a form that edits a per-user row then overrides ``get_initial`` with a scoped query such as ``get_object_or_404(Note, slug=slug, owner=request.user)``.
+A row addressed by its primary key also loads scoped through ``DObject`` in ``get_form_kwargs``.
 See :doc:`/content/topics/forms/modelforms` for the full pattern.
 
 URL kwargs on a POST
@@ -63,7 +65,8 @@ The dispatcher recovers them by resolving the hidden ``_next_form_origin`` field
 
 The origin field is user-controlled.
 A client can replace it with the path of any other routed page before posting, so the recovered kwargs carry the same trust level as the path itself, not the higher trust of a server-set value.
-They are the mechanism behind the ``instance_from_url`` insecure direct object reference, because the value that selects the row to edit travels in the request body.
+They are the mechanism behind the insecure direct object reference of an unscoped ``instance_from_url``, because the value that selects the row to edit travels in the request body.
+The posted origin cannot loosen access, since the rule of the page it names joins the rule of the page tree that declares the action, see :doc:`actions`.
 
 Validate or scope every lookup that reads a URL kwarg, whether the value arrived in the live path or through the posted origin.
 
@@ -135,7 +138,7 @@ A custom provider that reads from external state (database, cache, HTTP) must va
 The ``url_kwargs`` dict and ``request.GET`` are both untrusted.
 
 .. code-block:: python
-   :caption: notes/providers.py
+   :caption: notes/deps.py
 
    import inspect
    import re

@@ -39,8 +39,7 @@ _PARTIAL_MODULES = (
 def _partial_form_registries():
     """Register the partial-suite forms and restore the clean baseline after.
 
-    The snapshot predates the partial modules, so teardown drops what they registered,
-    and re-execution is idempotent because registration keys on the file path.
+    The snapshot predates the partial modules, so teardown drops what they registered.
     """
     with isolated_form_registries():
         for module_path in _PARTIAL_MODULES:
@@ -58,8 +57,7 @@ def next_client() -> NextClient:
 def restored_op_registry() -> Generator[PatchOpRegistry, None, None]:
     """Yield the process-global patch-op registry and put its records back after.
 
-    Order, index, and version are restored together so a verb registered here cannot
-    reach a later test through whichever of the three that test happens to read.
+    Order, index, and version are restored together so no verb leaks into later tests.
     """
     ordered = list(patch_op_registry._ordered)
     by_name = dict(patch_op_registry._by_name)

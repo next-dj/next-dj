@@ -316,20 +316,19 @@ export class Wire {
     const contentType = response.headers.get("content-type") ?? "";
     const baseType = contentType.replace(/;.*$/, "").trim();
     const hook = this.#parseHooks.get(baseType);
-    // A non-envelope reply or a redirect is a full navigation to the final URL. On a
-    // mutation the URL is the action endpoint, so navigating there would 405. A
-    // parse hook handles its content type, so its body never reaches navigation.
+    // A mutation never navigates to its own endpoint, that would answer 405
     if (hook === undefined && (baseType !== CONTENT_TYPE || response.redirected)) {
-      if (response.redirected || SAFE_METHODS.has(method)) {
-        this.#fallbackNavigate(response.url || target);
-        return;
+      const navigates = response.redirected || SAFE_METHODS.has(method);
+      const refused = !response.redirected && (response.status >= 400 || !navigates);
+      if (refused) {
+        const body = await response.text();
+        this.#dispatch("partial:error", {
+          kind: "http",
+          status: response.status,
+          body,
+        } satisfies PartialError);
       }
-      const body = await response.text();
-      this.#dispatch("partial:error", {
-        kind: "http",
-        status: response.status,
-        body,
-      } satisfies PartialError);
+      if (navigates) this.#fallbackNavigate(response.url || target);
       return;
     }
     const body = await response.text();

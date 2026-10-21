@@ -1,0 +1,73 @@
+from typing import Any
+
+from django.contrib import messages
+from django.contrib.admin.options import ModelAdmin
+from django.contrib.admin.utils import get_deleted_objects
+from django.core.exceptions import PermissionDenied
+from django.db.models import Model
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from shadcn_admin import utils
+
+from next import action, context
+
+
+def deletion(
+    request: HttpRequest, model_admin: ModelAdmin, obj: Model
+) -> tuple[dict[str, int], set[str], list[Model], bool]:
+    """Return what deleting `obj` takes and whether the user may do all of it.
+
+    Every cascaded row must be deletable too, as in Django's own `delete_view`.
+    """
+    _to_delete, model_count, perms_needed, protected = get_deleted_objects(
+        [obj], request, model_admin.admin_site
+    )
+    allowed = (
+        model_admin.has_delete_permission(request, obj)
+        and not perms_needed
+        and not protected
+    )
+    return model_count, perms_needed, protected, allowed
+
+
+@context("delete_state")
+def delete_state(
+    request: HttpRequest, app_label: str, model_name: str, pk: int
+) -> dict[str, Any]:
+    """Build the confirmation context for the object and its protected refs."""
+    model, model_admin, obj = utils.resolve_object_or_404(
+        request, app_label, model_name, pk
+    )
+    model_count, perms_needed, protected, allowed = deletion(request, model_admin, obj)
+    return {
+        "app_label": app_label,
+        "model_name": model_name,
+        "pk": pk,
+        "obj": obj,
+        "obj_repr": str(obj),
+        "verbose_name": str(model._meta.verbose_name),
+        "model_count": list(model_count.items()),
+        "perms_needed": sorted(perms_needed),
+        "protected": [str(p) for p in protected],
+        "changelist_url": utils.changelist_url(app_label, model_name),
+        "change_url": utils.change_url(app_label, model_name, pk),
+        "can_delete": allowed,
+    }
+
+
+@action("admin:delete", login_required=True)
+def delete(
+    request: HttpRequest, app_label: str, model_name: str, pk: int
+) -> HttpResponse:
+    """Delete the object via `ModelAdmin.delete_model` and redirect."""
+    model, model_admin, obj = utils.resolve_object_or_404(
+        request, app_label, model_name, pk
+    )
+    if not deletion(request, model_admin, obj)[3]:
+        raise PermissionDenied
+    obj_repr = str(obj)
+    model_admin.log_deletions(request, [obj])
+    model_admin.delete_model(request, obj)
+    messages.success(
+        request, f"The {model._meta.verbose_name} {obj_repr} was deleted successfully."
+    )
+    return HttpResponseRedirect(utils.changelist_url(app_label, model_name))

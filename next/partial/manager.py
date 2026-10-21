@@ -43,18 +43,13 @@ partial_backend_manager = SingleBackendManager(
 def asset_version() -> str:
     """Return the memoised asset version stamped on a partial response.
 
-    Every partial response reads it and the manifest branch hashes the whole
-    path mapping, so it resolves once per configuration, not per request.
+    Every response reads it and the manifest branch hashes the mapping.
     """
     return _resolve_asset_version()
 
 
 def pinned_version(options: "Mapping[str, Any]") -> str | None:
-    """Return the release tag the options pin, or None when the version is derived.
-
-    Only a string other than the `"manifest"` sentinel pins a tag, so an unset option
-    and the sentinel alike resolve through the staticfiles manifest.
-    """
+    """Return the release tag the options pin, or None when the version is derived."""
     configured = options.get(VERSION_OPTION)
     if isinstance(configured, str) and configured != MANIFEST_VERSION:
         return configured
@@ -64,9 +59,7 @@ def pinned_version(options: "Mapping[str, Any]") -> str | None:
 def _resolve_asset_version() -> str:
     """Resolve the asset version from the options, the project stamp, and the manifest.
 
-    An explicit `VERSION` pins a release tag and the `"manifest"` sentinel demands the
-    manifest hash, while the derived default reads the deploy stamp a project already
-    sets as `STATIC_VERSION` before it asks the staticfiles manifest.
+    A derived default reads `STATIC_VERSION` before it asks the staticfiles manifest.
     """
     options = partial_backend_manager.get().options
     pinned = pinned_version(options)
@@ -86,8 +79,7 @@ def _project_version() -> str | None:
 def _manifest_version() -> str:
     """Return a stable version hash from the staticfiles manifest.
 
-    The precomputed `manifest_hash` wins, otherwise the `hashed_files` mapping is
-    hashed, and a storage exposing neither falls back to the stable default.
+    `manifest_hash` wins, then a hash of `hashed_files`, else the stable default.
     """
     try:
         is_manifest = isinstance(staticfiles_storage, ManifestFilesMixin)
@@ -117,8 +109,7 @@ def forget_partial_backend(**kwargs) -> None:
 def forget_asset_version(*, setting: str, **kwargs) -> None:
     """Drop the memoised version when the staticfiles configuration moves.
 
-    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half, and the
-    storage behind the manifest hash is configured on the Django half.
+    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half of the configuration.
     """
     if setting in _STORAGE_SETTINGS:
         asset_version.cache_clear()

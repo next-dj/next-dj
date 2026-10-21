@@ -11,7 +11,7 @@ It re-exports ``PageRoot`` from :doc:`utils`, the labelled page tree a backend r
 It also exposes the ``RouterFactory`` and ``RouterManager`` that build and own them.
 The ``URLPatternParser`` for bracket-segment parsing is part of the public surface, together with the ``URLParameterError`` base and its ``DuplicateURLParameterError`` and ``InvalidURLParameterError`` refusals.
 
-It also exposes the ``page_reverse``, ``page_reverse_lazy``, and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, and the Django integration name ``app_name``.
+It also exposes the ``page_reverse``, ``page_reverse_lazy``, and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, the Django integration name ``app_name``, and ``pages``, which places one application page tree from a ``urls.py``.
 The ``TrieURLResolver`` that dispatches URL resolution through a route trie completes the routing surface.
 The parameter providers and the dependency markers ``DUrl`` (captured path segments) and ``DQuery`` (query string parameters) round out the public surface.
 
@@ -21,18 +21,64 @@ Public API
 Backends
 ~~~~~~~~
 
+``FileRouterBackend`` routes the ``PAGES_DIR`` tree of every installed application that is not Django's own or ``next`` from the point where the root URLconf includes ``next.urls``, and leaves out each tree a ``pages()`` include claims.
+
+``page_roots`` reports every tree the router serves, the ``pages()`` trees of the root URLconf included, as ``PageRoot`` values.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Field
+     - Meaning
+   * - ``path``
+     - The directory of the tree.
+   * - ``label``
+     - The name a report gives the tree, such as ``App 'notes'``.
+   * - ``prefix``
+     - The full route from the root URLconf that a ``pages()`` include places the tree under, in Django :func:`~django.urls.path` syntax, and ``None`` for a tree ``next.urls`` routes.
+   * - ``namespace``
+     - The URL namespace of the tree, ``next`` for a tree ``next.urls`` routes, and for a ``pages()`` tree the application label or the ``namespace`` the call passes.
+   * - ``trail``
+     - The include route of a ``pages()`` tree as a trail, ``[name]`` for each named group, and ``None`` for a tree of ``next.urls``.
+
+``prefix``, ``namespace``, and ``trail`` default, so ``PageRoot(path=..., label=...)`` from a custom backend reports a tree of ``next.urls``.
+``route_trail(trail)`` returns the trail a page at the tree-relative ``trail`` routes by, prefix included, read from ``trail`` when it is set and from ``prefix`` otherwise.
+The walk builds ``trail`` from a :func:`~django.urls.path` segment by its converters and from a :func:`~django.urls.re_path` segment the way Django reverses it, a named group becoming ``[name]`` and a pattern Django cannot reverse becoming a catch-all.
+A tree under a prefix Django cannot reverse lists no static page in the sitemap.
+
 Every page view the file router generates carries a ``next_page_path`` attribute naming the page source, including the synthesised ``page.py`` location of a virtual ``template.djx`` route.
 The form dispatcher reads it when it resolves a posted origin URL back to the page that re-renders after a validation failure.
 
 .. automodule:: next.urls.backends
    :members:
 
+Placing a tree
+~~~~~~~~~~~~~~
+
+``pages(app, subdir=None, *, namespace=None)`` returns the ``(urlconf_module, app_name, namespace)`` triple :func:`~django.urls.include` returns, so ``path("staff/", pages("audit"))`` places the ``PAGES_DIR`` tree of ``audit`` under ``/staff/``.
+Without ``subdir`` it places the tree named by the ``PAGES_DIR`` of the first ``FileRouterBackend`` of ``router_manager``, the router that builds every ``pages()`` tree, and raises ``ImproperlyConfigured`` when ``PAGE_BACKENDS`` lists no file router.
+``app`` is the label or the dotted name of an installed application, resolved when the call runs, so an unknown one raises ``LookupError`` while the URLconf imports.
+``subdir`` is one plain directory name, and a missing one, one holding a separator, or ``""``, ``"."``, or ``".."`` raises ``ImproperlyConfigured`` at the same point.
+The application name of the triple is the application label, and the namespace defaults to it, so a second tree of the same application passes ``namespace=`` to keep its names apart.
+
+The include target builds its patterns on first read through the first ``FileRouterBackend`` of ``router_manager``, with the same walk, skip names, component registration, and ``route_registered`` signal as ``next.urls``, wraps them in the ``URL_RESOLVER`` class, and rebuilds them when the router version moves.
+Its pattern names stay relative to the tree, so ``page_reverse("log", namespace="audit")`` reverses ``audit/pages/log/page.py``.
+
+The router finds each ``pages()`` include by walking ``ROOT_URLCONF``, nested includes included, see :doc:`/content/internals/url-router`.
+The patterns of ``next.urls`` are cached per router version, so they follow a new ``ROOT_URLCONF`` only after ``router_manager.reload()``, which the ``setting_changed`` receiver ``reload_app_routers`` runs, see :ref:`topics-testing-urlconf`.
+A tree found there leaves the auto-assembly of ``next.urls``.
+A subdirectory other than ``PAGES_DIR`` routes only through a ``pages()`` include.
+:ref:`topics-file-router-trees` covers both places together.
+
+.. autofunction:: next.urls.pages
+
 Manager
 ~~~~~~~
 
-``urlpatterns`` is a one-element sequence holding the resolver named by ``URL_RESOLVER``, which ships as ``TrieURLResolver`` and wraps a lazy sequence of router, form-action, and SEO patterns.
-:func:`~django.urls.include` therefore mounts one resolver, and the pattern collection is deferred to the first URL resolution instead of running while the root URLconf imports.
-It is a ``Sequence`` rather than a ``list``, so a root URLconf mounts it through ``include()`` and never concatenates or appends to it.
+``urlpatterns`` is a one-element sequence holding the resolver named by ``URL_RESOLVER``, which ships as ``TrieURLResolver`` and wraps a lazy sequence of the CSRF, form-action, page, and SEO patterns, in that order.
+:func:`~django.urls.include` therefore receives one resolver, and the pattern collection is deferred to the first URL resolution instead of running while the root URLconf imports.
+It is a ``Sequence`` rather than a ``list``, so a root URLconf hands it to ``include()`` and never concatenates or appends to it.
 Code that reads ``next.urls.urlpatterns`` directly observes that one element, not the individual page patterns.
 
 The wrapped sequence caches the concatenated pattern list against a three-part version token, one counter owned by ``RouterManager``, one by the form-action manager, and ``seo_routes_version`` of ``next.urls.manager`` for the SEO routes spliced in through a port.
@@ -46,7 +92,7 @@ The counters are read after the pattern build, because expanding page modules ca
 A registration that bypasses the manager and writes into a backend directly is not tracked by the counters and does not appear in the cached list.
 The backends themselves are cached by ``router_manager`` and are only rebuilt when ``router_manager.reload()`` runs or when ``PAGE_BACKENDS`` changes.
 A page added on disk after that first collection needs ``router_manager.reload()``, which rebuilds the backends and clears the Django resolver cache.
-Within a backend both the per-application pattern lists and the patterns from the roots configured in ``DIRS`` are memoised after the first scan, and a settings reload recreates the backend with fresh caches.
+Within a backend both the pattern list of each application tree and the patterns from the roots configured in ``DIRS`` are memoised after the first scan, and a settings reload recreates the backend with fresh caches.
 
 Reverse-name population iterates the wrapped sequence with ``reversed()``, which it answers through an explicit ``__reversed__`` that builds the pattern list once per pass.
 
@@ -87,7 +133,8 @@ Parser
 
 ``URLPatternParser`` raises a subclass of ``URLParameterError`` for a bracket segment it cannot turn into a Django route.
 The parser knows the route but not the file it came from, so the page manager catches whatever the ``parameter_error`` class attribute names and re-raises it through ``with_file``, which is what puts the offending ``page.py`` at the end of the message.
-A parser subclass that adds a refusal of its own points ``parameter_error`` at a base covering every refusal it raises, so the page manager keeps naming the file for the new one too.
+``FileRouterBackend`` catches the same class around each page, logs the refusal as a warning through the ``next.urls.backends`` logger, and leaves that page unrouted, so one refused directory never aborts the URLconf and ``manage.py check`` still runs.
+A parser subclass that adds a refusal of its own points ``parameter_error`` at a base covering every refusal it raises, so the page manager keeps naming the file and the router keeps skipping only the refused page.
 
 .. automodule:: next.urls.parser
    :members:
@@ -154,6 +201,7 @@ They are exported from ``next.urls`` for introspection and for authors writing c
    * - ``UrlKwargsProvider``
      - Supplies a URL kwarg value by parameter name, coercing the raw string to the parameter annotation when one is present.
        ``DUrl``-annotated parameters are claimed by ``UrlByAnnotationProvider`` first.
+       A parameter whose annotation names ``DObject`` is never claimed, since its raw kwarg is the unscoped primary key, and a ``DObject`` no ``ObjectProvider`` loads raises :exc:`~django.core.exceptions.ImproperlyConfigured`, see :ref:`topics-di-dobject`.
    * - ``QueryParamProvider``
      - Supplies ``request.GET`` values for parameters annotated with ``DQuery[...]``.
 
@@ -251,8 +299,6 @@ Checks
         - A ``FileRouterBackend`` entry carries no ``APP_DIRS``.
       * - ``next.E005``
         - ``APP_DIRS`` is not a boolean.
-      * - ``next.E026``
-        - A ``FileRouterBackend`` entry carries no ``OPTIONS``.
       * - ``next.E006``
         - ``DIRS`` is not a list.
       * - ``next.E094``
@@ -269,13 +315,15 @@ Checks
 ``check_url_patterns``.
    Collects patterns from every configured tree, application pages and root ``DIRS`` alike.
    Fails with :ref:`next.E015 <ref-system-checks>` when two file routes convert to exactly the same Django path string.
+   Routes are compared from the URLconf root, the prefixes of ``pages()`` includes too, so two trees placed onto one URL conflict as well.
    Fails with :ref:`next.E028 <ref-system-checks>` when a route repeats a captured parameter name, listing every conflicting name.
-   Fails with :ref:`next.E082 <ref-system-checks>` for any other refusal the parser raises for a bracket segment, so a name the route compiler would reject is reported instead of becoming a traceback out of the first resolution.
+   Fails with :ref:`next.E152 <ref-system-checks>` when a page captures a name the ``pages()`` prefix of its tree captures already, naming the page and the prefix.
+   Fails with :ref:`next.E082 <ref-system-checks>` for any other refusal the parser raises for a bracket segment, so a page the router left unrouted for a name the route compiler would reject is named at check time.
    Reports :ref:`next.E016 <ref-system-checks>` when pattern collection from a router raises.
    Reports :ref:`next.E014 <ref-system-checks>` when the conflict comparison itself raises.
 
 ``check_reverse_name_collisions``.
-   Fails with :ref:`next.E039 <ref-system-checks>` when two distinct routes collapse to the same reverse URL name.
+   Fails with :ref:`next.E039 <ref-system-checks>` when two distinct routes collapse to the same reverse URL name within one namespace.
    It reuses the same pattern collection but leaves collection errors to ``check_url_patterns``, so :ref:`next.E016 <ref-system-checks>` surfaces only once.
 
 .. automodule:: next.urls.checks

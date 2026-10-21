@@ -1,6 +1,7 @@
 import pytest
 from django.template import Context, Engine, TemplateSyntaxError
 from django.template.base import Template
+from django.template.defaulttags import ForNode, IfNode
 from django.test import RequestFactory
 
 from next.partial.zone import (
@@ -11,7 +12,9 @@ from next.partial.zone import (
     ZoneOptions,
     ZonePartial,
     render_zone_standalone,
+    zones_under,
 )
+from next.permissions.nodes import HasPermNode
 
 
 def _render(source: str, **ctx) -> str:
@@ -131,8 +134,7 @@ class TestZoneTagSyntax:
             Template('{% zone "z" garbage %}body{% endzone %}')
 
     def test_spaces_around_equals_raise(self) -> None:
-        # token splitting turns poll = "5s" into three bits, the first of
-        # which carries no '=' and must fail loudly instead of dropping poll
+        # poll = "5s" splits into three bits and must fail loudly, not drop poll
         with pytest.raises(TemplateSyntaxError, match='key="value"'):
             Template('{% zone "z" poll = "5s" %}body{% endzone %}')
 
@@ -233,8 +235,7 @@ class TestRenderZoneStandalone:
         assert LAZY_ATTR not in out
 
     def test_standalone_render_carries_poll_interval(self) -> None:
-        # The client re-reads the interval from the live element after every
-        # morph, so a delivered poll zone must keep the hint on its wrapper.
+        # The client re-reads the interval from the live element, so the zone keeps it.
         template = Template('{% zone "p" poll="5s" %}<b>{{ v }}</b>{% endzone %}')
         node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
         out = render_zone_standalone(
@@ -288,3 +289,28 @@ class TestRequestFixture:
         node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
         out = node.partial.render(Context({"request": request}))
         assert out == "/"
+
+
+class TestNodeWalks:
+    """The walkers the guard analysis and the zone checks read node trees with."""
+
+    def test_an_ancestor_tuple_counts_each_class(self) -> None:
+        template = Template(
+            '{% if a %}{% zone "i" %}x{% endzone %}{% endif %}'
+            '{% for x in y %}{% zone "f" %}x{% endzone %}{% endfor %}'
+            '{% zone "open" %}x{% endzone %}'
+        )
+        assert list(zones_under(template.nodelist, (IfNode, ForNode))) == ["i", "f"]
+
+    def test_zones_under_walks_zone_bodies_and_branches(self) -> None:
+        template = Template(
+            '{% zone "a" %}{% has_perm "x.y" %}{% zone "b" %}{% zone "c" %}'
+            "{% endzone %}{% endzone %}{% endhas_perm %}{% endzone %}"
+            '{% has_perm "x.y" %}plain{% else %}{% zone "d" %}{% endzone %}'
+            "{% endhas_perm %}"
+        )
+        assert list(zones_under(template.nodelist, HasPermNode)) == ["b", "c", "d"]
+
+    def test_zones_under_nothing_without_the_ancestor(self) -> None:
+        template = Template('{% zone "a" %}{% zone "b" %}{% endzone %}{% endzone %}')
+        assert list(zones_under(template.nodelist, HasPermNode)) == []

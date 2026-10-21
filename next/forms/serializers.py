@@ -110,8 +110,7 @@ def formset_spec(formset: BaseFormSet) -> FormsetSpec:
     """Build a `FormsetSpec` from a Django formset."""
     rows: list[FormsetRowSpec] = []
     for row_form in formset.forms:
-        # Plain `BaseFormSet` rows do not expose `.instance`. Treat an absent
-        # instance as "no pk", so `empty_permitted` alone marks the row blank.
+        # Plain `BaseFormSet` rows lack `.instance`, so an absent one means no pk.
         instance = getattr(row_form, "instance", None)
         is_extra = bool(row_form.empty_permitted and not getattr(instance, "pk", None))
         visible_names = [

@@ -136,7 +136,10 @@ class TestCaptureFrameworkSignals:
     def test_covers_every_exported_signal(self) -> None:
         with capture_framework_signals() as rec:
             pass
-        assert len(rec.signals) == len(framework_signals.__all__)
+        exported = [
+            getattr(framework_signals, name) for name in framework_signals.__all__
+        ]
+        assert len(rec.signals) == sum(isinstance(value, Signal) for value in exported)
 
     def test_covers_wizard_signals(self) -> None:
         with capture_framework_signals() as rec:

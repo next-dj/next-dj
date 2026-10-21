@@ -1,7 +1,6 @@
 """HTML helpers for next-dj tests.
 
-Django's own assertions do not cover picking one anchor or form out of a rendered page,
-so these helpers locate elements with `html.parser` and return the source span.
+They locate one anchor or form in a rendered page and return its source span.
 """
 
 from __future__ import annotations
@@ -15,8 +14,7 @@ from typing import Any, cast, override
 
 _INIT_CALL_RE = re.compile(r"Next\._init\(\s*(?=\{)")
 
-# One object decoded from the offset the regex stopped at, so neither the tail of
-# the page nor the rest of the script body is scanned to find where it ends.
+# Decoding one object from where the regex stopped avoids scanning the rest of the page.
 _DECODER = json.JSONDecoder()
 
 
@@ -68,8 +66,7 @@ class _Element:
 class _Elements(HTMLParser):
     """Collect every complete element of one tag name in document order.
 
-    A same-name tag nested in an open one is invalid HTML, so the outermost
-    start tag opens the span and the first matching end tag closes it.
+    A same-name tag inside an open one is invalid HTML, so the first end tag closes it.
     """
 
     def __init__(self, tag: str, source: str) -> None:
@@ -161,8 +158,7 @@ def _input_fields(fragment: str, *, hidden_only: bool) -> dict[str, str]:
 def find_anchor(html: str, *, href: str | None = None, text: str | None = None) -> str:
     """Return the first `<a>...</a>` substring that matches the filters.
 
-    `href` matches exactly and `text` matches as a substring of the stripped inner text,
-    while an anchor inside a comment or a script body never matches.
+    `href` matches exactly, `text` as a substring, and comments or scripts never match.
     """
     for anchor in _elements(html, "a"):
         if href is not None and anchor.attrs.get("href") != href:
@@ -183,8 +179,7 @@ def find_form(
 ) -> str:
     """Return the first `<form>...</form>` substring that matches the filters.
 
-    `action` matches exactly, `contains` and `excludes` are substrings the block must
-    and must not hold. A form inside a comment or a script body never matches.
+    `action` matches exactly, `contains` and `excludes` are substring filters.
     """
     for form in _elements(html, "form"):
         if action is not None and form.attrs.get("action") != action:
@@ -216,8 +211,7 @@ def form_action(fragment: str) -> str:
 def form_fields(fragment: str) -> dict[str, str]:
     """Return every `<input>` name to value pair inside the fragment.
 
-    Inputs are read in document order, a later duplicate name wins, and an input
-    without a `value` attribute maps to the empty string.
+    A later duplicate name wins and an input without `value` maps to the empty string.
     """
     return _input_fields(fragment, hidden_only=False)
 
@@ -233,8 +227,7 @@ def hidden_fields(fragment: str) -> dict[str, str]:
 def init_payload(html: str) -> dict[str, Any]:
     """Return the payload of the `Next._init(...)` bootstrap call in a page.
 
-    The call is a script body rather than markup, so the object is located by regex and
-    decoded from there. Raises `LookupError` when the call is absent or malformed.
+    Raises `LookupError` when the call is absent or malformed.
     """
     match = _INIT_CALL_RE.search(html)
     if match is None:

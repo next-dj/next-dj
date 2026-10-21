@@ -1,8 +1,4 @@
-"""Filesystem scanner that produces `ComponentInfo` from a directory.
-
-`ComponentScanner` walks one directory and yields a `ComponentInfo` per simple `.djx`
-file and per sub-directory holding a composite `component.djx` or `component.py`.
-"""
+"""Filesystem scanner that produces `ComponentInfo` from a directory."""
 
 from __future__ import annotations
 

@@ -1,8 +1,4 @@
-"""Components backend contract and file-based implementation.
-
-`ComponentsBackend` is the ABC for alternative component sources.
-`FileComponentsBackend` is the default filesystem-based backend.
-"""
+"""Components backend contract and file-based implementation."""
 
 from __future__ import annotations
 
@@ -51,8 +47,7 @@ class ComponentsBackend(ABC):
     def import_component_modules(self) -> tuple[Path, ...]:
         """Execute the module of every known component and return their paths.
 
-        Separate from `discover`, since `LAZY_COMPONENT_MODULES` leaves modules
-        unexecuted until a render needs one, and decorator state cannot wait that long.
+        Apart from `discover`, as `LAZY_COMPONENT_MODULES` defers modules to render.
         """
         return ()
 
@@ -83,8 +78,7 @@ class ComponentsBackend(ABC):
     def watch_roots(self) -> Iterable[Path]:
         """Return the trees the development watcher and link tooling observe.
 
-        A backend that computes its roots from somewhere other than its config
-        entry names them here, which is the only way they reach autoreload.
+        The only way roots not named in the config entry reach autoreload.
         """
         return ()
 
@@ -93,11 +87,7 @@ class FileComponentsBackend(ComponentsBackend):
     """Load components from `DIRS` and from the filesystem walk in `next.urls`."""
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """Build registry and scanner from the merged `DIRS` roots.
-
-        `COMPONENTS_DIR` is not read here. It names the folder the URL router skips
-        inside a page tree, and `FileRouterBackend` reads it straight from the settings.
-        """
+        """Build registry and scanner from the merged `DIRS` roots."""
         self._config = config
         self._extra_component_roots = component_extra_roots_from_config(config)
 
@@ -115,11 +105,7 @@ class FileComponentsBackend(ComponentsBackend):
         self._ensure_loaded()
 
     def _ensure_loaded(self) -> None:
-        """Discover the roots once, whatever reaches the backend first.
-
-        The scan registers every `ComponentInfo` it finds, so a second thread
-        arriving mid-discovery has to wait rather than register the tree twice.
-        """
+        """Discover the roots once, holding a second thread until the scan ends."""
         if self._loaded:
             return
         with self._lock:
@@ -151,11 +137,7 @@ class FileComponentsBackend(ComponentsBackend):
 
     @override
     def import_component_modules(self) -> tuple[Path, ...]:
-        """Import every discovered `component.py` and return their paths.
-
-        The import is unconditional, so under `LAZY_COMPONENT_MODULES` a caller that
-        walks decorator state triggers the import the lazy mode otherwise avoids.
-        """
+        """Import every discovered `component.py` even under lazy module loading."""
         self._ensure_loaded()
         self._import_registered_modules()
         return self._distinct_module_paths()
@@ -190,11 +172,7 @@ class FileComponentsBackend(ComponentsBackend):
 
     @override
     def watch_roots(self) -> tuple[Path, ...]:
-        """Return the `DIRS` roots, read again rather than taken from discovery.
-
-        A root named by `DIRS` that the disk did not hold at construction carries no
-        component yet, and a watch built from that snapshot would never notice one.
-        """
+        """Return the `DIRS` roots, re-read so a late-created root is watched."""
         return tuple(component_extra_roots_from_config(self._config))
 
     @override

@@ -204,11 +204,7 @@ class TestWindowFilters:
     def test_only_recent_buckets_count_under_one_minute_window(
         self, next_client, frozen_now
     ) -> None:
-        """A bucket 30 minutes old falls outside the one-minute read window.
-
-        The render of `/stats/` itself lands in the current minute, so the
-        recent counter is at least the two increments seeded here.
-        """
+        """A bucket 30 minutes old falls outside the one-minute read window."""
         with frozen_now(self.BASE) as traveller:
             metrics.incr("pages.rendered", "/old", by=99)
             traveller.move_to("2026-05-08T12:30:00+00:00")
@@ -232,11 +228,7 @@ class TestWindowFilters:
 
 
 class TestJsxAssetPipeline:
-    """`.jsx` files are emitted as `<script type="text/babel">` tags.
-
-    The overview page mounts the React sparkline through `BabelJsxBackend` while the
-    Chart.js widget on `/stats/` travels the regular `.js` path.
-    """
+    """`.jsx` files are emitted as `<script type="text/babel">` tags."""
 
     def test_overview_emits_babel_script_tag(self, next_client) -> None:
         response = next_client.get("/")
@@ -347,8 +339,7 @@ class TestDevFlagChannel:
 class TestSparklineStaysOutsideEveryZone:
     """No zone on the dashboard renders the sparkline mount.
 
-    The `next.W074` silencing in `config/settings.py` is honest only while the
-    Babel-compiled widget never rides a patch envelope, so this fails if it ever is.
+    The `next.W074` silencing in `config/settings.py` holds only while that stays true.
     """
 
     def test_full_render_owns_the_sparkline(self, next_client) -> None:
@@ -385,11 +376,7 @@ class TestFilterFormDispatch:
     def test_partial_post_without_the_zone_visits_the_live_page(
         self, next_client
     ) -> None:
-        """A stats sub-page renders the filter zoneless, so its apply navigates.
-
-        The live totals zone exists only on `/stats/`, and morphing it for a
-        sub-page would render a zone that page never declared.
-        """
+        """A stats sub-page renders the filter zoneless, so its apply navigates."""
         response = next_client.post_action(
             "window_filter_form", {"window": "1h"}, origin="/stats/pages/", partial=True
         )
@@ -499,11 +486,7 @@ class TestSignalGroupsCovered:
     """A walk through the dashboard increments every signal group at least once."""
 
     def test_each_group_increments(self, next_client) -> None:
-        """Lifecycle-only signals are provoked inside the recorder window.
-
-        `settings_reloaded`, `provider_registered`, and `watch_specs_ready`
-        never fire on a plain page render, so the walk triggers one of each.
-        """
+        """Lifecycle-only signals are provoked inside the recorder window."""
         recorder_signals = [
             sig for signals in GROUP_SAMPLES.values() for sig in signals
         ]

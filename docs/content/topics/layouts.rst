@@ -5,6 +5,7 @@ Layouts
 
 A layout is a ``layout.djx`` file in any directory under a page root.
 The framework wraps every page below it through string substitution into a ``{% template %}`` placeholder.
+A layout carries markup alone, and the logic and the access of a segment live in its ``page.py``.
 
 .. contents::
    :local:
@@ -55,13 +56,14 @@ The composed template is kept per page and reused by later requests, under a sna
 In a process that watches template edits a layout that is edited, created, or deleted therefore reaches the next render rather than the next restart.
 See :doc:`/content/internals/page-discovery` for the snapshot and the staleness check that reads it.
 
-Layout-only directories
-~~~~~~~~~~~~~~~~~~~~~~~
+A layout is no body
+~~~~~~~~~~~~~~~~~~~
 
-A page directory that contains a sibling ``layout.djx`` but no body source still renders.
-The body slot is the empty string and the layout chain composes around it.
-Use this shape for landing routes whose whole markup belongs in the layout shell.
-:ref:`next.E012 <ref-system-checks>` does not fire in this case.
+A ``layout.djx`` wraps the body of a page and is no body itself.
+A ``page.py`` with no ``render``, no ``template``, and no template a loader finds routes no URL, whatever ``layout.djx`` sits beside it or above it.
+:ref:`next.E012 <ref-system-checks>` reports such a file when it passes nothing to the pages below it and its directory declares no action, and :ref:`next.E166 <ref-system-checks>` when it declares access without ``inherit=True`` and no action of its directory answers to that rule.
+A ``layout.djx`` in a directory with no page and no action at any depth wraps nothing, and :ref:`next.W128 <ref-system-checks>` names the outermost such directory.
+A landing route whose whole markup belongs in the layout shell gets a ``template.djx``, and an empty one is enough.
 
 Layout template contract
 ------------------------
@@ -105,11 +107,21 @@ The paired form ``{% #template %}...{% /template %}`` marks the same hole and ca
 A layout rendered on its own, outside the chain that would fill its hole, shows that body instead of an empty gap.
 Write the fallback where a layout doubles as a standalone template, such as a shell a plain Django view renders, and keep the single form everywhere else.
 
-Publishing context from a layout segment
+.. _topics-layouts-segment-files:
+
+layout.djx beside page.py
+-------------------------
+
+A ``layout.djx`` carries markup alone.
+The logic of a segment lives in the ``page.py`` of its directory, and so does the access of the directory and every page below it, declared with ``inherit=True``, see :doc:`access`.
+A layout markup reads every value of the page context, because the whole chain renders from one context.
+
+.. _topics-layouts-inherited-context:
+
+Inherited context from a segment page.py
 ----------------------------------------
 
-A segment directory that contains a ``layout.djx`` can also have a sibling ``page.py``.
-Use it to publish values that the layout markup needs and, with ``inherit_context=True``, to make those values available to every descendant page.
+A segment directory that holds a ``page.py`` publishes context to every page below it through ``inherit_context=True``.
 
 .. code-block:: python
    :caption: notes/pages/page.py
@@ -127,9 +139,38 @@ Use it to publish values that the layout markup needs and, with ``inherit_contex
        return Note.objects.count()
 
 The ``inherit_context=True`` flag publishes the value to every descendant page, whereas without the flag the value is available only when ``notes/pages/page.py`` itself handles the request.
+The chain follows the ancestor directories on disk, not the URL, so a tree that ``pages()`` places under a prefix of another tree inherits no context from the ``page.py`` files of the host.
 
 Context functions in a segment ``page.py`` take dependencies the same way any page does.
-The resolver shares its cache across the entire layout chain and the leaf page, so a value resolved at an ancestor segment is not recomputed further down.
+The resolver shares its cache across the entire chain and the leaf page, so a value resolved at an ancestor segment is not recomputed further down.
+
+A render runs the inherited callables root first, directory by directory, and the callables of the page itself last.
+A nested ``DObject`` relies on that order.
+A ``DObject[Comment, "post"]`` in a page reads the ``post`` value an ancestor ``page.py`` loaded, so a comment URL under another post answers 404, see :ref:`topics-di-dobject`.
+
+.. code-block:: python
+   :caption: blog/pages/posts/[int:post]/page.py
+
+   from blog.models import Post
+
+   from next import context
+   from next.deps import DObject
+
+   @context("post", inherit_context=True)
+   def post(post: DObject[Post]) -> Post:
+       return post
+
+.. code-block:: python
+   :caption: blog/pages/posts/[int:post]/comments/[int:comment]/page.py
+
+   from blog.models import Comment
+
+   from next import context
+   from next.deps import DObject
+
+   @context("comment")
+   def comment(comment: DObject[Comment, "post"]) -> Comment:
+       return comment
 
 The same segment ``page.py`` is where a section declares its metadata.
 A module-level ``metadata`` dict reaches every page under the directory without a flag, and a ``@page.metadata(inherit=True)`` callable does the same with the request in hand.
@@ -189,23 +230,19 @@ The separation comes from the directories, not from the backends, because layout
        "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "DIRS": [],
                "APP_DIRS": True,
-               "PAGES_DIR": "routes",
-               "OPTIONS": {"context_processors": []},
+               "PAGES_DIR": "pages",
            },
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "DIRS": [],
                "APP_DIRS": True,
-               "PAGES_DIR": "admin_routes",
-               "OPTIONS": {"context_processors": []},
+               "PAGES_DIR": "admin_pages",
            }
        ]
    }
 
-The first backend reads ``notes/routes/`` and uses ``notes/routes/layout.djx`` as its root.
-The second backend reads ``notes/admin_routes/`` and uses ``notes/admin_routes/layout.djx`` as its root.
+The first backend reads ``notes/pages/`` and uses ``notes/pages/layout.djx`` as its root.
+The second backend reads ``notes/admin_pages/`` and uses ``notes/admin_pages/layout.djx`` as its root.
 The two chains stay separate only because the two directories share no ancestor that carries a ``layout.djx``.
 A layout in a shared ancestor directory, such as the ``notes`` package directory itself, wraps pages from both backends.
 Root layouts collected from ``DIRS`` are also global.
@@ -259,9 +296,13 @@ Inherited context not visible to a sub-page.
    The ``inherit_context=True`` flag is required on the ancestor ``page.py`` that declares the value.
    Without it the value is not injected into descendant routes.
 
+A ``pages()`` tree misses a requirement.
+   A tree that ``pages()`` places under a prefix inherits no declaration of the tree that hosts it.
+   Declare the requirement with ``inherit=True`` in the ``page.py`` at the root of that tree, see :doc:`access`.
+
 Two roots produce one composed page.
    A page composes its layout chain from its own ancestor directories.
-   The chain follows the directory the file sits in, so a file routed by two backends composes the same layouts under both mounts.
+   The chain follows the directory the file sits in, so a file routed by two backends composes the same layouts under both routes.
    The duplicate route itself is reported as ``next.E015``, see :doc:`file-router`.
 
 See also
@@ -271,6 +312,7 @@ See also
 
    :doc:`pages` for the page body sources and the layout placeholder.
    :doc:`context` for context inheritance rules.
+   :doc:`access` for the access a ``page.py`` declares over a subtree.
    :doc:`seo/metadata` for the ``{% metadata %}`` tag and the metadata a segment ``page.py`` declares.
    :doc:`multi-project` for project-level layout roots.
    :doc:`/content/internals/page-discovery` for the composition pipeline.

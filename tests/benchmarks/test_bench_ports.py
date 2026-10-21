@@ -10,8 +10,7 @@ from tests.support import plain_get
 class TestBenchShaperGate:
     """What a full render pays to ask the port whether it must shape.
 
-    The direct `partial_intent` read is benched beside the gate, so the two
-    rows of the group price the port hop itself rather than the parse.
+    The direct `partial_intent` read beside the gate prices the port hop itself.
     """
 
     @pytest.mark.benchmark(group="ports.shaper_gate")

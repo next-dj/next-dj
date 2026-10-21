@@ -38,8 +38,7 @@ class _BoundProvider(NamedTuple):
 def check_context_reads_foreign_zone(*args, **kwargs) -> list[CheckMessage]:
     """Warn when a `@context` reads a key bound to a zone it misses (`next.W077`).
 
-    A zone request that does not name the bound zone skips the provider,
-    while the reader still runs and receives `None` for the parameter.
+    A zone request not naming the bound zone skips the provider, the reader gets `None`.
     """
     warnings: list[CheckMessage] = []
     for entry in loaded_page_contexts():
@@ -105,8 +104,7 @@ def _zone_bound_providers(
 def _context_parameters(func: Callable[..., Any]) -> list[inspect.Parameter]:
     """Return the parameters of a context callable that the context alone fills.
 
-    A parameter with a default is left out, because the resolver falls back to that
-    default, and a `Depends` or `Context` marker is passed as a default.
+    A parameter with a default is left out, and so is a `Depends` or `Context` marker.
     """
     try:
         parameters = inspect.signature(func).parameters

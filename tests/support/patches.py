@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 from django.contrib.staticfiles.storage import StaticFilesStorage
 
 from next.deps import provider_registry, resolver
+from next.deps.resolver import _holder, current_resolver
 from next.static import default_kinds, default_placeholders
 from next.static.discovery import default_stems
 from tests.support.components import write_colocated_component_assets
@@ -32,8 +33,7 @@ if TYPE_CHECKING:
 def _advance_version(registry: object, *, reached: int = 0) -> None:
     """Leave the version of `registry` past every generation it has carried.
 
-    Two registry states sharing a version would let a stale plan read as
-    fresh, so a restore rolls the state back and the counter forward.
+    Two states sharing a version would let a stale plan read as fresh.
     """
     registry._version = max(registry.version, reached) + 1
 
@@ -42,8 +42,7 @@ def _advance_version(registry: object, *, reached: int = 0) -> None:
 def restored_provider_registry() -> Generator[None, None, None]:
     """Put the provider registry and the singleton's provider list back afterwards.
 
-    A provider class declared in a test registers itself for the whole process, so this
-    restores both the class list and the singleton's providers.
+    A provider class declared in a test registers for the whole process.
     """
     classes = list(provider_registry)
     head = list(resolver._head)
@@ -63,13 +62,22 @@ def restored_provider_registry() -> Generator[None, None, None]:
 
 
 @contextmanager
+def restored_resolver() -> Generator[None, None, None]:
+    """Restore the object behind the resolver holder, so no swap outlives the block."""
+    original = current_resolver()
+    try:
+        yield
+    finally:
+        _holder._wrapped = original
+
+
+@contextmanager
 def bound_dependency(
     name: str, provider: Callable[..., object]
 ) -> Generator[None, None, None]:
     """Bind `Depends(name)` on the singleton to `provider` itself for the block.
 
-    `override_dependency` wraps a value in a constant lambda, which hides the
-    callable a test counts calls on or hands parameters to.
+    `override_dependency` wraps a value in a lambda, hiding the callable a test counts.
     """
     previous = resolver.get_dependency(name)
     resolver.register_dependency(name, provider)
@@ -86,8 +94,7 @@ def bound_dependency(
 def restored_static_registries() -> Generator[None, None, None]:
     """Put the stem, kind, and slot registries back the way the body found them.
 
-    These are process globals an asset plan's generation check compares
-    against, so `_advance_version` bumps the counter forward after restoring.
+    An asset plan's generation check compares against them, so the counter advances.
     """
     registries = (default_stems, default_kinds, default_placeholders)
     saved = [copy.deepcopy(registry.__dict__) for registry in registries]
@@ -111,8 +118,7 @@ def patched_watch_sources(
 ) -> Generator[None, None, None]:
     """Answer the four watch seams `next.static.finders` reads from one call.
 
-    Leaving one seam unpatched leaks the real project tree into the caller's assertions,
-    and a named component folder is written because no page-tree fixture builds one.
+    An unpatched seam leaks the real project tree into the caller's assertions.
     """
     write_colocated_component_assets(components)
     with (
@@ -149,8 +155,7 @@ def importable_dir(directory: Path) -> Generator[None, None, None]:
             del sys.modules[name]
 
 
-# Every checks submodule that binds `get_router_manager` at import time. The name is
-# read through the module that imported it, so patching the package misses all of them.
+# Every checks submodule binds `get_router_manager` at import, so patch each module.
 PAGES_ROUTER_MANAGER_TARGETS: tuple[str, ...] = (
     "next.pages.checks.composed.get_router_manager",
     "next.pages.checks.contexts.get_router_manager",
@@ -244,8 +249,7 @@ def static_names_resolved_by(
 ) -> Generator[MagicMock, None, None]:
     """Answer `staticfiles_storage.url` from a mapping and miss like a manifest does.
 
-    A name the mapping does not list raises the manifest's own `ValueError`, and the
-    patch is applied to the class so an `override_settings` inside the block keeps it.
+    An unlisted name raises the manifest's `ValueError`, patched on the class.
     """
 
     def resolve(name: str) -> str:

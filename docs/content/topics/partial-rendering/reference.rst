@@ -314,13 +314,14 @@ Status codes
    * - 303
      - A mutation succeeded with no runtime on the page, the plain ``POST`` then ``303`` then ``GET`` cycle.
    * - 403 without an envelope
-     - A guard denial or a CSRF failure served outside the shaping path.
+     - A guard denial, an access rule of the page, or a CSRF failure served outside the shaping path.
        On a mutation the runtime stays in place and fires ``partial:error`` with the status and body.
-       On a safe method it navigates fully.
+       On a safe method it fires the same ``partial:error`` and then navigates fully.
    * - 400
      - An intent that did not validate, such as a zone no name in the batch declares, a bad origin, or a zone named on a dynamic page body.
    * - 404
-     - The request named a form uid the action registry does not hold.
+     - The request named a form uid the action registry does not hold, or the page answered a zone GET with 404, such as a ``DObject`` row outside the scope or a broken ``page.py`` over the page.
+       On a safe method the runtime fires ``partial:error`` and then navigates fully, and on a mutation it stays in place after the event.
    * - 409
      - A version mismatch on a safe method, with an empty body.
        The runtime fully visits the URL the request was made against, which is the page that owns the zone rather than whatever the address bar holds.

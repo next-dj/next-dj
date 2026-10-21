@@ -17,7 +17,8 @@ Pages
 Page does not appear at the expected URL
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Confirm that the directory contains a ``page.py`` plus at least one body source, a ``render`` function, a ``template`` attribute, a ``template.djx``, or a sibling ``layout.djx``.
+Confirm that the directory contains a ``page.py`` plus at least one body source, a ``render`` function, a ``template`` attribute, or a ``template.djx``.
+A ``layout.djx`` beside or above the page is no body source.
 Confirm that the application is listed in ``INSTALLED_APPS`` and ``APP_DIRS=True`` in the page backend.
 
 Run ``uv run python manage.py check`` and resolve every warning.
@@ -53,7 +54,7 @@ next.E017 on a page.py that fails to import
 A ``page.py`` raised while importing, so the framework loads it as nothing.
 Its ``render``, ``template``, and ``@context`` declarations never take effect, and a sibling ``template.djx`` can otherwise hide the failure.
 The report names the exception type and message, so fix the named error and the module loads.
-The check imports every routed ``page.py``, so it runs under ``manage.py check --deploy`` rather than on a plain ``manage.py check``.
+The check imports every routed ``page.py`` and runs on a plain ``manage.py check``.
 At request time the same failure raises under ``DEBUG`` or ``STRICT_LOADING``, see :doc:`/content/ref/pages`.
 
 Page answers 404 although its files exist
@@ -62,7 +63,7 @@ Page answers 404 although its files exist
 The ``page.py`` behind the URL raised while importing.
 With ``DEBUG`` and ``STRICT_LOADING`` both off the framework answers 404 for the broken page while ``logger.exception`` records the traceback.
 Read the server log for the ``Could not import page module`` record, or turn on ``DEBUG`` or ``NEXT_FRAMEWORK["STRICT_LOADING"]`` so the request raises with the real cause.
-``uv run python manage.py check --deploy`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message.
+``uv run python manage.py check`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message.
 See :doc:`/content/ref/pages` for the full import-failure contract.
 
 next.E018 on multiple keyless context functions
@@ -102,7 +103,7 @@ The ``{% form %}`` tag injects the token automatically.
 Manual forms need ``{% csrf_token %}`` plus a fresh cookie.
 
 When the token is fine, the 403 can come from an access guard.
-An authenticated user missing a ``Meta.permission_required`` permission gets ``PermissionDenied``.
+An authenticated user missing a ``Meta.permission_required`` permission gets ``PermissionDenied``, and so does one whose registered predicate refuses the bound row, see :ref:`topics-permissions`.
 A dynamic permission hook, ``check_permissions`` or ``has_object_permission``, returning ``False`` or raising ``PermissionDenied`` produces the same bare 403, see :ref:`topics-forms-actions-dynamic-guards`.
 See :ref:`topics-forms-actions-guards`.
 
@@ -177,11 +178,10 @@ See :doc:`/content/ref/template-tags` for the three outcomes.
 next.E084 on a component.py that fails to import
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A ``component.py`` raised while importing, so the framework loads it as nothing.
-The component still renders, because its template is a separate file, and only the ``@component.context`` values of that module vanish from the body.
+A ``component.py`` raised while importing, so the component renders as an empty string, since the access it would have declared is unknown, and under ``next.conf.fail_loudly`` it raises ``ComponentModuleImportError`` with the import failure as ``__cause__``.
 The report names the exception type and message, so fix the named error and the module loads.
-The check imports every discovered ``component.py``, so it runs under ``manage.py check --deploy`` rather than on a plain ``manage.py check``.
-See :doc:`/content/topics/components` for the degraded render.
+The check imports every discovered ``component.py`` and runs on a plain ``manage.py check``.
+See :doc:`/content/topics/components` for the closed render.
 
 Component prop does not resolve
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -292,7 +292,9 @@ Partial rendering
 Zone GET returns HTTP 400
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A response body of ``unknown zone`` means the requested name matches no ``{% zone %}`` in the composed page.
+A response body of ``unknown zone`` means the requested name matches no ``{% zone %}`` in the composed page, or names one that may not render on its own, under a ``{% has_perm %}``, an ``{% if %}``, or a ``{% for %}`` of the page, or in the body of a component that decides what that part shows, or under a block tag from a module outside ``django.`` and ``next.``, which ``next.E161``, ``next.E063``, and ``next.E062`` report at ``manage.py check``.
+Such a zone is refused to every user, so move the decision inside the zone, see :ref:`topics-permissions-zones`.
+A zone GET that answers 403 hit the access rule of the page itself, see :ref:`topics-permissions-tree`.
 Check that ``data-next-target`` names the same string as the zone tag on the page that serves the request.
 A response body of ``zone in dynamic body`` means the page body comes from a ``render`` function returning a string, so there is no compiled template source to render the slice standalone.
 Move the zone to a page whose body comes from a template source.
@@ -340,7 +342,7 @@ UnknownDependencyError
 The resolver raises ``UnknownDependencyError`` when ``Depends("name")`` or a bare ``Depends()`` names a dependency nothing has registered.
 The message carries the dependency name, the parameter, and the callable with its source path.
 When a registered name is close to the missing one, the message ends with a ``Did you mean`` hint naming it.
-Register the callable with ``resolver.dependency("name")`` from a module imported in ``AppConfig.ready``, or fix the name at the ``Depends`` site.
+Register the callable with ``resolver.dependency("name")`` in the ``deps.py`` of an app, which the framework imports at startup, or fix the name at the ``Depends`` site.
 
 DI parameter resolves to None
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -380,7 +382,7 @@ Use ``make_resolution_context`` from the same module when you need finer control
 Custom marker not handled
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Confirm that the provider class is imported during ``AppConfig.ready``.
+Confirm that the provider class lives in the ``deps.py`` of an installed app, or in a module imported from it or from ``AppConfig.ready``.
 ``RegisteredParameterProvider`` registers at class creation, so a marker stays unhandled for exactly as long as the module defining its provider goes unimported.
 A class that registers after the first resolve joins the provider list by priority and the affected plans recompile, so a late import costs order predictability rather than correctness.
 
@@ -403,7 +405,7 @@ The context manager prepends the provider to the resolver list on entry and remo
 .. code-block:: python
 
    from django.test import TestCase
-   from myapp.providers import TenantProvider
+   from myapp.deps import TenantProvider
 
    from next.testing.patching import override_provider
 
@@ -424,7 +426,8 @@ Virtual routes and bracket directories
 A plain directory that contains only a ``template.djx`` and no ``page.py`` is a virtual route.
 The router still maps it to a URL.
 
-Captured-parameter directories (names in brackets) must contain ``page.py``, ``layout.djx``, ``template.djx``, or a direct child directory that contains ``page.py``.
+Captured-parameter directories (names in brackets) must serve a page, a ``page.py`` with a body or a lone ``template.djx``, at any depth the router walks, which leaves out ``_name`` folders.
+A ``layout.djx`` or a ``page.py`` without a body does not count, since neither routes a URL.
 Otherwise ``manage.py check`` reports :ref:`next.E010 <ref-system-checks>`.
 
 URL name not found

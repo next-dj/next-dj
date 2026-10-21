@@ -17,8 +17,7 @@ if TYPE_CHECKING:
     from next.components import ComponentInfo
 
 
-# A cold round builds a plan from scratch, so the count stays modest and the
-# warmup rounds keep the page-module import out of the reported median.
+# A cold round builds a plan from scratch, so keep the count modest.
 _COLD_ROUNDS = 50
 _COLD_WARMUP_ROUNDS = 5
 
@@ -121,8 +120,7 @@ class TestBenchComponentAssetDiscovery:
 class TestBenchColdAssetPlan:
     """What building an `_AssetPlan` costs, against the replay of a built one.
 
-    A cold round holds no plan and no page root, what a first render after a reload
-    meets. A rebuild round drops only the plan, what a touched asset directory leaves.
+    A cold round holds no plan and no page root, a rebuild round drops only the plan.
     """
 
     @pytest.mark.benchmark(group="static.discovery")

@@ -10,6 +10,7 @@ from django.template.defaulttags import ForNode, WithNode
 
 from next.forms.nodes import FormNode
 from next.partial.zone import ZoneNode
+from next.utils import child_nodelists
 
 
 if TYPE_CHECKING:
@@ -23,14 +24,6 @@ def zone_nodes(template: "Template") -> list[ZoneNode]:
     return cast("list[ZoneNode]", template.nodelist.get_nodes_by_type(ZoneNode))
 
 
-def child_nodelists(node: Node) -> "Iterator[NodeList]":
-    """Yield each declared child node list of a node."""
-    for attr in node.child_nodelists:
-        nodelist = getattr(node, attr, None)
-        if isinstance(nodelist, NodeList):
-            yield nodelist
-
-
 def significant(nodelist: NodeList) -> list[Node]:
     """Return the nodes of a list that are not pure whitespace text."""
     out: list[Node] = []
@@ -39,20 +32,6 @@ def significant(nodelist: NodeList) -> list[Node]:
             continue
         out.append(node)
     return out
-
-
-def zones_under(
-    nodelist: NodeList, ancestor: type[Node], *, inside: bool = False
-) -> "Iterator[str]":
-    """Yield names of zones reached while an `ancestor` node is on the path."""
-    for node in nodelist:
-        if isinstance(node, ZoneNode):
-            if inside:
-                yield node.name
-            continue
-        now_inside = inside or isinstance(node, ancestor)
-        for child in child_nodelists(node):
-            yield from zones_under(child, ancestor, inside=now_inside)
 
 
 def zones_directly_in_with(nodelist: NodeList) -> "Iterator[str]":
@@ -76,11 +55,4 @@ def forms_in_loop(nodelist: NodeList, *, inside: bool = False) -> "Iterator[Form
             yield from forms_in_loop(child, inside=now_inside)
 
 
-__all__ = [
-    "child_nodelists",
-    "forms_in_loop",
-    "significant",
-    "zone_nodes",
-    "zones_directly_in_with",
-    "zones_under",
-]
+__all__ = ["forms_in_loop", "significant", "zone_nodes", "zones_directly_in_with"]

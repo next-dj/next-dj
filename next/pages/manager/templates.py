@@ -31,8 +31,7 @@ class PageTemplateCache:
         self.composed: PageCache[Path, str] = PageCache()
         self.compiled: PageCache[Path, Template] = PageCache()
         self.skeleton: PageCache[Path, str] = PageCache()
-        # The skeleton keeps its own snapshot, because the composed layer refreshes
-        # its own on eviction and would otherwise hide a layout edit.
+        # The skeleton keeps its own snapshot, or a composed refresh hides layout edits.
         self.composed_sources: SourceMtimes = PageCache()
         self.skeleton_sources: SourceMtimes = PageCache()
         self._layout_loader = layout_loader
@@ -70,8 +69,7 @@ class PageTemplateCache:
     def source_paths(self, file_path: Path) -> list[Path]:
         """Return every path whose change alters the composition of this page.
 
-        The directories come along with the files, because a `layout.djx`
-        created or deleted there moves no mtime a file-only snapshot sees.
+        Directories come too, since a new `layout.djx` moves no file mtime.
         """
         paths: list[Path] = []
         for loader in build_registered_loaders():
@@ -86,8 +84,7 @@ class PageTemplateCache:
     def _record(self, file_path: Path, store: SourceMtimes) -> None:
         """Snapshot mtimes of the template sources of `file_path` into `store`.
 
-        Taken whether or not the process watches edits, because an entry
-        composed with the watch off would hold nothing to compare against.
+        Taken even with the watch off, since a later check needs something to compare.
         """
         paths = self.source_paths(file_path)
         if not paths:
@@ -104,8 +101,7 @@ class PageTemplateCache:
     def _is_stale(self, file_path: Path, store: SourceMtimes) -> bool:
         """Return whether any source tracked in `store` changed on disk.
 
-        Compared for inequality rather than growth, so a checkout that moves an mtime
-        backwards counts as a change, as does a source that no longer exists.
+        Compared for inequality, so an mtime moving backwards or a lost source counts.
         """
         if not template_edits_watched():
             return False

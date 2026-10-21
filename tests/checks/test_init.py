@@ -53,7 +53,7 @@ def _check_id_literals() -> dict[str, set[str]]:
 _CHECK_ID_LITERALS = _check_id_literals()
 
 _RETIRED_IDS = frozenset(
-    {"next.E001", "next.E066", "next.E091", "next.E109"}
+    {"next.E001", "next.E026", "next.E066", "next.E091", "next.E109"}
     | {f"next.W{number:03d}" for number in range(3, 30)}
     | {f"next.W{number:03d}" for number in range(32, 42)}
     | {"next.W044", "next.W045"}
@@ -69,7 +69,7 @@ _CHECKS_REFERENCE = (
     / "ref"
     / "system-checks.rst"
 )
-_REFERENCE_ROW = re.compile(r"^   \* - ``(next\.[EW]\d{3})``$", re.MULTILINE)
+_REFERENCE_ROW = re.compile(r"^   \* - ``(next\.[EWI]\d{3})``$", re.MULTILINE)
 
 
 def _defined_check_names(module_path: pathlib.Path) -> frozenset[str]:
@@ -185,10 +185,7 @@ class TestPublicSurface:
 class TestRetiredReExports:
     """Private page helpers no longer resolve off the checks facade."""
 
-    @pytest.mark.parametrize(
-        "name",
-        ["_has_template_or_djx", "_load_python_module", "load_python_module_memo"],
-    )
+    @pytest.mark.parametrize("name", ["_load_python_module", "load_python_module_memo"])
     def test_private_page_helper_is_gone(self, name: str) -> None:
         assert not hasattr(checks_package, name)
 
@@ -196,8 +193,7 @@ class TestRetiredReExports:
 class TestCheckIdAllocation:
     """Every `next.*` check id is allocated to one module across the framework.
 
-    Two areas reaching for the same free number is invisible when each area asserts
-    its own id in isolation, so the whole tree is read in one pass here.
+    Each area asserting its own id hides two areas taking the same number.
     """
 
     def test_the_tree_allocates_check_ids(self) -> None:

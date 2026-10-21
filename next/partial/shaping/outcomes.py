@@ -3,14 +3,17 @@
 from typing import TYPE_CHECKING
 
 from django.contrib.messages import get_messages
-from django.http import HttpResponse, HttpResponseRedirect
+from django.core.exceptions import PermissionDenied
+from django.http import Http404, HttpResponse, HttpResponseRedirect
 from django.utils.http import url_has_allowed_host_and_scheme
 
+from next.deps import render_dep_cache
 from next.forms.dispatch import FormActionDispatch
 from next.forms.dispatch.responses import ActionOutcome, ActionOutcomeKind
 from next.forms.origin import filter_reserved_url_kwargs
 from next.forms.uid import FORM_ORIGIN_OVERRIDE_KEY
 from next.pages import page as page_manager
+from next.pages.access import page_access, refusal
 from next.partial import keys
 from next.partial.headers import RESPONSE_ACTION, RESPONSE_FORM, set_partial_vary
 from next.partial.patches import Patches, PatchResponse
@@ -50,8 +53,7 @@ def shape_partial(
 ) -> HttpResponse:
     """Shape one action outcome as a patch envelope for a partial request.
 
-    The rotation marker is read before any re-render mints a token, so a login on
-    submit stamps the fresh token, reading it after would flag every response instead.
+    The rotation marker is read before a re-render mints a token.
     """
     rotated = _csrf_rotated(request)
     if outcome.kind == ActionOutcomeKind.INVALID:
@@ -64,8 +66,7 @@ def shape_partial(
 def drain_messages(request: "HttpRequest", patches: Patches) -> Patches:
     """Drain pending contrib.messages into toast patches.
 
-    Iterating `get_messages` marks the messages read, so a later full navigation does
-    not replay them. The success message of an action becomes a toast without code.
+    Iterating `get_messages` marks them read, so a full navigation does not replay.
     """
     for message in get_messages(request):
         variant = _MESSAGE_VARIANTS.get(message.level_tag, "info")
@@ -82,8 +83,7 @@ def _shape_invalid(
 ) -> HttpResponse:
     """Shape an invalid submission as a patch addressing only the failed form.
 
-    A named zone re-renders only that zone with the bound form in overrides. Without
-    one, the patch carries `extract: true` so the client trims the failed form by uid.
+    A named zone re-renders with the bound form, else `extract: true` trims it by uid.
     """
     patches = Patches(request)
     form = outcome.form
@@ -115,8 +115,7 @@ def _shape_advance(
 ) -> HttpResponse:
     """Shape a wizard step advance as a master-zone morph, never a redirect.
 
-    The next step's page authorizes the request before its zone renders, and a denial
-    falls back to the plain redirect a runtime-free client would have followed.
+    A denial by the next step's page falls back to the plain redirect.
     """
     wizard = outcome.wizard
     redirect_to = outcome.redirect_to
@@ -130,7 +129,10 @@ def _shape_advance(
     if target is None:
         return _step_redirect(redirect_to)
     page_path, url_kwargs = target
-    if _step_denies(request, page_path, url_kwargs, redirect_to):
+    # The step URL comes from the posted origin, so only the wizard's own page morphs.
+    if page_path != outcome.page_path or _step_denies(
+        request, page_path, url_kwargs, redirect_to
+    ):
         return _step_redirect(redirect_to)
     next_wizard = type(wizard)(
         request=request, url_kwargs=url_kwargs, base_path=redirect_to
@@ -138,8 +140,7 @@ def _shape_advance(
     form = next_wizard.current_form()
     patches = Patches(request)
     overrides = _zone_overrides(form, next_wizard, outcome.action_name)
-    # The hidden _next_form_origin must carry the next step URL, not the current
-    # one from request.POST, or a blur probe morphs the previous step back in.
+    # The hidden _next_form_origin must carry the next step URL, not the current one.
     overrides[FORM_ORIGIN_OVERRIDE_KEY] = redirect_to
     zone = _form_zone(request, page_path)
     if zone is not None:
@@ -174,9 +175,16 @@ def _step_denies(
 ) -> bool:
     """Return True when the next step's page refuses to serve a visit of `step_url`.
 
-    The step page keeps every captured parameter for its render, so the guard sees
-    only the DI-safe subset, the same one the page's own view would be injected with.
+    Its declared rule runs first and its guard sees the DI-safe parameters, as its view.
     """
+    if page_access(page_path).broken is not None:
+        return True
+    try:
+        login = refusal(page_path, request, dict(url_kwargs), render_dep_cache(request))
+    except (PermissionDenied, Http404):
+        return True
+    if login is not None:
+        return True
     denial, _dynamic = page_manager.authorization_outcome(
         page_path, request, step_url, filter_reserved_url_kwargs(url_kwargs)
     )
@@ -193,8 +201,7 @@ def _advance_zone(
 ) -> None:
     """Render the next step's zone and morph it with its co-located assets.
 
-    Renders directly rather than through `morph_zone`, since the next step lives on a
-    foreign page, and forwards the manifest and js-context delta along with it.
+    Renders directly since the step lives on a foreign page, forwarding its assets.
     """
     result = render_zone(
         page_path, (zone,), request, url_kwargs=url_kwargs, overrides=overrides
@@ -212,8 +219,7 @@ def _shape_result(
 ) -> HttpResponse:
     """Shape a successful outcome, packing redirects and the success funnel.
 
-    A `None` result runs the success funnel,
-    morphing in place instead of a full origin re-render.
+    A `None` result runs the success funnel, morphing in place without a re-render.
     """
     raw = outcome.raw
     if isinstance(raw, PatchResponse):
@@ -230,8 +236,7 @@ def _redirect_as_visit(
 ) -> HttpResponse:
     """Pack a handler redirect into a `visit`, full-navigating external hosts.
 
-    An external URL gets a full-navigation marker past the same-host validator.
-    Never build it from user input, or it opens a redirect.
+    The external marker passes the same-host validator, so never use user input.
     """
     href = redirect["Location"]
     internal = url_has_allowed_host_and_scheme(

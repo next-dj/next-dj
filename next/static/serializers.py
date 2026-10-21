@@ -1,8 +1,4 @@
-"""Pluggable JS-context serializers for `@context(serialize=True)` values.
-
-`StaticCollector.add_js_context` delegates encoding to a `JsContextSerializer`,
-pluggable via `JS_CONTEXT_SERIALIZER` for pydantic, msgspec, or another type.
-"""
+"""Pluggable JS-context serializers for `@context(serialize=True)` values."""
 
 from __future__ import annotations
 
@@ -24,8 +20,7 @@ pydantic: ModuleType | None
 try:
     import pydantic
 except ImportError:  # pragma: no cover - pydantic is installed in CI
-    # pydantic is an optional dependency. Its absence is reported when the
-    # pydantic serializer is constructed, never at module import.
+    # Optional dependency, its absence is reported when the serializer is built.
     pydantic = None
 
 
@@ -55,8 +50,7 @@ class JsonJsContextSerializer:
 class PydanticJsContextSerializer:
     """Serialise values through pydantic model dump when available.
 
-    Unknown types fall through to `DjangoJSONEncoder`, so lists and dicts containing
-    mixed pydantic and plain values still serialise without a second code path.
+    Unknown types fall through to `DjangoJSONEncoder`.
     """
 
     def __init__(self) -> None:
@@ -78,8 +72,7 @@ class PydanticJsContextSerializer:
 def _pydantic_encoder(module: ModuleType) -> type[DjangoJSONEncoder]:
     """Return the encoder unwrapping `BaseModel` of the validated module.
 
-    Built once per module rather than per serializer, because defining a class builds
-    a namespace and an MRO, and the encoder holds no state.
+    Built once per module because the encoder holds no state.
     """
     base_model = module.BaseModel
 
@@ -138,9 +131,7 @@ def _instantiate(path: str) -> JsContextSerializer:
 def _build_serializer(path: str) -> JsContextSerializer:
     """Import and instantiate the serializer `path` names, the default on a failure.
 
-    A broken serializer would fail every render, so the JSON default replaces it. The
-    error is raised under `DEBUG` and otherwise logged at the `FailureLog` rate, and
-    `next.W079` to `next.W082` report the cause.
+    `next.W079` to `next.W082` report the cause of a failure.
     """
     with _failures.guard(
         path,
@@ -156,8 +147,7 @@ def _build_serializer(path: str) -> JsContextSerializer:
 def resolve_serializer() -> JsContextSerializer:
     """Return the configured serializer or the process-wide default.
 
-    The path is read per call, the instance built once per path. A render falling back
-    from a broken one is degraded and logged at the `FailureLog` rate.
+    The path is read per call, the instance built once per path.
     """
     path = getattr(next_framework_settings, "JS_CONTEXT_SERIALIZER", None)
     if not path:

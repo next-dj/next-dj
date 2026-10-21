@@ -17,8 +17,7 @@ _OP_TOKEN = re.compile(r"\A[A-Za-z0-9_.-]+\Z")
 def check_custom_patch_ops_well_formed(*args, **kwargs) -> list[CheckMessage]:
     """Error when a custom patch verb is not a valid verb token.
 
-    `register_patch_op` already refuses a built-in verb, so only the token shape is
-    left to report at `manage.py check` time.
+    `register_patch_op` already refuses a built-in, so only the token shape is left.
     """
     return [
         Error(

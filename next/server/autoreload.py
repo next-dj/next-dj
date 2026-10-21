@@ -1,7 +1,6 @@
 """Custom `StatReloader` that also watches the discovered route set.
 
-`.djx` templates are deliberately left out of the watch. Under `DEBUG` they are
-re-read on render with mtime-based invalidation inside pages and components.
+A `.djx` edit re-reads on render, so only a template that appears or goes restarts.
 """
 
 from __future__ import annotations
@@ -12,6 +11,7 @@ from typing import TYPE_CHECKING, override
 
 from django.utils.autoreload import StatReloader
 
+from next.pages.loaders import has_body
 from next.pages.watch import get_pages_directories_for_watch
 from next.urls.dispatcher import scan_pages_tree
 
@@ -27,8 +27,7 @@ logger = logging.getLogger(__name__)
 def _tree_dir_signature(root: Path) -> tuple[float, int]:
     """Return `(max mtime, directory count)` across every subdirectory.
 
-    `os.scandir` hands back a cached stat per `DirEntry`, sparing a second syscall, and
-    the count catches two renames that preserve the latest mtime.
+    The count catches two renames that preserve the latest mtime.
     """
     try:
         root_st = root.stat()
@@ -63,11 +62,11 @@ class NextStatReloader(StatReloader):
     def __init__(self) -> None:
         """Initialise the cached route set used for tick-to-tick diffs."""
         super().__init__()
-        self._previous_routes: set[tuple[str, Path]] | None = None
+        self._previous_routes: set[tuple[str, Path, bool]] | None = None
         self._dir_signatures: dict[Path, tuple[float, int]] = {}
-        self._cached_routes: set[tuple[str, Path]] | None = None
+        self._cached_routes: set[tuple[str, Path, bool]] | None = None
 
-    def _check_routes(self, current: set[tuple[str, Path]]) -> None:
+    def _check_routes(self, current: set[tuple[str, Path, bool]]) -> None:
         """Notify the reloader when the discovered route set changed."""
         prev = self._previous_routes
         if prev is None or current == prev:
@@ -78,14 +77,17 @@ class NextStatReloader(StatReloader):
         self.notify_file_changed(next(iter(diff))[1])
         self._previous_routes = current
 
-    def _collect_routes(self) -> set[tuple[str, Path]]:
-        """Return the route set, reusing the cached value when signatures match."""
+    def _collect_routes(self) -> set[tuple[str, Path, bool]]:
+        """Return the routes and their loader bodies, cached while signatures match.
+
+        A body in `page.py` changes with the file, which the `.py` watch restarts on.
+        """
         pages_paths = get_pages_directories_for_watch()
         new_signatures = {p: _tree_dir_signature(p) for p in pages_paths}
         if self._cached_routes is not None and new_signatures == self._dir_signatures:
             return self._cached_routes
         routes = {
-            (url_path, file_path.resolve())
+            (url_path, file_path.resolve(), has_body(file_path, None))
             for pages_path in pages_paths
             for url_path, file_path in scan_pages_tree(pages_path)
         }
@@ -101,8 +103,7 @@ class NextStatReloader(StatReloader):
             try:
                 routes = self._collect_routes()
             except (OSError, ImportError, ValueError) as e:
-                # Narrow on purpose. The watch helpers already absorb what a
-                # router raises, so a blind catch would hide a framework bug.
+                # Narrow on purpose, the watch helpers absorb what a router raises.
                 logger.debug("next route set check skipped: %s", e)
             else:
                 self._check_routes(routes)

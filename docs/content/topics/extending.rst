@@ -139,12 +139,12 @@ Register entries in ``AppConfig.ready`` or through a settings key.
        Import ``default_kinds`` from ``next.static`` (top-level re-export).
    * - Asset stems
      - ``default_stems.register(...)`` in ``AppConfig.ready``.
-       Import ``default_stems`` from ``next.static.discovery`` (deep import).
+       Import ``default_stems`` from ``next.static`` (top-level re-export).
    * - Placeholder slots
      - ``default_placeholders.register(...)`` in ``AppConfig.ready``.
        Import ``default_placeholders`` from ``next.static`` (top-level re-export).
    * - Dependency providers
-     - Subclass ``RegisteredParameterProvider``, imported in ``AppConfig.ready``.
+     - Subclass ``RegisteredParameterProvider`` in the ``deps.py`` of an app, which the framework imports at startup.
    * - Named dependencies
      - ``@resolver.dependency("name")`` decorator.
        Import ``resolver`` from ``next.deps``.
@@ -164,7 +164,7 @@ Call ``default_stems.register(...)`` from ``AppConfig.ready`` so the new stem is
 
    from django.apps import AppConfig
 
-   from next.static.discovery import default_stems
+   from next.static import default_stems
 
    class NotesConfig(AppConfig):
        name = "notes"
@@ -177,7 +177,7 @@ App order in ``INSTALLED_APPS``
 
 Django runs every ``AppConfig.ready`` during application population, in ``INSTALLED_APPS`` order, so an app listed above ``next`` registers before ``NextFrameworkConfig.ready`` runs and an app listed below it registers after.
 For the registries on this page that ordering does not change the outcome.
-``NextFrameworkConfig.ready`` installs the autoreload, template, staticfiles, and component hooks and runs component discovery, and none of those steps read the kind, stem, placeholder, provider, named-dependency, or patch-verb registries.
+``NextFrameworkConfig.ready`` installs the autoreload, template, and staticfiles hooks, imports the ``deps``, ``permissions``, ``forms``, and ``signals`` modules of every app, then installs the component hooks and runs component discovery, and none of those steps read the kind, stem, placeholder, provider, named-dependency, or patch-verb registries.
 Each of those registries is read on the first render, the first dispatch, or the first ``manage.py check``, and the watch specs are resolved when the autoreload watcher starts, all of which happen after application population finishes.
 What matters is that the call sits in ``ready`` rather than in request-time code, not where the app sits in the list.
 
@@ -324,6 +324,9 @@ A port is the narrow surface one subsystem calls another through.
    * - Slot
      - Shipped implementation
      - What it answers
+   * - ``action_owners_slot``
+     - ``next.forms.ports.ActionOwnersImpl``
+     - Answers the ``page.py`` of every directory whose files declare an action.
    * - ``form_routes_slot``
      - ``next.forms.manager.form_action_manager``
      - Answers the URL patterns of every form backend.
@@ -346,7 +349,7 @@ A port is the narrow surface one subsystem calls another through.
      - ``next.static.ports.StaticAssetsImpl``
      - Creates a collector, discovers page and component assets, and injects the placeholder tags.
 
-``NextFrameworkConfig.ready()`` binds all seven, ahead of every step that imports user code.
+``NextFrameworkConfig.ready()`` binds all eight, ahead of every step that imports user code.
 Replace one by subclassing the shipped implementation and calling ``set`` on its slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since a slot holds one implementation and the last binding wins.
 
 .. code-block:: python
@@ -432,21 +435,24 @@ Choosing between mechanisms
 Packaging an extension
 ----------------------
 
-A reusable extension ships as an ordinary Django application, and its ``AppConfig`` is where the registration runs.
+A reusable extension ships as an ordinary Django application.
+The framework imports its ``deps.py``, ``permissions.py``, and ``signals.py`` at startup like those of any installed app, so the providers, named dependencies, predicates, and receivers declared there need no code of their own, see :doc:`/content/ref/settings`.
 
 .. code-block:: python
    :caption: next_audit/apps.py
 
    from django.apps import AppConfig
 
+   from next.static import default_stems
+
    class NextAuditConfig(AppConfig):
        name = "next_audit"
 
        def ready(self) -> None:
-           from next_audit import providers, receivers  # noqa: F401
+           default_stems.register("component", "audit")
 
 Register through ``ready`` rather than at module import, because the app registry is not populated when the module body runs.
-Everything a package registers imperatively goes there, the provider and named-dependency registrations, the asset kinds and stems, the patch verbs, the autoreload watch specs, the signal receivers, and a port replacement.
+Everything else a package registers imperatively goes there, the asset kinds and stems, the patch verbs, the autoreload watch specs, and a port replacement.
 What a package cannot register for its adopter is a backend or a strategy, since both are named by a dotted path in ``NEXT_FRAMEWORK``, so the package documents the path and the adopter adds the entry.
 
 Position the app relative to ``next`` in ``INSTALLED_APPS`` by what it registers.
@@ -460,7 +466,7 @@ Position the app relative to ``next`` in ``INSTALLED_APPS`` by what it registers
    ]
 
 For every registry on this page the position does not change the outcome, as *App order in* ``INSTALLED_APPS`` above explains.
-A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all seven slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
+A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all eight slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
 A package that reuses an existing kind or placeholder name with different parameters fails at startup either way, and its position only decides which ``ready`` call raises.
 
 Declare the dependency on next.dj under its distribution name, and constrain it from below only.

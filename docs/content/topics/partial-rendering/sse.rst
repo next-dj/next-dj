@@ -24,8 +24,8 @@ The page view authorizes the subscriber, the same as any other page.
 
    from django.http import HttpRequest
    from polls.broker import broker
+   from polls.deps import DPoll
    from polls.models import Poll
-   from polls.providers import DPoll
 
    from next.partial import Patches, PatchEventStream
 
@@ -145,7 +145,7 @@ Stream telemetry
 ``sse_stream_closed`` carries the ``request``, the ``duration_ms`` the connection lived, and the ``envelopes_sent`` count flushed over it, and fires when the source is exhausted or the client is gone.
 
 .. code-block:: python
-   :caption: notes/receivers.py
+   :caption: notes/signals.py
 
    import logging
 

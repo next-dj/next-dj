@@ -1,4 +1,5 @@
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
@@ -11,6 +12,8 @@ from django.urls import NoReverseMatch, include, path, re_path
 from django.views import View
 
 from next.checks import reset_check_caches
+from next.forms import RegistryFormActionBackend
+from next.forms.manager import form_action_manager
 from next.forms.uid import reverse_form_action
 from next.testing import override_next_settings
 from next.urls import PageRoot, RouterBackend
@@ -23,12 +26,19 @@ from next.urls.checks import (
     check_url_patterns,
 )
 from tests.support import (
+    check_ids,
     file_router,
+    file_router_config_entry,
     importable_dir,
+    installed_apps,
+    isolated_form_registries,
     patch_checks_router_manager_with_routers,
     routed,
+    write_app,
     write_page,
+    write_urlconf,
 )
+from tests.support.access import PAGE_HEAD, page_source
 
 
 def _write_virtual_page(tree: Path, route: str) -> Path:
@@ -245,17 +255,15 @@ class TestCheckUrlPatterns:
         """The folder a backend names through the contract leaves the collection."""
         tree_a = tmp_path / "tree_a"
         tree_b = tmp_path / "tree_b"
-        write_page(tree_a, "_components/widget")
-        write_page(tree_b, "_components/widget")
+        write_page(tree_a, "widgets/card")
+        write_page(tree_b, "widgets/card")
 
         unskipped = _TreeRouter(root_trees=[tree_a, tree_b])
         with patch_checks_router_manager_with_routers(routers=[unskipped]):
             assert any(m.id == "next.E015" for m in check_url_patterns(None))
 
         reset_check_caches()
-        skipped = _TreeRouter(
-            root_trees=[tree_a, tree_b], components_folder="_components"
-        )
+        skipped = _TreeRouter(root_trees=[tree_a, tree_b], components_folder="widgets")
         with patch_checks_router_manager_with_routers(routers=[skipped]):
             assert check_url_patterns(None) == []
 
@@ -265,8 +273,8 @@ class TestCheckUrlPatterns:
         """A directory the router itself refuses keeps its pages out of the routes."""
         tree_a = tmp_path / "tree_a"
         tree_b = tmp_path / "tree_b"
-        write_page(tree_a, "_drafts/wip")
-        write_page(tree_b, "_drafts/wip")
+        write_page(tree_a, "drafts/wip")
+        write_page(tree_b, "drafts/wip")
         router = _TreeRouter(root_trees=[tree_a, tree_b])
 
         with patch_checks_router_manager_with_routers(routers=[router]):
@@ -274,7 +282,7 @@ class TestCheckUrlPatterns:
 
         reset_check_caches()
         skipping = _TreeRouter(
-            root_trees=[tree_a, tree_b], skip_names=frozenset({"_drafts"})
+            root_trees=[tree_a, tree_b], skip_names=frozenset({"drafts"})
         )
         with patch_checks_router_manager_with_routers(routers=[skipping]):
             assert check_url_patterns(None) == []
@@ -354,8 +362,7 @@ class TestCheckReverseNameCollisions:
     def test_a_failing_tree_listing_leaves_the_url_checks_silent(self) -> None:
         """A router that cannot list its trees contributes none, and raises nothing.
 
-        The finding itself is `next.E030` from the pages structure check, which
-        is the one place that names it, so the run reports it exactly once.
+        `next.E030` from the pages structure check names it, so it reports once.
         """
         with patch_checks_router_manager_with_routers(routers=[_BrokenRouter()]):
             path_messages = check_url_patterns(None)
@@ -417,6 +424,29 @@ class TestPagesConfigurationCodes:
             errors = check_next_pages_configuration()
         assert [e.id for e in errors] == ["next.E002"]
 
+    @pytest.mark.parametrize(
+        ("dirs", "fragment"),
+        [("pages", "must be a list"), ([5], "neither a path nor a segment name")],
+        ids=["not_a_list", "item_of_another_type"],
+    )
+    def test_a_dirs_value_the_router_cannot_read_is_e006(self, dirs, fragment) -> None:
+        entry = {**file_router_config_entry(), "DIRS": dirs}
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
+            errors = check_next_pages_configuration()
+        assert [e.id for e in errors] == ["next.E006"]
+        assert fragment in errors[0].msg
+
+    def test_paths_strings_and_none_in_dirs_pass(self, tmp_path) -> None:
+        entry = {**file_router_config_entry(), "DIRS": [tmp_path, "shell", None]}
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
+            assert check_next_pages_configuration() == []
+
+    def test_an_entry_without_options_passes(self) -> None:
+        entry = file_router_config_entry()
+        del entry["OPTIONS"]
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
+            assert check_next_pages_configuration() == []
+
     def test_non_string_pages_dir_is_e027(self) -> None:
         with override_settings(
             NEXT_FRAMEWORK={
@@ -470,6 +500,63 @@ class _CallableView:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """Return a plain response."""
         return HttpResponse("instance")
+
+
+_TENANT_PAGE = """
+from django.http import HttpResponse
+from next.forms import action
+
+template = '{% form "tenant_ping" %}<button>go</button>{% endform %}'
+
+
+@action("tenant_ping")
+def tenant_ping():
+    return HttpResponse("pong")
+"""
+
+
+class TenantFormActionBackend(RegistryFormActionBackend):
+    """A project backend whose actions exist only once its page modules run."""
+
+
+def _tenant_tree(tmp_path: Path) -> Path:
+    root = tmp_path / "pages"
+    write_page(root, "", _TENANT_PAGE)
+    return root
+
+
+@pytest.fixture()
+def tenant_backend(monkeypatch) -> Iterator[TenantFormActionBackend]:
+    """Serve the form actions through a fresh project backend nothing has filled."""
+    backend = TenantFormActionBackend()
+    with isolated_form_registries():
+        monkeypatch.setattr(form_action_manager, "_backends", [backend])
+        yield backend
+
+
+class TestFrameworkRoutesBeforeDiscovery:
+    """`next.E149` run first discovers the pages that register the form actions."""
+
+    def test_a_custom_backend_dispatch_is_recognised(
+        self, tmp_path, tenant_backend: TenantFormActionBackend
+    ) -> None:
+        with routed(_tenant_tree(tmp_path)):
+            assert list(tenant_backend.iter_actions()) == []
+            assert check_framework_routes_reachable() == []
+        assert [meta["name"] for meta in tenant_backend.iter_actions()] == [
+            "tenant_ping"
+        ]
+
+    def test_a_pattern_above_the_include_is_still_e149(
+        self, tmp_path, tenant_backend: TenantFormActionBackend
+    ) -> None:
+        urlconf = _urlconf(
+            "tenant_catch_all", re_path(r"^.*$", _mine), path("", include("next.urls"))
+        )
+        with routed(_tenant_tree(tmp_path)), override_settings(ROOT_URLCONF=urlconf):
+            errors = check_framework_routes_reachable()
+        assert [error.id for error in errors] == ["next.E149", "next.E149"]
+        assert "form action endpoint" in errors[1].msg
 
 
 class TestFrameworkRoutesReachable:
@@ -564,3 +651,181 @@ class TestFrameworkRoutesReachable:
     def test_an_unrouted_endpoint_is_left_to_its_own_check(self) -> None:
         with override_settings(ROOT_URLCONF=_urlconf("none", path("", _mine))):
             assert check_framework_routes_reachable() == []
+
+
+def _url_messages(root: Path, *names: str, urlconf: str | None = None) -> list:
+    with installed_apps(root, *names, urlconf=urlconf):
+        reset_check_caches()
+        return [*check_url_patterns(None), *check_reverse_name_collisions(None)]
+
+
+class TestPagesTreeUrlChecks:
+    """The URL checks key each route from the URLconf root, prefix and all."""
+
+    @pytest.mark.parametrize(
+        ("entry", "head", "trail"),
+        [
+            (
+                'path("w/<int:wallet>/", pages("wallets"))',
+                "w/<int:wallet>/",
+                "ops/[int:wallet]",
+            ),
+            ('path("<slug:wallet>/", pages("wallets"))', "<slug:wallet>/", "[wallet]"),
+            ('path("w/", pages("wallets"), {"wallet": 1})', "w/", "[wallet]"),
+            (
+                r're_path(r"^w/(?P<wallet>\d+)/", pages("wallets"))',
+                r"^w/(?P<wallet>\d+)/",
+                "[wallet]",
+            ),
+            (
+                'path("o/<int:wallet>/", include([path("w/", pages("wallets"))]))',
+                "o/<int:wallet>/w/",
+                "[wallet]",
+            ),
+        ],
+        ids=["deep", "top", "extra-kwargs", "regex", "nested"],
+    )
+    def test_e152_for_a_segment_repeating_an_include_kwarg(
+        self, tmp_path, entry, head, trail
+    ) -> None:
+        write_app(tmp_path, "wallets", {"pages": ("", trail)})
+        urlconf = write_urlconf(tmp_path, "e152_urls", entry)
+
+        messages = _url_messages(tmp_path, "wallets", urlconf=urlconf)
+
+        page_file = tmp_path / "wallets" / "pages" / trail / "page.py"
+        assert check_ids(messages) == ["next.E152"]
+        assert messages[0].obj == str(page_file)
+        assert messages[0].msg == (
+            f"The page {page_file} captures ['wallet'], which the include {head!r} "
+            "of its tree passes already, as a captured or an extra kwarg, so one "
+            "value would overwrite the other."
+        )
+
+    def test_e152_for_a_segment_repeating_a_kwarg_of_the_next_urls_include(
+        self, tmp_path
+    ) -> None:
+        write_app(tmp_path, "wallets", {"pages": ("", "[wallet]")})
+        urlconf = write_urlconf(
+            tmp_path, "e152_auto_urls", 'path("<int:wallet>/", include("next.urls"))'
+        )
+
+        messages = _url_messages(tmp_path, "wallets", urlconf=urlconf)
+
+        assert check_ids(messages) == ["next.E152"]
+        assert "the include '<int:wallet>/' of its tree" in messages[0].msg
+
+    def test_e028_inside_a_prefixed_tree(self, tmp_path) -> None:
+        write_app(tmp_path, "shop", {"pages": ("", "item/[id]/[id]")})
+        urlconf = write_urlconf(tmp_path, "e028_urls", 'path("s/", pages("shop"))')
+
+        messages = _url_messages(tmp_path, "shop", urlconf=urlconf)
+
+        assert check_ids(messages) == ["next.E028"]
+
+    def test_e015_for_a_pages_include_onto_a_routed_url(self, tmp_path) -> None:
+        write_app(tmp_path, "audit", {"pages": ("log",)})
+        write_app(tmp_path, "blog", {"pages": ("audit/log",)})
+        urlconf = write_urlconf(
+            tmp_path,
+            "e015_urls",
+            'path("audit/", pages("audit"))',
+            'path("", include("next.urls"))',
+        )
+
+        messages = _url_messages(tmp_path, "audit", "blog", urlconf=urlconf)
+
+        assert check_ids(messages) == ["next.E015"]
+        assert '"audit/log/"' in messages[0].msg
+
+    def test_a_tree_two_routers_report_is_no_conflict(self, tmp_path) -> None:
+        write_app(tmp_path, "audit", {"pages": ("log",)})
+        urlconf = write_urlconf(
+            tmp_path, "two_routers_urls", 'path("a/", pages("audit"))'
+        )
+        routers = [
+            file_router_config_entry(app_dirs=True),
+            file_router_config_entry(app_dirs=True, pages_dir_name="staff_pages"),
+        ]
+
+        with installed_apps(
+            tmp_path, "audit", urlconf=urlconf, framework={"PAGE_BACKENDS": routers}
+        ):
+            reset_check_caches()
+            messages = check_url_patterns(None)
+
+        assert check_ids(messages) == []
+
+    def test_one_page_under_two_prefixes_is_no_conflict(self, tmp_path) -> None:
+        write_app(tmp_path, "shop", {"pages": ("cart",)})
+        write_app(tmp_path, "store", {"pages": ("cart",)})
+        urlconf = write_urlconf(
+            tmp_path,
+            "two_urls",
+            'path("a/", pages("shop"))',
+            'path("b/", pages("store"))',
+        )
+
+        assert _url_messages(tmp_path, "shop", "store", urlconf=urlconf) == []
+
+    def test_a_tree_a_pages_include_mounts_draws_nothing(self, tmp_path) -> None:
+        write_app(tmp_path, "audit", {"pages": ("log",)})
+        urlconf = write_urlconf(tmp_path, "quiet_urls", 'path("a/", pages("audit"))')
+
+        assert _url_messages(tmp_path, "audit", urlconf=urlconf) == []
+
+    def test_e039_compares_names_within_one_namespace(self, tmp_path) -> None:
+        write_app(tmp_path, "audit", {"pages": ("foo-bar",)})
+        write_app(tmp_path, "blog", {"pages": ("foo_bar", "foo-bar")})
+        urlconf = write_urlconf(
+            tmp_path,
+            "e039_urls",
+            'path("audit/", pages("audit"))',
+            'path("", include("next.urls"))',
+        )
+
+        messages = _url_messages(tmp_path, "audit", "blog", urlconf=urlconf)
+
+        assert check_ids(messages) == ["next.E039"]
+        assert "blog" in messages[0].msg
+        assert "audit" not in messages[0].msg
+
+    def test_a_pages_tree_two_routers_report_is_collected_once(self, tmp_path):
+        write_app(tmp_path, "audit", {"pages": ("log",)})
+        urlconf = write_urlconf(tmp_path, "twice_urls", 'path("a/", pages("audit"))')
+        routers = [file_router(app_dirs=True), file_router(app_dirs=False)]
+
+        with installed_apps(tmp_path, "audit", urlconf=urlconf):
+            with patch_checks_router_manager_with_routers(routers=routers):
+                messages = check_url_patterns(None)
+            roots = [root.prefix for router in routers for root in router.page_roots()]
+
+        assert roots == ["a/", "a/"]
+        assert messages == []
+
+
+_SUBTREE_RULE = "page.login_required(inherit=True)\n"
+
+
+class TestDeclarativePageUrlChecks:
+    """A `page.py` that only declares access for the pages below routes no URL."""
+
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            (f"{PAGE_HEAD}{_SUBTREE_RULE}", []),
+            (page_source(_SUBTREE_RULE), ["next.E015"]),
+        ],
+        ids=["declarative", "page"],
+    )
+    def test_a_url_another_tree_routes(self, tmp_path, source, expected) -> None:
+        write_app(tmp_path, "shop")
+        write_app(tmp_path, "audit", {"pages": ("activity",)})
+        write_page(tmp_path / "audit" / "pages", source=source)
+        urlconf = write_urlconf(
+            tmp_path, "declarative_urls", 'path("", include("next.urls"))'
+        )
+
+        messages = _url_messages(tmp_path, "shop", "audit", urlconf=urlconf)
+
+        assert check_ids(messages) == expected

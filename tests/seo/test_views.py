@@ -35,6 +35,12 @@ from tests.support import (
     write_page,
     write_tree,
 )
+from tests.support.access import (
+    login_required_middleware,
+    login_required_setting,
+    page_source,
+    write_guard,
+)
 
 
 I18N_ROOT_URLCONFS = [SEO_I18N_URLCONF, SEO_I18N_AFTER_URLCONF]
@@ -924,3 +930,86 @@ class TestHostRootMount:
         )
         assert _locs(top) == ["http://testserver/about/"]
         assert [copy.status_code for copy in copies] == [404, 404, 404]
+
+
+@pytest.mark.parametrize(
+    "view", [views.robots_view, views.sitemap_view], ids=["robots", "sitemap"]
+)
+def test_an_seo_view_is_exempt_from_the_login_middleware(view) -> None:
+    assert view.login_required is False
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize("path", ["/robots.txt", "/sitemap.xml"])
+def test_an_anonymous_visitor_reads_it_under_the_login_middleware(
+    tmp_path, path: str
+) -> None:
+    root = write_tree(tmp_path / "pages", sitemap="", robots="")
+    with login_required_middleware(), routed(root, urlconf=USER_URLCONF):
+        response = Client().get(path)
+    assert response.status_code == 200
+
+
+def _closed_tree(root: Path) -> Path:
+    write_tree(root, pages=("", "open"), sitemap="")
+    write_page(root, "public", page_source("page.public()\n"))
+    write_page(root, "login", page_source("page.login_required()\n"))
+    write_page(
+        root,
+        "staff",
+        page_source('page.permission_required("auth.view_user", inherit=True)\n'),
+    )
+    return root
+
+
+@pytest.mark.django_db()
+class TestClosedPagesInTheSitemap:
+    """The sitemap lists only the static pages an anonymous request may open."""
+
+    def test_a_declared_requirement_keeps_a_page_out(self, tmp_path) -> None:
+        root = _closed_tree(tmp_path / "pages")
+        with routed(root, urlconf=USER_URLCONF):
+            response = Client().get("/sitemap.xml")
+        assert _locs(response) == [
+            "http://testserver/",
+            "http://testserver/open/",
+            "http://testserver/public/",
+        ]
+
+    @pytest.mark.parametrize(
+        "framing",
+        [login_required_middleware, login_required_setting],
+        ids=["middleware", "setting"],
+    )
+    def test_the_default_login_leaves_only_public_pages(
+        self, tmp_path, framing
+    ) -> None:
+        root = _closed_tree(tmp_path / "pages")
+        client = Client()
+        with routed(root, urlconf=USER_URLCONF):
+            before = client.get("/sitemap.xml")
+            with framing():
+                closed = client.get("/sitemap.xml")
+        assert len(_locs(before)) == 3
+        assert _locs(closed) == ["http://testserver/public/"]
+
+    def test_a_page_under_a_broken_chain_is_left_out(self, tmp_path) -> None:
+        root = tmp_path / "pages"
+        write_tree(root, pages=("",), sitemap="")
+        write_page(root, "broken", page_source("raise RuntimeError('boom')\n"))
+        write_page(root, "broken/child", page_source())
+        with routed(root, urlconf=USER_URLCONF):
+            response = Client().get("/sitemap.xml")
+        assert _locs(response) == ["http://testserver/"]
+
+    def test_a_guard_page_is_left_out(self, tmp_path) -> None:
+        root = tmp_path / "pages"
+        write_tree(root, pages=("",), sitemap="")
+        write_guard(root / "docs", "page.public(inherit=True)\n")
+        write_page(root, "docs/intro", page_source())
+        with routed(root, urlconf=USER_URLCONF):
+            response = Client().get("/sitemap.xml")
+        assert _locs(response) == [
+            "http://testserver/",
+            "http://testserver/docs/intro/",
+        ]

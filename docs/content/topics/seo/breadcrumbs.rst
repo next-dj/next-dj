@@ -51,6 +51,13 @@ The URL of a crumb reverses the page of its directory through the ``page_reverse
 A crumb whose page does not reverse, or a render without a resolved request, gets no URL and renders as plain text.
 The crumb whose URL is the request path is the current one.
 
+The kwargs an include around the tree captures, such as the ``tenant`` of ``path("<str:tenant>/", include("next.urls"))`` or the route above a ``pages()`` include, are passed to every crumb as well.
+
+The crumbs of a page come from its own page tree, the directories above it on disk, as its layouts and its contexts do.
+A tree that a ``pages()`` include places under a prefix starts its trail at its own root, so a page of another tree above it in the URL adds no crumb.
+A ``page.py`` that serves no page and declares the access of the pages below it may still set a ``breadcrumb``, see :ref:`topics-access-declaring-page`.
+Its crumb reverses the route of its directory like any other, so it links to whatever page answers that route in the namespace of the request, and renders as plain text when none does.
+
 The tag
 -------
 

@@ -209,8 +209,7 @@ def _decode_value(value: object) -> object:
     if tag == "model":
         label, pk = payload
         model = apps.get_model(label)
-        # A draft may outlive the row it points at, so a deleted instance
-        # decodes to None instead of raising mid-request.
+        # A draft may outlive its row, so a deleted instance decodes to None.
         return model._default_manager.filter(pk=pk).first()
     return _SCALAR_DECODERS[tag](payload)
 
@@ -353,11 +352,18 @@ class FormWizard:
         else:
             self.base_path = escape_uri_path(getattr(request, "path", "") or "")
         self.wizard_id = _to_snake_case(type(self).__name__)
-        # Read the class's own namespace so an unregistered subclass never
-        # borrows the storage bucket of a registered ancestor.
+        # Read the own namespace so a subclass never borrows its ancestor's bucket.
         scope_key = (
             type(self).__dict__.get("_storage_scope_key") or type(self).__module__
         )
+        # Each URL a wizard serves, its step aside, keeps a draft of its own.
+        bound = sorted(
+            (name, str(value))
+            for name, value in self.url_kwargs.items()
+            if name != self.url_param
+        )
+        if bound:
+            scope_key = f"{scope_key}|{bound!r}"
         self.storage_id = f"{_storage_scope_hash(scope_key)}:{self.wizard_id}"
         self._backend = wizard_backend_manager.get()
         self._loaded: dict[str, Any] | None = None
@@ -389,8 +395,7 @@ class FormWizard:
     def _stored_steps(self) -> dict[str, Any]:
         """Return the stored `{step: data}` mapping, loaded once per request.
 
-        The loaded mapping is memoised on the request so sibling wizard
-        instances built for the same request share one backend load.
+        The memo on the request lets sibling wizard instances share one backend load.
         """
         if self._loaded is None:
             memo = _request_load_memo(self.request)
@@ -430,8 +435,7 @@ class FormWizard:
     def save_step(self, step: str, data: dict[str, Any]) -> None:
         """Persist cleaned data for one step through the backend.
 
-        Any already-loaded mapping is updated in place rather than invalidated, so the
-        request skips a reload round-trip and sibling instances sharing its memo see it.
+        A loaded mapping is updated in place, so sibling instances see the write.
         """
         self._backend.save_step(self.request, self.storage_id, step, data)
         stored = self._loaded

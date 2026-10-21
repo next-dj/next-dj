@@ -14,6 +14,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`reverse-urls`
    Build URLs from page templates and Python.
 
+:doc:`serve-an-application-under-a-prefix`
+   Serve the page tree of an application under a URL prefix with ``pages()``.
+
 :doc:`reload-routes-from-code`
    Trigger router reload at runtime.
 
@@ -154,6 +157,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 
    add-a-page
    reverse-urls
+   serve-an-application-under-a-prefix
    reload-routes-from-code
    write-a-router-backend
    read-query-parameters

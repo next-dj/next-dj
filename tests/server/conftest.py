@@ -18,8 +18,7 @@ if TYPE_CHECKING:
 def _instant_reloader_ticks(monkeypatch: pytest.MonkeyPatch) -> None:
     """Drop the one-second sleep a real tick performs.
 
-    Django's ``StatReloader.tick`` sleeps ``SLEEP_TIME`` before every
-    yield, so each tick a test drives costs a second of wall clock.
+    Django's ``StatReloader.tick`` sleeps ``SLEEP_TIME`` before every yield.
     """
     monkeypatch.setattr(NextStatReloader, "SLEEP_TIME", 0)
 

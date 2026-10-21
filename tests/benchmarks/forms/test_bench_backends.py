@@ -71,8 +71,7 @@ class TestBenchFormActionBackend:
 class TestBenchScopedLookup:
     """Lookups that pass ``page_path`` resolve the path before the keyed hit.
 
-    This is the per-request path the ``{% form %}`` tag drives, distinct from the
-    unscoped name-index fallback in ``test_get_meta_hit``.
+    This is the per-request path the ``{% form %}`` tag drives.
     """
 
     @staticmethod

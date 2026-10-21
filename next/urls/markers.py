@@ -1,7 +1,6 @@
 """Dependency injection markers and providers for URL-derived parameters.
 
-`DUrl` pulls a value from URL kwargs and `DQuery` from `request.GET`, and the providers
-plug into the `next.deps` resolver through `RegisteredParameterProvider`.
+`DUrl` pulls from URL kwargs and `DQuery` from `request.GET` via `next.deps`.
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ from django.http import HttpRequest
 
 from next.deps import DDependencyBase, RegisteredParameterProvider
 from next.deps.markers import marker_origin, unwrap_annotated
+from next.deps.objects import names_object
 
 from .parser import _coerce_url_value
 
@@ -34,8 +34,7 @@ if TYPE_CHECKING:
 class DUrl[T](DDependencyBase[T]):
     """Annotation for a captured URL path parameter with optional type coercion.
 
-    The named forms carry the segment name, so a parameter keeps reading the
-    same segment once either of the two is renamed away from the other.
+    The named forms keep a parameter bound to its segment across renames.
     """
 
     __slots__ = ()
@@ -43,9 +42,7 @@ class DUrl[T](DDependencyBase[T]):
     def __class_getitem__(cls, item: object) -> object:
         """Build the marker for the type, named-key, and named-key-with-type forms.
 
-        The name travels as a `Literal` rather than a bare string, because
-        `typing.get_type_hints` would otherwise read it as a forward reference and
-        resolve it away into whatever global happens to carry that name.
+        The name travels as a `Literal` so `get_type_hints` skips forward references.
         """
         if isinstance(item, (str, tuple)):
             raw = item if isinstance(item, tuple) else (item,)
@@ -57,8 +54,7 @@ class DUrl[T](DDependencyBase[T]):
 class DQuery[T](DDependencyBase[T]):
     """Annotation marker for a `request.GET` parameter.
 
-    A query string carries neither a type nor an arity of its own, so the annotation
-    supplies both, and the list form covers a repeated key spelled several ways.
+    A query string carries no type or arity, so the annotation supplies both.
     """
 
     __slots__ = ()
@@ -67,9 +63,7 @@ class DQuery[T](DDependencyBase[T]):
 def _request_annotation_class(annotation: object) -> type | None:
     """Return the request class an annotation names, or `None` for every other shape.
 
-    A union mixing a request with another concrete type is refused since the provider
-    cannot choose between them, and both union origins are tested because `Optional`
-    spells `typing.Union` on 3.12 and 3.13 but `types.UnionType` under PEP 604.
+    A union mixing a request with another type is refused.
     """
     if annotation is HttpRequest:
         return HttpRequest
@@ -93,8 +87,7 @@ def _is_http_request_annotation(annotation: object) -> bool:
 class HttpRequestProvider(RegisteredParameterProvider):
     """Supply `HttpRequest` from `context.request`.
 
-    The optional `request: HttpRequest | None = None` form is claimed too, so a handler
-    keeps it for a direct unit-test call without giving up injection.
+    The `request: HttpRequest | None = None` form is claimed too, for direct test calls.
     """
 
     priority = 50
@@ -103,8 +96,7 @@ class HttpRequestProvider(RegisteredParameterProvider):
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Return True when the request in context inhabits the annotated class.
 
-        A handler asking for a concrete subclass under a server serving another takes
-        the default, while the bare `HttpRequest` takes whatever the context carries.
+        A concrete subclass under a server serving another takes the default.
         """
         request = context.request
         if request is None:
@@ -178,8 +170,7 @@ def _marker_args(annotation: object) -> tuple[object, ...]:
 def _url_key(args: tuple[object, ...]) -> str | None:
     """Return the segment name a `DUrl` annotation carries, or `None` for no name.
 
-    The name arrives wrapped, so the unwrapped argument is a string only for
-    the named forms and the type of `DUrl[SomeType]` falls through.
+    The name arrives wrapped, so only the named forms unwrap to a string.
     """
     first = args[0] if args else None
     if get_origin(first) is Literal:
@@ -190,8 +181,7 @@ def _url_key(args: tuple[object, ...]) -> str | None:
 def _url_type_hint(args: tuple[object, ...]) -> type:
     """Return the coercion type carried by a `DUrl` annotation, or `str`.
 
-    Reads position 0 for `DUrl[SomeType]` and position 1 for `DUrl["param", SomeType]`.
-    Every other shape, including the bare `DUrl["param"]`, coerces to `str`.
+    It sits at position 0 for `DUrl[SomeType]` and position 1 when named.
     """
     if args and isinstance(args[0], type):
         return args[0]
@@ -201,14 +191,19 @@ def _url_type_hint(args: tuple[object, ...]) -> type:
 
 
 class UrlKwargsProvider(RegisteredParameterProvider):
-    """Fill parameters by name from `url_kwargs`."""
+    """Fill parameters by name from `url_kwargs`, a `DObject` one never."""
 
     priority = 70
 
     @override
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Return True when `url_kwargs` contains this parameter name."""
-        return param.name in context.url_kwargs
+        return param.name in context.url_kwargs and not names_object(param.annotation)
+
+    @override
+    def static_can_handle(self, param: inspect.Parameter) -> bool | None:
+        """Rule out a `DObject` annotation, whose raw kwarg is the unscoped pk."""
+        return False if names_object(param.annotation) else None
 
     @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
@@ -269,8 +264,7 @@ def _resolve_multi(
 ) -> object:
     """Resolve a `DQuery[list[T]]` parameter from repeated query-string keys.
 
-    One value is ambiguous between the three spellings, so the other two are
-    read only once the plain repeated key has yielded no more than that.
+    One value is ambiguous between three spellings, so the others are read only then.
     """
     inner = get_args(hint)
     first = inner[0] if inner else str
@@ -286,8 +280,7 @@ def _resolve_multi(
 def _expand_multi_value(request: HttpRequest, name: str, plain: list[str]) -> list[str]:
     """Return values for `name` after considering the bracket and comma forms.
 
-    `plain` carries at most one element by the time the caller gets here,
-    which is what leaves room for the other two spellings to mean something.
+    `plain` carries at most one element here, which leaves room for the other spellings.
     """
     only = plain[0] if plain else ""
     if not only:
@@ -300,8 +293,7 @@ def _expand_multi_value(request: HttpRequest, name: str, plain: list[str]) -> li
 def get_multi_values(request: HttpRequest, name: str) -> list[str]:
     """Return every value `name` carries in `request.GET`.
 
-    The three spellings a client may use for one repeated key are read in
-    turn, so a caller sees one list whichever of them the front end sent.
+    The three spellings of a repeated key are read in turn into one list.
     """
     plain = request.GET.getlist(name)
     if len(plain) > 1:

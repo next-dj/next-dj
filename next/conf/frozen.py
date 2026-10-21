@@ -1,8 +1,6 @@
 """Immutable `list` and `dict` subclasses used for merged settings values.
 
-Staying real builtins keeps every `isinstance` guard across the framework
-working unchanged, and `copy.copy` and `copy.deepcopy` thaw a value back to
-plain containers when a caller needs a mutable one.
+Staying real builtins keeps every `isinstance` guard working, `copy` thaws them.
 """
 
 from __future__ import annotations
@@ -106,8 +104,7 @@ _IN_PROGRESS = object()
 # Leaves that cannot be mutated, so the merge may hand them out as they are.
 _ATOMIC = (str, bytes, int, float, complex, frozenset, type(None))
 
-# Containers the merge rebuilds. The frozen pair belongs here so a merged value
-# fed back into the settings freezes again instead of thawing through `copy`.
+# The frozen pair belongs here so a merged value fed back in freezes again.
 _REBUILT = frozenset({dict, list, FrozenDict, FrozenList})
 
 
@@ -116,8 +113,7 @@ def _freeze(value: object, memo: dict[int, object]) -> object:
         return value
     if type(value) is tuple:
         return tuple(_freeze(item, memo) for item in value)
-    # Any other subclass is deep-copied instead, since a rebuilt `defaultdict`
-    # would lose its factory and a rebuilt namedtuple its field names.
+    # Other subclasses are deep-copied, a rebuilt `defaultdict` would lose its factory.
     if not isinstance(value, dict | list) or type(value) not in _REBUILT:
         return copy.deepcopy(value)
     seen = memo.get(id(value), _MISSING)
@@ -142,9 +138,7 @@ def _freeze(value: object, memo: dict[int, object]) -> object:
 def freeze(value: object) -> object:
     """Return a deep immutable copy of one merged settings value.
 
-    Exact `list`, `dict`, `tuple` and already-frozen containers are rebuilt and
-    everything else is deep-copied, so the merge aliases nothing the caller
-    still holds. A self-referential config raises `ImproperlyConfigured`.
+    A self-referential config raises `ImproperlyConfigured`.
     """
     return _freeze(value, {})
 

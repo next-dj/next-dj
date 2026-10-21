@@ -3,8 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-# Sentinels the matrix reads specially: RAISE makes the hook raise
-# PermissionDenied, BAD_TYPE makes it return an unsupported type.
+# RAISE makes the hook raise PermissionDenied, BAD_TYPE makes it return a bad type.
 PERMISSION_HOOK_RAISE = object()
 PERMISSION_HOOK_BAD_TYPE = object()
 

@@ -32,9 +32,7 @@ class OriginMatch:
     def path(self) -> str:
         """Return the origin URL without its query string.
 
-        A caller that treats the origin as a page address, such as the wizard
-        deriving a sibling step URL from it, works on the path alone so a query
-        parameter cannot be mistaken for a path segment.
+        Callers treating it as a page address, like the wizard step URL, need the path.
         """
         return self.origin.partition("?")[0]
 

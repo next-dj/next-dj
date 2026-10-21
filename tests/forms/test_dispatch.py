@@ -15,9 +15,9 @@ from django.http import (
     QueryDict,
 )
 
+from next.components import render_component
 from next.components.context import component as component_ctx
 from next.components.info import ComponentInfo
-from next.components.renderers import _inject_component_context
 from next.deps import REQUEST_DEP_CACHE_ATTR, Depends, resolver
 from next.forms import (
     ActionOutcome,
@@ -29,9 +29,8 @@ from next.forms import (
 )
 from next.forms.dispatch import FormActionDispatch
 from next.forms.dispatch.build import (
-    _bind_form_for_post,
+    _construct_form,
     _form_action_context_callable,
-    _form_from_initial_data,
     _resolve_form_class,
 )
 from next.forms.manager import build_form_namespace_for_action, form_action_manager
@@ -128,12 +127,11 @@ class KwargsDispatchWizard(FormWizard):
 
 
 def _run_component_context(tmp_path: Path, request: object) -> object:
-    """Register a `@component.context` referencing `Depends("token")` and invoke it.
-
-    Returns the value the consumer wrote under the `out` key.
-    """
+    """Render a component whose `@component.context` reads `Depends("token")`."""
     module_path = tmp_path / "component.py"
     module_path.write_text("")
+    template_path = tmp_path / "component.djx"
+    template_path.write_text("{{ out }}")
 
     def provide(token: str = Depends("token")) -> str:
         return token
@@ -144,13 +142,11 @@ def _run_component_context(tmp_path: Path, request: object) -> object:
             name="t",
             scope_root=tmp_path,
             scope_relative="t",
-            template_path=None,
+            template_path=template_path,
             module_path=module_path,
             is_simple=False,
         )
-        context_data: dict[str, object] = {}
-        _inject_component_context(info, context_data, request)
-        return context_data["out"]
+        return render_component(info, {}, request)
     finally:
         component_ctx._registry.unregister(module_path)
 
@@ -259,8 +255,7 @@ class TestDispatchViaClient:
             data={"name": "Alice", "email": "", "_next_form_origin": "/"},
             follow=False,
         )
-        # SimpleForm.on_valid returns None, so the dispatcher re-renders the
-        # origin page with 200 and none of the invalid-submission headers.
+        # SimpleForm.on_valid returns None, so the origin page re-renders with 200.
         assert resp.status_code == 200
         assert "Location" not in resp.headers
         assert "X-Next-Form" not in resp.headers
@@ -831,12 +826,12 @@ class TestFormClassInitKwargs:
             mock_post = MagicMock()
             mock_post.get.return_value = "ok"
             request = mock_http_request(method="POST", POST=mock_post, FILES=None)
-            form = _bind_form_for_post(
-                _CustomInitForm, request, None, init_kwargs={"label_suffix": suffix}
+            form = _construct_form(
+                _CustomInitForm, {"label_suffix": suffix}, request=request
             )
         else:
-            form = _form_from_initial_data(
-                _CustomInitForm, None, init_kwargs={"label_suffix": suffix}
+            form = _construct_form(
+                _CustomInitForm, {"label_suffix": suffix}, request=None
             )
         assert isinstance(form, _CustomInitForm)
         assert form.label_suffix == suffix
@@ -957,10 +952,7 @@ class TestDispatchSharedDepCache:
     def test_depends_provider_invoked_once_across_phases(
         self, mock_http_request
     ) -> None:
-        """A ``Depends("name")`` shared by factory and handler resolves exactly once.
-
-        The dispatcher threads one ``dep_cache`` keyed by name, so reuse hits cache.
-        """
+        """A ``Depends("name")`` shared by factory and handler resolves once."""
         calls = {"n": 0}
 
         def make_widget() -> str:

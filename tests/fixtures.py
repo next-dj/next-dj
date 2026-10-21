@@ -1,4 +1,4 @@
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from pathlib import Path
 
 import pytest
@@ -13,24 +13,32 @@ from django.template.engine import Engine
 from django.test import override_settings
 from django.utils.encoding import iri_to_uri
 
+from next import utils
 from next.checks import reset_check_caches
 from next.conf import NextFrameworkSettings, next_framework_settings
+from next.deps.objects import forget_object_rows
 from next.diagnostics import reset_failure_logs, watch_degraded
-from next.forms import uid
 from next.forms.wizard import SessionFormWizardBackend, wizard_backend_manager
 from next.pages import Page
 from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
 from next.pages.metadata.hreflang import forget_translated_urls
 from next.pages.registry import PageContextRegistry
+from next.permissions.manager import PermissionManager
 from next.ports import partial_shaper_slot
 from next.server import NextStatReloader
 from next.urls import URLPatternParser
 from tests.support import (
+    OBJECT_PERMISSION_BACKENDS,
     CountingWizardBackend,
     IntentOnlyShaper,
     build_mock_http_request,
+    install_visibility_hooks,
+    isolated_form_registries,
+    restored_permissions,
+    tags,
     tick_scenario,
 )
+from tests.support.access import restored_declarations
 
 
 _REDIRECT_CAP = 16384
@@ -48,8 +56,8 @@ class _CappedRedirect(HttpResponseRedirect):
 
 @pytest.fixture()
 def cap_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give the shared redirect helper Django's Location cap on every version."""
-    monkeypatch.setattr(uid, "HttpResponseRedirect", _CappedRedirect)
+    """Give the shared redirect helpers Django's Location cap on every version."""
+    monkeypatch.setattr(utils, "HttpResponseRedirect", _CappedRedirect)
 
 
 @pytest.fixture()
@@ -66,6 +74,12 @@ def site_model(transactional_db) -> Iterator[type[Model]]:
             model.objects.clear_cache()
             with connection.schema_editor() as editor:
                 editor.delete_model(model)
+
+
+@pytest.fixture()
+def scoped_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give the auth and contenttypes default managers a `visible_to` hook."""
+    install_visibility_hooks(monkeypatch)
 
 
 @pytest.fixture()
@@ -90,6 +104,14 @@ def _reset_check_caches() -> Generator[None, None, None]:
     reset_check_caches()
     yield
     reset_check_caches()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_object_rows() -> Generator[None, None, None]:
+    """Drop the `visible_to` memo, since tests patch and lift the manager hooks."""
+    forget_object_rows()
+    yield
+    forget_object_rows()
 
 
 @pytest.fixture(autouse=True)
@@ -132,8 +154,7 @@ def page_instance():
 def watched_template_edits() -> Generator[None, None, None]:
     """Run the body with the dev-loop staleness checks engaged.
 
-    The suite runs with ``DEBUG`` off, so a test about picking an edit up
-    without a restart asks for the dev setting by name.
+    The suite runs with ``DEBUG`` off, so a test about edits asks for the dev setting.
     """
     with override_settings(DEBUG=True):
         yield
@@ -218,8 +239,7 @@ def intent_only_shaper():
 def counting_wizard_backend() -> Generator[CountingWizardBackend, None, None]:
     """Count wizard backend round-trips, putting the cached backend back after.
 
-    The manager caches its backend in the instance dict, so the entry found on entry
-    is restored rather than dropped by a `reset()` the next test would pay for.
+    The manager caches its backend in the instance dict, so the entry is restored.
     """
     cached = wizard_backend_manager.__dict__.get("_backend")
     had_backend = "_backend" in wizard_backend_manager.__dict__
@@ -232,3 +252,62 @@ def counting_wizard_backend() -> Generator[CountingWizardBackend, None, None]:
             wizard_backend_manager._backend = cached
         else:
             wizard_backend_manager.reset()
+
+
+@pytest.fixture()
+def isolated_permissions() -> Generator[PermissionManager, None, None]:
+    """Yield the shared permission manager empty and restore its permissions after."""
+    with restored_permissions() as manager:
+        yield manager
+
+
+@pytest.fixture()
+def form_registries() -> Generator[None, None, None]:
+    """Run the test over empty form action registries and restore them after."""
+    with isolated_form_registries():
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _isolated_declarations() -> Generator[None, None, None]:
+    """Run each test over no access declarations and restore the earlier ones after.
+
+    A page module a test runs declares into the shared registry, read by later checks.
+    """
+    with restored_declarations():
+        yield
+
+
+@pytest.fixture()
+def object_permission_backend() -> Generator[None, None, None]:
+    """List `ObjectPermissionBackend` after `ModelBackend` for the test."""
+    with override_settings(AUTHENTICATION_BACKENDS=OBJECT_PERMISSION_BACKENDS):
+        yield
+
+
+@pytest.fixture()
+def guard_tags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let `{% load guard_tags %}` find the block tags of `tests.support.tags`."""
+    engine = Engine.get_default()
+    monkeypatch.setitem(engine.template_libraries, "guard_tags", tags.register)
+
+
+@pytest.fixture()
+def findable_templates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Callable[[str, str], str]:
+    """Return a writer of templates the default engine finds by a test-unique name.
+
+    The cached loader keeps a name across tests, so each name carries the tmp folder.
+    """
+    folder = tmp_path / "templates"
+    folder.mkdir()
+    engine = Engine.get_default()
+    monkeypatch.setattr(engine, "dirs", [*engine.dirs, str(folder)])
+
+    def write(name: str, text: str) -> str:
+        full = f"{tmp_path.name}_{name}"
+        (folder / full).write_text(text)
+        return full
+
+    return write

@@ -21,7 +21,8 @@ from next.checks.common import (
     read_page_roots,
 )
 from next.conf import next_framework_settings
-from next.utils import normalise_route_name, walk_page_tree
+from next.pages.access import routed
+from next.utils import list_page_dir, normalise_route_name, routes_into, walk_page_tree
 
 
 if TYPE_CHECKING:
@@ -46,13 +47,11 @@ def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
     # Nested and doubly-mounted roots reach one directory through several trees.
     seen: set[Path] = set()
     for router in router_manager.backends:
-        # The one check that names a failing `page_roots`, every other reader
-        # takes the empty list, so a broken router costs one message and trace.
+        # The one check naming a failing `page_roots`, so one report per router.
         try:
             roots = read_page_roots(router)
         except PageRootsError as e:
-            # Only a raised failure carries a traceback, a wrong shape has no
-            # cause and its whole diagnosis is the message below.
+            # Only a raised failure has a traceback, a wrong shape has none.
             hint = None
             if e.__cause__ is not None:
                 logger.exception("a router failed to report its page trees")
@@ -112,8 +111,7 @@ def _working_directory_page_trees() -> list[Path]:
 def _touches_a_routed_tree(directory: Path, routed: set[Path]) -> bool:
     """Whether a routed page tree is this directory, or sits above or below it.
 
-    A routed tree nested inside the candidate makes it part of a served layout, the
-    shape of an app package that happens to carry the `PAGES_DIR` name.
+    A tree nested inside makes the directory part of a served layout.
     """
     return any(
         root.is_relative_to(directory) or directory.is_relative_to(root)
@@ -223,36 +221,27 @@ def _check_missing_page_files(
     context: str,
     skip_dir_names: frozenset[str],
 ) -> list[CheckMessage]:
-    """Check for missing `page.py` files inside parameter directories."""
+    """Check that every routed parameter directory serves a page at some depth.
+
+    Only what the router routes counts, never a `layout.djx` or a bodyless `page.py`.
+    """
     errors: list[CheckMessage] = []
 
     for item in directories:
-        dir_name_str = item.name
-        if _is_bracket_segment(dir_name_str):
-            page_file = item / "page.py"
-            layout_file = item / "layout.djx"
-            template_file = item / "template.djx"
-
-            if page_file.exists() or layout_file.exists() or template_file.exists():
-                continue
-
-            has_child_routes = False
-            for child in item.iterdir():
-                if child.name in skip_dir_names:
-                    continue
-                if child.is_dir() and (child / "page.py").exists():
-                    has_child_routes = True
-                    break
-
-            if not has_child_routes:
-                errors.append(
-                    Error(
-                        f"{context} pages: Parameter directory "
-                        f'"{item.relative_to(pages_path)}" is missing page.py file.',
-                        obj=settings,
-                        id="next.E010",
-                    )
-                )
+        if not _is_bracket_segment(item.name):
+            continue
+        relative = item.relative_to(pages_path)
+        if any(routed(page) for _trail, page in walk_page_tree(item, skip_dir_names)):
+            continue
+        errors.append(
+            Error(
+                f"{context} pages: Parameter directory "
+                f'"{relative}" serves no page. Add a page.py with a body or a '
+                "template.djx in it or below it.",
+                obj=settings,
+                id="next.E010",
+            )
+        )
 
     return errors
 
@@ -262,19 +251,12 @@ def _iter_routed_directories(
 ) -> Iterator[Path]:
     """Yield every directory under `pages_path` the router's own walk enters.
 
-    A refused name takes its whole subtree with it, so a structural report
-    names only directories a route can come out of.
+    A refused name takes its subtree with it, so only routable directories are named.
     """
-    try:
-        items = sorted(pages_path.iterdir())
-    except OSError as e:
-        logger.debug("Cannot list directory %s: %s", pages_path, e)
-        return
-    for item in items:
-        if not item.is_dir() or item.name in skip_dir_names:
-            continue
-        yield item
-        yield from _iter_routed_directories(item, skip_dir_names)
+    for item in list_page_dir(pages_path).children:
+        if routes_into(item.name, skip_dir_names):
+            yield item
+            yield from _iter_routed_directories(item, skip_dir_names)
 
 
 def _check_pages_directory(
@@ -299,8 +281,7 @@ def _check_pages_directory(
 def _route_name_error(name: str) -> str | None:
     """Return why Django refuses `name` between its angle brackets, or `None`.
 
-    Django compiles a route as the pattern is built, so a name it refuses is a
-    traceback out of the first URL resolution rather than a report here.
+    Django compiles a route when the pattern is built, so a refusal is a traceback.
     """
     if normalise_route_name(name).isidentifier():
         return None
@@ -347,8 +328,7 @@ def _parameter_syntax_error(param_str: str) -> str | None:
 def _args_syntax_error(args_str: str) -> str | None:
     """Return why a `[[args]]` directory names no route, or `None` when it does.
 
-    The name is read unstripped, because the router captures whatever sits
-    between the brackets and Django allows no whitespace in a route parameter.
+    The name is read unstripped, since Django allows no whitespace in a route parameter.
     """
     if not _is_args_segment(args_str):
         return _ARGS_FORMAT_HINT

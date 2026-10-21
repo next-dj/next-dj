@@ -11,7 +11,7 @@ The page tree should serve several languages, each under its own URL prefix such
 Solution
 --------
 
-The file router mounts as a single :func:`~django.urls.include` in the root URLconf.
+The file router sits behind a single :func:`~django.urls.include` in the root URLconf.
 Wrap that include in :func:`~django.conf.urls.i18n.i18n_patterns` so Django prepends the language prefix to every routed URL.
 Add :class:`~django.middleware.locale.LocaleMiddleware` so the prefix sets the active language, and translate template text with the usual Django i18n tags.
 
@@ -83,7 +83,7 @@ Load the ``i18n`` tag library at the top of the template.
 The examples below use a separate ``shop`` project rather than the Notes project shown elsewhere in the documentation.
 
 .. code-block:: jinja
-   :caption: shop/routes/template.djx
+   :caption: shop/pages/template.djx
 
    {% load i18n %}
 
@@ -94,7 +94,7 @@ Translate text built in Python with :func:`~django.utils.translation.gettext`.
 A ``@context`` callable returns the already-translated string.
 
 .. code-block:: python
-   :caption: shop/routes/page.py
+   :caption: shop/pages/page.py
 
    from django.utils.translation import gettext as _
 
@@ -112,7 +112,7 @@ Page titles and descriptions live in the ``metadata`` dict of a ``page.py``, and
 Wrap the texts in :func:`~django.utils.translation.gettext_lazy`, the settings tier included, and add ``alternates`` so every variant of a page links to the others.
 
 .. code-block:: python
-   :caption: shop/routes/page.py
+   :caption: shop/pages/page.py
 
    from django.utils.translation import gettext_lazy as _
 
@@ -129,7 +129,7 @@ See :doc:`/content/topics/seo/social-and-canonical` for the mapping form and the
 
 The sitemap follows the same languages.
 ``i18n = True`` in the ``sitemap.py`` at the top of the page root lists every URL once per language with the prefix in the path, and ``alternates = True`` adds the hreflang block to each entry, see :doc:`/content/topics/seo/sitemaps`.
-Because the router include sits inside ``i18n_patterns``, the sitemap and robots routes it carries sit under the prefix too, so ``path("", include("next.seo.urls"))`` goes in the plain ``urlpatterns`` list ahead of the language block to mount them at the host root, see :ref:`topics-seo-host-root`.
+Because the router include sits inside ``i18n_patterns``, the sitemap and robots routes it carries sit under the prefix too, so ``path("", include("next.seo.urls"))`` goes in the plain ``urlpatterns`` list ahead of the language block to serve them at the host root, see :ref:`topics-seo-host-root`.
 
 Compile the catalogs
 ~~~~~~~~~~~~~~~~~~~~

@@ -248,11 +248,7 @@ def check_asset_renderers(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _loses_inline_bodies(kind: str) -> bool:
-    """Return True when a kind's URL form has an insertion verb but its bodies do not.
-
-    A kind without an `inline_tag` is left to `next.W074`, since its inline
-    bodies render verbatim and name no element either render can build.
-    """
+    """Return True when a kind's URL form has a verb but its inline bodies do not."""
     if default_kinds.inline_tag(kind) is None:
         return False
     return (
@@ -325,11 +321,7 @@ def check_js_context_serializer(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _js_context_serializer_message() -> CheckMessage | None:
-    """Return the single configuration warning for `JS_CONTEXT_SERIALIZER`.
-
-    An unset option or a non-dict `NEXT_FRAMEWORK` is healthy and returns
-    None, so the registered check stays a thin list wrapper.
-    """
+    """Return the configuration warning for `JS_CONTEXT_SERIALIZER`, if any."""
     raw_framework = getattr(settings, "NEXT_FRAMEWORK", {}) or {}
     if not isinstance(raw_framework, dict):
         return None
@@ -389,11 +381,7 @@ def _publishes_framework_package(path: object) -> bool:
 
 @register(NEXT)
 def check_app_directories_finder(*args, **kwargs) -> list[CheckMessage]:
-    """Refuse an app-directories finder that publishes the framework package.
-
-    An error rather than a warning, because a warning leaves `collectstatic` free to
-    copy the framework's own sources into a directory the web server serves.
-    """
+    """Refuse an app-directories finder that publishes the framework package."""
     return [
         Error(
             f"STATICFILES_FINDERS entry {path!r} extends Django's "

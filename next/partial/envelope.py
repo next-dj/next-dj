@@ -1,7 +1,6 @@
 """Value objects of a patch envelope and their wire forms.
 
-The module stays free of request and rendering machinery so the envelope
-shape can be built and serialized outside a Django request cycle.
+Free of request and rendering machinery, so an envelope can be built outside a request.
 """
 
 from dataclasses import dataclass, field

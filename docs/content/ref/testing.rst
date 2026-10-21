@@ -58,6 +58,12 @@ Actions
 ~~~~~~~
 
 ``resolve_action_url`` and ``build_form_for`` exercise a registered action without crafting POST bodies.
+A bare name makes ``resolve_action_url``, and through it ``NextClient.post_action``, import every routed ``page.py`` once before it answers, and a lookup with ``page`` does so on a miss.
+A test therefore needs no visit of the page first, and a name still missing raises ``FormActionNotFoundError``.
+The ``page`` keyword names the ``page.py``, or its directory, whose action the name means, and without it a name declared in several files raises ``LookupError`` listing them.
+Only a name that pages scope to themselves is checked, since a shared name is one per project.
+A ``page`` without the action raises ``FormActionNotFoundError`` naming the files that declare it.
+A relative ``page`` resolves against ``BASE_DIR``, or against the working directory when the setting is absent.
 
 .. automodule:: next.testing.actions
    :members:
@@ -78,6 +84,8 @@ Loaders
 ~~~~~~~
 
 ``eager_load_components``, ``eager_load_pages``, and ``clear_loaded_dirs`` force-import or reset the per-directory memoisation of ``page.py`` and ``component.py`` modules in tests.
+``eager_load_pages`` runs each ``page.py`` through the loader a request uses, so a page never executes as a second module that registers its actions again, and a broken page raises ``PageModuleImportError`` with the original exception as its cause.
+``clear_loaded_dirs`` drops the loaded modules with the directory memo, so the next call executes the files afresh.
 
 .. automodule:: next.testing.loaders
    :members:

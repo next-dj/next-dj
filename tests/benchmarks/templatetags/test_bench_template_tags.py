@@ -6,8 +6,7 @@ from django.template import Context, Template, engines
 from next.static.collector import StaticCollector
 
 
-# Touching the engines triggers the global init that registers the next tags,
-# so warm it up here and keep the bench body on render cost alone.
+# Touching the engines registers the next tags, so warm them off the timed body.
 engines.all()
 
 

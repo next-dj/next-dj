@@ -13,7 +13,7 @@ Overview
 --------
 
 The dispatcher runs at ``/_next/form/<uid>/`` where the UID is the first 16 hex characters of a SHA-256 digest of the scope key and the action name.
-The dispatcher loads the action handler, enforces the declared access guard and the authorization of the origin page, builds the form, runs the validation chain, and either calls the handler or re-renders the origin page.
+The dispatcher loads the action handler, enforces the access rule of the page tree, the declared access guard, and the authorization of the origin page, builds the form, runs the validation chain, and either calls the handler or re-renders the origin page.
 A verb outside GET and POST is refused with HTTP 405 before the UID is looked up.
 A GET reaches the lookup, so an unknown UID answers HTTP 404 and a registered one answers HTTP 405.
 The UID is an address rather than a secret, derived from public inputs and rendered into every page that carries the form, so knowing one grants nothing and the guards described below are the whole access boundary, see :doc:`/content/security/overview`.
@@ -29,7 +29,11 @@ Pipeline
        Endpoint --> Lookup["Resolve action by UID"]
        Lookup -- unknown UID --> NotFound["HTTP 404"]
        Lookup -- "found, non-POST" --> NotAllowed
-       Lookup -- "found, POST" --> Guard{"Static access guard"}
+       Lookup -- "found, POST" --> Tree{"Page tree access rule"}
+       Tree -- anonymous --> LoginRedirect
+       Tree -- "refused" --> Forbidden
+       Tree -- "refused" --> AccessDenied
+       Tree -- pass --> Guard{"Static access guard"}
        Guard -- anonymous --> LoginRedirect["HTTP 302 to LOGIN_URL"]
        Guard -- "missing permission" --> Forbidden["HTTP 403"]
        Guard -- pass --> PageAuth{"Origin page authorizes"}
@@ -45,7 +49,10 @@ Pipeline
        ViewHook -- "allow, wizard_class" --> WizardStep["Bind current wizard step"]
        HandlerOnly --> HandlerOnlyResponse["Handler response or HTTP 204"]
        HandlerOnly --> ActionDispatched["action_dispatched signal"]
-       Build --> ObjectHook{"has_object_permission hook"}
+       Build --> RegisteredPerms{"Registered permissions on the bound row"}
+       RegisteredPerms -- "deny" --> RegisteredDenied["HTTP 403"]
+       RegisteredPerms -- "deny" --> AccessDenied
+       RegisteredPerms -- allow --> ObjectHook{"has_object_permission hook"}
        WizardStep --> ObjectHook
        ObjectHook -- "deny" --> ObjectDenied["HTTP 403 or response"]
        ObjectHook -- "deny" --> AccessDenied
@@ -110,7 +117,7 @@ Modules
    A package of one-word submodules, ``actions``, ``config``, ``sources``, ``widgets``, and ``wizards``, holding the system checks that read the registration diagnostics and walk every configured backend.
 
 ``next.forms.uid``.
-   ``redirect_to_origin``, ``redirect_or_fallback``, ``reverse_form_action``, ``current_origin_path``, ``is_path_only``, ``validated_origin_path``, and ``posted_origin_path`` helpers for the origin page round trip, plus the ``MAX_ORIGIN_LENGTH`` cap, the ``ORIGIN_FIELD_NAME`` wire constant, and the ``FORM_ORIGIN_OVERRIDE_KEY`` render-context key the partial shaping layer sets on a wizard advance.
+   ``redirect_to_origin``, ``reverse_form_action``, ``current_origin_path``, ``is_path_only``, ``validated_origin_path``, and ``posted_origin_path`` helpers for the origin page round trip, plus the ``MAX_ORIGIN_LENGTH`` cap, the ``ORIGIN_FIELD_NAME`` wire constant, and the ``FORM_ORIGIN_OVERRIDE_KEY`` render-context key the partial shaping layer sets on a wizard advance.
 
 ``next.forms.origin``.
    Resolution of the posted origin path into the page module and the typed URL kwargs, memoised per request.
@@ -143,12 +150,32 @@ Modules
    The ``PartialShaper`` protocol and the ``partial_shaper_slot`` the app config binds at startup.
    The dispatch pipeline asks the slot whether a request is partial and hands it the outcome, so the forms path never imports ``next.partial``.
 
+Page tree access
+----------------
+
+The page tree access check runs first, right after origin resolution.
+It joins the rule of the owner, the page of the directory the action is declared in, with the rule of the resolved origin page, so a forged origin adds requirements and lifts none, see :doc:`/content/security/actions`.
+It runs through ``enforce`` of ``next.pages.access``, the check a page view runs.
+An anonymous user is redirected to the login page with the posted origin as ``next``.
+A chain holding a broken file answers 404 or raises under ``fail_loudly``, and under the default login the redirect comes before that judgement.
+A refusal raises ``PermissionDenied`` after sending ``form_access_denied`` with ``layer="page"`` and ``reason="denied"``.
+Each ``obj=DObject[Model]`` loads its row through ``url_lookup`` from the URL kwargs of the posted origin, through the same dependency cache the handler reads, so the check and the handler see one row.
+An origin whose route does not capture the kwarg of the model raises ``UnboundObjectError``, and a row the scope does not see answers 404 before any permission is asked.
+Under the default login an owner or origin rule that declares nothing and is not public still requires a login, through the ``deferred`` flag of the joined rules.
+An action outside any tree has an empty owner rule, so it is closed at any origin under the default login, because the endpoint itself is marked with ``login_not_required``.
+
 Access guard
 ------------
 
 An action that declares ``login_required`` or ``permission_required`` carries an ``ActionGuard`` in its registry metadata under the ``guard`` key.
-The shared pipeline enforces this static guard right after origin resolution and ahead of the page authorization, ``get_initial``, and form binding, so no application code or database access runs for a request the static guard denies.
+``guard_rule(meta)`` turns it into the ``AccessRule`` the dispatcher enforces, the same rule ``manage.py permissions`` prints, a registered permission on the form branch as ``perm <name> on form``.
+The shared pipeline enforces this static guard right after the page tree access and ahead of the page authorization, ``get_initial``, and form binding, so no application code or database access runs for a request the static guard denies.
 An anonymous user receives a redirect to ``LOGIN_URL`` whose ``next`` is the validated posted origin, and an authenticated user missing a permission raises ``PermissionDenied``.
+
+On the form-class branch the guard leaves out every permission ``next.permissions`` has registered, and the dispatcher checks them once the form binds, as ``user.has_perm(perm, obj)``.
+``obj`` is the instance of a ``ModelForm`` that edits a saved row and ``None`` otherwise, and a refusal raises ``PermissionDenied`` after sending ``form_access_denied`` with ``layer="object"`` and ``reason="denied"``.
+The split between the two sets is kept per permission tuple until the registry version moves.
+The wizard and handler-only branches bind no form at the guard, so the guard checks every permission there with no object.
 Every backend that delegates to ``FormActionDispatch.dispatch`` inherits the enforcement.
 
 Origin page authorization

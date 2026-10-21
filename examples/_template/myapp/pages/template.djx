@@ -1,0 +1,14 @@
+<h1>Items</h1>
+
+{% form "create_item_form" %}
+  {{ form }}
+  <button type="submit">Add</button>
+{% endform %}
+
+<ul>
+  {% for item in items %}
+    <li>{{ item.title }}</li>
+  {% empty %}
+    <li>No items yet.</li>
+  {% endfor %}
+</ul>

@@ -99,13 +99,13 @@ Tests run on two stacks. `uv run pytest` exercises the page modules, the broker,
 ```
 studio/
 └── layout.djx                        <- project-level HTML envelope, page_head, collect_scripts
-polls/screens/
+polls/pages/
 ├── page.py                           <- redirects / to /polls/
 └── polls/
     ├── layout.djx                    <- section wrapper
     ├── page.py                       <- index callables, @context active_polls_count inherit
     ├── template.djx                  <- index template using poll_card
-    ├── _widgets/poll_card/           <- index list composite, no Python and no Vue
+    ├── _components/poll_card/        <- index list composite, no Python and no Vue
     │   ├── component.djx
     │   └── component.css
     └── [int:id]/
@@ -115,7 +115,7 @@ polls/screens/
         ├── page.test.js              <- Vitest cover for the mount entry
         ├── template.djx              <- poll-results zone + data-next-sse element
         ├── stream/page.py            <- PatchEventStream over broker.changes(poll.pk)
-        └── _widgets/poll_chart/      <- detail composite, owns the Vue layer
+        └── _components/poll_chart/   <- detail composite, owns the Vue layer
             ├── component.py          <- @component.context("results", serialize=True)
             ├── component.djx         <- SSR bars, data-poll-chart-data block, vote form
             ├── component.vue         <- chart SFC driven by a snapshot prop
@@ -123,7 +123,7 @@ polls/screens/
             └── component.css
 ```
 
-Two page roots, as in every example. [`studio/`](studio/) is the project-level root in `PAGE_BACKENDS["DIRS"]` and owns the single outer `layout.djx`. The routable pages come from the app through `APP_DIRS = True` and `PAGES_DIR = "screens"`. The framework discovers every co-located `.djx`, `.css`, and `.vue` file next to the page or component that owns it, with no manifest of asset paths to maintain.
+Two page roots, as in every example. [`studio/`](studio/) is the project-level root in `PAGE_BACKENDS["DIRS"]` and owns the single outer `layout.djx`. The routable pages come from the app through `APP_DIRS = True` and `PAGES_DIR = "pages"`. The framework discovers every co-located `.djx`, `.css`, and `.vue` file next to the page or component that owns it, with no manifest of asset paths to maintain.
 
 ### 2. Two calls in `apps.py`
 
@@ -134,11 +134,9 @@ class PollsConfig(AppConfig):
             "vue", extension=".vue", slot="scripts", renderer="render_module_tag"
         )
         default_stems.register("template", "page")
-
-        from polls import providers, signals  # noqa: F401, PLC0415
 ```
 
-The `vue` kind binds the `.vue` extension to the `scripts` slot and reuses the framework built-in `render_module_tag`. Reusing a built-in renderer is what earns the kind a client insertion verb: every asset in a patch envelope carries a `load` field, and the `.vue` files ride out as `load: "module"` while the co-located `component.css` rides as `load: "link"`. A kind registered with a renderer of your own carries no verb and its assets reach the browser only on a full render, which the framework reports as `next.W074`. The `signals` import wires both the Vite dev-asset injector and the `action_dispatched` listener that drives the broker fan-out.
+The `vue` kind binds the `.vue` extension to the `scripts` slot and reuses the framework built-in `render_module_tag`. Reusing a built-in renderer is what earns the kind a client insertion verb: every asset in a patch envelope carries a `load` field, and the `.vue` files ride out as `load: "module"` while the co-located `component.css` rides as `load: "link"`. A kind registered with a renderer of your own carries no verb and its assets reach the browser only on a full render, which the framework reports as `next.W074`. Nothing else lives in `ready()`. The framework imports the `deps.py` and `signals.py` of every installed app at startup, so [`polls/deps.py`](polls/deps.py) registers the `DPoll` provider and [`polls/signals.py`](polls/signals.py) wires both the Vite dev-asset injector and the `action_dispatched` listener that drives the broker fan-out.
 
 ### 3. The stream through the page escape hatch
 
@@ -215,7 +213,7 @@ Two serialize providers feed one JS object here, the component-level `results` a
 
 ### 7. Inherit context across the layout chain
 
-`polls/page.py` declares `active_polls_count` with `inherit_context=True` so descendant pages, including the detail page and its child stream endpoint, share the same value without a second query. The root layout reads it for the header badge. The `[int:id]/page.py` adds `poll` with `inherit_context=True`. The nested `[int:id]/layout.djx` and the inner template both consume `poll` directly, demonstrating context flow without a context processor.
+`polls/page.py` declares `active_polls_count` with `inherit_context=True` so descendant pages, including the detail page and its child stream endpoint, share the same value without a second query. Both index callables ask [`polls/services.py`](polls/services.py), `poll_index()` over the `with_totals()` method of `PollQuerySet` and `poll_count()`, since a poll has no owner to narrow it by and a page tree reads only through `visible_to(...)` or a function of `services.py`. The root layout reads it for the header badge. The `[int:id]/page.py` adds `poll` with `inherit_context=True`. The nested `[int:id]/layout.djx` and the inner template both consume `poll` directly, demonstrating context flow without a context processor.
 
 ### 8. DI through `DPoll[Poll]`
 
@@ -256,13 +254,13 @@ Page and component modules that use `DPoll[Poll]` never start with `from __futur
 
 ### 9. Two composites at two scopes
 
-`poll_card` is the index list composite. It has no `component.py` and no Vue, only markup and a stylesheet, and it sits in `polls/_widgets/` at the section root because the index template is what renders it. `poll_chart` is the detail composite that owns the Vue layer, and it sits in `polls/[int:id]/_widgets/` because only the poll page renders it.
+`poll_card` is the index list composite. It has no `component.py` and no Vue, only markup and a stylesheet, and it sits in `polls/_components/` at the section root because the index template is what renders it. `poll_chart` is the detail composite that owns the Vue layer, and it sits in `polls/[int:id]/_components/` because only the poll page renders it.
 
 Component visibility follows the directory tree. A component is in scope for every template at or below its scope root, so the detail template can call `poll_card` but the index template cannot call `poll_chart`. Placing a composite at the narrowest scope that uses it keeps the name from leaking into pages that have no data to feed it.
 
 ### 10. A vote tab titled after its question
 
-[`studio/layout.djx`](studio/layout.djx) calls the shared `page_head` component without a title, and the builtin `{% metadata %}` tag inside it folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with what the page tree declares. [`polls/page.py`](polls/screens/polls/page.py) titles the index with the one-line `metadata: MetadataDict = {"title": "Polls"}`, and [`[int:id]/page.py`](polls/screens/polls/[int:id]/page.py) registers a callable beside the `poll` context of section 7:
+[`studio/layout.djx`](studio/layout.djx) calls the shared `page_head` component without a title, and the builtin `{% metadata %}` tag inside it folds `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` from [`config/settings.py`](config/settings.py) with what the page tree declares. [`polls/page.py`](polls/pages/polls/page.py) titles the index with the one-line `metadata: MetadataDict = {"title": "Polls"}`, and [`[int:id]/page.py`](polls/pages/polls/[int:id]/page.py) registers a callable beside the `poll` context of section 7:
 
 ```python
 @page.metadata
@@ -280,7 +278,7 @@ Vite hashes the filenames it builds, so the asset URLs need no `v` parameter and
 
 ### A page that always redirects refuses submissions it would own
 
-[`polls/screens/page.py`](polls/screens/page.py) is a `render()` that redirects the bare root to `/polls/` unconditionally. Form dispatch authorizes the posted origin page by replaying its `render()`, so any submission naming `/` as its origin would come back as that redirect instead of being handled. Nothing here does: `/` never renders HTML, and the only `{% form %}` of the example sits in `poll_chart` under `polls/[int:id]/_widgets/`, so the poll page is the only origin it can carry. The refusal is honest rather than accidental, because a page that redirects every visitor serves nobody and the authorization call asks it as a GET of `/` exactly as a browser would. A redirect meant to let some requests through stays conditional and is reproduced faithfully, query string and method included.
+[`polls/pages/page.py`](polls/pages/page.py) is a `render()` that redirects the bare root to `/polls/` unconditionally. Form dispatch authorizes the posted origin page by replaying its `render()`, so any submission naming `/` as its origin would come back as that redirect instead of being handled. Nothing here does: `/` never renders HTML, and the only `{% form %}` of the example sits in `poll_chart` under `polls/[int:id]/_components/`, so the poll page is the only origin it can carry. The refusal is honest rather than accidental, because a page that redirects every visitor serves nobody and the authorization call asks it as a GET of `/` exactly as a browser would. A redirect meant to let some requests through stays conditional and is reproduced faithfully, query string and method included.
 
 ## Further reading
 
@@ -288,8 +286,9 @@ Vite hashes the filenames it builds, so the asset URLs need no `v` parameter and
 - [`polls/signals.py`](polls/signals.py): `broadcast_vote` receiver plus the dev-mode Vite injector.
 - [`polls/broker.py`](polls/broker.py): `PollBroker`, `Snapshot`, and the `Change` value object.
 - [`polls/backends.py`](polls/backends.py): `ViteManifestBackend` dev/prod URL routing.
-- [`polls/screens/polls/[int:id]/stream/page.py`](polls/screens/polls/[int:id]/stream/page.py): the `PatchEventStream` page module.
-- [`polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue`](polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue): the chart Vue SFC.
+- [`polls/deps.py`](polls/deps.py): the `DPoll` marker and the `PollProvider` that resolves it.
+- [`polls/pages/polls/[int:id]/stream/page.py`](polls/pages/polls/[int:id]/stream/page.py): the `PatchEventStream` page module.
+- [`polls/pages/polls/[int:id]/_components/poll_chart/component.vue`](polls/pages/polls/[int:id]/_components/poll_chart/component.vue): the chart Vue SFC.
 - [`next/partial/sse.py`](../../next/partial/sse.py): `PatchEventStream`, the politeness headers, and the heartbeat contract.
 - [`next/partial/patches.py`](../../next/partial/patches.py): the `Patches` builder and the `refresh` verb.
 - [`next/forms/signals.py`](../../next/forms/signals.py): `action_dispatched` payload contract used by the receiver.

@@ -11,11 +11,7 @@ class PydanticJsContextSerializer(_FrameworkPydantic):
 
 
 class WrappedJsContextSerializer:
-    """Per-key override that wraps the payload in a versioned envelope.
-
-    Encoding flows through `PydanticJsContextSerializer` so pydantic
-    models inside the wrapped payload still serialise correctly.
-    """
+    """Per-key override that wraps the payload in a versioned envelope."""
 
     def __init__(self) -> None:
         """Build the inner serializer eagerly to surface missing pydantic up front."""

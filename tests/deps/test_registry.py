@@ -8,6 +8,7 @@ from next.deps import (
     provider_registry,
 )
 from next.deps.markers import DependsProvider
+from next.deps.objects import ObjectProvider
 from next.deps.signals import provider_registered
 from next.forms.markers import CleanedDataProvider, FormProvider
 from next.pages.context import ContextByNameProvider
@@ -24,8 +25,7 @@ _late_serial = count()
 
 
 def _late(priority_value: int, value: object = "late") -> type:
-    # A distinct qualname per class, because the registry reads a repeated
-    # address as the dev reloader replacing the class that held it.
+    # A distinct qualname per class, as a repeated address reads as a reloader swap.
     serial = next(_late_serial)
 
     class Late(RegisteredParameterProvider):
@@ -173,11 +173,11 @@ class TestResolverSync:
         planned = DependencyResolver()
         stub = DeferringProvider("plain")
         planned.prepend_provider(stub)
-        _late(5)
+        late = _late(5)
         assert planned.resolve_dependencies(_plain) == {"plain": "STUB"}
         assert planned._providers[0] is stub
-        assert isinstance(planned._providers[1], RegisteredParameterProvider)
-        assert planned._providers[1].priority == 5
+        assert _index_of(planned, ObjectProvider) == 1
+        assert _index_of(planned, late) == 2
 
     def test_manual_append_lands_behind_the_auto_providers(self) -> None:
         planned = DependencyResolver()
@@ -185,7 +185,7 @@ class TestResolverSync:
         planned.add_provider(stub)
         assert planned.resolve_dependencies(_plain) == {"plain": "STUB"}
         assert planned._providers[-1] is stub
-        assert isinstance(planned._providers[0], DependsProvider)
+        assert isinstance(planned._providers[0], ObjectProvider)
 
     def test_explicit_resolver_never_reads_the_registry(self) -> None:
         planned = DependencyResolver(UrlKwargsProvider())
@@ -205,9 +205,8 @@ class TestResolverSync:
         assert all(type(p) is not DependsProvider for p in planned._providers)
         late = _late(5)
         planned.resolve_dependencies(_plain)
-        # The resync rebuilds every auto instance from the registry, and the
-        # class the caller took out stays out while the newcomer joins.
-        assert _index_of(planned, late) == 0
+        # The resync rebuilds auto instances, and the removed class stays out.
+        assert _index_of(planned, late) == _index_of(planned, ObjectProvider) + 1
         assert all(type(p) is not DependsProvider for p in planned._providers)
 
     def test_removing_an_auto_provider_outlives_a_reloaded_declaration(self) -> None:
@@ -217,8 +216,7 @@ class TestResolverSync:
         planned.remove_provider(planned._providers[_index_of(planned, first)])
         reloaded = _declare_in_page_module("/pages/flags/page.py")
         planned.resolve_dependencies(_plain)
-        # The reloader mints a fresh class under the address the caller took
-        # out, so the removal has to read the address rather than the class.
+        # The reloader mints a new class at one address, so removal reads the address.
         assert reloaded is not first
         assert all(type(p).__qualname__ != "Flag" for p in planned._providers)
 

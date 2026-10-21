@@ -109,6 +109,7 @@ The inherit_context flag
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``inherit_context=True`` makes a keyed value visible to every descendant route, not only to the page that declares it.
+A section that shares a value declares it in the ``page.py`` of its directory, and the access of the section follows the same model with ``inherit=True``, see :doc:`access`.
 
 .. code-block:: python
    :caption: notes/pages/page.py
@@ -121,6 +122,20 @@ The inherit_context flag
 
 Use this for header copy, brand colors, feature flags, and other shared values.
 Without the flag the value is only available when that exact ``page.py`` handles the request, and descendant routes cannot read it.
+
+A directory that shares a value with the pages below it but serves no page of its own gets a ``page.py`` with the ``@context`` and no body, no ``render``, no ``template``, and no ``template.djx``.
+
+.. code-block:: python
+   :caption: shop/pages/admin/page.py
+
+   from next import context
+
+   @context("sidebar", inherit_context=True)
+   def sidebar() -> list[str]:
+       return ["Accounts", "Orders"]
+
+Such a file routes no URL, so ``/admin/`` answers 404, while ``admin/accounts/template.djx`` renders with ``sidebar`` in its context.
+``next.E012`` leaves it alone, and ``next.W128`` warns when no page sits below it, see :doc:`/content/ref/system-checks`.
 
 The zone keyword
 ~~~~~~~~~~~~~~~~
@@ -225,7 +240,7 @@ Resolution order
 The framework computes the template scope in this order.
 
 1. URL kwargs from the matched route are seeded into the context dict.
-2. Inherited context functions from every ancestor ``page.py``, bounded at 64 levels, the outermost file first and each file's callables in the order the file declares them.
+2. Inherited context functions from every ancestor ``page.py``, bounded at 64 levels, the outermost directory first, and each file's callables in the order the file declares them.
    Each one resolves its parameters against the context the pass has collected so far, so a callable reads a value an outer file or an earlier sibling published, and that value beats a captured URL segment of the same name.
    A key an outer file already published is not computed again by a nearer callable, which is skipped.
 3. Page level context functions declared in the current ``page.py``.
@@ -251,6 +266,7 @@ Inheritance rules
 
 Inherited context follows the filesystem route tree.
 The framework walks up from the current ``page.py`` directory and runs every ``@context`` callable marked ``inherit_context=True`` that it finds in ancestor ``page.py`` files.
+The walk follows the directories on disk, not the URL, so a tree that ``pages()`` places under a prefix of another tree inherits nothing from the ``page.py`` files of the host.
 
 - A ``page.py`` at ``notes/pages/`` publishes inherited values for every page under that root.
 - A ``page.py`` at ``notes/pages/admin/`` publishes inherited values only for pages under ``/admin/``.
@@ -262,7 +278,7 @@ Page metadata folds the other way round, the segment nearest to the page wins, s
 
 The chain is read from the registry of ``@context`` registrations rather than probed on disk, so a ``page.py`` deleted inside a running process keeps publishing its inherited values until the registry is rebuilt.
 
-The current page can shadow an inherited value by declaring a context function with the same key.
+The current page can shadow a value an ancestor ``page.py`` inherits by declaring a context function with the same key.
 The page level value takes precedence on that page's own render, and every layout wrapper in the chain sees it, while the descendants of the page still receive the outer value.
 
 ``inherit_context=True`` and ``zone=`` are incompatible, and combining them raises ``ValueError`` at registration.
@@ -408,7 +424,7 @@ When two context functions need the same expensive value, register the callable 
    def tenant_seats(tenant: Tenant = Depends("active_tenant")) -> int:
        return tenant.seats
 
-Import ``notes/deps.py`` from ``AppConfig.ready`` so the registration runs before the first request.
+The ``next`` application imports ``notes/deps.py`` at startup, so the registration runs before the first request, see :doc:`/content/ref/settings`.
 
 The resolution cache memoises a ``Depends("name")`` value by its registered name and shares the store across every ``@context`` callable of one page render, so the first callable to ask pays the query and the rest read the result.
 The unkeyed dict shape is the other answer, and it fits when the two values belong in one merge anyway.

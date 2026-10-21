@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Any
 
 from django.urls import Resolver404, resolve
 
+from access.forms import POLICY_FIELD
 from access.models import AuditEntry
-from access.policy import POLICY_FIELD
 from next.forms import RegistryFormActionBackend
 
 
@@ -21,8 +21,7 @@ _RESERVED_FORM_KEYS = frozenset(
 def _safe_form_payload(request: HttpRequest) -> dict[str, list[str]]:
     """Capture POST keys for the audit row, dropping framework-internal fields.
 
-    A real project should extend `_RESERVED_FORM_KEYS` with any password or secret
-    field names it uses, since this payload is persisted to the audit log.
+    A real project adds its secret field names to `_RESERVED_FORM_KEYS`.
     """
     return {
         key: values
@@ -32,10 +31,7 @@ def _safe_form_payload(request: HttpRequest) -> dict[str, list[str]]:
 
 
 def _step_from_origin(request: HttpRequest) -> str:
-    """Derive the active wizard step from the posted origin URL.
-
-    Resolving the posted origin URL against the URLconf recovers the typed `step` kwarg.
-    """
+    """Recover the active wizard step by resolving the posted origin URL."""
     origin = request.POST.get("_next_form_origin", "")
     path = origin.partition("?")[0]
     if not path.startswith("/"):
@@ -48,22 +44,13 @@ def _step_from_origin(request: HttpRequest) -> str:
 
 
 class AuditedFormActionBackend(RegistryFormActionBackend):
-    """Registry backend that writes a backend-sourced `AuditEntry` per dispatch.
-
-    Writes `request_started` and `dispatched` rows alongside the signal-sourced ones
-    `access.receivers` writes, so the admin page shows both channels side by side.
-    """
+    """Registry backend that writes backend-sourced `AuditEntry` rows per dispatch."""
 
     def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
-        """Wrap the registry dispatch with two backend-sourced audit rows.
-
-        Consuming `request.session["access_request_just_created"]` here, rather than in
-        the handler, ties the dispatched row to the request the handler just created.
-        """
-        key = self._uid_to_name.get(uid)
-        if key is None:
+        """Wrap the registry dispatch with `request_started` and `dispatched` rows."""
+        action_name = self.action_name(uid)
+        if action_name is None:
             return super().dispatch(request, uid)
-        action_name = key[1]
         step = _step_from_origin(request) if request.method == "POST" else ""
         payload: dict[str, Any] = (
             _safe_form_payload(request) if request.method == "POST" else {}

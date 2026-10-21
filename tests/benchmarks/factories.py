@@ -1,11 +1,18 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Self
+from unittest.mock import patch
+
+from django.contrib.auth.models import Group
 
 from next.components.info import ComponentInfo
+from next.deps.objects import SCOPE_DEPENDENCY
+from tests.support import bound_dependency
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 
@@ -80,3 +87,48 @@ def build_layout_page(
     if template is not None:
         (directory / "template.djx").write_text(template)
     return directory / "page.py"
+
+
+class StandInRows:
+    """Rows answering every lookup with one unsaved row, so no query is ever made."""
+
+    def __init__(self, row: Group) -> None:
+        """Answer every lookup with `row`."""
+        self._row = row
+
+    def visible_to(self, scope: object) -> Self:
+        """Return the rows themselves, whatever the scope."""
+        return self
+
+    def filter(self, **lookups: object) -> Self:
+        """Return the rows themselves, whatever the lookups."""
+        return self
+
+    def order_by(self) -> Self:
+        """Return the rows themselves, unordered."""
+        return self
+
+    def __getitem__(self, window: slice) -> list[Group]:
+        """Return the one row, whatever the window."""
+        return [self._row]
+
+
+STAND_IN_PK = 7
+"""The primary key of the one row a stand-in `Group` manager answers with."""
+
+
+@contextmanager
+def stand_in_rows(pk: int = STAND_IN_PK) -> Iterator[None]:
+    """Give the `Group` manager a `visible_to` that answers one unsaved row of `pk`."""
+    rows = StandInRows(Group(pk=pk, name="bench"))
+    with patch.object(
+        Group._default_manager, "visible_to", rows.visible_to, create=True
+    ):
+        yield
+
+
+@contextmanager
+def stand_in_scope(pk: int = STAND_IN_PK) -> Iterator[None]:
+    """Answer every `Group` lookup with one unsaved row of `pk` and bind the `scope`."""
+    with stand_in_rows(pk), bound_dependency(SCOPE_DEPENDENCY, lambda: "tenant"):
+        yield

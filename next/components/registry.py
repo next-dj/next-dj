@@ -1,9 +1,4 @@
-"""Component registry and visibility resolver.
-
-`ComponentRegistry` orders one backend's discovered `ComponentInfo` entries and versions
-them for `ComponentVisibilityResolver`, which lazily indexes and caches which component
-names are in scope for a given template file path.
-"""
+"""Component registry and visibility resolver."""
 
 from __future__ import annotations
 
@@ -49,8 +44,7 @@ class ComponentRegistry:
     def register_many(self, components: Iterable[ComponentInfo]) -> None:
         """Index every component from the iterable in order.
 
-        Follows the Django bulk convention (`bulk_create` skips `post_save`), firing the
-        plural `components_registered` signal only, never the singular one.
+        Like `bulk_create`, fires only the plural `components_registered` signal.
         """
         added = tuple(components)
         if not added:
@@ -68,8 +62,7 @@ class ComponentRegistry:
     def mark_as_root(self, path: Path) -> None:
         """Mark `path` as globally visible across the tree, either spelling.
 
-        The resolved form goes in beside the given one, so a backend naming a root
-        through a symlink still answers `is_root` for the path a scan resolved.
+        The resolved form goes in too, so a symlinked root still answers `is_root`.
         """
         self._root_roots.add(path)
         self._root_roots.add(path.resolve())
@@ -152,8 +145,7 @@ class ComponentVisibilityResolver:
     def resolve_visible(self, template_path: Path) -> Mapping[str, ComponentInfo]:
         """Return a mapping of visible component names for `template_path`.
 
-        The path memo is keyed by the spelling the caller passed, so a render
-        repeating one unresolved path keeps hitting it after an invalidation.
+        The path memo keys on the spelling passed, so repeated renders keep hitting it.
         """
         if self._cached_registry_version != self._registry.version:
             self._result_cache.clear()
@@ -180,8 +172,7 @@ class ComponentVisibilityResolver:
                     (score, dirs_origin, component.name, position, component)
                 )
 
-        # Higher score wins, then a page-tree component shadows a shared DIRS one,
-        # then name and registration order keep the first discovery ahead.
+        # Higher score wins, then page tree over shared DIRS, then discovery order.
         candidates.sort(key=lambda x: (-x[0], x[1], x[2], x[3]))
 
         seen: set[str] = set()

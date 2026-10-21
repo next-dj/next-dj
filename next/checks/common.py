@@ -24,6 +24,7 @@ from next.discovery import (
     get_router_manager,
     iter_page_tree_component_folders,
     iter_scanned_page_pairs,
+    iter_scanned_pages,
     page_tree_skip_names,
     read_page_roots,
     reset_router_manager_cache,
@@ -121,8 +122,7 @@ def registration_file_errors(
 ) -> list[CheckMessage]:
     """Report registrations that no render of the intended file collects.
 
-    A registration is keyed on the file that declares the callable, so decorating an
-    imported helper binds it to the helper's file.
+    A registration is keyed on its declaring file, so an imported helper binds there.
     """
     records = sorted(misattributed, key=_by_paths)
     errors = _cross_file_errors(subject, records)
@@ -133,8 +133,7 @@ def registration_file_errors(
 def import_backend_class(dotted_path: str) -> type[Any]:
     """Import a dotted backend path, folding any import-time failure into ImportError.
 
-    A backend module runs arbitrary code at import, and a check that lets it raise
-    aborts the whole run instead of reporting one error.
+    A raising backend module would otherwise abort the whole check run.
     """
     try:
         return import_class_cached(dotted_path)
@@ -223,6 +222,7 @@ __all__ = [
     "import_backend_class",
     "iter_page_tree_component_folders",
     "iter_scanned_page_pairs",
+    "iter_scanned_pages",
     "page_tree_skip_names",
     "raw_scope",
     "read_page_roots",

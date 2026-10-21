@@ -8,15 +8,11 @@ from django.http import Http404, HttpResponse
 from django.urls import URLPattern, path
 
 from next.caches import PageCache
-from next.conf import fail_loudly, next_framework_settings
+from next.conf import next_framework_settings
 from next.deps.cache import render_dep_cache
 from next.diagnostics import watch_degraded
-from next.pages.loaders import (
-    build_registered_loaders,
-    has_load_errors,
-    last_load_error,
-    load_page_module,
-)
+from next.pages.access import page_access, refusal, routed
+from next.pages.loaders import load_page_module, load_python_module_memo, serves
 from next.pages.responses import (
     finish_response,
     finish_zone_response,
@@ -46,9 +42,13 @@ _SUCCESS: Final = range(200, 300)
 
 
 class _RoutedPageView(Protocol):
-    """A page view carrying the `page.py` path form dispatch maps an origin URL to."""
+    """A page view carrying the `page.py` path form dispatch maps an origin URL to.
+
+    `login_required` is the attribute `LoginRequiredMiddleware` reads off a view.
+    """
 
     next_page_path: Path
+    login_required: bool
 
     def __call__(self, request: HttpRequest, **kwargs) -> HttpResponseBase: ...
 
@@ -62,7 +62,7 @@ def unified_view(
 ) -> Callable[..., HttpResponseBase]:
     """Return the static or the resolving view of a page, as its body source requires.
 
-    The view carries `next_page_path`, so form dispatch maps an origin URL back to it.
+    Dispatch maps an origin by `next_page_path`, and a public page skips the middleware.
     """
     has_render = module is not None and callable(getattr(module, "render", None))
     view = (
@@ -70,40 +70,24 @@ def unified_view(
         if has_render or broken_at_build
         else _static_view(page, file_path)
     )
-    cast("_RoutedPageView", view).next_page_path = file_path
+    tagged = cast("_RoutedPageView", view)
+    tagged.next_page_path = file_path
+    tagged.login_required = not page_access(file_path).rule.public
     return view
-
-
-def _raise_load_error(file_path: Path) -> None:
-    """Raise the import failure of `file_path` when the framework fails loudly."""
-    # `has_load_errors` runs first, so a site without a load error runs no stat.
-    if has_load_errors() and fail_loudly():
-        error = last_load_error(file_path)
-        if error is not None:
-            raise error
-
-
-def _reloaded_module(file_path: Path) -> types.ModuleType | None:
-    """Return the module now at `file_path`, raising its import failure or a 404."""
-    # The memo re-reads by mtime and drops the error once the file imports.
-    module, error = load_page_module(file_path)
-    if error is not None:
-        if fail_loudly():
-            raise error
-        raise Http404
-    return module
 
 
 def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]:
     """Return the view of a page whose body comes from files on disk.
 
-    The body does not depend on the request, so the view renders the compiled
-    composed template and resolves no body per request.
+    The body is request-independent, so the view renders the compiled template.
     """
 
     def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
         watch_degraded()
-        _raise_load_error(file_path)
+        dep_cache = render_dep_cache(request)
+        denial = refusal(file_path, request, kwargs, dep_cache)
+        if denial is not None:
+            return denial
         shaper = partial_shaper_slot.get()
         intent = shaper.intent(request)
         if intent.zones:
@@ -111,7 +95,6 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
                 file_path, request, intent, dynamic_body=False, url_kwargs=dict(kwargs)
             )
             return finish_zone_response(zone, zone_policy(page, file_path), request)
-        dep_cache = render_dep_cache(request)
         policy = response_policy(
             page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
         )
@@ -135,18 +118,20 @@ def _resolving_view(
 ) -> Callable[..., HttpResponseBase]:
     """Return the view that resolves a per-request body before composing.
 
-    `broken_at_build` re-reads the module per request, so a fix takes effect without a
-    restart and a still-broken file never bypasses the guards `render()` applies.
+    `broken_at_build` re-reads the module per request, a 404 once it has no body.
     """
 
     def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
         watch_degraded()
-        if broken_at_build:
-            active_module = _reloaded_module(file_path)
-        else:
-            _raise_load_error(file_path)
-            active_module = module
+        if broken_at_build and not routed(file_path):
+            raise Http404
         dep_cache = render_dep_cache(request)
+        denial = refusal(file_path, request, kwargs, dep_cache)
+        if denial is not None:
+            return denial
+        active_module = (
+            load_python_module_memo(file_path) if broken_at_build else module
+        )
         shaper = partial_shaper_slot.get()
         intent = shaper.intent(request)
         resolution = page._resolve_page_body(
@@ -197,8 +182,7 @@ def _finish_render_response(
 ) -> HttpResponseBase:
     """Finish the full-page response `render()` returned, varying a cacheable one.
 
-    A browser may serve a stored full page in place of a zone fetch to the same URL,
-    so a successful response that carries `Cache-Control` gets the partial `Vary`.
+    A browser may serve a stored full page for a zone fetch, so `Vary` is added.
     """
     finish_response(response, policy, request, file_path)
     if (
@@ -210,46 +194,22 @@ def _finish_render_response(
     return response
 
 
-def _has_body_source(
-    page: Page, file_path: Path, module: types.ModuleType | None
-) -> bool:
-    """Return True when `file_path` can produce a body or layout body."""
-    if module is not None:
-        if callable(getattr(module, "render", None)):
-            return True
-        if isinstance(getattr(module, "template", None), str):
-            return True
-    if any(loader.can_load(file_path) for loader in build_registered_loaders()):
-        return True
-    return page._layout_loader.can_load(file_path)
-
-
 def _page_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase] | None:
     """Return the view of a real or virtual page, or `None` when it has no body.
 
-    A `page.py` whose import failed still gets a view to surface that error per
-    request, while a path that never existed is a template-only page with no module.
+    A `page.py` whose import failed keeps a view, so each request surfaces the error.
     """
-    if not file_path.exists():
-        if not _has_body_source(page, file_path, module=None):
-            return None
-        return unified_view(page, file_path, None)
     module, error = load_page_module(file_path)
-    if module is None:
-        if error is None:
-            return None
-        return unified_view(page, file_path, None, broken_at_build=True)
-    if not _has_body_source(page, file_path, module):
+    if not serves(file_path, module, error):
         return None
-    return unified_view(page, file_path, module)
+    return unified_view(page, file_path, module, broken_at_build=error is not None)
 
 
 def create_url_pattern(
     page: Page, url_path: str, file_path: Path, url_parser: URLPatternParser
 ) -> URLPattern | None:
     """Return a `path()` pattern for a page, template, or virtual entry."""
-    # The error class comes through the parser, because importing next.urls
-    # at module level would create an import cycle between next.pages and next.urls.
+    # The error class comes through the parser, as importing next.urls is a cycle.
     try:
         django_pattern, _parameters = url_parser.parse_url_pattern(url_path)
     except url_parser.parameter_error as exc:
@@ -269,8 +229,7 @@ def create_url_pattern(
 def fit_page_caches(patterns: Iterable[object]) -> None:
     """Size the page-keyed memos by the pages that `patterns` mount.
 
-    The URL build calls it once with the router patterns it built. A router reuses its
-    patterns between builds, so the count is read from the views they hold.
+    The URL build calls it once, and routers reuse patterns, so views give the count.
     """
     pages = {
         page_path

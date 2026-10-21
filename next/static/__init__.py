@@ -1,8 +1,4 @@
-"""Discover and inject co-located static assets for pages and components.
-
-The `Next` runtime injects by default as the first script plus an inline init
-script. `ScriptInjectionPolicy.DISABLED` or `MANUAL` opts out.
-"""
+"""Discover and inject co-located static assets for pages and components."""
 
 from __future__ import annotations
 
@@ -16,7 +12,7 @@ from .collector import (
     default_placeholders,
 )
 from .defaults import register_defaults
-from .discovery import AssetDiscovery
+from .discovery import AssetDiscovery, default_stems
 from .errors import StaticAssetNotFoundError, StaticAssetTraversalError
 from .finders import NextAppDirectoriesFinder, NextStaticFilesFinder
 from .manager import (
@@ -59,6 +55,7 @@ __all__ = [
     "default_kinds",
     "default_manager",
     "default_placeholders",
+    "default_stems",
     "get_static_manager",
     "register_defaults",
     "reset_default_manager",

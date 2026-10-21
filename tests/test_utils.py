@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 from pathlib import Path
@@ -7,22 +8,35 @@ from unittest.mock import patch
 
 import pytest
 from django.middleware.locale import LocaleMiddleware
+from django.template import Template
 from django.test import override_settings
 
 from next.errors import InvalidDirsError
+from next.urls.dispatcher import scan_pages_tree
 from next.utils import (
+    PageRoot,
     TreeSource,
+    child_nodelists,
     classify_dirs_entries,
     exec_module_file,
     is_dynamic_trail,
     is_int,
     is_middleware,
+    join_trail,
     load_tree_source,
     middleware_listed,
+    prefix_trail,
+    redirect_or_fallback,
+    regex_trail,
     resolve_base_dir,
     stat_mtime_ns,
     template_edits_watched,
+    walk_page_tree,
 )
+from tests.support import write_page
+
+
+_OVERSIZE_TARGET = "/search/?q=" + "\u044f" * 3000
 
 
 class TestStatMtimeNs:
@@ -198,6 +212,166 @@ class TestIsDynamicTrail:
         assert is_dynamic_trail(trail) is expected
 
 
+class TestPrefixTrail:
+    """A Django `path()` prefix reads as the bracket trail of the page directories."""
+
+    @pytest.mark.parametrize(
+        ("prefix", "trail"),
+        [
+            ("", ""),
+            ("/", ""),
+            ("shop/", "shop"),
+            ("/shop", "shop"),
+            ("w/<int:wallet>/ops/", "w/[int:wallet]/ops"),
+            ("<slug>/", "[slug]"),
+            ("a/<int:x>/<str:y>/", "a/[int:x]/[str:y]"),
+        ],
+        ids=["empty", "slash", "static", "leading", "typed", "untyped", "two"],
+    )
+    def test_a_prefix_becomes_a_trail(self, prefix: str, trail: str) -> None:
+        assert prefix_trail(prefix) == trail
+
+
+class TestJoinTrail:
+    """Two trails join with one slash, and an empty side adds nothing."""
+
+    @pytest.mark.parametrize(
+        ("head", "tail", "joined"),
+        [
+            ("", "", ""),
+            ("", "ops", "ops"),
+            ("w/[int:wallet]", "", "w/[int:wallet]"),
+            ("w/[int:wallet]", "ops/[int:pk]", "w/[int:wallet]/ops/[int:pk]"),
+        ],
+        ids=["both_empty", "no_head", "no_tail", "both"],
+    )
+    def test_the_join(self, head: str, tail: str, joined: str) -> None:
+        assert join_trail(head, tail) == joined
+
+
+class TestRegexTrail:
+    """A `re_path()` route reads as a trail the way Django reverses it."""
+
+    @pytest.mark.parametrize(
+        ("regex", "trail"),
+        [
+            ("^shop/", "shop"),
+            (r"^blog/(?P<year>[0-9]{4})/", "blog/[year]"),
+            (r"^v1\.0/", "v1.0"),
+            (r"^x/(\d+)/", "x/[_0]"),
+            ("^", ""),
+            ("^(?:en|de)/", "[[route]]"),
+            ("^(?i)shop/", "[[route]]"),
+        ],
+        ids=["static", "named", "escaped", "positional", "empty", "either", "flags"],
+    )
+    def test_a_regex_becomes_a_trail(self, regex: str, trail: str) -> None:
+        assert regex_trail(regex) == trail
+
+
+class TestPageRootTrails:
+    """A tree answers routes under the prefix of the include that mounts it."""
+
+    @pytest.mark.parametrize(
+        ("prefix", "trail", "route"),
+        [
+            (None, "ops", "ops"),
+            (None, "", ""),
+            ("org/<int:org>/audit/", "log", "org/[int:org]/audit/log"),
+            ("staff/", "", "staff"),
+        ],
+        ids=["assembled", "assembled_index", "included", "included_index"],
+    )
+    def test_route_trails(self, prefix: str | None, trail: str, route: str) -> None:
+        root = PageRoot(path=Path(), label="x", prefix=prefix)
+
+        assert root.route_trail(trail) == route
+
+    def test_a_walked_trail_wins_over_the_prefix(self) -> None:
+        root = PageRoot(
+            path=Path(), label="x", prefix=r"^org/(?P<org>\d+)/", trail="org/[org]"
+        )
+
+        assert root.route_trail("log") == "org/[org]/log"
+
+    def test_the_defaults_describe_an_auto_assembled_tree(self) -> None:
+        root = PageRoot(path=Path(), label="Root")
+
+        assert (root.prefix, root.namespace) == (None, "next")
+        assert root.route_trail() == ""
+
+
+class TestPrivateDirectories:
+    """A directory whose name starts with `_` is a private folder, never a route."""
+
+    def _tree(self, root: Path) -> None:
+        for trail in ("", "about", "_drafts/wip", "about/_notes/x", "_components/card"):
+            write_page(root, trail)
+
+    def test_a_private_folder_routes_none_of_its_pages(self, tmp_path: Path) -> None:
+        self._tree(tmp_path)
+
+        assert [trail for trail, _page in walk_page_tree(tmp_path)] == ["", "about"]
+
+    def test_every_private_folder_is_reported_where_it_sits(
+        self, tmp_path: Path
+    ) -> None:
+        self._tree(tmp_path)
+        skipped: list[tuple[str, Path, str]] = []
+
+        list(
+            walk_page_tree(
+                tmp_path,
+                on_skipped_dir=lambda folder, root, trail: skipped.append(
+                    (folder.name, root, trail)
+                ),
+            )
+        )
+
+        assert sorted(skipped) == [
+            ("_components", tmp_path, ""),
+            ("_drafts", tmp_path, ""),
+            ("_notes", tmp_path, "about"),
+        ]
+
+    def test_a_named_skip_and_a_private_folder_report_alike(
+        self, tmp_path: Path
+    ) -> None:
+        self._tree(tmp_path)
+        write_page(tmp_path, "drafts/wip")
+        skipped: list[str] = []
+
+        routes = [
+            trail
+            for trail, _page in walk_page_tree(
+                tmp_path,
+                {"drafts"},
+                on_skipped_dir=lambda folder, _root, _trail: skipped.append(
+                    folder.name
+                ),
+            )
+        ]
+
+        assert routes == ["", "about"]
+        assert sorted(skipped) == ["_components", "_drafts", "_notes", "drafts"]
+
+    def test_the_components_folder_still_registers(self, tmp_path: Path) -> None:
+        self._tree(tmp_path)
+        registered: list[tuple[str, Path, str]] = []
+
+        with patch(
+            "next.urls.dispatcher.register_components_folder_from_router_walk",
+            lambda folder, root, trail: registered.append((folder.name, root, trail)),
+        ):
+            routes = [
+                trail
+                for trail, _page in scan_pages_tree(tmp_path, register_components=True)
+            ]
+
+        assert routes == ["", "about"]
+        assert registered == [("_components", tmp_path, "")]
+
+
 class _SourceError(Exception):
     def __init__(self, path: Path) -> None:
         super().__init__(f"{path} failed")
@@ -298,7 +472,51 @@ class TestMiddlewareDetection:
         assert is_middleware("csp.missing.CSPMiddleware", "csp.missing.CSPMiddleware")
         assert not is_middleware(self.LOCALE, "csp.missing.CSPMiddleware")
 
+    def test_an_entry_fixed_after_a_failed_import_matches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.syspath_prepend(tmp_path)
+        entry = "late_locale_middleware.Late"
+        assert not is_middleware(entry, self.LOCALE)
+        (tmp_path / "late_locale_middleware.py").write_text(
+            "from django.middleware.locale import LocaleMiddleware\n\n"
+            "class Late(LocaleMiddleware):\n    pass\n"
+        )
+        importlib.invalidate_caches()
+        assert is_middleware(entry, self.LOCALE)
+        sys.modules.pop("late_locale_middleware")
+
     def test_a_list_holding_a_match_lists_the_base(self) -> None:
         assert middleware_listed(["a.B", f"{__name__}._Locale"], self.LOCALE)
         assert not middleware_listed(["a.B"], self.LOCALE)
         assert not middleware_listed([], self.LOCALE)
+
+
+class TestRedirectOrFallback:
+    """`redirect_or_fallback` answers the target unless Django refuses the Location."""
+
+    def test_accepted_target_carries_the_status(self) -> None:
+        response = redirect_or_fallback("/items/", "/", status=303)
+        assert response.status_code == 303
+        assert response.url == "/items/"
+
+    def test_default_status_is_found(self) -> None:
+        assert redirect_or_fallback("/items/", "/").status_code == 302
+
+    @pytest.mark.usefixtures("cap_redirects")
+    def test_refused_target_redirects_to_the_fallback(self) -> None:
+        response = redirect_or_fallback(_OVERSIZE_TARGET, "/safe/", status=303)
+        assert response.status_code == 303
+        assert response.url == "/safe/"
+
+    def test_disallowed_scheme_redirects_to_the_fallback(self) -> None:
+        assert redirect_or_fallback("javascript:alert(1)", "/safe/").url == "/safe/"
+
+
+class TestChildNodelists:
+    """A node list on `child_nodelists` is yielded only when the node holds it."""
+
+    def test_a_missing_list_is_skipped(self) -> None:
+        (node,) = Template('{% has_perm "a.b" %}x{% endhas_perm %}').nodelist
+        node.nodelist_false = None
+        assert list(child_nodelists(node)) == [node.nodelist_true]

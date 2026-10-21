@@ -124,7 +124,7 @@ The base implementation returns ``None``.
 ``FormActionManager`` asks each backend's ``get_meta`` in order and routes those two concerns to the first backend that answers with a non-``None`` meta.
 The URL reverse takes a different path.
 The manager calls each backend's ``get_action_url`` in order and returns the first answer, collecting ``FormActionNotFoundError`` suggestions along the way, so ``get_meta`` plays no part in it.
-The proxy method ``FormActionManager.get_action_meta`` exposes the meta resolution, and the ``{% form %}`` tag calls it to stamp the meta's ``uid`` key onto the ``data-next-action`` attribute of the rendered ``<form>`` element.
+The delegating method ``FormActionManager.get_action_meta`` exposes the meta resolution, and the ``{% form %}`` tag calls it to stamp the meta's ``uid`` key onto the ``data-next-action`` attribute of the rendered ``<form>`` element.
 A custom backend whose ``get_meta`` returns ``None`` for its own actions still resolves their URLs through ``get_action_url``, so the ``{% form %}`` tag renders the form element.
 That form renders without ``data-next-action`` and without a bound form instance, and the dispatch-time signals carry ``uid=None``.
 Return a truthy meta for owned names to restore the attribute, the bound form, and the uid.

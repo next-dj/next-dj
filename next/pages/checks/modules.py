@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from django.conf import settings
 from django.core.checks import (
@@ -21,21 +21,82 @@ from next.checks.common import (
     get_router_manager,
     page_tree_skip_names,
 )
+from next.pages.checks.access import declares_for_itself, passes_down
 from next.pages.loaders import (
     build_registered_loaders,
     last_load_error,
+    load_page_module,
     load_python_module_memo,
+    serves,
 )
 from next.pages.scan import iter_existing_scanned_pages
+from next.permissions.access import declared
+from next.ports import action_owners_slot
 from next.utils import walk_page_tree
 
 
 if TYPE_CHECKING:
+    import types
+    from collections.abc import Collection
     from pathlib import Path
 
 
 # A page declares a body-source conflict only when two or more sources claim it.
 _MIN_CONFLICTING_BODY_SOURCES = 2
+
+
+class LoadedPage(NamedTuple):
+    """One load of a `page.py` and whether it routes, read once for every body check."""
+
+    module: types.ModuleType | None
+    routed: bool
+
+    @property
+    def bodyless(self) -> bool:
+        """Whether the module imported and gives the page no body."""
+        return self.module is not None and not self.routed
+
+
+def load_page(file_path: Path) -> LoadedPage:
+    """Load a `page.py` once and tell whether it routes a URL of its own."""
+    module, error = load_page_module(file_path)
+    return LoadedPage(module, serves(file_path, module, error))
+
+
+def serves_nothing(file_path: Path, loaded: LoadedPage) -> bool:
+    """Return whether an imported `page.py` has no body and declares and passes nothing.
+
+    An action of its directory still answers to it, so `next.E012` weighs that apart.
+    """
+    return (
+        loaded.bodyless
+        and getattr(loaded.module, "render", None) is None
+        and declared(file_path).undeclared
+        and not passes_down(file_path)
+    )
+
+
+def render_broken(loaded: LoadedPage) -> bool:
+    """Return whether a `page.py` sets a `render` that is not callable (`next.E013`)."""
+    render = getattr(loaded.module, "render", None)
+    return render is not None and not callable(render)
+
+
+def declares_without_page(file_path: Path, loaded: LoadedPage) -> bool:
+    """Return whether a `page.py` with no body declares something without inherit."""
+    return loaded.bodyless and declares_for_itself(file_path)
+
+
+def faulty(file_path: Path, loaded: LoadedPage) -> bool:
+    """Return whether `next.E012`, `next.E013` or `next.E166` names a `page.py`.
+
+    It leaves actions out, which clear `next.E012` and `next.E166` for their directory.
+    """
+    return (
+        serves_nothing(file_path, loaded)
+        or render_broken(loaded)
+        or declares_without_page(file_path, loaded)
+    )
 
 
 @register(NEXT)
@@ -50,12 +111,13 @@ def check_page_functions(*args, **kwargs) -> list[CheckMessage]:
 
     # One `page.py` reached through several page trees is one page.
     seen: set[Path] = set()
+    owners = action_owners_slot.get().page_files()
     for router in router_manager.backends:
         skip_dir_names = page_tree_skip_names(router)
         try:
             for root in get_page_roots(router):
                 root_errors, root_warnings = _check_page_functions_in_directory(
-                    root.path, root.label, seen, skip_dir_names
+                    root.path, root.label, seen, skip_dir_names, owners
                 )
                 errors.extend(root_errors)
                 warnings.extend(root_warnings)
@@ -74,12 +136,15 @@ def check_page_functions(*args, **kwargs) -> list[CheckMessage]:
 
 
 def _check_page_functions_in_directory(
-    pages_path: Path, context: str, seen: set[Path], skip_dir_names: frozenset[str]
+    pages_path: Path,
+    context: str,
+    seen: set[Path],
+    skip_dir_names: frozenset[str],
+    owners: Collection[Path],
 ) -> tuple[list[CheckMessage], list[CheckMessage]]:
     """Check `page.py` files for render/template rules, skipping files in `seen`.
 
-    The walk skips what the router skips, so a `page.py` under a skipped directory
-    serves no URL and is exempt from the body-source rules.
+    A `page.py` under a directory the router skips serves no URL, so the walk skips it.
     """
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
@@ -88,30 +153,32 @@ def _check_page_functions_in_directory(
         return errors, warnings
 
     for _url_path, page_file in walk_page_tree(pages_path, skip_dir_names):
-        # A virtual page carries a path that never existed, and the
-        # template.djx that made it is body source enough.
+        # A virtual page has a path that never existed, its template.djx is its body.
         if not page_file.exists() or not first_visit(page_file, seen):
             continue
-        render_func = _load_render_function(page_file)
-        if last_load_error(page_file) is not None:
-            # A broken import surfaces once through next.E017, so the
-            # body-source checks stay silent for this file.
+        loaded = load_page(page_file)
+        if loaded.module is None:
+            # A broken import surfaces once through next.E017, so these checks skip it.
             continue
-        has_template = _has_template_or_djx(page_file)
-        hard_error = False
-
-        if render_func is None and not has_template:
+        if serves_nothing(page_file, loaded) and page_file not in owners:
             errors.append(
                 Error(
                     f"{context} pages: {page_file.relative_to(pages_path)} "
-                    "has no body source. Add a render function, a template "
-                    "attribute, a sibling template.djx, or a sibling layout.djx.",
+                    "has no body source, passes nothing to the pages below, and no "
+                    "action of its directory answers to it. Add a render function, a "
+                    "template attribute, or a template a loader finds, like "
+                    "template.djx.",
+                    hint=(
+                        "A layout.djx wraps the body of a page and is none itself. "
+                        "A page.py needs no body source when it passes its access "
+                        "with inherit=True or its context with inherit_context=True "
+                        "to the pages below, or when its directory declares an action."
+                    ),
                     obj=settings,
                     id="next.E012",
                 )
             )
-            hard_error = True
-        elif render_func is not None and not callable(render_func):
+        elif render_broken(loaded):
             errors.append(
                 Error(
                     f"{context} pages: {page_file.relative_to(pages_path)} "
@@ -120,23 +187,14 @@ def _check_page_functions_in_directory(
                     id="next.E013",
                 )
             )
-            hard_error = True
-
-        if not hard_error:
-            shadow_warning = _check_body_source_conflicts(page_file)
-            if shadow_warning is not None:
-                warnings.append(shadow_warning)
+        elif shadow := _check_body_source_conflicts(page_file, loaded.module):
+            warnings.append(shadow)
 
     return errors, warnings
 
 
-def _active_body_sources(page_file: Path) -> list[str]:
-    """Return the body sources declared on `page_file` in priority order.
-
-    Priority: `render()`, the `template` attribute, then
-    `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]` entries.
-    """
-    module = load_python_module_memo(page_file)
+def _active_body_sources(page_file: Path, module: types.ModuleType | None) -> list[str]:
+    """Return the body sources declared on `page_file` in priority order."""
     sources: list[str] = []
     if module is not None:
         if callable(getattr(module, "render", None)):
@@ -152,9 +210,11 @@ def _active_body_sources(page_file: Path) -> list[str]:
     return sources
 
 
-def _check_body_source_conflicts(page_file: Path) -> CheckMessage | None:
+def _check_body_source_conflicts(
+    page_file: Path, module: types.ModuleType | None
+) -> CheckMessage | None:
     """Warn (`next.W043`) when more than one body source is declared for `page_file`."""
-    sources = _active_body_sources(page_file)
+    sources = _active_body_sources(page_file, module)
     if len(sources) < _MIN_CONFLICTING_BODY_SOURCES:
         return None
     winner = sources[0]
@@ -168,62 +228,41 @@ def _check_body_source_conflicts(page_file: Path) -> CheckMessage | None:
     )
 
 
-def _load_render_function(file_path: Path) -> object:
-    """Return the `render` callable declared in a `page.py`, or `None`.
-
-    A broken `page.py` loads as `None` and yields `None` here. The caller
-    reads `last_load_error` and leaves the failure to `next.E017`.
-    """
-    module = load_python_module_memo(file_path)
-    if module is None:
-        return None
-    return getattr(module, "render", None)
-
-
-def _has_template_or_djx(file_path: Path) -> bool:
-    """Return True when the page has a body source or a sibling ``layout.djx``."""
-    if (file_path.parent / "layout.djx").exists():
-        return True
-
-    module = load_python_module_memo(file_path)
-    if module is not None and hasattr(module, "template"):
-        return True
-
-    return any(loader.can_load(file_path) for loader in build_registered_loaders())
-
-
 def _page_import_error_message(page_path: Path) -> str:
     """Compose the `next.E017` text, naming the recorded failure when known."""
     error = last_load_error(page_path)
     if error is None:
         return (
-            f"page.py at {page_path} could not be imported. Fix the syntax or "
-            "import error so the framework stops skipping the module silently."
+            f"{page_path.name} at {page_path} could not be imported. Fix the syntax "
+            "or import error so the framework stops skipping the module silently."
         )
     cause = error.__cause__
     return (
-        f"page.py at {page_path} failed to import "
+        f"{page_path.name} at {page_path} failed to import "
         f"({type(cause).__name__}: {cause}). A raising import in the module "
         "body counts the same as a syntax error. Fix it so the framework "
         "stops skipping the module silently."
     )
 
 
-@register(Tags.templates, NEXT, deploy=True)
+@register(Tags.templates, NEXT)
 def check_page_module_imports(*args, **kwargs) -> list[CheckMessage]:
-    """Report `page.py` files that raise while importing (`next.E017`).
-
-    Importing every user module costs a full tree walk, so the check is a deployment
-    one and runs under `manage.py check --deploy` instead of on every command.
-    """
+    """Report the `page.py` files that raise while importing (`next.E017`)."""
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
         return []
     return [
-        Error(_page_import_error_message(page_path), obj=str(page_path), id="next.E017")
-        for page_path in iter_existing_scanned_pages(router_manager, set())
-        if load_python_module_memo(page_path) is None
+        Error(_page_import_error_message(path), obj=str(path), id="next.E017")
+        for path in iter_existing_scanned_pages(router_manager, set())
+        if load_python_module_memo(path) is None
     ]
 
 
-__all__ = ["check_page_functions", "check_page_module_imports"]
+__all__ = [
+    "LoadedPage",
+    "check_page_functions",
+    "check_page_module_imports",
+    "declares_without_page",
+    "faulty",
+    "load_page",
+]

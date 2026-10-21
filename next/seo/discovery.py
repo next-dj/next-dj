@@ -15,6 +15,7 @@ from django.apps import apps
 from django.utils.text import slugify
 
 from next.discovery import routed_page_trees
+from next.pages.access import routed_pages
 from next.pages.responses import cache_control
 from next.urls.manager import router_manager, seo_routes_version
 from next.utils import TreeSource, load_tree_source, stat_mtime_ns, walk_page_tree
@@ -199,7 +200,7 @@ def discover_seo_roots(manager: RouterManager) -> tuple[SeoRoot, ...]:
             root=root,
             label=label,
             section=section,
-            trails=dict(sorted(walk_page_tree(root.path, skip_names))),
+            trails=dict(sorted(routed_pages(walk_page_tree(root.path, skip_names)))),
             sitemap=sitemap,
             robots=load_source(root.path / ROBOTS_MODULE),
             robots_file=_file(root.path / ROBOTS_FILE),
@@ -234,8 +235,7 @@ _roots_memo: Final = _RootsMemo()
 def page_tree_roots() -> tuple[SeoRoot, ...]:
     """Return every page tree the URL router serves, discovered once per routes version.
 
-    Discovery runs under a lock, so concurrent callers execute each source once. Trees
-    discovered while a reset moves the version are returned but never served again.
+    Discovery runs under a lock, so concurrent callers execute each source once.
     """
     roots = _roots_memo.current(seo_routes_version.value)
     if roots is not None:

@@ -8,24 +8,23 @@ Module summary
 
 next.dj contributes Django system checks for every subsystem.
 Run them through ``uv run python manage.py check`` and the framework reports configuration mistakes with a code and a hint.
-Nine of them are deployment checks and answer only to ``uv run python manage.py check --deploy``, see `Check registration`_ for which nine and why.
+Six of them are deployment checks and answer only to ``uv run python manage.py check --deploy``, see `Check registration`_ for which six and why.
 
 Check registration
 ------------------
 
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
-The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
+The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
 
 Each of these modules registers checks.
 ``next.pages.checks``, ``next.forms.checks``, ``next.partial.checks``, and ``next.seo.checks`` are packages rather than single modules, and importing the package imports every submodule that carries a check.
 ``next.pages.checks.metadata`` is a package inside the pages one and splits the same way.
 The address a project imports stays the same either way, and the tables under `Check code reference`_ name the submodule behind each code.
 
-Nine checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
-Four of them are ``check_page_module_imports`` (``next.E017``), ``check_component_module_imports`` (``next.E084``), ``check_composed_templates_compile`` (``next.E072``), and ``check_asset_version_moves_between_deploys`` (``next.W083``).
-The first three import or compile every user module of a tree, which costs a full walk that a routine ``manage.py`` command should not pay.
-The fourth describes a configuration every development checkout has, so reporting it outside a deployment audit would warn every project about nothing.
+Six checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
+``check_asset_version_moves_between_deploys`` (``next.W083``) describes a configuration every development checkout has, so reporting it outside a deployment audit would warn every project about nothing.
+``check_page_module_imports`` (``next.E017``), ``check_component_module_imports`` (``next.E084``), and ``check_composed_templates_compile`` (``next.E072``) run on every ``manage.py check``, since the other page and component checks already import and compile those modules.
 ``check_runtime_bundles_deployed`` (``next.W090``) asks the static files a deployment serves for the client runtime, which a source checkout builds only on demand.
 The other four read the settings a deployment runs on, ``check_site_url_for_deploy`` (``next.W110``, ``next.W122``) and ``check_seo_sources_on_closed_site`` (``next.W111``) with the ``seo`` tag, ``check_script_deploy`` (``next.W118``), and ``check_consent_cookie_secure`` (``next.W119``).
 
@@ -33,7 +32,7 @@ Every next.dj check carries the ``next`` tag.
 That tag is the importable string constant ``next.checks.NEXT``, so a project check joins the framework ones by decorating itself with ``@register(NEXT)`` rather than by repeating the literal.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
-A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the nine deployment checks to it.
+A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the six deployment checks to it.
 The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check, every page metadata check, and the site checks.
 ``manage.py check --tag seo`` runs the metadata, crawler-document, and site checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.
 Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
@@ -82,7 +81,7 @@ Pages
 ~~~~~
 
 The package splits by subject, one submodule per group of codes.
-``contexts`` covers the ``@context`` callables of a routed ``page.py``, ``layouts`` the page-body placeholder of a ``layout.djx``, ``loaders`` the ``TEMPLATE_LOADERS`` entries, ``metadata`` the ``METADATA`` settings scope and the metadata of every routed ``page.py``, split further under `Metadata and responses`_ below, ``modules`` what a ``page.py`` declares, ``processors`` the context processors a render runs, ``structure`` the shape of a tree on disk, and ``zones`` a ``@context`` reading a key another callable bound to a zone.
+``access`` covers the access a ``page.py`` declares, a ``public()`` beside a requirement of the same file, a declaration made from any other module, and the declaring ``page.py`` files without a page below them, ``contexts`` covers the ``@context`` callables of a routed ``page.py``, ``layouts`` the page-body placeholder of a ``layout.djx``, ``loaders`` the ``TEMPLATE_LOADERS`` entries, ``metadata`` the ``METADATA`` settings scope and the metadata of every routed ``page.py``, split further under `Metadata and responses`_ below, ``modules`` what a ``page.py`` declares, ``processors`` the context processors a render runs, ``structure`` the shape of a tree on disk, and ``zones`` a ``@context`` reading a key another callable bound to a zone.
 ``composed`` carries no check and holds the one walk of the composed page templates that ``next.W085`` and the partial checks share, a ``RunMemo`` that ``forget_run_memos`` drops.
 
 .. automodule:: next.pages.checks
@@ -175,7 +174,17 @@ The package splits into ``backends`` for the ``PARTIAL_BACKENDS`` entries, ``for
 
 .. automodule:: next.partial.checks
    :members:
-   :exclude-members: E_BACKENDS_NOT_A_LIST, E_BACKEND_WITHOUT_PATH, E_COMPOSED_TEMPLATE_SYNTAX, E_CONTEXT_ZONE_UNKNOWN, E_DUPLICATE_ZONE, E_LAZY_WITHOUT_PLACEHOLDER, E_NON_ASCII_ZONE, E_OP_BAD_NAME, E_ZONE_IN_COMPONENT, E_ZONE_IN_FOR, E_ZONE_IN_IF, W_FORM_BACKEND_NOT_AWARE, W_FORM_IN_FOR_NO_KEY, W_MANIFEST_VERSION_NO_STORAGE, W_TOO_MANY_BACKENDS, W_WITH_OVER_ZONE
+   :exclude-members: E_BACKENDS_NOT_A_LIST, E_BACKEND_WITHOUT_PATH, E_COMPOSED_TEMPLATE_SYNTAX, E_CONTEXT_ZONE_UNKNOWN, E_DUPLICATE_ZONE, E_LAZY_WITHOUT_PLACEHOLDER, E_NON_ASCII_ZONE, E_OP_BAD_NAME, E_ZONE_IN_COMPONENT, E_ZONE_IN_FOR, E_ZONE_IN_HAS_PERM, E_ZONE_IN_IF, W_FORM_BACKEND_NOT_AWARE, W_FORM_IN_FOR_NO_KEY, W_MANIFEST_VERSION_NO_STORAGE, W_TOO_MANY_BACKENDS, W_WITH_OVER_ZONE
+
+Permissions
+~~~~~~~~~~~
+
+``next.permissions.checks`` reads the registered predicates, ``AUTHENTICATION_BACKENDS``, and every permission name the project writes, the literal name of a ``{% has_perm %}`` tag in a composed page or a component template, the ``permission_required()`` declarations of every ``page.py`` and ``component.py``, and the guard of every form action.
+It also owns ``next.W130`` and ``next.W131`` for the ``LOGIN_REQUIRED`` setting.
+``next.W129`` for an action nothing guards, ``next.E165`` for an action of a ``component.py`` whose permission names a context, ``next.E166`` for a ``page.py`` without a body whose declaration binds neither a page nor an action, and ``next.W128`` for a directory with no page and no action live in ``next.forms.checks.actions``, and ``next.E161`` for a zone under a ``{% has_perm %}`` or in the body of a component that decides what it shows lives in ``next.partial.checks.zones``, beside the other zone placement checks.
+
+.. automodule:: next.permissions.checks
+   :members:
 
 Apps
 ~~~~
@@ -192,7 +201,7 @@ Configuration
 Dependency injection
 ~~~~~~~~~~~~~~~~~~~~
 
-The layer contributes no check, and there is no ``next.ENNN`` code for a missing provider, a bad marker graph, or an unregistered ``Depends`` name.
+The layer contributes the ``DObject`` checks of ``next.deps.checks``, listed under `Errors`_ and `Warnings`_, and apart from ``next.E157`` for the ``scope`` dependency there is no ``next.ENNN`` code for a missing provider, a bad marker graph, or an unregistered ``Depends`` name.
 
 .. note::
 
@@ -209,7 +218,7 @@ One code stands for one condition, so silencing it through ``SILENCED_SYSTEM_CHE
 The ``Emitted by`` column names the module that builds the message, which for the three check packages is the submodule rather than the package.
 
 A code that a release dropped is retired and never reused, so a silenced code keeps naming the condition it named.
-The retired errors are ``next.E001``, ``next.E066``, ``next.E091``, and ``next.E109``.
+The retired errors are ``next.E001``, ``next.E026``, ``next.E066``, ``next.E091``, and ``next.E109``.
 The retired warnings are ``next.W003`` through ``next.W029``, ``next.W032`` through ``next.W041``, ``next.W044``, ``next.W045``, ``next.W047`` through ``next.W053``, ``next.W064`` through ``next.W066``, and ``next.W073``.
 
 Errors
@@ -236,7 +245,7 @@ Errors
      - The file router ``APP_DIRS`` value is not a boolean.
      - ``next.urls.checks``
    * - ``next.E006``
-     - The file router ``DIRS`` value is not a list.
+     - The file router ``DIRS`` value is not a list, or holds an entry that is neither a path nor a segment name.
        The ``OPTIONS`` shapes carry ``next.E094`` through ``next.E097``, so one malformed key costs one error.
      - ``next.urls.checks``
    * - ``next.E007``
@@ -250,17 +259,22 @@ Errors
      - A ``[[args]]`` directory names no route, because the brackets hold nothing or hold a name that is no Python identifier once ``-`` is read as ``_``.
      - ``next.pages.checks.structure``
    * - ``next.E010``
-     - A parameter directory is missing its ``page.py`` file.
+     - A routed parameter directory serves no page at any depth the router walks.
+       A page is a ``page.py`` with a body, a broken one that routes to show its error, or a lone ``template.djx``, so a ``layout.djx`` or a ``page.py`` without a body does not count.
      - ``next.pages.checks.structure``
    * - ``next.E011``
      - An error was raised while checking page functions.
        What failed is the page-tree walk of one router, so the body-source checks ``next.E012``, ``next.E013``, and ``next.W043`` report nothing for the pages beneath it and a ``page.py`` with neither a body source nor a conflict passes unexamined.
      - ``next.pages.checks.modules``
    * - ``next.E012``
-     - A ``page.py`` has no body source, meaning no ``render`` function, no ``template`` attribute, no loader match, and no sibling ``layout.djx``.
+     - A ``page.py`` has no body source, meaning no ``render`` function, no ``template`` attribute, and no loader match, it declares no access, it passes no context with ``inherit_context=True`` to the pages below, and no action of its directory answers to it.
+       A ``layout.djx`` beside or above the file is no body source, since it only wraps the body of a page, so such a file routes no URL either.
+       A ``page.py`` with no body is legitimate and routes no URL of its own when it passes access with ``inherit=True`` or a ``@context(..., inherit_context=True)`` to the pages below, or when it or a file beside it declares an ``@action``, which answers to its rule.
+       One that declares access without ``inherit=True`` answers to ``next.E166`` instead.
      - ``next.pages.checks.modules``
    * - ``next.E013``
      - A page ``render`` attribute is not callable.
+       The file routes no URL, and ``next.W128`` leaves its branch to this error even when the file passes access or context to the pages below.
      - ``next.pages.checks.modules``
    * - ``next.E014``
      - An error was raised while checking URL conflicts.
@@ -275,9 +289,9 @@ Errors
      - ``next.urls.checks``
    * - ``next.E017``
      - A ``page.py`` raises while importing.
+       A broken ``page.py`` closes its own page and every page below it, since what it declares with ``inherit=True`` is unknown, so they answer 404 or raise under ``next.conf.fail_loudly``.
        The message names the recorded exception type and text, so an ``ImportError`` raised by the module body reads as such instead of masking as a missing body source.
        The body-source checks ``next.E012``, ``next.E013``, and ``next.W043`` stay silent for that file, so the import failure surfaces once.
-       Importing every routed module costs a full tree walk, so the check carries ``deploy=True`` and the code fires under ``manage.py check --deploy`` alone.
      - ``next.pages.checks.modules``
    * - ``next.E018``
      - A ``page.py`` registers more than one keyless ``@context`` callable, and only the last one runs.
@@ -302,9 +316,6 @@ Errors
      - ``next.urls.checks``
    * - ``next.E025``
      - A file router entry is missing ``APP_DIRS``.
-     - ``next.urls.checks``
-   * - ``next.E026``
-     - A file router entry is missing ``OPTIONS``.
      - ``next.urls.checks``
    * - ``next.E027``
      - A ``PAGES_DIR`` value is not a string.
@@ -426,10 +437,13 @@ Errors
      - A zone name is not an ASCII slug, so it cannot travel in the latin-1 ``X-Next-Zone`` header.
      - ``next.partial.checks.zones``
    * - ``next.E062``
-     - A ``{% zone %}`` sits inside a ``{% for %}`` loop, which a standalone zone render cannot reproduce.
+     - A ``{% zone %}`` sits inside a ``{% for %}`` loop at any depth, one nested in another zone under the loop included, which a standalone zone render cannot reproduce.
+       The runtime refuses such a zone as an unknown zone.
      - ``next.partial.checks.zones``
    * - ``next.E063``
-     - A ``{% zone %}`` sits inside an ``{% if %}`` block, whose condition a standalone zone render cannot evaluate.
+     - A ``{% zone %}`` sits inside an ``{% if %}`` block at any depth, one nested in another zone under the block included, whose condition a standalone zone render cannot evaluate.
+       A zone under a block tag from a module outside ``django.`` and ``next.`` draws the same code, naming the tag, since such a tag may decide in code what its body shows.
+       The runtime refuses such a zone as an unknown zone.
      - ``next.partial.checks.zones``
    * - ``next.E064``
      - A ``lazy=`` zone declares no ``{% placeholder %}`` branch to show until its body arrives.
@@ -455,7 +469,6 @@ Errors
      - ``next.forms.checks.config``
    * - ``next.E072``
      - A composed page template does not compile, so the syntax error would otherwise surface only as a 500 on the first request to the page.
-       Compiling every composed template of every tree costs a full walk, so the check carries ``deploy=True`` and the code fires under ``manage.py check --deploy`` alone.
      - ``next.partial.checks.templates``
    * - ``next.E073``
      - A ``PARTIAL_BACKENDS`` entry has no ``BACKEND`` key, so the entry would fall back to the default protocol backend and the intended wire format would never load.
@@ -506,9 +519,8 @@ Errors
        Django's stock path is substituted automatically, so the check fires only for a finder the project wrote itself, and subclassing ``next.static.NextAppDirectoriesFinder`` clears it.
      - ``next.static.checks``
    * - ``next.E084``
-     - A ``component.py`` raises while importing, so the render falls back to the template alone and every ``@component.context`` of that module stays out of the body.
+     - A ``component.py`` raises while importing, so the component renders as an empty string, since the access it would have declared is unknown, and under ``next.conf.fail_loudly`` it raises ``ComponentModuleImportError`` with the import failure as ``__cause__``.
        The message names the recorded exception type and text, which is what tells a missing import path apart from a typo in the module.
-       Importing every component module costs a full tree walk, so the check carries ``deploy=True`` and the code fires under ``manage.py check --deploy`` alone.
      - ``next.components.checks``
    * - ``next.E085``
      - An ``@action`` declares a ``scope`` keyword other than ``"page"`` or ``"shared"``.
@@ -742,6 +754,68 @@ Errors
      - The consent cookie's ``max_age`` option is not a positive int.
        A value that is not an int is replaced by the default age, and zero or less makes the browser drop the cookie at once, so the choice is not kept.
      - ``next.consent.checks``
+   * - ``next.E152``
+     - A page captures a URL parameter that an include over its tree passes already, as a captured kwarg or an extra kwarg, so one value would overwrite the other.
+       The check reads every include around the tree, a ``path()`` or a ``re_path()``, a nested include, and the include of ``next.urls``, so ``path("w/", pages("x"), {"wallet": 1})`` counts as well as ``path("w/<int:wallet>/", pages("x"))``.
+       The message names the page, the clashing names, and the include.
+     - ``next.urls.checks``
+   * - ``next.E153``
+     - A model under ``DObject``, in a parameter or in an ``obj=DObject[Model]`` of an access declaration, has a default manager that defines no callable ``visible_to``, so every lookup of that model fails.
+     - ``next.deps.checks``
+   * - ``next.E154``
+     - A ``DObject`` with a parent sits on a page context callable that runs before any context callable provides a value under the parent name, which an ancestor ``page.py`` declares with ``@context("post", inherit_context=True)``.
+       A parent read after a keyless callable is not judged, since its keys are known only at render time.
+       The message quotes the full route of the page, every prefix included, as ``next.W126`` does.
+     - ``next.deps.checks``
+   * - ``next.E155``
+     - A ``DObject`` with a parent sits on a form handler, a form factory, or one of the form hooks ``get_initial``, ``get_form_kwargs``, ``check_permissions``, ``has_object_permission``, and ``on_valid``, or on a ``FormWizard`` hook ``check_permissions`` or ``done``, which resolve with no page context, so the parent is never there.
+     - ``next.deps.checks``
+   * - ``next.E156``
+     - A ``DObject`` parameter sits on a ``@component.context`` callable, which resolves with no URL kwargs, so the lookup never finds its pk.
+     - ``next.deps.checks``
+   * - ``next.E157``
+     - The project declares a ``DObject`` parameter or an ``obj=DObject[Model]`` and no ``scope`` dependency is registered, so no lookup can call ``visible_to``.
+       Register it with ``@resolver.dependency("scope")`` in the ``deps.py`` of an app.
+     - ``next.deps.checks``
+   * - ``next.E158``
+     - A ``DObject`` parameter sits on a callable whose type hints do not resolve, such as a module under ``from __future__ import annotations`` that imports a name of the signature under ``TYPE_CHECKING``, so the annotation stays a string and every resolve raises ``TypeError``.
+     - ``next.deps.checks``
+   * - ``next.E159``
+     - A registered permission is checked by a callable whose signature the predicate cannot call, one that takes ``*args``, requires a keyword-only parameter, takes more than two positional parameters, or has no signature Python can read.
+       The message names the permission, the callable, and the reason, and the hint restates the rule, ``()``, ``(user)``, or ``(user, obj)`` with ``**kwargs`` allowed.
+     - ``next.permissions.checks``
+   * - ``next.E160``
+     - Object permissions are registered while ``AUTHENTICATION_BACKENDS`` lists no ``ObjectPermissionBackend`` or subclass of it, so ``user.has_perm()`` never consults their predicates.
+       The message names ``"next.permissions.ObjectPermissionBackend"`` to add next to ``ModelBackend``, and the hint names the ``backend`` argument ``login()`` needs once two backends are listed.
+     - ``next.permissions.checks``
+   * - ``next.E161``
+     - A ``{% zone %}`` sits inside a ``{% has_perm %}`` block of the composed page at any depth, or renders in the body of a component, any slot or the children, that decides whether that part shows, so a standalone zone render would skip the decision.
+       A component decides when it has a ``component.py``, whose ``render()``, contexts, or access declarations may decide in code, or when its template, followed through nested components, a literal ``{% extends %}``, and a literal ``{% include %}``, reaches a ``{% has_perm %}``, a condition around that part, or a reference the check cannot follow, such as an unresolved component, a template name in a variable, a missing template, or one that does not compile.
+       The message names the block or the component, and the runtime refuses the same zones as an unknown zone for every user, from the same analysis.
+       Put the decision inside the zone, or the zone outside the block or the component.
+     - ``next.partial.checks.zones``
+   * - ``next.E162``
+     - A ``permission_required(..., obj=DObject[Model])`` in a ``page.py`` loads its row by the URL kwarg named after the ``model_name`` of the model, and the route of a page the declaration binds, its own or one below under ``inherit=True``, does not capture it, so every request to that page raises ``UnboundObjectError``.
+       The message names the declaring file, the page, and the kwargs its route captures, and a page whose ``public()`` lifts the declaration is not judged.
+     - ``next.deps.checks``
+   * - ``next.E163``
+     - A ``page.py`` declares ``public()`` beside its own ``login_required()`` or ``permission_required()``, with or without ``inherit=True`` on either, and the requirements still bind, so the ``public()`` opens nothing.
+       The hint suggests ``page.public()`` alone in the page meant to open under a guarded directory.
+     - ``next.pages.checks.access``
+   * - ``next.E164``
+     - An access declaration binds to a file that is neither a ``page.py`` of a page tree nor a ``component.py``, such as a ``page.py`` a loader ran outside every tree, so it guards nothing.
+       A declaration from a helper function never gets here, since it raises ``DeclarationOutsideModuleError`` when the page loads.
+     - ``next.pages.checks.access``
+   * - ``next.E165``
+     - A ``component.py`` declares ``component.permission_required(perm, obj="name")`` and registers an ``@action``, and an action POST renders no component, so the context is never there and the action refuses every user, a superuser included.
+       The message names the contexts and the actions, and the hint asks for the object check in the form the action binds, through ``has_object_permission()`` or a ``Meta`` ``permission_required`` on a permission ``add_perm()`` registers, or for the actions in the ``page.py`` of the page.
+     - ``next.forms.checks.actions``
+   * - ``next.E166``
+     - A ``page.py`` with no body source declares ``login_required()``, ``permission_required()``, or ``public()`` without ``inherit=True``, and no action of its directory answers to its rule.
+       The file routes no URL, and only its own page and the actions declared in it or in a file beside it would answer to such a declaration, so it protects nothing.
+       A directory with such an action passes, since the declaration guards that action.
+       The hint asks for ``inherit=True`` to guard the pages below, or for a ``render`` function, a ``template`` attribute, or a ``template.djx`` to make the file a page.
+     - ``next.forms.checks.actions``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -830,7 +904,7 @@ Warnings
        Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.
      - ``next.partial.checks.backends``
    * - ``next.W072``
-     - A ``NEXT_FRAMEWORK`` bool key, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, or ``CSP_NONCE``, holds a non-bool value.
+     - A ``NEXT_FRAMEWORK`` bool key, ``LOGIN_REQUIRED``, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, or ``CSP_NONCE``, holds a non-bool value.
        The ``bool()`` coercion turns a falsy-looking string such as ``'False'`` into ``True``, so the written value can mean the opposite of the intent.
      - ``next.conf.checks``
    * - ``next.W074``
@@ -942,7 +1016,7 @@ Warnings
        Each problem names its own fix, setting the option it needs or dropping the one not read.
      - ``next.seo.checks.sitemaps``
    * - ``next.W101``
-     - A ``sitemap.py`` sets ``i18n = True`` while ``ROOT_URLCONF`` mounts no ``i18n_patterns()``, so every language lists the same URL.
+     - A ``sitemap.py`` sets ``i18n = True`` while ``ROOT_URLCONF`` holds no ``i18n_patterns()``, so every language lists the same URL.
      - ``next.seo.checks.sitemaps``
    * - ``next.W102``
      - An ``@sitemap.items`` trail matches an ``exclude`` glob of the same file, so its URLs are dropped.
@@ -1031,6 +1105,41 @@ Warnings
    * - ``next.W125``
      - The consent cookie's ``samesite`` option is ``"None"`` while ``secure`` is not ``True``, so a browser rejects the cookie on a page that is not served over https.
      - ``next.consent.checks``
+   * - ``next.W126``
+     - A ``DObject`` parameter on a context callable that a routed ``page.py`` runs, an inherited one included, is named after no kwarg the full route of that page hands it, so the lookup finds no URL kwarg.
+       The full route counts the bracket segments of the page and every kwarg the includes around the tree capture or pass as extra kwargs, the ``path()`` that includes a ``pages()`` tree and the one that includes ``next.urls`` alike.
+       A ``DObject`` named ``wallet`` under ``path("w/<int:wallet>/", pages("wallets"))`` therefore draws no warning, and the message quotes the full route, such as ``/w/<int:wallet>/ops/``.
+       A tree that ``pages()`` includes twice is judged by the include the URLconf lists first.
+       A warning rather than an error, because the walk cannot read an include hidden behind a lazy pattern sequence, while a kwarg missing at runtime raises ``UnboundObjectError``.
+     - ``next.deps.checks``
+   * - ``next.W127``
+     - A permission name that no installed model defines and no ``add_perm()`` registers is written in the guard of a form action, as a literal of a ``{% has_perm %}`` in a composed page or a component template, or in a ``permission_required()`` of a ``page.py`` or a ``component.py``, so every user but a superuser is refused it.
+       One message per name and place, which the message names, the first page reaching a ``{% has_perm %}`` name or else its component template, and a name a variable carries is not read.
+       A ``{% has_perm %}`` name and a declared name are judged in every project, while the guard of a form or an ``@action`` is judged only in a project that declares access, as for ``next.W129``.
+       A permission django-rules registers counts as known while ``rules.permissions.ObjectPermissionBackend`` is listed in ``AUTHENTICATION_BACKENDS``.
+       Silent while ``django.contrib.auth`` is not installed, which ``next.W060`` reports for a form action.
+       A model permission counts as known when a model class declares it, through ``default_permissions`` or ``Meta.permissions``, so a ``Permission`` row created only by a data migration or through the admin draws the warning, and declaring it in ``Meta.permissions`` or listing the code in ``SILENCED_SYSTEM_CHECKS`` quiets it.
+     - ``next.permissions.checks``
+   * - ``next.W128``
+     - A directory of a routed page tree holds no page and no action at any depth, so the message names what it holds in vain, a ``page.py`` whose ``inherit=True`` access guards no page, or opens none for a ``public(inherit=True)``, or whose ``inherit_context=True`` context reaches no page, else a ``layout.djx`` that wraps no page, else nothing that routes.
+       A page is a ``page.py`` with a body, a broken one, or a lone ``template.djx``, and a private ``_name/`` directory or the ``COMPONENTS_DIR`` folder is neither content nor a branch of its own.
+       One message names the outermost such directory, the tree root when the whole tree is empty, unless the root holds the ``layout.djx`` of a ``DIRS`` tree, which wraps the pages of every tree.
+       A branch holding a file or a directory that ``next.E010``, ``next.E012``, ``next.E013``, or ``next.E166`` already reports is left to that error.
+     - ``next.forms.checks.actions``
+   * - ``next.W129``
+     - A ``page.py`` or another file of a page tree declares actions that no declaration of its page, no ``inherit=True`` declaration of a ``page.py`` above it, no ``Meta`` guard, and no default login guard, so anyone may post to them.
+       An action declared outside a page tree answers to the rule of its origin page alone and is not judged.
+       Silent while the default login is on, through ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware``, and silent until the project declares access.
+       A project declares access once it holds a ``login_required()``, ``permission_required()``, or ``public()`` in a ``page.py`` or a ``component.py``, or a permission registered through ``add_perm``.
+       A ``public()`` is such a declaration and states that the actions under it are open on purpose, so they draw no warning.
+     - ``next.forms.checks.actions``
+   * - ``next.W130``
+     - ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` is set to ``False`` while ``LoginRequiredMiddleware`` or a subclass sits in ``MIDDLEWARE``, which asks the login anyway, so the setting turns nothing off.
+       Leaving the key out beside the middleware draws no warning.
+     - ``next.permissions.checks``
+   * - ``next.W131``
+     - ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` is ``True`` while ``django.contrib.auth`` is not installed or ``MIDDLEWARE`` lists no ``AuthenticationMiddleware`` or a subclass, so no request carries a signed-in user and every page and action that declares no access sends each visitor to the login.
+     - ``next.permissions.checks``
 
 Codes are assigned per check and are not contiguous.
 

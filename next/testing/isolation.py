@@ -1,7 +1,6 @@
 """Helpers to drop registry state between tests.
 
-Opt-in, since most Django tests expect module-level registrations to persist, for
-tests that verify registry behaviour or reload backends after swapping settings.
+Opt-in, since most Django tests expect module-level registrations to persist.
 """
 
 from __future__ import annotations
@@ -19,8 +18,7 @@ from next.seo.manager import reset_seo_sources
 def reset_form_actions() -> None:
     """Drop cached form-action backends and reload them from settings.
 
-    Forms register imperatively at import time, so the manager does not auto-rebuild on
-    `settings_reloaded` and a swapped backend list needs this call.
+    Forms register at import time, so `settings_reloaded` does not rebuild the manager.
     """
     form_action_manager.reload()
 
@@ -49,8 +47,7 @@ def reset_registries() -> None:
 def reset_component_templates() -> None:
     """Drop compiled component templates so the next render reads sources again.
 
-    Needed between renders against a component rewritten on disk, because outside
-    `DEBUG` the loader reuses a compiled template without checking its source.
+    Outside `DEBUG` the loader reuses a compiled template without checking its source.
     """
     components_manager.clear_template_caches()
 
@@ -58,7 +55,6 @@ def reset_component_templates() -> None:
 def reset_page_cache() -> None:
     """Drop the page template cache and source-mtime bookkeeping.
 
-    Needed between `render_page` runs against rewritten files on disk, because
     `page.render` memoises the composed template string per file path.
     """
     page.clear_template_caches()

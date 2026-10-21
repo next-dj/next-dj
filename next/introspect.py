@@ -27,8 +27,7 @@ def code_filename(func: object) -> str | None:
         try:
             target = inspect.unwrap(func)
         except ValueError:
-            # A ``__wrapped__`` cycle names no innermost function, so the
-            # outermost wrapper answers rather than the registration failing.
+            # A ``__wrapped__`` cycle has no innermost function, so use the outermost.
             target = func
     code = getattr(target, "__code__", None)
     return code.co_filename if isinstance(code, CodeType) else None
@@ -80,6 +79,15 @@ def registering_file() -> Path:
     return Path(sys._getframe(2).f_code.co_filename)
 
 
+def registering_site() -> tuple[Path, bool]:
+    """Return the file calling the caller of this helper, and whether its top level did.
+
+    Module code runs once per load, so only a call from there declares for good.
+    """
+    code = sys._getframe(2).f_code
+    return Path(code.co_filename), code.co_name == "<module>"
+
+
 def declared_file(
     func: Callable[..., Any],
     registered_from: Path,
@@ -95,8 +103,7 @@ def declared_file(
 def callable_name(obj: object) -> str:
     """Return the name a registration reports for ``obj`` in diagnostics.
 
-    A partial and a callable instance carry no ``__name__``, so the name of
-    the wrapped function or of the class stands in for one.
+    A partial or callable instance has no ``__name__``, so its target stands in.
     """
     if isinstance(obj, functools.partial):
         return callable_name(obj.func)
@@ -112,11 +119,7 @@ def describe_callable(func: Callable[..., Any]) -> str:
 
 
 class MisattributedContext(NamedTuple):
-    """One registration whose callable was declared outside the file running it.
-
-    Both files are kept because a diagnostic has to name the file that
-    expected the value and the one the registration is bound to.
-    """
+    """One registration whose callable was declared outside the file running it."""
 
     registered_from: Path
     declared_in: Path
@@ -128,8 +131,7 @@ class MisattributionLog:
 
     def __init__(self) -> None:
         """Start with no recorded registration."""
-        # Keyed by the whole record so a module executed more than once
-        # reports one diagnostic rather than one per execution.
+        # Keyed by the record, so a module run twice reports once.
         self._records: dict[MisattributedContext, None] = {}
 
     def record(
@@ -161,4 +163,5 @@ __all__ = [
     "defining_file",
     "describe_callable",
     "registering_file",
+    "registering_site",
 ]

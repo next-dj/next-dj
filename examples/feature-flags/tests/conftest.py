@@ -2,8 +2,8 @@ from collections.abc import Callable
 
 import pytest
 from flags.demo import seed_demo
+from flags.deps import WRITE_GATE_FLAG
 from flags.models import Flag
-from flags.providers import WRITE_GATE_FLAG
 
 
 @pytest.fixture()

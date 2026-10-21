@@ -1,7 +1,6 @@
 """Render helpers for next-dj pages and components.
 
-Thin wrappers over `page.render` and `render_component`, so a test needs no
-hand-built `ComponentInfo` or `HttpRequest` to exercise a renderer.
+Thin wrappers over `page.render` and `render_component` needing no hand-built request.
 """
 
 from __future__ import annotations
@@ -32,9 +31,7 @@ def render_page(
 ) -> str:
     """Render the page at `file_path` and return its HTML string.
 
-    When `request` is not provided a minimal `HttpRequest` is built via
-    `RequestFactory().get("/")`. Extra `url_kwargs` are forwarded to
-    `page.render` so tests can exercise parametric pages.
+    Without `request` a bare GET `/` request is built, `url_kwargs` go to `page.render`.
     """
     target = Path(file_path) if not isinstance(file_path, Path) else file_path
     req = request if request is not None else RequestFactory().get("/")

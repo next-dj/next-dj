@@ -3,11 +3,14 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.template import Template
 
-from next.components import FileComponentsBackend
+from next.components import ComponentInfo, FileComponentsBackend, sources
+from next.components.renderers import TemplateSource
 from next.components.sources import (
     get_components_manager,
     iter_serialized_component_context_keys,
+    reached_components,
     reset_components_manager_cache,
 )
 from next.conf.signals import settings_reloaded
@@ -108,3 +111,83 @@ class TestSerializedComponentContextKeys:
 
     def test_backend_without_component_files_is_skipped(self, tmp_path: Path) -> None:
         assert self._keys(DummyComponentsBackend({})) == []
+
+
+class _Sources:
+    """Hand back the template text a stub manager holds for a component."""
+
+    def __init__(self, texts: dict[str, str | None], root: Path) -> None:
+        self.texts = texts
+        self.root = root
+
+    def load_source(self, info: ComponentInfo) -> TemplateSource | None:
+        text = self.texts[info.name]
+        return None if text is None else TemplateSource(text, self.root / info.name)
+
+
+class _Reached:
+    """A components manager resolving only the names it holds a template text for."""
+
+    def __init__(self, root: Path, **texts: str | None) -> None:
+        self.root = root
+        self.template_loader = _Sources(texts, root)
+
+    def get_component(self, name: str, anchor: Path) -> ComponentInfo | None:
+        if name not in self.template_loader.texts:
+            return None
+        return ComponentInfo(
+            name=name,
+            scope_root=self.root,
+            scope_relative="",
+            template_path=self.root / f"{name}.djx",
+            module_path=None,
+            is_simple=True,
+        )
+
+
+class TestLiteral:
+    """Only a template named by a plain string literal is followed."""
+
+    @pytest.mark.parametrize(
+        ("expression", "name"),
+        [
+            pytest.param(
+                Template('{% include "a.html" %}').nodelist[0].template,
+                "a.html",
+                id="literal",
+            ),
+            pytest.param(
+                Template("{% include a %}").nodelist[0].template, None, id="variable"
+            ),
+            pytest.param(
+                Template('{% include "a.html"|lower %}').nodelist[0].template,
+                None,
+                id="filtered",
+            ),
+            pytest.param(Template("x"), None, id="a-compiled-template"),
+        ],
+    )
+    def test_literal(self, expression, name) -> None:
+        assert sources._literal(expression) == name
+
+
+class TestReachedComponents:
+    """`reached_components` follows the tags of every template it reaches, once each."""
+
+    def test_nested_tags_are_followed_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        manager = _Reached(
+            tmp_path,
+            outer='{% component "inner" %}{% component "outer" %}',
+            inner='{% component "unread" %}{% component "broken" %}',
+            unread=None,
+            broken='{% component "hidden" %}{% if %}',
+            hidden="x",
+        )
+        monkeypatch.setattr(sources, "get_components_manager", lambda: manager)
+        nodelist = Template(
+            '{% component "outer" %}{% component "ghost" %}{% component "outer" %}'
+        ).nodelist
+        reached = reached_components(nodelist, tmp_path / "template.djx")
+        assert [info.name for info in reached] == ["outer", "inner", "unread", "broken"]

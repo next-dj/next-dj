@@ -9,18 +9,18 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from obs import metrics
-from obs.apps import METRIC_PULSE_OP
 from obs.backends import BabelJsxBackend, CountingComponentsBackend
-from obs.dashboards.page import totals
-from obs.dashboards.stats.components.page import counters as components_counters
-from obs.dashboards.stats.forms.page import dispatched, validation_failed
-from obs.dashboards.stats.page import LIVE_TOTALS_ZONE, live_stats, live_zone, window
-from obs.dashboards.stats.pages.page import counters as pages_counters
-from obs.dashboards.stats.static.page import assets, collector, dedup
 from obs.forms import WINDOW_CHOICES, WindowFilterForm
 from obs.metrics import INDEX_KEY, PREFIX
 from obs.models import MetricSnapshot
-from obs.receivers import (
+from obs.pages.page import totals
+from obs.pages.stats.components.page import counters as components_counters
+from obs.pages.stats.forms.page import dispatched, validation_failed
+from obs.pages.stats.page import LIVE_TOTALS_ZONE, live_stats, live_zone, window
+from obs.pages.stats.pages.page import counters as pages_counters
+from obs.pages.stats.static.page import assets, collector, dedup
+from obs.serializers import PydanticJsContextSerializer, WrappedJsContextSerializer
+from obs.signals import (
     on_action_dispatched,
     on_action_registered,
     on_asset_registered,
@@ -40,12 +40,10 @@ from obs.receivers import (
     on_watch_specs_ready,
     page_key,
 )
-from obs.serializers import PydanticJsContextSerializer, WrappedJsContextSerializer
 from obs.static_policies import InstrumentedDedup
 from pydantic import BaseModel
 
 from next.components import FileComponentsBackend
-from next.partial.registry import patch_op_registry
 from next.static import StaticAsset
 
 
@@ -175,13 +173,6 @@ class TestLiveZoneContext:
 
     def test_returns_the_live_totals_zone(self) -> None:
         assert live_zone() == LIVE_TOTALS_ZONE
-
-
-class TestMetricPulseRegistration:
-    """`apps.ready()` registers the custom verb so `op()` accepts it."""
-
-    def test_metric_pulse_is_registered(self) -> None:
-        assert METRIC_PULSE_OP in patch_op_registry
 
 
 class _PydanticPayload(BaseModel):
@@ -487,8 +478,8 @@ class TestPageKey:
     """Page metric labels stay relative to the project, never absolute."""
 
     def test_a_project_page_loses_the_absolute_prefix(self) -> None:
-        absolute = Path(settings.BASE_DIR) / "obs" / "dashboards" / "page.py"
-        assert page_key(absolute) == "obs/dashboards/page.py"
+        absolute = Path(settings.BASE_DIR) / "obs" / "pages" / "page.py"
+        assert page_key(absolute) == "obs/pages/page.py"
 
     def test_a_path_outside_the_project_is_kept_whole(self) -> None:
         assert page_key(Path("/somewhere/else/page.py")) == "/somewhere/else/page.py"

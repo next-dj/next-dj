@@ -15,8 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-# The default bound of a path-keyed cache, far above the page count of a project.
-# It limits memory when a caller creates keys without end, rather than ranking entries.
+# Far above a project's page count, so it only limits memory against endless keys.
 DEFAULT_CACHE_SIZE = 2048
 
 PAGE_HEADROOM: Final = 2
@@ -47,8 +46,7 @@ class BoundedCache[K, V]:
             try:
                 self._entries.popitem(last=False)
             except KeyError:
-                # No caller holds a lock, so a concurrent clear may have emptied the
-                # cache already, which also brings it back within the bound.
+                # A concurrent clear may have emptied the cache, so it is in bound.
                 return
 
     def __contains__(self, key: object) -> bool:
@@ -83,11 +81,7 @@ class BoundedCache[K, V]:
 
 
 class PageCache[K, V](BoundedCache[K, V]):
-    """A FIFO cache keyed by page, whose bound follows the routed page count.
-
-    A FIFO bound below the page count evicts every entry before its next read under
-    uniform traffic, so the URL build reports the count through `fit`.
-    """
+    """A FIFO cache keyed by page, whose bound follows the routed page count."""
 
     __slots__ = ("__weakref__",)
 
@@ -101,10 +95,9 @@ class PageCache[K, V](BoundedCache[K, V]):
 
     @staticmethod
     def fit(page_count: int) -> None:
-        """Set the bound of every page cache to `PAGE_HEADROOM` entries per routed page.
+        """Set every page cache bound to `PAGE_HEADROOM` entries per routed page.
 
-        The bound never falls below `DEFAULT_CACHE_SIZE`. A lower bound drops the oldest
-        entries of each cache at once, so the pages of an earlier build are not held.
+        The bound never falls below `DEFAULT_CACHE_SIZE`.
         """
         bound = max(DEFAULT_CACHE_SIZE, page_count * PAGE_HEADROOM)
         with _FIT_LOCK:
@@ -133,10 +126,7 @@ class LruCache[K, V](BoundedCache[K, V]):
     @override
     def __getitem__(self, key: K) -> V:
         """Return the entry under `key` and mark it as the most recently read."""
-        # The lookup runs first, so an unhashable key raises `TypeError`, which tells
-        # a caller to bypass the cache, where `move_to_end` would raise `KeyError`.
-        # No reader holds a lock, so a concurrent eviction between the two calls
-        # raises `KeyError`, which a caller treats as a miss and rebuilds.
+        # Lookup first, so an unhashable key raises `TypeError` to bypass the cache.
         value = self._entries[key]
         self._entries.move_to_end(key)
         return value
@@ -150,8 +140,7 @@ class LruCache[K, V](BoundedCache[K, V]):
             if len(self._entries) > self._maxsize:
                 self._entries.popitem(last=False)
         except KeyError:
-            # The write runs first, so a held key never goes missing for a reader. A
-            # concurrent eviction that removed this key has already restored the bound.
+            # A concurrent eviction removed this key and already restored the bound.
             return
 
     @overload

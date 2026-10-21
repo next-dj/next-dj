@@ -1,7 +1,6 @@
 """The schema.org node base and the breadcrumb list a page folds into its `@graph`.
 
-A node is a frozen value, so mypy and `TypeError` catch a missing required property.
-`to_json` is the one walk that turns a node or a raw value into its JSON form.
+A node is a frozen value, so a missing required property is a `TypeError`.
 """
 
 import math
@@ -87,11 +86,7 @@ def to_json(
 ) -> object:
     """Return a node or a raw value in JSON form, ready for `json.dumps`.
 
-    A nested node renders in place, every `@id` passes through `ids`, and `urls`
-    maps the strings of a URL property, the value itself or a sequence's items.
-    An enum becomes its value and a naive datetime takes the current time zone.
-    A leaf JSON cannot hold, `nan` or a set among them, raises `ValueError`, and so
-    does a mapping key other than text, a number, a bool or `None`.
+    A leaf JSON cannot hold, `nan` or a set among them, raises `ValueError`.
     """
     if isinstance(value, Node | Ref):
         return value.as_jsonld(ids)
@@ -174,8 +169,7 @@ class Node:
     def as_jsonld(self, url: UrlMap = _same) -> dict[str, object]:
         """Return the node as a JSON-LD object, `None` and empty sequences dropped.
 
-        `url` maps the `@id` and every URL property, so resolve can absolutize them.
-        A property JSON cannot hold raises `ValueError`.
+        `url` maps the `@id` and URL properties so resolve can absolutize them.
         """
         out: dict[str, object] = {TYPE: self.type or self.TYPE}
         if self.id is not None:

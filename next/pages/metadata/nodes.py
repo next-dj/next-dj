@@ -41,8 +41,7 @@ class _Resolved(NamedTuple):
 def context_metadata(context: Context) -> ResolvedMetadata | None:
     """Return the resolved metadata of the page render, `None` outside a page render.
 
-    The result is published on the request and memoised in the root render-context
-    layer, so an `{% include %}` reuses it instead of folding the chain again.
+    The result is memoised in the root render-context layer for `{% include %}` reuse.
     """
     thunk = context.get(METADATA_KEY)
     if not isinstance(thunk, MetadataThunk):

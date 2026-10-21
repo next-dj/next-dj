@@ -630,8 +630,7 @@ def _dispatch_probe(
 class TestDispatchSignalSender:
     """Receivers filtering on `sender=FormActionDispatch` still get every signal.
 
-    The dispatch bodies live in the submodules of `next.forms.dispatch`, so
-    the sender identity is the contract keeping those receivers wired.
+    The dispatch bodies live in submodules, so the sender keeps receivers wired.
     """
 
     def test_action_dispatched_reaches_a_sender_filtered_receiver(

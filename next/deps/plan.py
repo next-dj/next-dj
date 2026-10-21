@@ -1,8 +1,4 @@
-"""Compile a per-callable injection plan from the providers' static verdicts.
-
-A marker parameter is owned by one provider no matter the context, so the compiler asks
-each provider once and the resolver replays the short-list.
-"""
+"""Compile a per-callable injection plan from the providers' static verdicts."""
 
 from __future__ import annotations
 
@@ -48,13 +44,11 @@ EMPTY_PLAN: InjectionPlan = ()
 def _filler(provider: ParameterProvider, param: inspect.Parameter) -> ParameterFiller:
     """Return the single call that fills `param` for the provider owning it.
 
-    The hook is read off the instance, so a provider without one keeps the plain
-    `resolve`. One that compiles something uncallable raises here, where it is named.
+    A provider without a hook keeps the plain `resolve`, and an uncallable one raises.
     """
     hook: _CompileHook | None = getattr(provider, "compile_resolve", None)
     if callable(hook):
-        # Widened from the declared return, because the compiler guards against a
-        # third-party hook that hands back something no replay could call.
+        # Widened from the declared return to guard against a third-party hook.
         compiled: object = hook(param)
         if compiled is not None:
             if not callable(compiled):
@@ -86,8 +80,7 @@ def compile_plan(
         candidates: list[ParameterProvider] = []
         terminal: ParameterProvider | None = None
         for provider in providers:
-            # Widened from the declared verdict, because the compiler guards
-            # against a third-party hook that returns something else.
+            # Widened from the declared verdict to guard against a third-party hook.
             verdict: object = provider.static_can_handle(param)
             if verdict is False:
                 continue

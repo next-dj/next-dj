@@ -76,7 +76,7 @@ The ``{% crispy %}`` tag drives the layout from a ``FormHelper``, and a helper d
 Inside ``{% form %}`` both must be switched off.
 
 .. code-block:: python
-   :caption: contact/pages/contact/page.py — replaces the earlier ``ContactForm``
+   :caption: contact/pages/contact/page.py, replaces the earlier ``ContactForm``
 
    from crispy_forms.helper import FormHelper
    from django import forms

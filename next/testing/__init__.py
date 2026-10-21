@@ -1,8 +1,6 @@
 """Framework-agnostic helpers for testing next-dj apps.
 
-The public surface is a small set of pure-Python utilities that work with Django
-`TestCase`, stdlib `unittest`, and pytest. Nothing re-exported here imports
-pytest, which lives alone in the opt-in `next.testing.plugin` module.
+Pure-Python utilities for Django `TestCase`, unittest and pytest.
 """
 
 from __future__ import annotations

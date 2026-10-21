@@ -1,15 +1,10 @@
-"""Router manager, lazy urlpatterns sequence, and settings-reload wiring.
-
-`_LazyResolverSlot` holds the resolver back until first read, so the first resolve wires
-routers and form actions without touching the page tree at import time.
-"""
+"""Router manager, lazy urlpatterns sequence, and settings-reload wiring."""
 
 from __future__ import annotations
 
 import itertools
 import threading
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, overload, override
+from typing import TYPE_CHECKING, Any, override
 
 from django.urls import URLPattern, URLResolver, clear_url_caches, path
 from django.urls.resolvers import RoutePattern
@@ -23,10 +18,11 @@ from next.ports import seo_routes_slot
 from .backends import RouterBackend
 from .resolver import TrieURLResolver
 from .signals import router_backend_loaded, router_reloaded
+from .urlconf import MountedPatterns
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator
+    from collections.abc import Generator, Sequence
 
 
 _version_counter = itertools.count(1)
@@ -72,8 +68,7 @@ class RouterManager:
     def version(self) -> int:
         """Cache token for the lazy urlpatterns concat, moved by `reload()`.
 
-        Read it to key a cache of your own on the active backend list. The token is
-        drawn process-wide, so a second manager never reuses the number of the first.
+        The token is drawn process-wide, so a second manager never reuses a number.
         """
         return self._version
 
@@ -83,8 +78,7 @@ class RouterManager:
     def _ensure_loaded(self) -> None:
         """Build the backend list on the first read, whichever accessor asks.
 
-        The in-build escape is keyed on the building thread, so a backend consulting the
-        manager on construction cannot recurse while another thread waits for the build.
+        The in-build escape is keyed on the building thread, so no backend recurses.
         """
         if self._loaded or self._building_thread == threading.get_ident():
             return
@@ -105,8 +99,7 @@ class RouterManager:
     def __repr__(self) -> str:
         """Debug representation with backend count and load state.
 
-        It reports the raw state instead of loading, so a debugger displaying the
-        manager neither rebuilds routes nor sends signals.
+        It reports raw state, so a debugger neither rebuilds routes nor sends signals.
         """
         return (
             f"<{self.__class__.__name__} backends={len(self._backends)} "
@@ -116,8 +109,7 @@ class RouterManager:
     def __iter__(self) -> Generator[URLPattern | URLResolver, None, None]:
         """All patterns from each backend, loading config on first use.
 
-        Iteration yields URL patterns rather than backends, so the manager
-        deliberately offers no `len` or indexing. Read `backends` for those.
+        Iteration yields patterns, so the manager offers no `len` or indexing.
         """
         self._ensure_loaded()
         for backend in self._backends:
@@ -126,16 +118,13 @@ class RouterManager:
     def reload(self, *, notify: bool = True) -> None:
         """Rebuild backends from `PAGE_BACKENDS` and notify listeners.
 
-        The rebuild clears the URL caches, sends `router_backend_loaded` per backend and
-        then `router_reloaded`, and `notify=False` skips all three. A reentrant lock
-        lets a receiver reload from this thread without deadlocking.
+        It clears the URL caches and sends both signals unless `notify=False`.
         """
         with self._lock:
             self._bump()
             self._config_cache = None
 
-            # Recorded for the whole build, so a backend reading the manager during
-            # construction is answered instead of deadlocking on this thread's lock.
+            # Recorded for the whole build, so a backend reading the manager is served.
             self._building_thread = threading.get_ident()
             try:
                 built = load_backends(
@@ -167,33 +156,56 @@ router_manager = RouterManager()
 def reload_router_settings(**kwargs) -> None:
     """Rebuild router backends and drop the built URL resolver on settings reload.
 
-    The slot keeps its identity so the outer include resolver, which iterates it on
-    every resolve, picks the replacement up on its next read.
+    The slot keeps its identity so the outer include resolver picks up the replacement.
     """
     router_manager.reload()
     urlpatterns.reset()
 
 
-def reload_app_routers(*, setting: str, **kwargs) -> None:
-    """Rebuild the routers when the app list behind their page trees moves.
+_ROUTED_SETTINGS = frozenset({"INSTALLED_APPS", "ROOT_URLCONF"})
 
-    The rebuild bumps the version behind the lazy patterns, clears Django's URL caches,
-    and drops a file router's pattern cache, which is keyed on the app name alone.
+
+def reload_app_routers(*, setting: str, **kwargs) -> None:
+    """Rebuild the routers when the apps or the URLconf behind their page trees move.
+
+    The rebuild bumps the version behind the lazy patterns and clears the URL caches.
     """
-    if setting == "INSTALLED_APPS":
+    if setting in _ROUTED_SETTINGS:
         router_manager.reload()
+
+
+class _RoutedPages:
+    """The page patterns each URL build of one router version mounts, sized together.
+
+    `next.urls` and each `pages()` tree build apart, and the caches must hold them all.
+    """
+
+    def __init__(self) -> None:
+        """Start with no build on record."""
+        self._version = 0
+        self._builds: dict[object, list[URLPattern | URLResolver]] = {}
+        self._lock = threading.Lock()
+
+    def fit(self, build: object, patterns: list[URLPattern | URLResolver]) -> None:
+        """Record the patterns of one build and size the page caches by every build."""
+        with self._lock:
+            version = router_manager.version
+            if version != self._version:
+                self._version = version
+                self._builds = {}
+            self._builds[build] = patterns
+            fit_page_caches(itertools.chain.from_iterable(self._builds.values()))
+
+
+routed_pages = _RoutedPages()
 
 
 _CSRF_PATTERN = path("_next/csrf/", csrf_view, name=CSRF_URL_NAME)
 """The endpoint the runtime fetches a CSRF token from when the page HTML omits it."""
 
 
-class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
-    """Defer expanding CSRF, form, router and SEO patterns until first use.
-
-    Skips `list` so `include()` defers materialisation, overrides `__reversed__` to
-    avoid a per-index list build, and caches the concat against its version token.
-    """
+class _LazyUrlPatterns(MountedPatterns):
+    """Defer expanding CSRF, form, router and SEO patterns until first use."""
 
     def __init__(self) -> None:
         """Empty cache until the first pattern build."""
@@ -207,15 +219,15 @@ class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
             seo_routes_version.value,
         )
 
+    @override
     def _patterns(self) -> list[URLPattern | URLResolver]:
         cache = self._cache
         if cache is not None and cache[0] == self.version_token():
             return cache[1]
         seo_routes = seo_routes_slot.peek()
-        # Pages expand first because loading a page module registers its form actions.
-        # The framework routes still lead, so a root catch-all cannot match them.
+        # Pages expand first, since loading a page module registers its form actions.
         pages = list(router_manager)
-        fit_page_caches(pages)
+        routed_pages.fit(app_name, pages)
         patterns: list[URLPattern | URLResolver] = [
             _CSRF_PATTERN,
             *form_action_manager,
@@ -225,54 +237,32 @@ class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
         if seo_routes is None:
             # Before `ready()` binds the port the list is incomplete and stays uncached.
             return patterns
-        # Versions are read after the build because expanding pages can
-        # register form actions and bump the forms version mid-build.
+        # Versions are read after the build, since pages can bump the forms version.
         self._cache = (self.version_token(), patterns)
         return patterns
 
-    @override
-    def __iter__(self) -> Iterator[URLPattern | URLResolver]:
-        return iter(self._patterns())
 
-    @override
-    def __reversed__(self) -> Iterator[URLPattern | URLResolver]:
-        return reversed(self._patterns())
+def build_url_resolver(
+    patterns: Sequence[URLPattern | URLResolver] | None = None,
+) -> URLResolver:
+    """Instantiate the resolver class named by `NEXT_FRAMEWORK["URL_RESOLVER"]`.
 
-    @override
-    def __len__(self) -> int:
-        return len(self._patterns())
-
-    @overload
-    def __getitem__(self, key: int, /) -> URLPattern | URLResolver: ...
-
-    @overload
-    def __getitem__(self, key: slice, /) -> list[URLPattern | URLResolver]: ...
-
-    @override
-    def __getitem__(
-        self, key: int | slice, /
-    ) -> URLPattern | URLResolver | list[URLPattern | URLResolver]:
-        return self._patterns()[key]
-
-
-def _build_url_resolver() -> URLResolver:
-    """Instantiate the resolver class named by `NEXT_FRAMEWORK["URL_RESOLVER"]`."""
+    It wraps the `next.urls` patterns unless a `pages()` tree hands its own.
+    """
     cls = resolve_setting_class(
         "URL_RESOLVER",
         base=URLResolver,
-        # The package binds `TrieURLResolver` only after importing this module,
-        # so the import helper would hit a half-initialised `next.urls`.
+        # The import helper would hit a half-initialised `next.urls` at this point.
         shipped=TrieURLResolver,
         base_path="django.urls.resolvers.URLResolver",
     )
-    return cls(RoutePattern(""), _LazyUrlPatterns())
+    return cls(RoutePattern(""), _LazyUrlPatterns() if patterns is None else patterns)
 
 
-class _LazyResolverSlot(Sequence["URLPattern | URLResolver"]):
+class _LazyResolverSlot(MountedPatterns):
     """Hold the outer resolver in one slot and build it on first read.
 
-    Building at import time would read `NEXT_FRAMEWORK` before Django settings are set,
-    which a pytest plugin hits before pytest-django exports the settings module.
+    Building at import would read `NEXT_FRAMEWORK` before Django settings are set.
     """
 
     def __init__(self) -> None:
@@ -283,35 +273,16 @@ class _LazyResolverSlot(Sequence["URLPattern | URLResolver"]):
         """Drop the built resolver so the next read rebuilds it from settings."""
         self._slot = ()
 
-    def _built(self) -> tuple[URLPattern | URLResolver, ...]:
-        # Held as a ready one-tuple rather than rebuilt per read, because
-        # every URL resolve iterates this sequence once.
+    @override
+    def _patterns(self) -> tuple[URLPattern | URLResolver, ...]:
         slot = self._slot
         if not slot:
-            slot = self._slot = (_build_url_resolver(),)
+            slot = self._slot = (build_url_resolver(),)
         return slot
-
-    @override
-    def __iter__(self) -> Iterator[URLPattern | URLResolver]:
-        return iter(self._built())
 
     @override
     def __len__(self) -> int:
         return 1
-
-    @overload
-    def __getitem__(self, key: int, /) -> URLPattern | URLResolver: ...
-
-    @overload
-    def __getitem__(self, key: slice, /) -> list[URLPattern | URLResolver]: ...
-
-    @override
-    def __getitem__(
-        self, key: int | slice, /
-    ) -> URLPattern | URLResolver | list[URLPattern | URLResolver]:
-        if isinstance(key, slice):
-            return list(self._built()[key])
-        return self._built()[key]
 
 
 app_name = "next"
@@ -321,6 +292,7 @@ urlpatterns = _LazyResolverSlot()
 __all__ = [
     "RouterManager",
     "app_name",
+    "routed_pages",
     "router_manager",
     "seo_routes_version",
     "urlpatterns",

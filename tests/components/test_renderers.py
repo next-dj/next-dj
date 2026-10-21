@@ -15,7 +15,6 @@ from next.components.loading import ModuleLoader
 from next.components.renderers import (
     _RESERVED_CONTEXT_KEYS,
     COMPONENT_PROPS_CONTEXT_KEY,
-    _inject_component_context,
 )
 from next.deps.cache import REQUEST_DEP_CACHE_ATTR
 from next.pages import page
@@ -25,7 +24,7 @@ from tests.support import (
     unified_view,
     write_page_chain,
 )
-from tests.support.components import build_composite_component
+from tests.support.components import build_composite_component, render_with
 
 
 RESERVED_KEYS = sorted(_RESERVED_CONTEXT_KEYS)
@@ -79,14 +78,6 @@ PINNED_RESERVED_KEYS = frozenset(
 )
 
 
-def _inject(
-    manager: ComponentContextManager, info: ComponentInfo, context_data: dict
-) -> None:
-    """Run the injection step with `manager` standing in for the global one."""
-    with patch("next.components.renderers.component", manager):
-        _inject_component_context(info, context_data, None)
-
-
 class TestNamedDependenciesPerInstance:
     """Every component instance keeps its own named-dependency resolutions."""
 
@@ -135,7 +126,7 @@ class TestKeylessContextCollisions:
         with pytest.raises(
             ValueError, match="Component 'card' context returns 'title'"
         ):
-            _inject(mgr, info, context_data)
+            render_with(mgr, info, context_data)
 
         assert context_data["title"] == "from prop"
 
@@ -154,20 +145,19 @@ class TestKeylessContextCollisions:
         context_data = {key: original}
 
         with pytest.raises(ValueError, match=f"returns {key!r}"):
-            _inject(mgr, info, context_data)
+            render_with(mgr, info, context_data)
 
         assert context_data[key] is original
 
     def test_non_string_keys_merge_without_raising(self, tmp_path: Path) -> None:
         """A dict keyed by non-strings survives the slot-prefix scan."""
-        mgr, info, module_path = build_composite_component(tmp_path)
+        mgr, info, module_path = build_composite_component(
+            tmp_path, template="{{ ok }}"
+        )
         mgr._registry.register(module_path, None, lambda: {1: "one", "ok": "yes"})
         context_data = {COMPONENT_PROPS_CONTEXT_KEY: frozenset({"title"})}
 
-        _inject(mgr, info, context_data)
-
-        assert context_data[1] == "one"
-        assert context_data["ok"] == "yes"
+        assert render_with(mgr, info, context_data) == "yes"
 
     def test_slot_prefixed_key_raises(self, tmp_path: Path) -> None:
         """Any `slot_` prefixed key is reserved for slot content."""
@@ -176,7 +166,7 @@ class TestKeylessContextCollisions:
         context_data = {"slot_footer": "<footer/>"}
 
         with pytest.raises(ValueError, match="'slot_footer'"):
-            _inject(mgr, info, context_data)
+            render_with(mgr, info, context_data)
 
         assert context_data["slot_footer"] == "<footer/>"
 
@@ -188,7 +178,7 @@ class TestKeylessContextCollisions:
         )
 
         with pytest.raises(ValueError, match="returns 'children', 'slot_a',"):
-            _inject(mgr, info, {})
+            render_with(mgr, info, {})
 
 
 class TestKeylessContextMerges:
@@ -196,17 +186,19 @@ class TestKeylessContextMerges:
 
     def test_non_conflicting_keys_merge(self, tmp_path: Path) -> None:
         """A dict that sets no guarded key is merged into the context."""
-        mgr, info, module_path = build_composite_component(tmp_path)
+        mgr, info, module_path = build_composite_component(
+            tmp_path, template="{{ env }}"
+        )
         mgr._registry.register(module_path, None, lambda: {"env": "prod"})
         context_data = {COMPONENT_PROPS_CONTEXT_KEY: frozenset({"title"})}
 
-        _inject(mgr, info, context_data)
-
-        assert context_data["env"] == "prod"
+        assert render_with(mgr, info, context_data) == "prod"
 
     def test_inherited_page_key_is_shadowed(self, tmp_path: Path) -> None:
         """A page key that is not a prop of this call may be shadowed."""
-        mgr, info, module_path = build_composite_component(tmp_path)
+        mgr, info, module_path = build_composite_component(
+            tmp_path, template="{{ title }}|{{ variant }}"
+        )
         mgr._registry.register(module_path, None, lambda: {"title": "component wins"})
         context_data = {
             COMPONENT_PROPS_CONTEXT_KEY: frozenset({"variant"}),
@@ -214,10 +206,7 @@ class TestKeylessContextMerges:
             "variant": "wide",
         }
 
-        _inject(mgr, info, context_data)
-
-        assert context_data["title"] == "component wins"
-        assert context_data["variant"] == "wide"
+        assert render_with(mgr, info, context_data) == "component wins|wide"
 
     def test_same_key_merges_when_tag_passes_no_prop(self, tmp_path: Path) -> None:
         """The guard follows the call site, so a propless call still merges."""
@@ -225,13 +214,13 @@ class TestKeylessContextMerges:
         mgr._registry.register(module_path, None, lambda: {"title": "from context"})
         context_data = {COMPONENT_PROPS_CONTEXT_KEY: frozenset()}
 
-        _inject(mgr, info, context_data)
-
-        assert context_data["title"] == "from context"
+        assert render_with(mgr, info, context_data) == "<div>from context</div>"
 
     def test_reading_a_prop_and_returning_a_new_key_works(self, tmp_path: Path) -> None:
         """The supported way to build on a prop is a parameter named after it."""
-        mgr, info, module_path = build_composite_component(tmp_path)
+        mgr, info, module_path = build_composite_component(
+            tmp_path, template="{{ headline }}|{{ title }}"
+        )
 
         def headline(title: str) -> dict:
             return {"headline": title.upper()}
@@ -242,32 +231,28 @@ class TestKeylessContextMerges:
             "title": "hello",
         }
 
-        _inject(mgr, info, context_data)
-
-        assert context_data["headline"] == "HELLO"
-        assert context_data["title"] == "hello"
+        assert render_with(mgr, info, context_data) == "HELLO|hello"
 
     def test_a_keyless_return_that_is_no_dict_merges_nothing(
         self, tmp_path: Path
     ) -> None:
         """Only a mapping names keys, so anything else leaves the context alone."""
-        mgr, info, module_path = build_composite_component(tmp_path)
+        mgr, info, module_path = build_composite_component(
+            tmp_path, template="{{ env }}"
+        )
         mgr._registry.register(module_path, None, lambda: "not a mapping")
-        context_data: dict = {"env": "prod"}
 
-        _inject(mgr, info, context_data)
-
-        assert context_data == {"env": "prod"}
+        assert render_with(mgr, info, {"env": "prod"}) == "prod"
 
     def test_keyed_context_still_overwrites(self, tmp_path: Path) -> None:
         """A keyed registration names one key explicitly and is not guarded."""
-        mgr, info, module_path = build_composite_component(tmp_path)
+        mgr, info, module_path = build_composite_component(
+            tmp_path, template="{{ children }}"
+        )
         mgr._registry.register(module_path, "children", lambda: "keyed")
         context_data = {"children": "<i>body</i>"}
 
-        _inject(mgr, info, context_data)
-
-        assert context_data["children"] == "keyed"
+        assert render_with(mgr, info, context_data) == "keyed"
 
 
 class TestRenderComponentWithoutTag:
@@ -415,60 +400,16 @@ class TestCallerContextOwnership:
         assert html == "<b>Hi</b>"
         assert context_data == {"title": "Hi"}
 
-    def test_fallback_to_template_leaves_the_caller_dict_untouched(
-        self, tmp_path: Path
-    ) -> None:
-        """The unloadable-module fallback stamps the anchor on its own copy."""
+    def test_an_unloadable_module_renders_nothing(self, tmp_path: Path) -> None:
+        """Its access declarations are unknown, so the template stays out."""
         mgr, info, _module_path = build_composite_component(
-            tmp_path,
-            template="<div>{{ title }}|{{ current_component_module_path }}</div>",
+            tmp_path, template="<div>{{ title }}</div>"
         )
-        context_data = {"title": "Hi"}
 
         with (
             patch("next.components.renderers.component", mgr),
             patch.object(ModuleLoader, "load", return_value=None),
         ):
-            html = render_component(info, context_data)
+            html = render_component(info, {"title": "Hi"})
 
-        assert "Hi" in html
-        assert context_data == {"title": "Hi"}
-
-    def test_an_unloadable_module_keeps_its_registrations_out_of_the_render(
-        self, tmp_path: Path
-    ) -> None:
-        """A decorator may have registered before the import raised further down."""
-        mgr, info, module_path = build_composite_component(
-            tmp_path, template="<div>brand={{ brand }}</div>"
-        )
-
-        def brand() -> str:
-            raise NameError(name="BRAND")
-
-        mgr._registry.register(module_path, "brand", brand)
-
-        with (
-            patch("next.components.renderers.component", mgr),
-            patch.object(ModuleLoader, "load", return_value=None),
-        ):
-            html = render_component(info, {})
-
-        assert html == "<div>brand=</div>"
-
-    def test_an_unloadable_module_still_hands_over_the_request(
-        self, tmp_path: Path
-    ) -> None:
-        """A body reaching for the request must not go dark on a failed import."""
-        mgr, info, _module_path = build_composite_component(
-            tmp_path, template="<div>{{ request.path }}|{% csrf_token %}</div>"
-        )
-        request = RequestFactory().get("/board/")
-
-        with (
-            patch("next.components.renderers.component", mgr),
-            patch.object(ModuleLoader, "load", return_value=None),
-        ):
-            html = render_component(info, {}, request=request)
-
-        assert "/board/" in html
-        assert 'name="csrfmiddlewaretoken"' in html
+        assert html == ""

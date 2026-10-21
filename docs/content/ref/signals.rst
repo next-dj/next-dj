@@ -8,6 +8,7 @@ Module summary
 
 ``next.signals`` is an aggregator that re-exports every framework signal.
 Importing a signal from ``next.signals`` is equivalent to importing it from its subpackage.
+Receivers connect through Django's :func:`~django.dispatch.receiver`, and :ref:`topics-signals` shows how a receiver waits for the commit.
 
 Signal catalog
 --------------
@@ -103,9 +104,9 @@ Each family owns its own signal rather than sharing one, so a receiver connected
    * - ``form_access_denied``
      - ``FormActionDispatch``
      - ``action_name``, ``uid``, ``request``, ``layer``, ``reason``
-     - When the origin page or a dynamic permission hook denies a request, never on the static guard path.
-       ``layer`` is ``"page"``, ``"view"``, or ``"object"``.
-       ``reason`` is ``"raised"``, ``"denied"``, or ``"response"``, and a ``"page"`` denial is always ``"response"``.
+     - When the access rule of the page tree, the origin page, a dynamic permission hook, or a registered permission checked on the bound form denies a request, never on the static guard path.
+       ``layer`` is ``"page"``, ``"view"``, or ``"object"``, and a registered permission refused on the bound form is ``"object"`` with ``"denied"``.
+       ``reason`` is ``"raised"``, ``"denied"``, or ``"response"``, and a ``"page"`` denial is ``"denied"`` for a refused access rule and ``"response"`` for a ``render()`` that answered.
    * - ``form_backend_loaded``
      - The form action backend class
      - ``config``, ``instance``

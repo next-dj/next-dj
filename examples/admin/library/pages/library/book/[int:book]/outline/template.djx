@@ -1,0 +1,19 @@
+<div class="space-y-6">
+  {% #component "page_header" eyebrow="Outline" title=book.title description=book.author.full_name %}
+    {% #slot "actions" %}
+      {% component "button" href=change_url text="Edit book" variant="outline" %}
+    {% /slot %}
+  {% /component %}
+
+  {% zone "outline" %}
+    <div class="space-y-6">
+      {% component "chapter_table" chapters=outline.chapters words=outline.words %}
+
+      {% has_perm "library.change_book" book %}
+        {% component "button" href=manuscript_url text="Open the manuscript" %}
+      {% else %}
+        <p class="text-sm text-muted-foreground" data-outline-read-only>The book is not a draft of yours, so its outline is read-only.</p>
+      {% endhas_perm %}
+    </div>
+  {% endzone %}
+</div>

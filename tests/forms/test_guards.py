@@ -35,10 +35,11 @@ from next.forms.dispatch.permissions import (
     _check_access,
     _emit_form_access_denied,
     _normalize_permission,
-    _redirect_to_login,
+    guard_rule,
 )
 from next.forms.manager import form_action_manager
 from next.forms.signals import action_dispatched, form_access_denied
+from next.permissions.markers import AccessRule
 from tests.support import GuardedTenantForm, bound_dependency, build_post_request
 from tests.support.cases.forms import (
     PERMISSION_HOOK_BAD_TYPE,
@@ -46,6 +47,9 @@ from tests.support.cases.forms import (
     PERMISSION_OUTCOME_CASES,
     PermissionHookCase,
 )
+
+
+_LOGIN_NEXT = "/accounts/login/?next=/"
 
 
 User = get_user_model()
@@ -227,24 +231,8 @@ class TestGuardRegistration:
         assert meta.get("guard") == expected
 
 
-class TestRedirectToLogin:
-    """_redirect_to_login mirrors django.contrib.auth.views.redirect_to_login."""
-
-    def test_appends_next_to_login_url(self) -> None:
-        resp = _redirect_to_login("/boards/1/")
-        assert resp.status_code == 302
-        assert resp.url == "/accounts/login/?next=/boards/1/"
-
-    def test_preserves_existing_login_url_query(self, settings) -> None:
-        settings.LOGIN_URL = "/login/?theme=dark"
-        resp = _redirect_to_login("/x/")
-        assert "theme=dark" in resp.url
-        assert "next=/x/" in resp.url
-
-    @pytest.mark.usefixtures("cap_redirects")
-    def test_next_past_the_redirect_cap_is_dropped(self) -> None:
-        resp = _redirect_to_login("/search/?q=" + "\u044f" * 3000)
-        assert resp.url == "/accounts/login/"
+def _rule(guard: ActionGuard) -> AccessRule:
+    return guard_rule({"guard": guard, "file_path": "/x/forms.py"})
 
 
 class TestCheckAccess:
@@ -252,29 +240,29 @@ class TestCheckAccess:
 
     def test_request_without_user_redirects_to_login(self, rf) -> None:
         request = rf.post("/_next/form/x/", {"_next_form_origin": "/boards/2/"})
-        denial = _check_access(request, ActionGuard(login_required=True))
+        denial = _check_access(request, _rule(ActionGuard(login_required=True)))
         assert denial is not None
         assert denial.url == "/accounts/login/?next=/boards/2/"
 
     def test_anonymous_user_redirects_with_root_fallback(self, rf) -> None:
         request = rf.post("/_next/form/x/")
         request.user = AnonymousUser()
-        denial = _check_access(request, ActionGuard(login_required=True))
+        denial = _check_access(request, _rule(ActionGuard(login_required=True)))
         assert denial is not None
-        assert denial.url == "/accounts/login/?next=/"
+        assert denial.url == _LOGIN_NEXT
 
     def test_offsite_origin_falls_back_to_root(self, rf) -> None:
         request = rf.post(
             "/_next/form/x/", {"_next_form_origin": "https://evil.example/"}
         )
-        denial = _check_access(request, ActionGuard(login_required=True))
+        denial = _check_access(request, _rule(ActionGuard(login_required=True)))
         assert denial is not None
-        assert denial.url == "/accounts/login/?next=/"
+        assert denial.url == _LOGIN_NEXT
 
     def test_origin_past_the_url_length_cap_rides_along(self, rf) -> None:
         origin = "/items/?q=" + "x" * 3000
         request = rf.post("/_next/form/x/", {"_next_form_origin": origin})
-        denial = _check_access(request, ActionGuard(login_required=True))
+        denial = _check_access(request, _rule(ActionGuard(login_required=True)))
         assert denial is not None
         assert denial.url == "/accounts/login/?next=/items/%3Fq%3D" + "x" * 3000
 
@@ -282,20 +270,20 @@ class TestCheckAccess:
         request = rf.post("/_next/form/x/")
         request.user = _PermUser(allowed=False)
         with pytest.raises(PermissionDenied):
-            _check_access(request, ActionGuard(permissions=("auth.add_user",)))
+            _check_access(request, _rule(ActionGuard(permissions=("auth.add_user",))))
 
     def test_authenticated_with_permission_passes(self, rf) -> None:
         request = rf.post("/_next/form/x/")
         user = _PermUser(allowed=True)
         request.user = user
         guard = ActionGuard(permissions=("auth.add_user",))
-        assert _check_access(request, guard) is None
+        assert _check_access(request, _rule(guard)) is None
         assert user.checked == ("auth.add_user",)
 
     def test_login_only_guard_passes_authenticated_user(self) -> None:
         request = HttpRequest()
         request.user = _PermUser(allowed=False)
-        assert _check_access(request, ActionGuard(login_required=True)) is None
+        assert _check_access(request, _rule(ActionGuard(login_required=True))) is None
 
 
 @pytest.mark.django_db()
@@ -312,7 +300,7 @@ class TestGuardDispatchViaClient:
     def test_anonymous_post_redirects_to_login(self, client_no_csrf) -> None:
         resp = self._post(client_no_csrf, "guarded_login_form", {"name": "Ada"})
         assert resp.status_code == 302
-        assert resp.url == "/accounts/login/?next=/"
+        assert resp.url == _LOGIN_NEXT
 
     def test_authenticated_post_dispatches(self, client_no_csrf) -> None:
         client_no_csrf.force_login(User.objects.create_user("ada", password="pw"))
@@ -323,7 +311,7 @@ class TestGuardDispatchViaClient:
     def test_anonymous_permission_post_redirects_to_login(self, client_no_csrf) -> None:
         resp = self._post(client_no_csrf, "guarded_permission_form", {"name": "Ada"})
         assert resp.status_code == 302
-        assert resp.url == "/accounts/login/?next=/"
+        assert resp.url == _LOGIN_NEXT
 
     def test_authenticated_without_permission_gets_403(self, client_no_csrf) -> None:
         client_no_csrf.force_login(User.objects.create_user("bob", password="pw"))
@@ -341,7 +329,7 @@ class TestGuardDispatchViaClient:
     def test_inherited_guard_protects_subclass(self, client_no_csrf) -> None:
         resp = self._post(client_no_csrf, "inherited_guard_form", {"name": "Ada"})
         assert resp.status_code == 302
-        assert resp.url == "/accounts/login/?next=/"
+        assert resp.url == _LOGIN_NEXT
 
     def test_wizard_step_post_is_guarded(self, client_no_csrf) -> None:
         url = form_action_manager.get_action_url("guarded_wizard")
@@ -369,7 +357,7 @@ class TestGuardDispatchViaClient:
     def test_handler_action_is_guarded(self, client_no_csrf) -> None:
         resp = self._post(client_no_csrf, "guarded_handler_action")
         assert resp.status_code == 302
-        assert resp.url == "/accounts/login/?next=/"
+        assert resp.url == _LOGIN_NEXT
 
     def test_handler_action_runs_for_authenticated_user(self, client_no_csrf) -> None:
         client_no_csrf.force_login(User.objects.create_user("kim", password="pw"))
@@ -382,10 +370,20 @@ class TestGuardDispatchViaClient:
         assert client_no_csrf.get(url).status_code == 405
 
 
+_AUTH_CONFIG = "django.contrib.auth.apps.AuthConfig"
+
+
 class TestPermissionGuardCheck:
     """next.W060 warns on permission_required without django.contrib.auth."""
 
     def test_auth_installed_is_clean(self) -> None:
+        assert check_action_guard_permissions() == []
+
+    def test_auth_installed_by_its_app_config_is_clean(self, settings) -> None:
+        settings.INSTALLED_APPS = [
+            _AUTH_CONFIG if app == "django.contrib.auth" else app
+            for app in settings.INSTALLED_APPS
+        ]
         assert check_action_guard_permissions() == []
 
     def test_permission_without_auth_app_warns(self, settings) -> None:
@@ -638,11 +636,7 @@ class TestDetectionFlags:
         assert _Guarded._has_check_permissions is True
 
     def test_unguarded_subclass_of_guarded_inherits_the_hook(self) -> None:
-        """A concrete subclass of a guarded abstract base inherits the True flag.
-
-        The subclass does not re-declare the method, so __func__ identity still
-        resolves to the base override, keeping the flag True.
-        """
+        """A concrete subclass of a guarded abstract base inherits the True flag."""
 
         class _GuardedBase(Form):
             @classmethod
@@ -879,7 +873,7 @@ class TestStaticGuardPrecedesDynamicHook:
             backend, request, "ordering_action", meta
         )
         assert response.status_code == 302
-        assert response.url == "/accounts/login/?next=/"
+        assert response.url == _LOGIN_NEXT
         # The static guard short-circuited before the hook could run.
         assert _OrderingForm.check_calls == []
 

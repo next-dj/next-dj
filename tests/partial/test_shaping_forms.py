@@ -235,8 +235,7 @@ class TestSuccessFunnelMorphsAndDrainsMessages:
             partial=True,
             zones="rename-board",
         )
-        # the drained messages of the first request are read, so the second
-        # request flashes its own two and replays none of the first
+        # the first request's messages are drained, so the second flashes its own two
         assert len(envelope_of(second).toasts()) == 2
 
 

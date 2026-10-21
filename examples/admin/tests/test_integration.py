@@ -1,13 +1,21 @@
 import re
 import warnings
 from dataclasses import dataclass
+from io import StringIO
 
 import pytest
 from admin_audit.models import AdminActivityLog
+from django.contrib import admin
+from django.contrib.auth.models import Group, Permission
+from django.core.checks import run_checks
 from django.core.management import call_command
+from django.db import connection
 from django.db.models import UniqueConstraint
+from django.test.utils import CaptureQueriesContext
+from django.urls import reverse
 from library.demo import DEMO_BOOKS, seed_demo
 from library.models import Book, Chapter, Tag
+from shadcn_admin.forms import AdminFormSpec, AdminInlineSpec, InlineRights
 
 from next.testing import (
     NextClient,
@@ -18,16 +26,30 @@ from next.testing import (
     form_fields,
     hidden_fields,
 )
+from next.urls import page_reverse
 
 
 pytestmark = pytest.mark.django_db
 
 ELEMENT_ID_RE = re.compile(r'\sid="([^"]+)"')
+CRUMB_NAV_RE = re.compile(r'<nav aria-label="Breadcrumb"[^>]*>(.*?)</nav>', re.DOTALL)
+CRUMB_LINK_RE = re.compile(r'<a href="([^"]*)"( aria-current="page")?[^>]*>([^<]*)</a>')
 
 
 def action_form(client: NextClient, body: str, action_name: str) -> str:
     """Return the page form that posts `action_name`, found by its dispatch URL."""
     return find_form(body, action=client.get_action_url(action_name))
+
+
+def crumbs(html: str) -> list[tuple[str, str, bool]]:
+    """Return the breadcrumb links of the shell as `(label, href, current)`."""
+    nav = CRUMB_NAV_RE.search(html)
+    if nav is None:
+        return []
+    return [
+        (label, href, bool(current))
+        for href, current, label in CRUMB_LINK_RE.findall(nav.group(1))
+    ]
 
 
 def element_ids(html: str) -> list[str]:
@@ -53,8 +75,8 @@ class TestDashboard:
         for label in ("Library", "Books", "Authors", "Tags", "Chapters"):
             assert label in body
 
-    def test_two_layout_roots_produce_one_document(self, admin_client):
-        """`chrome/layout.djx` wraps `surfaces/layout.djx`, neither repeats."""
+    def test_the_project_layout_produces_one_document(self, admin_client):
+        """`chrome/layout.djx` is the only layout, so nothing in the shell repeats."""
         body = admin_client.get("/admin/").content.decode()
         assert body.count("<!DOCTYPE html>") == 1
         assert body.count("<body") == 1
@@ -201,6 +223,16 @@ class TestActionGuards:
         assert r.status_code == 403
         assert Tag.objects.filter(pk=tag.pk).exists()
 
+    def test_staff_without_model_rights_cannot_run_a_bulk_action(
+        self, editor_client, editor
+    ):
+        r = editor_client.post_action(
+            "admin:bulk_action",
+            {"action": "unknown", "_selected_action": [str(editor.pk)]},
+            origin="/admin/auth/user/",
+        )
+        assert r.status_code == 403
+
     def test_non_staff_bulk_action_post_is_forbidden(
         self, next_client, django_user_model, make_book
     ):
@@ -216,6 +248,434 @@ class TestActionGuards:
         assert book.status == Book.DRAFT
 
 
+PROTECTED_PATHS = (
+    "/admin/",
+    "/admin/library/book/",
+    "/admin/library/book/add/",
+    "/admin/activity/",
+    "/admin/library/book/{pk}/history/",
+    "/admin/library/book/{pk}/outline/",
+    "/admin/library/book/{pk}/manuscript/",
+)
+
+DASHBOARD_PANELS = "dashboard-panels"
+
+PERMISSION_CHECKS = frozenset(
+    [f"next.E{number}" for number in range(159, 165)]
+    + [f"next.W{number}" for number in range(127, 130)]
+)
+
+ACTIVITY_ACCESS = (
+    "login, perm shadcn_admin.use_admin, perm admin_audit.view_adminactivitylog"
+)
+
+LIBRARY_RULE = "library/pages/page.py"
+MANUSCRIPT_RULE = "library/pages/library/book/[int:book]/manuscript/page.py"
+MANUSCRIPT_ACCESS = (
+    "login, perm shadcn_admin.use_admin, perm library.change_book on library.Book"
+)
+
+
+def permission_rows(*args: str) -> dict[str, tuple[str, str, str]]:
+    """Return the rows `manage.py permissions` prints, keyed by URL or action name."""
+    out = StringIO()
+    call_command("permissions", *args, stdout=out)
+    _header, *lines = out.getvalue().splitlines()
+    rows = (re.split(r"\s{2,}", line.strip()) for line in lines)
+    return {
+        name.partition(" ")[0]: (kind, access, sources)
+        for kind, name, access, sources in rows
+    }
+
+
+def log_entry(object_repr: str) -> AdminActivityLog:
+    return AdminActivityLog.objects.create(
+        action="change",
+        app_label="library",
+        model_name="book",
+        object_repr=object_repr,
+        response_status=302,
+    )
+
+
+class TestTreeAccess:
+    """The `page.py` rules close each admin tree and the auth pages stay public."""
+
+    @pytest.mark.parametrize("path", PROTECTED_PATHS)
+    def test_an_anonymous_visit_redirects_to_the_login(self, next_client, book, path):
+        url = path.format(pk=book.pk)
+        r = next_client.get(url)
+        assert r.status_code == 302
+        assert r["Location"] == f"/admin/login/?next={url}"
+
+    @pytest.mark.parametrize("path", PROTECTED_PATHS)
+    def test_a_signed_in_non_staff_user_is_forbidden(
+        self, next_client, django_user_model, book, path
+    ):
+        next_client.force_login(django_user_model.objects.create_user("reader"))
+        assert next_client.get(path.format(pk=book.pk)).status_code == 403
+
+    @pytest.mark.parametrize("path", ["/admin/login/", "/admin/logout/"])
+    def test_the_auth_pages_answer_an_anonymous_visit(self, next_client, path):
+        assert next_client.get(path).status_code == 200
+
+    def test_an_anonymous_zone_request_redirects_to_the_login(self, next_client):
+        r = next_client.get_zones("/admin/", DASHBOARD_PANELS)
+        assert r.status_code == 302
+        assert r["Location"] == "/admin/login/?next=/admin/"
+
+    def test_an_anonymous_sign_out_post_redirects_to_the_login(self, next_client):
+        r = next_client.post_action("admin:logout", origin="/admin/")
+        assert r.status_code == 302
+        assert r["Location"] == "/admin/login/?next=/admin/"
+
+    def test_the_permission_table_names_each_rule_and_its_file(self):
+        rows = permission_rows()
+        assert rows["/admin/"] == (
+            "page",
+            "login, perm shadcn_admin.use_admin",
+            "shadcn_admin/pages/page.py",
+        )
+        assert rows["/admin/activity/"] == (
+            "page",
+            ACTIVITY_ACCESS,
+            "admin_audit/pages/page.py",
+        )
+        assert rows["/admin/login/"] == (
+            "page",
+            "public",
+            "public (shadcn_admin/pages/login/page.py)",
+        )
+        assert rows["admin:login"][1] == "public"
+        assert rows["admin:logout"][1:] == ("login (default)", "LOGIN_REQUIRED")
+
+    def test_the_permission_table_narrows_to_one_url(self):
+        rows = permission_rows("/admin/library/book/1/history/")
+        assert rows["/admin/<str:app_label>/<str:model_name>/<int:pk>/history/"] == (
+            "page",
+            "login, perm shadcn_admin.use_admin",
+            "shadcn_admin/pages/page.py",
+        )
+
+    def test_the_permission_table_names_the_book_rules_and_their_files(self):
+        outline = permission_rows("/admin/library/book/1/outline/")
+        assert outline["/admin/library/book/<int:book>/outline/"] == (
+            "page",
+            "login, perm shadcn_admin.use_admin",
+            LIBRARY_RULE,
+        )
+        manuscript = permission_rows("/admin/library/book/1/manuscript/")
+        rule = (MANUSCRIPT_ACCESS, f"{LIBRARY_RULE}, {MANUSCRIPT_RULE}")
+        assert manuscript["/admin/library/book/<int:book>/manuscript/"] == (
+            "page",
+            *rule,
+        )
+        assert manuscript["add_chapter_form"] == ("action", *rule)
+
+
+class TestDashboardPanels:
+    """`admin_audit` registers a dashboard panel that only readers of the log see."""
+
+    def test_the_superuser_sees_the_newest_entries(self, admin_client):
+        log_entry("Frankenstein")
+        body = admin_client.get("/admin/").content.decode()
+        assert f'data-next-zone="{DASHBOARD_PANELS}"' in body
+        assert "Recent activity" in body
+        assert "Frankenstein" in body
+        assert 'href="/admin/activity/"' in body
+
+    def test_the_zone_shows_an_empty_feed(self, admin_client):
+        r = admin_client.get_zones("/admin/", DASHBOARD_PANELS)
+        assert "No activity yet." in envelope_of(r).html_for_zone(DASHBOARD_PANELS)
+
+    def test_a_zone_render_carries_an_entry_logged_after_the_page(self, admin_client):
+        admin_client.get("/admin/")
+        log_entry("Dracula")
+        r = admin_client.get_zones("/admin/", DASHBOARD_PANELS)
+        assert r.status_code == 200
+        assert "Dracula" in envelope_of(r).html_for_zone(DASHBOARD_PANELS)
+
+    def test_the_editor_gets_no_panel(self, editor_client):
+        log_entry("Frankenstein")
+        body = editor_client.get("/admin/").content.decode()
+        assert "Recent activity" not in body
+        assert "Frankenstein" not in body
+
+    def test_a_zone_request_from_the_editor_carries_no_entry(self, editor_client):
+        log_entry("Frankenstein")
+        r = editor_client.get_zones("/admin/", DASHBOARD_PANELS)
+        assert r.status_code == 200
+        html = envelope_of(r).html_for_zone(DASHBOARD_PANELS)
+        assert "Recent activity" not in html
+        assert "Frankenstein" not in html
+
+    def test_the_feed_keeps_the_five_newest(self, admin_client):
+        for number in range(7):
+            log_entry(f"Entry {number}")
+        html = envelope_of(
+            admin_client.get_zones("/admin/", DASHBOARD_PANELS)
+        ).html_for_zone(DASHBOARD_PANELS)
+        assert html.count("<li") == 5
+
+
+OUTLINE = "outline"
+MANUSCRIPT = "manuscript"
+APPEND = "Append chapter"
+READ_ONLY = "data-outline-read-only"
+
+
+def outline_url(book: Book) -> str:
+    return f"/admin/library/book/{book.pk}/outline/"
+
+
+def manuscript_url(book: Book) -> str:
+    return f"/admin/library/book/{book.pk}/manuscript/"
+
+
+def append(client: NextClient, book: Book, title: str, **kwargs):
+    return client.post_action(
+        "add_chapter_form",
+        {"title": title, "word_count": "300"},
+        origin=manuscript_url(book),
+        **kwargs,
+    )
+
+
+def book_reads(client: NextClient, url: str) -> int:
+    with CaptureQueriesContext(connection) as queries:
+        assert client.get(url).status_code == 200
+    return sum('FROM "library_book"' in q["sql"] for q in queries.captured_queries)
+
+
+class TestBookOutline:
+    """Every admin reads the outline, and its zone decides who sees the manuscript."""
+
+    def test_the_editor_reads_the_outline_of_a_draft(
+        self, editor_client, make_book, make_chapter
+    ):
+        draft = make_book("Mathilda", status=Book.DRAFT)
+        make_chapter(draft, 1, "Intro", 100)
+        make_chapter(draft, 2, "Rising", 250)
+        r = editor_client.get(outline_url(draft))
+        assert r.status_code == 200
+        body = r.content.decode()
+        assert f'data-next-zone="{OUTLINE}"' in body
+        assert body.index("Intro") < body.index("Rising")
+        assert "data-total-words>350<" in body
+        assert APPEND not in body
+
+    def test_an_empty_draft_says_so(self, editor_client, make_book):
+        body = editor_client.get(outline_url(make_book(status=Book.DRAFT))).content
+        assert "No chapters yet." in body.decode()
+
+    def test_the_editor_reads_a_published_book_without_the_link(
+        self, editor_client, make_book
+    ):
+        published = make_book("Dracula", status=Book.PUBLISHED)
+        r = editor_client.get(outline_url(published))
+        assert r.status_code == 200
+        body = r.content.decode()
+        assert "Dracula" in body
+        assert manuscript_url(published) not in body
+        assert READ_ONLY in body
+
+    @pytest.mark.parametrize(
+        ("client_name", "status", "owner", "links"),
+        [
+            ("editor_client", Book.DRAFT, "editor", True),
+            ("editor_client", Book.DRAFT, None, True),
+            ("editor_client", Book.DRAFT, "copyeditor", False),
+            ("editor_client", Book.PUBLISHED, "editor", False),
+            ("admin_client", Book.PUBLISHED, "copyeditor", True),
+        ],
+    )
+    def test_a_zone_render_decides_who_sees_the_manuscript(
+        self, request, make_book, make_chapter, client_name, status, owner, links
+    ):
+        client = request.getfixturevalue(client_name)
+        editor = owner and request.getfixturevalue(owner)
+        target = make_book(status=status, editor=editor)
+        make_chapter(target, title="Opening")
+        r = client.get_zones(outline_url(target), OUTLINE)
+        assert r.status_code == 200
+        html = envelope_of(r).html_for_zone(OUTLINE)
+        assert "Opening" in html
+        assert (manuscript_url(target) in html) is links
+        assert (READ_ONLY in html) is not links
+
+    def test_an_anonymous_zone_request_redirects_to_the_login(self, next_client, book):
+        r = next_client.get_zones(outline_url(book), OUTLINE)
+        assert r.status_code == 302
+        assert r["Location"] == f"/admin/login/?next={outline_url(book)}"
+
+    def test_the_page_reads_the_book_once(self, editor_client, make_book):
+        assert book_reads(editor_client, outline_url(make_book())) == 1
+
+    def test_an_unknown_book_is_not_found(self, admin_client):
+        assert admin_client.get("/admin/library/book/999/outline/").status_code == 404
+
+    def test_the_crumbs_start_at_the_dashboard(self, admin_client, book):
+        body = admin_client.get(outline_url(book)).content.decode()
+        assert crumbs(body) == [
+            ("Dashboard", "/admin/", False),
+            ("Outline", outline_url(book), True),
+        ]
+
+    def test_the_page_is_titled_after_the_book(self, admin_client, make_book):
+        target = make_book("Ulysses")
+        assert_metadata(
+            admin_client.get(outline_url(target)), title="Ulysses · next.dj admin"
+        )
+
+    def test_the_outline_links_back_to_the_change_view(self, admin_client, book):
+        body = admin_client.get(outline_url(book)).content.decode()
+        assert f'href="/admin/library/book/{book.pk}/change/"' in body
+
+    @pytest.mark.parametrize(
+        ("client_name", "status"),
+        [
+            ("editor_client", Book.DRAFT),
+            ("editor_client", Book.PUBLISHED),
+            ("admin_client", Book.PUBLISHED),
+        ],
+    )
+    def test_the_change_view_links_the_outline(
+        self, request, make_book, client_name, status
+    ):
+        client = request.getfixturevalue(client_name)
+        target = make_book(status=status)
+        body = client.get(f"/admin/library/book/{target.pk}/change/").content.decode()
+        assert f'href="{outline_url(target)}"' in body
+
+    def test_a_model_without_object_links_offers_none(self, admin_client, make_tag):
+        tag = make_tag()
+        body = admin_client.get(f"/admin/library/tag/{tag.pk}/change/").content
+        assert "/outline/" not in body.decode()
+
+
+class TestManuscript:
+    """`manuscript/page.py` asks `change_book` on the book the URL names."""
+
+    def test_the_editor_works_an_own_draft(
+        self, editor_client, editor, make_book, make_chapter
+    ):
+        draft = make_book("Mathilda", status=Book.DRAFT, editor=editor)
+        make_chapter(draft, title="Opening")
+        r = editor_client.get(manuscript_url(draft))
+        assert r.status_code == 200
+        body = r.content.decode()
+        assert f'data-next-zone="{MANUSCRIPT}"' in body
+        assert "Opening" in body
+        assert APPEND in body
+
+    def test_an_unassigned_draft_opens_for_every_editor(self, editor_client, make_book):
+        draft = make_book(status=Book.DRAFT)
+        assert editor_client.get(manuscript_url(draft)).status_code == 200
+
+    @pytest.mark.parametrize(
+        ("status", "owner"),
+        [(Book.DRAFT, "copyeditor"), (Book.PUBLISHED, "editor")],
+        ids=["foreign-draft", "own-published"],
+    )
+    def test_the_editor_is_refused_on_every_path(
+        self, request, editor_client, make_book, make_chapter, status, owner
+    ):
+        target = make_book(status=status, editor=request.getfixturevalue(owner))
+        make_chapter(target, title="Secret")
+        url = manuscript_url(target)
+        page_response = editor_client.get(url)
+        assert page_response.status_code == 403
+        assert b"Secret" not in page_response.content
+        zone_response = editor_client.get_zones(url, MANUSCRIPT)
+        assert zone_response.status_code == 403
+        assert b"Secret" not in zone_response.content
+        assert append(editor_client, target, "Coda").status_code == 403
+        assert list(target.chapters.values_list("title", flat=True)) == ["Secret"]
+
+    def test_the_change_view_of_a_foreign_draft_is_read_only(
+        self, editor_client, copyeditor, make_book
+    ):
+        draft = make_book(status=Book.DRAFT, editor=copyeditor)
+        body = editor_client.get(f"/admin/library/book/{draft.pk}/change/").content
+        assert "data-read-only" in body.decode()
+
+    def test_a_zone_render_carries_the_form(self, editor_client, editor, make_book):
+        draft = make_book(status=Book.DRAFT, editor=editor)
+        r = editor_client.get_zones(manuscript_url(draft), MANUSCRIPT)
+        assert r.status_code == 200
+        assert APPEND in envelope_of(r).html_for_zone(MANUSCRIPT)
+
+    def test_the_editor_appends_a_chapter_to_an_own_draft(
+        self, editor_client, editor, make_book, make_chapter
+    ):
+        draft = make_book(status=Book.DRAFT, editor=editor)
+        make_chapter(draft, 1, "Intro", 100)
+        r = append(editor_client, draft, "Coda")
+        assert r.status_code == 303
+        assert r["Location"] == manuscript_url(draft)
+        added = draft.chapters.get(title="Coda")
+        assert (added.number, added.word_count) == (2, 300)
+
+    def test_a_partial_append_morphs_the_manuscript(self, editor_client, make_book):
+        draft = make_book(status=Book.DRAFT)
+        r = append(editor_client, draft, "Prologue", partial=True)
+        assert r.status_code == 200
+        assert envelope_of(r).zone_targets() == [MANUSCRIPT]
+        assert "Prologue" in envelope_of(r).html_for_zone(MANUSCRIPT)
+        assert draft.chapters.get().number == 1
+
+    def test_a_blank_title_rerenders_with_its_error(self, editor_client, make_book):
+        draft = make_book(status=Book.DRAFT)
+        r = append(editor_client, draft, "")
+        assert r.status_code == 200
+        assert "This field is required." in r.content.decode()
+        assert not draft.chapters.exists()
+
+    def test_a_partial_blank_title_reports_the_invalid_form(
+        self, editor_client, make_book
+    ):
+        draft = make_book(status=Book.DRAFT)
+        r = append(editor_client, draft, "", partial=True)
+        assert r["X-Next-Form"] == "invalid"
+        assert envelope_of(r).form_meta()["errors"]["title"] == [
+            "This field is required."
+        ]
+        assert not draft.chapters.exists()
+
+    def test_the_superuser_works_a_published_book(
+        self, admin_client, editor, make_book
+    ):
+        published = make_book("Dracula", status=Book.PUBLISHED, editor=editor)
+        assert APPEND in admin_client.get(manuscript_url(published)).content.decode()
+        assert append(admin_client, published, "Epilogue").status_code == 303
+        assert published.chapters.get().title == "Epilogue"
+
+    def test_an_anonymous_append_redirects_to_the_login(self, next_client, book):
+        r = append(next_client, book, "Coda")
+        assert r.status_code == 302
+        assert r["Location"].startswith("/admin/login/")
+        assert not book.chapters.exists()
+
+    def test_the_rule_and_the_page_read_the_book_once(self, editor_client, make_book):
+        draft = make_book(status=Book.DRAFT)
+        assert book_reads(editor_client, manuscript_url(draft)) == 1
+
+    def test_an_unknown_book_is_not_found(self, admin_client):
+        r = admin_client.get("/admin/library/book/999/manuscript/")
+        assert r.status_code == 404
+
+    def test_the_crumbs_end_at_the_manuscript(self, admin_client, book):
+        body = admin_client.get(manuscript_url(book)).content.decode()
+        assert crumbs(body) == [
+            ("Dashboard", "/admin/", False),
+            ("Manuscript", manuscript_url(book), True),
+        ]
+
+    def test_the_manuscript_links_back_to_the_outline(self, admin_client, book):
+        body = admin_client.get(manuscript_url(book)).content.decode()
+        assert f'href="{outline_url(book)}"' in body
+
+
 class TestDemoSeed:
     """The demo catalog loads from a seed module, never from a migration."""
 
@@ -227,6 +687,15 @@ class TestDemoSeed:
     def test_seeding_twice_keeps_one_copy(self, demo_data):
         seed_demo()
         assert Book.objects.count() == len(DEMO_BOOKS)
+
+    def test_the_books_split_between_two_editors(self, demo_data):
+        assert set(Book.objects.values_list("editor__username", flat=True)) == {
+            "editor",
+            "copyeditor",
+        }
+        assert Book.objects.get(title="Mathilda").editor.username == "editor"
+        mysterious = Book.objects.get(title="The Mysterious Island")
+        assert mysterious.editor.username == "copyeditor"
 
 
 class TestSeededCatalog:
@@ -368,19 +837,18 @@ class TestChangelistChrome:
         assert "ACTION CHECKBOX" not in body
         assert "action checkbox" not in body.lower()
 
-    def test_delete_selected_description_is_interpolated(self, admin_client):
-        """Django ships `delete_selected` with a `%(verbose_name_plural)s` slot."""
-        r = admin_client.get("/admin/library/tag/")
-        body = r.content.decode()
+    def test_action_descriptions_are_interpolated(self, admin_client):
+        """`mark_as_published` carries a `%(verbose_name_plural)s` slot."""
+        body = admin_client.get("/admin/library/book/").content.decode()
         assert "%(verbose_name_plural)s" not in body
-        assert "Delete selected tags" in body
+        assert "Mark selected books as published" in body
+
+    def test_the_site_offers_no_delete_selected(self, admin_client):
+        body = admin_client.get("/admin/library/tag/").content.decode()
+        assert 'value="delete_selected"' not in body
 
     def test_action_labels_come_from_a_version_stable_admin_api(self, admin_client):
-        """`get_actions` answers a tuple on Django 5.2 and an `Action` from 6.0.
-
-        `get_action_choices` reads the same registry on both without the deprecated
-        tuple unpacking, so the changelist render must raise no deprecation warning.
-        """
+        """The changelist render raises no deprecation warning on either Django."""
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
             warnings.simplefilter("error", PendingDeprecationWarning)
@@ -388,7 +856,6 @@ class TestChangelistChrome:
         assert r.status_code == 200
         body = r.content.decode()
         assert "Mark selected books as published" in body
-        assert "Delete selected books" in body
 
 
 class TestBulkAction:
@@ -524,11 +991,7 @@ class TestInlineFieldIds:
     def test_a_layered_editor_shares_no_id_with_the_page_behind_it(
         self, admin_client, book_with_one_chapter
     ):
-        """`admin:inline_add` opens the chapter editor over the book editor.
-
-        Both documents then live in one DOM, so a bare `id_%s` would repeat
-        `id_title` and every label inside the layer would address the book.
-        """
+        """The chapter editor layered over the book editor repeats no `id_title`."""
         book, _chapter = book_with_one_chapter
         page = admin_client.get(f"/admin/library/book/{book.pk}/change/")
         new_chapter = Chapter.objects.create(
@@ -654,11 +1117,7 @@ class TestInlines:
         assert '<select name="author"' in body
 
     def test_add_book_through_browser_flow(self, admin_client, author, make_tag):
-        """Walk the browser flow, copying every rendered input from the GET to the POST.
-
-        Catches a GET page missing a hidden field, or an unfilled `extra` row whose
-        initial values drag empty required fields into validation.
-        """
+        """Copy every rendered input from the GET to the POST like a browser."""
         tag = make_tag("Fantasy")
 
         get = admin_client.get("/admin/library/book/add/")
@@ -709,10 +1168,9 @@ _INLINE_ACTIONS = ("admin:inline_change", "admin:inline_add")
 
 @pytest.fixture()
 def chapter_unique_constraint(monkeypatch):
-    """Restate the chapter pair rule as the `UniqueConstraint` Django documents.
+    """Restate the chapter pair rule as a `UniqueConstraint`, checked separately.
 
-    `unique_together` and `Meta.constraints` run through two different `_post_clean`
-    checks, so the modern spelling needs its own proof that the parent key is in scope.
+    It runs through a different `_post_clean` check than `unique_together`.
     """
     monkeypatch.setattr(Chapter._meta, "unique_together", ())
     monkeypatch.setattr(
@@ -821,11 +1279,7 @@ class TestLiveInlines:
     def test_a_duplicate_number_comes_back_as_a_row_error(
         self, admin_client, book_with_two_chapters
     ):
-        """`Chapter.unique_together` is checked before the INSERT reaches SQLite.
-
-        The parent link is absent from a keyed row form, so without the exclusion
-        Django skips the pair check and errors with `IntegrityError`.
-        """
+        """`Chapter.unique_together` is checked before the INSERT reaches SQLite."""
         book, first, second = book_with_two_chapters
         r = admin_client.post_action(
             "admin:inline_change",
@@ -1074,11 +1528,7 @@ class TestLayerDismiss:
         assert "Discard" in html
 
     def test_only_a_change_view_renders_the_discard_form(self, admin_client, chapter):
-        """Discard dismisses an open editor, so the add view never offers it.
-
-        Whether the editor sits in a layer is a client-side fact, so the co-located CSS
-        hides the button. This test asserts only which pages carry the form.
-        """
+        """Discard dismisses an open editor, so the add view never offers it."""
         discard_url = admin_client.get_action_url("admin:discard")
         change = admin_client.get(
             f"/admin/library/chapter/{chapter.pk}/change/"
@@ -1124,11 +1574,7 @@ class TestHistoryView:
 
 
 class TestInlineValidationFailure:
-    """The add view's batch inline formset re-renders with errors on a bad row.
-
-    Filling `chapters-0-number` marks the row "intent to save", so the empty required
-    `chapters-0-title` flips the formset invalid and `AdminForm.clean()` re-renders it.
-    """
+    """The add view's batch inline formset re-renders with errors on a bad row."""
 
     def test_inline_invalid_rerenders_with_errors(self, admin_client, author):
         get = admin_client.get("/admin/library/book/add/")
@@ -1259,6 +1705,146 @@ class TestActivityLog:
         assert "library.tag" in body
 
 
+ROUTE_COLUMNS = ("url", "name", "file", "access")
+
+
+def route_rows() -> dict[str, dict[str, str]]:
+    """Return the rows `manage.py routes` prints, keyed by URL."""
+    out = StringIO()
+    call_command("routes", stdout=out)
+    _header, *lines = out.getvalue().splitlines()
+    rows = (
+        dict(zip(ROUTE_COLUMNS, line.split(maxsplit=3), strict=True)) for line in lines
+    )
+    return {row["url"]: row for row in rows}
+
+
+class TestAppPageTrees:
+    """Each app serves the pages of its own `pages/` tree under the one include."""
+
+    HISTORY_URL = "/admin/<str:app_label>/<str:model_name>/<int:pk>/history/"
+    HISTORY_NAME = "page_str_app_label_str_model_name_int_pk_history"
+
+    def test_the_history_page_receives_the_prefix_kwargs(self, admin_client, make_book):
+        book = make_book("Ulysses")
+        r = admin_client.get(f"/admin/library/book/{book.pk}/history/")
+        assert r.status_code == 200
+        assert r.resolver_match.kwargs == {
+            "app_label": "library",
+            "model_name": "book",
+            "pk": book.pk,
+        }
+        assert "Ulysses" in r.content.decode()
+
+    def test_the_activity_url_and_name_are_unchanged(self):
+        assert page_reverse("activity") == "/admin/activity/"
+        assert reverse("next:page_activity") == "/admin/activity/"
+
+    def test_the_history_url_and_name_are_unchanged(self):
+        kwargs = {"app_label": "library", "model_name": "tag", "pk": 7}
+        trail = "[str:app_label]/[str:model_name]/[int:pk]/history"
+        expected = "/admin/library/tag/7/history/"
+        assert page_reverse(trail, **kwargs) == expected
+        assert reverse(f"next:{self.HISTORY_NAME}", kwargs=kwargs) == expected
+
+    def test_the_route_map_names_the_file_of_each_page(self):
+        rows = route_rows()
+        assert rows["/admin/activity/"] == {
+            "url": "/admin/activity/",
+            "name": "next:page_activity",
+            "file": "admin_audit/pages/activity/page.py",
+            "access": ACTIVITY_ACCESS,
+        }
+        assert rows[self.HISTORY_URL] == {
+            "url": self.HISTORY_URL,
+            "name": f"next:{self.HISTORY_NAME}",
+            "file": (
+                "shadcn_admin/pages/[str:app_label]/[str:model_name]/[int:pk]/"
+                "history/page.py"
+            ),
+            "access": "login, perm shadcn_admin.use_admin",
+        }
+
+    def test_a_tree_rule_routes_no_page_of_its_own(self, admin_client):
+        rows = route_rows()
+        files = {row["file"] for row in rows.values()}
+        assert {"admin_audit/pages/page.py", "library/pages/page.py"}.isdisjoint(files)
+        assert rows["/admin/"]["file"] == "shadcn_admin/pages/page.py"
+        assert admin_client.get("/admin/").status_code == 200
+
+    def test_the_admin_tree_holds_the_auth_pages(self):
+        rows = route_rows()
+        admin_rows = [
+            row for row in rows.values() if row["file"].startswith("shadcn_admin/")
+        ]
+        assert len(admin_rows) == 8
+        assert rows["/admin/"]["name"] == "next:page_"
+        assert rows["/admin/login/"]["file"] == "shadcn_admin/pages/login/page.py"
+        assert rows["/admin/logout/"]["name"] == "next:page_logout"
+
+    @pytest.mark.parametrize(
+        "path", ["/admin/activity/", "/admin/library/book/{pk}/history/"]
+    )
+    def test_an_app_page_keeps_the_admin_shell(self, admin_client, book, path):
+        body = admin_client.get(path.format(pk=book.pk)).content.decode()
+        logout_url = admin_client.get_action_url("admin:logout")
+        assert body.count("<!DOCTYPE html>") == 1
+        assert body.count("<aside") == 1
+        assert body.count(f'action="{logout_url}"') == 1
+        assert body.count(">Library<") == 1
+
+    def test_the_auth_pages_keep_the_centered_chrome(self, next_client):
+        body = next_client.get("/admin/login/").content.decode()
+        assert "<aside" not in body
+        assert body.count("<main") == 1
+
+
+class TestBreadcrumbs:
+    """The shell renders the crumbs page metadata declares, tree by tree."""
+
+    def test_the_dashboard_is_its_own_crumb(self, admin_client):
+        body = admin_client.get("/admin/").content.decode()
+        assert crumbs(body) == [("Dashboard", "/admin/", True)]
+
+    def test_a_changelist_links_back_to_the_dashboard(self, admin_client):
+        body = admin_client.get("/admin/library/book/").content.decode()
+        assert crumbs(body) == [
+            ("Dashboard", "/admin/", False),
+            ("Books", "/admin/library/book/", True),
+        ]
+
+    def test_a_delete_page_reverses_its_ancestors_with_its_kwargs(
+        self, admin_client, book
+    ):
+        body = admin_client.get(f"/admin/library/book/{book.pk}/delete/").content
+        assert crumbs(body.decode()) == [
+            ("Dashboard", "/admin/", False),
+            ("Books", "/admin/library/book/", False),
+        ]
+
+    def test_the_history_crumb_reverses_with_the_prefix_kwargs(
+        self, admin_client, book
+    ):
+        url = f"/admin/library/book/{book.pk}/history/"
+        body = admin_client.get(url).content.decode()
+        assert crumbs(body) == [
+            ("Dashboard", "/admin/", False),
+            ("Books", "/admin/library/book/", False),
+            ("History", url, True),
+        ]
+
+    def test_the_activity_crumb_follows_the_dashboard(self, admin_client):
+        body = admin_client.get("/admin/activity/").content.decode()
+        assert crumbs(body) == [
+            ("Dashboard", "/admin/", False),
+            ("Activity", "/admin/activity/", True),
+        ]
+
+    def test_the_auth_chrome_renders_no_crumbs(self, next_client):
+        body = next_client.get("/admin/login/").content.decode()
+        assert crumbs(body) == []
+
+
 class TestFlashMessages:
     """`django.contrib.messages` round-trips through the flash_messages component."""
 
@@ -1341,3 +1927,516 @@ class TestPageMetadata:
     )
     def test_no_seo_route_is_mounted(self, admin_client, path):
         assert admin_client.get(path).status_code == 404
+
+
+def _book_payload(book: Book, **fields: str) -> dict[str, str]:
+    return {
+        "title": book.title,
+        "author": str(book.author.pk),
+        "status": book.status,
+        "summary": "",
+        "price": "0",
+        **fields,
+    }
+
+
+class StockChapterInline(admin.TabularInline):
+    model = Chapter
+
+
+class TestObjectPermissions:
+    """The editor changes and deletes draft books only, the superuser everything."""
+
+    def test_has_perm_asks_the_predicates_for_the_editor(self, editor, make_book):
+        draft = make_book(status=Book.DRAFT)
+        published = make_book(status=Book.PUBLISHED)
+        assert editor.has_perm("library.change_book", draft) is True
+        assert editor.has_perm("library.change_book", published) is False
+        assert editor.has_perm("library.change_book") is True
+        assert editor.has_perm("library.delete_book", published) is False
+        assert editor.has_perm("admin_audit.view_adminactivitylog") is False
+
+    def test_the_superuser_holds_every_row(self, admin_user, make_book):
+        published = make_book(status=Book.PUBLISHED)
+        assert admin_user.has_perm("library.change_book", published) is True
+        assert admin_user.has_perm("library.delete_book", published) is True
+
+    def test_the_editor_sees_the_library_and_nothing_else(self, editor_client):
+        body = editor_client.get("/admin/").content.decode()
+        assert "Books" in body
+        assert "Admin activity" not in body
+        assert "Users" not in body
+
+    def test_a_draft_offers_save_and_delete_to_the_editor(
+        self, editor_client, make_book
+    ):
+        draft = make_book(status=Book.DRAFT)
+        body = editor_client.get(f"/admin/library/book/{draft.pk}/change/")
+        html = body.content.decode()
+        assert 'name="_save_continue"' in html
+        assert f"/admin/library/book/{draft.pk}/delete/" in html
+        assert "data-read-only" not in html
+
+    def test_a_published_book_is_read_only_for_the_editor(
+        self, editor_client, make_book
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        html = editor_client.get(
+            f"/admin/library/book/{published.pk}/change/"
+        ).content.decode()
+        assert "data-read-only" in html
+        assert 'name="_save_continue"' not in html
+        assert f"/admin/library/book/{published.pk}/delete/" not in html
+
+    def test_a_published_book_keeps_its_buttons_for_the_superuser(
+        self, admin_client, make_book
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        html = admin_client.get(
+            f"/admin/library/book/{published.pk}/change/"
+        ).content.decode()
+        assert 'name="_save_continue"' in html
+        assert "data-read-only" not in html
+
+    def test_the_editor_saves_a_draft(self, editor_client, make_book):
+        draft = make_book("Draft", status=Book.DRAFT)
+        r = editor_client.post_action(
+            "admin:change",
+            _book_payload(draft, title="Revised"),
+            origin=f"/admin/library/book/{draft.pk}/change/",
+        )
+        assert r.status_code == 302
+        draft.refresh_from_db()
+        assert draft.title == "Revised"
+
+    def test_the_editor_cannot_save_a_published_book(self, editor_client, make_book):
+        published = make_book("Locked", status=Book.PUBLISHED)
+        r = editor_client.post_action(
+            "admin:change",
+            _book_payload(published, title="Hacked"),
+            origin=f"/admin/library/book/{published.pk}/change/",
+        )
+        assert r.status_code == 403
+        published.refresh_from_db()
+        assert published.title == "Locked"
+
+    def test_demoting_a_published_book_to_draft_is_refused(
+        self, editor_client, make_book
+    ):
+        published = make_book("Locked", status=Book.PUBLISHED)
+        r = editor_client.post_action(
+            "admin:change",
+            _book_payload(published, title="Hacked", status=Book.DRAFT),
+            origin=f"/admin/library/book/{published.pk}/change/",
+        )
+        assert r.status_code == 403
+        published.refresh_from_db()
+        assert (published.title, published.status) == ("Locked", Book.PUBLISHED)
+
+    def test_an_invalid_demotion_is_refused_too(self, editor_client, make_book):
+        published = make_book("Locked", status=Book.PUBLISHED)
+        r = editor_client.post_action(
+            "admin:change",
+            _book_payload(published, title="", status=Book.DRAFT),
+            origin=f"/admin/library/book/{published.pk}/change/",
+        )
+        assert r.status_code == 403
+
+    def test_publishing_a_draft_shows_the_refusal(self, editor_client, make_book):
+        draft = make_book("Draft", status=Book.DRAFT)
+        r = editor_client.post_action(
+            "admin:change",
+            _book_payload(draft, status=Book.PUBLISHED),
+            origin=f"/admin/library/book/{draft.pk}/change/",
+        )
+        assert "You may not save this book in this state." in r.content.decode()
+
+    def test_the_editor_may_not_publish_a_draft(self, editor_client, make_book):
+        draft = make_book("Draft", status=Book.DRAFT)
+        r = editor_client.post_action(
+            "admin:change",
+            _book_payload(draft, status=Book.PUBLISHED),
+            origin=f"/admin/library/book/{draft.pk}/change/",
+        )
+        assert r.status_code == 200
+        draft.refresh_from_db()
+        assert draft.status == Book.DRAFT
+
+    def test_the_editor_may_not_add_a_published_book(self, editor_client, author):
+        r = editor_client.post_action(
+            "admin:add",
+            {
+                "title": "Born published",
+                "author": str(author.pk),
+                "status": Book.PUBLISHED,
+                "summary": "",
+                "price": "0",
+            },
+            origin="/admin/library/book/add/",
+        )
+        assert r.status_code == 200
+        assert not Book.objects.filter(title="Born published").exists()
+
+    def test_the_superuser_publishes_a_draft(self, admin_client, make_book):
+        draft = make_book("Draft", status=Book.DRAFT)
+        r = admin_client.post_action(
+            "admin:change",
+            _book_payload(draft, status=Book.PUBLISHED),
+            origin=f"/admin/library/book/{draft.pk}/change/",
+        )
+        assert r.status_code == 302
+        draft.refresh_from_db()
+        assert draft.status == Book.PUBLISHED
+
+    def test_the_superuser_saves_a_published_book(self, admin_client, make_book):
+        published = make_book("Locked", status=Book.PUBLISHED)
+        r = admin_client.post_action(
+            "admin:change",
+            _book_payload(published, title="Revised"),
+            origin=f"/admin/library/book/{published.pk}/change/",
+        )
+        assert r.status_code == 302
+        published.refresh_from_db()
+        assert published.title == "Revised"
+
+    def test_the_editor_cannot_delete_a_published_book(self, editor_client, make_book):
+        published = make_book(status=Book.PUBLISHED)
+        r = editor_client.post_action(
+            "admin:delete", origin=f"/admin/library/book/{published.pk}/delete/"
+        )
+        assert r.status_code == 403
+        assert Book.objects.filter(pk=published.pk).exists()
+
+    def test_the_editor_deletes_a_draft(self, editor_client, make_book):
+        draft = make_book(status=Book.DRAFT)
+        r = editor_client.post_action(
+            "admin:delete", origin=f"/admin/library/book/{draft.pk}/delete/"
+        )
+        assert r.status_code == 302
+        assert not Book.objects.filter(pk=draft.pk).exists()
+
+    def test_chapters_of_a_published_book_are_locked_for_the_editor(
+        self, editor_client, make_book, make_chapter
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        chapter = make_chapter(published)
+        r = editor_client.post_action(
+            "admin:inline_change",
+            {
+                "_inline": "chapter",
+                "_inline_pk": str(chapter.pk),
+                "number": "1",
+                "title": "Hacked",
+                "word_count": "1",
+            },
+            origin=f"/admin/library/book/{published.pk}/change/",
+        )
+        assert r.status_code == 403
+        chapter.refresh_from_db()
+        assert chapter.title == "Intro"
+
+    def test_the_editor_cannot_add_a_chapter_to_a_published_book(
+        self, editor_client, make_book
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        r = editor_client.post_action(
+            "admin:inline_add",
+            {"_inline": "chapter", "number": "9", "title": "New", "word_count": "1"},
+            origin=f"/admin/library/book/{published.pk}/change/",
+        )
+        assert r.status_code == 403
+        assert not published.chapters.exists()
+
+    def test_a_standalone_chapter_of_a_published_book_is_locked(
+        self, editor_client, make_book, make_chapter
+    ):
+        chapter = make_chapter(make_book(status=Book.PUBLISHED))
+        r = editor_client.post_action(
+            "admin:delete", origin=f"/admin/library/chapter/{chapter.pk}/delete/"
+        )
+        assert r.status_code == 403
+
+    def test_bulk_publish_skips_the_rows_the_editor_may_not_change(
+        self, editor_client, author, make_book
+    ):
+        draft = make_book("Draft", author=author, status=Book.DRAFT)
+        archived = make_book("Archived", author=author, status=Book.ARCHIVED)
+        editor_client.post_action(
+            "admin:bulk_action",
+            {
+                "action": "mark_as_published",
+                "_selected_action": [str(draft.pk), str(archived.pk)],
+            },
+            origin="/admin/library/book/",
+        )
+        draft.refresh_from_db()
+        archived.refresh_from_db()
+        assert draft.status == Book.DRAFT
+        assert archived.status == Book.ARCHIVED
+
+    @pytest.mark.parametrize("account", ["editor", "superuser"])
+    def test_a_forged_delete_selected_deletes_nothing(
+        self, account, editor_client, admin_client, make_book
+    ):
+        client = editor_client if account == "editor" else admin_client
+        book = make_book(status=Book.DRAFT)
+        client.post_action(
+            "admin:bulk_action",
+            {
+                "action": "delete_selected",
+                "post": "yes",
+                "_selected_action": [str(book.pk)],
+            },
+            origin="/admin/library/book/",
+        )
+        assert Book.objects.filter(pk=book.pk).exists()
+
+    def test_the_superuser_bulk_publishes_any_book(
+        self, admin_client, author, make_book
+    ):
+        archived = make_book("Archived", author=author, status=Book.ARCHIVED)
+        admin_client.post_action(
+            "admin:bulk_action",
+            {"action": "mark_as_published", "_selected_action": [str(archived.pk)]},
+            origin="/admin/library/book/",
+        )
+        archived.refresh_from_db()
+        assert archived.status == Book.PUBLISHED
+
+    def test_deleting_an_author_never_cascades_past_the_editor(
+        self, editor_client, make_book
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        author_pk = published.author_id
+        page = editor_client.get(f"/admin/library/author/{author_pk}/delete/")
+        assert page.status_code == 200
+        assert "books" in page.content.decode().lower()
+        r = editor_client.post_action(
+            "admin:delete", origin=f"/admin/library/author/{author_pk}/delete/"
+        )
+        assert r.status_code == 403
+        assert Book.objects.filter(pk=published.pk).exists()
+
+    def test_the_editor_deletes_an_author_of_drafts_only(
+        self, editor_client, make_book
+    ):
+        draft = make_book(status=Book.DRAFT)
+        r = editor_client.post_action(
+            "admin:delete", origin=f"/admin/library/author/{draft.author_id}/delete/"
+        )
+        assert r.status_code == 302
+        assert not Book.objects.filter(pk=draft.pk).exists()
+
+    def test_the_superuser_deletes_an_author_and_their_books(
+        self, admin_client, make_book
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        r = admin_client.post_action(
+            "admin:delete",
+            origin=f"/admin/library/author/{published.author_id}/delete/",
+        )
+        assert r.status_code == 302
+        assert not Book.objects.filter(pk=published.pk).exists()
+
+    def test_a_chapter_add_offers_and_accepts_drafts_only(
+        self, editor_client, make_book
+    ):
+        draft = make_book("Open draft", status=Book.DRAFT)
+        published = make_book("Closed book", status=Book.PUBLISHED)
+        html = editor_client.get("/admin/library/chapter/add/").content.decode()
+        assert "Open draft" in html
+        assert "Closed book" not in html
+        r = editor_client.post_action(
+            "admin:add",
+            {
+                "book": str(published.pk),
+                "number": "9",
+                "title": "In",
+                "word_count": "1",
+            },
+            origin="/admin/library/chapter/add/",
+        )
+        assert r.status_code == 200
+        assert not Chapter.objects.filter(book=published).exists()
+        r = editor_client.post_action(
+            "admin:add",
+            {"book": str(draft.pk), "number": "9", "title": "In", "word_count": "1"},
+            origin="/admin/library/chapter/add/",
+        )
+        assert r.status_code == 302
+        assert Chapter.objects.filter(book=draft).exists()
+
+    def test_a_chapter_cannot_move_into_a_published_book(
+        self, editor_client, make_book, make_chapter
+    ):
+        chapter = make_chapter(make_book(status=Book.DRAFT))
+        published = make_book(status=Book.PUBLISHED)
+        editor_client.post_action(
+            "admin:change",
+            {"book": str(published.pk), "number": "7", "title": "M", "word_count": "1"},
+            origin=f"/admin/library/chapter/{chapter.pk}/change/",
+        )
+        chapter.refresh_from_db()
+        assert chapter.book.status == Book.DRAFT
+
+    def test_the_superuser_adds_a_chapter_to_a_published_book(
+        self, admin_client, make_book
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        r = admin_client.post_action(
+            "admin:add",
+            {
+                "book": str(published.pk),
+                "number": "9",
+                "title": "In",
+                "word_count": "1",
+            },
+            origin="/admin/library/chapter/add/",
+        )
+        assert r.status_code == 302
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/admin/auth/user/",
+            "/admin/auth/user/{pk}/change/",
+            "/admin/auth/user/{pk}/history/",
+            "/admin/auth/user/{pk}/delete/",
+            "/admin/auth/user/add/",
+            "/admin/auth/group/",
+        ],
+    )
+    def test_the_editor_reads_nothing_outside_the_library(
+        self, path, editor_client, admin_client, admin_user
+    ):
+        url = path.format(pk=admin_user.pk)
+        assert editor_client.get(url).status_code == 403
+        assert admin_client.get(url).status_code == 200
+
+    def test_a_tag_on_a_published_book_stays_for_the_editor(
+        self, editor_client, make_book, make_tag
+    ):
+        tag = make_tag("Classic")
+        make_book(status=Book.PUBLISHED).tags.add(tag)
+        r = editor_client.post_action(
+            "admin:delete", origin=f"/admin/library/tag/{tag.pk}/delete/"
+        )
+        assert r.status_code == 403
+        assert Tag.objects.filter(pk=tag.pk).exists()
+
+    def test_a_tag_on_drafts_only_is_the_editors_to_delete(
+        self, editor_client, make_book, make_tag
+    ):
+        tag = make_tag("Working title")
+        make_book(status=Book.DRAFT).tags.add(tag)
+        r = editor_client.post_action(
+            "admin:delete", origin=f"/admin/library/tag/{tag.pk}/delete/"
+        )
+        assert r.status_code == 302
+        assert not Tag.objects.filter(pk=tag.pk).exists()
+
+    def test_the_sidebar_offers_the_activity_feed_to_its_readers(
+        self, editor_client, admin_client
+    ):
+        assert "Activity feed" not in editor_client.get("/admin/").content.decode()
+        assert "Activity feed" in admin_client.get("/admin/").content.decode()
+
+    def test_the_activity_feed_refuses_the_editor(self, editor_client, admin_client):
+        assert editor_client.get("/admin/activity/").status_code == 403
+        assert admin_client.get("/admin/activity/").status_code == 200
+
+    def test_group_rights_on_a_plain_model_keep_save_and_delete(
+        self, django_user_model
+    ):
+        role = Group.objects.create(name="Group managers")
+        role.permissions.set(
+            Permission.objects.filter(
+                content_type__app_label="auth",
+                codename__in=["view_group", "change_group", "delete_group"],
+            )
+        )
+        manager = django_user_model.objects.create_user("manager", is_staff=True)
+        manager.groups.add(role)
+        target = Group.objects.create(name="Reviewers")
+        client = NextClient()
+        client.force_login(manager)
+
+        html = client.get(f"/admin/auth/group/{target.pk}/change/").content.decode()
+        assert 'name="_save_continue"' in html
+        assert f"/admin/auth/group/{target.pk}/delete/" in html
+        assert "data-read-only" not in html
+
+        r = client.post_action(
+            "admin:change",
+            {"name": "Senior reviewers"},
+            origin=f"/admin/auth/group/{target.pk}/change/",
+        )
+        assert r.status_code == 302
+        target.refresh_from_db()
+        assert target.name == "Senior reviewers"
+
+    def test_a_plain_model_without_the_right_reads_only(self, django_user_model):
+        role = Group.objects.create(name="Group readers")
+        role.permissions.set(
+            Permission.objects.filter(
+                content_type__app_label="auth", codename="view_group"
+            )
+        )
+        reader = django_user_model.objects.create_user("reader", is_staff=True)
+        reader.groups.add(role)
+        client = NextClient()
+        client.force_login(reader)
+        html = client.get(f"/admin/auth/group/{role.pk}/change/").content.decode()
+        assert "data-read-only" in html
+        assert f"/admin/auth/group/{role.pk}/delete/" not in html
+
+    def test_the_editor_sees_the_chapters_of_a_published_book_read_only(
+        self, editor_client, make_book, make_chapter
+    ):
+        published = make_book(status=Book.PUBLISHED)
+        chapter = make_chapter(published)
+        html = editor_client.get(
+            f"/admin/library/book/{published.pk}/change/"
+        ).content.decode()
+        assert f'data-inline-read-only="{chapter.pk}"' in html
+        assert f'data-next-key="{chapter.pk}"' not in html
+        assert 'data-next-key="chapter"' not in html
+        assert "Add chapter" not in html
+
+    @pytest.mark.parametrize(
+        ("account", "status"),
+        [("editor", Book.DRAFT), ("superuser", Book.PUBLISHED)],
+        ids=["editor-draft", "superuser-published"],
+    )
+    def test_inline_rows_stay_editable_where_the_right_holds(
+        self, account, status, editor_client, admin_client, make_book, make_chapter
+    ):
+        client = editor_client if account == "editor" else admin_client
+        book = make_book(status=status)
+        chapter = make_chapter(book)
+        html = client.get(f"/admin/library/book/{book.pk}/change/").content.decode()
+        assert f'data-next-key="{chapter.pk}"' in html
+        assert 'data-next-key="chapter"' in html
+        assert "data-inline-read-only" not in html
+
+    def test_a_stock_inline_asks_the_model_level_rights(self, rf, admin_user, book):
+        request = rf.get("/")
+        request.user = admin_user
+        spec = AdminFormSpec.resolve(request, "library", "book", book.pk)
+        rights = AdminInlineSpec(spec, StockChapterInline(Book, admin.site)).rights
+        assert rights == InlineRights(
+            "library.change_chapter", "library.add_chapter", book, row_rules=False
+        )
+
+    def test_seed_demo_creates_the_editors_once(self, db, django_user_model):
+        call_command("seed_demo", stdout=StringIO())
+        call_command("seed_demo", stdout=StringIO())
+        for name in ("editor", "copyeditor"):
+            editor = django_user_model.objects.get(username=name)
+            assert editor.is_staff is True
+            assert editor.is_superuser is False
+            assert editor.check_password(name) is True
+
+    def test_the_permission_checks_find_nothing(self, db):
+        found = {message.id for message in run_checks()}
+        assert found.isdisjoint(PERMISSION_CHECKS)

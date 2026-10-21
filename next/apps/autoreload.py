@@ -31,8 +31,7 @@ _state = _PatchState()
 def install() -> None:
     """Swap `StatReloader` for `NextStatReloader` and wire watch specs.
 
-    Safe to call more than once: subsequent calls are no-ops once the current
-    `autoreload.StatReloader` is already our subclass or one of its descendants.
+    Repeat calls are no-ops once the current reloader is already our subclass.
     """
     current = autoreload.StatReloader
     if issubclass(current, NextStatReloader):

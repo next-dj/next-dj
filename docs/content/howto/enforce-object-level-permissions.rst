@@ -8,76 +8,109 @@ Problem
 
 A ``ModelForm`` edits a row loaded from the URL.
 Any visitor who can reach the action can submit another user's identifier and edit a row they do not own.
-A static ``permission_required`` cannot express "the current user owns this row", because the decision depends on the loaded instance.
+A model permission such as ``notes.change_note`` cannot express "the current user owns this row", because the decision depends on the loaded instance.
 
 Solution
 --------
 
-Override ``has_object_permission`` on the ``ModelForm``.
-The framework binds the form before the hook runs, so ``self.instance`` is the loaded target.
-Return ``True`` when the request owns the row, ``False`` otherwise.
-A ``False`` return denies with HTTP 403 and the row is never saved.
+Declare the rule once as a predicate in ``permissions.py`` and register it under a permission name.
+Name that permission in ``Meta.permission_required``, and the dispatcher checks it against the bound row with ``user.has_perm(perm, form.instance)``.
+The ``{% has_perm %}`` tag asks the same question in the template, so the page hides the edit link from exactly the users the form refuses.
+A ``False`` answer denies the submission with HTTP 403 and the row is never saved.
 
 Walkthrough
 -----------
 
-Load the row from the URL
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Declare the predicate
+~~~~~~~~~~~~~~~~~~~~~
 
-The edit form loads its instance from a captured URL segment through ``Meta.instance_from_url``.
-The route segment ``[slug]`` captures the lookup value.
+The ``permissions.py`` of the application registers the permission.
+The ``next`` application imports it at startup, so it needs no import of its own.
 
 .. code-block:: python
-   :caption: notes/pages/notes/edit/[slug]/page.py
+   :caption: notes/permissions.py
 
-   from django.http import HttpRequest
+   from next.permissions import add_perm
+
+   def is_owner(user, note):
+       return note is not None and note.owner_id == user.pk
+
+   add_perm("notes.edit_note", is_owner)
+
+``edit_note`` is a codename no model defines, so the predicate alone answers it.
+``note`` is ``None`` on the model-level question, and ``is_owner`` refuses it, since no row has an owner yet.
+A predicate that never looks at the row takes the user alone, ``def is_editor(user)``, and one that looks at neither takes no parameter, ``def notes_open()``.
+See :ref:`topics-permissions` for a predicate that combines several conditions with ``and`` and ``or``.
+
+List the backend
+~~~~~~~~~~~~~~~~
+
+``ObjectPermissionBackend`` answers ``user.has_perm()`` from the registered predicates, next to the ``ModelBackend`` that logs users in.
+
+.. code-block:: python
+   :caption: settings.py
+
+   AUTHENTICATION_BACKENDS = [
+       "django.contrib.auth.backends.ModelBackend",
+       "next.permissions.ObjectPermissionBackend",
+   ]
+
+A project that registers a permission without the backend fails ``manage.py check`` with ``next.E160``.
+With two backends listed, a view that logs in a user :func:`~django.contrib.auth.authenticate` did not return, such as a fresh signup, passes ``backend="django.contrib.auth.backends.ModelBackend"`` to :func:`~django.contrib.auth.login`, which raises ``ValueError`` without it.
+
+Guard the form
+~~~~~~~~~~~~~~
+
+In this project ``visible_to(scope)`` returns the notes a user may read, their own and every note marked ``shared``, and the permission decides which of those they may edit.
+The edit form loads its row through ``DObject`` in ``get_form_kwargs`` and names the permission in ``Meta.permission_required``.
+
+.. code-block:: python
+   :caption: notes/pages/notes/[int:note]/edit/page.py
+
+   from typing import Any
+
    from notes.models import Note
 
    import next.forms
+   from next.deps import DObject
 
    class NoteEditForm(next.forms.ModelForm):
        class Meta:
            model = Note
            fields = ["title", "body"]
-           instance_from_url = "slug"
+           permission_required = "notes.edit_note"
 
-       def has_object_permission(self, request: HttpRequest) -> bool:
-           return self.instance.owner_id == request.user.id
+       @classmethod
+       def get_form_kwargs(cls, note: DObject[Note]) -> dict[str, Any]:
+           return {"instance": note}
 
-The default ``get_initial`` loads ``Note.objects.get(slug=<captured slug>)`` through :func:`~django.shortcuts.get_object_or_404`.
-The dispatcher binds the form against that instance, then resolves ``has_object_permission``.
-At that point ``self.instance`` is the loaded ``Note``, so the hook compares its owner against the current user.
+``permission_required`` implies a login, so an anonymous POST is redirected to ``LOGIN_URL`` before any application code runs.
+``DObject`` reads the row through ``visible_to(scope)``, so a row the user cannot read answers 404 before any permission runs, see :ref:`topics-di-dobject`.
+The dispatcher binds the form against the loaded row and then asks ``user.has_perm("notes.edit_note", form.instance)``, before ``is_valid`` and the handler.
 
-Combine it with a login requirement
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. warning::
 
-The object-level hook compares ``request.user``, so the request needs an authenticated user.
-Pair the hook with the static ``Meta.login_required`` so an anonymous POST is redirected to the login page before the hook runs.
+   ``Meta.instance_from_url`` reads through ``visible_to(scope)`` too in this project, which defines ``visible_to`` and registers ``scope``, while a model without ``visible_to`` loads through an unscoped :func:`~django.shortcuts.get_object_or_404`.
+   The registered permission is checked only after that row has loaded, so an unscoped lookup gives a refused user 403 for an id that exists and 404 for one that does not, which lets them probe which ids exist.
+   Keep the lookup scoped through ``DObject`` or a ``visible_to`` manager, so a row outside the scope answers 404 exactly like a missing one, see :doc:`/content/topics/forms/modelforms`.
 
-.. code-block:: python
-   :caption: notes/pages/notes/edit/[slug]/page.py
+Render the link and the form
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   class NoteEditForm(next.forms.ModelForm):
-       class Meta:
-           model = Note
-           fields = ["title", "body"]
-           instance_from_url = "slug"
-           login_required = True
-
-       def has_object_permission(self, request: HttpRequest) -> bool:
-           return self.instance.owner_id == request.user.id
-
-The static guard runs first and pre-database.
-An anonymous visitor is redirected before any application code runs, and the object-level hook only ever sees an authenticated user.
-
-Render the form
-~~~~~~~~~~~~~~~
-
-The template renders the form by name.
-A ``GET`` still renders the page, because the hook guards the mutation, not the markup.
+The note page, whose context carries ``note``, shows the edit link only to a user who may follow it.
 
 .. code-block:: jinja
-   :caption: notes/pages/notes/edit/[slug]/template.djx
+   :caption: notes/pages/notes/[int:note]/template.djx
+
+   {% has_perm "notes.edit_note" note %}
+     <a href="/notes/{{ note.pk }}/edit/">Edit</a>
+   {% endhas_perm %}
+
+The edit page renders the form by name.
+A ``GET`` still renders it, because the ``Meta`` guard protects the mutation, not the markup.
+
+.. code-block:: jinja
+   :caption: notes/pages/notes/[int:note]/edit/template.djx
 
    {% form "note_edit_form" %}
      {{ form.title }}
@@ -85,10 +118,66 @@ A ``GET`` still renders the page, because the hook guards the mutation, not the 
      <button type="submit">Save</button>
    {% endform %}
 
+Close the edit page itself
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The page can declare the same permission on the row it loads, so the ``GET`` of the edit page and every action declared beside it answer to it as well.
+Add the declaration at the top of the same ``page.py``, above ``NoteEditForm``.
+
+.. code-block:: python
+   :caption: notes/pages/notes/[int:note]/edit/page.py
+
+   from notes.models import Note
+
+   from next import context, page
+   from next.deps import DObject
+
+   page.permission_required("notes.edit_note", obj=DObject[Note])
+
+   @context("note")
+   def note(note: DObject[Note]) -> Note:
+       return note
+
+The check loads the row by the URL kwarg ``note`` through ``visible_to(scope)`` before any context runs, answers 404 for a row outside the scope and 403 for a refused user, and the ``note`` context reads the same row from the cache, see :ref:`topics-permissions-tree`.
+The ``Meta`` guard on the form still checks the bound row after the page rule, so the visit and the submission agree on who may edit.
+With the page rule in place the stranger's POST is refused by the rule of the page, and ``form_access_denied`` carries ``layer="page"`` instead of ``layer="object"``.
+
+Check against the request
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A predicate sees the user and the row and nothing else.
+A rule that reads the request, such as the tenant a middleware attaches to it, overrides ``has_object_permission`` on the form, which runs after the registered permissions with ``self.instance`` bound.
+
+.. code-block:: python
+   :caption: notes/pages/notes/[int:note]/edit/page.py
+
+   from typing import Any
+
+   from django.http import HttpRequest
+   from notes.models import Note
+
+   import next.forms
+   from next.deps import DObject
+
+   class NoteEditForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["title", "body"]
+           permission_required = "notes.edit_note"
+
+       @classmethod
+       def get_form_kwargs(cls, note: DObject[Note]) -> dict[str, Any]:
+           return {"instance": note}
+
+       def has_object_permission(self, request: HttpRequest) -> bool:
+           return self.instance.tenant_id == request.tenant.id
+
+The hook is dependency-injected, so it declares only the parameters it reads, see :ref:`topics-forms-actions-dynamic-guards`.
+
 Verification
 ------------
 
-A test signs in as the owner, edits the row, then signs in as another user and confirms the edit is refused.
+A test signs in as the owner and edits a shared note, then signs in as another user, who may read the note but not edit it, and finally asks for a private note of the owner.
 
 .. code-block:: python
    :caption: tests/test_object_permissions.py
@@ -102,31 +191,40 @@ A test signs in as the owner, edits the row, then signs in as another user and c
        User = get_user_model()
        owner = User.objects.create_user("owner")
        stranger = User.objects.create_user("stranger")
-       note = Note.objects.create(slug="intro", title="Intro", body="", owner=owner)
+       shared = Note.objects.create(title="Intro", body="", owner=owner, shared=True)
+       private = Note.objects.create(title="Diary", body="", owner=owner)
 
        client = NextClient()
        client.force_login(owner)
        client.post_action(
            "note_edit_form",
            {"title": "Intro v2", "body": ""},
-           origin=f"/notes/edit/{note.slug}/",
+           origin=f"/notes/{shared.pk}/edit/",
        )
-       assert Note.objects.get(pk=note.pk).title == "Intro v2"
+       assert Note.objects.get(pk=shared.pk).title == "Intro v2"
 
        client.force_login(stranger)
        response = client.post_action(
            "note_edit_form",
            {"title": "Hijacked", "body": ""},
-           origin=f"/notes/edit/{note.slug}/",
+           origin=f"/notes/{shared.pk}/edit/",
        )
        assert response.status_code == 403
-       assert Note.objects.get(pk=note.pk).title == "Intro v2"
+       assert Note.objects.get(pk=shared.pk).title == "Intro v2"
 
-The owner's POST binds the form, passes ``has_object_permission``, and saves.
-The stranger's POST binds the same row, the hook returns ``False``, and the dispatcher raises :exc:`~django.core.exceptions.PermissionDenied`.
+       response = client.post_action(
+           "note_edit_form",
+           {"title": "Hijacked", "body": ""},
+           origin=f"/notes/{private.pk}/edit/",
+       )
+       assert response.status_code == 404
+
+The owner's POST loads the shared note, passes ``notes.edit_note`` on it, and saves.
+The stranger's POST loads the same note, since ``visible_to`` lets them read it, and the predicate refuses it, so the dispatcher raises :exc:`~django.core.exceptions.PermissionDenied`.
 Django renders the denial as a bare HTTP 403 without re-rendering the origin, so the row is unchanged.
+The private note lies outside the scope of the stranger, so ``DObject`` answers 404 and no permission runs.
 
-A ``form_access_denied`` signal fires on the denial with ``layer="object"`` and ``reason="denied"``.
+A ``form_access_denied`` signal fires on the 403 with ``layer="object"`` and ``reason="denied"``.
 Connect a receiver to audit refused edits, see :ref:`topics-forms-signals-form-access-denied`.
 
 See also
@@ -134,7 +232,8 @@ See also
 
 .. seealso::
 
+   :ref:`topics-permissions` for predicates, the backend, the tag, and django-rules side by side.
    :ref:`topics-forms-actions-dynamic-guards` for the full hook contract and the view-level companion.
-   :doc:`/content/topics/forms/modelforms` for ``instance_from_url`` and the ownership-scoped lookup.
+   :doc:`/content/topics/forms/modelforms` for ``DObject`` in ``get_form_kwargs`` and the scope of ``instance_from_url``.
    :doc:`/content/security/di-and-untrusted-input` for the untrusted-input rules behind the loaded row.
    :doc:`/content/howto/require-login-on-pages` for the project-wide login requirement.

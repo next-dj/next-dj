@@ -70,10 +70,10 @@ def check_seo_route_collisions(*args, **kwargs) -> list[CheckMessage]:
     routes = [route for route, _view, _source in _served(roots)]
     for root in roots:
         for trail, page_path in root.trails.items():
-            address = _trail_address(trail, routes)
+            address = _trail_address(root.root.route_trail(trail), routes)
             if address is None:
                 continue
-            routed_at = route_path(trail) or f"/{trail}/"
+            routed_at = route_path(trail, root.root) or f"/{trail}/"
             errors.append(
                 Error(
                     f"{page_path} routes {routed_at}, beside the {address} the "

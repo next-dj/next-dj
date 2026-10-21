@@ -1,8 +1,4 @@
-"""Fill a callable's parameters from the context by replaying its compiled plan.
-
-`DependencyResolver` serves page views, form actions, and component renderers, and a
-plan is compiled once per callable rather than scanned per resolve.
-"""
+"""Fill a callable's parameters from the context by replaying its compiled plan."""
 
 from __future__ import annotations
 
@@ -10,6 +6,7 @@ import inspect
 import logging
 import threading
 from operator import attrgetter
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast, override
 
 from django.utils.functional import SimpleLazyObject, empty
@@ -43,9 +40,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# The names `resolve_dependencies` takes out one by one, spelled there for speed.
-# Whatever `RESERVED_KEYS` grows beyond them is stripped by the loop that follows,
-# so a new reserved name never reaches the URL kwargs a provider reads by name.
+# Names `resolve_dependencies` pops inline for speed, the rest are stripped in a loop.
 _CLAIMED_RESERVED = frozenset(
     {"_cache", "request", "form", "cleaned_data", "_context_data", "_stack"}
 )
@@ -55,8 +50,7 @@ _UNCLAIMED_RESERVED: tuple[str, ...] = tuple(RESERVED_KEYS - _CLAIMED_RESERVED)
 class _Described:
     """Log argument that describes its callable only once a handler formats it.
 
-    A disabled debug log discards the record before formatting, so the walk
-    `_describe_callable` runs costs nothing on the path that repeats it.
+    A disabled debug log discards the record before formatting, so the walk is free.
     """
 
     __slots__ = ("func",)
@@ -119,8 +113,7 @@ def _drop[P](holder: list[P], provider: object) -> bool:
 def forget_dep_caches(**kwargs) -> None:
     """Drop the introspection memos, so a reloaded module leaves none behind.
 
-    A saved `page.py` mints fresh function objects the memos would otherwise pin
-    along with their globals, and the per-name dependency bindings go with them.
+    A saved `page.py` mints fresh function objects the memos would otherwise pin.
     """
     forget_introspection_caches()
     resolver._plan_cache.clear()
@@ -138,31 +131,24 @@ class DependencyResolver:
     ) -> None:
         """Initialise with explicit providers or defer to the auto-registry."""
         self._dependency_callables: dict[str, Callable[..., Any]] = {}
-        # Reentrant, because building a provider may resolve through this very
-        # resolver and would otherwise deadlock against its own resync.
+        # Reentrant, as building a provider may resolve through this resolver.
         self._lock = threading.RLock()
         self._head: list[ParameterProvider] = []
         self._auto: list[RegisteredParameterProvider] = []
         self._tail: list[ParameterProvider] = [_adopt_provider(p) for p in providers]
         self._providers: list[ParameterProvider] = list(self._tail)
-        # Explicit providers make the registry irrelevant for good, so a sync
-        # only records the registry version it would otherwise catch up to.
+        # Explicit providers make the registry moot, so sync only notes its version.
         self._explicit = bool(providers)
         self._registry_seen = -1
-        # Addresses a `remove_provider` dropped, so a later resync does not put
-        # the instance the caller took out back on the list. Addressed the way
-        # the registry addresses a class, so a reloader re-executing the module
-        # that declares it does not bypass the removal with a fresh class.
+        # Addresses `remove_provider` dropped, keyed like the registry.
         self._suppressed: set[_Address] = set()
         self._syncing = False
-        # Bumped on every `_providers` mutation, so a compiled plan carries the
-        # version it saw and is recompiled once the list has moved on.
+        # Bumped on every `_providers` mutation, so stale plans recompile.
         self._providers_version = 0
         self._plan_cache: LruCache[IntrospectKey, tuple[int, InjectionPlan]] = (
             LruCache()
         )
-        # Dependency callables whose plan fills nothing, held under the name they answer
-        # to and checked by identity, so a rebound name is looked at afresh.
+        # Dependency callables filling nothing, checked by identity so a rebind is seen.
         self._leaf_dependencies: dict[str, Callable[..., Any]] = {}
 
     def _instantiate(
@@ -176,8 +162,7 @@ class DependencyResolver:
     def _rebuild(self) -> None:
         """Publish the flat provider list and move the version plans carry.
 
-        A fresh list rather than an in-place edit, so a compile walking the
-        previous one keeps a consistent snapshot for the whole walk.
+        A fresh list, so a compile walking the previous one keeps a consistent snapshot.
         """
         self._providers = [*self._head, *self._auto, *self._tail]
         self._providers_version += 1
@@ -195,13 +180,11 @@ class DependencyResolver:
         with self._lock:
             version = provider_registry.version
             if self._registry_seen == version or self._syncing:
-                # A provider constructed through this resolver re-enters here, and the
-                # half-built list is the wrong one to restart from.
+                # A provider built through this resolver re-enters here half-built.
                 return
             self._syncing = True
             try:
-                # An abstract intermediate base is a legitimate class to
-                # register and no instance of it exists to place.
+                # An abstract intermediate base registers but has no instance.
                 auto = [
                     _adopt_provider(self._instantiate(cls))
                     for cls in provider_registry
@@ -212,17 +195,14 @@ class DependencyResolver:
                 self._syncing = False
             auto.sort(key=attrgetter("priority"))
             self._auto = auto
-            # The rebuild runs first, so a resolve on another thread never
-            # finds the registry caught up while the plans it stamped are
-            # still reading fresh against the previous provider list.
+            # Rebuild first, so no thread sees fresh-looking plans on a stale list.
             self._rebuild()
             self._registry_seen = version
 
     def skips(self, param: inspect.Parameter) -> bool:
         """Return True for `self` / `cls` and variadic parameters.
 
-        Public because `compile_plan` takes it as the predicate a plan is
-        built from, and a subclass may widen what the resolver refuses.
+        Public as the `compile_plan` predicate, which a subclass may widen.
         """
         return param.name in ("self", "cls") or param.kind in (
             inspect.Parameter.VAR_POSITIONAL,
@@ -232,8 +212,7 @@ class DependencyResolver:
     def _compile_plan(self, func: Callable[..., Any]) -> tuple[InjectionPlan, bool]:
         """Compile the plan for `func` and say whether it is settled enough to cache.
 
-        Unresolved hints leave raw annotations in place and mark the plan provisional,
-        so a name a later import defines is retried rather than frozen out for good.
+        Unresolved hints mark the plan provisional, so a later import is retried.
         """
         try:
             sig = cached_signature(func)
@@ -254,8 +233,7 @@ class DependencyResolver:
     def _plan_for(self, key: IntrospectKey, func: Callable[..., Any]) -> InjectionPlan:
         """Return the plan for `func` under `key`, recompiling once the providers moved.
 
-        The version is read before the compile, so a plan built from a list
-        another thread was replacing is stamped stale rather than fresh.
+        The version is read before the compile, so a racing list swap stamps it stale.
         """
         self._sync_providers()
         version = self._providers_version
@@ -279,8 +257,7 @@ class DependencyResolver:
     ) -> bool:
         """Return whether a registered provider fills `param` of `func` in `context`.
 
-        The answer comes from the compiled plan, so a skipped parameter never matches
-        and candidates see the resolved parameter `resolve` hands them.
+        Answered from the compiled plan, so a skipped parameter never matches.
         """
         plan = self._plan_for(introspect_key(func), func)
         entry = next((e for e in plan if e[0] == param.name), None)
@@ -296,8 +273,7 @@ class DependencyResolver:
     ) -> Callable[..., Any]:
         """Register a callable as a dependency reachable through `Depends("name")`.
 
-        Any note the name carries goes with it, so the new callable is looked at afresh
-        and no callable of an earlier generation stays pinned here.
+        Drops any leaf note for the name, so the new callable is looked at afresh.
         """
         self._dependency_callables[name] = callable_dep
         self._leaf_dependencies.pop(name, None)
@@ -306,6 +282,10 @@ class DependencyResolver:
     def get_dependency(self, name: str) -> Callable[..., Any] | None:
         """Return the callable bound to `name`, or None when nothing is bound."""
         return self._dependency_callables.get(name)
+
+    def dependencies(self) -> Mapping[str, Callable[..., Any]]:
+        """Return a read-only view of every named dependency and its callable."""
+        return MappingProxyType(self._dependency_callables)
 
     def unregister_dependency(self, name: str) -> None:
         """Drop the binding for `name`, tolerating a name that has none."""
@@ -332,8 +312,7 @@ class DependencyResolver:
     ) -> object:
         """Resolve a named dependency with cycle-safe memoisation.
 
-        An unregistered name raises at once rather than injecting `None`, so the
-        error surfaces at the `Depends` site instead of deep inside user code.
+        An unregistered name raises at once rather than injecting `None`.
         """
         callable_dep = self._dependency_callables.get(name)
         if callable_dep is None:
@@ -355,8 +334,7 @@ class DependencyResolver:
             return cached
 
         if self._leaf_dependencies.get(name) is callable_dep:
-            # Nothing to inject is nothing that could re-enter this resolution, so the
-            # call needs neither the stack nor the in-progress marker.
+            # Nothing to inject cannot re-enter, so no stack or in-progress marker.
             value = callable_dep()
             context.cache.set(name, value)
             return value
@@ -367,8 +345,7 @@ class DependencyResolver:
         try:
             resolved = self.resolve(callable_dep, context)
             if not resolved:
-                # No provider can add a parameter to a signature, so a plan that came
-                # back empty stays empty for as long as the name keeps this callable.
+                # No provider adds parameters, so an empty plan stays empty.
                 self._leaf_dependencies[name] = callable_dep
             value = callable_dep(**resolved)
             context.cache.set(name, value)
@@ -393,8 +370,7 @@ class DependencyResolver:
     def remove_provider(self, provider: ParameterProvider) -> None:
         """Drop `provider` by identity, tolerating one the resolver never held.
 
-        Identity beats equality, since two dataclass providers compare equal, and
-        suppression keeps a resync from restoring an auto one.
+        Matches by identity as dataclass providers compare equal. Suppresses auto ones.
         """
         with self._lock:
             dropped = _drop(self._head, provider)
@@ -421,10 +397,9 @@ class DependencyResolver:
     ) -> dict[str, Any]:
         """Return keyword arguments for `func` by replaying its compiled plan.
 
-        A missing dependency names the callable filled here, the innermost of a nested
-        chain and so the one whose signature carries the offending `Depends`.
+        A missing dependency names the innermost callable carrying the `Depends`.
         """
-        # The hit path is inlined because a miss is rare enough to afford the helper.
+        # The hit path is inlined, a miss is rare enough to afford the helper.
         key = introspect_key(func)
         try:
             entry = self._plan_cache.get(key)
@@ -460,8 +435,7 @@ class DependencyResolver:
     ) -> dict[str, Any]:
         """Resolve `func` from a loose kwargs mapping and build a context object.
 
-        The reserved names are popped from the mapping rather than filtered into a copy,
-        because `**context` owns its dict and what is left of it is the URL kwargs.
+        Reserved names are popped in place, leaving the URL kwargs in `**context`.
         """
         cache_obj = context.pop("_cache", None)
         request = context.pop("request", None)
@@ -495,8 +469,7 @@ class DependencyResolver:
     ) -> dict[str, Any]:
         """Resolve `func` for component callables using template context.
 
-        The context is passed unfiltered, since providers reading it by name already
-        refuse `RESERVED_KEYS` themselves, cheaper than a full copy.
+        The context is passed unfiltered, as providers refuse `RESERVED_KEYS` already.
         """
         cache = DependencyCache() if _cache is None else _as_cache(_cache)
 
@@ -512,10 +485,7 @@ class DependencyResolver:
         return self.resolve(func, context)
 
 
-# One holder every reference points at, with the configured resolver behind it.
-# The object is built afresh whenever the setting names another class, so the
-# holder is what keeps a framework module, a provider and a test helper reading
-# the resolver in force rather than the one they imported.
+# One holder every reference points at, so none keeps a resolver the setting replaced.
 _holder = SimpleLazyObject(DependencyResolver)
 resolver: DependencyResolver = cast("DependencyResolver", _holder)
 
@@ -527,8 +497,7 @@ def _configured_resolver_class() -> type[DependencyResolver]:
     return resolve_setting_class(
         "DEPENDENCY_RESOLVER",
         base=DependencyResolver,
-        # The package binds `DependencyResolver` only after importing this module,
-        # so the import helper would hit a half-initialised `next.deps`.
+        # The import helper would hit a half-initialised `next.deps` package.
         shipped=DependencyResolver,
         base_path="next.deps.DependencyResolver",
     )
@@ -537,7 +506,7 @@ def _configured_resolver_class() -> type[DependencyResolver]:
 def current_resolver() -> DependencyResolver:
     """Return the resolver object the holder stands for, building it on first read.
 
-    Read on a render path, because an attribute off the holder is a forwarded call.
+    Read on a render path, as an attribute off the holder is a forwarded call.
     """
     if _holder._wrapped is empty:
         _holder._setup()
@@ -548,8 +517,7 @@ def current_resolver() -> DependencyResolver:
 def apply_resolver_setting() -> None:
     """Put an instance of the configured resolver class behind the holder.
 
-    A fresh object rather than a retype, so the `__init__` of a subclass runs and
-    everything the resolver it replaces was told at runtime goes with that object.
+    A fresh object, so a subclass `__init__` runs and runtime registrations are dropped.
     """
     cls = _configured_resolver_class()
     if _holder._wrapped is not empty and type(_holder._wrapped) is cls:

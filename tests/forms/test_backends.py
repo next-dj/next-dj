@@ -38,6 +38,7 @@ from next.forms.registration import registration_diagnostics
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
+_REGISTRY_BACKEND = {"BACKEND": "next.forms.RegistryFormActionBackend"}
 _FAKE_FILE_PAGE = "/fake/myapp/page.py"
 
 
@@ -315,6 +316,21 @@ class TestRegistryFormActionBackend:
         assert isinstance(backend, RegistryFormActionBackend)
         with pytest.raises(FormActionNotFoundError, match="Unknown form action"):
             backend.get_action_url("nonexistent_xyz")
+
+    def test_action_name_reads_the_uid_of_a_registered_action(self) -> None:
+        """`action_name` answers the name behind a uid, `None` for an unknown one."""
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="named", file_path=_FAKE_FILE, scope="shared", handler=print
+            )
+        )
+        meta = backend.get_meta("named")
+        assert meta is not None
+        assert (backend.action_name(meta["uid"]), backend.action_name("x")) == (
+            "named",
+            None,
+        )
 
     def test_generate_urls_empty_when_no_actions(self) -> None:
         """Empty backend yields no URL patterns."""
@@ -714,6 +730,63 @@ class TestUnknownActionSuggestions:
         assert one.value.candidates == several.value.candidates == ("delete_note",)
 
 
+class TestNameDeclaredElsewhere:
+    """A name another page declares points at that page, not at itself."""
+
+    def test_error_drops_the_own_name_and_lists_the_files(self) -> None:
+        """The searched name never comes back as its own close match."""
+        exc = FormActionNotFoundError(
+            name="twin",
+            page_path="/app/page.py",
+            candidates=("twin", "twins"),
+            declared_in=lambda: ["/b/page.py", "/a/page.py", "/a/page.py"],
+        )
+        assert exc.suggestions == ("twins",)
+        assert exc.declared_in == ("/a/page.py", "/b/page.py")
+        assert str(exc).endswith(
+            "The name is declared only in /a/page.py, /b/page.py. "
+            "Closest matches: 'twins'."
+        )
+
+    def test_reduce_keeps_the_declaring_files(self) -> None:
+        """A revived refusal still knows where the name lives."""
+        exc = FormActionNotFoundError(name="twin", declared_in=lambda: ["/a/page.py"])
+        revived = copy.deepcopy(exc)
+        assert revived.declared_in == ("/a/page.py",)
+        assert str(revived) == str(exc)
+
+    def test_backend_names_the_declaring_page(self) -> None:
+        """A page-scoped lookup on another page lists the page that declares it."""
+        backend = RegistryFormActionBackend()
+        _register_action(backend, "twin", "/app/a/page.py", scope="page")
+        with pytest.raises(FormActionNotFoundError) as excinfo:
+            backend.get_action_url("twin", page_path="/app/b/page.py")
+        assert excinfo.value.suggestions == ()
+        assert excinfo.value.declared_in == ("/app/a/page.py",)
+
+    def test_manager_names_the_declaring_page_across_backends(self) -> None:
+        """Several backends pool the files that declare the name."""
+        first = RegistryFormActionBackend()
+        second = RegistryFormActionBackend()
+        _register_action(first, "twin", "/app/a/page.py", scope="page")
+        _register_action(second, "twin", "/app/c/page.py", scope="page")
+        manager = FormActionManager(backends=[first, second])
+        with pytest.raises(FormActionNotFoundError) as excinfo:
+            manager.get_action_url("twin", page_path="/app/b/page.py")
+        assert excinfo.value.declared_in == ("/app/a/page.py", "/app/c/page.py")
+        assert "'twin'" not in str(excinfo.value).partition("Closest")[2]
+
+    def test_require_action_meta_names_the_declaring_page(self) -> None:
+        """The meta lookup refuses with the same pointer at the declaring page."""
+        backend = RegistryFormActionBackend()
+        _register_action(backend, "twin", "/app/a/page.py", scope="page")
+        manager = FormActionManager(backends=[backend])
+        with pytest.raises(FormActionNotFoundError) as excinfo:
+            manager.require_action_meta("twin", page_path="/app/b/page.py")
+        assert excinfo.value.suggestions == ()
+        assert "declared only in /app/a/page.py" in str(excinfo.value)
+
+
 class TestEmptyRegistryDiagnosis:
     """Lookup failures on an empty registry explain the autodiscover miss."""
 
@@ -907,11 +980,7 @@ class TestManagerBackendsAccessor:
 
     def test_loads_configuration_lazily(self, settings) -> None:
         """An unprimed manager builds its backends from settings."""
-        settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [
-                {"BACKEND": "next.forms.RegistryFormActionBackend"}
-            ]
-        }
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": [_REGISTRY_BACKEND]}
         manager = FormActionManager()
         backends = manager.backends
         assert len(backends) == 1
@@ -930,10 +999,7 @@ class TestFormActionManagerReload:
     def test_non_dict_entries_are_skipped(self, settings) -> None:
         """Non-dict entries inside the list are skipped without raising."""
         settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [
-                "not-a-dict",
-                {"BACKEND": "next.forms.RegistryFormActionBackend"},
-            ]
+            "FORM_ACTION_BACKENDS": ["not-a-dict", _REGISTRY_BACKEND]
         }
         manager = FormActionManager()
         manager.reload()
@@ -952,12 +1018,7 @@ class TestFormActionManagerReload:
         self, settings, caplog, broken
     ) -> None:
         """A broken entry costs its own backend and nothing else."""
-        settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [
-                broken,
-                {"BACKEND": "next.forms.RegistryFormActionBackend"},
-            ]
-        }
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": [broken, _REGISTRY_BACKEND]}
         manager = FormActionManager()
         with caplog.at_level(logging.ERROR, logger="next.backends"):
             manager.reload()
@@ -992,11 +1053,7 @@ class TestFormActionManagerLoadedFlag:
         manager = FormActionManager()
         assert manager.backends == ()
 
-        settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [
-                {"BACKEND": "next.forms.RegistryFormActionBackend"}
-            ]
-        }
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": [_REGISTRY_BACKEND]}
         assert [type(backend) for backend in manager.backends] == [
             RegistryFormActionBackend
         ]
@@ -1044,11 +1101,7 @@ class TestFormActionManagerLoadedFlag:
 
     def test_explicit_backends_are_not_replaced_by_settings(self, settings) -> None:
         """A manager built with backends never reads the settings list."""
-        settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [
-                {"BACKEND": "next.forms.RegistryFormActionBackend"}
-            ]
-        }
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": [_REGISTRY_BACKEND]}
         explicit = _MinimalBackend()
         manager = FormActionManager(backends=[explicit])
         with patch("next.forms.manager.load_backends") as load_backends_mock:
@@ -1170,10 +1223,7 @@ class TestManagerClearRegistries:
 
 
 class TestFormActionManagerVersion:
-    """The `version` cache token moves on every registry mutation.
-
-    The counter is process-wide, so a test pins that the token moved, not its value.
-    """
+    """The `version` cache token moves on every registry mutation."""
 
     def test_register_action_bumps_version(self) -> None:
         """register_action moves the version after forwarding."""
@@ -1221,11 +1271,7 @@ class TestFormActionManagerVersion:
 
     def test_reload_bumps_version(self, settings) -> None:
         """Reloading moves the version alongside the backend rebuild."""
-        settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [
-                {"BACKEND": "next.forms.RegistryFormActionBackend"}
-            ]
-        }
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": [_REGISTRY_BACKEND]}
         manager = FormActionManager()
         before = manager.version
         manager.reload()
@@ -1235,11 +1281,7 @@ class TestFormActionManagerVersion:
         """The public entry point swaps the backends for the configured ones."""
         manager = FormActionManager(backends=[RegistryFormActionBackend()])
         first = manager.backends[0]
-        settings.NEXT_FRAMEWORK = {
-            "FORM_ACTION_BACKENDS": [
-                {"BACKEND": "next.forms.RegistryFormActionBackend"}
-            ]
-        }
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": [_REGISTRY_BACKEND]}
 
         manager.reload()
 

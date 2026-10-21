@@ -11,17 +11,13 @@ DEBUG = True
 ALLOWED_HOSTS: list[str] = ["*"]
 
 INSTALLED_APPS = [
-    # Django contrib.
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.admin",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    # next.dj framework.
     "next",
-    # Project apps. shadcn_admin renders the UI, library is the demo
-    # domain, admin_audit observes admin actions via signals.
     "shadcn_admin",
     "library",
     "admin_audit",
@@ -35,7 +31,6 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "shadcn_admin.middleware.AdminPermissionMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -76,27 +71,31 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 SHARED_DIR = BASE_DIR.parent / "_shared"
-# The shared kit ships Python helpers next to its components, so the directory joins the
-# import path the way `pytest.ini` already adds it for the test run.
 sys.path.insert(0, str(SHARED_DIR))
 STATICFILES_DIRS = [SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "next.permissions.ObjectPermissionBackend",
+]
+
 LOGIN_URL = "/admin/login/"
 
 NEXT_FRAMEWORK = {
+    "LOGIN_REQUIRED": True,
     "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
-            # The project-level page root `chrome/` holds only the outer `layout.djx`.
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "chrome")],
-            "PAGES_DIR": "surfaces",
+            "PAGES_DIR": "pages",
             "OPTIONS": {
-                # The hand-crafted logout form in `layout.djx` writes a bare
-                # `{% csrf_token %}`, which reads the token this processor seeds.
-                "context_processors": ["django.template.context_processors.csrf"]
+                "context_processors": [
+                    "django.template.context_processors.csrf",
+                    "shadcn_admin.context_processors.admin_shell",
+                ]
             },
         }
     ],
@@ -104,10 +103,10 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [
-                str(BASE_DIR / "shadcn_admin" / "_panels"),
+                str(BASE_DIR / "shadcn_admin" / "_components"),
                 str(SHARED_DIR / "_components"),
             ],
-            "COMPONENTS_DIR": "_panels",
+            "COMPONENTS_DIR": "_components",
         }
     ],
     "STATIC_VERSION": "v1",

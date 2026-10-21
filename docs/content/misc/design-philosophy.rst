@@ -96,7 +96,7 @@ The class is the unit of registration, file scope decides its reach, and ``__ini
 Every action posts to one endpoint, ``/_next/form/<uid>/``, where the ``uid`` is a stable short id derived from the action's scope and name, so moving a form between pages never changes the URL configuration.
 
 The cost is that registration happens on import and reaches further than a single view would.
-An action is live as soon as its module is imported, and the endpoint accepts a POST from any visitor until the form declares a guard.
+An action is live as soon as its module is imported, and the endpoint accepts a POST from any visitor until the form, its page, or a ``page.py`` above it declares a guard.
 :doc:`/content/security/overview` states where the identity check belongs and which guard keys enforce it.
 
 Small public surfaces

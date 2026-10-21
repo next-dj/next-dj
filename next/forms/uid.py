@@ -1,12 +1,11 @@
 """Dispatch-URL reversing, origin-path validation, and origin redirects."""
 
-from contextlib import suppress
-
-from django.core.exceptions import DisallowedRedirect
 from django.http import HttpRequest, HttpResponseRedirect
 from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
 from django.utils.encoding import escape_uri_path
+
+from next.utils import redirect_or_fallback
 
 
 URL_NAME_FORM_ACTION = "form_action"
@@ -26,8 +25,7 @@ def reverse_form_action(uid: str) -> str:
 
 ORIGIN_FIELD_NAME = "_next_form_origin"
 
-# Render-context key the shaping layer sets on a wizard advance to override the
-# rendered form's _next_form_origin, instead of mutating a request attribute.
+# Render-context key set on a wizard advance to override the form's _next_form_origin.
 FORM_ORIGIN_OVERRIDE_KEY = "form_origin_override"
 
 # Django's redirect Location cap, pinned because Django before 5.2.9 has no constant.
@@ -42,8 +40,7 @@ def current_origin_path(request: HttpRequest) -> str | None:
     path = getattr(request, "path", None)
     if not path:
         return None
-    # A request whose META is not a real mapping is a unit-test stand-in, and
-    # asking it for the query string would splice a stub into the field value.
+    # A non-mapping META is a unit-test stand-in and would pollute the field value.
     meta = getattr(request, "META", None)
     query = meta.get("QUERY_STRING", "") if isinstance(meta, dict) else ""
     encoded = escape_uri_path(str(path))
@@ -78,18 +75,6 @@ def posted_origin_path(request: HttpRequest) -> str | None:
     return validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
 
 
-def redirect_or_fallback(
-    target: str, fallback: str, *, status: int = 302
-) -> HttpResponseRedirect:
-    """Redirect to `target`, or to `fallback` when Django refuses it as a Location.
-
-    A handler has already run by now, so a target past the length cap is not a 400.
-    """
-    with suppress(DisallowedRedirect):
-        return HttpResponseRedirect(target, status=status)
-    return HttpResponseRedirect(fallback, status=status)
-
-
 def redirect_to_origin(
     request: HttpRequest, fallback: str = "/"
 ) -> HttpResponseRedirect:
@@ -106,7 +91,6 @@ __all__ = [
     "current_origin_path",
     "is_path_only",
     "posted_origin_path",
-    "redirect_or_fallback",
     "redirect_to_origin",
     "reverse_form_action",
     "validated_origin_path",

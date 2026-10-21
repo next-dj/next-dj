@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from next.components.registry import ComponentRegistry
 from next.forms.backends import ActionRegistration, RegistryFormActionBackend
-from tests.benchmarks.factories import build_component_info_list, noop_form_handler
+from tests.benchmarks.factories import (
+    build_component_info_list,
+    noop_form_handler,
+    stand_in_rows as rows_standing_in,
+    stand_in_scope as scope_standing_in,
+)
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 _BENCH_ROOT = Path(__file__).parent
@@ -41,3 +51,17 @@ def populated_component_registry(tmp_path: Path) -> tuple[ComponentRegistry, Pat
     registry.mark_as_root(tmp_path)
     registry.register_many(build_component_info_list(tmp_path, 500))
     return registry, tmp_path
+
+
+@pytest.fixture()
+def stand_in_rows() -> Iterator[None]:
+    """Answer every `Group` lookup from memory, never reaching the database."""
+    with rows_standing_in():
+        yield
+
+
+@pytest.fixture()
+def stand_in_scope() -> Iterator[None]:
+    """Answer every `Group` lookup from memory and bind the `scope` dependency."""
+    with scope_standing_in():
+        yield

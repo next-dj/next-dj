@@ -26,7 +26,7 @@ Declare the parameter with a type and a default.
 The default is used when the key is absent from the query string.
 
 .. code-block:: python
-   :caption: storefront/page.py
+   :caption: catalog/pages/page.py
 
    from catalog.models import Product
 
@@ -103,7 +103,7 @@ A single callable can mix scalar and list parameters.
 Each annotation drives its own coercion.
 
 .. code-block:: python
-   :caption: storefront/catalog/page.py
+   :caption: catalog/pages/catalog/page.py
 
    from next import context
    from next.urls import DQuery
@@ -129,7 +129,7 @@ Annotate the ``request`` parameter with :class:`~django.http.HttpRequest`.
 The resolver injects the request by annotation and never by parameter name, so a bare ``def parse_filters(request)`` receives ``None`` and fails on its first attribute read.
 
 .. code-block:: python
-   :caption: catalog/filters.py
+   :caption: catalog/deps.py
 
    from dataclasses import dataclass
 
@@ -155,15 +155,15 @@ The resolver injects the request by annotation and never by parameter name, so a
            sort=g.get("sort") or "newest",
        )
 
-Import ``catalog/filters.py`` from ``AppConfig.ready`` so the registration runs before the first request.
+The ``next`` application imports ``catalog/deps.py`` at startup, so the registration runs before the first request.
 
 Each callable that needs the snapshot takes it through ``Depends("filters")``.
 The resolution cache memoises the value by its registered name for the rest of the pass, so the query string is parsed once however many callables ask for it.
 
 .. code-block:: python
-   :caption: storefront/catalog/page.py
+   :caption: catalog/pages/catalog/page.py
 
-   from catalog.filters import Filters
+   from catalog.deps import Filters
    from catalog.models import Product
 
    from next import Depends, context
@@ -191,7 +191,7 @@ A bookmarked URL reproduces the same listing.
 Reserve ``@action`` for POST side effects such as creating or deleting rows.
 
 .. code-block:: jinja
-   :caption: storefront/catalog/_components/filter_panel/component.djx
+   :caption: catalog/pages/catalog/_components/filter_panel/component.djx
 
    <form method="get" action="{{ submit_url }}" data-filter-form>
      <input name="q" type="search" value="{{ current_filters.q }}"/>
@@ -216,7 +216,7 @@ The parameter therefore stays untyped and the callable returns early when the va
 Child callables then ask for ``category`` by parameter name and never re-query.
 
 .. code-block:: python
-   :caption: storefront/catalog/[category]/page.py
+   :caption: catalog/pages/catalog/[category]/page.py
 
    from catalog.models import Category
    from django.http import Http404
@@ -235,7 +235,7 @@ Child callables then ask for ``category`` by parameter name and never re-query.
 A descendant page reads the resolved instance back through its parameter name.
 
 .. code-block:: python
-   :caption: storefront/catalog/[category]/products/page.py
+   :caption: catalog/pages/catalog/[category]/products/page.py
 
    from catalog.models import Category, Product
 

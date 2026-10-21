@@ -25,8 +25,7 @@ def installed_file_backend(
 ) -> Generator[FileComponentsBackend, None, None]:
     """Run the shared manager over one file backend and restore it afterwards.
 
-    The manager is told the settings were read, otherwise the first access
-    reloads from settings and drops the installed backend.
+    The manager is told settings were read, else the first access drops the backend.
     """
     backend = FileComponentsBackend(dict(min_component_config))
     saved_backends = components_manager._backends

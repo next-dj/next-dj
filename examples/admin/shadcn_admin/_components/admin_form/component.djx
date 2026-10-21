@@ -1,0 +1,53 @@
+<div class="space-y-6">
+  {% #component "page_header" title=form_state.title description=form_state.verbose_name %}
+    {% if form_state.is_change %}
+      {% #slot "actions" %}
+        {# Hidden outside a dialog by the co-located CSS: only the client knows the editor is layered. #}
+        {% form "admin:discard" class="discard-in-layer" %}
+          {% component "button" type="submit" text="Discard" variant="ghost" %}
+        {% endform %}
+        {% for label, url in form_state.object_links %}
+          {% component "button" href=url text=label variant="outline" %}
+        {% endfor %}
+        {% if form_state.row_rules %}
+          {% has_perm form_state.delete_perm form_state.instance %}{% component "button" href=form_state.delete_url text="Delete" variant="outline" %}{% endhas_perm %}
+        {% else %}
+          {% has_perm form_state.delete_perm %}{% component "button" href=form_state.delete_url text="Delete" variant="outline" %}{% endhas_perm %}
+        {% endif %}
+      {% /slot %}
+    {% endif %}
+  {% /component %}
+
+  {% form form_state.action_name %}
+    <div class="space-y-4">
+      {% if form_state.form_spec.non_field_errors %}
+        {% #component "alert" variant="destructive" %}
+          {% #slot "content" %}
+            <ul>{% for err in form_state.form_spec.non_field_errors %}<li>{{ err }}</li>{% endfor %}</ul>
+          {% /slot %}
+        {% /component %}
+      {% endif %}
+
+      <div class="space-y-4">
+        {% for section in form_state.form_spec.sections %}
+          {% component "form_section" section=section %}
+        {% endfor %}
+        {% for block in form_state.inlines %}
+          {% component "inline_formset" block=block %}
+        {% endfor %}
+      </div>
+
+      {% if not form_state.is_change %}
+        {% component "save_bar" %}
+      {% elif form_state.row_rules %}
+        {% has_perm form_state.change_perm form_state.instance %}{% component "save_bar" %}{% else %}{% component "save_bar" read_only=True %}{% endhas_perm %}
+      {% else %}
+        {% has_perm form_state.change_perm %}{% component "save_bar" %}{% else %}{% component "save_bar" read_only=True %}{% endhas_perm %}
+      {% endif %}
+    </div>
+  {% endform %}
+
+  {% for section in form_state.related_sections %}
+    {% component "inline_live" section=section %}
+  {% endfor %}
+</div>

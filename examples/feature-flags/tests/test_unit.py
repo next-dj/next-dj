@@ -9,18 +9,12 @@ from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
 from flags.cache import FLAG_PREFIX, MISSING_SENTINEL, get_cached_flag, invalidate_flag
 from flags.demo import DEMO_FLAGS, seed_demo
+from flags.deps import WRITE_GATE_FLAG, DFlag, FlagProvider, FlagService, flag_service
 from flags.metrics import RENDER_INDEX_KEY, record_render, render_counts
 from flags.models import Flag
-from flags.panels._chunks.feature_guard import component as guard
-from flags.panels.admin.page import BulkToggleForm
-from flags.providers import (
-    WRITE_GATE_FLAG,
-    DFlag,
-    FlagProvider,
-    FlagService,
-    flag_service,
-)
-from flags.receivers import DENIED_COUNT_KEY, _page_key, access_denied_count
+from flags.pages._components.feature_guard import component as guard
+from flags.pages.admin.page import BulkToggleForm
+from flags.signals import DENIED_COUNT_KEY, PAGES_ROOT, _page_key, access_denied_count
 
 from next.testing import make_resolution_context, resolve_call
 
@@ -172,14 +166,14 @@ class TestPageKey:
     @pytest.mark.parametrize(
         ("path", "expected"),
         [
-            ("/src/flags/panels/page.py", "/"),
-            ("/src/flags/panels/admin/metrics/page.py", "admin/metrics"),
-            ("/elsewhere/page.py", "page"),
+            (PAGES_ROOT / "page.py", "/"),
+            (PAGES_ROOT / "admin" / "metrics" / "page.py", "admin/metrics"),
+            (Path("/elsewhere/page.py"), "page"),
         ],
-        ids=["root", "nested", "outside-the-panels-anchor"],
+        ids=["root", "nested", "outside-the-pages-root"],
     )
-    def test_key_is_derived_from_the_path(self, path: str, expected: str) -> None:
-        assert _page_key(Path(path)) == expected
+    def test_key_is_derived_from_the_path(self, path: Path, expected: str) -> None:
+        assert _page_key(path) == expected
 
 
 class TestFlagService:

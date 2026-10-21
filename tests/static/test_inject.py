@@ -648,8 +648,7 @@ class TestInjectForwardsRequest:
 class TestBackendRewritesEveryAssetUrl:
     """A backend that rewrites `asset_url` reaches every URL the page carries.
 
-    The runtime bundle isn't a collected asset, so a composed hook must
-    rewrite it just like a class override does.
+    The runtime bundle is no collected asset, so a composed hook must rewrite it too.
     """
 
     @staticmethod
@@ -893,8 +892,7 @@ class _Clock:
 class TestMemoisedFallbacksDegradeEveryRender:
     """A fallback a contained failure built marks every render that reuses it.
 
-    Each case renders twice, moves the clock past the quiet period and renders once
-    more, so the reused fallback is logged a second time with the suppressed count.
+    Each case renders twice, moves the clock past the quiet period, and renders again.
     """
 
     PAGE = f"<head>{HEAD_CLOSE}</head><body>{SCRIPTS_PLACEHOLDER}</body>"

@@ -1,8 +1,4 @@
-"""`ComponentsManager` and the settings hooks that invalidate its caches.
-
-Backends load lazily and share a render pipeline, and a `settings_reloaded`
-subscription drops the cached state without reimporting this module.
-"""
+"""`ComponentsManager` and the settings hooks that invalidate its caches."""
 
 from __future__ import annotations
 
@@ -39,8 +35,7 @@ def _configured_template_loader_class() -> type[ComponentTemplateLoader]:
     return resolve_setting_class(
         "COMPONENT_TEMPLATE_LOADER",
         base=ComponentTemplateLoader,
-        # The package binds `CachedComponentTemplateLoader` only after importing this
-        # module, so the import helper would hit a half-initialised `next.components`.
+        # The import helper would hit a half-initialised `next.components` package.
         shipped=CachedComponentTemplateLoader,
         base_path="next.components.ComponentTemplateLoader",
     )
@@ -82,8 +77,7 @@ class ComponentsManager(BackendListManager[ComponentsBackend]):
     def clear_template_caches(self) -> None:
         """Drop compiled component templates without rebuilding the pipeline.
 
-        Outside `DEBUG` the loader reuses a compiled template without checking its
-        source, so a caller that rewrote a component on disk drops it here.
+        Outside `DEBUG` the loader never rechecks a source rewritten on disk.
         """
         self.template_loader.clear()
 
@@ -94,11 +88,7 @@ class ComponentsManager(BackendListManager[ComponentsBackend]):
         return cast("ComponentRenderer", self._component_renderer)
 
     def _invalidate(self) -> None:
-        """Drop cached backends and the render pipeline without rebuilding.
-
-        Settings reload far more often than a component renders, so the rebuild waits
-        for the next access instead of running in the signal receiver.
-        """
+        """Drop cached backends and the render pipeline, rebuilt on next access."""
         self._reset_render_pipeline()
         self._backends = []
         self._walk_registered_folders.clear()
@@ -108,8 +98,7 @@ class ComponentsManager(BackendListManager[ComponentsBackend]):
     def reload(self, *, notify: bool = True) -> None:
         """Rebuild the backends from the current `NEXT_FRAMEWORK` settings.
 
-        The render pipeline and the router-walk claims go with the old backends. A
-        manager nobody renders from passes `notify=False` and announces nothing.
+        The render pipeline and router-walk claims go too. `notify=False` stays silent.
         """
         self._invalidate()
         self._backends = load_backends(
@@ -142,11 +131,9 @@ class ComponentsManager(BackendListManager[ComponentsBackend]):
     ) -> None:
         """Register components for one folder discovered during a page-tree walk.
 
-        The route trail becomes the scope, and the folder goes to the first backend
-        whose `register_walked_folder` claims it.
+        The first backend whose `register_walked_folder` claims the folder owns it.
         """
-        # Backends first, because loading them clears the claim set and a claim
-        # taken before that would be forgotten as soon as it was made.
+        # Backends first, as loading them clears the claim set.
         self._ensure_backends()
         if not self._claim_router_walk_folder(folder):
             return
@@ -194,8 +181,7 @@ def forget_component_backends(**kwargs) -> None:
 def forget_render_pipeline(*, setting: str, **kwargs) -> None:
     """Drop the render pipeline when Django reports a `TEMPLATES` change.
 
-    A compiled template pins the engine that built it, and the `settings_reloaded`
-    hook beside this one fires for `NEXT_FRAMEWORK` alone.
+    A compiled template pins its engine, and `settings_reloaded` skips `TEMPLATES`.
     """
     if setting == "TEMPLATES":
         components_manager._reset_render_pipeline()

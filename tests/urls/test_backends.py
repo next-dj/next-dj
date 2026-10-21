@@ -5,7 +5,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
-from django.test import RequestFactory, override_settings
+from django.test import Client, RequestFactory, override_settings
+from django.urls import URLPattern, URLResolver, clear_url_caches
 
 from next.pages import page
 from next.testing import override_next_settings
@@ -13,11 +14,15 @@ from next.urls import FileRouterBackend, PageRoot, RouterBackend, RouterFactory
 from next.urls.backends import _installed_app_directories, _is_framework_app
 from next.utils import forget_resolved_trees
 from tests.support import (
+    NAMESPACED_URLCONF,
     EntryRouter,
     file_router,
     file_router_config_entry,
     importable_dir,
+    installed_apps,
     record_path_calls,
+    write_app,
+    write_page,
 )
 
 
@@ -62,16 +67,44 @@ class TestFileRouterBackend:
         assert router.pages_dir == pages_dir
         assert router.app_dirs == app_dirs
         assert router.options == expected_options
-        assert router._patterns_cache == {}
+        assert router._tree_patterns_cache == {}
 
-    @pytest.mark.parametrize("missing", ["PAGES_DIR", "APP_DIRS", "DIRS", "OPTIONS"])
+    @pytest.mark.parametrize("missing", ["PAGES_DIR", "APP_DIRS"])
     def test_entry_missing_one_key_is_refused(self, missing: str) -> None:
         """A partial entry is a settings mistake rather than a shorthand."""
         entry = file_router_config_entry()
         del entry[missing]
 
-        with pytest.raises(ImproperlyConfigured, match=missing):
+        with pytest.raises(ImproperlyConfigured, match=missing) as caught:
             FileRouterBackend(entry)
+        named = str(caught.value).partition(", got")[0]
+        assert "OPTIONS" not in named
+        assert "DIRS" not in named.replace("APP_DIRS", "")
+
+    def test_an_entry_without_options_serves_its_pages(self, tmp_path: Path) -> None:
+        """OPTIONS left out reads as the empty mapping its default is."""
+        root = tmp_path / "pages"
+        write_page(root, "about")
+        entry = file_router_config_entry(pages_dir=root)
+        del entry["OPTIONS"]
+        assert FileRouterBackend(entry).options == {}
+        with override_settings(
+            ROOT_URLCONF=NAMESPACED_URLCONF, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}
+        ):
+            response = Client().get("/about/")
+        assert response.content == b"ok"
+
+    def test_an_entry_without_dirs_serves_its_app_pages(self, tmp_path: Path) -> None:
+        """DIRS left out reads as the empty list, so the app trees alone route."""
+        write_app(tmp_path, "shop", {"pages": ("about",)})
+        entry = file_router_config_entry(app_dirs=True)
+        del entry["DIRS"]
+        with (
+            installed_apps(tmp_path, "shop", urlconf=NAMESPACED_URLCONF),
+            override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
+        ):
+            response = Client().get("/about/")
+        assert response.content == b"ok"
 
     def test_non_dict_options_are_read_as_empty(self) -> None:
         """OPTIONS naming no mapping narrows to nothing rather than refusing."""
@@ -122,8 +155,7 @@ class TestFileRouterBackend:
     def test_get_app_pages_path_memoises_a_missing_tree(self, tmp_path) -> None:
         """An app without a pages tree is answered from the memo too.
 
-        The memo lives as long as this router, and a tree an app grows later reaches the
-        watcher through the next router, not through this one probing again.
+        A tree an app grows later reaches the watcher through the next router.
         """
         app_dir = tmp_path / "shop"
         app_dir.mkdir()
@@ -334,34 +366,43 @@ class TestFileRouterBackend:
             (directory / "page.py").write_text('template = "ok"\n')
         return {"testapp": tmp_path}
 
+    def _app_urls(
+        self, router: FileRouterBackend, directories: dict[str, Path]
+    ) -> list[URLPattern | URLResolver]:
+        with patch(
+            "next.urls.backends._installed_app_directories", return_value=directories
+        ):
+            return router._generate_app_urls()
+
     def test_an_app_tree_contributes_one_pattern_per_page(self, router, tmp_path):
         """Every routed page under the app's pages directory becomes a named pattern."""
         directories = self._app_tree(tmp_path, "home", "about")
 
-        patterns = router._generate_urls_for_app("testapp", directories)
+        patterns = self._app_urls(router, directories)
 
         assert sorted(pattern.name for pattern in patterns) == [
             "page_about",
             "page_home",
         ]
-        assert router._patterns_cache["testapp"] == patterns
+        tree = (tmp_path / "pages").resolve()
+        assert router._tree_patterns_cache[tree] == patterns
 
     def test_a_memoised_app_answers_after_its_tree_is_gone(self, router, tmp_path):
         """The memo is what a reload drops, so it outlives the tree it was built from."""
         directories = self._app_tree(tmp_path, "home")
-        first = router._generate_urls_for_app("testapp", directories)
+        first = self._app_urls(router, directories)
         shutil.rmtree(tmp_path / "pages")
 
-        assert router._generate_urls_for_app("testapp", directories) == first
+        assert self._app_urls(router, directories) == first
         assert [pattern.name for pattern in first] == ["page_home"]
 
     def test_an_app_without_a_pages_tree_contributes_nothing(self, router, tmp_path):
         """A missing pages directory leaves no pattern and nothing in the memo."""
-        assert router._generate_urls_for_app("testapp", {"testapp": tmp_path}) == []
-        assert "testapp" not in router._patterns_cache
+        assert self._app_urls(router, {"testapp": tmp_path}) == []
+        assert router._tree_patterns_cache == {}
 
     def test_generate_patterns_from_directory(self) -> None:
-        """Builds URL patterns from scan results via create_url_pattern."""
+        """Builds URL patterns from scan results, each view keeping its trail."""
         router = file_router()
         mock_pages_path = Mock()
 
@@ -373,10 +414,12 @@ class TestFileRouterBackend:
             ),
             patch("next.urls.backends.page.create_url_pattern") as mock_create,
         ):
-            mock_create.side_effect = ["pattern1", "pattern2"]
+            built = [Mock(), Mock()]
+            mock_create.side_effect = built
 
             patterns = list(router._generate_patterns_from_directory(mock_pages_path))
-            assert patterns == ["pattern1", "pattern2"]
+            assert patterns == built
+            assert [p.callback.next_route_trail for p in patterns] == ["url1", "url2"]
 
     def test_scan_pages_directory_empty(self, tmp_path) -> None:
         """A directory holding nothing yields no routes."""
@@ -755,8 +798,7 @@ class TestAppDirectoryResolution:
         ):
             assert router.page_roots() == []
 
-        # The empty answer reads as "this project has no app pages", so it is
-        # named rather than left to pass for the truth.
+        # The empty answer reads as no app pages, so it is named, not left as truth.
         assert "read before Django populated it" in caplog.text
 
 
@@ -989,3 +1031,34 @@ class TestComponentsFolderResolution:
             nfs.COMPONENT_BACKENDS = [{}]
             with pytest.raises(ImproperlyConfigured, match="COMPONENTS_DIR"):
                 FileRouterBackend._resolve_components_folder_name()
+
+
+class TestPageRootsMemo:
+    """A held router answers its page trees from a memo keyed on their inputs."""
+
+    def test_a_second_read_answers_from_the_memo(self, tmp_path) -> None:
+        root = tmp_path / "shell"
+        root.mkdir()
+        router = file_router(app_dirs=False, dirs=[root])
+        first = router.page_roots()
+
+        with patch.object(router, "_get_root_pages_paths") as probe:
+            second = router.page_roots()
+
+        probe.assert_not_called()
+        assert second == first
+        assert second is not first
+
+    def test_a_new_urlconf_walk_reads_the_trees_again(self, tmp_path) -> None:
+        root = tmp_path / "shell"
+        root.mkdir()
+        router = file_router(app_dirs=False, dirs=[root])
+        router.page_roots()
+        clear_url_caches()
+
+        with patch.object(
+            router, "_get_root_pages_paths", return_value=[root]
+        ) as probe:
+            router.page_roots()
+
+        probe.assert_called_once_with()

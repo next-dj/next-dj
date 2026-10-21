@@ -11,8 +11,7 @@ r"""                  __           __
 A next-gen framework based on Django without the tears.
 """
 
-# Every annotation here is a builtin, so the module skips `from __future__ import
-# annotations` and the import it would add to `import next`.
+# Every annotation is a builtin, so no `__future__` import slows `import next`.
 import importlib
 from typing import TYPE_CHECKING
 
@@ -22,8 +21,7 @@ if TYPE_CHECKING:
     from next.deps import Depends
     from next.forms import action
 
-    # `context` is both a submodule and a callable inside `next.pages`, so the
-    # import points at the defining module to keep the name unambiguous.
+    # `context` is also a submodule of `next.pages`, so import it from its definer.
     from next.pages.manager import context, page
 
 
@@ -57,8 +55,7 @@ def _resolve(name: str) -> object:
     return getattr(importlib.import_module(module_name), name)
 
 
-# A visible module `__getattr__` would make any name typecheck, so the binding sits
-# in the arm a type checker never reads while `_resolve` itself stays checked.
+# A visible module `__getattr__` would make any name typecheck, so bind it unseen.
 if TYPE_CHECKING:
     pass
 else:

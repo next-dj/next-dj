@@ -1,0 +1,16 @@
+<section class="rounded-lg border border-border bg-card p-6">
+  <h2 class="mb-4 text-sm font-semibold">{{ panel.title }}</h2>
+  <ul>
+    {% for row in panel.rows %}
+      <li class="flex items-center justify-between gap-4 border-b border-border py-2 text-sm last:border-0">
+        <span><span class="rounded-full bg-muted px-2 py-0.5 text-xs">{{ row.badge }}</span> {{ row.text|default:"—" }}</span>
+        <span class="text-xs text-muted-foreground">{{ row.note }}</span>
+      </li>
+    {% empty %}
+      <li class="text-sm text-muted-foreground">{{ panel.empty }}</li>
+    {% endfor %}
+  </ul>
+  {% if panel.link_url %}
+    <a href="{{ panel.link_url }}" class="mt-4 inline-block text-sm text-muted-foreground hover:text-foreground">{{ panel.link_label }}</a>
+  {% endif %}
+</section>

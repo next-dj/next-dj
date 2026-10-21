@@ -89,7 +89,7 @@ Stems and owners
 A stem is the filename without the extension.
 Discovery recognises the stems ``template``, ``layout``, and ``component``, see :doc:`co-located-files`.
 
-The stem registry is ``default_stems``, which lives at ``next.static.discovery`` rather than the package root.
+The stem registry is ``default_stems``, exported from ``next.static`` next to ``default_kinds``.
 Projects register extra stems through ``default_stems.register``.
 See :doc:`custom-stems`.
 

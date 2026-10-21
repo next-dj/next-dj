@@ -44,11 +44,7 @@ def _consume_one_change(
     *,
     request_id: str | None = None,
 ) -> Change | None:
-    """Drain one change a worker captures after the main thread publishes.
-
-    Starting the consumer thread on the lazy `changes` generator captures its baseline
-    revision before the main thread publishes, keeping the wake race-free.
-    """
+    """Drain one change a worker thread captures after the main thread publishes."""
     captured: list[Change] = []
     stream = target.changes(poll_id)
     worker = threading.Thread(target=lambda: captured.append(next(stream)))
@@ -62,11 +58,7 @@ def _consume_one_change(
 
 @pytest.fixture()
 def primed_broker(poll: Poll) -> PollBroker:
-    """Stand-alone broker with `poll`'s snapshot cached for change tests.
-
-    A local instance keeps revision counters from leaking across cases, and the cache is
-    process-wide so `store_snapshot` alone primes the first wake.
-    """
+    """Stand-alone broker with `poll`'s snapshot cached for change tests."""
     store_snapshot(build_snapshot(poll))
     return PollBroker()
 
@@ -339,11 +331,7 @@ class TestPartialVote:
 
 
 class TestZoneAssetsCarryInsertionVerbs:
-    """The asset manifest of a zone morph names how the client inserts each file.
-
-    `PollsConfig.ready` registers the `vue` kind with `render_module_tag`, so
-    `component.vue` files travel with `load: "module"` and the stylesheet with `"link"`.
-    """
+    """The asset manifest of a zone morph names how the client inserts each file."""
 
     def _vote_envelope(self, next_client: NextClient, poll: Poll) -> PartialEnvelope:
         choice = poll.choices.get(text="Tabs")
@@ -388,11 +376,7 @@ class TestBroadcastReceiver:
     def test_snapshot_cached_after_vote(
         self, next_client: NextClient, poll: Poll
     ) -> None:
-        """A vote ends with a fresh snapshot in cache, written by the receiver alone.
-
-        The vote handler never writes to the cache, so a cached payload after the POST
-        proves the receiver ran and called `broker.publish`.
-        """
+        """A vote ends with a fresh snapshot in cache, written by the receiver alone."""
         choice = poll.choices.get(text="Tabs")
         next_client.post_action("vote_form", {"poll": poll.pk, "choice": choice.pk})
         snapshot = read_snapshot(poll.pk)
@@ -405,11 +389,7 @@ class TestBroadcastReceiver:
     def test_receiver_invokes_broker_publish_with_new_snapshot(
         self, next_client: NextClient, poll: Poll, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A spy on `broker.publish` confirms the receiver is the publish source.
-
-        The handler runs `UPDATE` only, so any SSE wake has to come from the receiver.
-        Delegating the spy to the real method keeps the cache state intact.
-        """
+        """A spy on `broker.publish` confirms the receiver is the publish source."""
         captured: list[Snapshot] = []
         real_publish = broker.publish
 
@@ -543,11 +523,7 @@ class TestEchoThreading:
 
 @pytest.mark.django_db(transaction=True)
 class TestStreamPatchFrame:
-    """A change over the open HTTP stream yields a refresh patch with the echo.
-
-    The poll is committed so the streaming response, built on its own worker-thread
-    connection, sees it, and the fan-out's request id lets the initiator drop the echo.
-    """
+    """A change over the open HTTP stream yields a refresh patch with the echo."""
 
     def test_change_frame_carries_refresh_and_echo(
         self, next_client: NextClient

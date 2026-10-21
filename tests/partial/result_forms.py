@@ -24,8 +24,7 @@ class InternalRedirectForm(Form):
 class ExternalRedirectForm(Form):
     """Form whose handler redirects to an external host, the OAuth path.
 
-    The shaping layer must pack the external URL into a visit carrying the
-    full-navigation marker so the same-host validator does not reject it.
+    The shaping layer packs the URL into a visit with the full-navigation marker.
     """
 
     name = forms.CharField(max_length=100)
@@ -96,8 +95,7 @@ class RotatingResultForm(Form):
 class RotatingInvalidForm(Form):
     """Form that rotates the CSRF token then fails validation.
 
-    The invalid-shape envelope must carry the fresh CSRF payload so a
-    rotation on a failed submit still refreshes the document tokens.
+    The invalid-shape envelope must carry the fresh CSRF payload.
     """
 
     name = forms.CharField(max_length=100)

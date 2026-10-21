@@ -1,8 +1,6 @@
 """Dependency-injection helpers for tests.
 
-Unit-testing a next-dj provider or a DI-aware callable usually means
-building a `ResolutionContext` with sensible defaults and delegating to
-the module-level `resolver`. These helpers wrap that ritual.
+They build a `ResolutionContext` with defaults and delegate to the `resolver`.
 """
 
 from __future__ import annotations
@@ -32,9 +30,7 @@ def make_resolution_context(
 ) -> ResolutionContext:
     """Construct a `ResolutionContext` with empty defaults.
 
-    A fresh `DependencyCache` and a fresh stack are created on every call so
-    tests do not share memoised values or a resolution chain by accident. A
-    test that wants to read either afterwards passes its own.
+    A fresh cache and stack per call keep tests from sharing memoised values.
     """
     return ResolutionContext(
         request=request,
@@ -57,8 +53,7 @@ def resolve_call(
 ) -> dict[str, Any]:
     """Resolve the dependencies of `func` and return the kwargs mapping.
 
-    Thin wrapper over `DependencyResolver.resolve` that builds the context
-    from the request, form, URL kwargs, and context data it is handed.
+    Wraps `DependencyResolver.resolve` over a context built from the arguments.
     """
     context = make_resolution_context(
         request=request, form=form, url_kwargs=url_kwargs, context_data=context_data

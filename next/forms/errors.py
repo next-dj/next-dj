@@ -19,6 +19,7 @@ class _LookupContext(NamedTuple):
     page_path: "str | None"
     candidates: "Callable[[], Iterable[str]] | Iterable[str]"
     registry_empty: bool
+    declared_in: "Callable[[], Iterable[str]] | Iterable[str]"
 
 
 class FormActionNotFoundError(LookupError):
@@ -32,11 +33,13 @@ class FormActionNotFoundError(LookupError):
         page_path: str | None = None,
         candidates: "Callable[[], Iterable[str]] | Iterable[str]" = (),
         registry_empty: bool = False,
+        declared_in: "Callable[[], Iterable[str]] | Iterable[str]" = (),
     ) -> None:
         """Store the lookup context, deferring close-match work until rendered."""
-        # The manager probes backends by catching this, so raising stays cheap.
-        # The close-match search and the message run only when the error is rendered.
-        self._context = _LookupContext(name, page_path, candidates, registry_empty)
+        # The manager catches this to probe backends, so the message builds on render.
+        self._context = _LookupContext(
+            name, page_path, candidates, registry_empty, declared_in
+        )
         if message is None:
             super().__init__()
         else:
@@ -64,9 +67,16 @@ class FormActionNotFoundError(LookupError):
         return tuple(raw() if callable(raw) else raw)
 
     @cached_property
+    def declared_in(self) -> tuple[str, ...]:
+        """Return the files that declare the name outside the searched scope."""
+        raw = self._context.declared_in
+        return tuple(sorted(set(raw() if callable(raw) else raw)))
+
+    @cached_property
     def suggestions(self) -> tuple[str, ...]:
-        """Return close matches for the name, computed on first access."""
-        return tuple(difflib.get_close_matches(self.name, sorted(set(self.candidates))))
+        """Return close matches for the name other than the name itself."""
+        others = sorted(set(self.candidates) - {self.name})
+        return tuple(difflib.get_close_matches(self.name, others))
 
     @override
     def __str__(self) -> str:
@@ -80,7 +90,7 @@ class FormActionNotFoundError(LookupError):
         """Pickle the rendered message and drop the live candidates source."""
         state = {
             "_context": _LookupContext(
-                self.name, self.page_path, (), self.registry_empty
+                self.name, self.page_path, (), self.registry_empty, self.declared_in
             ),
             "suggestions": self.suggestions,
         }
@@ -88,7 +98,7 @@ class FormActionNotFoundError(LookupError):
 
     @cached_property
     def _composed(self) -> str:
-        """Render the failure with scope, close matches, and registry state."""
+        """Render the failure with scope, declaring files, and close matches."""
         if self.page_path is None:
             searched = "Searched the shared registry (no page scope)."
         else:
@@ -96,6 +106,9 @@ class FormActionNotFoundError(LookupError):
                 f"Searched page scope for {self.page_path} and the shared registry."
             )
         message = f"Unknown form action {self.name!r}. {searched}"
+        if self.declared_in:
+            files = ", ".join(self.declared_in)
+            message = f"{message} The name is declared only in {files}."
         if self.suggestions:
             rendered = ", ".join(repr(suggestion) for suggestion in self.suggestions)
             message = f"{message} Closest matches: {rendered}."

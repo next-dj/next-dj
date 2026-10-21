@@ -47,25 +47,31 @@ gate.save(update_fields=['enabled', 'updated_at'])
 
 ## Walking the code
 
-### 1. Rename `pages/` and `_components/` to fit the domain
+### 1. Two page roots and the app layout
 
-[`config/settings.py`](config/settings.py) reshapes the conventional folders through `NEXT_FRAMEWORK`:
+[`config/settings.py`](config/settings.py) wires both backends through `NEXT_FRAMEWORK`:
 
 ```python
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
-        {"BACKEND": "next.urls.FileRouterBackend", "PAGES_DIR": "panels"}
+        {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "APP_DIRS": True,
+            "DIRS": [str(BASE_DIR / "frame")],
+            "PAGES_DIR": "pages",
+        }
     ],
     "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
-            "COMPONENTS_DIR": "_chunks",
+            "DIRS": [str(SHARED_DIR / "_components")],
+            "COMPONENTS_DIR": "_components",
         }
     ],
 }
 ```
 
-Both keys are strings (not paths). The file router and components backend look up `panels/` inside every installed app. Any directory name works. The word "pages" is a default, not a framework requirement.
+The router walks the project-level root [`frame/`](frame/), whose `layout.djx` is the outer envelope, and the `pages/` tree of every installed app, so the pages themselves live in [`flags/pages/`](flags/pages/). Components resolve from the `_components/` folders inside that tree and from the shared kit. The rest of the app keeps the canonical layout as well, with the DI provider and the named dependency in [`flags/deps.py`](flags/deps.py) and every receiver in [`flags/signals.py`](flags/signals.py), both imported by the framework at startup, so [`FlagsConfig`](flags/apps.py) has no `ready()`. The two directory names stay settings, so a project that already has its own keeps them.
 
 ### 2. `Flag` model and cache-through lookup
 
@@ -92,7 +98,7 @@ The sentinel for "flag does not exist" (`"__missing__"`) is stored the same way 
 
 ### 3. DI provider: `DFlag[Flag]`
 
-[`flags/providers.py`](flags/providers.py) registers a generic marker and a resolver that reads the flag name from two places:
+[`flags/deps.py`](flags/deps.py) registers a generic marker and a resolver that reads the flag name from two places:
 
 ```python
 class DFlag[T](DDependencyBase[T]):
@@ -126,7 +132,7 @@ class FlagProvider(RegisteredParameterProvider):
 
 Two call sites drive the same provider:
 
-- **Pages / URL kwargs**: not used here, but the pattern `panels/admin/flags/[name]/` would resolve `flag: DFlag[Flag]` from `context.url_kwargs["name"]`. Mirrors the `DLink[Link]` pattern from the URL shortener example.
+- **Pages / URL kwargs**: not used here, but the pattern `pages/admin/flags/[name]/` would resolve `flag: DFlag[Flag]` from `context.url_kwargs["name"]`. Mirrors the `DLink[Link]` pattern from the URL shortener example.
 - **Components / template props**: the `feature_guard` component is called as `{% component "feature_guard" flag_name="beta_checkout" %}`, and the literal string flows into the component's template context. The provider reads `context.context_data["flag_name"]`.
 
 When the flag does not exist, the provider returns a **disabled placeholder** (`Flag(name=..., enabled=False)`) instead of `None`. Guard components can then blindly check `flag.enabled` without three-way `None` logic at every usage site. It is a deliberate choice. A `None` would force every call site to handle a ternary (on / off / unknown), and "unknown" is always treated as off here.
@@ -135,7 +141,7 @@ The component modules never start with `from __future__ import annotations`, the
 
 ### 4. Composite `feature_guard`: Python `render()` returns empty to hide
 
-[`flags/panels/_chunks/feature_guard/component.py`](flags/panels/_chunks/feature_guard/component.py) has no `component.djx`. It is a pure-Python composite:
+[`flags/pages/_components/feature_guard/component.py`](flags/pages/_components/feature_guard/component.py) has no `component.djx`. It is a pure-Python composite:
 
 ```python
 def render(flag: DFlag[Flag]) -> str:
@@ -153,7 +159,7 @@ The HTML is a pre-parsed `django.template.Template`. Django's auto-escape handle
 The admin form uses a second composite to show an "on / off" badge next to every row. It takes the template path instead of the Python-render path because the badge has no conditional logic around whether to render at all:
 
 ```python
-# _chunks/toggle_preview/component.py
+# _components/toggle_preview/component.py
 @component.context("state")
 def state(flag: DFlag[Flag]) -> dict[str, str]:
     if flag.enabled:
@@ -162,7 +168,7 @@ def state(flag: DFlag[Flag]) -> dict[str, str]:
 ```
 
 ```djx
-{# _chunks/toggle_preview/component.djx #}
+{# _components/toggle_preview/component.djx #}
 <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ state.classes }}">
   {{ state.label }}
 </span>
@@ -174,7 +180,7 @@ Inside the admin `template.djx` the `for`-loop binds `flag` to each Flag row. `{
 
 ### 6. Bulk-toggle form
 
-[`flags/panels/admin/page.py`](flags/panels/admin/page.py) declares a single self-registering `BulkToggleForm` (auto-name `bulk_toggle_form`, rendered with `{% form "bulk_toggle_form" %}`) handling a checkbox grid. The submit logic lives in `on_valid`:
+[`flags/pages/admin/page.py`](flags/pages/admin/page.py) declares a single self-registering `BulkToggleForm` (auto-name `bulk_toggle_form`, rendered with `{% form "bulk_toggle_form" %}`) handling a checkbox grid. `on_valid` hands the submitted names to `set_enabled_flags` in [`flags/services.py`](flags/services.py):
 
 ```python
 class BulkToggleForm(Form):
@@ -189,22 +195,18 @@ class BulkToggleForm(Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["enabled_names"].choices = [
-            (name, name) for name in Flag.objects.values_list("name", flat=True)
+            (name, name) for name in services.flag_names()
         ]
 
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
-        enabled = set(self.cleaned_data["enabled_names"])
-        for flag in Flag.objects.all():
-            should_be_on = flag.name in enabled
-            if flag.enabled != should_be_on:
-                flag.enabled = should_be_on
-                flag.save(update_fields=["enabled", "updated_at"])
+        services.set_enabled_flags(enabled_names=self.cleaned_data["enabled_names"])
         return super().on_valid(request)
 ```
 
 Three details worth noting:
 
 - `choices` is populated in `__init__` rather than at class-define time so the field reflects the current set of flags on every request.
+- The write and every read of the pages live in `flags/services.py`, since a page tree reads through `visible_to(...)` or a function of `services.py` and writes through a form or a service. Flags have no owner to narrow them by, so the pages ask the service functions.
 - Only **changed** flags are saved. Untouched rows do not fire `post_save`, so the cache-invalidation receiver invalidates nothing unless there is a real state transition.
 - The redirect and the flash come from the declarative success contract. `Meta.success_url` and `Meta.success_message` let the overridden `on_valid` end with `super().on_valid(request)` instead of a hand-built `HttpResponseRedirect`. The base method redirects to the URL `page_reverse_lazy("admin")` resolves once the URLconf is ready, and flashes "Flag toggles saved." through Django's messages framework. The admin template calls the shared `flash_messages` component, which drains the queue and maps each level tag onto an `alert` variant.
 
@@ -224,7 +226,7 @@ class BulkToggleForm(Form):
 
 `WRITE_GATE_FLAG` is `"admin_writes"`. The seed ships it enabled, so the first POST passes the hook, saves, and redirects. Turn the row off (or delete it) and the hook raises `PermissionDenied`, the action returns `403`, and no flag is touched. The gate uses the example's own flag mechanism, the same `Flag` rows and the same read-through cache, so toggling the gate is itself an ordinary flag edit.
 
-[`flags/providers.py`](flags/providers.py) registers the injected service as a named dependency:
+[`flags/deps.py`](flags/deps.py) registers the injected service as a named dependency:
 
 ```python
 @resolver.dependency("flag_service")
@@ -236,11 +238,13 @@ def flag_service() -> FlagService:
 
 The return contract mirrors a Django permission check. `None` or `True` allows. `False` or a raised `PermissionDenied` denies with `403`. Returning an `HttpResponse` short-circuits the dispatch with that response verbatim, which is the seam for redirecting to an upgrade page instead of a bare `403`. Any other return type raises `TypeError`.
 
-A denial emits `next.signals.form_access_denied` with `action_name`, `uid`, `request`, `layer` (`"view"` here), and `reason` (`"raised"` for the `PermissionDenied` path). The `_count_access_denied` receiver in [`flags/receivers.py`](flags/receivers.py) bumps a counter, and the `/admin/metrics/` page surfaces it as a stat card next to the render counters.
+A denial emits `next.signals.form_access_denied` with `action_name`, `uid`, `request`, `layer` (`"view"` here), and `reason` (`"raised"` for the `PermissionDenied` path). The `_count_access_denied` receiver in [`flags/signals.py`](flags/signals.py) bumps a counter, and the `/admin/metrics/` page surfaces it as a stat card next to the render counters.
+
+The flag is the one rule on the action. The example signs nobody in, so [`flags/pages/admin/page.py`](flags/pages/admin/page.py) declares `page.public()`, the statement that the action is open to every visitor on purpose, and `manage.py permissions` lists it as `public`. `manage.py check` reports `next.W129` for an action nothing guards only in a project that declares access, and the declaration itself is that guard.
 
 ### 8. Receivers: `post_save`, `post_delete`, `page_rendered`, `component_rendered`
 
-[`flags/receivers.py`](flags/receivers.py) wires its database and render receivers at app ready time:
+[`flags/signals.py`](flags/signals.py) wires its database and render receivers at app ready time:
 
 ```python
 @receiver(post_save, sender=Flag)
@@ -269,7 +273,7 @@ Django sends `sender` as a keyword like every other argument, so a receiver that
 
 The two database receivers mean the cache and the DB can never drift apart. Toggle a flag, the row saves, the cache entry disappears, the next read refetches, in that order, in under a millisecond.
 
-`page_rendered` is a `next.pages.signals` signal, not a Django one. It fires at the end of every page render and carries the full `file_path` of the `page.py` that produced it. Because every page file is named `page.py`, the receiver derives the key from the path segments _under_ `panels/`. The root page becomes `"/"`, `admin/page.py` becomes `"admin"`, and `admin/metrics/page.py` becomes `"admin/metrics"`. The `/admin/metrics/` page reads the counters through `render_counts()`, and because the signal fires _after_ rendering, the metrics page's own entry only appears on the next visit.
+`page_rendered` is a `next.pages.signals` signal, not a Django one. It fires at the end of every page render and carries the full `file_path` of the `page.py` that produced it. Because every page file is named `page.py`, the receiver derives the key from the directory segments _under_ `PAGES_ROOT`, the app's own `pages/` directory. The root page becomes `"/"`, `admin/page.py` becomes `"admin"`, and `admin/metrics/page.py` becomes `"admin/metrics"`. The `/admin/metrics/` page reads the counters through `render_counts()`, and because the signal fires _after_ rendering, the metrics page's own entry only appears on the next visit.
 
 `component_rendered` is the components-area counterpart, sent from `next.components` once per component render with the `ComponentInfo` in `info`. `_count_feature_guard` filters on `info.name` and bumps a second counter. The signal fires after the render regardless of what came back, so a `feature_guard` whose `render()` returned an empty string still counts. The number answers how often the gate was consulted, not how often it let something through. `/admin/metrics/` shows it as a stat card beside the per-page table.
 
@@ -293,24 +297,24 @@ The root header uses `active_when="page_admin"` so `/admin/` and `/admin/metrics
 
 ### 10. URL names from the file router
 
-| File                           | URL               | Name                      |
-| ------------------------------ | ----------------- | ------------------------- |
-| `panels/page.py`               | `/`               | `next:page_`              |
-| `panels/admin/page.py`         | `/admin/`         | `next:page_admin`         |
-| `panels/admin/metrics/page.py` | `/admin/metrics/` | `next:page_admin_metrics` |
-| `panels/demo/page.py`          | `/demo/`          | `next:page_demo`          |
+| File                          | URL               | Name                      |
+| ----------------------------- | ----------------- | ------------------------- |
+| `pages/page.py`               | `/`               | `next:page_`              |
+| `pages/admin/page.py`         | `/admin/`         | `next:page_admin`         |
+| `pages/admin/metrics/page.py` | `/admin/metrics/` | `next:page_admin_metrics` |
+| `pages/demo/page.py`          | `/demo/`          | `next:page_demo`          |
 
 The bulk-toggle action is mounted at the framework's action URL. Tests use `NextClient.post_action("bulk_toggle_form", {...})` instead of a hardcoded path.
 
 ### 11. Tab titles and a `noindex` admin
 
-[`frame/layout.djx`](frame/layout.djx) calls the shared `page_head` component without a title, and the component renders the builtin `{% metadata %}` tag. `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in [`config/settings.py`](config/settings.py) supplies the template `{title} · {site_name}` and the `default` that the flag board at `/` renders as-is, and `NEXT_FRAMEWORK["SITE"]["NAME"]` fills `{site_name}`. Every other panel names itself with a one-line dict in its `page.py`, and [`panels/admin/page.py`](flags/panels/admin/page.py) adds a robots directive to it:
+[`frame/layout.djx`](frame/layout.djx) calls the shared `page_head` component without a title, and the component renders the builtin `{% metadata %}` tag. `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]` in [`config/settings.py`](config/settings.py) supplies the template `{title} · {site_name}` and the `default` that the flag board at `/` renders as-is, and `NEXT_FRAMEWORK["SITE"]["NAME"]` fills `{site_name}`. Every other panel names itself with a one-line dict in its `page.py`, and [`pages/admin/page.py`](flags/pages/admin/page.py) adds a robots directive to it:
 
 ```python
 metadata: MetadataDict = {"title": "Flag admin", "robots": {"index": False}}
 ```
 
-A dict is inherited by every page below it, so [`admin/metrics/page.py`](flags/panels/admin/metrics/page.py) declares only `{"title": "Metrics"}` and still renders `<meta name="robots" content="noindex">`. The toggle form and the render counters are operator screens with nothing a search engine should rank. `/demo/` is titled `Guard demo` and stays indexable like the board. One parametrized integration test pins all four titles and where the robots tag appears.
+A dict is inherited by every page below it, so [`admin/metrics/page.py`](flags/pages/admin/metrics/page.py) declares only `{"title": "Metrics"}` and still renders `<meta name="robots" content="noindex">`. The toggle form and the render counters are operator screens with nothing a search engine should rank. `/demo/` is titled `Guard demo` and stays indexable like the board. One parametrized integration test pins all four titles and where the robots tag appears.
 
 ## Gotchas
 
@@ -326,9 +330,9 @@ A dict is inherited by every page below it, so [`admin/metrics/page.py`](flags/p
 
 A page with both `render()` and `template.djx` emits `next.W043`. If a page has none of (render / template attribute / registered loader that matches), `next.E012` fails. Every page in this example declares exactly one body source. The `page.py` modules all ship `template.djx` siblings and no `template` attribute.
 
-### Receivers are imported in `apps.ready()`, not at module level
+### `deps` and `signals` load once the app registry is ready
 
-`FlagsConfig.ready()` imports `flags.providers` and `flags.receivers`. If you move those imports to the top of `flags/__init__.py`, Django will try to load them before the app registry is populated and `@receiver(post_save, sender=Flag)` will crash looking up `Flag`.
+The framework imports `flags.deps` and `flags.signals` from its own `ready()`, after every app has loaded, so `FlagsConfig` declares none. Importing them from `flags/__init__.py` instead would run before the app registry is populated, and `@receiver(post_save, sender=Flag)` would crash looking up `Flag`.
 
 ## Further reading
 

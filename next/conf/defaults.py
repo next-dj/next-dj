@@ -1,7 +1,6 @@
 """Framework-level defaults for the `settings.NEXT_FRAMEWORK` mapping.
 
-The values are deep-copied into the merged view on every reload, and nothing here
-imports the rest of the framework, so the configuration layer has no dependencies.
+The values are deep-copied on every reload and nothing here imports the framework.
 """
 
 from __future__ import annotations
@@ -81,6 +80,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "STRICT_CONTEXT": False,
     "STRICT_LOADING": False,
+    "LOGIN_REQUIRED": False,
     "LAZY_COMPONENT_MODULES": False,
     "FORM_AUTODISCOVER": True,
     "FORM_ANCHOR_FILES": None,

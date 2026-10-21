@@ -1,0 +1,5 @@
+{% if rights.row_rules %}
+  {% has_perm rights.change_perm rights.parent %}{% component "inline_row_form" %}{% else %}{% component "inline_row_view" %}{% endhas_perm %}
+{% else %}
+  {% has_perm rights.change_perm %}{% component "inline_row_form" %}{% else %}{% component "inline_row_view" %}{% endhas_perm %}
+{% endif %}

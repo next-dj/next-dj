@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from notes.access import get_active_tenant
+from notes.middleware import get_active_tenant
 from notes.themes import accent_color, theme_stylesheet
 
 

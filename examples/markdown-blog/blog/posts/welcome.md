@@ -7,7 +7,7 @@ description: A tour of the blog, where every post is a Markdown file and one dyn
 keywords: next.dj, markdown, django
 ---
 This is a demo blog built on **next-dj**. Every post you are reading is a Markdown file
-under `blog/posts/`, and one dynamic route at `screens/posts/[slug]/` serves them all.
+under `blog/posts/`, and one dynamic route at `pages/posts/[slug]/` serves them all.
 
 ## Why Markdown?
 

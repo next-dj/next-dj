@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -214,3 +215,41 @@ class TestTickReadsTheWatchedTrees:
             next(gen)
 
         assert notified == [(root / "hello" / "page.py").resolve()]
+
+    @pytest.mark.parametrize("before", [False, True], ids=["appears", "goes"])
+    def test_a_template_beside_a_page_notifies(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, before: bool
+    ) -> None:
+        """A `template.djx` written or removed beside a `page.py` restarts the server."""
+        root = tmp_path / "shell"
+        page_dir = root / "hello"
+        page_dir.mkdir(parents=True)
+        (page_dir / "page.py").write_text("#")
+        template = page_dir / "template.djx"
+        if before:
+            template.write_text("<p>hi</p>")
+        reloader = NextStatReloader()
+        notified: list[Path] = []
+        monkeypatch.setattr(
+            reloader, "notify_file_changed", lambda p: notified.append(Path(p))
+        )
+
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={
+                    "PAGE_BACKENDS": [file_router_config_entry(pages_dir=root)]
+                }
+            ),
+            patch.object(reloader, "snapshot_files", return_value=iter([])),
+        ):
+            gen = reloader.tick()
+            next(gen)
+            if before:
+                template.unlink()
+            else:
+                template.write_text("<p>hi</p>")
+            stamp = page_dir.stat().st_mtime + 10
+            os.utime(page_dir, (stamp, stamp))
+            next(gen)
+
+        assert notified == [(page_dir / "page.py").resolve()]

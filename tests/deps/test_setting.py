@@ -19,6 +19,7 @@ from next.deps.resolver import (
     resolver,
 )
 from next.testing import override_next_settings, resolve_call
+from tests.support import restored_resolver
 
 
 DEFAULT_PATH = "next.deps.DependencyResolver"
@@ -75,12 +76,9 @@ def apply_with(dotted: str) -> None:
 
 @pytest.fixture(autouse=True)
 def _restored_resolver() -> Generator[None, None, None]:
-    """Put the object the holder stood for back, so no swap outlives a test."""
-    original = current_resolver()
-    try:
+    """Keep a resolver swap made inside a test from outliving it."""
+    with restored_resolver():
         yield
-    finally:
-        _holder._wrapped = original
 
 
 class TestConfiguredResolverClass:

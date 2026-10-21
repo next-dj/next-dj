@@ -29,11 +29,7 @@ type _RouteKey = tuple[
 type _PathKey = tuple[str, str, str]
 type _Paths = tuple[tuple[str, str], ...]
 
-# A route key is the URLconf, the script prefix, the view name and the URL arguments,
-# so every language variant and query of one page shares one entry. A route whose
-# arguments do not hash is keyed by the URLconf, the script prefix and its path.
-# An entry pairs every `LANGUAGES` code, in order, with the path of the route under it,
-# and an empty string marks a code the route does not reverse under.
+# Keyed by route, so every language variant of a page shares one entry.
 _translated: Final[LruCache[_RouteKey | _PathKey, _Paths]] = LruCache()
 
 
@@ -92,8 +88,7 @@ def _route_paths(
 def _own_code(paths: _Paths, path: str) -> str | None:
     """Return the one code whose route path is `path`, `None` for none or several.
 
-    Each language of `i18n_patterns()` reverses to a path of its own, so the path a
-    request resolved names its language without parsing the prefix again.
+    Each `i18n_patterns()` language reverses to its own path, which names the language.
     """
     owners = [code for code, found in paths if found == path]
     return owners[0] if len(owners) == 1 else None
@@ -104,8 +99,7 @@ def _translations(
 ) -> tuple[tuple[str, str], ...]:
     """Return `path` under every `LANGUAGES` code its route reverses under, in order.
 
-    A `match` resolved for `path` saves the resolve. A code repeating the own path is
-    left out, and a path no named route resolves has no alternates.
+    A resolved `match` saves the resolve, and a code repeating the own path is left out.
     """
     parts = urlsplit(path)
     if not parts.path.startswith(prefix):
@@ -150,8 +144,7 @@ def hreflang_urls(
 ) -> tuple[tuple[str, str], ...]:
     """Return `path` under every `LANGUAGES` code it translates to, empty below two.
 
-    `match` is the resolve of `path` when the caller holds it, the request's own. A
-    URLconf without `i18n_patterns()` has no language prefix, so it returns none.
+    `match` is the caller's resolve of `path`, and no `i18n_patterns()` means no result.
     """
     urlconf = get_urlconf() or str(getattr(settings, "ROOT_URLCONF", ""))
     if not is_language_prefix_patterns_used(urlconf)[0]:

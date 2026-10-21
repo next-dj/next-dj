@@ -1,7 +1,6 @@
 """Router access implementation bound into the `next.ports` slot at app startup.
 
-The urls area routes to pages and so imports `next.pages`. The watcher and the system
-checks read this port instead, which keeps them out of that loop.
+Importing `next.pages` here would loop, so the watcher and checks read this port.
 """
 
 from __future__ import annotations

@@ -93,11 +93,7 @@ class PollBroker:
             condition.notify_all()
 
     def changes(self, poll_id: int) -> Iterator[Change]:
-        """Yield a `Change` for every poll mutation while the client stays open.
-
-        Each subscriber tracks its own `last_revision`, so concurrent tabs each read a
-        snapshot once, and a timed-out wait loops without yielding.
-        """
+        """Yield a `Change` for every poll mutation while the client stays open."""
         condition = self._conditions[poll_id]
         last_revision = self._revisions[poll_id]
         while True:
@@ -115,11 +111,7 @@ class PollBroker:
     def _wait_for_new_revision(
         self, poll_id: int, condition: threading.Condition, baseline: int
     ) -> int:
-        """Block until the revision differs from `baseline` or the wake fires.
-
-        Binds `baseline` as a default argument on the predicate to keep the lambda
-        free of late-binding traps when this helper runs from a loop.
-        """
+        """Block until the revision differs from `baseline` or the wake fires."""
         with condition:
             condition.wait_for(
                 lambda b=baseline: self._revisions[poll_id] != b,

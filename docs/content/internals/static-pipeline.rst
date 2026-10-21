@@ -108,7 +108,7 @@ Modules
 ``next.static.discovery``.
    ``AssetDiscovery`` walks the filesystem and produces ``StaticAsset`` records.
    Hosts ``StemRegistry`` plus the ``default_stems`` instance and reads the ``default_kinds`` registry from ``next.static.assets``.
-   ``default_stems`` is not re-exported from the ``next.static`` package surface, so code that registers a stem imports it from ``next.static.discovery`` directly.
+   ``next.static`` re-exports ``default_stems``, so code that registers a stem imports it from the package.
 
 ``next.static.assets``.
    The ``StaticAsset`` frozen dataclass and ``KindRegistry`` plus the ``default_kinds`` instance.

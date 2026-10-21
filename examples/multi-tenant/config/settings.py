@@ -72,8 +72,7 @@ STATIC_URL = "static/"
 ASSET_BUILD_ID = os.environ.get("NOTES_BUILD_ID", "2026.09.1")
 
 SHARED_DIR = BASE_DIR.parent / "_shared"
-# The shared kit ships Python helpers next to its components, so the directory joins the
-# import path the way `pytest.ini` already adds it for the test run.
+# The shared kit ships Python helpers beside its components, so it joins sys.path.
 sys.path.insert(0, str(SHARED_DIR))
 STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
@@ -85,7 +84,7 @@ NEXT_FRAMEWORK = {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
             "DIRS": [BASE_DIR / "root_pages"],
-            "PAGES_DIR": "workspaces",
+            "PAGES_DIR": "pages",
             "OPTIONS": {
                 "context_processors": [
                     "django.template.context_processors.request",
@@ -98,7 +97,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(BASE_DIR / "root_blocks"), str(SHARED_DIR / "_components")],
-            "COMPONENTS_DIR": "_blocks",
+            "COMPONENTS_DIR": "_components",
         }
     ],
     "STATIC_BACKENDS": [{"BACKEND": "notes.backends.TenantPrefixStaticBackend"}],

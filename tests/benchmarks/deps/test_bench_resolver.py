@@ -1,8 +1,9 @@
 import pytest
+from django.contrib.auth.models import Group
 from django.http import HttpRequest
 from django.test import RequestFactory
 
-from next.deps import Depends
+from next.deps import Depends, DObject
 from next.deps.introspect import (
     cached_accepts_var_keyword,
     cached_signature,
@@ -12,6 +13,7 @@ from next.deps.linear import LinearDependencyResolver
 from next.deps.resolver import DependencyResolver
 from next.pages.context import Context
 from next.urls import DUrl
+from tests.benchmarks.factories import STAND_IN_PK
 from tests.support import build_mock_http_request
 
 
@@ -60,6 +62,10 @@ def _handler_component(value: int = Context("page_value"), key_3: str = "") -> s
     return f"{value}:{key_3}"
 
 
+def _handler_object(group: DObject[Group]) -> Group:
+    return group
+
+
 _FOUR_MARKERS_KWARGS: dict[str, object] = {
     "request": RequestFactory().get("/"),
     "slug": "hello",
@@ -83,8 +89,7 @@ def _default_resolver() -> DependencyResolver:
 def _themed_resolver() -> DependencyResolver:
     """Fresh resolver with its providers loaded and the `theme` dependency bound.
 
-    The registry sync is paid here, so a plan benchmark measures the compile of
-    one callable rather than the one-off instantiation of every provider.
+    The registry sync is paid here, so a plan benchmark prices one compile only.
     """
     planned = DependencyResolver()
     planned.dependency("theme")(lambda: "dark")
@@ -102,6 +107,20 @@ def _linear_resolver() -> LinearDependencyResolver:
 
 def _resolve_four_markers(planned: DependencyResolver) -> dict[str, object]:
     return planned.resolve_dependencies(_handler_four_markers, **_FOUR_MARKERS_KWARGS)
+
+
+def _scoped_resolver() -> DependencyResolver:
+    """Fresh resolver with its providers loaded and the `scope` dependency bound."""
+    fresh = DependencyResolver()
+    fresh.dependency("scope")(lambda: "tenant")
+    fresh._sync_providers()
+    return fresh
+
+
+def _resolve_object(
+    fresh: DependencyResolver, cache: dict[str, object] | None = None
+) -> dict[str, object]:
+    return fresh.resolve_dependencies(_handler_object, group=STAND_IN_PK, _cache=cache)
 
 
 class TestBenchDependencyResolver:
@@ -134,8 +153,7 @@ class TestBenchDependencyResolver:
     def test_resolve_claimed_request_and_default(self, benchmark) -> None:
         """Plan replay over an ``HttpRequest`` annotation and one default kwarg.
 
-        The compile narrows the request parameter to one provider, which still asks
-        ``can_handle`` because only the context knows whether a request is in flight.
+        The request provider still asks ``can_handle`` because only the context knows.
         """
         resolver = _default_resolver()
         request = build_mock_http_request()
@@ -183,8 +201,7 @@ class TestBenchDependencyResolver:
     def test_linear_resolve_four_markers(self, benchmark) -> None:
         """The four-marker handler walked by the plan-free reference resolver.
 
-        Paired with ``test_resolve_four_markers``, which is the same work under
-        the compiled plan, so the price of the safety net stays a measurement.
+        Pairs with ``test_resolve_four_markers``, the same work under the compiled plan.
         """
         walked = _linear_resolver()
         benchmark(
@@ -217,8 +234,7 @@ class TestBenchDependencyResolver:
 class TestBenchInjectionPlan:
     """Cold compile against warm replay of the same four-marker handler.
 
-    Signature and type-hint memos are process-wide and warm after the first
-    round, so only the initial static-verdict walk pays the cold-compile price.
+    Type-hint memos are process-wide, so only the first static-verdict walk is cold.
     """
 
     @pytest.mark.benchmark(group="deps.plan")
@@ -252,11 +268,47 @@ class TestBenchInjectionPlan:
         )
 
 
+@pytest.mark.usefixtures("stand_in_rows")
+class TestBenchObjectFill:
+    """A `DObject` parameter compiled once, then replayed with and without its row.
+
+    `visible_to` answers from memory, so the rounds measure the injection path alone.
+    """
+
+    @pytest.mark.benchmark(group="deps.objects")
+    def test_compile_cold(self, benchmark) -> None:
+        """First resolve of the handler, compiling the filler that reads the model."""
+
+        def setup() -> tuple[tuple[DependencyResolver], dict[str, object]]:
+            return (_scoped_resolver(),), {}
+
+        benchmark.pedantic(
+            _resolve_object,
+            setup=setup,
+            rounds=_PLAN_ROUNDS,
+            warmup_rounds=_PLAN_WARMUP_ROUNDS,
+        )
+
+    @pytest.mark.benchmark(group="deps.objects")
+    def test_replay_cached_row(self, benchmark) -> None:
+        """Warm resolver whose row already sits in the render cache."""
+        warm = _scoped_resolver()
+        cache: dict[str, object] = {}
+        _resolve_object(warm, cache)
+        benchmark(_resolve_object, warm, cache)
+
+    @pytest.mark.benchmark(group="deps.objects")
+    def test_replay_fetch(self, benchmark) -> None:
+        """Warm resolver with a fresh cache, paying the scope and the lookup."""
+        warm = _scoped_resolver()
+        _resolve_object(warm)
+        benchmark(_resolve_object, warm)
+
+
 class TestBenchIntrospectionCache:
     """Warm reads of the per-callable introspection memos.
 
-    Every page, component, and action callable goes through these on each
-    resolve, and the form dispatcher reads the var-keyword one on its own.
+    Every page, component, and action callable goes through these on each resolve.
     """
 
     @pytest.mark.benchmark(group="deps.introspection")

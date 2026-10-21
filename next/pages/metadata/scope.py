@@ -64,10 +64,7 @@ class SiteTier(NamedTuple):
 def site_tier() -> SiteTier:
     """Return the settings defaults as the outermost segment of every chain.
 
-    The site name defaults to `SITE["NAME"]`. A malformed `DEFAULTS` raises under
-    `DEBUG` or `STRICT_LOADING`, as a malformed `page.py` dict does. Otherwise the
-    segment carries the site name alone under `REFUSED_ROBOTS`, with the refusal, so
-    a page is not indexed with defaults it was not meant to have.
+    A malformed `DEFAULTS` raises under `DEBUG` or `STRICT_LOADING`, else is refused.
     """
     defaults = scope_value("METADATA", "DEFAULTS")
     tier = SiteTier(Segment(SITE_SOURCE))
@@ -94,8 +91,7 @@ def site_segment() -> Segment:
 def contain_site_refusal() -> None:
     """Mark the current render degraded while `DEFAULTS` is refused.
 
-    A render that reads a refused tier is not stored in a shared cache, and the
-    refusal is logged at the `FailureLog` rate.
+    Such a render skips shared caches, and the refusal is logged at `FailureLog` rate.
     """
     refusal = site_tier().refusal
     if refusal is None:

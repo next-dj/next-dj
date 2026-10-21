@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from tests.support.apps import (
+    AppFactory,
+    installed_apps,
+    throwaway_apps,
+    write_app,
+    write_urlconf,
+)
 from tests.support.attribution import (
     handler_declared_here,
     unwrapped_decorator,
@@ -97,13 +104,16 @@ from tests.support.deps import (
     DeferringProvider,
     OtherForm,
     PlanEntry,
+    install_visibility_hooks,
     plan_by_name,
     plan_entries,
 )
 from tests.support.forms import (
+    TWIN_ACTION,
     GuardedTenantForm,
     build_post_request,
     isolated_form_registries,
+    write_twin_pages,
 )
 from tests.support.helpers import (
     SignalSender,
@@ -156,8 +166,19 @@ from tests.support.patches import (
     patched_watch_sources,
     record_calls,
     restored_provider_registry,
+    restored_resolver,
     restored_static_registries,
     static_names_resolved_by,
+)
+from tests.support.permissions import (
+    MODEL_BACKEND,
+    OBJECT_PERMISSION_BACKENDS,
+    PermissionHolder,
+    QuietHolder,
+    is_owner,
+    is_staff,
+    owns_group,
+    restored_permissions,
 )
 from tests.support.ports import (
     IntentOnlyShaper,
@@ -166,6 +187,7 @@ from tests.support.ports import (
     port_methods,
 )
 from tests.support.routers import (
+    ENTRY_ROUTER,
     AppRootRouter,
     EntryRouter,
     MalformedRootsRouter,
@@ -176,6 +198,7 @@ from tests.support.routers import (
     RaisingSkipNamesRouter,
     RootPagesRouter,
     SkippingRouter,
+    routers_from,
 )
 from tests.support.scenarios import tick_scenario
 from tests.support.sites import (
@@ -218,6 +241,7 @@ __all__ = [
     "COERCE_URL_VALUE_CASES",
     "DUMMY_COMPONENTS_BACKEND",
     "EMPTY_ASSET_CASES",
+    "ENTRY_ROUTER",
     "FEED_URLCONF",
     "FINDER_INSTALL_CASES",
     "I18N",
@@ -230,8 +254,10 @@ __all__ = [
     "MANIFEST_BACKENDS",
     "METADATA_MERGE_CASES",
     "METADATA_SHAPE_CASES",
+    "MODEL_BACKEND",
     "NAMESPACED_URLCONF",
     "NOINDEX",
+    "OBJECT_PERMISSION_BACKENDS",
     "PAGES_DIRS_CONFIG_CASES",
     "PAGES_ROUTER_MANAGER_TARGETS",
     "PAGE_BODY_SOURCE_CASES",
@@ -256,6 +282,7 @@ __all__ = [
     "TEMPLATE_AND_COMPONENT_SOURCES",
     "TEMPLATE_PRIORITY_CASES",
     "TITLE_TEMPLATE_CASES",
+    "TWIN_ACTION",
     "URLS_ROUTER_MANAGER_TARGETS",
     "URL_BY_ANNOTATION_RESOLVE_CASES",
     "URL_KWARGS_RESOLVE_CASES",
@@ -266,6 +293,7 @@ __all__ = [
     "WITH_BASE",
     "AForm",
     "AbsoluteUrlCase",
+    "AppFactory",
     "AppFinderCase",
     "AppRootRouter",
     "BuildManifestBackend",
@@ -292,10 +320,12 @@ __all__ = [
     "PageRenderCase",
     "PagesDirsConfigCase",
     "ParityCase",
+    "PermissionHolder",
     "PlainStaticBackend",
     "PlanCase",
     "PlanEntry",
     "PrefixingStaticBackend",
+    "QuietHolder",
     "RaisingComponentsRouter",
     "RaisingRootsRouter",
     "RaisingSkipNamesRouter",
@@ -342,9 +372,14 @@ __all__ = [
     "handler_declared_here",
     "importable_dir",
     "inspect_parameter",
+    "install_visibility_hooks",
+    "installed_apps",
+    "is_owner",
+    "is_staff",
     "isolated_form_registries",
     "named_temp_py",
     "next_framework_settings_stand_in",
+    "owns_group",
     "page_naming_one_style",
     "parameter_shape",
     "partial_meta",
@@ -363,11 +398,15 @@ __all__ = [
     "record_calls",
     "record_path_calls",
     "resolve_page_metadata",
+    "restored_permissions",
     "restored_provider_registry",
+    "restored_resolver",
     "restored_static_registries",
     "routed",
+    "routers_from",
     "site_settings",
     "static_names_resolved_by",
+    "throwaway_apps",
     "tick_scenario",
     "touch_later",
     "typing_optional",
@@ -375,9 +414,12 @@ __all__ = [
     "unwrapped_decorator",
     "watching_components_entry",
     "wraps_decorator",
+    "write_app",
     "write_colocated_component_assets",
     "write_metadata_tree",
     "write_page",
     "write_page_chain",
     "write_tree",
+    "write_twin_pages",
+    "write_urlconf",
 ]

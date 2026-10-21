@@ -1,0 +1,11 @@
+from flags.deps import DFlag
+from flags.models import Flag
+
+from next import component
+
+
+@component.context("state")
+def state(flag: DFlag[Flag]) -> dict[str, str]:
+    if flag.enabled:
+        return {"label": "on", "classes": "bg-emerald-100 text-emerald-800"}
+    return {"label": "off", "classes": "bg-slate-100 text-slate-600"}

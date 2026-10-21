@@ -49,15 +49,17 @@ A request to ``/_next/form/<uid>/`` follows a fixed pipeline.
 
 1. The dispatcher resolves the action UID to its handler and form class.
 2. The static ``ActionGuard`` runs, so a denied request never reaches application code, see :ref:`topics-forms-actions-guards`.
+   A permission registered in a ``permissions.py`` waits for the bound form on a class-bound form.
 3. The posted origin resolves to its page module and typed URL kwargs.
 4. That page authorizes the request through its own ``render()``, and a response it returns is sent as the answer to the submission.
 5. The shared dependency cache is installed on the request.
 6. The form class resolves through the dependency resolver and ``check_permissions`` runs on it, see :ref:`topics-forms-actions-dynamic-guards`.
-7. The form is constructed with POST data, uploaded files, and the initial data that ``get_initial`` returns.
-8. ``has_object_permission`` runs on the bound form.
-9. A request that names validate fields short circuits here.
-   The form validates, the response carries only the errors of the named fields, and the handler never runs.
-10. ``form.is_valid()`` runs.
+7. The form is constructed with POST data, uploaded files, and the kwargs that ``get_form_kwargs`` returns, or the initial data of ``get_initial`` when the class does not override that hook.
+8. The registered permissions of ``Meta.permission_required`` are checked on the bound row as ``user.has_perm(perm, obj)``, see :ref:`topics-permissions`.
+9. ``has_object_permission`` runs on the bound form.
+10. A request that names validate fields short circuits here.
+    The form validates, the response carries only the errors of the named fields, and the handler never runs.
+11. ``form.is_valid()`` runs.
     On a valid form the handler is called with the dependency-resolved parameters and its return value goes to the client.
     On an invalid form the dispatcher loads the origin page, reattaches the cached dependencies, and re-renders the template with ``form`` set to the bound failing form.
 
@@ -87,6 +89,8 @@ Dependency cache.
    Read the per-request cache through ``next.deps.render_dep_cache(request)``.
    The dispatcher stores it on the request under the attribute named by ``REQUEST_DEP_CACHE_ATTR`` so the helper can find it.
    The re-render reuses each cached value without rerunning the provider.
+   The one exception is a cached row that a failing ``ModelForm`` holds as its instance, such as a ``DObject`` row handed over through ``get_initial`` or ``get_form_kwargs``.
+   Django validation writes the posted values into that instance, so the dispatcher drops every cache entry that holds it, and the page contexts load the row afresh and show what is stored while the form keeps the posted values and its errors.
    A custom DI provider must therefore be idempotent across a render cycle.
 
 .. tip::
@@ -108,7 +112,7 @@ Page module body source.
 
 Layout chain.
    Every ancestor ``layout.djx`` renders again.
-   Layout level context functions still run, with the cached values where the cache hit, with fresh evaluation where it did not.
+   The inherited context functions of ancestor ``page.py`` files still run, with the cached values where the cache hit, with fresh evaluation where it did not.
 
 Static collector.
    The collector restarts so the rendered HTML contains the right set of asset links.
@@ -135,13 +139,17 @@ The dispatcher does not rerun the validation of any other form.
 Influencing the re-render
 -------------------------
 
-One hook lets a page customise the form before it reaches the template.
+Two hooks let a page customise the form before it reaches the template.
 
 The ``get_initial`` hook.
    Override ``get_initial`` on the form class to shape the initial data or the bound model instance.
    The hook runs on the initial GET render and again on every POST bind, where its return value seeds the bound form's ``initial`` and, for a ModelForm, its ``instance``.
    On the re-render the submitted POST values win over the seeded initial, so the user sees what they typed.
-   The one path that skips ``get_initial`` on POST is a ``form_class`` factory that returns a ``(FormClass, init_kwargs)`` tuple, see :doc:`actions`.
+   Two paths skip ``get_initial`` on POST, a ``form_class`` factory that returns a ``(FormClass, init_kwargs)`` tuple and a ``get_form_kwargs`` override that does not call ``super()``, see :doc:`actions`.
+
+The ``get_form_kwargs`` hook.
+   Override ``get_form_kwargs`` to hand the constructor further arguments, such as a prefix or an instance loaded through ``DObject``.
+   It runs on the same two occasions, and the bound form on the re-render is the one built from its result, see :ref:`topics-forms-actions-form-kwargs`.
 
 Redirecting back to the origin
 ------------------------------

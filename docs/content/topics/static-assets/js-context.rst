@@ -22,6 +22,7 @@ Pass ``serialize=True`` on the ``@context`` decorator, or on ``@component.contex
 See :doc:`/content/topics/context` for both decorators.
 The value appears under ``window.Next.context.<key>``.
 Keys without the flag stay server-side only.
+A component whose access check refuses the user publishes none of its ``serialize=True`` values, because they reach the page collector only after the grant.
 
 A value the active serializer cannot encode raises ``TypeError`` during rendering, when the collector registers it.
 The error names the offending key.

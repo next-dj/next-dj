@@ -3,7 +3,7 @@
 It lives here so the partial checks reach it without importing the tag shim.
 """
 
-from typing import TYPE_CHECKING, Final, cast, override
+from typing import TYPE_CHECKING, Any, Final, cast, override
 
 from django import template
 from django.core.exceptions import ImproperlyConfigured
@@ -28,6 +28,7 @@ from next.seeding import (
     ACTION_ANCHOR_KEY,
     COLLECTOR_KEY,
     COMPONENT_MODULE_PATH_KEY,
+    DEP_CACHE_KEY,
     PAGE_MODULE_PATH_KEY,
     REQUEST_KEY,
     TEMPLATE_PATH_KEY,
@@ -63,6 +64,11 @@ def _action_anchor_from_context(context: template.Context) -> str | None:
     """Return the anchor the actions of the enclosing form resolve against."""
     raw_anchor = context.get(ACTION_ANCHOR_KEY)
     return str(raw_anchor) if raw_anchor else None
+
+
+def _dep_cache(value: object) -> dict[str, Any] | None:
+    """Return the dependency cache a page render left in the context, if it did."""
+    return cast("dict[str, Any]", value) if isinstance(value, dict) else None
 
 
 def anchor_lookup_from_context(
@@ -142,8 +148,7 @@ class FormNode(template.Node):
     def _origin_path(context: template.Context, request: "HttpRequest") -> str | None:
         """Return the page URL the form belongs to, query string included.
 
-        `FORM_ORIGIN_OVERRIDE_KEY` wins over both the posted origin and the current
-        URL, for a validation-error re-render and a wizard step advance alike.
+        `FORM_ORIGIN_OVERRIDE_KEY` wins over both the posted origin and the current URL.
         """
         override = context.get(FORM_ORIGIN_OVERRIDE_KEY)
         if override is not None:
@@ -209,7 +214,9 @@ class FormNode(template.Node):
             wizard_instance = getattr(form_obj, "wizard", None)
         else:
             built = (
-                _build_form_namespace_from_meta(meta, request)
+                _build_form_namespace_from_meta(
+                    meta, request, _dep_cache(context.get(DEP_CACHE_KEY))
+                )
                 if meta is not None
                 else None
             )

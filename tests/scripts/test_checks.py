@@ -203,7 +203,7 @@ def _consented_run(root: Path, **framework: object):
 class TestConsentedNeedsConsent:
     """`{% #consented %}` without a `CONSENT` entry warns (`next.W123`)."""
 
-    def test_a_consented_block_without_consent_is_w133(self, tmp_path: Path) -> None:
+    def test_a_consented_block_without_consent_is_w123(self, tmp_path: Path) -> None:
         root = write_tree(tmp_path / "pages", scripts=None)
         for index in range(4):
             write_page(root, f"p{index}", f"template = {CONSENTED!r}\n")
@@ -243,7 +243,7 @@ MARKETING = {"CATEGORIES": ["necessary", "marketing"]}
 class TestConsentedCategories:
     """`{% #consented %}` names a listed category (`next.W091`)."""
 
-    def test_an_unlisted_literal_is_w092_once_per_name(self, tmp_path: Path) -> None:
+    def test_an_unlisted_literal_is_w091_once_per_name(self, tmp_path: Path) -> None:
         root = write_tree(
             tmp_path / "pages", scripts=None, page=f"template = {NESTED!r}\n"
         )

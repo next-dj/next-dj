@@ -53,7 +53,7 @@ Each key accepts one shape, and a value of any other type is dropped in favour o
 - ``CSRF_DELIVERY`` accepts a string naming a mode.
 - ``STATIC_VERSION`` accepts a string or ``None``.
 - ``URL_NAME_TEMPLATE`` also accepts a string, but a format template such as ``page_{name}`` rather than a dotted path.
-- The bool flags (``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, ``CSP_NONCE``) accept any value and pass through ``bool()``.
+- The bool flags (``LOGIN_REQUIRED``, ``STRICT_CONTEXT``, ``STRICT_LOADING``, ``LAZY_COMPONENT_MODULES``, ``FORM_AUTODISCOVER``, ``STATIC_DISCOVERY_CACHE``, ``CSP_NONCE``) accept any value and pass through ``bool()``.
 
 A dropped value is reported at ``manage.py check`` as ``next.E076``, or under the code the key owns where it carries one, and a bool flag holding a non-bool is reported as ``next.W072``.
 A top-level key that is not in this catalog is reported as ``next.E035``, and the merged view raises ``AttributeError`` for it, so a typo never reaches a read site as a default.
@@ -85,6 +85,7 @@ Default value.
 
 Each entry is passed to the backend constructor.
 Keys are ``BACKEND``, ``DIRS``, ``APP_DIRS``, ``PAGES_DIR``, and ``OPTIONS``.
+A ``FileRouterBackend`` entry may leave out ``OPTIONS``, which then reads as the empty mapping, and ``DIRS``, which then reads as the empty list.
 
 ``DIRS`` accepts two kinds of entry.
 An absolute or project-relative path that resolves to an existing directory is added as an extra page root.
@@ -148,16 +149,6 @@ Default value.
            "OPTIONS": {},
        }
    ]
-
-FORM_AUTODISCOVER
-~~~~~~~~~~~~~~~~~
-
-Boolean that controls whether ``NextFrameworkConfig.ready`` imports the ``forms`` submodule of every installed app on startup.
-
-Default value ``True``.
-
-When ``True``, shared forms declared in ``app/forms.py`` register before the first request arrives.
-Set to ``False`` to disable the automatic import and manage registration manually.
 
 FORM_ANCHOR_FILES
 ~~~~~~~~~~~~~~~~~
@@ -234,6 +225,25 @@ A version that never changes leaves the version guard silent at runtime, so a de
 
 See :doc:`/content/topics/partial-rendering/reference` for the wire protocol and :doc:`/content/topics/partial-rendering/sse` for the stream contract.
 
+Application modules
+-------------------
+
+``NextFrameworkConfig.ready`` imports four conventional modules from every installed app, the third-party ones included, the way Django's admin imports every ``admin.py``.
+All ``deps`` modules load first, then all ``permissions`` modules, then all ``forms`` modules, then all ``signals`` modules, so a form finds the providers, named dependencies, and object permissions of every app already registered.
+An app without the module is skipped, and a module that fails to import raises its own error out of ``ready``.
+The ``deps``, ``permissions``, and ``signals`` sweeps always run, and ``FORM_AUTODISCOVER`` turns off the ``forms`` one.
+
+FORM_AUTODISCOVER
+~~~~~~~~~~~~~~~~~
+
+Boolean that controls whether the ``forms`` submodule of every installed app is imported on startup.
+
+Default value ``True``.
+
+When ``True``, shared forms declared in ``app/forms.py`` register before the first request arrives.
+``next.forms.autodiscover_forms`` runs the same sweep on a manual call and honours the key as well.
+A project that sets it to ``False`` imports the ``forms`` modules it wants from ``AppConfig.ready``.
+
 Routing
 -------
 
@@ -255,7 +265,7 @@ Dotted path to the resolver class that wraps the framework urlpatterns.
 
 Default value ``"next.urls.TrieURLResolver"``.
 
-The class is instantiated with a root route pattern and the lazy sequence of router and form-action patterns, so it owns every resolution under the ``include("next.urls")`` mount.
+The class is instantiated with a root route pattern and a lazy pattern sequence, the CSRF, form-action, page, and SEO patterns of ``include("next.urls")`` or the patterns of one ``pages()`` tree, so it owns every resolution under both include points.
 The default ``TrieURLResolver`` resolves a static route through a dictionary lookup and a parameterised route through a walk over a segment trie, with the final match delegated to standard Django pattern resolution.
 Set the key to ``"django.urls.resolvers.URLResolver"`` to opt out of the trie and run every resolution through Django's plain linear scan.
 A custom value must name a :class:`~django.urls.URLResolver` subclass whose constructor accepts the same pattern and pattern-sequence pair.
@@ -338,6 +348,21 @@ The built-in ``JsonJsContextSerializer`` steps in only when the setting is unset
 
 See :doc:`static` under *JS context serializer* for the protocol and the bundled serializers.
 
+Access
+------
+
+LOGIN_REQUIRED
+~~~~~~~~~~~~~~
+
+When ``True``, every page, action, and zone request whose access rule declares nothing and is not public requires a logged-in user, and a component follows the page or the zone it renders in.
+A ``page.public()`` lifts the requirement for its page, and ``page.public(inherit=True)`` for every page below it as well.
+Listing ``LoginRequiredMiddleware`` or a subclass of it in ``MIDDLEWARE`` turns the same behaviour on with the key left out, and the framework then takes the login URL and the field name from the listed middleware.
+The key closes the page trees alone, so a Django view of the project outside them needs the middleware or :func:`~django.contrib.auth.decorators.login_required` of its own.
+
+Default value ``False``.
+``manage.py check`` warns with ``next.W130`` about ``False`` written beside the middleware and with ``next.W131`` about ``True`` without ``django.contrib.auth`` and its ``AuthenticationMiddleware``.
+:ref:`topics-access-default-login` describes the behaviour and how ``page.public()`` differs from :func:`~django.contrib.auth.decorators.login_not_required`.
+
 Strictness
 ----------
 
@@ -362,7 +387,7 @@ A ``{% component %}`` name that does not resolve raises ``TemplateSyntaxError`` 
 When ``False``, the default, the framework logs and keeps rendering.
 A broken ``page.py`` answers 404 while ``logger.exception`` records the full traceback, and a missed component renders as an empty string with a warning log.
 ``settings.DEBUG`` raises the same page-load error without this flag, so the flag matters for a ``DEBUG=False`` deployment.
-In every mode the failure is scoped to the broken page, sibling pages keep serving.
+In every mode the failure is scoped to the broken page and the pages below it, which answer to what it would have declared with ``inherit=True``, and sibling pages keep serving.
 
 Every fail-loud path reads the flag through the ``next.conf.fail_loudly`` predicate, which combines it with ``settings.DEBUG`` so the page loader and the component tag cannot drift apart.
 The same predicate lets a failure of any other user callable propagate, see :ref:`topics-failure-containment`.

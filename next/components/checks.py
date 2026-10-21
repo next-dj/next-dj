@@ -160,11 +160,7 @@ def _checked_backends() -> tuple[ComponentsBackend, ...]:
 
 @register(NEXT)
 def check_duplicate_component_names(*args, **kwargs) -> list[CheckMessage]:
-    """Check that no two components share a name within one route scope.
-
-    The scope is the pair the resolver scores on, so the same name under two
-    route trails of one tree is the documented override rather than a clash.
-    """
+    """Check that no two components share a name within one route scope."""
     errors: list[CheckMessage] = []
     configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
@@ -223,8 +219,7 @@ def _root_scope_entries(
 def _resolution_is_ordering(first: _RootScopeEntry, second: _RootScopeEntry) -> bool:
     """Whether only registration order decides between two same-named components.
 
-    A page tree beats a `COMPONENT_BACKENDS` root as a project-local override, so only
-    two roots of one kind with reachable scopes come down to order.
+    A page tree beats a `COMPONENT_BACKENDS` root, so only same-kind roots tie.
     """
     if first.everywhere != second.everywhere:
         return False
@@ -339,13 +334,9 @@ def check_component_py_no_pages_context(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
-@register(NEXT, deploy=True)
+@register(NEXT)
 def check_component_module_imports(*args, **kwargs) -> list[CheckMessage]:
-    """Report a `component.py` that raises while importing (`next.E084`).
-
-    Importing every user module costs a full tree walk, so the check is a deployment
-    one and runs under `manage.py check --deploy` instead of on every command.
-    """
+    """Report a `component.py` that raises while importing (`next.E084`)."""
     configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return []
@@ -359,9 +350,9 @@ def check_component_module_imports(*args, **kwargs) -> list[CheckMessage]:
             errors.append(
                 Error(
                     f"component.py at {module_path} failed to import "
-                    f"({type(error).__name__}: {error}). The render falls back "
-                    "to the template alone, so every @component.context of that "
-                    "module stays out of the body.",
+                    f"({type(error).__name__}: {error}). Its access declarations "
+                    "are unknown, so the component renders as nothing, or raises "
+                    "the error under DEBUG or STRICT_LOADING.",
                     obj=str(module_path),
                     id="next.E084",
                 )
@@ -373,22 +364,20 @@ def check_component_module_imports(*args, **kwargs) -> list[CheckMessage]:
 def check_component_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
     """Flag a `@component.context` no component render collects (`next.E075`).
 
-    A registration keys on the file declaring the callable, so decorating an imported
-    helper or a sibling `component.py` callable binds it to that other module instead.
+    A registration keys on the declaring file, so an imported helper binds elsewhere.
     """
     configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return []
 
     for backend in _checked_backends():
-        # Called for the import it performs, which is what runs the decorators this
-        # check then reads out of the registry.
+        # Called for the import, which runs the decorators the registry read needs.
         backend.import_component_modules()
 
     return registration_file_errors(
         _COMPONENT_CONTEXT_SUBJECT,
-        registrations=component._registry.registered_names(),
-        misattributed=component._registry.misattributed(),
+        registrations=component.registry.registered_names(),
+        misattributed=component.registry.misattributed(),
     )
 
 

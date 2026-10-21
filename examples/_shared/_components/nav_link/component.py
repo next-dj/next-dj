@@ -42,11 +42,7 @@ def href(
     url_kwargs: Mapping[str, object] | None = None,
     url_args: Sequence[object] | None = None,
 ) -> str:
-    """Resolve the anchor target from ``url_name`` or a literal ``url``.
-
-    A literal ``url`` wins so a caller can precompute the href, and an
-    unreversible ``url_name`` degrades to ``#`` instead of raising.
-    """
+    """Resolve the anchor target from a literal ``url`` or ``url_name``, else ``#``."""
     if url:
         return url
     if not url_name:

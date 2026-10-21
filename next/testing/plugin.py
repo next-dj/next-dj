@@ -1,7 +1,6 @@
 """Pytest plugin wiring the next.dj test scaffold to ini options and fixtures.
 
-Enabled per project with `-p next.testing.plugin` rather than a `pytest11` entry point,
-since pytest imports entry-point plugins before pytest-cov starts measuring.
+Enabled with `-p next.testing.plugin` since entry points import before pytest-cov.
 """
 
 from __future__ import annotations
@@ -45,8 +44,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def next_pages(pytestconfig: pytest.Config) -> None:
     """Import the page and component modules named by the ini options.
 
-    Page decorators register as an import side effect, so the modules have
-    to run before the first request rather than when a route is missed.
+    Page decorators register on import, so this must run before the first request.
     """
     for directory in pytestconfig.getini(PAGES_INI):
         eager_load_pages(directory)

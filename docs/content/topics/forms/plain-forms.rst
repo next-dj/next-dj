@@ -27,7 +27,7 @@ Subclassing ``next.forms.Form`` registers the class and derives its action name 
 See :doc:`actions` for the registration rules.
 
 .. code-block:: python
-   :caption: obs/forms.py — auto-registered as ``window_filter_form`` (shared)
+   :caption: obs/forms.py, auto-registered as ``window_filter_form`` (shared)
 
    import next.forms
 
@@ -55,7 +55,7 @@ Override ``on_valid`` when the submission needs a different redirect or its own 
 A filter form, for example, redirects with the picked value on the query string.
 
 .. code-block:: python
-   :caption: obs/forms.py — redirect with the chosen window
+   :caption: obs/forms.py, redirect with the chosen window
 
    from django.http import HttpRequest, HttpResponseRedirect
 
@@ -74,7 +74,7 @@ There is no model to save, so the page owns every write.
 The bulk form below declares ``enabled_names`` with an empty choice list, so a ``MultipleChoiceField`` rejects every submitted value until `Dynamic choices`_ fills the list in ``__init__``.
 
 .. code-block:: python
-   :caption: flags/panels/admin/page.py — bulk update across many rows
+   :caption: flags/pages/admin/page.py, bulk update across many rows
 
    from django.http import HttpRequest, HttpResponseRedirect
 
@@ -99,7 +99,7 @@ A filter form owns both halves of a round trip.
 The redirect above puts the picked value on the query string, and the page reads it back on the next GET through ``DQuery[str]``.
 
 .. code-block:: python
-   :caption: obs/stats/page.py — read the window currently in force
+   :caption: obs/stats/page.py, read the window currently in force
 
    from next import context
    from next.urls import DQuery
@@ -112,7 +112,7 @@ A ``get_initial`` classmethod pre-selects the same value on the form itself.
 Without it the control resets to the first choice on every render and shows a filter the page is not applying.
 
 .. code-block:: python
-   :caption: obs/forms.py — pre-select the current window
+   :caption: obs/forms.py, pre-select the current window
 
    import next.forms
    from next.urls import DQuery
@@ -139,7 +139,7 @@ Populate choices in ``__init__`` when they depend on the database or the request
 Call ``super().__init__`` first, then rewrite the field's ``choices`` or ``queryset``.
 
 .. code-block:: python
-   :caption: flags/panels/admin/page.py — choices from current flag names
+   :caption: flags/pages/admin/page.py, choices from current flag names
 
    import next.forms
 
@@ -155,7 +155,7 @@ Call ``super().__init__`` first, then rewrite the field's ``choices`` or ``query
 The same pattern narrows a ``ModelChoiceField`` queryset to the submitted parent so Django rejects forged primary keys at field-validation time.
 
 .. code-block:: python
-   :caption: polls/forms.py — narrow the queryset on binding
+   :caption: polls/forms.py, narrow the queryset on binding
 
    import next.forms
 

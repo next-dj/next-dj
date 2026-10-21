@@ -16,6 +16,7 @@ _BUILTIN_MODULES = (
     "next.templatetags.next_static",
     "next.templatetags.pages",
     "next.templatetags.partial",
+    "next.templatetags.permissions",
     "next.templatetags.scripts",
 )
 
@@ -33,6 +34,7 @@ _NEXT_TAG_NAMES = (
     "component",
     "consented",
     "form",
+    "has_perm",
     "metadata",
     "script",
     "set_slot",
@@ -56,8 +58,7 @@ _UNKNOWN_TAG_PATTERN = (
 def _multiline_tag_pattern(pattern: str) -> str:
     """Return *pattern* with a line-spanning branch for next-dj's own block tags.
 
-    Raises when Django's branch is not found, and every tag outside the next-dj
-    set keeps that branch, so a stray `{%` elsewhere consumes no extra text.
+    Raises when Django's branch is missing, and every other tag keeps that branch.
     """
     if _MULTILINE_BLOCK_TAG_BRANCH in pattern:
         return pattern
@@ -69,8 +70,7 @@ def _multiline_tag_pattern(pattern: str) -> str:
 def _install_lexer() -> None:
     """Let a next-dj block tag span lines, leaving every other tag as Django lexes it.
 
-    Both `Lexer.tokenize` and `DebugLexer` read the pattern as a module global, so the
-    widened branch reaches every lexing path and the install repeats as a no-op.
+    `Lexer.tokenize` and `DebugLexer` both read the pattern as a module global.
     """
     pattern = _multiline_tag_pattern(template_base.tag_re.pattern)
     if pattern != template_base.tag_re.pattern:
@@ -80,8 +80,7 @@ def _install_lexer() -> None:
 def _engine_with_builtins(engine: dict[str, Any]) -> dict[str, Any] | None:
     """Return a copy of *engine* carrying the builtins, or `None` when it has them.
 
-    Copies rather than writes in place, because the engine dicts belong to the
-    settings module and an override restores them by reference.
+    It copies because the engine dicts belong to the settings module.
     """
     options: dict[str, Any] = engine.get("OPTIONS", {})
     builtins: list[str] = list(options.get("builtins", []))
@@ -94,8 +93,7 @@ def _engine_with_builtins(engine: dict[str, Any]) -> dict[str, Any] | None:
 def _forget_engines() -> None:
     """Drop engines built from the `TEMPLATES` value that carried no builtins.
 
-    Only a fresh read reaches an engine handler that already read the settings, and the
-    memo behind `Engine.get_default` is a second one, read by every bare `Template`.
+    Both the engine handler and the `Engine.get_default` memo hold a stale read.
     """
     engines.__dict__.pop("templates", None)
     engines._templates = None  # type: ignore[attr-defined]
@@ -105,8 +103,7 @@ def _forget_engines() -> None:
 
 def _install_builtins() -> None:
     """Point `TEMPLATES` at engines that carry the next-dj tag libraries."""
-    # The stubs type the entries as a TypedDict, the settings module holds
-    # plain dicts that carry whatever keys a backend reads.
+    # The stubs type the entries as a TypedDict, but settings hold plain dicts.
     updated = cast("list[dict[str, Any]]", list(settings.TEMPLATES))
     changed = False
     for index, engine in enumerate(updated):

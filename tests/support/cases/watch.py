@@ -7,8 +7,7 @@ from dataclasses import dataclass
 class WatchSourcesCase:
     """What the reloader reports for one finder run, spelled relative to the tree.
 
-    `rooted` decides whether the tree is reported as a page root at all, which is what
-    tells a path under no page tree from one the finder can name.
+    `rooted` decides whether the tree is reported as a page root at all.
     """
 
     rooted: bool = True
@@ -17,8 +16,7 @@ class WatchSourcesCase:
     components: tuple[str, ...] = ()
 
 
-# The component folder is the one watch source a page tree does not carry on its own,
-# so this row is what makes the finder walk its component branch at all.
+# The component folder is the one watch source a page tree lacks, so this row walks it.
 TEMPLATE_AND_COMPONENT_SOURCES: WatchSourcesCase = WatchSourcesCase(
     templates=("about/template.djx",), components=("_components/widget/component.py",)
 )
@@ -28,8 +26,7 @@ TEMPLATE_AND_COMPONENT_SOURCES: WatchSourcesCase = WatchSourcesCase(
 class WatchedBackendsCase:
     """One ``PAGE_BACKENDS`` shape the watcher reads its page trees from.
 
-    ``entries`` names the entry shapes a test builds under its own ``tmp_path``,
-    because a configured tree only exists once a test has a directory to make.
+    ``entries`` names shapes built under the test's own `tmp_path`.
     """
 
     id: str

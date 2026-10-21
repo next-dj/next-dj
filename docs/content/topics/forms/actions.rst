@@ -191,6 +191,70 @@ The base signatures carry no positional arguments of their own.
 ``BaseForm.get_initial(cls)`` takes none, and ``BaseModelForm.get_initial(cls, **url_kwargs)`` accepts the URL kwargs as keywords.
 Declare only the parameters an override actually reads.
 
+.. _topics-forms-actions-form-kwargs:
+
+``get_form_kwargs`` builds the constructor arguments
+----------------------------------------------------
+
+Override ``get_form_kwargs`` as a classmethod when the form constructor needs more than ``get_initial`` supplies, such as an ``instance`` loaded through ``DObject``, a ``prefix``, or an argument of a custom ``__init__``.
+The classmethod is DI-resolved exactly like ``get_initial``, and its result is the keyword arguments of the constructor.
+
+.. code-block:: python
+   :caption: notes/pages/notes/[int:note]/edit/page.py
+
+   from django.http import HttpRequest
+   from notes.models import Note
+
+   import next.forms
+   from next.deps import DObject
+
+   class NoteEditForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["title", "body"]
+
+       @classmethod
+       def get_form_kwargs(cls, request: HttpRequest, note: DObject[Note]) -> dict:
+           return {**super().get_form_kwargs(request), "instance": note}
+
+The default returns ``{"instance": ...}`` when ``get_initial`` answers a model instance and ``{"initial": ...}`` otherwise, so an override that starts from ``super().get_form_kwargs(request)`` keeps the ``get_initial`` behaviour and adds its own keys.
+A form that does not override the method never calls it and goes straight to ``get_initial``.
+
+``super().get_form_kwargs(request)`` is a plain Python call, and the dependency injector resolves only the parameters of the method the dispatcher calls.
+A parent override that asks for dependencies of its own, such as ``scope=Depends("scope")``, receives its defaults through ``super()`` rather than the resolved values.
+A subclass therefore declares those parameters and passes them on, or leaves ``get_form_kwargs`` alone and loads its row in ``get_initial``, which the default resolves through the injector.
+The second form is the short one, an abstract subclass of the shared form that only names its row.
+
+.. code-block:: python
+   :caption: budget/pages/wallets/[int:wallet]/edit/page.py
+
+   from budget.forms import WalletForm
+   from budget.models import Wallet
+   from django.http import HttpRequest
+
+   from next.deps import DObject
+   from next.forms import DForm, action, redirect_to_origin
+
+   class WalletEditForm(WalletForm):
+       class Meta(WalletForm.Meta):
+           abstract = True
+
+       @classmethod
+       def get_initial(cls, wallet: DObject[Wallet]) -> Wallet:
+           return wallet
+
+   @action("wallet_form", form_class=WalletEditForm)
+   def update_wallet(request: HttpRequest, form: DForm[WalletEditForm]):
+       form.save()
+       return redirect_to_origin(request)
+
+A ``get_form_kwargs`` that ``WalletForm`` overrides still runs with its own dependencies resolved, and the default it reaches through ``super()`` turns the row into the ``instance`` of the form.
+
+The dispatcher calls the hook on the GET render of the page and on the POST, where it runs after ``check_permissions`` and before ``has_object_permission``.
+The dispatcher passes ``data`` and ``files`` itself, so a result that carries either key, or a result that is not a dict, raises ``TypeError``.
+The default resolves ``get_initial`` in the dependency cache of the override, on the GET render and on the POST alike, so a dependency both ask for resolves once.
+A ``FormWizard`` builds its step forms through its own ``get_form_kwargs`` and never calls this hook on a step form, see :doc:`wizard`.
+
 Form-less actions
 -----------------
 
@@ -299,15 +363,16 @@ A ``form_class=`` argument may be a factory callable instead of a form class.
 The factory is dependency-injected, so it can read ``request`` and URL kwargs, and it returns one of two shapes.
 
 A plain form class.
-   The dispatcher then calls ``get_initial`` on it and binds the form as usual.
+   The dispatcher then calls ``get_form_kwargs`` or ``get_initial`` on it and binds the form as usual.
 
 A ``(FormClass, init_kwargs)`` tuple.
-   When ``init_kwargs`` is non-empty, the dispatcher passes ``**init_kwargs`` straight to the form constructor and skips ``get_initial``.
+   When ``init_kwargs`` is non-empty, the dispatcher passes ``**init_kwargs`` straight to the form constructor and skips both ``get_form_kwargs`` and ``get_initial``.
    An empty dict behaves like returning the bare class, so a class with no ``get_initial`` needs at least the neutral ``{"initial": {}}``.
-   Use the tuple when the constructor needs arguments that ``get_initial`` cannot supply, such as a preloaded model ``instance`` or a formset ``queryset``.
+   Use the tuple for a class that has no hooks of its own, such as a formset or a third-party form.
+   A ``next.forms`` class takes the same arguments from its own ``get_form_kwargs``, see :ref:`topics-forms-actions-form-kwargs`.
 
 .. code-block:: python
-   :caption: page.py — a factory returning the tuple form
+   :caption: page.py, a factory returning the tuple form
 
    from django.shortcuts import get_object_or_404, redirect
 
@@ -336,7 +401,7 @@ A project base class that other forms subclass should not register as an action 
 Set ``Meta.abstract = True`` to skip auto-registration.
 
 .. code-block:: python
-   :caption: app/forms.py — a shared base that does not register
+   :caption: app/forms.py, a shared base that does not register
 
    from django.http import HttpRequest
 
@@ -363,8 +428,9 @@ Access guards
 -------------
 
 The dispatch endpoint of an action lives at ``/_next/form/<uid>/``, outside the page URL space, so a middleware scoped to a URL prefix does not cover it.
-The page the submission names does authorize it, through its own ``render()``, so a page that refuses a visitor refuses that visitor's submissions as well, see :doc:`/content/topics/pages`.
-Declare the access requirements on the action itself for a check that stands on its own.
+An action declared in a page tree answers to the access of the page in its directory, the ``inherit=True`` declarations of every ``page.py`` above included, checked before anything below, see :doc:`/content/security/actions`.
+The page the submission names authorizes it too, through its access rule and its own ``render()``, so a page that refuses a visitor refuses that visitor's submissions as well, see :doc:`/content/topics/pages`.
+Declare the access requirements on the action itself for a check that stands on its own, such as a shared form outside any page tree.
 ``Meta.login_required`` and ``Meta.permission_required`` guard a class-bound form, and the same names are keyword arguments on ``@action``.
 
 .. code-block:: python
@@ -395,6 +461,14 @@ A submission whose ``_next_form_origin`` is missing or not a same-site path gets
 An origin so long that the login URL would exceed the length Django allows in a redirect ``Location`` sends the user to plain ``LOGIN_URL`` with no ``next``.
 An authenticated user missing a permission gets :exc:`~django.core.exceptions.PermissionDenied`, which Django renders as HTTP 403.
 
+A permission registered through ``add_perm`` in a ``permissions.py`` is an object permission, and a class-bound form checks it on the row it edits rather than up front.
+The static guard leaves it out, and once the form binds the dispatcher asks ``user.has_perm(perm, form.instance)`` for a ``ModelForm`` that edits a saved row, or ``user.has_perm(perm, None)`` for a new record and a plain ``Form``.
+A new record is therefore never checked against the row it is created under, and a rule on that parent row goes into ``has_object_permission`` or into the access of the page as ``permission_required(perm, obj=DObject[Model])`` in its ``page.py``, see :ref:`topics-access`.
+The check runs once, before ``has_object_permission`` and validation, and a refusal is HTTP 403 with ``form_access_denied`` sent as ``layer="object"`` and ``reason="denied"``.
+A ``FormWizard`` and a handler-only ``@action`` bind no form at that point, so their guard checks every listed permission up front with no object, registered ones included.
+Without a ``visible_to`` on the model manager and a registered ``scope``, ``Meta.instance_from_url`` looks the row up unscoped and answers a refused user 403 for an existing id and 404 for a missing one, so load the row through ``DObject`` in ``get_form_kwargs`` or give the model both halves, see :ref:`topics-di-dobject`.
+See :ref:`topics-permissions` for the predicates and the backend that answers them.
+
 Unlike ``Meta.abstract``, which is own-class-only, the guard keys survive subclassing through plain class-attribute lookup.
 A subclass that declares no ``Meta`` of its own inherits the base ``Meta`` and stays guarded.
 A subclass that declares its own ``Meta`` shadows the base one entirely and registers unguarded.
@@ -408,6 +482,8 @@ Hide the form in the template when the page should not show it to anonymous visi
 
 The guard is stored as an ``ActionGuard`` on the action's registry metadata, so a custom backend that delegates to the standard pipeline inherits the enforcement.
 The ``next.W060`` check warns when ``permission_required`` is declared while ``django.contrib.auth`` is not installed.
+The ``next.W127`` check warns about a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, since such a guard refuses every user but a superuser, once the project declares access through a ``page.py`` or ``component.py`` declaration or ``add_perm``.
+It reads the model permissions off the model classes, so a ``Permission`` row created only by a data migration or through the admin draws it, and declaring that permission in ``Meta.permissions`` or silencing the code quiets it.
 
 .. _topics-forms-actions-dynamic-guards:
 
@@ -425,11 +501,11 @@ The base signatures take no parameters of their own, and an override declares on
 The signature is open, so an override pulls ``request``, captured URL kwargs, ``DUrl[...]`` markers, ``Depends(...)`` providers, or nothing at all, following the same rule as the other DI hooks.
 
 Unlike the static guard, the dynamic hooks intentionally run application code.
-``check_permissions`` runs after the origin and the dependency cache are set up and after the form class is resolved, before ``get_initial`` and form binding.
+``check_permissions`` runs after the origin and the dependency cache are set up and after the form class is resolved, before ``get_form_kwargs``, ``get_initial``, and form binding.
 ``has_object_permission`` runs after the form is bound, so ``self.instance`` is the loaded target on a ``ModelForm``, and before ``is_valid`` and the handler.
 
 .. code-block:: python
-   :caption: page.py — view-level gate with no parameters
+   :caption: page.py, view-level gate with no parameters
 
    from notes.models import Note
 
@@ -448,7 +524,7 @@ A parameterless override always allows.
 Declare ``request`` to read the user, and any further parameter the injector resolves.
 
 .. code-block:: python
-   :caption: page.py — view-level gate reading the request, a URL kwarg, and a provider
+   :caption: page.py, view-level gate reading the request, a URL kwarg, and a provider
 
    from django.http import HttpRequest
    from notes.models import Note
@@ -476,7 +552,7 @@ Declare ``request`` to read the user, and any further parameter the injector res
 The object-level hook reads the bound instance.
 
 .. code-block:: python
-   :caption: page.py — object-level gate on the loaded row
+   :caption: page.py, object-level gate on the loaded row
 
    from django.http import HttpRequest
    from notes.models import Note
@@ -506,7 +582,7 @@ The hook return type alias is ``next.forms.PermissionOutcome``, equal to ``bool 
 The two hooks combine with the static guard in a fixed order.
 The static guard runs first and pre-database.
 A request it denies never reaches a dynamic hook, so the static guard stays the cheap default for the authentication-and-named-permission case.
-``check_permissions`` runs next, then the form binds, then ``has_object_permission`` runs on the bound form.
+``check_permissions`` runs next, then the form binds, then the registered permissions of ``Meta.permission_required`` are checked on the bound row, then ``has_object_permission`` runs on the bound form.
 
 The view hook resolves on the resolved form class, so a factory ``form_class`` is covered as well, see `Dynamic form classes`_.
 A handler-only ``@action`` carries no class to host a method, so it has no dynamic hook.
@@ -517,15 +593,15 @@ It does not re-render the origin page.
 The hook runs on the bound form before validation, so the 403 is a deliberate authorization refusal independent of whether the submitted data is valid.
 This differs from a validation failure, which re-renders the origin with field errors, see :doc:`validation-rerender`.
 
-The hooks share the per-request dependency cache with ``get_initial`` and ``on_valid``.
+The hooks share the per-request dependency cache with ``get_form_kwargs``, ``get_initial``, and ``on_valid``.
 A provider resolved inside a hook is not resolved again downstream in the same dispatch, so a tenant or permission lookup runs once across the hook and the rest of the pipeline.
 
-The ``form_access_denied`` signal fires on an origin-page or dynamic-hook denial, never on the static guard path, see :ref:`topics-forms-signals-form-access-denied` for its sender, payload, and receiver rules.
+The ``form_access_denied`` signal fires on an origin-page denial, a dynamic-hook denial, and a registered permission refused on the bound form, never on the static guard path, see :ref:`topics-forms-signals-form-access-denied` for its sender, payload, and receiver rules.
 
 On a ``FormWizard`` the ``check_permissions`` classmethod runs per step POST, before the step form binds, so a denied step writes no storage.
 The wizard class has no object-level hook of its own.
 A step form that declares ``has_object_permission`` has it enforced after the step binds and before ``is_valid``.
-A wizard step binds from posted data and ``get_form_kwargs`` and never runs ``get_initial`` or ``Meta.instance_from_url``, so a ``ModelForm`` step sees a fresh unsaved ``self.instance`` rather than a URL-addressed row, unlike a standalone form.
+A wizard step binds from posted data and the ``get_form_kwargs`` of the wizard and never runs the ``get_form_kwargs`` or ``get_initial`` of the step form or its ``Meta.instance_from_url``, so a ``ModelForm`` step sees a fresh unsaved ``self.instance`` rather than a URL-addressed row, unlike a standalone form.
 
 .. note::
 
@@ -716,6 +792,15 @@ The registration and scope checks are listed here, the wizard checks on :doc:`wi
 
 ``next.W060`` (Warning)
    An action declares ``permission_required`` while ``django.contrib.auth`` is not in ``INSTALLED_APPS``, so the permission check cannot resolve users or permissions.
+
+``next.W127`` (Warning)
+   An action declares a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, so the guard refuses every user but a superuser.
+   It judges a form guard only in a project that declares access, see :doc:`/content/ref/system-checks`.
+   The same check reads the names of ``{% has_perm %}`` tags and of access declarations in every project, and the message names the place.
+
+``next.W129`` (Warning)
+   A file of a page tree declares actions that no declaration of its page, no ``inherit=True`` declaration above it, no ``Meta`` guard, and no default login guard, so anyone may post to them.
+   It runs only in a project that declares access and keeps ``LOGIN_REQUIRED`` and ``LoginRequiredMiddleware`` off, see :doc:`/content/security/actions`.
 
 ``next.W061`` (Warning)
    An action declares ``Meta.success_message`` while the messages framework is not fully installed.

@@ -258,8 +258,7 @@ class TestFrozenDictMutators:
 class TestMutatorInventory:
     """The guarded mutators are pinned against the whole builtin inventory.
 
-    A method CPython adds later lands in neither half and fails this, so it
-    reaches a person instead of silently widening the hole.
+    A method CPython adds later lands in neither half and fails here.
     """
 
     @pytest.mark.parametrize(("builtin", "guarded", "inherited"), INVENTORIES)

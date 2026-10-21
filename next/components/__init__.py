@@ -1,8 +1,4 @@
-"""Discover and render DJX components for templates.
-
-Each subsystem lives in its own submodule, and internal classes stay reachable through
-deep imports such as `from next.components.registry import ComponentRegistry`.
-"""
+"""Discover and render DJX components for templates."""
 
 from __future__ import annotations
 
@@ -15,6 +11,7 @@ from .context import (
     component,
     context,
 )
+from .errors import ComponentModuleImportError
 from .facade import (
     collect_visible_components,
     get_component,
@@ -46,6 +43,7 @@ __all__ = [
     "ComponentContextManager",
     "ComponentContextRegistry",
     "ComponentInfo",
+    "ComponentModuleImportError",
     "ComponentRegistry",
     "ComponentRenderStrategy",
     "ComponentRenderer",

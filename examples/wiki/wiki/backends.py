@@ -23,11 +23,7 @@ PUBLIC_PREFIX = "wiki"
 class HybridRouterBackend(FileRouterBackend):
     """File router that also publishes one named URL per Article row.
 
-    The file route at ``wiki/routes/wiki/[slug]/page.py`` handles the actual rendering
-    through dependency injection. This backend appends a named URL pattern for each
-    existing article slug. The aliases share the catchall view but bind a fixed ``slug``
-    kwarg, so the ``DArticle`` provider sees the right URL parameter when called via a
-    reversed name. Each alias has a unique reverse name of ``wiki_article_<slug>``.
+    Each `wiki_article_<slug>` alias shares the catchall view and binds a fixed `slug`.
     """
 
     def generate_urls(self) -> list[URLPattern | URLResolver]:

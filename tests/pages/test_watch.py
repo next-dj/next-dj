@@ -334,8 +334,7 @@ class TestRouterFailuresNeverReachTheWatcher:
             watched = get_pages_directories_for_watch()
 
         assert watched == [root.resolve()]
-        # A wrong shape is no failing source, so it is reported as the wrong
-        # type rather than as a raise, and carries no traceback.
+        # A wrong shape is no failing source, so it reports the type with no traceback.
         assert _watch_tracebacks(caplog) == []
         watched_records = [r for r in caplog.records if r.name == "next.pages.watch"]
         assert (
@@ -565,8 +564,7 @@ class TestTheRoutersOutliveOneTick:
     def test_a_new_base_dir_is_read_without_a_settings_reload(self, tmp_path) -> None:
         """A relative `DIRS` entry follows `BASE_DIR`, whose change reloads nothing.
 
-        The routers read the base directory while they are built, so holding them
-        across a change to it alone would report the previous project root.
+        The routers read the base directory at build, so held ones report the old root.
         """
         first_base = tmp_path / "a"
         (first_base / "site").mkdir(parents=True)
@@ -581,8 +579,7 @@ class TestTheRoutersOutliveOneTick:
                 first = get_pages_directories_for_watch()
             with override_settings(BASE_DIR=second_base):
                 second = get_pages_directories_for_watch()
-                # The resolutions survive the routers, because only a
-                # reconfiguration can change the tree one of them names.
+                # The resolutions outlive routers, only a reconfiguration moves a tree.
                 held = resolved_tree.cache_info().currsize
 
         assert first == [(first_base / "site").resolve()]
@@ -613,8 +610,7 @@ class TestTheRoutersOutliveOneTick:
     def test_the_memo_answers_what_a_rebuild_answers(self, tmp_path, case) -> None:
         """Across the configured shapes, held routers read like rebuilt ones.
 
-        A settings reload drops the held routers, so the comparison is against the
-        result of routers built for a fresh generation.
+        The comparison is against routers built for a fresh generation.
         """
         backends = _watched_backends(case, tmp_path)
         settings_value = {"PAGE_BACKENDS": backends}
@@ -636,8 +632,7 @@ class TestTheRoutersOutliveOneTick:
 class TestAWatchingProcessHoldsNoRouter:
     """Under `DEBUG` a router reports trees it probed once, so none is held.
 
-    A page tree created, moved, or removed under the development server has to
-    reach the very next read, whichever of the three shapes names it.
+    A tree created, moved, or removed must reach the very next read.
     """
 
     def test_every_read_builds_the_routers_again(self, tmp_path) -> None:
@@ -660,8 +655,7 @@ class TestAWatchingProcessHoldsNoRouter:
     def test_a_dirs_root_created_later_reaches_the_watcher(self, tmp_path) -> None:
         """A `DIRS` entry that named a URL segment names a tree once one is there.
 
-        Nothing but a fresh classification can tell the two apart, so this is
-        the shape a router held across the change could never report.
+        Only a fresh classification tells them apart, which a held router never reports.
         """
         entry = file_router_config_entry(dirs=["site"])
 

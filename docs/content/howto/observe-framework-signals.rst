@@ -13,7 +13,7 @@ Solution
 --------
 
 next.dj emits :doc:`Django signals <django:topics/signals>` from every subsystem.
-Connect plain receivers from ``AppConfig.ready`` and forward each payload to your metrics store or tracer.
+Connect plain receivers in the ``signals.py`` of an app and forward each payload to your metrics store or tracer.
 This is the production counterpart of ``SignalRecorder``, which captures the same signals inside tests.
 
 This page stays task focused.
@@ -30,7 +30,7 @@ Each receiver reads the payload keyword arguments it needs and leaves the rest i
 The framework emits these signals on hot rendering paths, so receivers stay synchronous and fast.
 
 .. code-block:: python
-   :caption: obs/receivers.py
+   :caption: obs/signals.py
 
    from django.dispatch import receiver
 
@@ -95,7 +95,7 @@ The ``html_injected`` payload carries ``injected_bytes``, which is useful as a p
 ``static_backend_loaded`` belongs to the backend-load family covered under `Inventory the loaded backends`_ below.
 
 .. code-block:: python
-   :caption: obs/receivers.py
+   :caption: obs/signals.py
 
    from django.dispatch import receiver
 
@@ -125,7 +125,7 @@ The URL subsystem emits ``route_registered`` for each route discovered during a 
 ``router_reloaded`` carries no extra keyword arguments.
 
 .. code-block:: python
-   :caption: obs/receivers.py
+   :caption: obs/signals.py
 
    from django.dispatch import receiver
 
@@ -148,7 +148,7 @@ Each of the eight settings-driven backend families announces what it built throu
 Every one of them carries the same two keyword arguments, ``config``, a copy of the settings entry that named the class, and ``instance``, the object the loader built from it, so one receiver serves all eight.
 
 .. code-block:: python
-   :caption: obs/receivers.py
+   :caption: obs/signals.py
 
    from functools import partial
    from typing import Any
@@ -198,7 +198,7 @@ Every one of them carries the same two keyword arguments, ``config``, a copy of 
 The sender is the resolved backend class rather than the manager, so ``sender=`` filtering works per family and a receiver can narrow to one implementation.
 
 .. code-block:: python
-   :caption: obs/receivers.py
+   :caption: obs/signals.py
 
    from django.dispatch import receiver
 
@@ -218,7 +218,7 @@ A Content Security Policy lists every origin a page loads scripts from, and ``sc
 ``scripts_registered`` fires each time the registry takes a tree's ``scripts.py``, so a receiver can keep the origins of every tree current and compare them with the policy.
 
 .. code-block:: python
-   :caption: obs/receivers.py
+   :caption: obs/signals.py
 
    import logging
    from pathlib import Path
@@ -256,7 +256,7 @@ Invalidate a cache on a settings reload
 The signal carries no keyword arguments, so a receiver that holds its own memo drops it and lets the next read rebuild from the merged settings.
 
 .. code-block:: python
-   :caption: obs/receivers.py
+   :caption: obs/signals.py
 
    from django.dispatch import receiver
 
@@ -274,18 +274,7 @@ The first error reaches the caller that asked for the reload once the whole chai
 Connect receivers at startup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Import the receivers module from ``AppConfig.ready`` so the ``@receiver`` decorators run once at startup.
-
-.. code-block:: python
-   :caption: obs/apps.py
-
-   from django.apps import AppConfig
-
-   class ObsConfig(AppConfig):
-       name = "obs"
-
-       def ready(self) -> None:
-           from obs import receivers  # noqa: F401
+The ``next`` application imports ``obs/signals.py`` at startup, so the ``@receiver`` decorators run once with no ``AppConfig.ready`` code, see :doc:`/content/ref/settings`.
 
 Verification
 ------------

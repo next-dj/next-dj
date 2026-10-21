@@ -28,8 +28,7 @@ if TYPE_CHECKING:
 class PageContextEntry(NamedTuple):
     """One context callable registered for a `page.py` file.
 
-    `zones` binds the callable to the named zones, so a GET for another zone skips it.
-    A `NamedTuple` keeps each registration as cheap as a plain tuple.
+    `zones` binds the callable to named zones, so a GET for another zone skips it.
     """
 
     func: Callable[..., Any]
@@ -121,14 +120,12 @@ class PageContextRegistry:
     def __init__(self) -> None:
         """Start with an empty registry and no memoised merge order."""
         self._context_registry: dict[Path, dict[str | None, PageContextEntry]] = {}
-        # Keyless callables share the `None` slot, so the registry keeps only
-        # the last. Retain the overwritten names for the `next.E018` diagnostic.
+        # Keyless callables share the `None` slot, so overwritten names feed E018.
         self._keyless_conflicts: dict[Path, list[str]] = {}
         self._misattributions = MisattributionLog()
         self._version = 0
         self._memo_version = 0
-        # Bounded, because a router may name page paths without end, while the
-        # registry holds only the files a `@context` ran in.
+        # Bounded, since a router may name page paths without end.
         self._merge_order: PageCache[Path, _PageOrder] = PageCache()
         self._inheritable: PageCache[Path, tuple[_OrderedEntries, ...]] = PageCache()
 
@@ -147,8 +144,7 @@ class PageContextRegistry:
     def reset(self) -> None:
         """Drop every registered context so the next import repopulates it.
 
-        Re-executing a `page.py` only overwrites the keys it still declares, so
-        a removed `@context` would otherwise leave a stale entry behind.
+        Re-executing a `page.py` overwrites only declared keys, so removed ones linger.
         """
         self._context_registry.clear()
         self._keyless_conflicts.clear()
@@ -164,8 +160,7 @@ class PageContextRegistry:
     ) -> None:
         """Record a `@context` whose callable was declared outside the running file.
 
-        The registration binds to `declared_in`, which no render of
-        `registered_from` reads, so the pair feeds the `next.E074` diagnostic.
+        It binds to `declared_in`, which `registered_from` never renders (`next.E074`).
         """
         self._misattributions.record(registered_from, declared_in, func)
 
@@ -211,6 +206,11 @@ class PageContextRegistry:
             )
             for file_path, entries in self._context_registry.items()
         }
+
+    def passes_context(self, file_path: Path) -> bool:
+        """Return whether `file_path` registers an `inherit_context=True` callable."""
+        entries = self._context_registry.get(file_path, {})
+        return any(entry.inherit_context for entry in entries.values())
 
     def register_context(
         self,
@@ -266,8 +266,7 @@ class PageContextRegistry:
     ) -> ContextResult:
         """Merge inherited ancestor page.py context with this file's context callables.
 
-        Inherited context comes from `inherit_context=True` callables in ancestor
-        `page.py` files, not layouts, and first registration wins for the js_context.
+        Only `inherit_context=True` callables of ancestor `page.py` files inherit.
         """
         context_data: dict[str, Any] = {}
         js_context: dict[str, Any] = {}
@@ -280,8 +279,7 @@ class PageContextRegistry:
         )
         context_data.update(inherited_context)
 
-        # Read once for the whole merge, because each attribute read on the shared
-        # holder is forwarded to the active resolver.
+        # Read once for the merge, since each read on the shared holder is forwarded.
         active = current_resolver()
         order = self._page_order(file_path)
         for key, entry in order.entries:
@@ -363,6 +361,16 @@ class PageContextRegistry:
                 for name in merged:
                     inherited_context[name] = result[name]
         return inherited_context
+
+    def run_order(self, file_path: Path) -> _OrderedEntries:
+        """Return every callable a render of `file_path` runs, in the order of the run.
+
+        The inheritable callables of the ancestor pages lead, root first.
+        """
+        inherited = tuple(
+            step for group in self._inheritable_groups(file_path) for step in group
+        )
+        return inherited + self._page_order(file_path).entries
 
     def _sync_memos(self) -> None:
         """Drop the per-path memos once the registry changed after they were built."""

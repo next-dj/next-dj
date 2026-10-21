@@ -1,6 +1,6 @@
 # DB-backed wiki
 
-A wiki served from two stores at once. Some pages live as files in `wiki/routes/`. The rest live in the database as `Article` rows. Both kinds share one router, one root layout, and one search page.
+A wiki served from two stores at once. Some pages live as files in `wiki/pages/`. The rest live in the database as `Article` rows. Both kinds share one router, one root layout, and one search page.
 
 ## What you will see
 
@@ -35,13 +35,13 @@ Open the index, click `New article`, write some Markdown, and submit. The new ar
 
 ### 1. Two URL sources, one router
 
-`wiki.backends.HybridRouterBackend.generate_urls` returns `super().generate_urls()` plus one named pattern per existing article. Each alias targets the catchall callback at `wiki/[slug]/` and binds a fixed `slug` kwarg so `DArticle` resolves the right row. The catchall file route `wiki/routes/wiki/[slug]/page.py` owns the rendering logic. The aliases give templates a per-slug `reverse()` name and keep the public URL space tidy at `/wiki/<slug>/`.
+`wiki.backends.HybridRouterBackend.generate_urls` returns `super().generate_urls()` plus one named pattern per existing article. Each alias targets the catchall callback at `wiki/[slug]/` and binds a fixed `slug` kwarg so `DArticle` resolves the right row. The catchall file route `wiki/pages/wiki/[slug]/page.py` owns the rendering logic. The aliases give templates a per-slug `reverse()` name and keep the public URL space tidy at `/wiki/<slug>/`.
 
 The catchall view never has to know whether it was reached through the generic `<slug>` capture or through a hybrid alias. Both paths feed the same DI flow.
 
 ### 2. Reloading after data changes
 
-`wiki/receivers.py` listens to `post_save` and `post_delete` of `Article` and calls `router_manager.reload()`. The reload path is one public method that:
+`wiki/signals.py` listens to `post_save` and `post_delete` of `Article` and calls `router_manager.reload()`. The reload path is one public method that:
 
 1. Drops the cached backend list.
 2. Reinstantiates every backend from `PAGE_BACKENDS`.
@@ -52,7 +52,7 @@ The next request observes the fresh URL tree without a process restart. Tests co
 
 ### 3. DI provider for the slug
 
-`wiki.providers.ArticleProvider` claims any parameter annotated as `DArticle[Article]`. It reads `context.url_kwargs.get("slug")`, returns the matching row, raises `Http404` when no row carries that slug, and answers `None` when the call captured no slug at all. The catchall page and both contexts of the edit page use it, so the slug-to-row lookup lives in one place. `static_can_handle` settles the claim from the annotation, so the plan compiler picks the provider once per callable, and `compile_resolve` unpacks the model out of `DArticle[Article]` once per plan, leaving each request the query alone.
+`wiki.deps.ArticleProvider` claims any parameter annotated as `DArticle[Article]`. It reads `context.url_kwargs.get("slug")`, returns the matching row, raises `Http404` when no row carries that slug, and answers `None` when the call captured no slug at all. The catchall page and both contexts of the edit page use it, so the slug-to-row lookup lives in one place. `static_can_handle` settles the claim from the annotation, so the plan compiler picks the provider once per callable, and `compile_resolve` unpacks the model out of `DArticle[Article]` once per plan, leaving each request the query alone.
 
 The edit form does not go through the provider. A `ModelForm` names the URL kwarg that identifies its row with `Meta.instance_from_url = "slug"`, and the framework loads that row onto `self.instance` when it builds the form, which is what the object-level permission hook in section 8 reads.
 
@@ -76,27 +76,29 @@ The script registers its work through `Next.partial.onMount("[data-markdown-prev
 
 ### 7. LIKE search across two stores
 
-`wiki/routes/search/page.py` runs two scans for each query. A literal substring match against a curated catalogue surfaces matching file pages. A `Q(title__icontains) | Q(body_md__icontains)` query against `Article` surfaces matching rows. The same template renders both lists side by side inside a `search-results` zone.
+`wiki/pages/search/page.py` runs two scans for each query. A literal substring match against a curated catalogue surfaces matching file pages. A `Q(title__icontains) | Q(body_md__icontains)` query against `Article` surfaces matching rows. The same template renders both lists side by side inside a `search-results` zone.
 
 The search form carries `data-next-target="search-results"`, `data-next-trigger="input"`, and `data-next-debounce="300"`, so the runtime debounces keystrokes, issues a GET for the `search-results` zone, and morphs the two result lists in place. `page.py` does not change: the same view answers the full page and the zone request, reading `?q=` from `request.GET` either way. Without the runtime the form is a plain `<form method="get">` and the Search button reloads the page, so a bookmark of `/search/?q=routing` still reproduces the listing.
 
 ### 8. Object-level edit permission
 
-`Article` carries a `locked` boolean. The edit form in `wiki/routes/articles/edit/[slug]/page.py` declares `has_object_permission(self)`, an object-level hook that the framework resolves like `on_valid` and runs after the form binds, so `self.instance` is the loaded target row. The override reads only what it needs from `self.instance` and returns `not self.instance.locked`. A locked article short-circuits to a bare 403 before validation runs, so there is no form re-render. The create form has no such hook and stays open.
+`Article` carries a `locked` boolean. The edit form in `wiki/pages/articles/edit/[slug]/page.py` declares `has_object_permission(self)`, an object-level hook that the framework resolves like `on_valid` and runs after the form binds, so `self.instance` is the loaded target row. The override reads only what it needs from `self.instance` and returns `not self.instance.locked`. A locked article short-circuits to a bare 403 before validation runs, so there is no form re-render. The create form has no such hook and stays open. Both forms write through [`wiki/services.py`](wiki/services.py), `create_article` and `update_article`, which run `full_clean` before they save, and ask `slug_taken` for the uniqueness message.
+
+Nobody signs in to the wiki, so both form pages declare `page.public()`, which says anyone may post to them on purpose, and the lock stays the one rule on an edit. `manage.py check` reports `next.W129` for an action nothing guards only in a project that declares access, and the declaration itself is that guard.
 
 ### 9. Free children in the documentation figure
 
-Both file-backed doc pages wrap examples in [`wiki/routes/docs/_blocks/doc_figure/`](wiki/routes/docs/_blocks/doc_figure/). The component sits inside the page tree, so it is visible from every template under `/docs/` and from nowhere else. It has exactly one insertion point, so a named slot would be ceremony: the caller writes markup between `{% #component "doc_figure" %}` and `{% /component %}`, the framework hands it over as `children`, and the template splices it with `{{ children }}`.
+Both file-backed doc pages wrap examples in [`wiki/pages/docs/_components/doc_figure/`](wiki/pages/docs/_components/doc_figure/). The component sits inside the page tree, so it is visible from every template under `/docs/` and from nowhere else. It has exactly one insertion point, so a named slot would be ceremony: the caller writes markup between `{% #component "doc_figure" %}` and `{% /component %}`, the framework hands it over as `children`, and the template splices it with `{{ children }}`.
 
 The two channels differ, and `/docs/components/` shows the difference on one call. The block body is spliced as written, so the `<em>` and `<strong>` runs inside it reach the page as markup. Whether the values interpolated there were escaped is the responsibility of the calling template, exactly as with `{% include %}`. The `caption` prop carries the same snippet from `markup_sample` in `page.py` and is escaped like every prop, so the figcaption shows `<em>emphasis</em>` as text.
 
 ### 10. One layout, two page roots
 
-The router walks two roots. `PAGE_BACKENDS["DIRS"]` lists `shell/`, a project-level page root whose only file is [`shell/layout.djx`](shell/layout.djx) with the outer HTML envelope. `APP_DIRS = True` plus `PAGES_DIR = "routes"` picks up `wiki/routes/`, which owns every page and ships no `layout.djx` of its own. One wrapper covers the whole site, so nothing here needs a nested layout. Examples that do are `examples/multi-tenant` and `examples/markdown-blog`.
+The router walks two roots. `PAGE_BACKENDS["DIRS"]` lists `shell/`, a project-level page root whose only file is [`shell/layout.djx`](shell/layout.djx) with the outer HTML envelope. `APP_DIRS = True` plus `PAGES_DIR = "pages"` picks up `wiki/pages/`, which owns every page and ships no `layout.djx` of its own. One wrapper covers the whole site, so nothing here needs a nested layout. Examples that do are `examples/multi-tenant` and `examples/markdown-blog`.
 
 ### 11. Article titles and descriptions through the slug provider
 
-The tab title of an article is the article's title, its description is its first paragraph, and the row is not fetched again for either. [`wiki/[slug]/page.py`](wiki/routes/wiki/[slug]/page.py) registers two `@context` callables that take `item: DArticle[Article]`, the provider of section 3, and a third callable under `@page.metadata` that names the `article` context key as its parameter:
+The tab title of an article is the article's title, its description is its first paragraph, and the row is not fetched again for either. [`wiki/[slug]/page.py`](wiki/pages/wiki/[slug]/page.py) registers two `@context` callables that take `item: DArticle[Article]`, the provider of section 3, and a third callable under `@page.metadata` that names the `article` context key as its parameter:
 
 ```python
 @page.metadata
@@ -111,11 +113,11 @@ def article_meta(article: Article) -> MetadataDict:
 
 Context callables run before the head is rendered and share one dependency cache with the metadata callable, so a parameter named after a context key receives the value that callable produced, exactly as a downstream `@context` would. `article_meta` therefore reads the row the slug provider fetched for `article` and issues no query of its own, which the integration test pins by counting the by-slug selects of one GET. The `{% metadata %}` tag in the shared `page_head` component renders the fold of `NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`, the module dict of every ancestor `page.py`, and the callable, so the title renders as `Routing internals · next.dj Wiki` through the template the settings declare.
 
-The rest of the tree is static. The root [`routes/page.py`](wiki/routes/page.py) titles the index `Home` and declares the site description, which a dict passes down to every page below that names none. The two documentation pages declare a title and a description of their own, the search page a title. `articles/new/` and `articles/edit/<slug>/` add `"robots": {"index": False}`, so a crawler that follows the edit links off the index gets `<meta name="robots" content="noindex">` and an `X-Robots-Tag: noindex` header on the form pages and keeps the public article as the page worth ranking. The search page is the robots file's job instead, section 12 explains why the two are split that way.
+The rest of the tree is static. The root [`pages/page.py`](wiki/pages/page.py) titles the index `Home` and declares the site description, which a dict passes down to every page below that names none. The two documentation pages declare a title and a description of their own, the search page a title. `articles/new/` and `articles/edit/<slug>/` add `"robots": {"index": False}`, so a crawler that follows the edit links off the index gets `<meta name="robots" content="noindex">` and an `X-Robots-Tag: noindex` header on the form pages and keeps the public article as the page worth ranking. The search page is the robots file's job instead, section 12 explains why the two are split that way.
 
 ### 12. A sitemap fed by the database
 
-Articles are rows, so the sitemap has to ask the table. [`wiki/routes/sitemap.py`](wiki/routes/sitemap.py) sits at the top of the page root and declares the one dynamic trail:
+Articles are rows, so the sitemap has to ask the table. [`wiki/pages/sitemap.py`](wiki/pages/sitemap.py) sits at the top of the page root and declares the one dynamic trail:
 
 ```python
 exclude = ["search"]
@@ -125,8 +127,10 @@ exclude = ["search"]
     "wiki/[slug]", kwargs=lambda article: {"slug": article.slug}, lastmod="updated_at"
 )
 def articles() -> QuerySet[Article]:
-    return Article.objects.only("slug", "updated_at").order_by("pk")
+    return article_index()
 ```
+
+`article_index` in [`wiki/services.py`](wiki/services.py) returns `Article.objects.only("slug", "updated_at").order_by("pk")`. The wiki has no accounts, so every read and write of its page tree goes through a function of `services.py`, the forms of section 11 included.
 
 The trail is the directory path of the page, `[slug]` included, and the check refuses a trail no page under the root answers to. The callable returns the queryset itself rather than a list of entries, so nothing runs until the document is requested, and then the database does the paging: one `COUNT` sizes the document, one `LIMIT`/`OFFSET` slice fills the page asked for, and the newest `updated_at` for the index comes from one ordered query. The number of queries per page does not grow with the number of articles. `kwargs` maps one row onto the URL kwargs that reverse the page, so `/wiki/<slug>/` is built by the router rather than spelled by hand, and `lastmod="updated_at"` names the column each `<lastmod>` is read from. `only()` keeps the query to the two columns those read, and `order_by("pk")` gives the pages a stable order, which the framework would add on its own for an unordered queryset. The callable runs through the same resolver as a `@context`, `request` is a parameter when it is needed and a `Depends` works, this one needs nothing. The file is loaded once and re-read when it changes.
 
@@ -134,7 +138,7 @@ The static side of the tree needs no declaration. `/`, `/docs/routing/` and `/do
 
 ### 13. Robots from a list of rules
 
-[`wiki/routes/robots.py`](wiki/routes/robots.py) declares `rules` as a list of `RobotsRule` groups, two here:
+[`wiki/pages/robots.py`](wiki/pages/robots.py) declares `rules` as a list of `RobotsRule` groups, two here:
 
 ```python
 rules = [

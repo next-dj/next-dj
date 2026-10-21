@@ -322,6 +322,24 @@ describe("layer flow through the partial surface", () => {
     expect(container.hasAttribute("data-next-busy")).toBe(false);
   });
 
+  it("a refused layer body reports the status and leaves no busy mark behind", async () => {
+    const opener = document.createElement("a");
+    document.body.append(opener);
+    respond = () =>
+      envelopeResponse("<html>403</html>", { status: 403, type: "text/html" });
+    await partial.layers.open(opener, "/w/", "z");
+    const container = document.querySelector('dialog [data-next-zone="z"]')!;
+    expect(container.textContent).toBe("");
+    expect(opener.hasAttribute("aria-busy")).toBe(false);
+    expect(container.hasAttribute("data-next-busy")).toBe(false);
+    const error = dispatched.find((d) => d.event === "partial:error");
+    expect(error!.detail).toEqual({
+      kind: "http",
+      status: 403,
+      body: "<html>403</html>",
+    });
+  });
+
   it("a browser dismiss gesture rejects the matching layer with its reason", async () => {
     respond = () =>
       envelopeResponse(zoneMorphBody("z", '<div data-next-zone="z">step</div>'));

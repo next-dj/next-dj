@@ -47,7 +47,7 @@ A typical multi-project repository looks like this.
          chrome/
            layout.djx
          admin_app/
-           routes/
+           pages/
              page.py
              template.djx
        site/
@@ -56,7 +56,7 @@ A typical multi-project repository looks like this.
          chrome/
            layout.djx
          site_app/
-           routes/
+           pages/
              page.py
              template.djx
 
@@ -85,8 +85,7 @@ Each project points at the shared directory through ``DIRS``.
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [str(BASE_DIR / "chrome")],
                "APP_DIRS": True,
-               "PAGES_DIR": "routes",
-               "OPTIONS": {"context_processors": []},
+               "PAGES_DIR": "pages",
            }
        ],
        "COMPONENT_BACKENDS": [

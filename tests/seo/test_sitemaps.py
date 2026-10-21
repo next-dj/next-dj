@@ -1,6 +1,7 @@
 import logging
 import types
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import pytest
 from django.contrib.auth.models import User
@@ -21,18 +22,23 @@ from next.seo.sitemaps import (
     lastmod_datetime,
     listed_trails,
     static_noindex,
+    static_trails,
 )
 from next.testing import parse_sitemap
+from next.utils import PageRoot
 from tests.support import (
     BASE,
     I18N,
     I18N_URLCONF,
     NOINDEX,
     WITH_BASE,
+    installed_apps,
     routed,
+    write_app,
     write_metadata_tree,
     write_page,
     write_tree,
+    write_urlconf,
 )
 
 
@@ -543,3 +549,58 @@ class TestLatestLastmod:
         root = write_tree(tmp_path / "pages", pages=("posts/[slug]",), sitemap="")
         with routed(root):
             assert _section().get_latest_lastmod() is None
+
+
+class TestMountedTreeSitemaps:
+    """A section of a `pages()` tree reverses its entries under the include prefix."""
+
+    def _sections(self, root, *entries: str) -> dict[str, list[str]]:
+        write_app(root, "shop", {"pages": ("", "about")})
+        write_app(root, "wallets", {"pages": ("", "about", "ops")})
+        write_app(root, "audit", {"pages": ("", "log")})
+        for app in ("shop", "wallets", "audit"):
+            (root / app / "pages" / "sitemap.py").write_text("")
+        (root / "wallets" / "pages" / "sitemap.py").write_text(
+            _items("@sitemap.items('ops')\ndef ops():\n    return [{'wallet': 3}]\n")
+        )
+        urlconf = write_urlconf(
+            root,
+            "sitemap_urls",
+            'path("shop/", pages("shop"))',
+            'path("w/<int:wallet>/", pages("wallets"))',
+            *entries,
+        )
+        with installed_apps(
+            root, "shop", "wallets", "audit", urlconf=urlconf, framework=WITH_BASE
+        ):
+            return {
+                name: _locations(section)
+                for name, section in PageTreeSitemapBackend({}).sections(None).items()
+            }
+
+    @pytest.mark.parametrize(
+        ("include", "audit"),
+        [
+            ('path("logs/", pages("audit"))', [f"{BASE}/logs/", f"{BASE}/logs/log/"]),
+            ('path("org/<slug:org>/audit/", pages("audit"))', []),
+        ],
+        ids=["static_include", "parameter_include"],
+    )
+    def test_each_tree_lists_its_own_urls(self, tmp_path, include, audit) -> None:
+        sections = self._sections(tmp_path, 'path("", include("next.urls"))', include)
+
+        assert sections == {
+            "shop": [f"{BASE}/shop/", f"{BASE}/shop/about/"],
+            "wallets": [f"{BASE}/w/3/ops/"],
+            "audit": audit,
+        }
+
+    @pytest.mark.parametrize(
+        ("prefix", "kept"),
+        [(None, True), ("shop/", True), ("w/<int:wallet>/", False)],
+        ids=["unprefixed", "static_prefix", "parameter_prefix"],
+    )
+    def test_static_trails_need_a_prefix_without_parameters(self, prefix, kept) -> None:
+        root = PageRoot(path=Path(), label="x", prefix=prefix)
+
+        assert static_trails(root, ["", "about"]) == (("", "about") if kept else ())

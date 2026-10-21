@@ -1,0 +1,21 @@
+<section class="rounded-lg border border-border bg-card p-6 space-y-4">
+  <header class="flex items-center justify-between">
+    <div>
+      <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{{ section.verbose_name_plural }}</h3>
+      <p class="text-xs text-muted-foreground">Each row saves on its own, keyed by primary key.</p>
+    </div>
+    <span data-inline-count="{{ section.token }}" class="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+      {{ section.count }} saved
+    </span>
+  </header>
+  <div class="space-y-3">
+    {% for row in section.rows %}
+      {% component "inline_row" row=row token=section.token rights=section.rights %}
+    {% endfor %}
+  </div>
+  {% if section.rights.row_rules %}
+    {% has_perm section.rights.add_perm section.rights.parent %}{% component "inline_add_form" %}{% endhas_perm %}
+  {% else %}
+    {% has_perm section.rights.add_perm %}{% component "inline_add_form" %}{% endhas_perm %}
+  {% endif %}
+</section>

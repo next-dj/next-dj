@@ -77,8 +77,7 @@ def _flash_success_before_rerender(
     page_path: "Path | None",
 ) -> bool:
     """Flash the success message ahead of an in-place origin re-render."""
-    # A None result re-renders the origin within this same request, so the
-    # message must reach the store before that render reads {% messages %}.
+    # A None result re-renders at once, so the message must reach the store first.
     if raw is None and page_path is not None:
         _send_success_message(request, source, cleaned_data)
         return True
@@ -96,8 +95,7 @@ def _normalize_handler_response(
         if get_absolute_url is not None:
             # Mirrors Django's CreateView convention for a returned instance.
             return HttpResponseRedirect(str(get_absolute_url()))
-    # Every rich return type the framework ships subclasses HttpResponse and is
-    # caught above, so the `.url` check is a last-resort fallback, not a hook.
+    # Every shipped rich return type subclasses HttpResponse, so `.url` is a fallback.
     if hasattr(raw, "url") and (url := getattr(raw, "url", None)):
         return HttpResponseRedirect(url)
     warnings.warn(
@@ -114,8 +112,7 @@ def _origin_rerender_response(
 ) -> HttpResponse:
     """Re-render the origin page after a valid submission's handler returned None.
 
-    The success response carries no invalid-submission headers and never re-enters
-    `backend.shape_response`, so `ActionOutcomeKind.INVALID` envelopes stay untouched.
+    The response skips `backend.shape_response`, so INVALID envelopes stay untouched.
     """
     origin_match = resolve_origin(request)
     if origin_match is None or origin_match.page_path is None:

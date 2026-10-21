@@ -1,0 +1,28 @@
+<div class="overflow-x-auto rounded-lg border border-border bg-card">
+  <table class="w-full text-sm">
+    <thead class="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+      <tr>
+        <th class="px-3 py-2 text-left font-medium">No.</th>
+        <th class="px-3 py-2 text-left font-medium">Chapter</th>
+        <th class="px-3 py-2 text-right font-medium">Words</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-border">
+      {% for chapter in chapters %}
+        <tr data-next-key="{{ chapter.pk }}">
+          <td class="px-3 py-2 text-muted-foreground">{{ chapter.number }}</td>
+          <td class="px-3 py-2">{{ chapter.title }}</td>
+          <td class="px-3 py-2 text-right tabular-nums">{{ chapter.word_count }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="3" class="px-3 py-6 text-center text-muted-foreground">No chapters yet.</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot class="border-t border-border text-xs text-muted-foreground">
+      <tr>
+        <td colspan="2" class="px-3 py-2">{{ chapters|length }} chapter{{ chapters|length|pluralize }}</td>
+        <td class="px-3 py-2 text-right tabular-nums" data-total-words>{{ words }}</td>
+      </tr>
+    </tfoot>
+  </table>
+</div>

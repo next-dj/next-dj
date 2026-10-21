@@ -1,0 +1,32 @@
+from typing import override
+
+from django.contrib import admin
+from django.db.models import QuerySet
+from django.forms import ModelForm
+from django.http import HttpRequest
+
+from myapp.models import Item
+from myapp.services import create_item, rename_item
+
+
+@admin.register(Item)
+class ItemAdmin(admin.ModelAdmin):
+    fields = ("title",)
+    list_display = ("title", "owner", "created_at")
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[Item]:
+        """List only the items the signed-in user may see."""
+        return super().get_queryset(request).visible_to(request.user)
+
+    @override
+    def save_model(
+        self, request: HttpRequest, obj: Item, form: ModelForm, change: bool
+    ) -> None:
+        """Write through the services, so the admin passes the rules the site does."""
+        title = form.cleaned_data["title"]
+        if change:
+            saved = rename_item(request.user, item_id=obj.pk, title=title)
+        else:
+            saved = create_item(request.user, title=title)
+        obj.pk = saved.pk
+        obj.refresh_from_db()

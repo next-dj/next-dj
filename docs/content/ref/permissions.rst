@@ -1,0 +1,123 @@
+.. _ref-permissions:
+
+Permissions reference
+=====================
+
+Module summary
+--------------
+
+``next.permissions`` binds a predicate to each object permission ``app_label.codename`` and answers ``user.has_perm(perm, obj)`` through ``ObjectPermissionBackend``.
+The package exports ``DeclarationOutsideModuleError``, ``ObjectPermissionBackend``, ``PermissionAlreadyRegisteredError``, ``UnknownAccessObjectError``, ``add_perm``, and ``has_perm``.
+``next.permissions.checks`` registers the system checks and stays out of the package namespace, so import it by its full path.
+Nothing in it imports a model, so the package loads before the app registry is ready.
+:doc:`/content/topics/permissions` covers the concepts, the access declarations, and the forms integration.
+
+Predicates
+----------
+
+A predicate is a plain function that takes ``()``, ``(user)``, or ``(user, obj)``, at most two positional parameters with defaults counted, ``**kwargs`` allowed, and no ``*args`` or keyword-only parameter without a default.
+``add_perm`` counts the positional parameters once, when it registers the function, and a check passes the function exactly that many of ``user`` and ``obj``, so a one-parameter function always receives the user.
+It refuses no signature, so a module whose function breaks the rule still imports and ``next.E159`` reports it.
+
+.. code-block:: python
+   :caption: the three signatures
+
+   from next.permissions import add_perm
+
+   def maintenance_off():
+       return True
+
+   def is_staff(user):
+       return user.is_staff
+
+   def is_owner(user, obj=None):
+       return obj is not None and obj.owner_id == user.pk
+
+   add_perm("notes.publish_note", maintenance_off)
+   add_perm("notes.moderate_note", is_staff)
+   add_perm("notes.delete_note", is_owner)
+
+A rule over several conditions combines them with ``and`` and ``or`` in the body of one function.
+
+.. code-block:: python
+   :caption: two conditions in one predicate
+
+   def can_edit(user, obj=None):
+       return user.is_staff or (obj is not None and obj.owner_id == user.pk)
+
+Registration and questions
+--------------------------
+
+``add_perm(name, predicate) -> None`` registers the function under the permission name.
+A name outside ``app_label.codename`` raises ``ValueError``, the same function under a name already held changes nothing, and a different one raises ``PermissionAlreadyRegisteredError``.
+A function of the same qualified name defined again in the same file, as a module that runs twice under the development server defines it, replaces the one the name held, so an edited ``page.py`` that registers a permission imports again.
+The ``permissions.py`` module of every installed application is imported at startup, so that is where ``add_perm`` calls live.
+
+``has_perm(user, perm, obj=None)`` answers from the registered predicates alone.
+An inactive user holds nothing, an unregistered name answers ``False``, and the function neither asks another backend nor grants a superuser anything a predicate refuses.
+A question without an object, as the admin and ``get_all_permissions`` ask, denies when the predicate raises ``AttributeError`` or ``TypeError`` on ``obj=None``, and the first such failure of each permission is logged as a warning.
+
+.. automodule:: next.permissions.manager
+   :members: add_perm, has_perm
+
+Access declarations
+-------------------
+
+``page.login_required``, ``page.permission_required``, and ``page.public`` record what a ``page.py`` declares, see :ref:`topics-access` and :doc:`pages`.
+``component.login_required`` and ``component.permission_required`` record what a ``component.py`` declares for its component alone, see :doc:`components`.
+Every page view, the action dispatcher, and a zone request check the declared rule before any application code but the ``scope`` dependency runs, a login first, then every permission without an object, then each permission on the object, the order of ``AccessMixin`` and ``PermissionRequiredMixin``.
+A refused login redirects to the login page and a refused permission raises :exc:`~django.core.exceptions.PermissionDenied`.
+A refused component renders nothing, and an object it names that is ``None`` refuses without asking ``has_perm``, as ``{% has_perm %}`` does.
+An ``@action`` of a ``component.py`` answers to what the component declares as well, and under a permission on a context it refuses every user, which ``next.E165`` reports.
+A file executed again drops what it declared before, so a reload never keeps a stale requirement.
+``manage.py permissions`` prints the rule every endpoint answers to, see :doc:`management`.
+
+Backend
+-------
+
+``ObjectPermissionBackend`` belongs in ``AUTHENTICATION_BACKENDS`` next to :class:`~django.contrib.auth.backends.ModelBackend`.
+It authenticates nobody and answers the authorization methods of :ref:`django:authorization_methods` from the registered predicates.
+``has_module_perms`` asks the model-level question, ``obj`` set to ``None``, of every registered permission of the application.
+The async twins run the predicates in a thread through ``sync_to_async``.
+
+.. automodule:: next.permissions.backends
+   :members: ObjectPermissionBackend
+
+Errors
+------
+
+``PermissionAlreadyRegisteredError`` carries the permission ``name`` that was registered twice.
+``DeclarationOutsideModuleError`` is a ``RuntimeError`` raised when ``login_required()``, ``permission_required()`` or ``public()`` runs inside a function rather than at the top level of the module it binds to, such as in ``render()`` or in a helper a page calls, and it carries that ``source`` file.
+
+``UnknownAccessObjectError`` is a ``LookupError`` raised when the ``obj=`` of a component names no prop and no context the component produces, and it carries the context ``name`` and the ``endpoint`` file.
+An ``obj=DObject[Model]`` of a ``page.py`` whose route lacks the kwarg raises ``UnboundObjectError`` from ``next.deps`` instead, see ``next.E162``.
+
+.. automodule:: next.permissions.errors
+
+Template tag
+------------
+
+``{% has_perm perm [obj] %}`` … ``{% else %}`` … ``{% endhas_perm %}`` is a builtin from ``next.templatetags.permissions``, see :doc:`template-tags`.
+A zone under the tag, or in the body of a component that decides what it shows, is refused to a partial request as an unknown zone, see :ref:`topics-permissions-zones`.
+
+Management command
+------------------
+
+``manage.py permissions [url]`` prints the rule of every endpoint or of one page or view, see :doc:`management`.
+
+System checks
+-------------
+
+``next.permissions.checks`` owns ``next.E159``, ``next.E160``, ``next.W127``, ``next.W130``, and ``next.W131``.
+``next.W128``, ``next.W129``, and ``next.E166`` live with the forms checks, ``next.E161`` with the zone checks, ``next.E162`` with the ``DObject`` checks, and ``next.E163`` and ``next.E164`` with the page checks, see :doc:`system-checks`.
+``next.W129``, like ``next.W127`` for a form guard, runs only in a project that declares access, and only while the default login is off.
+
+See also
+--------
+
+.. seealso::
+
+   :doc:`/content/topics/permissions` for the vocabulary, the backend, the tag, and the forms integration.
+   :doc:`/content/howto/enforce-object-level-permissions` for an owner-only edit form.
+   :doc:`forms` for ``Meta.permission_required`` and ``has_object_permission``.
+   :doc:`/content/security/actions` for the rule an action answers to.

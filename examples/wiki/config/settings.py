@@ -69,8 +69,7 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 SHARED_DIR = BASE_DIR.parent / "_shared"
-# The shared kit ships Python helpers next to its components, so the directory joins the
-# import path the way `pytest.ini` already adds it for the test run.
+# The shared kit ships Python helpers beside its components, so it joins sys.path.
 sys.path.insert(0, str(SHARED_DIR))
 STATICFILES_DIRS = [SHARED_DIR / "static"]
 
@@ -83,7 +82,7 @@ NEXT_FRAMEWORK = {
             "APP_DIRS": True,
             # The shared HTML envelope, walked next to the per-app trees.
             "DIRS": [str(BASE_DIR / "shell")],
-            "PAGES_DIR": "routes",
+            "PAGES_DIR": "pages",
             "OPTIONS": {
                 "context_processors": ["django.template.context_processors.request"]
             },
@@ -93,7 +92,7 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
-            "COMPONENTS_DIR": "_blocks",
+            "COMPONENTS_DIR": "_components",
         }
     ],
     "STATIC_VERSION": "v1",

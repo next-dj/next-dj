@@ -1,7 +1,10 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
+from unittest.mock import patch
 
-from next.components import ComponentContextManager, ComponentInfo
+from django.http import HttpRequest
+
+from next.components import ComponentContextManager, ComponentInfo, render_component
 
 
 def components_config(root: Path) -> dict[str, object]:
@@ -12,8 +15,7 @@ def components_config(root: Path) -> dict[str, object]:
 def write_colocated_component_assets(sources: Iterable[Path]) -> None:
     """Write a `component.css` beside each component source the caller names.
 
-    A page-tree fixture builds template and layout assets only, so the folder a watch
-    case points at has to exist on disk before a finder scan can report anything.
+    A page-tree fixture builds only template and layout assets.
     """
     for source in sources:
         folder = source.parent
@@ -58,3 +60,14 @@ def build_composite_component(
     module_path.write_text("# empty\n")
     info = component_info(root, name=name, module=module_path, template=template)
     return ComponentContextManager(), info, module_path
+
+
+def render_with(
+    manager: ComponentContextManager,
+    info: ComponentInfo,
+    context_data: Mapping[str, object],
+    request: HttpRequest | None = None,
+) -> str:
+    """Render `info` the way a page renders it, `manager` holding its context."""
+    with patch("next.components.renderers.component", manager):
+        return render_component(info, context_data, request)

@@ -37,7 +37,6 @@ from next.components.manager import (
 from next.components.renderers import (
     TemplateSource,
     _CompiledTemplate,
-    _inject_component_context,
     _merge_csrf_context,
 )
 from next.components.signals import component_backend_loaded
@@ -86,8 +85,7 @@ SHIPPED_LOADER_PATHS = [
 def shipped_template_loader(request) -> Generator[ComponentTemplateLoader, None, None]:
     """Run the enclosing suite once per shipped component template loader.
 
-    The override reloads the framework settings, which drops the shared render
-    pipeline, so the next access rebuilds it around the named class.
+    The override reloads settings, so the render pipeline rebuilds around the class.
     """
     with override_settings(NEXT_FRAMEWORK={"COMPONENT_TEMPLATE_LOADER": request.param}):
         yield components_manager.template_loader
@@ -407,8 +405,7 @@ class TestRegisterComponentsFolderFromRouterWalk:
         assert len(list(backend._registry.get_all())) == 1
 
     def test_the_first_claim_survives_a_cold_backend_load(self, tmp_path: Path) -> None:
-        # Loading the backends clears the claim set, so a claim taken before
-        # that load would be forgotten and the folder registered twice.
+        # Loading the backends clears the claim set, so an earlier claim is forgotten.
         folder = tmp_path / "_components"
         folder.mkdir()
         (folder / "a.djx").write_text("a")
@@ -635,8 +632,8 @@ class TestRenderComponent:
         out = load_component_template(info)
         assert out == "<div>{{ x }}</div>"
 
-    def test_render_composite_module_load_fallback(self, tmp_path: Path) -> None:
-        """When composite module fails to load, fall back to template string."""
+    def test_render_composite_module_load_failure(self, tmp_path: Path) -> None:
+        """A composite module that fails to load renders nothing, not its template."""
         (tmp_path / "bad").mkdir()
         (tmp_path / "bad" / "component.djx").write_text("<p>fallback</p>")
         (tmp_path / "bad" / "component.py").write_text("syntax error (")
@@ -649,7 +646,7 @@ class TestRenderComponent:
             is_simple=False,
         )
         html = render_component(info, {})
-        assert "fallback" in html
+        assert html == ""
 
     def test_render_composite_with_custom_render(self, tmp_path: Path) -> None:
         """Composite with render() in component.py uses it and returns string."""
@@ -757,7 +754,7 @@ class TestComponentRenderers:
     def test_render_with_template_returns_empty_when_no_template_string(
         self, tmp_path: Path
     ) -> None:
-        """_render_with_template returns '' when template loader yields None."""
+        """A composite render returns '' when the template loader yields None."""
         d = tmp_path / "nt"
         d.mkdir()
         (d / "component.djx").write_text("<p>x</p>")
@@ -769,7 +766,7 @@ class TestComponentRenderers:
         tl = ComponentTemplateLoader(loader)
         r = CompositeComponentRenderer(loader, tl)
         with patch.object(tl, "load_template", return_value=None):
-            assert r._render_with_template(info, {}, None) == ""
+            assert r.render(info, {}, None) == ""
 
     def test_fallback_template_none_returns_empty(self, tmp_path: Path) -> None:
         """When module load fails and template loader returns None, render is empty."""
@@ -854,8 +851,7 @@ class TestCachedComponentTemplateLoader:
     def test_a_module_string_follows_its_module(self, tmp_path: Path) -> None:
         """An edited component.py expires the entry, so the body follows it.
 
-        The module cache has no mtime of its own, so the new body arrives with
-        the restart the autoreloader performs for a watched `component.py`.
+        The module cache has no mtime, so the new body arrives with the restart.
         """
         module_dir = tmp_path / "mod"
         module_dir.mkdir()
@@ -1335,17 +1331,6 @@ class TestBothShippedLoadersAgree:
         cached, plain = SHIPPED_LOADER_PATHS
         assert counts[cached] == 0
         assert counts[plain] == 1
-
-
-class TestInjectComponentContext:
-    """_inject_component_context early exits."""
-
-    def test_no_op_when_no_module_path(self) -> None:
-        """When module_path is None, nothing is merged."""
-        info = ComponentInfo("s", Path("/"), "", Path("/t.djx"), None, True)
-        data: dict[str, object] = {"keep": 1}
-        _inject_component_context(info, data, None)
-        assert data == {"keep": 1}
 
 
 class TestGetComponentPathsForWatch:

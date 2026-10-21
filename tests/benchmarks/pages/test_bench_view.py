@@ -28,8 +28,7 @@ _DYNAMIC_PAGE = (
     + "".join(f"<p>row {i}</p>" for i in range(10))
     + "'\n"
 )
-# A cold round throws away every composed layer, so the count stays modest and
-# a couple of warmup rounds keep the first import out of the reported median.
+# Cold rounds discard every composed layer, so keep the count modest.
 _COLD_ROUNDS = 50
 _COLD_WARMUP_ROUNDS = 5
 
@@ -51,8 +50,7 @@ def _zone_get() -> HttpRequest:
 def _view_for(page_file: Path) -> Iterator[Callable[..., HttpResponseBase]]:
     """Build the unified view of a page on the module-level singleton.
 
-    Created the way the URL builder creates it, so the benchmark times the
-    per-request path and none of the build-time work.
+    Created the way the URL builder creates it, so only the per-request path is timed.
     """
     module = load_python_module_memo(page_file)
     view = page_singleton._create_unified_view(page_file, module)
@@ -65,8 +63,7 @@ def _view_for(page_file: Path) -> Iterator[Callable[..., HttpResponseBase]]:
 class TestBenchColdViewGet:
     """The same GETs with the composed layers thrown away before every round.
 
-    `clear_template_caches` drops the composed source and compiled template,
-    so each cold round re-pays the composition and parse a warm round skips.
+    `clear_template_caches` drops the composed source and compiled template.
     """
 
     @pytest.mark.benchmark(group="pages.view")
@@ -168,8 +165,7 @@ class TestBenchUnifiedViewGet:
     def test_static_layout_depth(self, tmp_path: Path, layouts: int, benchmark) -> None:
         """Layout-chain depth against a flat page, on one static body.
 
-        The two-layout point repeats `test_static_warm` on purpose, so the
-        pair reports the spread the stand puts on one configuration.
+        The two-layout point repeats `test_static_warm` to report the stand's spread.
         """
         page_file = build_layout_page(
             tmp_path, layouts=layouts, template=_STATIC_TEMPLATE

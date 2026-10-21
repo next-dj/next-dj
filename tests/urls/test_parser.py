@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import pytest
@@ -302,18 +303,21 @@ class TestCreateUrlPatternFileContext:
 
 
 class TestGeneratePatternsFileContext:
-    """FileRouterBackend re-raises scan failures with the page file attached."""
+    """FileRouterBackend leaves a refused page unrouted and logs it with its file."""
 
-    def test_keeps_file_path_from_create_url_pattern(self, router, tmp_path) -> None:
-        """A real duplicate-wildcard tree reports the discovered page.py."""
+    def test_a_refused_page_is_logged_and_left_unrouted(
+        self, router, tmp_path, caplog
+    ) -> None:
+        """A duplicate-wildcard page drops out, and its sibling still routes."""
         page_dir = tmp_path / "[[x]]" / "[[y]]"
         page_dir.mkdir(parents=True)
         page_file = page_dir / "page.py"
         page_file.write_text("def render(request, **kwargs):\n    return 'ok'\n")
+        (tmp_path / "page.py").write_text("def render(request):\n    return 'ok'\n")
 
-        with pytest.raises(DuplicateURLParameterError) as excinfo:
-            list(router._generate_patterns_from_directory(tmp_path))
-        error = excinfo.value
-        assert error.param_name == "y"
-        assert error.file_path == page_file
-        assert str(page_file) in str(error)
+        with caplog.at_level(logging.WARNING, logger="next.urls.backends"):
+            patterns = list(router._generate_patterns_from_directory(tmp_path))
+
+        assert [str(pattern.pattern) for pattern in patterns] == [""]
+        assert str(page_file) in caplog.text
+        assert "not routed" in caplog.text

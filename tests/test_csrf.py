@@ -29,7 +29,7 @@ from next.csrf import (
 )
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.partial.headers import REQUEST_FLAG
-from tests.support import FEED_URLCONF, isolated_form_registries, routed, write_page
+from tests.support import FEED_URLCONF, routed, write_page
 from tests.support.sites import mine
 
 
@@ -69,10 +69,7 @@ def _action_and_origin(html: str) -> tuple[str, str]:
     return action.group(1), origin.group(1)
 
 
-@pytest.fixture(autouse=True)
-def _form_registries():
-    with isolated_form_registries():
-        yield
+pytestmark = pytest.mark.usefixtures("form_registries")
 
 
 class TestDelivery:

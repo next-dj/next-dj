@@ -13,7 +13,7 @@ The framework ships ``template``, ``layout``, and ``component`` as default stems
 The stem registry
 -----------------
 
-The stem registry is ``next.static.discovery.default_stems``, an instance of ``StemRegistry``.
+The stem registry is ``next.static.default_stems``, an instance of ``StemRegistry``.
 It maps a role to a list of stems.
 
 .. list-table::
@@ -60,7 +60,7 @@ Register stems in ``AppConfig.ready``.
 
    from django.apps import AppConfig
 
-   from next.static.discovery import default_stems
+   from next.static import default_stems
 
    class NotesConfig(AppConfig):
        name = "notes"

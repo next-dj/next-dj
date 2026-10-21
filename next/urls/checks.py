@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
@@ -11,6 +13,7 @@ from django.urls import NoReverseMatch, Resolver404, resolve
 from next.checks import NEXT, SEO
 from next.checks.common import (
     WALK_HINT,
+    discover_page_registrations,
     errors_for_unknown_keys,
     get_page_roots,
     get_router_manager,
@@ -19,17 +22,19 @@ from next.checks.common import (
 from next.conf import import_class_cached, next_framework_settings
 from next.csrf import csrf_url, csrf_view
 from next.forms.uid import URL_NAME_FORM_ACTION, reverse_form_action
+from next.pages.access import routed_pages
 from next.ports import form_routes_slot
+from next.utils import UNMOUNTED, PageRoot
 
 from .backends import FILE_ROUTER_CONFIG_KEYS, FileRouterBackend, RouterBackend
 from .dispatcher import scan_pages_tree
 from .errors import DuplicateURLParameterError, URLParameterError
 from .parser import default_url_parser
+from .urlconf import NO_MOUNTS, UrlconfMounts, outer_kwargs, tree_route, urlconf_mounts
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
-    from pathlib import Path
 
     from django.urls import ResolverMatch
 
@@ -42,8 +47,11 @@ _FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset({"BACKEND", *FILE_ROUTER_CONFIG_KEYS})
 
 _NON_FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset({"BACKEND"})
 
-_CollectedPattern = tuple[str, str, str, frozenset[str]]
-"""`(django_pattern, url_path, source, parameter_names)` for one route."""
+_CollectedPattern = tuple[str, str, str, frozenset[str], str]
+"""`(django_pattern, url_path, source, parameter_names, namespace)` for one route."""
+
+type _TreeKey = tuple[Path, str, str]
+"""A mounted tree by its path, the route it is included under and its namespace."""
 
 
 def _router_class(backend_path: str) -> type[RouterBackend] | None:
@@ -107,9 +115,19 @@ def _validate_file_router_backend_fields(
 
 
 def _validate_dirs_field(config: dict[str, Any], prefix: str) -> list[CheckMessage]:
-    """Validate that `DIRS`, when present, is a list."""
-    if "DIRS" in config and not isinstance(config["DIRS"], list):
+    """Validate that `DIRS`, when present, is a list of paths and segment names.
+
+    The router drops an entry it cannot read, so only this check names the cause.
+    """
+    if "DIRS" not in config:
+        return []
+    dirs = config["DIRS"]
+    if not isinstance(dirs, list):
         return [Error(f"{prefix}.DIRS must be a list.", obj=settings, id="next.E006")]
+    bad = [item for item in dirs if not isinstance(item, str | os.PathLike | None)]
+    if bad:
+        msg = f"{prefix}.DIRS holds {bad!r}, neither a path nor a segment name."
+        return [Error(msg, obj=settings, id="next.E006")]
     return []
 
 
@@ -150,15 +168,9 @@ def _validate_app_dirs_field(config: dict[str, Any], prefix: str) -> list[CheckM
 
 
 def _validate_options_field(config: dict[str, Any], prefix: str) -> list[CheckMessage]:
-    """Validate that `OPTIONS` is present, a dict, and only names known keys."""
+    """Validate that `OPTIONS`, when present, is a dict naming only known keys."""
     if "OPTIONS" not in config:
-        return [
-            Error(
-                f"{prefix} must specify OPTIONS when using FileRouterBackend.",
-                obj=settings,
-                id="next.E026",
-            )
-        ]
+        return []
     if not isinstance(config["OPTIONS"], dict):
         return [
             Error(
@@ -286,8 +298,7 @@ def check_next_pages_configuration(*args, **kwargs) -> list[CheckMessage]:
 def check_router_manager(*args, **kwargs) -> list[CheckMessage]:
     """Report a router that fails to initialise (`next.E007`), once per check run.
 
-    Every check that walks the routers skips the failure without a message. This check
-    carries each tag those checks run under, so any `--tag` selection reports it.
+    Router-walking checks skip the failure silently, so this carries every tag they use.
     """
     _router_manager, init_errors = get_router_manager()
     return init_errors
@@ -329,21 +340,20 @@ def check_reverse_name_collisions(*args, **kwargs) -> list[CheckMessage]:
     if router_manager is None:
         return []
 
-    # Collection errors surface through check_url_patterns already, so
-    # they are dropped here instead of being reported twice.
+    # Collection errors already surface through check_url_patterns.
     all_patterns, _ = _collect_all_patterns(router_manager)
 
     # reverse() picks by arguments, so a collision needs name and parameters both.
-    grouped: dict[tuple[str, frozenset[str]], dict[str, list[str]]] = {}
-    for _pattern, url_path, source, parameters in all_patterns:
+    grouped: dict[tuple[str, str, frozenset[str]], dict[str, list[str]]] = {}
+    for _pattern, url_path, source, parameters, namespace in all_patterns:
         full_name = next_framework_settings.URL_NAME_TEMPLATE.format(
             name=default_url_parser.prepare_url_name(url_path)
         )
-        grouped.setdefault((full_name, parameters), {}).setdefault(url_path, []).append(
-            source
-        )
+        grouped.setdefault((namespace, full_name, parameters), {}).setdefault(
+            url_path, []
+        ).append(source)
 
-    for (full_name, _signature), routes in grouped.items():
+    for (_namespace, full_name, _signature), routes in grouped.items():
         # One trail from several trees is an E015 path conflict, not this.
         if len(routes) == 1:
             continue
@@ -384,7 +394,11 @@ _PROBE_UID = "probe"
 
 
 def _framework_routes() -> tuple[tuple[str, Callable[[], str], frozenset[Any]], ...]:
-    """Return the label, reverse call and serving views of each framework endpoint."""
+    """Return the label, reverse call and serving views of each framework endpoint.
+
+    A `page.py` registers its actions as it runs, so the page tree is discovered first.
+    """
+    discover_page_registrations()
     action_views = frozenset(
         pattern.callback
         for pattern in form_routes_slot.get()
@@ -471,10 +485,11 @@ def _collect_all_patterns_uncached(
     """Collect one `_CollectedPattern` per route from every router backend."""
     all_patterns: list[_CollectedPattern] = []
     errors: list[CheckMessage] = []
+    seen: set[_TreeKey] = set()
 
     for router in router_manager.backends:
         try:
-            _collect_router_patterns(router, all_patterns, errors)
+            _collect_router_patterns(router, all_patterns, errors, seen)
         except (AttributeError, OSError) as e:
             errors.append(
                 Error(
@@ -492,13 +507,28 @@ def _collect_router_patterns(
     router: RouterBackend,
     all_patterns: list[_CollectedPattern],
     errors: list[CheckMessage],
+    seen: set[_TreeKey],
 ) -> None:
-    """Append patterns from every page tree `router` reports."""
+    """Append patterns from every page tree `router` reports.
+
+    Each file router labels a mounted tree its own way, so its route keys it once.
+    """
     skip_dir_names = page_tree_skip_names(router)
+    mounts = urlconf_mounts()
     for root in get_page_roots(router):
+        if root.prefix is not None:
+            key = (root.path, root.prefix, root.namespace)
+            if key in seen:
+                continue
+            seen.add(key)
         all_patterns.extend(
             _collect_url_patterns(
-                root.path, root.label, errors, skip_dir_names=skip_dir_names
+                root.path,
+                root.label,
+                errors,
+                skip_dir_names=skip_dir_names,
+                root=root,
+                mounts=mounts,
             )
         )
 
@@ -508,7 +538,7 @@ def _check_url_conflicts(
 ) -> None:
     """Report an error when the same Django path string comes from multiple sources."""
     pattern_dict: dict[str, list[str]] = {}
-    for pattern, _url_path, source, _parameters in all_patterns:
+    for pattern, _url_path, source, _parameters, _namespace in all_patterns:
         if pattern in pattern_dict:
             pattern_dict[pattern].append(source)
         else:
@@ -531,26 +561,57 @@ def _collect_url_patterns(
     context: str,
     errors: list[CheckMessage],
     skip_dir_names: Iterable[str] = (),
+    *,
+    root: PageRoot = UNMOUNTED,
+    mounts: UrlconfMounts = NO_MOUNTS,
 ) -> list[_CollectedPattern]:
     """Collect one `_CollectedPattern` per route from one pages root.
 
-    Conversion and skip set match the router, so the check sees its exact routes.
+    It matches the router walk and keys each route from the URLconf root.
     """
     patterns: list[_CollectedPattern] = []
 
     if not pages_path.exists():
         return patterns
 
-    for url_path, page_file in scan_pages_tree(pages_path, skip_dir_names):
+    head = tree_route(root, mounts.include_point or "")
+    prefix_names = outer_kwargs(root, mounts)
+    for url_path, page_file in routed_pages(
+        scan_pages_tree(pages_path, skip_dir_names)
+    ):
         try:
             django_pattern, parameters = default_url_parser.parse_url_pattern(url_path)
         except URLParameterError as exc:
             errors.append(_parameter_refusal_error(exc, url_path, page_file))
-        else:
-            source = f"{context}: {page_file.relative_to(pages_path)}"
-            patterns.append((django_pattern, url_path, source, frozenset(parameters)))
+            continue
+        clash = sorted(prefix_names.intersection(parameters))
+        if clash:
+            errors.append(_prefix_clash_error(head, clash, page_file))
+            continue
+        source = f"{context}: {page_file.relative_to(pages_path)}"
+        patterns.append(
+            (
+                f"{head}{django_pattern}",
+                url_path,
+                source,
+                frozenset(parameters),
+                root.namespace,
+            )
+        )
 
     return patterns
+
+
+def _prefix_clash_error(head: str, names: list[str], page_file: Path) -> Error:
+    """Report a page parameter that the include over its tree already passes."""
+    return Error(
+        f"The page {page_file} captures {names}, which the include {head!r} of its "
+        "tree passes already, as a captured or an extra kwarg, so one value would "
+        "overwrite the other.",
+        hint="Rename the bracket directory, or the kwarg the include passes.",
+        obj=str(page_file),
+        id="next.E152",
+    )
 
 
 def _parameter_refusal_error(
@@ -558,8 +619,7 @@ def _parameter_refusal_error(
 ) -> Error:
     """Report one parser refusal under the code its own subclass owns."""
     if isinstance(exc, DuplicateURLParameterError):
-        # Two wildcards with distinct names raise without a name duplicate, so fall back
-        # to the name the parser flagged.
+        # Two wildcards with distinct names raise no duplicate, so use the flagged name.
         names = default_url_parser.duplicate_parameter_names(url_path) or [
             exc.param_name
         ]

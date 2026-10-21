@@ -30,9 +30,8 @@ A page module can supply its body through these sources.
 Registered template loaders.
    The ordered list under ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]``, whose default first entry ``DjxTemplateLoader`` resolves the sibling ``template.djx``.
 
-A page directory may instead host only a sibling ``layout.djx``.
-That directory has no body source, and the layout chain renders with an empty body slot.
-See *Layout-only directories* under :doc:`layouts` for the wrapping rules, and note that :ref:`next.E012 <ref-system-checks>` does not fire when a sibling ``layout.djx`` is present.
+A ``layout.djx`` is no body source, since it only wraps the body of the page beneath it.
+A ``page.py`` with none of the three sources routes no URL, even beside or under a ``layout.djx``, and :ref:`next.E012 <ref-system-checks>` reports it unless it declares access, passes context to the pages below, or serves an ``@action`` of its directory, see *A layout is no body* under :doc:`layouts`.
 
 See *Render order* below for the per-request sequence and the ``render`` short-circuit.
 Processor ordering and ``STRICT_CONTEXT`` behaviour are documented in :doc:`context` and :ref:`ref-settings`.
@@ -194,6 +193,26 @@ Pass ``serializer=`` with a ``JsContextSerializer`` instance to use a per-key se
    def featured_payload() -> dict:
        return {"id": 1, "title": "Hello"}
 
+Page access
+-----------
+
+A ``page.py`` declares the access of its own page through ``page.login_required()``, ``page.permission_required(perm, *, obj=None)``, and ``page.public()``.
+The declaration binds that page, its actions, and its zone requests, and no page below it.
+A requirement a section shares carries ``inherit=True``, which binds every page below the directory as well, see :doc:`access`.
+
+.. code-block:: python
+   :caption: notes/pages/notes/[int:note]/edit/page.py
+
+   from notes.models import Note
+
+   from next import page
+   from next.deps import DObject
+
+   page.permission_required("notes.edit_note", obj=DObject[Note])
+
+``page.public()`` lifts what every ``page.py`` above requires for that page alone, and ``manage.py permissions`` names the file of the lift.
+See :ref:`topics-permissions-tree` for the order of the checks and the answer to a refusal.
+
 Custom template loaders
 -----------------------
 
@@ -310,7 +329,7 @@ Adopting next.dj in an existing codebase does not require porting the views alre
 Resolution order
 ~~~~~~~~~~~~~~~~
 
-The file router mounts as a single ``include("next.urls")`` in the root URLconf, and the root URLconf stays an ordinary Django list resolved from top to bottom.
+The file router sits behind a single ``include("next.urls")`` in the root URLconf, and the root URLconf stays an ordinary Django list resolved from top to bottom.
 Every pattern written above the include is matched first, and a page whose directory produces the same URL never sees the request.
 The router registers no catch-all pattern, so a path that matches no page directory falls through to whatever follows the include.
 
@@ -530,7 +549,8 @@ The pages subsystem contributes Django system checks.
 The ``check_page_functions`` check inspects every ``page.py`` and reports the following.
 
 ``next.E012``.
-   The page module has neither a ``render`` function nor a ``template`` attribute, no registered loader can produce a body, and no sibling ``layout.djx`` wraps it.
+   The page module has neither a ``render`` function nor a ``template`` attribute, no registered loader can produce a body, it declares no access, and it passes no context with ``inherit_context=True`` to the pages below.
+   A ``layout.djx`` beside or above it is no body, since it only wraps one.
 
 ``next.E013``.
    The page module defines a ``render`` attribute that is not callable.
@@ -579,11 +599,10 @@ Fail quiet, the default.
    The view answers 404 and the failure is visible only in the log record.
    A deployment that never reads its logs therefore reads a broken page as a missing one, which is the reason :doc:`/content/deployment/settings` recommends ``STRICT_LOADING`` in production.
 
-The blast radius is one page in every mode.
+The blast radius is the broken page and the pages below it in every mode, since what it would have declared with ``inherit=True`` is unknown, see :ref:`topics-access`.
 The broken page still gets its URL pattern, so the error surfaces at the view rather than while the URL configuration is built, and every sibling page keeps its pattern and keeps serving.
 The record is keyed by modification time, so saving a fixed ``page.py`` clears it on the next request without a restart.
-``manage.py check --deploy`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message, which catches a broken page before traffic reaches it.
-The check imports every routed ``page.py`` and so costs a full tree walk, which is why it runs under the deployment flag rather than on every ``manage.py`` command.
+``manage.py check`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message, which catches a broken page before traffic reaches it.
 
 See :doc:`/content/ref/pages` for the exception class and :ref:`ref-settings` for the loudness table across ``DEBUG`` and the strict flags.
 
@@ -594,6 +613,7 @@ See also
 
    :doc:`layouts` for how the layout chain wraps the page body.
    :doc:`context` for ``@context`` patterns and inheritance.
+   :doc:`access` for the access a section declares over its pages.
    :doc:`seo/metadata` for the metadata a page declares and the head it renders.
    :doc:`/content/internals/page-discovery` for the discovery pipeline.
    :doc:`/content/ref/pages` for the public API.

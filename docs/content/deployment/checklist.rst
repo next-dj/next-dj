@@ -132,7 +132,7 @@ Monitoring
 
 - Forward ``page_rendered`` and ``action_dispatched`` to your metrics pipeline.
 - Forward ``form_validation_failed`` to alerting when failure rate exceeds the baseline.
-- Track ``router_reloaded`` if the project mounts a dynamic router.
+- Track ``router_reloaded`` if the project routes through a dynamic router.
 - Forward ``sse_stream_opened``, ``sse_stream_closed``, and ``zone_rendered`` when the project uses partial rendering.
 
 System checks
@@ -147,12 +147,19 @@ Run the framework system checks as part of CI and as part of the deployment scri
 
 A clean exit is required for the deployment to proceed.
 
-The ``--deploy`` flag is what matters here, because nine framework checks are registered as deployment checks and a plain ``check`` never runs them.
-Three report ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
-Each one costs a full walk of the page tree, which is why it is paid once per deploy rather than on every management command, and each one names a failure a visitor would otherwise meet as a 404, a silently stripped body, or a 500.
+The ``--deploy`` flag is what matters here, because six framework checks are registered as deployment checks and a plain ``check`` never runs them.
+A plain ``check`` already reports ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile, and the deployment run repeats them.
 ``next.W083`` reports an asset version that never moves, ``next.W090`` a client runtime bundle or lazy chunk the static files storage cannot serve, ``next.W110`` and ``next.W122`` a missing ``SITE["URL"]``, ``next.W111`` a closed site that still publishes crawler documents, ``next.W118`` a script over plain HTTP, and ``next.W119`` an insecure consent cookie.
 
 See :ref:`ref-system-checks` for the full catalog.
+
+Several deployments
+-------------------
+
+One code base can ship as several deployments, such as a public site and a back office, each with a settings module of its own over a shared base, its own ``INSTALLED_APPS``, and its own ``ROOT_URLCONF``.
+The file router walks the page trees of the installed applications alone, so ``manage.py routes --settings=config.settings.backoffice`` lists exactly what that deployment serves.
+CI runs ``manage.py check --deploy --settings=...`` once per deployment, where Django reports a relation declared by a string into an application the settings leave out as ``fields.E300`` and ``fields.E307``, see :doc:`django:ref/checks`.
+A deployment that no CI step checks is the one whose missing application reaches production first, and :doc:`/content/howto/split-settings-per-environment` covers the settings package the deployments build on.
 
 Access control tests
 --------------------
@@ -172,7 +179,7 @@ Hit at least three URLs after the deploy.
 - One captured URL such as ``/notes/<existing-id>/``.
 - One action endpoint through a simulated POST.
 
-The smoke tests confirm that the file router is mounted, the database is reachable, and the dispatcher resolves URLs.
+The smoke tests confirm that the file router is included, the database is reachable, and the dispatcher resolves URLs.
 
 See also
 --------

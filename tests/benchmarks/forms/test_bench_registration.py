@@ -74,8 +74,7 @@ def imported_forms_module(settings, tmp_path: Path) -> Iterator[ModuleType]:
 class TestBenchFormRegistration:
     """Import-time cost of declaring auto-registered Form subclasses.
 
-    Each declaration runs `__init_subclass__` and the registration gate, while the
-    repeated class names overwrite in place and keep the registry size-stable.
+    Repeated class names overwrite in place, keeping the registry size-stable.
     """
 
     @pytest.mark.benchmark(group="forms.registration")

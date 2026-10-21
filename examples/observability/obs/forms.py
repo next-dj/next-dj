@@ -5,12 +5,13 @@ from next.forms import Form
 from next.partial import Patches, zone_requested
 from next.urls import page_reverse, with_query
 
+from .apps import METRIC_PULSE_OP
+
 
 WINDOW_CHOICES = (("1m", "Last minute"), ("5m", "Last 5 minutes"), ("1h", "Last hour"))
 DEFAULT_WINDOW = "5m"
 LIVE_TOTALS_ZONE = "live-totals"
 WINDOW_LABEL_ZONE = "stats-window"
-METRIC_PULSE_OP = "metric-pulse"
 STATS_PAGE = "stats"
 
 
@@ -37,11 +38,9 @@ class WindowFilterForm(Form):
     def on_valid(self, request: HttpRequest) -> HttpResponse:
         """Re-aggregate the totals under the picked window and pulse the change.
 
-        An apply morphs `live-totals` and the `stats-window` label so the heading never
-        names a stale window, and emits `metric-pulse` for the co-located handler.
+        An apply morphs `live-totals` and `stats-window`, and emits `metric-pulse`.
         """
-        # Pick the literal out of WINDOW_CHOICES so the redirect target is
-        # built from trusted constants, with request data used only to compare.
+        # Pick the literal out of WINDOW_CHOICES so the redirect uses trusted constants.
         chosen = next(
             value for value, _ in WINDOW_CHOICES if value == self.cleaned_data["window"]
         )

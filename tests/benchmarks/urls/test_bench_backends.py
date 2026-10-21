@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from next.urls.urlconf import urlconf_mounts
 from tests.benchmarks.factories import build_pages_tree
 from tests.support import file_router, importable_dir
 
@@ -41,6 +42,33 @@ def _write_apps(
     return names
 
 
+_PRIVATE_APPS = ("bench_shop", "bench_wallets", "bench_blog", "bench_plain")
+
+
+def _write_private_apps(root: Path) -> list[str]:
+    """Write apps whose page trees each hold a private `_drafts` tree beside them."""
+    for name in _PRIVATE_APPS:
+        app = root / name
+        app.mkdir(parents=True)
+        (app / "__init__.py").write_text("")
+        tree = app / "pages"
+        tree.mkdir()
+        build_pages_tree(tree, depth=3, fanout=3, leaf="page.py")
+        drafts = tree / "_drafts"
+        drafts.mkdir()
+        build_pages_tree(drafts, depth=3, fanout=3, leaf="page.py")
+    return list(_PRIVATE_APPS)
+
+
+@pytest.fixture()
+def installed_private_apps(tmp_path: Path, settings) -> Iterator[None]:
+    """Install four apps with a private `_drafts` tree beside every route."""
+    entries = _write_private_apps(tmp_path)
+    with importable_dir(tmp_path):
+        settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, *entries]
+        yield
+
+
 @pytest.fixture()
 def installed_page_apps(tmp_path: Path, settings) -> Iterator[None]:
     """Install two apps of 27 pages each so app resolution has trees to find."""
@@ -65,8 +93,7 @@ def installed_many_apps(tmp_path: Path, settings) -> Iterator[None]:
 class TestBenchFileRouter:
     """A fresh backend per round, because the second call is a cache copy.
 
-    `generate_urls` copies `_root_patterns_cache` after the first tree walk,
-    so reusing a backend would time a list copy instead of the discovery.
+    `generate_urls` copies `_root_patterns_cache` after the first walk.
     """
 
     @pytest.mark.benchmark(group="urls.backends")
@@ -115,3 +142,28 @@ class TestBenchManyInstalledApps:
         self, installed_many_apps, benchmark
     ) -> None:
         benchmark(lambda: _app_dirs_router().generate_urls())
+
+
+class TestBenchPrivateFolders:
+    """A `_name` folder is skipped, so its subtree costs one directory entry."""
+
+    @pytest.mark.benchmark(group="urls.backends")
+    def test_private_folders_build_and_generate(
+        self, installed_private_apps, benchmark
+    ) -> None:
+        benchmark(lambda: _app_dirs_router().generate_urls())
+
+    @pytest.mark.benchmark(group="urls.backends")
+    def test_private_folders_page_roots(
+        self, installed_private_apps, benchmark
+    ) -> None:
+        benchmark(lambda: _app_dirs_router().page_roots())
+
+
+class TestBenchUrlconfMounts:
+    """`page_roots` reads the URLconf walk on every call, so a memo hit is hot."""
+
+    @pytest.mark.benchmark(group="urls.backends")
+    def test_urlconf_mounts_memo_hit(self, benchmark) -> None:
+        urlconf_mounts()
+        benchmark(urlconf_mounts)

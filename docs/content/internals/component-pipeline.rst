@@ -121,7 +121,7 @@ Component context resolution
 
 Each ``@component.context("key")`` function runs once per component render.
 An unkeyed callable's dict is checked before the merge, so a key naming a prop of the rendering ``{% component %}`` call site, a reserved render key, or anything carrying the ``slot_`` prefix raises ``ValueError`` rather than overwriting the entry.
-When a component's ``component.py`` fails to import, the renderer falls back to plain template rendering and the ``@component.context`` callables in that module do not run.
+When a component's ``component.py`` fails to import, the component renders as an empty string, since the access it would have declared is unknown, and under ``next.conf.fail_loudly`` it raises ``ComponentModuleImportError`` with the import failure as ``__cause__``.
 On the template render path each component instance resolves against a copy of the request-scoped dependency cache that ``render_dep_cache`` returns.
 Named ``Depends("name")`` values resolved earlier in the dispatch are reused inside the component callables, and what one instance resolves never reaches another instance or a later ``@page.metadata`` callable.
 Only a form dispatch puts that cache on the request, so an ordinary GET leaves each component render building a ``DependencyCache`` of its own and two components asking for one name each pay for it.

@@ -2,20 +2,23 @@ from __future__ import annotations
 
 import inspect
 import re
+from io import StringIO
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
 from django.conf import settings
+from django.core.checks import run_checks
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.db import connection
 from django.http import Http404
 from django.test.utils import CaptureQueriesContext
 from django.urls import path, reverse
 from django.utils.text import Truncator
 from wiki.backends import HybridRouterBackend
+from wiki.deps import ArticleProvider, DArticle
 from wiki.models import Article
-from wiki.providers import ArticleProvider, DArticle
 
 from next.testing import (
     NextClient,
@@ -160,7 +163,7 @@ class TestDocFigureChildren:
     def test_routing_page_reuses_the_figure(self, next_client: NextClient) -> None:
         body = next_client.get(reverse("next:page_docs_routing")).content.decode()
         assert "<figure" in body
-        assert "<li><code>routes/page.py</code> → <code>/</code></li>" in body
+        assert "<li><code>pages/page.py</code> → <code>/</code></li>" in body
 
 
 class TestArticleCreation:
@@ -433,7 +436,7 @@ class TestRouterReloadSignal:
 
 
 class TestUnits:
-    """Unit tests covering defensive branches in models, providers, and backends."""
+    """Unit tests covering defensive branches in models, deps, and backends."""
 
     def test_article_str_returns_title(self, routing_doc: Article) -> None:
         assert str(routing_doc) == routing_doc.title
@@ -703,3 +706,27 @@ class TestRobots:
             "",
             "Sitemap: https://wiki.example/sitemap.xml",
         ]
+
+
+OPEN_ACTIONS = frozenset({"article_edit_form", "article_create_form"})
+
+
+class TestOpenActions:
+    """Nobody signs in here, so every page with an action declares itself public."""
+
+    def test_the_permission_table_lists_the_actions_as_public(self) -> None:
+        out = StringIO()
+        call_command("permissions", stdout=out)
+        _header, *lines = out.getvalue().splitlines()
+        rows = (re.split(r"\s{2,}", line.strip()) for line in lines)
+        access = {
+            name.partition(" ")[0]: rule
+            for kind, name, rule, _sources in rows
+            if kind == "action"
+        }
+        assert {name: access[name] for name in OPEN_ACTIONS} == dict.fromkeys(
+            OPEN_ACTIONS, "public"
+        )
+
+    def test_the_declared_access_leaves_no_action_unguarded(self) -> None:
+        assert "next.W129" not in {message.id for message in run_checks()}

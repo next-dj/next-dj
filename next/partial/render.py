@@ -34,8 +34,7 @@ _NESTABLE_BATCH: Final = 2
 class ZoneRenderResult:
     """Rendered zones plus the assets their bodies collected.
 
-    A morph or replace addresses the wrapped element in `html`, while an append or
-    prepend grafts the bare body in `bodies` into the live zone.
+    `html` holds the wrapped element for morph or replace, `bodies` the bare body.
     """
 
     html: dict[str, str]
@@ -72,13 +71,12 @@ def render_zone(
 ) -> ZoneRenderResult:
     """Render the named zones of a page with the full page context.
 
-    Widens the batch by the zones nested in the bodies, so a `@context(zone=)` on a
-    nested zone still runs. An unknown name is skipped, an all-unknown batch raises.
+    A nested zone runs its `@context(zone=)` too, and a batch of unknown names raises.
     """
     start = time.perf_counter()
     kwargs = url_kwargs or {}
     template = page.composed_template_for(page_path)
-    zones = zones_of(template)
+    zones = zones_of(template, page_path)
     rendered_names = _renderable_zone_names(zone_names, zones)
 
     if context_data is None:
@@ -114,12 +112,16 @@ def _renderable_zone_names(
 ) -> tuple[str, ...]:
     """Return the declared names of a batch, deduplicated in request order.
 
-    An undeclared name is dropped and so is one nested in another name of the batch,
-    whose body renders once inside it. A batch with nothing declared raises.
+    An undeclared, bound or nested name drops out, and a batch left empty raises.
     """
-    declared = tuple(name for name in dict.fromkeys(zone_names) if name in zones)
+    declared = tuple(
+        name
+        for name in dict.fromkeys(zone_names)
+        if (info := zones.get(name)) is not None and info.standalone
+    )
     if zone_names and not declared:
-        raise UnknownZoneError(zone_names[0], tuple(sorted(zones)))
+        open_names = sorted(name for name, info in zones.items() if info.standalone)
+        raise UnknownZoneError(zone_names[0], tuple(open_names))
     if len(declared) < _NESTABLE_BATCH:
         return declared
     covered = frozenset[str]().union(*(zones[name].nested for name in declared))
@@ -131,8 +133,7 @@ def _context_zone_names(
 ) -> frozenset[str]:
     """Return the batch names widened by the zones nested in their bodies.
 
-    A nested zone renders inside the body of a requested one, so its
-    zone-bound context callables have to run for the batch.
+    A nested zone renders inside a requested one, so its zone-bound context must run.
     """
     widened = set(rendered)
     for name in rendered:

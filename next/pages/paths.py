@@ -1,28 +1,22 @@
 """Per-page path facts memoised for the render path.
 
-Nothing here depends on a request, so a value is read once per page path
-and dropped by the lifecycle that rebuilds a composition.
+Nothing here depends on a request, so a value is read once per page path.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from next.caches import PageCache
 from next.utils import MAX_ANCESTOR_WALK_DEPTH
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
 class PagePathInfo:
     """The path facts of one `page.py` that no request can change.
 
-    `template_path` falls back to the page itself where no sibling
-    `template.djx` exists, and `ancestors` runs from the page outwards.
+    `template_path` falls back to the page itself, `ancestors` runs from it outwards.
     """
 
     module_path: str
@@ -30,8 +24,7 @@ class PagePathInfo:
     ancestors: tuple[Path, ...]
 
 
-# Bounded because a router may name a page path no earlier read named, and each
-# entry pins an ancestor tuple until the process ends.
+# Bounded because a router may name page paths without end and each entry pins a tuple.
 _PAGE_PATH_INFO_CACHE: PageCache[Path, PagePathInfo] = PageCache()
 
 
@@ -42,6 +35,11 @@ def page_path_info(file_path: Path) -> PagePathInfo:
         info = _build_page_path_info(file_path)
         _PAGE_PATH_INFO_CACHE[file_path] = info
     return info
+
+
+def page_template_path(page_path: Path) -> Path:
+    """Return the template a component tag of the page resolves against."""
+    return Path(page_path_info(page_path).template_path).resolve()
 
 
 def _build_page_path_info(file_path: Path) -> PagePathInfo:

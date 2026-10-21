@@ -25,11 +25,7 @@ def _renderer() -> markdown.Markdown:
 
 
 def render_markdown(text: str) -> SafeString:
-    """Render Markdown to safe HTML for a page body or a live preview pane.
-
-    Escaping neutralizes `<script>` before rendering, and stripping
-    `javascript:`/`data:` hrefs after closes the auto-link gap.
-    """
+    """Render Markdown to safe HTML, escaping first and stripping unsafe hrefs after."""
     body = text or ""
     if not body.strip():
         return EMPTY_PREVIEW

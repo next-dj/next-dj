@@ -36,8 +36,7 @@ def _origin_target(request: "HttpRequest") -> "tuple[Path | None, dict[str, obje
 def _form_zone(request: "HttpRequest", page_path: "Path | None") -> str | None:
     """Return the zone the failed form lives in, or None for the form-by-uid path.
 
-    The zone named by the partial intent wins when the origin page declares it, else
-    falls through to the extract-morph of the form by uid.
+    The zone named by the intent wins when the origin page declares it.
     """
     if page_path is None:
         return None
@@ -49,9 +48,11 @@ def _form_zone(request: "HttpRequest", page_path: "Path | None") -> str | None:
 
 
 def _declared_zones(page_path: "Path") -> frozenset[str]:
-    """Return the zone names the origin page declares."""
+    """Return the zone names the origin page declares that render on their own."""
     template = page.composed_template_for(page_path)
-    return frozenset(zones_of(template))
+    return frozenset(
+        name for name, info in zones_of(template, page_path).items() if info.standalone
+    )
 
 
 def _zone_overrides(
@@ -59,8 +60,7 @@ def _zone_overrides(
 ) -> dict[str, object]:
     """Return the overrides binding one form into a zone re-render.
 
-    The `{% form %}` tag honours the action key only when it carries a `.form`
-    attribute, so a bare form there makes the tag build an unbound replacement instead.
+    `{% form %}` honours the action key only with a `.form` attribute.
     """
     if form is None:
         return {}
@@ -78,8 +78,7 @@ def _resolve_step_target(
 ) -> "tuple[Path, dict[str, object]] | None":
     """Resolve the next step URL to its page identity and URL kwargs.
 
-    Resolves through the same URLconf as the origin, without running the step page
-    view. Kwargs stay unfiltered so the next step renders every parameter it declares.
+    Uses the origin's URLconf without running the step view, kwargs left unfiltered.
     """
     match = resolve_url_to_match(href, request, filter_reserved=False)
     if match is None or match.page_path is None:

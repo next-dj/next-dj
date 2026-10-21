@@ -1,8 +1,4 @@
-"""Pluggable backend contract and Django-staticfiles default implementation.
-
-The default backend resolves URLs through Django staticfiles,
-so manifest, S3, and CDN settings apply automatically.
-"""
+"""Pluggable backend contract and Django-staticfiles default implementation."""
 
 from __future__ import annotations
 
@@ -26,8 +22,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
 
-# Changing one of these rebuilds `staticfiles_storage`, so every URL resolved through
-# the previous storage refers to a manifest that no longer applies.
+# Changing one of these rebuilds `staticfiles_storage` and stales every memoised URL.
 MANIFEST_SETTINGS = frozenset({"STATIC_ROOT", "STATIC_URL", "STORAGES"})
 
 DEFAULT_STATIC_BACKEND: Final = "next.static.StaticFilesBackend"
@@ -35,17 +30,12 @@ DEFAULT_STATIC_BACKEND: Final = "next.static.StaticFilesBackend"
 
 
 class StaticBackend(ABC):
-    """Pluggable strategy for resolving asset files to URLs and rendering tags.
-
-    The base class memoises what each backend resolves, so `forget_urls` exists for
-    the framework to tell it when the storage behind those URLs is rebuilt.
-    """
+    """Pluggable strategy for resolving asset files to URLs and rendering tags."""
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
         """Store the raw config mapping and prime the URL memo it may fill."""
         self._config: Mapping[str, Any] = config or {}
-        # Bounded only to cap memory for an unbounded set of names. Eviction is by
-        # insertion order, so a cache hit reorders nothing.
+        # Bounded to cap memory for an unbounded set of names.
         self._url_cache: BoundedCache[tuple[str, ...], str] = BoundedCache()
 
     @property
@@ -56,8 +46,7 @@ class StaticBackend(ABC):
     def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
         """Return the public URL of an already-resolved asset for this render.
 
-        Override it to apply a per-request scheme, such as a per-tenant prefix, to
-        every asset URL, the `next.min.js` runtime tag included.
+        Override it to apply a per-request scheme such as a per-tenant prefix.
         """
         del request
         return url
@@ -70,19 +59,14 @@ class StaticBackend(ABC):
         return reference
 
     def forget_urls(self) -> None:
-        """Drop every memoised URL, so the next lookup resolves it again.
-
-        `StaticManager.forget_backend_urls` calls it after a storage rebuild and drops
-        the other memoised URLs itself, so call that method rather than this hook.
-        """
+        """Drop every memoised URL, call `StaticManager.forget_backend_urls` instead."""
         self._url_cache.clear()
 
     @abstractmethod
     def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
         """Register a co-located asset file and return its public URL.
 
-        Discovery asks on every render rather than caching the answer, so a backend
-        may resolve the same file to a different URL per request.
+        Discovery asks on every render, so a backend may answer differently per request.
         """
 
 
@@ -118,11 +102,7 @@ class StaticFilesBackend(StaticBackend):
 
     @override
     def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
-        """Return the staticfiles URL for `next/<logical_name><suffix>`.
-
-        Memoised per `(logical_name, suffix)`, because staticfiles reads its manifest
-        once per process, and `forget_urls` drops it when that manifest moves.
-        """
+        """Return the staticfiles URL for `next/<logical_name><suffix>`, memoised."""
         del kind
         suffix = source_path.suffix
         cache_key = ("file", logical_name, suffix)
@@ -139,11 +119,7 @@ class StaticFilesBackend(StaticBackend):
 
     @override
     def resolve_url(self, reference: str) -> str:
-        """Resolve a staticfiles name through storage and leave a ready URL alone.
-
-        The memo is read before the reference is classified, so a ready URL is parsed
-        once rather than on every render, and `forget_urls` drops both answers.
-        """
+        """Resolve a staticfiles name through storage and leave a ready URL alone."""
         cache_key = ("name", reference)
         cached = self._url_cache.get(cache_key)
         if cached is not None:

@@ -4,14 +4,19 @@ from unittest.mock import MagicMock
 import pytest
 from django.test import override_settings
 
+from next import discovery
 from next.components import components_manager
+from next.forms.checks import check_form_action_collisions
+from next.pages.errors import PageModuleImportError
+from next.pages.loaders import load_page_module
 from next.testing import (
     clear_loaded_dirs,
     eager_load_components,
     eager_load_pages,
     loaders,
 )
-from tests.support import DummyComponentsBackend
+from tests.support import DummyComponentsBackend, isolated_form_registries
+from tests.support.access import CONTEXT_CALLS
 
 
 @pytest.fixture(autouse=True)
@@ -35,6 +40,19 @@ def _component_backend_config(
         f"from pathlib import Path\nPath({str(marker)!r}).write_text('loaded')\n"
     )
     return {"DIRS": [str(root / "_components")], "COMPONENTS_DIR": "_components"}
+
+
+_COUNTED_ACTION = """
+from next.forms import action
+from tests.support.access import note_call
+
+note_call("counted")
+
+
+@action("counted_ping")
+def counted_ping():
+    return None
+"""
 
 
 class TestEagerLoadPages:
@@ -62,26 +80,30 @@ class TestEagerLoadPages:
             eager_load_pages(tmp_path / "missing")
 
     def test_errors_in_page_bubble_up(self, tmp_path: Path) -> None:
-        _write_page(tmp_path / "page.py", "raise RuntimeError('boom')\n")
-        with pytest.raises(RuntimeError, match="boom"):
+        page_file = tmp_path / "page.py"
+        _write_page(page_file, "raise RuntimeError('boom')\n")
+        with pytest.raises(PageModuleImportError) as caught:
             eager_load_pages(tmp_path)
+        assert caught.value.file_path == page_file.resolve()
+        assert isinstance(caught.value.__cause__, RuntimeError)
 
     def test_handles_bracket_segments(self, tmp_path: Path) -> None:
         _write_page(tmp_path / "[int:id]" / "page.py", "VALUE = 5\n")
         loaded = eager_load_pages(tmp_path)
         assert len(loaded) == 1
 
-    def test_import_spec_failure_raises(self, tmp_path: Path, monkeypatch) -> None:
-        _write_page(tmp_path / "page.py", "VALUE = 6\n")
-
-        def fake_spec(*args, **kwargs) -> None:
-            return None
-
-        monkeypatch.setattr(
-            loaders.importlib.util, "spec_from_file_location", fake_spec
-        )
-        with pytest.raises(ImportError, match="Cannot build import spec"):
+    def test_a_page_runs_once_with_the_request_loader(self, tmp_path: Path) -> None:
+        page_file = tmp_path / "page.py"
+        _write_page(page_file, _COUNTED_ACTION)
+        CONTEXT_CALLS.clear()
+        with isolated_form_registries():
             eager_load_pages(tmp_path)
+            module, error = load_page_module(page_file.resolve())
+            collisions = check_form_action_collisions()
+        assert error is None
+        assert module is not None
+        assert CONTEXT_CALLS == ["counted"]
+        assert collisions == []
 
     def test_clear_loaded_dirs_allows_reload(self, tmp_path: Path) -> None:
         _write_page(tmp_path / "page.py", "VALUE = 7\n")
@@ -89,6 +111,12 @@ class TestEagerLoadPages:
         clear_loaded_dirs()
         loaded = eager_load_pages(tmp_path)
         assert len(loaded) == 1
+
+
+def test_clear_loaded_dirs_drops_the_page_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(discovery._router_manager_cache, "pages", (object(), []))
+    clear_loaded_dirs()
+    assert discovery._router_manager_cache.pages is None
 
 
 class _RecordingBackend(DummyComponentsBackend):
@@ -161,8 +189,7 @@ class TestEagerLoadComponents:
     def test_a_backend_that_implements_neither_hook_keeps_working(
         self, monkeypatch
     ) -> None:
-        # A backend resolving names on demand owns no modules, so both
-        # hooks keep their inherited no-op behaviour.
+        # A backend resolving names on demand owns no modules, so both hooks no-op.
         backend = DummyComponentsBackend({})
         manager = _StubManager(backend)
         monkeypatch.setattr(loaders, "components_manager", manager)

@@ -3,7 +3,6 @@ import importlib.util
 import sys
 import textwrap
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -16,7 +15,6 @@ from next.components import (
     component,
     render_component,
 )
-from next.components.renderers import _inject_component_context
 from next.static import StaticCollector
 from tests.support import (
     assert_bounded_by_insert_age,
@@ -24,7 +22,7 @@ from tests.support import (
     handler_declared_here,
     record_path_calls,
 )
-from tests.support.components import build_composite_component
+from tests.support.components import build_composite_component, render_with
 
 
 # The package name `context` is the decorator, so the module comes from `sys.modules`.
@@ -349,8 +347,8 @@ class TestComponentContextRegistrySerialize:
         assert fn.serialize is False
 
 
-class TestInjectComponentContextSerialize:
-    """_inject_component_context populates StaticCollector when serialize=True."""
+class TestComponentContextSerialize:
+    """A render hands a `serialize=True` context to the `StaticCollector` it carries."""
 
     def test_keyed_serialize_populates_collector(self, tmp_path: Path) -> None:
         """A keyed context function with serialize=True writes to the collector."""
@@ -363,8 +361,7 @@ class TestInjectComponentContextSerialize:
 
         collector = StaticCollector()
         context_data: dict = {"_static_collector": collector}
-        with patch("next.components.renderers.component", mgr):
-            _inject_component_context(info, context_data, None)
+        render_with(mgr, info, context_data)
 
         assert collector.js_context()["theme"] == "dark"
 
@@ -379,8 +376,7 @@ class TestInjectComponentContextSerialize:
 
         collector = StaticCollector()
         context_data: dict = {"_static_collector": collector}
-        with patch("next.components.renderers.component", mgr):
-            _inject_component_context(info, context_data, None)
+        render_with(mgr, info, context_data)
 
         assert collector.js_context()["env"] == "prod"
         assert collector.js_context()["version"] == "1"
@@ -396,27 +392,24 @@ class TestInjectComponentContextSerialize:
 
         collector = StaticCollector()
         context_data: dict = {"_static_collector": collector}
-        with patch("next.components.renderers.component", mgr):
-            _inject_component_context(info, context_data, None)
+        render_with(mgr, info, context_data)
 
         assert collector.js_context() == {}
 
-    def test_serialize_without_collector_still_injects_the_value(
+    def test_serialize_without_collector_still_renders_the_value(
         self, tmp_path: Path
     ) -> None:
-        """With no `_static_collector` in context_data the key is injected anyway."""
-        mgr, info, module_path = build_composite_component(tmp_path)
+        """With no `_static_collector` in the context the key still renders."""
+        mgr, info, module_path = build_composite_component(
+            tmp_path, template="<i>{{ key }}</i>"
+        )
 
         def get_val() -> str:
             return "value"
 
         mgr._registry.register(module_path, "key", get_val, serialize=True)
 
-        context_data: dict = {}
-        with patch("next.components.renderers.component", mgr):
-            _inject_component_context(info, context_data, None)
-
-        assert context_data == {"key": "value"}
+        assert render_with(mgr, info, {}) == "<i>value</i>"
 
 
 class TestComponentContextSerializerOverride:
@@ -442,8 +435,7 @@ class TestComponentContextSerializerOverride:
 
         collector = StaticCollector()
         context_data: dict = {"_static_collector": collector}
-        with patch("next.components.renderers.component", mgr):
-            _inject_component_context(info, context_data, None)
+        render_with(mgr, info, context_data)
 
         assert collector.js_context_serializers() == {"feed": marker}
         assert marker.calls == ["payload"]
@@ -462,8 +454,7 @@ class TestComponentContextSerializerOverride:
 
         collector = StaticCollector()
         context_data: dict = {"_static_collector": collector}
-        with patch("next.components.renderers.component", mgr):
-            _inject_component_context(info, context_data, None)
+        render_with(mgr, info, context_data)
 
         assert collector.js_context_serializers() == {"a": marker, "b": marker}
 
@@ -474,8 +465,7 @@ class TestComponentContextSerializerOverride:
 
         collector = StaticCollector()
         context_data: dict = {"_static_collector": collector}
-        with patch("next.components.renderers.component", mgr):
-            _inject_component_context(info, context_data, None)
+        render_with(mgr, info, context_data)
 
         assert collector.js_context_serializers() == {}
 

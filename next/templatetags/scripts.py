@@ -79,8 +79,7 @@ def _merge_held(
 ) -> None:
     """Merge what a client-rendered gated body registered into the render's collector.
 
-    Styles and the JS context are merged, since they act only once their markup shows.
-    A script waits in the manifest for the category, and any other kind is dropped.
+    Styles and JS context merge, a script waits for the category, other kinds drop.
     """
     for slot in default_placeholders:
         for asset in shadow.assets_in_slot(slot.name):
@@ -113,9 +112,7 @@ def _merge_held(
 class ConsentedNode(ConsentedTagNode):
     """Renders its body for a visitor who granted the category, else its else branch.
 
-    On a client-rendered page the body sits in an inert `<template>`, followed by the
-    else branch and an end marker. The body registers on a collector of its own, so
-    the scripts it names wait in the manifest for the category.
+    On a client-rendered page the body sits in an inert `<template>`.
     """
 
     def __init__(

@@ -29,6 +29,28 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "signals",
         }
     ),
+    "next.deps": frozenset(
+        {
+            "DDependencyBase",
+            "DObject",
+            "DependencyCycleError",
+            "DependencyResolver",
+            "Depends",
+            "ParameterFiller",
+            "ParameterProvider",
+            "ProviderRegistry",
+            "REQUEST_DEP_CACHE_ATTR",
+            "RESERVED_KEYS",
+            "RegisteredParameterProvider",
+            "ResolutionContext",
+            "UnboundObjectError",
+            "UnknownDependencyError",
+            "provider_registry",
+            "render_dep_cache",
+            "resolver",
+            "signals",
+        }
+    ),
     "next.pages": frozenset(
         {
             "CacheControl",
@@ -118,6 +140,7 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
     ),
     "next.ports": frozenset(
         {
+            "ActionOwners",
             "FormRoutes",
             "PageScan",
             "PageScripts",
@@ -126,6 +149,7 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "RouterAccess",
             "SeoRoutes",
             "StaticAssets",
+            "action_owners_slot",
             "form_routes_slot",
             "page_scan_slot",
             "page_scripts_slot",
@@ -133,6 +157,16 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "router_access_slot",
             "seo_routes_slot",
             "static_assets_slot",
+        }
+    ),
+    "next.permissions": frozenset(
+        {
+            "DeclarationOutsideModuleError",
+            "ObjectPermissionBackend",
+            "PermissionAlreadyRegisteredError",
+            "UnknownAccessObjectError",
+            "add_perm",
+            "has_perm",
         }
     ),
     "next.scripts": frozenset(
@@ -164,6 +198,40 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
     ),
     "next.site": frozenset(
         {"SiteOriginError", "site_indexable", "site_origin", "site_url"}
+    ),
+    "next.static": frozenset(
+        {
+            "AssetDiscovery",
+            "JsContextSerializer",
+            "JsonJsContextSerializer",
+            "KindRegistry",
+            "NextAppDirectoriesFinder",
+            "NextScriptBuilder",
+            "NextStaticFilesFinder",
+            "PlaceholderRegistry",
+            "PlaceholderSlot",
+            "PydanticJsContextSerializer",
+            "ScriptInjectionPolicy",
+            "StaticAsset",
+            "StaticAssetNotFoundError",
+            "StaticAssetTraversalError",
+            "StaticBackend",
+            "StaticCollector",
+            "StaticFilesBackend",
+            "StaticManager",
+            "checks",
+            "collect_component_assets",
+            "default_kinds",
+            "default_manager",
+            "default_placeholders",
+            "default_stems",
+            "get_static_manager",
+            "register_defaults",
+            "reset_default_manager",
+            "resolve_serializer",
+            "signals",
+            "static_name",
+        }
     ),
     "next.testing": frozenset(
         {

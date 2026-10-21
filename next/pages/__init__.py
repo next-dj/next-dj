@@ -1,7 +1,6 @@
 """The pages subsystem covering templates, context, layouts, rendering, and URLs.
 
-`__all__` is the guaranteed public surface. A few underscore-free `Page` methods serve
-`next.forms` and `next.partial` as a cross-area contract with no stability guarantee.
+Only `__all__` is stable, not the `Page` methods that sibling areas call.
 """
 
 from __future__ import annotations

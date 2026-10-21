@@ -36,9 +36,7 @@ def reset_clicks(slug: str) -> None:
 def flush_clicks() -> int:
     """Transfer cached counters into the database and reset the cache.
 
-    Uses atomic ``cache.decr`` so increments racing with the flush are
-    preserved: the snapshot delta is subtracted from the live counter,
-    and any subsequent bumps stay around for the next flush.
+    Atomic ``cache.decr`` subtracts only the snapshot delta, keeping racing increments.
     """
     pending = pending_clicks()
     if not pending:

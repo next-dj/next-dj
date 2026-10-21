@@ -48,8 +48,7 @@ class PatchOpRegistry:
     def register(self, name: str) -> None:
         """Register a custom verb and announce it to subscribers.
 
-        A built-in verb raises `BuiltinPatchOpError`, because the client applies the
-        built-in and a custom handler under that name would never run.
+        A built-in raises `BuiltinPatchOpError`, since a custom handler would never run.
         """
         if name in BUILTIN_OPS:
             raise BuiltinPatchOpError(name)

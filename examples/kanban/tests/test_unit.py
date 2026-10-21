@@ -5,39 +5,40 @@ import inspect
 import json
 from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from django.conf import settings
+from django.contrib.auth.models import AnonymousUser
 from django.core.management import call_command
 from django.http import Http404, HttpRequest
 from django.test import override_settings
 from kanban.backends import ViteManifestBackend
 from kanban.demo import seed_demo
+from kanban.deps import CardProvider, DCard, scope
 from kanban.forms import CreateCardForm, MoveCardForm
-from kanban.models import Board, Card, Column
-from kanban.providers import BoardProvider, CardProvider, DBoard, DCard
+from kanban.models import Board, BoardQuerySet, Card, Column
 from kanban.signals import inject_vite_dev_assets
 
-from next.deps import ResolutionContext
-from next.deps.cache import DependencyCache
 from next.static import StaticAsset, StaticCollector
+from next.testing import make_resolution_context
 
 
 pytestmark = pytest.mark.django_db
 
-_PIECES = (
+_COMPONENTS = (
     Path(__file__).parent.parent
     / "kanban"
-    / "boards"
+    / "pages"
     / "board"
-    / "[int:id]"
-    / "_pieces"
+    / "[int:board]"
+    / "_components"
 )
 
 
 def _load(relative: str):
     spec = importlib.util.spec_from_file_location(
-        f"_test_{relative.replace('/', '_').replace('.py', '')}", _PIECES / relative
+        f"_test_{relative.replace('/', '_').replace('.py', '')}", _COMPONENTS / relative
     )
     mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
@@ -47,16 +48,6 @@ def _load(relative: str):
 def _param(annotation: object) -> inspect.Parameter:
     return inspect.Parameter(
         "value", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=annotation
-    )
-
-
-def _context(*, request=None, url_kwargs=None) -> ResolutionContext:
-    return ResolutionContext(
-        request=request,
-        form=None,
-        url_kwargs=url_kwargs or {},
-        context_data={},
-        cache=DependencyCache(),
     )
 
 
@@ -124,62 +115,18 @@ class TestCardExcerptProperty:
         assert len(result) <= 100
 
 
-class TestBoardProvider:
-    @pytest.mark.parametrize(
-        ("annotation", "expected"),
-        [(DBoard[Board], True), (int, False)],
-        ids=["dboard_subscript", "plain_int"],
-    )
-    def test_can_handle(self, annotation, expected) -> None:
-        provider = BoardProvider()
-        assert provider.can_handle(_param(annotation), _context()) is expected
+class TestScopeDependency:
+    def test_scope_is_the_visitor(self) -> None:
+        request = HttpRequest()
+        request.user = AnonymousUser()
+        assert scope(request) is request.user
 
-    def test_resolve_returns_board(self, board: Board) -> None:
-        provider = BoardProvider()
-        ctx = _context(url_kwargs={"id": board.pk})
-        assert provider.resolve(_param(DBoard[Board]), ctx) == board
 
-    def test_resolve_returns_none_without_id(self) -> None:
-        provider = BoardProvider()
-        assert provider.resolve(_param(DBoard[Board]), _context()) is None
-
-    def test_resolve_raises_404_for_missing_id(self, board: Board) -> None:
-        provider = BoardProvider()
-        ctx = _context(url_kwargs={"id": 99999})
-        with pytest.raises(Http404):
-            provider.resolve(_param(DBoard[Board]), ctx)
-
-    @pytest.mark.parametrize(
-        ("annotation", "expected"),
-        [(DBoard[Board], True), (int, False)],
-        ids=["dboard_subscript", "plain_int"],
-    )
-    def test_static_can_handle(self, annotation, expected) -> None:
-        provider = BoardProvider()
-        assert provider.static_can_handle(_param(annotation)) is expected
-
-    @pytest.mark.parametrize(
-        "make_ctx",
-        [
-            lambda pk: _context(url_kwargs={"id": pk}),
-            lambda pk: _context(request=_post_request(board_id=str(pk))),
-            lambda _pk: _context(),
-            lambda _pk: _context(request=_post_request()),
-        ],
-        ids=["url_id", "post_board_id", "no_source", "post_without_board_id"],
-    )
-    def test_compiled_filler_matches_resolve(self, board: Board, make_ctx) -> None:
-        provider = BoardProvider()
-        param = _param(DBoard[Board])
-        ctx = make_ctx(board.pk)
-        fill = provider.compile_resolve(param)
-        assert fill(ctx) == provider.resolve(param, ctx)
-
-    def test_compiled_filler_raises_404_for_missing_id(self) -> None:
-        provider = BoardProvider()
-        fill = provider.compile_resolve(_param(DBoard[Board]))
-        with pytest.raises(Http404):
-            fill(_context(url_kwargs={"id": 99999}))
+class TestBoardVisibility:
+    def test_every_board_is_visible_to_an_anonymous_visitor(self, board: Board) -> None:
+        archived = Board.objects.create(title="Old", slug="old", archived=True)
+        visible = set(Board.objects.visible_to(AnonymousUser()))
+        assert visible == {board, archived}
 
 
 class TestCardProvider:
@@ -200,7 +147,7 @@ class TestCardProvider:
     )
     def test_can_handle(self, annotation, http_request, expected) -> None:
         provider = CardProvider()
-        ctx = _context(request=http_request)
+        ctx = make_resolution_context(request=http_request)
         assert provider.can_handle(_param(annotation), ctx) is expected
 
     def test_resolve_returns_card_for_post_id(
@@ -208,13 +155,13 @@ class TestCardProvider:
     ) -> None:
         card = make_card(title="Move me")
         provider = CardProvider()
-        ctx = _context(request=_post_request(card_id=str(card.pk)))
+        ctx = make_resolution_context(request=_post_request(card_id=str(card.pk)))
         assert provider.can_handle(_param(DCard[Card]), ctx)
         assert provider.resolve(_param(DCard[Card]), ctx) == card
 
     def test_resolve_raises_404_when_missing(self) -> None:
         provider = CardProvider()
-        ctx = _context(request=_post_request(card_id="99999"))
+        ctx = make_resolution_context(request=_post_request(card_id="99999"))
         with pytest.raises(Http404):
             provider.resolve(_param(DCard[Card]), ctx)
 
@@ -232,20 +179,43 @@ class TestCardProvider:
         assert provider.compile_resolve(_param(DCard[Card])) is None
 
 
+def _hide_secret_boards(self: BoardQuerySet, user: object) -> BoardQuerySet:
+    return self.exclude(slug="secret")
+
+
+def _create_form(**post) -> CreateCardForm:
+    kwargs = CreateCardForm.get_form_kwargs(_post_request(**post), user=AnonymousUser())
+    return CreateCardForm(data=post, **kwargs)
+
+
+def _move_form(**post) -> MoveCardForm:
+    kwargs = MoveCardForm.get_form_kwargs(_post_request(**post), user=AnonymousUser())
+    return MoveCardForm(data=post, **kwargs)
+
+
 class TestMoveCardFormTargets:
+    def test_form_kwargs_offer_the_columns_of_the_card_board(
+        self, two_columns: tuple[Column, Column], make_card: Callable[..., Card]
+    ) -> None:
+        Column.objects.create(
+            board=Board.objects.create(title="Other", slug="other"),
+            title="X",
+            position=0,
+        )
+        card = make_card(title="Move me")
+        request = _post_request(card_id=str(card.pk))
+        kwargs = MoveCardForm.get_form_kwargs(request, user=AnonymousUser())
+        assert set(kwargs["targets"]) == set(two_columns)
+        assert kwargs["initial"] == {}
+
     def test_cross_board_target_is_not_a_valid_choice(
         self, make_card: Callable[..., Card]
     ) -> None:
         other_board = Board.objects.create(title="Other", slug="other")
         other_col = Column.objects.create(board=other_board, title="X", position=0)
         card = make_card(title="Stay")
-
-        form = MoveCardForm(
-            data={
-                "card_id": str(card.pk),
-                "target_column": str(other_col.pk),
-                "target_position": "0",
-            }
+        form = _move_form(
+            card_id=str(card.pk), target_column=str(other_col.pk), target_position="0"
         )
         assert not form.is_valid()
         assert "target_column" in form.errors
@@ -254,25 +224,33 @@ class TestMoveCardFormTargets:
         self, column: Column, make_card: Callable[..., Card]
     ) -> None:
         card = make_card(title="Move me")
-        form = MoveCardForm(
-            data={
-                "card_id": str(card.pk),
-                "target_column": str(column.pk),
-                "target_position": "0",
-            }
+        form = _move_form(
+            card_id=str(card.pk), target_column=str(column.pk), target_position="0"
         )
         assert form.is_valid()
         assert form.cleaned_data["target_column"] == column
 
     def test_unknown_card_leaves_no_valid_target(self) -> None:
-        form = MoveCardForm(
-            data={"card_id": "99999", "target_column": "99999", "target_position": "0"}
+        form = _move_form(card_id="99999", target_column="99999", target_position="0")
+        assert not form.is_valid()
+        assert "target_column" in form.errors
+
+    def test_non_numeric_card_offers_no_target(self, column: Column) -> None:
+        form = _move_form(
+            card_id="abc", target_column=str(column.pk), target_position="0"
         )
         assert not form.is_valid()
         assert "target_column" in form.errors
 
-    def test_missing_card_skips_the_narrowing_query(self) -> None:
-        form = MoveCardForm(data={"card_id": "", "target_column": ""})
+    def test_missing_card_offers_no_target(self, column: Column) -> None:
+        form = _move_form(card_id="", target_column=str(column.pk))
+        assert not form.is_valid()
+        assert "target_column" in form.errors
+
+    def test_form_built_without_targets_offers_none(self, column: Column) -> None:
+        form = MoveCardForm(
+            data={"target_column": str(column.pk), "target_position": "0"}
+        )
         assert not form.is_valid()
         assert "target_column" in form.errors
 
@@ -285,17 +263,33 @@ class TestCreateCardFormClean:
         column.save()
         make_card(title="One")
 
-        form = CreateCardForm(data={"column": str(column.pk), "title": "Two"})
+        form = _create_form(column=str(column.pk), title="Two")
         assert not form.is_valid()
         assert "WIP limit" in str(form.errors)
 
     def test_unknown_column_rejected(self) -> None:
-        form = CreateCardForm(data={"column": "99999", "title": "Lost"})
+        form = _create_form(column="99999", title="Lost")
         assert not form.is_valid()
         assert "column" in form.errors
 
     def test_blank_form_short_circuits_clean(self) -> None:
-        form = CreateCardForm(data={"column": "", "title": ""})
+        form = _create_form(column="", title="")
+        assert not form.is_valid()
+        assert "column" in form.errors
+
+    def test_column_of_a_board_outside_the_scope_is_rejected(
+        self, column: Column
+    ) -> None:
+        secret = Board.objects.create(title="Secret", slug="secret")
+        hidden = Column.objects.create(board=secret, title="Hidden", position=0)
+        with patch.object(BoardQuerySet, "visible_to", _hide_secret_boards):
+            assert _create_form(column=str(column.pk), title="Own").is_valid()
+            form = _create_form(column=str(hidden.pk), title="Injected")
+        assert not form.is_valid()
+        assert "column" in form.errors
+
+    def test_form_built_without_columns_offers_none(self, column: Column) -> None:
+        form = CreateCardForm(data={"column": str(column.pk), "title": "Lost"})
         assert not form.is_valid()
         assert "column" in form.errors
 
@@ -507,7 +501,7 @@ class TestCreateCardHandlerRace:
     ) -> None:
         column.wip_limit = 2
         column.save()
-        form = CreateCardForm(data={"column": str(column.pk), "title": "Late"})
+        form = _create_form(column=str(column.pk), title="Late")
         make_card(title="One")
         assert form.is_valid()
         make_card(title="Two", position=1)

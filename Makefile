@@ -101,7 +101,7 @@ BENCH_EXTRA ?=
 bench: # run performance benchmarks (opt-in, no coverage, flags match CI)
 	uv run pytest tests/benchmarks $(BENCH_FLAGS) $(BENCH_EXTRA)
 
-test-compat: # run ecosystem compatibility tests (allauth, crispy-forms, django-htmx, widget-tweaks)
+test-compat:
 	uv run --group compat pytest tests/compat -q --no-cov
 
 test-examples: # run Python, JS tests for examples with coverage
@@ -122,7 +122,7 @@ test-examples: # run Python, JS tests for examples with coverage
 	for example_dir in examples/*/; do \
 		if [ -d "$$example_dir" ] && [ -f "$$example_dir/manage.py" ]; then \
 			if [ -d "$$example_dir/tests" ]; then \
-				cd "$$example_dir" && $(PYTEST) tests/ --ignore=tests/e2e -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=100; \
+				cd "$$example_dir" && $(PYTEST) --ignore=tests/e2e -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=100; \
 				$(EXAMPLE_PYTHON) manage.py check --deploy --tag seo --fail-level WARNING; \
 				cd - > /dev/null; \
 			elif [ -f "$$example_dir/tests.py" ]; then \

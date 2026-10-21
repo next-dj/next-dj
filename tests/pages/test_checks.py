@@ -25,7 +25,6 @@ from next.pages.checks import (
     check_template_loaders,
     check_unrouted_working_directory_pages,
 )
-from next.pages.checks.modules import _has_template_or_djx
 from next.pages.manager import page
 from next.pages.registry import PageContextRegistry
 from next.urls import PageRoot, RouterBackend
@@ -45,49 +44,7 @@ from tests.support import (
     patch_checks_router_manager_with_routers,
     restored_provider_registry,
 )
-
-
-class TestPageChecks:
-    """Checks that decide whether a routed ``page.py`` can produce a body."""
-
-    @pytest.mark.parametrize(
-        ("page_content", "create_djx", "djx_content", "expected_result"),
-        [
-            ('template = "Hello {{ name }}!"', False, None, True),
-            ('print("test")', True, "<h1>{{ title }}</h1>", True),
-            ('print("test")', False, None, False),
-            (
-                """
-def render(request, **kwargs):
-    return "Hello World!"
-            """,
-                False,
-                None,
-                False,
-            ),
-            ("invalid python syntax {", False, None, False),
-        ],
-        ids=[
-            "template_attr",
-            "with_djx",
-            "no_template_no_djx",
-            "render_function_only",
-            "invalid_syntax",
-        ],
-    )
-    def test_has_template_or_djx(
-        self, tmp_path, page_content, create_djx, djx_content, expected_result
-    ) -> None:
-        """Only a ``template`` attribute or ``template.djx`` counts, not render()."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text(page_content)
-
-        if create_djx:
-            djx_file = tmp_path / "template.djx"
-            djx_file.write_text(djx_content)
-
-        result = _has_template_or_djx(page_file)
-        assert result is expected_result
+from tests.support.access import PAGE_HEAD
 
 
 class TestRequestInContextCheck:
@@ -205,8 +162,7 @@ class TestLayoutChecks:
             assert msg_substring in warnings[0].msg
 
     def test_nested_roots_report_one_layout_once(self, tmp_path) -> None:
-        # A root nested inside another reaches the same page twice, and the
-        # layout is warned about once however many routes reach it.
+        # A root nested in another reaches the page twice, yet the layout warns once.
         outer = tmp_path / "pages"
         inner = outer / "blog"
         inner.mkdir(parents=True)
@@ -281,6 +237,56 @@ class TestMemoAndBrokenPages:
             messages = check_page_functions(None)
         e012 = [m for m in messages if m.id == "next.E012"]
         assert len(e012) == 1
+
+    @pytest.mark.parametrize(
+        ("declarations", "expected"),
+        [
+            pytest.param("page.login_required(inherit=True)\n", [], id="inherit"),
+            pytest.param("page.public(inherit=True)\n", [], id="public-inherit"),
+            pytest.param(
+                'page.permission_required("auth.view_group", inherit=True)\n',
+                [],
+                id="permission-inherit",
+            ),
+            pytest.param("page.login_required()\n", [], id="own"),
+            pytest.param("page.public()\n", [], id="public-own"),
+        ],
+    )
+    def test_a_page_module_declaring_access_is_left_to_the_access_checks(
+        self, tmp_path, declarations, expected
+    ) -> None:
+        """A page.py without a body that declares access answers to E166, not E012."""
+        (tmp_path / "page.py").write_text(f"{PAGE_HEAD}{declarations}")
+
+        with patch_checks_router_manager_with_routers(
+            routers=[AppRootRouter(tmp_path)]
+        ):
+            messages = check_page_functions(None)
+
+        assert [m.id for m in messages] == expected
+
+    @pytest.mark.parametrize(
+        ("inherit", "expected"),
+        [(True, []), (False, ["next.E012"])],
+        ids=["inherit-context", "own-context"],
+    )
+    def test_a_page_module_passing_context_below_needs_no_body(
+        self, tmp_path, inherit, expected
+    ) -> None:
+        """A page.py without a body that passes context below it is no E012."""
+        (tmp_path / "page.py").write_text(
+            "from next.pages import context\n\n"
+            f'@context("sidebar", inherit_context={inherit})\n'
+            "def sidebar():\n"
+            '    return "menu"\n'
+        )
+
+        with patch_checks_router_manager_with_routers(
+            routers=[AppRootRouter(tmp_path)]
+        ):
+            messages = check_page_functions(None)
+
+        assert [m.id for m in messages] == expected
 
     def test_page_module_execed_once_across_checks(self, tmp_path, monkeypatch) -> None:
         """Two check passes over one page.py exec the module at most once per mtime."""
@@ -693,6 +699,35 @@ class TestContextProcessorSignature:
         errors = check_context_processor_signature()
         assert errors == []
 
+    @pytest.mark.parametrize(
+        "options",
+        [5, {"context_processors": 5}, {"context_processors": ["a."]}],
+        ids=["options_not_dict", "processors_not_list", "empty_module_name"],
+    )
+    def test_a_malformed_shape_reports_nothing_instead_of_crashing(
+        self, options
+    ) -> None:
+        backend = {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "APP_DIRS": True,
+            "DIRS": [],
+            "PAGES_DIR": "pages",
+            "OPTIONS": options,
+        }
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [backend]}):
+            assert check_context_processor_signature() == []
+
+    def test_malformed_template_processors_read_as_no_request(self) -> None:
+        options = {"context_processors": 5}
+        templates = [
+            {
+                "BACKEND": "django.template.backends.django.DjangoTemplates",
+                "OPTIONS": options,
+            }
+        ]
+        with override_settings(TEMPLATES=templates):
+            assert [e.id for e in check_request_in_context()] == ["next.E019"]
+
     @override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": "not a list"})
     def test_bad_settings_shape_is_tolerated(self) -> None:
         errors = check_context_processor_signature()
@@ -751,8 +786,7 @@ class TestPageModuleImports:
         assert messages == []
 
     def test_broken_page_in_a_later_root_reports_e017(self, tmp_path) -> None:
-        # The body-source checks stay silent on a broken import, so E017 is
-        # the only report left for a page outside the first root.
+        # The body-source checks stay silent on a broken import, leaving only E017.
         first_root = tmp_path / "first"
         second_root = tmp_path / "second"
         healthy = first_root / "ok" / "page.py"
@@ -769,8 +803,7 @@ class TestPageModuleImports:
         assert [(m.id, m.obj) for m in messages] == [("next.E017", str(broken))]
 
     def test_symlinked_root_does_not_double_report_one_page(self, tmp_path) -> None:
-        # The two roots spell one tree differently, and only the resolved
-        # spelling reveals that a second walk would report the same file twice.
+        # Only the resolved spelling shows a second walk would report the file twice.
         real_root = tmp_path / "real"
         broken = real_root / "bad" / "page.py"
         broken.parent.mkdir(parents=True)
@@ -785,8 +818,7 @@ class TestPageModuleImports:
         assert [(m.id, m.obj) for m in messages] == [("next.E017", str(broken))]
 
     def test_symlink_inside_one_tree_does_not_double_report(self, tmp_path) -> None:
-        # One walk of one root reaches the same file under two spellings, so the
-        # page identity has to be the resolved path rather than the walked one.
+        # One walk reaches a file under two spellings, so identity is the resolved path.
         real = tmp_path / "real"
         real.mkdir()
         (real / "page.py").write_text("def render( invalid syntax {\n")
@@ -799,8 +831,7 @@ class TestPageModuleImports:
         assert [m.id for m in messages] == ["next.E017"]
 
     def test_virtual_page_without_file_is_skipped(self, tmp_path) -> None:
-        # A `template.djx` with no `page.py` beside it routes as a virtual page,
-        # and the pair carries a path that never existed.
+        # A `template.djx` with no `page.py` routes as a virtual page with no real path.
         (tmp_path / "virtual").mkdir()
         (tmp_path / "virtual" / "template.djx").write_text("<p>ok</p>\n")
 
@@ -1080,8 +1111,7 @@ class TestContextChecksDeduplicate:
         assert [m.id for m in messages] == ["next.E029"]
 
     def test_e029_reported_once_for_a_symlinked_spelling(self, tmp_path) -> None:
-        # The registry keys on the spelling importlib loaded, so the check has to
-        # dedupe on the resolved path while still looking the page up as walked.
+        # The registry keys on the loaded spelling, so dedupe resolved, look up walked.
         real = tmp_path / "real"
         real.mkdir()
         page_file = real / "page.py"
@@ -1190,8 +1220,7 @@ class TestRouterFailureIsReportedNotRaised:
         assert "RaisingRootsRouter" in messages[0].msg
 
     def test_every_other_page_check_stays_quiet(self) -> None:
-        # The finding belongs to one check, so the rest of the run degrades to
-        # "this router reports no tree" instead of repeating the failure.
+        # The finding belongs to one check, so the rest of the run reports no tree.
         with patch_checks_router_manager_with_routers(routers=[RaisingRootsRouter()]):
             assert check_page_functions(None) == []
             assert check_page_module_imports(None) == []
@@ -1221,8 +1250,7 @@ class TestRouterFailureIsReportedNotRaised:
         assert "None" not in messages[0].msg
 
     def test_the_checks_that_walk_survive_a_wrong_tree_shape(self, tmp_path) -> None:
-        # These read the trees through the swallowing seam, so a bare path
-        # costs the router its reports instead of ending the run.
+        # These read trees through the swallowing seam, so a bare path costs reports.
         with patch_checks_router_manager_with_routers(
             routers=[MalformedRootsRouter([tmp_path])]
         ):
@@ -1314,7 +1342,8 @@ class TestRealFileRouterBackend:
         assert [m.msg for m in e010] == [
             (
                 "App 'shop_app' pages: Parameter directory \"items/[id]\" "
-                "is missing page.py file."
+                "serves no page. Add a page.py with a body or a template.djx in it "
+                "or below it."
             )
         ]
 
@@ -1412,7 +1441,8 @@ class TestSkippedDirectoriesLeaveThePageChecks:
         self, tmp_path
     ) -> None:
         """A page under a refused name is no child route, so the parameter dir is bare."""
-        self._write_bodyless_page(tmp_path, "items/[id]/drafts")
+        page_file = self._write_bodyless_page(tmp_path, "items/[id]/drafts")
+        page_file.with_name("template.djx").write_text("ok")
 
         with patch_checks_router_manager_with_routers(
             routers=[SkippingRouter([tmp_path], frozenset({"drafts"}))]
@@ -1439,8 +1469,7 @@ class TestThirdPartyBackendReachesEverySeam:
         return broken / "page.py"
 
     def test_the_import_check_sees_its_pages(self, tmp_path) -> None:
-        # next.E017 reaches the pairs through the framework's own walk, so a
-        # backend that walks nothing of its own is still covered.
+        # next.E017 reaches the pairs through the framework's walk, not the backend's.
         broken = self._write_project(tmp_path)
 
         with patch_checks_router_manager_with_routers(
@@ -1530,8 +1559,7 @@ class TestUnroutedWorkingDirectoryPages:
     def test_the_page_checks_leave_the_unrouted_tree_alone(
         self, tmp_path, monkeypatch
     ) -> None:
-        # The tree stops being walked, so its contents no longer reach
-        # next.E012 or next.E017. One warning stands for the lot.
+        # The tree is no longer walked, so one warning stands for E012 and E017 hits.
         self._write_unrouted_tree(tmp_path)
         (tmp_path / "pages" / "bare").mkdir()
         (tmp_path / "pages" / "bare" / "page.py").write_text("")
@@ -1576,8 +1604,7 @@ class TestUnroutedWorkingDirectoryPages:
                 assert check_unrouted_working_directory_pages(None) == []
 
     def test_a_directory_holding_no_page_is_silent(self, tmp_path, monkeypatch) -> None:
-        # An application package that happens to carry the PAGES_DIR name has
-        # no page under it, and naming it would be noise.
+        # An app package named like PAGES_DIR holds no page, so naming it is noise.
         (tmp_path / "pages").mkdir()
         (tmp_path / "pages" / "__init__.py").write_text("")
         (tmp_path / "pages" / "models.py").write_text("")
@@ -1589,8 +1616,7 @@ class TestUnroutedWorkingDirectoryPages:
                 assert check_unrouted_working_directory_pages(None) == []
 
     def test_an_application_named_pages_is_silent(self, tmp_path, monkeypatch) -> None:
-        # `pages/pages/` is the routed tree of an application called `pages`,
-        # so the directory above it is part of a served layout.
+        # `pages/pages/` is the tree of an app called `pages`, so the parent is served.
         app_pages = tmp_path / "pages" / "pages" / "hello"
         app_pages.mkdir(parents=True)
         (app_pages / "page.py").write_text('template = "ok"\n')
@@ -1714,3 +1740,61 @@ class TestBracketDirectoryNamesDjangoRefuses:
             return_value={**get_converters(), "four_digit_year": object()},
         ):
             assert self._messages(tmp_path, "[four_digit_year:year]") == []
+
+
+def _touch(root: Path, files: tuple[str, ...]) -> None:
+    for name in files:
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("")
+
+
+class TestParameterDirectoryServesAPage:
+    """A parameter directory answers for itself through a page at any routed depth."""
+
+    @pytest.mark.parametrize(
+        "files",
+        [
+            pytest.param(
+                ("[app]/[model]/deep/page.py", "[app]/[model]/deep/template.djx"),
+                id="deep-page",
+            ),
+            pytest.param(("[id]/a/b/template.djx",), id="deep-virtual-page"),
+            pytest.param(("_drafts/[id]/notes.txt",), id="under-a-private-folder"),
+        ],
+    )
+    def test_no_report(self, tmp_path: Path, files: tuple[str, ...]) -> None:
+        _touch(tmp_path, files)
+
+        with patch_checks_router_manager_with_routers(
+            routers=[RootPagesRouter([tmp_path])]
+        ):
+            assert check_pages_structure(None) == []
+
+    @pytest.mark.parametrize(
+        ("files", "reported"),
+        [
+            pytest.param(("[id]/a/b/notes.txt",), "[id]", id="no-page-at-any-depth"),
+            pytest.param(("[id]/layout.djx",), "[id]", id="layout"),
+            pytest.param(("[id]/a/page.py",), "[id]", id="page-without-a-body"),
+            pytest.param(
+                ("[id]/_private/page.py",), "[id]", id="page-in-a-private-folder"
+            ),
+            pytest.param(
+                ("[id]/[slug]/notes.txt", "[id]/page.py", "[id]/template.djx"),
+                "[id]/[slug]",
+                id="nested",
+            ),
+        ],
+    )
+    def test_report(
+        self, tmp_path: Path, files: tuple[str, ...], reported: str
+    ) -> None:
+        _touch(tmp_path, files)
+
+        with patch_checks_router_manager_with_routers(
+            routers=[RootPagesRouter([tmp_path])]
+        ):
+            messages = check_pages_structure(None)
+        assert [m.id for m in messages] == ["next.E010"]
+        assert f'Parameter directory "{reported}"' in messages[0].msg

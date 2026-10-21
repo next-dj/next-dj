@@ -30,11 +30,7 @@ class VoteForm(Form):
             self.fields["choice"].queryset = Choice.objects.filter(poll_id=poll_pk)
 
     def on_valid(self, request: HttpRequest) -> HttpResponse:
-        """Increment the chosen choice, then morph the zone and push counts.
-
-        A partial vote morphs `poll-results` and pushes the snapshot into
-        `live_results`, so the Vue island rebinds ahead of the fan-out.
-        """
+        """Increment the chosen choice, then morph the results zone with new counts."""
         selected: Poll = self.cleaned_data["poll"]
         choice: Choice = self.cleaned_data["choice"]
         Choice.objects.filter(pk=choice.pk).update(votes=F("votes") + 1)

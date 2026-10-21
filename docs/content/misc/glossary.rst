@@ -54,10 +54,19 @@ Terms used throughout the next.dj documentation.
       A Python callable decorated with ``@context("key")`` that publishes a value to the template scope.
       Also written ``@context`` callable.
 
+   declaring page.py
+      A ``page.py`` with no body that declares access with ``inherit=True`` for the pages below its directory and routes no URL of its own.
+      See :ref:`topics-access-declaring-page`.
+
    DI marker
       A typed annotation or default-value object that asks the resolver for a specific source of data.
       An annotation marker is written in the type position, for example ``param: DUrl[int]``, and covers ``DUrl``, ``DQuery``, and ``DForm``.
       A default-value marker is written as the parameter default, for example ``param: str = Context()``, and covers ``Context`` and ``Depends``.
+      ``DObject`` is an annotation marker as well.
+
+   DObject
+      The annotation that injects the model row whose primary key a URL kwarg holds, read through ``visible_to(scope)``, and names the row of an access declaration as ``obj=DObject[Model]``.
+      See :ref:`topics-di-dobject`.
 
    discovery
       The filesystem walk that builds the asset registry, the components registry, and the page registry at startup.
@@ -105,6 +114,7 @@ Terms used throughout the next.dj documentation.
    layout
       A ``layout.djx`` file in an ancestor directory.
       Wraps every descendant page.
+      It holds markup alone, and the access of its directory and every page below it lives in the ``page.py`` of the directory, under ``inherit=True``.
 
    JS context policy
       Algorithm class that resolves duplicate serialised keys for ``window.Next.context``.
@@ -196,6 +206,10 @@ Terms used throughout the next.dj documentation.
       A page-scoped action is keyed to the absolute path of its declaring ``page.py`` or ``component.py``, while a shared action is keyed to its dotted module name and is reachable project-wide.
       The resulting key is the scope key that the UID hashes together with the action name.
       See :doc:`/content/topics/forms/actions`.
+
+   scope dependency
+      The named dependency a project registers with ``@resolver.dependency("scope")``, which ``DObject`` passes to ``visible_to`` on the default manager of a model.
+      See :ref:`topics-di-dobject`.
 
    signal
       A Django signal emitted by one subsystem.
