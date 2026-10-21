@@ -261,6 +261,47 @@ class TestPagesInTheUrlconf:
         ]
         assert statuses == [200, 404, 200]
 
+    def test_a_mounted_tree_is_keyed_by_its_app_label_and_subdirectory(
+        self, tmp_path
+    ) -> None:
+        write_app(
+            tmp_path,
+            "corp.wallets",
+            {"pages": ("ops",), "staff_pages": ("team",)},
+            label="purse",
+        )
+        urlconf = write_urlconf(
+            tmp_path,
+            "keyed_urls",
+            'path("", include("next.urls"))',
+            'path("crew/", pages("purse", "staff_pages", namespace="crew"))',
+        )
+
+        with installed_apps(tmp_path, "corp.wallets", urlconf=urlconf):
+            _status("/ops/")
+            keys = [(root.prefix, root.key) for root in _roots()]
+
+        assert keys == [(None, "purse/pages"), ("crew/", "purse/staff_pages")]
+
+    def test_a_mount_over_an_auto_assembled_tree_leaves_one_root(
+        self, tmp_path
+    ) -> None:
+        write_app(tmp_path, "audit", {"pages": ("log",)})
+        urlconf = write_urlconf(
+            tmp_path,
+            "same_tree_urls",
+            'path("", include("next.urls"))',
+            'path("audit/", pages("audit"))',
+        )
+
+        with installed_apps(tmp_path, "audit", urlconf=urlconf):
+            _status("/audit/log/")
+            roots = _roots()
+
+        assert [(root.prefix, root.key) for root in roots] == [
+            ("audit/", "audit/pages")
+        ]
+
     def test_an_undeclared_tree_leaves_the_auto_assembly(self, tmp_path) -> None:
         write_app(tmp_path, "audit", {"pages": ("log",)})
         write_app(tmp_path, "blog", {"pages": ("about",)})

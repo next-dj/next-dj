@@ -121,8 +121,8 @@ def iter_page_backends_for_watch() -> Iterator[RouterBackend]:
     return iter(_page_backends_for_watch())
 
 
-def page_root_paths_for_watch(backend: RouterBackend) -> list[Path]:
-    """Return the resolved page trees `backend` reports.
+def page_root_keys_for_backend(backend: RouterBackend) -> list[tuple[Path, str | None]]:
+    """Return the resolved page trees `backend` reports with their static keys.
 
     A backend that raises or returns the wrong shape contributes no tree.
     """
@@ -135,7 +135,12 @@ def page_root_paths_for_watch(backend: RouterBackend) -> list[Path]:
         ),
         default=[],
     )
-    return [resolved_tree(root.path) for root in roots]
+    return [(resolved_tree(root.path), root.key) for root in roots]
+
+
+def page_root_paths_for_watch(backend: RouterBackend) -> list[Path]:
+    """Return the resolved page trees `backend` reports."""
+    return [path for path, _key in page_root_keys_for_backend(backend)]
 
 
 def components_folder_name_for_watch(backend: RouterBackend) -> str | None:
@@ -149,19 +154,27 @@ def components_folder_name_for_watch(backend: RouterBackend) -> str | None:
     )
 
 
+def get_page_root_keys_for_watch() -> list[tuple[Path, str | None]]:
+    """Return every resolved page root with its static key, a repeated root once.
+
+    The first router to report a root names its key.
+    """
+    seen: set[Path] = set()
+    result: list[tuple[Path, str | None]] = []
+    for backend in iter_page_backends_for_watch():
+        for root, key in page_root_keys_for_backend(backend):
+            if root not in seen:
+                seen.add(root)
+                result.append((root, key))
+    return result
+
+
 def get_pages_directories_for_watch() -> list[Path]:
     """Return the resolved page roots the autoreloader should observe.
 
     Every tree a router routes and nothing more, the set the page checks walk.
     """
-    seen: set[Path] = set()
-    result: list[Path] = []
-    for backend in iter_page_backends_for_watch():
-        for root in page_root_paths_for_watch(backend):
-            if root not in seen:
-                seen.add(root)
-                result.append(root)
-    return result
+    return [root for root, _key in get_page_root_keys_for_watch()]
 
 
 def _djx_paths_for_watch(file_name: str) -> set[Path]:

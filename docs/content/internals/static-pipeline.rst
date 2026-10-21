@@ -150,6 +150,8 @@ Modules
 ``next.static.finders``.
    ``NextStaticFilesFinder`` exposes co-located page and component assets to Django staticfiles, so ``collectstatic`` copies them into ``STATIC_ROOT``.
    :doc:`/content/topics/static-assets/overview` covers the finder from the user side.
+   It enumerates page-tree files through ``scan_page_tree_assets``, which visits sorted paths and resolves each name through the same ``PathResolver`` as discovery, with the key of the deepest page root containing the file.
+   The routers hand the resolver ``(root, key)`` pairs through ``next.pages.watch.get_page_root_keys_for_watch``, and a root with no key names nothing.
    The finder holds the mapping it discovered and rebuilds it when the stem or kind registry moves, when the framework settings reload, when the reported page or component trees change, or, while ``DEBUG`` is true, when the mtime of any directory inside those trees moves.
 
 ``next.static.defaults``.

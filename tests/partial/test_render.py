@@ -158,7 +158,9 @@ class TestRenderZoneCollector:
     def test_collector_holds_co_located_assets(self) -> None:
         result = render_zone(ZONED_PAGE, ("alpha",), _request())
         styles = result.collector.assets_in_slot("styles")
-        assert [asset.url for asset in styles] == ["/static/next/zoned.css"]
+        assert [asset.url for asset in styles] == [
+            "/static/next/tests/site_pages/zoned.css"
+        ]
 
 
 class TestZoneRenderedSignal:

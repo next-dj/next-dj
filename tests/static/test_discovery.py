@@ -82,20 +82,20 @@ class TestDefaultStems:
 class TestPathResolverFindPageRoot:
     def test_returns_matching_root(self, tmp_path: Path) -> None:
         (tmp_path / "page.djx").write_text("<div/>")
-        resolver = PathResolver(lambda: (tmp_path.resolve(),))
+        resolver = PathResolver(lambda: ((tmp_path.resolve(), "site"),))
         assert resolver.find_page_root(tmp_path / "page.djx") == tmp_path.resolve()
 
     def test_returns_none_when_outside(self, tmp_path: Path) -> None:
         elsewhere = tmp_path.parent
-        resolver = PathResolver(lambda: (tmp_path.resolve() / "other",))
+        resolver = PathResolver(lambda: ((tmp_path.resolve() / "other", "site"),))
         assert resolver.find_page_root(elsewhere / "x.djx") is None
 
-    def test_picks_first_matching_root(self, tmp_path: Path) -> None:
+    def test_picks_the_deepest_matching_root(self, tmp_path: Path) -> None:
         a = tmp_path / "a"
         a.mkdir()
         b = tmp_path / "b"
         b.mkdir()
-        resolver = PathResolver(lambda: (a.resolve(), b.resolve()))
+        resolver = PathResolver(lambda: ((a.resolve(), "a"), (b.resolve(), "b")))
         (a / "p.djx").write_text("")
         assert resolver.find_page_root(a / "p.djx") == a.resolve()
 
@@ -105,9 +105,9 @@ class TestPathResolverFindPageRoot:
         """A cached `None` answers from the memo, so the roots are read once."""
         reads: list[int] = []
 
-        def roots() -> tuple[Path, ...]:
+        def roots() -> tuple[tuple[Path, str | None], ...]:
             reads.append(1)
-            return (tmp_path.resolve() / "other",)
+            return ((tmp_path.resolve() / "other", "site"),)
 
         resolver = PathResolver(roots)
         outside = tmp_path / "x.djx"
@@ -118,7 +118,7 @@ class TestPathResolverFindPageRoot:
 
     def test_the_memo_holds_the_paths_resolved_last(self, tmp_path: Path) -> None:
         """A full memo drops its oldest insert and a warm lookup reorders nothing."""
-        resolver = PathResolver(lambda: (tmp_path.resolve(),))
+        resolver = PathResolver(lambda: ((tmp_path.resolve(), "site"),))
 
         def install(bound: int) -> tuple[BoundedCache, ...]:
             resolver._find_page_root_cache = BoundedCache(bound)
@@ -133,14 +133,14 @@ class TestPathResolverFindPageRoot:
 
 class TestPathResolverLogicalNameForTemplate:
     def test_root_level_template(self, tmp_path: Path) -> None:
-        resolver = PathResolver(lambda: (tmp_path.resolve(),))
-        assert resolver.logical_name_for_template(tmp_path, tmp_path) == "index"
+        resolver = PathResolver(lambda: ((tmp_path.resolve(), "site"),))
+        assert resolver.logical_name_for_template(tmp_path, tmp_path) == "site/index"
 
     def test_nested_template(self, tmp_path: Path) -> None:
         nested = tmp_path / "blog" / "post"
         nested.mkdir(parents=True)
-        resolver = PathResolver(lambda: (tmp_path.resolve(),))
-        assert resolver.logical_name_for_template(nested, tmp_path) == "blog/post"
+        resolver = PathResolver(lambda: ((tmp_path.resolve(), "site"),))
+        assert resolver.logical_name_for_template(nested, tmp_path) == "site/blog/post"
 
     def test_no_root_fallbacks_to_directory_name(self, tmp_path: Path) -> None:
         nested = tmp_path / "about"
@@ -151,14 +151,14 @@ class TestPathResolverLogicalNameForTemplate:
 
 class TestPathResolverLogicalNameForLayout:
     def test_root_level_layout(self, tmp_path: Path) -> None:
-        resolver = PathResolver(lambda: (tmp_path.resolve(),))
-        assert resolver.logical_name_for_layout(tmp_path, tmp_path) == "layout"
+        resolver = PathResolver(lambda: ((tmp_path.resolve(), "site"),))
+        assert resolver.logical_name_for_layout(tmp_path, tmp_path) == "site/layout"
 
     def test_nested_layout(self, tmp_path: Path) -> None:
         nested = tmp_path / "docs"
         nested.mkdir()
-        resolver = PathResolver(lambda: (tmp_path.resolve(),))
-        assert resolver.logical_name_for_layout(nested, tmp_path) == "docs/layout"
+        resolver = PathResolver(lambda: ((tmp_path.resolve(), "site"),))
+        assert resolver.logical_name_for_layout(nested, tmp_path) == "site/docs/layout"
 
     def test_no_root_uses_fallback(self, tmp_path: Path) -> None:
         nested = tmp_path / "section"
@@ -185,8 +185,8 @@ class TestAssetDiscoveryPageTemplate:
 
         style_urls = [a.url for a in collector.assets_in_slot("styles")]
         script_urls = [a.url for a in collector.assets_in_slot("scripts")]
-        assert style_urls == ["/static/next/index.css"]
-        assert script_urls == ["/static/next/index.js"]
+        assert style_urls == ["/static/next/site/index.css"]
+        assert script_urls == ["/static/next/site/index.js"]
 
     def test_missing_files_are_skipped(
         self, tmp_path: Path, file_backend: StaticBackend
@@ -227,9 +227,9 @@ class TestAssetDiscoveryLayoutChain:
         discovery.discover_page_assets(page_path, collector)
         urls = [a.url for a in collector.assets_in_slot("styles")]
         assert urls == [
-            "/static/next/layout.css",
-            "/static/next/section/layout.css",
-            "/static/next/section/post.css",
+            "/static/next/site/layout.css",
+            "/static/next/site/section/layout.css",
+            "/static/next/site/section/post.css",
         ]
 
 
@@ -368,7 +368,7 @@ class TestAssetDiscoveryPagePlanCache:
             collector = StaticCollector()
             discovery.discover_page_assets(page_path, collector)
         assert [a.url for a in collector.assets_in_slot("styles")] == [
-            "/static/next/section.css"
+            "/static/next/site/section.css"
         ]
 
     def test_debug_keeps_the_plan_while_no_directory_moves(
@@ -383,7 +383,7 @@ class TestAssetDiscoveryPagePlanCache:
             collector = StaticCollector()
             discovery.discover_page_assets(page_path, collector)
         assert [a.url for a in collector.assets_in_slot("styles")] == [
-            "/static/next/section.css"
+            "/static/next/site/section.css"
         ]
 
     def test_debug_rebuilds_when_a_directory_mtime_moves_backwards(
@@ -402,7 +402,7 @@ class TestAssetDiscoveryPagePlanCache:
             collector = StaticCollector()
             discovery.discover_page_assets(page_path, collector)
         assert [a.url for a in collector.assets_in_slot("styles")] == [
-            "/static/next/section.css"
+            "/static/next/site/section.css"
         ]
 
     def test_debug_rebuilds_when_the_page_tree_is_gone(
@@ -469,7 +469,7 @@ class TestAssetDiscoveryPagePlanCache:
         discovery.discover_page_assets(page_path, collector)
         assert builds == []
         assert [a.url for a in collector.assets_in_slot("styles")] == [
-            "/static/next/section.css"
+            "/static/next/site/section.css"
         ]
 
     def test_a_rebuilt_plan_keeps_the_age_of_its_first_insert(
@@ -631,7 +631,7 @@ class TestAssetDiscoveryWatchedDirectories:
             discovery.discover_page_assets(page_path, collector)
 
         assert [a.url for a in collector.assets_in_slot("styles")] == [
-            "/static/next/section.css"
+            "/static/next/site/section.css"
         ]
 
 
@@ -839,13 +839,13 @@ class TestAssetDiscoveryPagePlanWarmRender:
         discovery.discover_page_assets(page_path, built)
 
         assert [a.url for a in fallback.assets_in_slot("styles")] == [
-            "/static/next/layout.css",
-            "/static/next/middle/post.css",
+            "/static/next/site/layout.css",
+            "/static/next/site/middle/post.css",
             "https://cdn.example.com/x.css",
         ]
         assert [a.url for a in built.assets_in_slot("styles")] == [
-            "/build/layout.css",
-            "/build/middle/post.css",
+            "/build/site/layout.css",
+            "/build/site/middle/post.css",
             "https://cdn.example.com/x.css",
         ]
 
@@ -898,8 +898,8 @@ class TestAssetDiscoveryPagePlanWarmRender:
         assert stats == []
         assert probes == []
         assert [a.url for a in collector.assets_in_slot("styles")] == [
-            "/static/next/layout.css",
-            "/static/next/middle/post.css",
+            "/static/next/site/layout.css",
+            "/static/next/site/middle/post.css",
             "https://cdn.example.com/x.css",
         ]
 
@@ -923,9 +923,9 @@ class TestAssetDiscoveryPagePlanWarmRender:
             collector = StaticCollector()
             discovery.discover_page_assets(page_path, collector)
         assert [a.url for a in collector.assets_in_slot("styles")] == [
-            "/static/next/layout.css",
-            "/static/next/middle/layout.css",
-            "/static/next/middle/post.css",
+            "/static/next/site/layout.css",
+            "/static/next/site/middle/layout.css",
+            "/static/next/site/middle/post.css",
             "https://cdn.example.com/x.css",
         ]
 
@@ -943,7 +943,7 @@ class TestAssetDiscoveryPagePlanWarmRender:
             collector = StaticCollector()
             discovery.discover_page_assets(page_path, collector)
         assert [a.url for a in collector.assets_in_slot("styles")] == [
-            "/static/next/layout.css",
+            "/static/next/site/layout.css",
             "https://cdn.example.com/x.css",
         ]
 
@@ -1012,7 +1012,7 @@ class TestAssetDiscoveryRegistryGeneration:
 
         assert cold.assets_in_slot("styles") == ()
         assert [a.url for a in warm.assets_in_slot("styles")] == [
-            "/static/next/index.css"
+            "/static/next/site/index.css"
         ]
 
     def test_a_kind_registered_later_reaches_a_planned_component(
@@ -1084,7 +1084,7 @@ class TestAssetDiscoveryRegistryGeneration:
 
         assert cold.assets_in_slot("styles") == ()
         assert [a.url for a in warm.assets_in_slot("styles")] == [
-            "/static/next/index.css"
+            "/static/next/site/index.css"
         ]
 
     def test_a_stem_registered_during_the_page_probe_is_read_next_render(
@@ -1117,7 +1117,7 @@ class TestAssetDiscoveryRegistryGeneration:
         collector = StaticCollector()
         discovery.discover_page_assets(page_path, collector)
         assert [a.url for a in collector.assets_in_slot("styles")] == [
-            "/static/next/index.css"
+            "/static/next/site/index.css"
         ]
 
     def test_a_stem_registered_during_the_component_probe_is_read_next_render(
@@ -1206,7 +1206,7 @@ class TestAssetDiscoveryPagePlanFailures:
         discovery.discover_page_assets(page_path, collector)
         assert collector.assets_in_slot("styles") == ()
         assert [a.url for a in collector.assets_in_slot("scripts")] == [
-            "/static/next/index.js"
+            "/static/next/site/index.js"
         ]
 
 
@@ -2059,7 +2059,7 @@ class TestStaticDiscoveryCacheSwitchAgrees:
 
         assert cached_second.assets_in_slot("styles") == ()
         assert [a.url for a in uncached_second.assets_in_slot("styles")] == [
-            "/static/next/index.css"
+            "/static/next/site/index.css"
         ]
 
 
@@ -2100,7 +2100,7 @@ class TestAssetDiscoveryCustomStems:
         collector = StaticCollector()
         discovery.discover_page_assets(page_path, collector)
         assert [a.url for a in collector.assets_in_slot("styles")] == [
-            "/static/next/index.css"
+            "/static/next/site/index.css"
         ]
 
 

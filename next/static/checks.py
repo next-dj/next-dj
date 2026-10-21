@@ -17,10 +17,11 @@ from next.components.sources import iter_serialized_component_context_keys
 from next.conf import import_class_cached, next_framework_settings
 from next.pages.checks.responses import private_pages_warning
 from next.pages.scan import iter_serialized_page_context_keys
+from next.pages.watch import get_page_root_keys_for_watch
 
 from .assets import default_kinds
 from .backends import DEFAULT_STATIC_BACKEND, StaticBackend, StaticFilesBackend
-from .finders import NextAppDirectoriesFinder
+from .finders import NextAppDirectoriesFinder, scan_page_tree_assets
 from .nonce import nonce_active
 from .runtime import (
     CHUNK_STATIC_PATHS,
@@ -446,6 +447,40 @@ def check_nonce_on_shared_pages(*args, **kwargs) -> list[CheckMessage]:
         "source, or drop the shared cache.",
         "next.W120",
     )
+
+
+@register(NEXT)
+def check_colocated_name_collisions(*args, **kwargs) -> list[CheckMessage]:
+    """Reject two page-tree assets sharing one static name (`next.E167`)."""
+    return [
+        Error(
+            f"{kept} and {lost} are both served as the static name {name}, so "
+            "only the first reaches collectstatic and the page.",
+            hint="Move or rename one of the two files so each name has one source.",
+            obj=settings,
+            id="next.E167",
+        )
+        for name, kept, lost in scan_page_tree_assets().collisions
+    ]
+
+
+@register(NEXT)
+def check_page_roots_have_keys(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about a page tree with no static key, so it serves nothing (`next.W132`)."""
+    return [
+        DjangoWarning(
+            f"The page tree {root} has no static key, so its co-located layout and "
+            "template assets are not served.",
+            hint=(
+                "Keep the tree under BASE_DIR, set BASE_DIR, or give the PageRoot "
+                "a key."
+            ),
+            obj=settings,
+            id="next.W132",
+        )
+        for root, key in get_page_root_keys_for_watch()
+        if key is None
+    ]
 
 
 @register(NEXT)

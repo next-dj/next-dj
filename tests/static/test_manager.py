@@ -97,10 +97,10 @@ class TestPageRootsFollowTheRouters:
         """The watch layer returns resolved roots, so a lookup resolves once."""
         spelling = tmp_path / "site" / ".." / "site"
         with mock.patch(
-            "next.static.manager.get_pages_directories_for_watch",
-            return_value=[spelling],
+            "next.static.manager.get_page_root_keys_for_watch",
+            return_value=[(spelling, "site")],
         ):
-            assert fresh_manager.page_roots() == (spelling,)
+            assert fresh_manager.page_roots() == ((spelling, "site"),)
 
     def test_forgetting_the_page_roots_reads_them_again(
         self, fresh_manager: StaticManager, tmp_path: Path
@@ -109,18 +109,19 @@ class TestPageRootsFollowTheRouters:
         first = tmp_path / "one"
         second = tmp_path / "two"
         with mock.patch(
-            "next.static.manager.get_pages_directories_for_watch", return_value=[first]
+            "next.static.manager.get_page_root_keys_for_watch",
+            return_value=[(first, "one")],
         ):
-            assert fresh_manager.page_roots() == (first,)
+            assert fresh_manager.page_roots() == ((first, "one"),)
             stale_discovery = fresh_manager.discovery
         with mock.patch(
-            "next.static.manager.get_pages_directories_for_watch",
-            return_value=[first, second],
+            "next.static.manager.get_page_root_keys_for_watch",
+            return_value=[(first, "one"), (second, "two")],
         ):
-            assert fresh_manager.page_roots() == (first,)
+            assert fresh_manager.page_roots() == ((first, "one"),)
             fresh_manager.forget_page_roots()
 
-            assert fresh_manager.page_roots() == (first, second)
+            assert fresh_manager.page_roots() == ((first, "one"), (second, "two"))
         assert fresh_manager.discovery is not stale_discovery
 
 
@@ -139,17 +140,17 @@ class TestForgetManagerPageRoots:
         """The live manager drops what it held without being replaced."""
         manager = get_static_manager()
         with mock.patch(
-            "next.static.manager.get_pages_directories_for_watch", return_value=[]
+            "next.static.manager.get_page_root_keys_for_watch", return_value=[]
         ):
             assert manager.page_roots() == ()
 
         with mock.patch(
-            "next.static.manager.get_pages_directories_for_watch",
-            return_value=[tmp_path],
+            "next.static.manager.get_page_root_keys_for_watch",
+            return_value=[(tmp_path, "site")],
         ):
             forget_manager_page_roots()
 
-            assert manager.page_roots() == (tmp_path,)
+            assert manager.page_roots() == ((tmp_path, "site"),)
         assert get_static_manager() is manager
 
 
@@ -216,19 +217,19 @@ class TestAppListChanges:
         """The override reaches the live manager, including its resolver memo."""
         manager = get_static_manager()
         with mock.patch(
-            "next.static.manager.get_pages_directories_for_watch", return_value=[]
+            "next.static.manager.get_page_root_keys_for_watch", return_value=[]
         ):
             assert manager.page_roots() == ()
             stale_discovery = manager.discovery
 
         with (
             mock.patch(
-                "next.static.manager.get_pages_directories_for_watch",
-                return_value=[tmp_path],
+                "next.static.manager.get_page_root_keys_for_watch",
+                return_value=[(tmp_path, "site")],
             ),
             override_settings(INSTALLED_APPS=["django.contrib.contenttypes"]),
         ):
-            assert manager.page_roots() == (tmp_path,)
+            assert manager.page_roots() == ((tmp_path, "site"),)
             assert manager.discovery is not stale_discovery
 
     def test_an_unrelated_setting_change_keeps_the_cached_page_roots(
@@ -237,18 +238,18 @@ class TestAppListChanges:
         """Only the app list moves what an `APP_DIRS` router reports."""
         manager = get_static_manager()
         with mock.patch(
-            "next.static.manager.get_pages_directories_for_watch",
-            return_value=[tmp_path],
+            "next.static.manager.get_page_root_keys_for_watch",
+            return_value=[(tmp_path, "site")],
         ):
-            assert manager.page_roots() == (tmp_path,)
+            assert manager.page_roots() == ((tmp_path, "site"),)
 
         with (
             mock.patch(
-                "next.static.manager.get_pages_directories_for_watch", return_value=[]
+                "next.static.manager.get_page_root_keys_for_watch", return_value=[]
             ),
             override_settings(LANGUAGE_CODE="fr"),
         ):
-            assert manager.page_roots() == (tmp_path,)
+            assert manager.page_roots() == ((tmp_path, "site"),)
 
 
 class TestReloadConfig:
@@ -495,7 +496,7 @@ class TestWarmPlanFollowsTheStaticUrl:
     def _warmed_manager(self, tmp_path: Path) -> StaticManager:
         manager = get_static_manager()
         manager._ensure_backends()
-        manager._cached_page_roots = (tmp_path.resolve(),)
+        manager._cached_page_roots = ((tmp_path.resolve(), "site"),)
         return manager
 
     def test_a_warm_page_plan_emits_the_new_prefix(
@@ -542,7 +543,7 @@ class TestDiscoveryForwarding:
         (tmp_path / "template.css").write_text("")
         page_path = tmp_path / "page.djx"
         page_path.write_text("")
-        fresh_manager._cached_page_roots = (tmp_path.resolve(),)
+        fresh_manager._cached_page_roots = ((tmp_path.resolve(), "site"),)
 
         collector = StaticCollector()
         with mock.patch(
@@ -619,7 +620,7 @@ class TestSettingChangedReload:
         page_path = tmp_path / "page.djx"
         page_path.write_text("")
         manager = get_static_manager()
-        manager._cached_page_roots = (tmp_path.resolve(),)
+        manager._cached_page_roots = ((tmp_path.resolve(), "site"),)
         with mock.patch(
             "next.static.backends.staticfiles_storage.url",
             return_value="/static/next/index.css",

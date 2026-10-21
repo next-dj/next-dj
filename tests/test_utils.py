@@ -25,6 +25,7 @@ from next.utils import (
     join_trail,
     load_tree_source,
     middleware_listed,
+    page_roots_shape_error,
     prefix_trail,
     redirect_or_fallback,
     regex_trail,
@@ -299,6 +300,12 @@ class TestPageRootTrails:
 
         assert (root.prefix, root.namespace) == (None, "next")
         assert root.route_trail() == ""
+
+    def test_a_root_built_without_a_key_has_none_and_is_well_shaped(self) -> None:
+        root = PageRoot(Path(), "Third party")
+
+        assert root.key is None
+        assert page_roots_shape_error("Router", [root]) is None
 
 
 class TestPrivateDirectories:

@@ -129,7 +129,7 @@ Scripts and consent
 
 ``next.scripts.checks`` reads every ``scripts.py``, the consent categories, and the composed pages that render ``{% #consented %}``, and ``next.consent.checks`` the rest of the ``CONSENT`` scope.
 ``next.static.checks`` owns ``next.W117`` for the tag templates the nonce reaches and ``next.W120`` for the shared pages a nonce makes private, since the nonce is a static option.
-It also owns ``next.E130`` for the injection policy, ``next.E139`` for a tag template ``.format`` cannot fill, and ``next.W090`` for a runtime bundle the storage cannot serve.
+It also owns ``next.E130`` for the injection policy, ``next.E139`` for a tag template ``.format`` cannot fill, ``next.E167`` for two co-located files that share one static name, ``next.W090`` for a runtime bundle the storage cannot serve, and ``next.W132`` for a page tree that has no static key.
 
 .. automodule:: next.scripts.checks
    :members:
@@ -816,6 +816,11 @@ Errors
        A directory with such an action passes, since the declaration guards that action.
        The hint asks for ``inherit=True`` to guard the pages below, or for a ``render`` function, a ``template`` attribute, or a ``template.djx`` to make the file a page.
      - ``next.forms.checks.actions``
+   * - ``next.E167``
+     - Two co-located ``layout`` or ``template`` assets of the page trees get the same static name, so only the first, in sorted path order, reaches ``collectstatic`` and the page.
+       Two trees that share a key or two stems of one role in one directory produce it, and the message names both files.
+       Renaming a key or dropping one of the files clears it, see :ref:`topics-static-name-resolution-colocated`.
+     - ``next.static.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -1140,6 +1145,12 @@ Warnings
    * - ``next.W131``
      - ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` is ``True`` while ``django.contrib.auth`` is not installed or ``MIDDLEWARE`` lists no ``AuthenticationMiddleware`` or a subclass, so no request carries a signed-in user and every page and action that declares no access sends each visitor to the login.
      - ``next.permissions.checks``
+   * - ``next.W132``
+     - A page tree has no static key, so its co-located ``layout`` and ``template`` assets are not served.
+       The tree is a ``DIRS`` root outside ``BASE_DIR``, any ``DIRS`` root while ``BASE_DIR`` is unset, or a ``PageRoot`` of a third-party router that gives no ``key``.
+       The site keeps running and the pages render, only their co-located files are missing from the static tree.
+       Moving the root under ``BASE_DIR``, setting ``BASE_DIR``, or giving the ``PageRoot`` a ``key`` clears it, see :ref:`topics-static-name-resolution-colocated`.
+     - ``next.static.checks``
 
 Codes are assigned per check and are not contiguous.
 

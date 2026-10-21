@@ -60,9 +60,15 @@ _URLCONF_HEAD = (
 
 
 def write_app(
-    root: Path, name: str, trees: Mapping[str, Iterable[str]] | None = None
+    root: Path,
+    name: str,
+    trees: Mapping[str, Iterable[str]] | None = None,
+    label: str | None = None,
 ) -> Path:
-    """Write an importable app, `trees` mapping each subdirectory to its trails."""
+    """Write an importable app, `trees` mapping each subdirectory to its trails.
+
+    A `label` replaces the one Django derives from the last segment of the name.
+    """
     app = root
     for part in name.split("."):
         app /= part
@@ -71,7 +77,7 @@ def write_app(
     (app / "apps.py").write_text(
         "from django.apps import AppConfig\n\n\n"
         "class Config(AppConfig):\n"
-        f"    name = {name!r}\n"
+        f"    name = {name!r}\n" + ("" if label is None else f"    label = {label!r}\n")
     )
     for subdir, trails in ({"pages": ("",)} if trees is None else trees).items():
         (app / subdir).mkdir(parents=True, exist_ok=True)

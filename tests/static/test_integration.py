@@ -30,7 +30,7 @@ HTML_SHELL = (
 
 
 class _ManagerWithRoots(StaticManager):
-    def __init__(self, roots: tuple[Path, ...]) -> None:
+    def __init__(self, roots: tuple[tuple[Path, str | None], ...]) -> None:
         super().__init__()
         self._cached_page_roots = roots
 
@@ -66,13 +66,13 @@ class TestFullRenderPipeline:
         )
         page_path = tmp_path / "page.py"
 
-        manager = _ManagerWithRoots((tmp_path.resolve(),))
+        manager = _ManagerWithRoots(((tmp_path.resolve(), "site"),))
         manager._backends = [StaticFilesBackend()]
         manager._loaded = True
         manager.discover_page_assets(page_path, collector)
         out = manager.inject(HTML_SHELL, collector, page_path=page_path)
 
-        assert "/static/next/index.css" in out
+        assert "/static/next/site/index.css" in out
         assert "https://cdn/y.css" in out
         assert "next/next.min.js" in out
         assert "https://cdn/x.js" in out
@@ -231,7 +231,7 @@ class TestProjectStaticVersionReachesEveryAsset:
         with override_settings(NEXT_FRAMEWORK={"STATIC_VERSION": "2026.9.19"}):
             manager = StaticManager()
             manager._ensure_backends()
-            manager._cached_page_roots = (tmp_path.resolve(),)
+            manager._cached_page_roots = ((tmp_path.resolve(), "site"),)
             manager.discover_page_assets(page_path, collector)
             rendered = Template(
                 f'{{% load next_static %}}{{% asset "shared/tag.css" %}}{HTML_SHELL}'
@@ -239,6 +239,6 @@ class TestProjectStaticVersionReachesEveryAsset:
             out = manager.inject(rendered, collector, page_path=page_path)
 
         assert "/static/shared/tag.css?v=2026.9.19" in out
-        assert 'href="/static/next/index.css?v=2026.9.19"' in out
+        assert 'href="/static/next/site/index.css?v=2026.9.19"' in out
         assert 'href="/static/shared/list.css?v=2026.9.19"' in out
         assert 'src="/static/next/next.min.js?v=2026.9.19"' in out

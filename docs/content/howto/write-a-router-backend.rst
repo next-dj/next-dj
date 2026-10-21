@@ -26,6 +26,7 @@ Subclass FileRouterBackend
 Its one abstract method is ``generate_urls``, which returns the patterns the backend contributes to the project URLconf.
 It also carries ``page_roots``, which reports the page trees the system checks walk as ``PageRoot`` entries, each pairing a directory with the label the reports name it by.
 Implement ``page_roots`` when the backend has page trees.
+Give each ``PageRoot`` a ``key``, because the co-located ``layout`` and ``template`` assets of a tree without one are not served and ``next.W132`` warns about it, see :ref:`topics-static-name-resolution-colocated`.
 The base returns an empty list, so a backend that does not implement it is not checked and not watched, which is the right answer for a backend routing from a database or another source that is no tree on disk.
 
 A subclass of ``FileRouterBackend`` inherits the file router's own implementation and is checked as it stands.

@@ -119,25 +119,40 @@ The error subclasses Django's ``SuspiciousFileOperation``, itself a :exc:`~djang
 It is exported as ``next.static.StaticAssetTraversalError``, and it carries the offending reference as written on its ``reference`` attribute.
 A reference built from stored or user-supplied data is therefore refused at the door rather than rendered, see :doc:`/content/security/static-assets`.
 
+.. _topics-static-name-resolution-colocated:
+
 The name a co-located file gets
 -------------------------------
 
 A co-located file arrives from the other direction, with the framework choosing its public name instead of the project writing one.
 Discovery and the staticfiles finder share one ``PathResolver``, so both sides settle on the same name, and every name lands under the ``next/`` staticfiles namespace.
 
+A page tree names its files after its key, so two trees never compete for the same path.
+The key of a tree comes from where the tree lives.
+
+- An application tree takes the application label and the ``PAGES_DIR`` value, so the ``pages`` directory of the ``blog`` application has the key ``blog/pages``.
+- A ``DIRS`` root takes its path relative to ``BASE_DIR``, so ``BASE_DIR / "site"`` has the key ``site``, and a root equal to ``BASE_DIR`` takes the name of that directory.
+- A ``pages()`` mount takes the application label and the mounted subdirectory, by the same rule as an application tree.
+- A ``DIRS`` root outside ``BASE_DIR``, any ``DIRS`` root while ``BASE_DIR`` is unset, and a tree a third-party router reports with no ``key`` have none.
+
+A tree with no key serves no ``layout`` or ``template`` asset, and ``manage.py check`` reports ``next.W132`` for it.
+A router backend gives its trees a key through the ``key`` field of ``PageRoot``, see :doc:`/content/ref/urls`.
+When two page roots contain a file, the deepest one names it.
+
 ``template`` role.
-   The directory of the template relative to its page root, and ``index`` for the page root itself.
-   A ``template.css`` in ``notes/pages/archive/`` is published as ``next/archive.css``, and one beside the root ``template.djx`` as ``next/index.css``.
+   The key, then the directory of the template relative to its page root, and ``index`` for the page root itself.
+   A ``template.css`` in ``notes/pages/archive/`` is published as ``next/notes/pages/archive.css``, and one beside the root ``template.djx`` as ``next/notes/pages/index.css``.
 
 ``layout`` role.
-   The directory of the layout relative to its page root with ``/layout`` appended, and ``layout`` alone for the page root itself.
-   A ``layout.css`` in ``notes/pages/archive/`` is published as ``next/archive/layout.css``.
+   The key, then the directory of the layout relative to its page root with ``/layout`` appended, and ``layout`` alone for the page root itself.
+   A ``layout.css`` in ``notes/pages/archive/`` is published as ``next/notes/pages/archive/layout.css``, and one in a ``DIRS`` root ``site/`` as ``next/site/layout.css``.
 
 ``component`` role.
-   ``components/<name>``, where the name is the component directory name.
+   ``components/<name>``, where the name is the component directory name and no key is involved.
    A ``component.css`` in ``_components/note_card/`` is published as ``next/components/note_card.css``.
 
 The stem is no part of the name, so two stems of one role in one directory compete for a single path, see :doc:`/content/howto/add-a-custom-stem`.
+The finder keeps the first file in sorted path order, logs a warning for the other, and ``manage.py check`` reports ``next.E167``.
 
 .. warning::
 

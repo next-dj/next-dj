@@ -13,6 +13,7 @@ from next.deps import provider_registry, resolver
 from next.deps.resolver import _holder, current_resolver
 from next.static import default_kinds, default_placeholders
 from next.static.discovery import default_stems
+from tests.support.backends import TEST_ROOT_KEY
 from tests.support.components import write_colocated_component_assets
 from tests.support.helpers import next_framework_settings_stand_in
 
@@ -111,7 +112,7 @@ def restored_static_registries() -> Generator[None, None, None]:
 @contextmanager
 def patched_watch_sources(
     *,
-    pages: Iterable[Path] = (),
+    pages: Iterable[Path | tuple[Path, str | None]] = (),
     templates: AbstractSet[Path] = frozenset(),
     layouts: AbstractSet[Path] = frozenset(),
     components: AbstractSet[Path] = frozenset(),
@@ -123,8 +124,11 @@ def patched_watch_sources(
     write_colocated_component_assets(components)
     with (
         patch(
-            "next.static.finders.get_pages_directories_for_watch",
-            return_value=list(pages),
+            "next.static.finders.get_page_root_keys_for_watch",
+            return_value=[
+                root if isinstance(root, tuple) else (root, TEST_ROOT_KEY)
+                for root in pages
+            ],
         ),
         patch(
             "next.static.finders.get_template_djx_paths_for_watch",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import contextmanager
 from datetime import UTC
@@ -15,7 +16,12 @@ from django.core.management import call_command
 from django.test import override_settings
 
 from next.conf.signals import settings_reloaded
-from next.static import NextAppDirectoriesFinder, NextStaticFilesFinder
+from next.static import (
+    AssetDiscovery,
+    NextAppDirectoriesFinder,
+    NextStaticFilesFinder,
+    StaticCollector,
+)
 from next.static.discovery import default_stems
 from next.static.finders import (
     _MappedSourceStorage,
@@ -23,11 +29,16 @@ from next.static.finders import (
     _scan_directories,
     _ScanRoots,
     discover_colocated_static_assets,
+    scan_page_tree_assets,
 )
 from next.static.runtime import NEXT_JS_STATIC_PATH
 from tests.support import (
+    NESTED_ROOT_CASES,
     TEMPLATE_AND_COMPONENT_SOURCES,
+    TEST_ROOT_KEY,
     MalformedRootsRouter,
+    NestedRootCase,
+    StaticAssetProvider,
     WatchSourcesCase,
     patched_watch_sources,
     restored_static_registries,
@@ -36,6 +47,8 @@ from tests.support import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
+
+    from next.static import StaticBackend
 
 
 _TEMPLATE_AND_LAYOUT = WatchSourcesCase(
@@ -84,11 +97,11 @@ class TestDiscoverColocatedAssets:
     def test_picks_up_template_and_layout_assets(self, watched_tree: Path) -> None:
         mapping = discover_colocated_static_assets()
 
-        assert "next/about.css" in mapping
-        assert "next/about.js" in mapping
-        assert "next/layout.css" in mapping
-        assert "next/layout.js" in mapping
-        assert mapping["next/about.css"] == (
+        assert "next/site/about.css" in mapping
+        assert "next/site/about.js" in mapping
+        assert "next/site/layout.css" in mapping
+        assert "next/site/layout.js" in mapping
+        assert mapping["next/site/about.css"] == (
             (watched_tree / "about" / "template.css").resolve()
         )
 
@@ -102,7 +115,7 @@ class TestDiscoverColocatedAssets:
 
         mapping = discover_colocated_static_assets()
 
-        assert mapping["next/about.css"] == target.resolve()
+        assert mapping["next/site/about.css"] == target.resolve()
 
     @pytest.mark.parametrize(
         "watched_tree", [_UNROOTED_TEMPLATE], indirect=["watched_tree"]
@@ -123,7 +136,7 @@ class TestDiscoverColocatedAssets:
         assert mapping["next/components/widget.css"] == (
             (watched_tree / "_components" / "widget" / "component.css").resolve()
         )
-        assert "next/about.css" in mapping
+        assert "next/site/about.css" in mapping
 
     @pytest.mark.parametrize(
         "watched_tree", [_ONE_COMPONENT_FOLDER_TWICE], indirect=["watched_tree"]
@@ -144,7 +157,7 @@ class TestDiscoverColocatedAssets:
 
 class TestNextStaticFilesFinderFind:
     def test_find_returns_path_for_known_asset(self, watched_tree: Path) -> None:
-        result = NextStaticFilesFinder().find("next/about.css")
+        result = NextStaticFilesFinder().find("next/site/about.css")
 
         assert result == str((watched_tree / "about" / "template.css").resolve())
 
@@ -157,12 +170,12 @@ class TestNextStaticFilesFinderFind:
         assert NextStaticFilesFinder().find("next/missing.css") == []
 
     def test_find_all_returns_list(self, watched_tree: Path) -> None:
-        found = NextStaticFilesFinder().find("next/about.css", find_all=True)
+        found = NextStaticFilesFinder().find("next/site/about.css", find_all=True)
 
         assert found == [str((watched_tree / "about" / "template.css").resolve())]
 
     def test_find_honours_deprecated_all_keyword(self, watched_tree: Path) -> None:
-        found = NextStaticFilesFinder().find("next/about.css", all=True)
+        found = NextStaticFilesFinder().find("next/site/about.css", all=True)
 
         assert found == [str((watched_tree / "about" / "template.css").resolve())]
 
@@ -175,14 +188,14 @@ class TestNextStaticFilesFinderList:
         items = dict(NextStaticFilesFinder().list(ignore_patterns=None))
 
         assert set(items) == {
-            "next/about.css",
-            "next/about.js",
-            "next/layout.css",
-            "next/layout.js",
+            "next/site/about.css",
+            "next/site/about.js",
+            "next/site/layout.css",
+            "next/site/layout.js",
             *_runtime_bundle_static_files(),
         }
-        storage = items["next/about.css"]
-        assert storage.path("next/about.css") == str(
+        storage = items["next/site/about.css"]
+        assert storage.path("next/site/about.css") == str(
             (watched_tree / "about" / "template.css").resolve()
         )
 
@@ -190,7 +203,7 @@ class TestNextStaticFilesFinderList:
         items = dict(NextStaticFilesFinder().list(ignore_patterns=["*.js"]))
 
         assert set(items) == {
-            "next/about.css",
+            "next/site/about.css",
             *(
                 path
                 for path in _runtime_bundle_static_files()
@@ -207,7 +220,9 @@ class TestScanDirectorySnapshot:
     ) -> None:
         missing = tmp_path / "gone"
 
-        assert _scan_directories(_ScanRoots((missing,), ())) == ((missing, None),)
+        assert _scan_directories(_ScanRoots(((missing, None),), ())) == (
+            (missing, None),
+        )
 
     def test_a_root_that_holds_no_directory_ends_the_walk(self, tmp_path: Path) -> None:
         leaf = tmp_path / "notes.txt"
@@ -222,7 +237,10 @@ class TestScanDirectorySnapshot:
         (tmp_path / "inner").mkdir()
 
         walked = [
-            path for path, _ in _scan_directories(_ScanRoots((tmp_path,), (tmp_path,)))
+            path
+            for path, _ in _scan_directories(
+                _ScanRoots(((tmp_path, None),), (tmp_path,))
+            )
         ]
 
         assert walked.count(tmp_path) == 1
@@ -231,7 +249,7 @@ class TestScanDirectorySnapshot:
     def test_a_tree_that_never_stats_is_recorded_once(self, tmp_path: Path) -> None:
         missing = tmp_path / "gone"
 
-        recorded = _scan_directories(_ScanRoots((missing,), (missing,)))
+        recorded = _scan_directories(_ScanRoots(((missing, None),), (missing,)))
 
         assert recorded == ((missing, None),)
 
@@ -245,7 +263,9 @@ class TestScanDirectorySnapshot:
         link = tmp_path / "link"
         link.symlink_to(real)
 
-        walked = [path for path, _ in _scan_directories(_ScanRoots((real,), (link,)))]
+        walked = [
+            path for path, _ in _scan_directories(_ScanRoots(((real, None),), (link,)))
+        ]
 
         assert walked == [link, link / "inner", real]
 
@@ -256,7 +276,9 @@ class TestScanDirectorySnapshot:
         (tmp_path / ".git").mkdir()
         (tmp_path / "about").mkdir()
 
-        walked = [path for path, _ in _scan_directories(_ScanRoots((tmp_path,), ()))]
+        walked = [
+            path for path, _ in _scan_directories(_ScanRoots(((tmp_path, None),), ()))
+        ]
 
         assert walked == [tmp_path, tmp_path / "about"]
 
@@ -282,8 +304,8 @@ class TestFinderFreshness:
     def test_an_unmoved_tree_is_walked_once(self) -> None:
         finder = NextStaticFilesFinder()
         with override_settings(DEBUG=True), self._counted_scan() as scan:
-            finder.find("next/about.css")
-            finder.find("next/about.js")
+            finder.find("next/site/about.css")
+            finder.find("next/site/about.js")
             list(finder.list(None))
 
         assert scan.call_count == 1
@@ -293,44 +315,47 @@ class TestFinderFreshness:
         asset.unlink()
         with override_settings(DEBUG=True):
             finder = NextStaticFilesFinder()
-            assert finder.find("next/about.js") == []
+            assert finder.find("next/site/about.js") == []
 
             asset.write_text("//")
             self._move_mtime(asset.parent)
 
-            assert finder.find("next/about.js") == str(asset.resolve())
+            assert finder.find("next/site/about.js") == str(asset.resolve())
 
     @pytest.mark.usefixtures("watched_tree")
     def test_a_registered_stem_rebuilds_the_answer(self) -> None:
         finder = NextStaticFilesFinder()
-        finder.find("next/about.css")
+        finder.find("next/site/about.css")
 
         with restored_static_registries(), self._counted_scan() as scan:
             default_stems.register("template", "styles")
-            finder.find("next/about.css")
+            finder.find("next/site/about.css")
 
         assert scan.call_count == 1
 
     def test_a_reported_page_tree_rebuilds_the_answer(self, watched_tree: Path) -> None:
         finder = NextStaticFilesFinder()
         with override_settings(DEBUG=True):
-            finder.find("next/about.css")
+            finder.find("next/site/about.css")
 
         with (
             override_settings(DEBUG=True),
             mock.patch(
-                "next.static.finders.get_pages_directories_for_watch",
-                return_value=[watched_tree, watched_tree / "about"],
+                "next.static.finders.get_page_root_keys_for_watch",
+                return_value=[
+                    (watched_tree, TEST_ROOT_KEY),
+                    (watched_tree / "about", TEST_ROOT_KEY),
+                ],
             ),
             self._counted_scan() as scan,
         ):
-            finder.find("next/about.css")
+            finder.find("next/site/about.css")
 
         assert scan.call_count == 1
 
     def test_a_component_tree_rebuilds_the_answer(self, watched_tree: Path) -> None:
         finder = NextStaticFilesFinder()
-        finder.find("next/about.css")
+        finder.find("next/site/about.css")
 
         with (
             mock.patch(
@@ -338,18 +363,18 @@ class TestFinderFreshness:
             ),
             self._counted_scan() as scan,
         ):
-            finder.find("next/about.css")
+            finder.find("next/site/about.css")
 
         assert scan.call_count == 1
 
     @pytest.mark.usefixtures("watched_tree")
     def test_a_settings_reload_rebuilds_the_answer(self) -> None:
         finder = NextStaticFilesFinder()
-        finder.find("next/about.css")
+        finder.find("next/site/about.css")
 
         with self._counted_scan() as scan:
             settings_reloaded.send(sender=None)
-            finder.find("next/about.css")
+            finder.find("next/site/about.css")
 
         assert scan.call_count == 1
 
@@ -360,12 +385,12 @@ class TestFinderFreshness:
         asset.unlink()
         with override_settings(DEBUG=False):
             finder = NextStaticFilesFinder()
-            assert finder.find("next/about.js") == []
+            assert finder.find("next/site/about.js") == []
 
             asset.write_text("//")
             self._move_mtime(asset.parent)
 
-            assert finder.find("next/about.js") == []
+            assert finder.find("next/site/about.js") == []
 
     def test_an_answer_read_without_watching_goes_when_watching_starts(
         self, watched_tree: Path
@@ -374,27 +399,26 @@ class TestFinderFreshness:
         asset.unlink()
         finder = NextStaticFilesFinder()
         with override_settings(DEBUG=False):
-            assert finder.find("next/about.js") == []
+            assert finder.find("next/site/about.js") == []
 
         asset.write_text("//")
         with override_settings(DEBUG=True):
-            assert finder.find("next/about.js") == str(asset)
+            assert finder.find("next/site/about.js") == str(asset)
 
     def test_a_process_watching_no_edit_still_follows_the_trees(
         self, watched_tree: Path
     ) -> None:
         with override_settings(DEBUG=False):
             finder = NextStaticFilesFinder()
-            finder.find("next/about.css")
+            finder.find("next/site/about.css")
 
             with (
                 mock.patch(
-                    "next.static.finders.get_pages_directories_for_watch",
-                    return_value=[],
+                    "next.static.finders.get_page_root_keys_for_watch", return_value=[]
                 ),
                 self._counted_scan() as scan,
             ):
-                assert finder.find("next/about.css") == []
+                assert finder.find("next/site/about.css") == []
 
             assert scan.call_count == 1
 
@@ -476,7 +500,7 @@ class TestMalformedRouterSurvival:
 
     def test_find_answers_nothing_instead_of_raising(self, pages_tree: Path) -> None:
         with self._malformed_router(pages_tree):
-            assert NextStaticFilesFinder().find("next/about.css") == []
+            assert NextStaticFilesFinder().find("next/site/about.css") == []
 
     def test_list_answers_nothing_instead_of_raising(self, pages_tree: Path) -> None:
         with self._malformed_router(pages_tree):
@@ -544,7 +568,7 @@ class TestCollectstaticIntegration:
                 "collectstatic", "--noinput", "--ignore=*.py", verbosity=2, stdout=out
             )
 
-        assert "Skipping 'next/about.css' (not modified)" in out.getvalue()
+        assert "Skipping 'next/site/about.css' (not modified)" in out.getvalue()
 
 
 _ADMIN_APP = "django.contrib.admin.apps.SimpleAdminConfig"
@@ -723,7 +747,11 @@ class TestRuntimeBundleIsStattedLive:
         with mock.patch("next.static.finders._RUNTIME_BUNDLE_ROOT", root):
             listed = [path for path, _ in NextStaticFilesFinder().list(None)]
 
-        assert listed == ["next/about.css", "next/about.js", NEXT_JS_STATIC_PATH]
+        assert listed == [
+            "next/site/about.css",
+            "next/site/about.js",
+            NEXT_JS_STATIC_PATH,
+        ]
 
 
 class TestNextAppDirectoriesFinder:
@@ -757,3 +785,129 @@ class TestNoPythonSourceIsCollected:
         published = [path for path, _ in AppDirectoriesFinder().list(None)]
 
         assert _python_paths(published) != []
+
+
+def _write_template(root: Path, rel: str = "about") -> Path:
+    """Write a template and its stylesheet under `root` and return the template."""
+    directory = root / rel
+    directory.mkdir(parents=True)
+    (directory / "template.css").write_text("")
+    template = directory / "template.djx"
+    template.write_text("")
+    return template
+
+
+class TestScanPageTreeAssets:
+    @pytest.mark.parametrize("reverse", [False, True], ids=["in_order", "reversed"])
+    def test_a_shared_name_goes_to_the_first_sorted_path(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, *, reverse: bool
+    ) -> None:
+        first = tmp_path / "a"
+        second = tmp_path / "b"
+        templates = {_write_template(first), _write_template(second)}
+        roots = [first, second][:: -1 if reverse else 1]
+        name = "next/site/about.css"
+
+        with (
+            patched_watch_sources(pages=roots, templates=templates),
+            caplog.at_level(logging.WARNING, logger="next.static.finders"),
+        ):
+            scan = scan_page_tree_assets()
+            mapping = discover_colocated_static_assets()
+
+        kept = first / "about" / "template.css"
+        lost = second / "about" / "template.css"
+        assert scan.mapping == {name: kept}
+        assert scan.collisions == ((name, kept, lost),)
+        assert mapping == {name: kept}
+        warning = caplog.records[0].getMessage()
+        assert [record.levelno for record in caplog.records] == [logging.WARNING] * 2
+        assert str(kept) in warning
+        assert str(lost) in warning
+        assert name in warning
+
+    def test_distinct_names_collide_nowhere(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        about = _write_template(tmp_path, "about")
+        blog = _write_template(tmp_path, "blog")
+
+        with (
+            patched_watch_sources(pages=[tmp_path], templates={about, blog}),
+            caplog.at_level(logging.WARNING, logger="next.static.finders"),
+        ):
+            scan = scan_page_tree_assets()
+
+        assert set(scan.mapping) == {"next/site/about.css", "next/site/blog.css"}
+        assert scan.collisions == ()
+        assert caplog.records == []
+
+    def test_a_keyless_root_serves_neither_layout_nor_template(
+        self, tmp_path: Path
+    ) -> None:
+        template = _write_template(tmp_path)
+        (tmp_path / "layout.css").write_text("")
+        layout = tmp_path / "layout.djx"
+        layout.write_text("")
+
+        with patched_watch_sources(
+            pages=[(tmp_path, None)], templates={template}, layouts={layout}
+        ):
+            scan = scan_page_tree_assets()
+
+        assert scan.mapping == {}
+        assert scan.collisions == ()
+
+    def test_components_keep_their_name_under_a_keyless_root(
+        self, tmp_path: Path
+    ) -> None:
+        template = _write_template(tmp_path)
+        widget = tmp_path / "_components" / "widget" / "component.py"
+
+        with patched_watch_sources(
+            pages=[(tmp_path, None)], templates={template}, components={widget}
+        ):
+            mapping = discover_colocated_static_assets()
+
+        assert mapping == {"next/components/widget.css": widget.with_suffix(".css")}
+
+
+class TestNestedRootsAgree:
+    @staticmethod
+    def _tree(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+        outer = tmp_path.resolve()
+        inner = outer / "inner"
+        template = _write_template(inner)
+        layout = inner / "layout.djx"
+        layout.write_text("")
+        (inner / "layout.css").write_text("")
+        page = inner / "about" / "page.djx"
+        page.write_text("")
+        return outer, inner, template, layout
+
+    @pytest.mark.parametrize("case", NESTED_ROOT_CASES, ids=lambda case: case.id)
+    def test_discovery_names_a_page_as_the_finders_serve_it(
+        self, tmp_path: Path, file_backend: StaticBackend, case: NestedRootCase
+    ) -> None:
+        outer, inner, _template, _layout = self._tree(tmp_path)
+        roots = ((outer, case.outer_key), (inner, case.inner_key))
+        collector = StaticCollector()
+
+        AssetDiscovery(StaticAssetProvider(file_backend, roots)).discover_page_assets(
+            inner / "about" / "page.djx", collector
+        )
+
+        urls = sorted(asset.url for asset in collector.assets_in_slot("styles"))
+        assert urls == [f"/static/{name}" for name in case.expected]
+
+    @pytest.mark.parametrize("case", NESTED_ROOT_CASES, ids=lambda case: case.id)
+    def test_finders_serve_the_names_discovery_asks_for(
+        self, tmp_path: Path, case: NestedRootCase
+    ) -> None:
+        outer, inner, template, layout = self._tree(tmp_path)
+        roots = [(outer, case.outer_key), (inner, case.inner_key)]
+
+        with patched_watch_sources(pages=roots, templates={template}, layouts={layout}):
+            mapping = discover_colocated_static_assets()
+
+        assert sorted(mapping) == list(case.expected)

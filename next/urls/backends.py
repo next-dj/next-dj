@@ -55,18 +55,41 @@ def is_plain_subdir(name: str) -> bool:
     return name not in {"", ".", ".."} and "/" not in name and "\\" not in name
 
 
+def _tree_key(label: str, subdir: str) -> str:
+    """Return the static key of an app tree, its app label and its pages directory."""
+    return f"{label}/{subdir}"
+
+
+def _dirs_root_key(path: Path) -> str | None:
+    """Return the static key of a `DIRS` root, its path under `BASE_DIR`.
+
+    A root outside `BASE_DIR`, or any root while `BASE_DIR` is unset, has no key.
+    """
+    base_dir = resolve_base_dir()
+    if base_dir is None:
+        return None
+    base = base_dir.resolve()
+    tree = path.resolve()
+    if tree == base:
+        return base.name or None
+    if tree.is_relative_to(base):
+        return tree.relative_to(base).as_posix()
+    return None
+
+
 class _InstalledApps(dict[str, Path]):
     """Each installed app's directory by dotted name, built once per registry snapshot.
 
     A stable map lets `page_roots` keep its answer until the registry changes.
     """
 
-    __slots__ = ("configs",)
+    __slots__ = ("configs", "labels")
 
     def __init__(self, configs: tuple[AppConfig, ...]) -> None:
-        """Read the directory of every app."""
+        """Read the directory and the label of every app."""
         super().__init__((config.name, Path(config.path)) for config in configs)
         self.configs = configs
+        self.labels = {config.name: config.label for config in configs}
 
 
 class _InstalledAppsMemo:
@@ -260,7 +283,11 @@ class FileRouterBackend(RouterBackend):
             [] if directories is None else self._app_roots(directories, mounts.claimed)
         )
         roots.extend(
-            PageRoot(path=path, label="Root" if index == 0 else f"Root ({path})")
+            PageRoot(
+                path=path,
+                label="Root" if index == 0 else f"Root ({path})",
+                key=_dirs_root_key(path),
+            )
             for index, path in enumerate(self._get_root_pages_paths())
         )
         roots.extend(self._mounted_root(point) for point in mounts.points)
@@ -291,8 +318,17 @@ class FileRouterBackend(RouterBackend):
         self, directories: Mapping[str, Path], claimed: frozenset[tuple[str, str]]
     ) -> list[PageRoot]:
         """Return the app trees the auto-assembly routes at the root."""
+        held = _installed_apps.held
+        labels = {} if held is None else held.labels
+        subdir = Path(self.pages_dir).as_posix()
         return [
-            PageRoot(path=path, label=self._tree_label(app_name, self.pages_dir))
+            PageRoot(
+                path=path,
+                label=self._tree_label(app_name, self.pages_dir),
+                key=_tree_key(
+                    labels.get(app_name, app_name.rpartition(".")[2]), subdir
+                ),
+            )
             for app_name, path in self._app_trees(directories, claimed)
         ]
 
@@ -305,6 +341,7 @@ class FileRouterBackend(RouterBackend):
             prefix=point.prefix,
             namespace=point.namespace,
             trail=point.trail,
+            key=_tree_key(mount.app, Path(mount.subdir).as_posix()),
         )
 
     def _generate_app_urls(self) -> list[URLPattern | URLResolver]:

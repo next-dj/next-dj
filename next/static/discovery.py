@@ -117,8 +117,8 @@ class BackendProvider(Protocol):
         """Return the primary backend used for file registration."""
         raise NotImplementedError
 
-    def page_roots(self) -> tuple[Path, ...]:
-        """Return the configured page-tree roots as resolved absolute paths."""
+    def page_roots(self) -> PageRootKeys:
+        """Return the configured page-tree roots, resolved, with their static keys."""
         raise NotImplementedError
 
 
@@ -170,23 +170,27 @@ def find_role_files(
     return found
 
 
+type PageRootKeys = tuple[tuple[Path, str | None], ...]
+"""Resolved page roots, each with the key its co-located assets are named by."""
+
+
 class PathResolver:
     """Resolve page root and logical names for page, layout, and component paths.
 
     Discovery and the staticfiles finder share it to agree on logical names.
     """
 
-    def __init__(self, page_roots_provider: Callable[[], tuple[Path, ...]]) -> None:
+    def __init__(self, page_roots_provider: Callable[[], PageRootKeys]) -> None:
         """Store the page-roots provider callable consulted on every lookup."""
         self._provider = page_roots_provider
         self._find_page_root_cache: BoundedCache[Path, Path | None] = BoundedCache()
 
-    def page_roots(self) -> tuple[Path, ...]:
-        """Return the current tuple of page tree roots from the provider."""
+    def page_roots(self) -> PageRootKeys:
+        """Return the current page tree roots with their keys from the provider."""
         return self._provider()
 
     def find_page_root(self, path: Path) -> Path | None:
-        """Return the page tree root that contains the path, or None."""
+        """Return the deepest page tree root that contains the path, or None."""
         # Subscript rather than `get`, because a cached `None` is a real answer.
         try:
             return self._find_page_root_cache[path]
@@ -194,32 +198,47 @@ class PathResolver:
             pass
         found: Path | None = None
         resolved_parent = path.parent.resolve()
-        for root in self.page_roots():
-            if resolved_parent.is_relative_to(root):
+        for root, _key in self.page_roots():
+            if resolved_parent.is_relative_to(root) and (
+                found is None or len(root.parts) > len(found.parts)
+            ):
                 found = root
-                break
         self._find_page_root_cache[path] = found
         return found
 
+    def root_key(self, page_root: Path) -> str | None:
+        """Return the key of a page root, or None when it has none."""
+        return dict(self.page_roots()).get(page_root)
+
     def logical_name_for_template(
         self, template_dir: Path, page_root: Path | None
-    ) -> str:
-        """Return the logical URL name for a resolved page template directory."""
-        if page_root is None:
-            return self._fallback(template_dir)
-        rel = _rel_path_str(template_dir, page_root)
-        if rel is None:  # pragma: no cover
-            return self._fallback(template_dir)
-        return rel or "index"
+    ) -> str | None:
+        """Return the logical URL name for a resolved page template directory.
 
-    def logical_name_for_layout(self, layout_dir: Path, page_root: Path | None) -> str:
-        """Return the logical URL name for a resolved layout directory."""
+        A page root with no key names nothing.
+        """
+        if page_root is None:
+            return self._fallback(template_dir)
+        key = self.root_key(page_root)
+        rel = _rel_path_str(template_dir, page_root)
+        if key is None or rel is None:
+            return None
+        return f"{key}/{rel or 'index'}"
+
+    def logical_name_for_layout(
+        self, layout_dir: Path, page_root: Path | None
+    ) -> str | None:
+        """Return the logical URL name for a resolved layout directory.
+
+        A page root with no key names nothing.
+        """
         if page_root is None:
             return f"{self._fallback(layout_dir)}/layout"
+        key = self.root_key(page_root)
         rel = _rel_path_str(layout_dir, page_root)
-        if rel is None:  # pragma: no cover
-            return f"{self._fallback(layout_dir)}/layout"
-        return f"{rel}/layout" if rel else "layout"
+        if key is None or rel is None:
+            return None
+        return f"{key}/{rel}/layout" if rel else f"{key}/layout"
 
     @staticmethod
     def _fallback(directory: Path) -> str:
@@ -284,23 +303,17 @@ class AssetDiscovery:
         walk = self._walk_layouts(resolved, page_root)
         files: list[FoundAsset] = []
         for layout_dir in walk.layouts:
-            files += find_role_files(
-                layout_dir,
-                logical_name=self._resolver.logical_name_for_layout(
-                    layout_dir, page_root
-                ),
-                role="layout",
-                stems=self._stems,
-            )
+            name = self._resolver.logical_name_for_layout(layout_dir, page_root)
+            if name is not None:
+                files += find_role_files(
+                    layout_dir, logical_name=name, role="layout", stems=self._stems
+                )
         template_dir = resolved.parent
-        files += find_role_files(
-            template_dir,
-            logical_name=self._resolver.logical_name_for_template(
-                template_dir, page_root
-            ),
-            role="template",
-            stems=self._stems,
-        )
+        name = self._resolver.logical_name_for_template(template_dir, page_root)
+        if name is not None:
+            files += find_role_files(
+                template_dir, logical_name=name, role="template", stems=self._stems
+            )
         return _AssetPlan(
             files=tuple(files),
             module_assets=self._module_assets(lists),

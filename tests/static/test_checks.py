@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,10 +18,12 @@ from next.static.checks import (
     check_app_directories_finder,
     check_asset_kinds_are_loadable,
     check_asset_renderers,
+    check_colocated_name_collisions,
     check_inline_asset_bodies_are_loadable,
     check_js_context_serializer,
     check_nonce_on_shared_pages,
     check_nonce_templates,
+    check_page_roots_have_keys,
     check_reserved_js_context_keys,
     check_runtime_bundles_deployed,
     check_script_policy,
@@ -31,11 +34,17 @@ from tests.support import (
     APP_FINDER_CASES,
     PROJECT_APP_DIRECTORIES_FINDER,
     AppFinderCase,
+    RootPagesRouter,
     check_ids,
     patch_checks_router_manager,
+    patched_watch_sources,
     routed,
     write_page,
 )
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestEmptyConfig:
@@ -203,6 +212,8 @@ class TestChecksRegistered:
             check_inline_asset_bodies_are_loadable,
             check_reserved_js_context_keys,
             check_nonce_templates,
+            check_colocated_name_collisions,
+            check_page_roots_have_keys,
         ],
     )
     def test_registered_under_next_tag(self, check) -> None:
@@ -789,3 +800,100 @@ class TestRuntimeBundlesDeployedCheck:
         ):
             [warning] = check_runtime_bundles_deployed()
         assert warning.msg.startswith("next/next.sse.min.js: the static files storage")
+
+
+class TestColocatedNameCollisionsCheck:
+    """`next.E167` names two page-tree files that are served as one static name."""
+
+    @staticmethod
+    def _template(root: Path, rel: str) -> Path:
+        directory = root / rel
+        directory.mkdir(parents=True)
+        (directory / "template.css").write_text("")
+        template = directory / "template.djx"
+        template.write_text("")
+        return template
+
+    def test_two_files_sharing_a_name_are_e167(self, tmp_path: Path) -> None:
+        first = tmp_path / "a"
+        second = tmp_path / "b"
+        templates = {self._template(first, "about"), self._template(second, "about")}
+
+        with patched_watch_sources(pages=[first, second], templates=templates):
+            [error] = check_colocated_name_collisions()
+
+        assert isinstance(error, Error)
+        assert error.id == "next.E167"
+        assert "next/site/about.css" in error.msg
+        assert str(first / "about" / "template.css") in error.msg
+        assert str(second / "about" / "template.css") in error.msg
+
+    def test_distinct_names_are_silent(self, tmp_path: Path) -> None:
+        templates = {
+            self._template(tmp_path, "about"),
+            self._template(tmp_path, "blog"),
+        }
+
+        with patched_watch_sources(pages=[tmp_path], templates=templates):
+            assert check_colocated_name_collisions() == []
+
+    def test_a_keyless_root_collides_with_nothing(self, tmp_path: Path) -> None:
+        first = tmp_path / "a"
+        second = tmp_path / "b"
+        templates = {self._template(first, "about"), self._template(second, "about")}
+
+        with patched_watch_sources(
+            pages=[(first, None), (second, None)], templates=templates
+        ):
+            assert check_colocated_name_collisions() == []
+
+
+class TestPageRootsHaveKeysCheck:
+    """`next.W132` warns about a page tree that has no static key."""
+
+    def test_a_dirs_root_outside_base_dir_is_w132(self, tmp_path: Path) -> None:
+        base = tmp_path / "project"
+        base.mkdir()
+        outside = tmp_path / "elsewhere"
+        write_page(outside, "")
+
+        with override_settings(BASE_DIR=base), routed(outside):
+            [warning] = check_page_roots_have_keys()
+
+        assert isinstance(warning, DjangoWarning)
+        assert warning.id == "next.W132"
+        assert str(outside.resolve()) in warning.msg
+
+    def test_an_unset_base_dir_is_w132(self, tmp_path: Path) -> None:
+        tree = tmp_path / "site"
+        write_page(tree, "")
+
+        with override_settings(), routed(tree):
+            del settings.BASE_DIR
+            assert check_ids(check_page_roots_have_keys()) == ["next.W132"]
+
+    def test_a_third_party_root_without_a_key_is_w132(self, tmp_path: Path) -> None:
+        tree = tmp_path / "plugin"
+        write_page(tree, "")
+
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "plugin.Backend"}]}
+            ),
+            patch(
+                "next.urls.RouterFactory.create_backend",
+                return_value=RootPagesRouter([tree]),
+            ),
+        ):
+            [warning] = check_page_roots_have_keys()
+
+        assert warning.id == "next.W132"
+        assert str(tree.resolve()) in warning.msg
+
+    def test_keyed_roots_are_silent(self, tmp_path: Path) -> None:
+        base = tmp_path / "project"
+        tree = base / "site"
+        write_page(tree, "")
+
+        with override_settings(BASE_DIR=base), routed(tree):
+            assert check_page_roots_have_keys() == []

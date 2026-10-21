@@ -41,8 +41,11 @@ Backends
      - The URL namespace of the tree, ``next`` for a tree ``next.urls`` routes, and for a ``pages()`` tree the application label or the ``namespace`` the call passes.
    * - ``trail``
      - The include route of a ``pages()`` tree as a trail, ``[name]`` for each named group, and ``None`` for a tree of ``next.urls``.
+   * - ``key``
+     - The name the co-located ``layout`` and ``template`` assets of the tree are published under, such as ``blog/pages``.
+       ``None`` serves none of them and draws ``next.W132``, see :ref:`topics-static-name-resolution-colocated`.
 
-``prefix``, ``namespace``, and ``trail`` default, so ``PageRoot(path=..., label=...)`` from a custom backend reports a tree of ``next.urls``.
+``prefix``, ``namespace``, ``trail``, and ``key`` default, so ``PageRoot(path=..., label=...)`` from a custom backend reports a tree of ``next.urls``.
 ``route_trail(trail)`` returns the trail a page at the tree-relative ``trail`` routes by, prefix included, read from ``trail`` when it is set and from ``prefix`` otherwise.
 The walk builds ``trail`` from a :func:`~django.urls.path` segment by its converters and from a :func:`~django.urls.re_path` segment the way Django reverses it, a named group becoming ``[name]`` and a pattern Django cannot reverse becoming a catch-all.
 A tree under a prefix Django cannot reverse lists no static page in the sitemap.

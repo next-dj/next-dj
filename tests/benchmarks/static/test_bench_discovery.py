@@ -193,7 +193,7 @@ class TestBenchPathResolver:
         (tmp_path / "pages" / "a").mkdir()
         page_file = tmp_path / "pages" / "a" / "page.py"
         page_file.write_text("# noop")
-        roots = (tmp_path / "pages",)
+        roots = ((tmp_path / "pages", "site"),)
         resolver = PathResolver(lambda: roots)
         resolver.find_page_root(page_file)  # warm
         benchmark(resolver.find_page_root, page_file)
@@ -204,7 +204,7 @@ class TestBenchPathResolver:
         root.mkdir()
         template_dir = root / "a" / "b" / "c" / "d"
         template_dir.mkdir(parents=True)
-        resolver = PathResolver(lambda: (root,))
+        resolver = PathResolver(lambda: ((root, "site"),))
         benchmark(resolver.logical_name_for_template, template_dir, root)
 
     @pytest.mark.benchmark(group="static.discovery")
@@ -213,5 +213,5 @@ class TestBenchPathResolver:
         root.mkdir()
         layout_dir = root / "a" / "b" / "c" / "d"
         layout_dir.mkdir(parents=True)
-        resolver = PathResolver(lambda: (root,))
+        resolver = PathResolver(lambda: ((root, "site"),))
         benchmark(resolver.logical_name_for_layout, layout_dir, root)
