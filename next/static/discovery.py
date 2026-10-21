@@ -208,7 +208,10 @@ class PathResolver:
 
     def root_key(self, page_root: Path) -> str | None:
         """Return the key of a page root, or None when it has none."""
-        return dict(self.page_roots()).get(page_root)
+        for root, key in self.page_roots():
+            if root is page_root or root == page_root:
+                return key
+        return None
 
     def logical_name_for_template(
         self, template_dir: Path, page_root: Path | None

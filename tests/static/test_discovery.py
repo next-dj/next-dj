@@ -79,6 +79,15 @@ class TestDefaultStems:
         assert default_stems.stems("component") == ("component",)
 
 
+class TestPathResolverRootKey:
+    def test_keys_a_known_root_and_not_an_unknown_one(self, tmp_path: Path) -> None:
+        root = tmp_path.resolve()
+        resolver = PathResolver(lambda: ((root, "site"),))
+        assert resolver.root_key(root) == "site"
+        assert resolver.root_key(Path(str(root))) == "site"
+        assert resolver.root_key(root / "other") is None
+
+
 class TestPathResolverFindPageRoot:
     def test_returns_matching_root(self, tmp_path: Path) -> None:
         (tmp_path / "page.djx").write_text("<div/>")

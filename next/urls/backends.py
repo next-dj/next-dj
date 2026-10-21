@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -11,9 +12,16 @@ from django.apps import apps
 from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
 
 from next.backends import instantiate_backend, resolve_backend_class
+from next.caches import DEFAULT_CACHE_SIZE
 from next.conf import next_framework_settings
 from next.pages import page
-from next.utils import PageRoot, classify_dirs_entries, resolve_base_dir, resolved_tree
+from next.utils import (
+    PageRoot,
+    classify_dirs_entries,
+    on_forget_resolved_trees,
+    resolve_base_dir,
+    resolved_tree,
+)
 
 from .dispatcher import FilesystemTreeDispatcher
 from .parser import default_url_parser
@@ -60,14 +68,9 @@ def _tree_key(label: str, subdir: str) -> str:
     return f"{label}/{subdir}"
 
 
-def _dirs_root_key(path: Path) -> str | None:
-    """Return the static key of a `DIRS` root, its path under `BASE_DIR`.
-
-    A root outside `BASE_DIR`, or any root while `BASE_DIR` is unset, has no key.
-    """
-    base_dir = resolve_base_dir()
-    if base_dir is None:
-        return None
+@functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
+def _key_under(path: Path, base_dir: Path) -> str | None:
+    """Return the posix path of a tree under the base directory, both resolved."""
     base = base_dir.resolve()
     tree = path.resolve()
     if tree == base:
@@ -75,6 +78,18 @@ def _dirs_root_key(path: Path) -> str | None:
     if tree.is_relative_to(base):
         return tree.relative_to(base).as_posix()
     return None
+
+
+on_forget_resolved_trees(_key_under.cache_clear)
+
+
+def _dirs_root_key(path: Path) -> str | None:
+    """Return the static key of a `DIRS` root, its path under `BASE_DIR`.
+
+    A root outside `BASE_DIR`, or any root while `BASE_DIR` is unset, has no key.
+    """
+    base_dir = resolve_base_dir()
+    return None if base_dir is None else _key_under(path, base_dir)
 
 
 class _InstalledApps(dict[str, Path]):
