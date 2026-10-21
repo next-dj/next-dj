@@ -401,6 +401,15 @@ class TestInstalledAppsMovesTheRouters:
 
         assert before != during != router_manager.version
 
+    def test_moving_the_base_dir_rebuilds_the_routers(self, tmp_path) -> None:
+        """The relative `DIRS` roots and the static keys of the trees follow it."""
+        before = router_manager.version
+
+        with override_settings(BASE_DIR=tmp_path):
+            during = router_manager.version
+
+        assert before != during != router_manager.version
+
     def test_an_unrelated_setting_leaves_the_routers_where_they_are(self) -> None:
         """Only the app list rebuilds, so a stray setting costs no scan of the trees."""
         before = router_manager.version

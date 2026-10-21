@@ -5,7 +5,7 @@ from next.pages import MetadataDict
 from next.pages.metadata import absolute_url
 
 
-@context("article")
+@context("article", inherit_context=True)
 def article(slug: str) -> Post:
     """Read the post the URL names, parsed once for the body, head and layout."""
     return load_post(slug)

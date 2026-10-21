@@ -35,6 +35,7 @@ _NEXT_TAG_NAMES = (
     "consented",
     "form",
     "has_perm",
+    "layout",
     "metadata",
     "script",
     "set_slot",

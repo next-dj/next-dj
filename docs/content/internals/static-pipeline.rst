@@ -44,7 +44,9 @@ Five things invalidate a plan.
 - A ``STATIC_ROOT``, ``STATIC_URL``, or ``STORAGES`` change calls ``StaticManager.forget_backend_urls``, which drops the discovery instance outright alongside the script builder and the memo of every configured backend, so no plan survives holding a URL read through the old storage.
 - Under ``DEBUG`` each render re-stats the directories the plan was read from and rebuilds when one of them has moved, appeared, or gone away.
   The mtimes are read in nanoseconds and compared for inequality, so a directory restored from an archive with an older timestamp counts as changed too, and one that does not stat at all is recorded as absent rather than as a timestamp.
-  For a page those directories are the whole walk from the page directory up to the page root, not only the ones that already hold a ``layout.djx``, so a layout added in between is visible on the next request.
+  For a page those directories are the whole walk from the page directory up to its outermost page root, not only the ones that already hold a ``layout.djx``, so a layout added in between is visible on the next request.
+  Above the outermost root only the directories of the layouts in the chain are watched, a ``DIRS`` root layout included, so a ``layout.css`` added beside a shared layout reaches the page without a restart.
+  The plan also holds the mtime of every layout file in the cut ``layout_chain`` of the page, so switching a ``{% layout root %}`` marker on or off evicts it.
   For a component they are the component folder and the folder holding its module.
 
 Two of the five are a comparison the plan itself carries, and the other three discard the discovery instance with every plan in it, so the next render builds a fresh one.
@@ -150,6 +152,8 @@ Modules
 ``next.static.finders``.
    ``NextStaticFilesFinder`` exposes co-located page and component assets to Django staticfiles, so ``collectstatic`` copies them into ``STATIC_ROOT``.
    :doc:`/content/topics/static-assets/overview` covers the finder from the user side.
+   It enumerates page-tree files through ``scan_page_tree_assets``, which visits sorted paths and resolves each name through the same ``PathResolver`` as discovery, with the key of the deepest page root containing the file.
+   The routers hand the resolver ``(root, key)`` pairs through ``next.pages.watch.get_page_root_keys_for_watch``, and a root with no key names nothing.
    The finder holds the mapping it discovered and rebuilds it when the stem or kind registry moves, when the framework settings reload, when the reported page or component trees change, or, while ``DEBUG`` is true, when the mtime of any directory inside those trees moves.
 
 ``next.static.defaults``.

@@ -47,7 +47,7 @@ Add a stem when a project ships an asset under a filename that the default stems
 .. warning::
 
    Two stems of one role collapse into a single logical static path, because the path is built from the directory and drops the stem.
-   A directory holding both ``template.css`` and ``page.css`` therefore ships ``template.css`` only, and the second file is dropped without a warning.
+   A directory holding both ``template.css`` and ``page.css`` therefore ships ``template.css`` only, the second file is dropped with a logged warning, and ``manage.py check`` reports ``next.E167``.
    Register an extra stem as a rename, not as an addition.
 
 Registering a stem

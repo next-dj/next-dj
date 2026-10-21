@@ -10,7 +10,7 @@ Module summary
 ``resolve_base_dir`` returns ``settings.BASE_DIR`` coerced to ``pathlib.Path``, or ``None`` when it is unset, for backends that resolve project-relative paths.
 ``classify_dirs_entries`` splits a backend ``DIRS`` list into existing directory roots and plain skip-name segments, the same split the file router applies.
 A ``DIRS`` that is no sequence of trees raises :class:`~next.errors.InvalidDirsError`, a bare string included, because iterating a string would split it into characters.
-``PageRoot`` pairs a page tree with the label a report names it by.
+``PageRoot`` pairs a page tree with the label a report names it by and the key its co-located static files are named by.
 ``prefix`` is the route a ``pages()`` include places the tree under, in Django :func:`~django.urls.path` syntax, and ``None`` for a tree ``next.urls`` routes, and ``namespace`` is the URL namespace of its names, ``next`` unless a ``pages()`` include names another.
 ``route_trail(trail)`` returns the trail a page at the tree-relative ``trail`` routes by, prefix included.
 It lives here rather than beside the router because the system checks build one too, and it is re-exported as ``next.urls.PageRoot`` for the router contract that produces it.

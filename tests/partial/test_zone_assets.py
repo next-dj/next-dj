@@ -32,7 +32,11 @@ class TestZoneGetUrlAssets:
     def test_url_form_asset_travels(self) -> None:
         response = NextClient().get_zones("/zoned/", "alpha")
         assert envelope_of(response).assets == [
-            {"kind": "css", "url": "/static/next/zoned.css", "load": "link"}
+            {
+                "kind": "css",
+                "url": "/static/next/tests/site_pages/zoned.css",
+                "load": "link",
+            }
         ]
 
     def test_url_form_asset_carries_no_inline_key(self) -> None:
@@ -87,7 +91,7 @@ class TestZoneGetMixedManifest:
         } in envelope.assets
         assert {
             "kind": "css",
-            "url": "/static/next/zoned_inline.css",
+            "url": "/static/next/tests/site_pages/zoned_inline.css",
             "load": "link",
         } in envelope.assets
         context_ops = [op for op in envelope.ops if op["op"] == "context"]

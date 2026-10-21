@@ -332,16 +332,26 @@ BUILD_MANIFEST_BACKEND = f"{__name__}.BuildManifestBackend"
 MANIFEST_BACKENDS = {"STATIC_BACKENDS": [{"BACKEND": BUILD_MANIFEST_BACKEND}]}
 
 
+TEST_ROOT_KEY = "site"
+
+
 class StaticAssetProvider:
     """The narrow ``BackendProvider`` the asset discovery layer reads.
 
     Holds a backend and resolved page roots, so discovery needs no static manager.
+    A bare root is keyed ``TEST_ROOT_KEY``, a pair carries its own key.
     """
 
-    def __init__(self, backend: StaticBackend, roots: tuple[Path, ...] = ()) -> None:
-        """Keep the backend and the resolved page trees to report."""
+    def __init__(
+        self,
+        backend: StaticBackend,
+        roots: tuple[Path | tuple[Path, str | None], ...] = (),
+    ) -> None:
+        """Keep the backend and the resolved page trees with their keys."""
         self._backend = backend
-        self._roots = roots
+        self._roots: tuple[tuple[Path, str | None], ...] = tuple(
+            root if isinstance(root, tuple) else (root, TEST_ROOT_KEY) for root in roots
+        )
 
     @property
     def default_backend(self) -> StaticBackend:
@@ -352,8 +362,8 @@ class StaticAssetProvider:
         """Drop the backend's URL memo the way a static manager does."""
         self._backend.forget_urls()
 
-    def page_roots(self) -> tuple[Path, ...]:
-        """Return the resolved page trees discovery walks within."""
+    def page_roots(self) -> tuple[tuple[Path, str | None], ...]:
+        """Return the resolved page trees and their keys discovery walks within."""
         return self._roots
 
 

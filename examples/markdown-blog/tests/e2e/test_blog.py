@@ -97,3 +97,44 @@ def test_the_breadcrumb_trail_leads_back_to_the_index(
 
     expect(page).to_have_url(f"{base_url}/")
     expect(page.get_by_role("link", name="Hello, world")).to_be_visible()
+
+
+def test_the_print_view_drops_the_site_chrome_and_keeps_the_post(
+    page: Page, base_url: str
+) -> None:
+    page.goto(f"{base_url}/posts/welcome/print/")
+    wait_for_runtime(page)
+
+    expect(page).to_have_title("Welcome to the blog · next.dj blog")
+    expect(page.get_by_role("heading", level=1)).to_have_text("Welcome to the blog")
+    expect(page.get_by_role("heading", name="Why Markdown?")).to_be_visible()
+    expect(page.locator(SHARE)).to_have_count(0)
+    expect(page.locator(TRAIL)).to_have_count(0)
+    expect(page.get_by_text("next.dj blog", exact=True)).to_have_count(0)
+    expect(page.get_by_role("link", name="About")).to_have_count(0)
+
+
+def test_the_print_stylesheet_hides_the_footer_only_when_printing(
+    page: Page, base_url: str
+) -> None:
+    page.goto(f"{base_url}/posts/welcome/print/")
+    footer = page.locator(".print-footer")
+
+    expect(footer).to_be_visible()
+    page.emulate_media(media="print")
+    expect(footer).to_be_hidden()
+    page.emulate_media(media="screen")
+    expect(footer).to_be_visible()
+
+
+def test_the_post_page_opens_its_print_view_and_the_view_links_back(
+    page: Page, base_url: str
+) -> None:
+    open_post(page, base_url, "welcome")
+
+    page.get_by_role("link", name="Print view").click()
+
+    expect(page).to_have_url(f"{base_url}/posts/welcome/print/")
+    page.get_by_role("link", name="Back to the post").click()
+    expect(page).to_have_url(f"{base_url}/posts/welcome/")
+    expect(page.locator(SHARE)).to_have_count(1)

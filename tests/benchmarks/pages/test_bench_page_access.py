@@ -107,14 +107,12 @@ class TestBenchPageAccess:
         with routed(root):
             match = resolve(_URL)
             assert match.func(request, **match.kwargs).status_code == 200
-            benchmark.pedantic(
-                match.func,
-                args=(request,),
-                kwargs=match.kwargs,
-                setup=forget_page_access,
-                rounds=200,
-                iterations=1,
-            )
+
+            def forget() -> tuple[tuple[object, ...], dict[str, object]]:
+                forget_page_access()
+                return (request,), match.kwargs
+
+            benchmark.pedantic(match.func, setup=forget, rounds=200, iterations=1)
 
     @pytest.mark.benchmark(group="pages.page_access")
     def test_declared_chain_refuses_a_missing_permission(

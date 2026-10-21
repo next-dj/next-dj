@@ -1,0 +1,26 @@
+{% layout root %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  {% metadata %}
+  {% collect_styles %}
+</head>
+<body class="print-sheet">
+  <header class="print-header">
+    <h1>{{ article.title }}</h1>
+    <p>
+      <time datetime="{{ article.published|date:'Y-m-d' }}">{{ article.published|date:"j M Y" }}</time>
+      · {{ article.author }} · ~ {{ article.reading_minutes }} min read
+    </p>
+  </header>
+  <main class="print-body">
+    {% template %}
+  </main>
+  <footer class="print-footer">
+    <a href="/posts/{{ article.slug }}/">Back to the post</a>
+    <button type="button" onclick="window.print()">Print</button>
+  </footer>
+  {% collect_scripts %}
+</body>
+</html>

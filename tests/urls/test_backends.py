@@ -16,6 +16,7 @@ from next.utils import forget_resolved_trees
 from tests.support import (
     NAMESPACED_URLCONF,
     EntryRouter,
+    app_snapshot,
     file_router,
     file_router_config_entry,
     importable_dir,
@@ -252,7 +253,7 @@ class TestFileRouterBackend:
             held = list(router._extra_root_paths)
 
         assert held == [expected]
-        assert seen == [tmp_path / "site"]
+        assert seen.count(tmp_path / "site") == 1
 
     def test_get_root_pages_paths_fallback_when_app_dirs_false(
         self, mock_settings, tmp_path
@@ -499,15 +500,32 @@ class TestPageRoots:
         router = file_router(app_dirs=True, dirs=[root_tree])
 
         with (
-            patch.object(router, "_get_installed_apps", return_value=["shop"]),
+            patch(
+                "next.urls.backends._installed_app_directories",
+                return_value=app_snapshot({"shop": tmp_path}),
+            ),
             patch.object(router, "_get_app_pages_path", return_value=app_tree),
         ):
             roots = router.page_roots()
 
         assert roots == [
-            PageRoot(path=app_tree, label="App 'shop'"),
+            PageRoot(path=app_tree, label="App 'shop'", key="shop/pages"),
             PageRoot(path=root_tree.resolve(), label="Root"),
         ]
+
+    def test_a_custom_app_label_keys_the_app_tree(self, tmp_path) -> None:
+        """The key follows `AppConfig.label`, the name a `pages()` mount uses too."""
+        app_tree = tmp_path / "pages"
+        app_tree.mkdir()
+        router = file_router(app_dirs=True)
+        snapshot = app_snapshot({"acme.blog": tmp_path}, {"acme.blog": "news"})
+
+        with patch(
+            "next.urls.backends._installed_app_directories", return_value=snapshot
+        ):
+            roots = router.page_roots()
+
+        assert [root.key for root in roots] == ["news/pages"]
 
     def test_app_without_pages_directory_is_left_out(self, tmp_path) -> None:
         """An app with no pages tree contributes no root."""
@@ -516,14 +534,15 @@ class TestPageRoots:
         router = file_router(app_dirs=True)
 
         with (
-            patch.object(
-                router, "_get_installed_apps", return_value=["shop", "bare_app"]
+            patch(
+                "next.urls.backends._installed_app_directories",
+                return_value=app_snapshot({"shop": tmp_path, "bare_app": tmp_path}),
             ),
             patch.object(router, "_get_app_pages_path", side_effect=[app_tree, None]),
         ):
             roots = router.page_roots()
 
-        assert roots == [PageRoot(path=app_tree, label="App 'shop'")]
+        assert roots == [PageRoot(path=app_tree, label="App 'shop'", key="shop/pages")]
 
     def test_app_trees_are_skipped_without_app_dirs(self, tmp_path) -> None:
         """A root-only backend never reports app trees."""
@@ -724,7 +743,7 @@ class TestAppDirectoryResolution:
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "nsapp"]
             roots = router.page_roots()
 
-        assert roots == [PageRoot(path=pages, label="App 'nsapp'")]
+        assert roots == [PageRoot(path=pages, label="App 'nsapp'", key="nsapp/pages")]
 
     def test_app_config_path_attribute_wins(self, tmp_path, settings) -> None:
         """An `AppConfig` that declares `path` points the scan at that directory."""
@@ -748,7 +767,9 @@ class TestAppDirectoryResolution:
             ]
             roots = router.page_roots()
 
-        assert roots == [PageRoot(path=pages, label="App 'movedapp'")]
+        assert roots == [
+            PageRoot(path=pages, label="App 'movedapp'", key="movedapp/pages")
+        ]
 
     def test_a_blank_registry_reports_no_roots(self, tmp_path, settings) -> None:
         """The registry is the only source of app paths, so a blank one has none."""
@@ -761,7 +782,7 @@ class TestAppDirectoryResolution:
             with patch("next.urls.backends.apps.get_app_configs", return_value=[]):
                 blank = file_router(app_dirs=True).page_roots()
 
-        assert healthy == [PageRoot(path=pages, label="App 'shop'")]
+        assert healthy == [PageRoot(path=pages, label="App 'shop'", key="shop/pages")]
         assert blank == []
 
     def test_a_live_backend_sees_an_installed_apps_change(
@@ -778,7 +799,9 @@ class TestAppDirectoryResolution:
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "latecomer"]
             after = router.page_roots()
 
-        assert after == [PageRoot(path=pages, label="App 'latecomer'")]
+        assert after == [
+            PageRoot(path=pages, label="App 'latecomer'", key="latecomer/pages")
+        ]
 
     def test_a_registry_that_is_not_ready_reports_no_roots(
         self, tmp_path, caplog
@@ -1062,3 +1085,104 @@ class TestPageRootsMemo:
             router.page_roots()
 
         probe.assert_called_once_with()
+
+
+class TestPageRootKeys:
+    """Each tree reports the key its co-located static names are prefixed by."""
+
+    def _keys(self, router: FileRouterBackend) -> list[str | None]:
+        return [root.key for root in router.page_roots()]
+
+    def test_an_app_tree_is_keyed_by_the_label_not_the_dotted_name(
+        self, tmp_path
+    ) -> None:
+        write_app(tmp_path, "corp.billing", label="ledger")
+
+        with installed_apps(tmp_path, "corp.billing"):
+            keys = self._keys(file_router(app_dirs=True))
+
+        assert keys == ["ledger/pages"]
+
+    def test_two_pages_dirs_of_one_app_get_distinct_keys(self, tmp_path) -> None:
+        write_app(tmp_path, "shop", {"pages": ("",), "staff_pages": ("",)})
+
+        with installed_apps(tmp_path, "shop"):
+            plain = self._keys(file_router(app_dirs=True))
+            staff = self._keys(file_router(app_dirs=True, pages_dir="staff_pages"))
+
+        assert plain == ["shop/pages"]
+        assert staff == ["shop/staff_pages"]
+
+    def test_a_dirs_root_under_base_dir_is_keyed_by_its_relative_path(
+        self, tmp_path, settings
+    ) -> None:
+        tree = tmp_path / "site" / "pages"
+        tree.mkdir(parents=True)
+        settings.BASE_DIR = tmp_path
+
+        keys = self._keys(file_router(app_dirs=False, dirs=[tree]))
+
+        assert keys == ["site/pages"]
+
+    def test_a_dirs_root_equal_to_base_dir_is_keyed_by_its_folder_name(
+        self, tmp_path, settings
+    ) -> None:
+        tree = tmp_path / "project"
+        tree.mkdir()
+        settings.BASE_DIR = tree
+
+        keys = self._keys(file_router(app_dirs=False, dirs=[tree]))
+
+        assert keys == ["project"]
+
+    def test_a_dirs_root_outside_base_dir_has_no_key(self, tmp_path, settings) -> None:
+        base = tmp_path / "project"
+        base.mkdir()
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+        settings.BASE_DIR = base
+
+        keys = self._keys(file_router(app_dirs=False, dirs=[outside]))
+
+        assert keys == [None]
+
+    def test_an_unset_base_dir_leaves_every_dirs_root_without_a_key(
+        self, tmp_path, settings
+    ) -> None:
+        tree = tmp_path / "site"
+        tree.mkdir()
+        del settings.BASE_DIR
+
+        keys = self._keys(file_router(app_dirs=False, dirs=[tree]))
+
+        assert keys == [None]
+
+    @pytest.mark.parametrize("through_link", [False, True], ids=["real", "link"])
+    def test_a_symlinked_base_dir_still_keys_the_root(
+        self, tmp_path, settings, *, through_link: bool
+    ) -> None:
+        real = tmp_path / "real"
+        (real / "site").mkdir(parents=True)
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        settings.BASE_DIR = link
+        tree = (link if through_link else real) / "site"
+
+        keys = self._keys(file_router(app_dirs=False, dirs=[tree]))
+
+        assert keys == ["site"]
+
+    def test_an_installed_app_outside_base_dir_still_has_an_app_key(
+        self, tmp_path, settings
+    ) -> None:
+        base = tmp_path / "project"
+        base.mkdir()
+        apps = tmp_path / "site-packages"
+        apps.mkdir()
+        write_app(apps, "vendored")
+        settings.BASE_DIR = base
+
+        with installed_apps(apps, "vendored"):
+            keys = self._keys(file_router(app_dirs=True))
+
+        assert keys == ["vendored/pages"]

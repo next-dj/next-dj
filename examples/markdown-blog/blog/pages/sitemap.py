@@ -6,6 +6,7 @@ from next.seo import SitemapEntry, sitemap
 
 
 changefreq = "weekly"
+exclude = ["posts/*/print"]
 
 
 @sitemap.items("posts/[slug]")

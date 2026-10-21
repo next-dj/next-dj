@@ -64,9 +64,9 @@ def no_script_page(browser: Browser) -> Iterator[Page]:
     context.close()
 
 
-def open_poll(page: Page, base_url: str, poll: Poll) -> None:
+def open_poll(page: Page, base_url: str, poll: Poll, suffix: str = "") -> None:
     with page.expect_response(lambda response: STREAM in response.url):
-        page.goto(f"{base_url}/polls/{poll.pk}/")
+        page.goto(f"{base_url}/polls/{poll.pk}/{suffix}")
     wait_for_runtime(page)
     expect(page.locator(VUE_ROW)).to_have_count(poll.choices.count())
 
@@ -228,3 +228,58 @@ def test_without_scripting_the_server_still_counts_the_vote(
     assert bar_of(page, tabs).evaluate("element => element.style.width") == "0%"
     tabs.refresh_from_db()
     assert tabs.votes == 1
+
+
+def test_the_embed_widget_draws_its_own_document_shell(
+    page: Page, base_url: str, tabs_or_spaces: Poll
+) -> None:
+    open_poll(page, base_url, tabs_or_spaces, "embed/")
+
+    expect(page).to_have_title("Tabs or spaces? (embed) · next.dj polls")
+    expect(page.get_by_role("heading", name="Tabs or spaces?")).to_have_count(1)
+    expect(page.get_by_text("next.dj Live polls")).to_have_count(0)
+    expect(page.get_by_text("All polls")).to_have_count(0)
+    expect(page.get_by_text("open polls")).to_have_count(0)
+    expect(page.get_by_role("link", name="Open the full poll")).to_have_attribute(
+        "href", f"/polls/{tabs_or_spaces.pk}/"
+    )
+
+
+def test_a_vote_on_the_poll_page_reaches_the_embed_widget_live(
+    page: Page, base_url: str, watcher: Page, tabs_or_spaces: Poll
+) -> None:
+    tabs = tabs_or_spaces.choices.get(text="Tabs")
+    open_poll(page, base_url, tabs_or_spaces)
+    open_poll(watcher, base_url, tabs_or_spaces, "embed/")
+    expect(votes_of(watcher, tabs)).to_have_text("0")
+
+    vote_for(page, tabs)
+
+    expect(votes_of(watcher, tabs)).to_have_text("1")
+    expect(watcher.locator(TOTAL)).to_have_text("1")
+    expect(row_of(watcher, tabs)).to_have_attribute("data-just-updated", "true")
+
+
+def test_voting_inside_the_embed_widget_repaints_its_zone(
+    page: Page, base_url: str, tabs_or_spaces: Poll
+) -> None:
+    tabs = tabs_or_spaces.choices.get(text="Tabs")
+    open_poll(page, base_url, tabs_or_spaces, "embed/")
+    mark_document(page)
+
+    vote_for(page, tabs)
+
+    expect(votes_of(page, tabs)).to_have_text("1")
+    expect(page.locator(TOTAL)).to_have_text("1")
+    assert_same_document(page)
+
+
+def test_the_poll_page_links_to_its_embed_widget(
+    page: Page, base_url: str, tabs_or_spaces: Poll
+) -> None:
+    open_poll(page, base_url, tabs_or_spaces)
+
+    page.get_by_role("link", name="Embed").click()
+
+    expect(page).to_have_url(f"{base_url}/polls/{tabs_or_spaces.pk}/embed/")
+    expect(page.get_by_text("next.dj Live polls")).to_have_count(0)

@@ -790,7 +790,7 @@ class TestBuilderZoneManifest:
         } in wire
         assert {
             "kind": "css",
-            "url": "/static/next/zoned_inline.css",
+            "url": "/static/next/tests/site_pages/zoned_inline.css",
             "load": "link",
         } in wire
 

@@ -163,7 +163,7 @@ class TestRouting:
     ) -> None:
         """catalog/layout.css is not injected on the home page."""
         home_body = next_client.get("/").content.decode()
-        assert "catalog/layout" not in home_body
+        assert "catalog/pages/catalog/layout" not in home_body
 
 
 class TestFilters:

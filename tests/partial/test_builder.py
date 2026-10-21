@@ -37,9 +37,11 @@ class TestMorphZone:
 
     def test_zone_asset_manifest_travels_in_the_envelope(self) -> None:
         envelope = Patches(partial_request()).morph(zone="alpha").envelope()
-        assert {"kind": "css", "url": "/static/next/zoned.css", "load": "link"} in [
-            asset.as_dict() for asset in envelope.assets
-        ]
+        assert {
+            "kind": "css",
+            "url": "/static/next/tests/site_pages/zoned.css",
+            "load": "link",
+        } in [asset.as_dict() for asset in envelope.assets]
 
     def test_overrides_reach_the_zone_body(self) -> None:
         envelope = (

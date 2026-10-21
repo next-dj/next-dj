@@ -170,6 +170,7 @@ Drop a second layout inside ``notes/pages/notes/`` to wrap only the detail pages
 Reload ``/notes/1/`` and you should see both layouts at once.
 The root layout wraps the inner layout which wraps the detail template.
 Composition works by folding each descendant body into the parent ``{% template %}`` placeholder, so adding ancestor layouts never requires changes to the inner templates.
+A layout that opens with ``{% layout root %}`` ends the chain instead, see :doc:`/content/topics/layouts`.
 
 Use counts across pages
 ~~~~~~~~~~~~~~~~~~~~~~~

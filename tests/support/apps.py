@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import uuid
 from contextlib import ExitStack, contextmanager
-from typing import TYPE_CHECKING
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
 
 from django.apps import AppConfig, apps as django_apps
 from django.conf import settings
 from django.test import override_settings
 
+from next.urls.backends import _InstalledApps
 from tests.support.helpers import file_router_config_entry
 from tests.support.pages import write_page
 from tests.support.patches import importable_dir
@@ -60,9 +62,15 @@ _URLCONF_HEAD = (
 
 
 def write_app(
-    root: Path, name: str, trees: Mapping[str, Iterable[str]] | None = None
+    root: Path,
+    name: str,
+    trees: Mapping[str, Iterable[str]] | None = None,
+    label: str | None = None,
 ) -> Path:
-    """Write an importable app, `trees` mapping each subdirectory to its trails."""
+    """Write an importable app, `trees` mapping each subdirectory to its trails.
+
+    A `label` replaces the one Django derives from the last segment of the name.
+    """
     app = root
     for part in name.split("."):
         app /= part
@@ -71,7 +79,7 @@ def write_app(
     (app / "apps.py").write_text(
         "from django.apps import AppConfig\n\n\n"
         "class Config(AppConfig):\n"
-        f"    name = {name!r}\n"
+        f"    name = {name!r}\n" + ("" if label is None else f"    label = {label!r}\n")
     )
     for subdir, trails in ({"pages": ("",)} if trees is None else trees).items():
         (app / subdir).mkdir(parents=True, exist_ok=True)
@@ -85,6 +93,26 @@ def write_urlconf(root: Path, name: str, *entries: str) -> str:
     body = "".join(f"    {entry},\n" for entry in entries)
     (root / f"{name}.py").write_text(f"{_URLCONF_HEAD}{body}]\n")
     return name
+
+
+def app_snapshot(
+    directories: Mapping[str, Path], labels: Mapping[str, str] | None = None
+) -> _InstalledApps:
+    """Return a registry snapshot of `directories`, an app unlabelled named by its tail."""
+    given = labels or {}
+    return _InstalledApps(
+        tuple(
+            cast(
+                "AppConfig",
+                SimpleNamespace(
+                    name=name,
+                    path=str(path),
+                    label=given.get(name, name.rpartition(".")[2]),
+                ),
+            )
+            for name, path in directories.items()
+        )
+    )
 
 
 @contextmanager

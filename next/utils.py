@@ -145,6 +145,14 @@ def stat_mtime_ns(path: Path) -> int | None:
         return None
 
 
+def is_within(path: Path, root: Path) -> bool:
+    """Return whether the resolved `path` is `root` or lies under it, by parts.
+
+    It is far cheaper than `Path.is_relative_to` on a hot path.
+    """
+    return path.parts[: len(root.parts)] == root.parts
+
+
 class _SourceLoader(importlib.machinery.SourceFileLoader):
     """Validate the cached bytecode of a source on its nanosecond mtime.
 
@@ -215,6 +223,7 @@ class PageRoot:
     """A page tree a router routes, with the label a report names it by.
 
     A `pages()` tree carries its include route, in Django's spelling and as a trail.
+    The key names the tree in co-located static names, and none serves no assets.
     """
 
     path: Path
@@ -222,6 +231,7 @@ class PageRoot:
     prefix: str | None = None
     namespace: str = "next"
     trail: str | None = None
+    key: str | None = None
 
     def route_trail(self, trail: str = "") -> str:
         """Return the trail of the route a page at the tree-relative `trail` answers."""

@@ -9,6 +9,7 @@ A polling app where the results on every open tab refresh the moment someone vot
 | `/` | Redirects to `/polls/` so the bare site root is never empty. |
 | `/polls/` | Server-rendered list of polls. Each card shows choice count and total votes. |
 | `/polls/<id>/` | Vote page with the live chart, a button-per-choice form, and a `data-next-sse` element. |
+| `/polls/<id>/embed/` | The same live chart in a widget with its own bare document shell, linked as "Embed" from the vote page. |
 | `/polls/<id>/stream/` | The patch event stream. Each poll change emits a `next-patches` event carrying a `refresh` of the `poll-results` zone. |
 | `POST vote_form` | Atomically increments a choice via `F("votes") + 1`, then morphs the `poll-results` zone and pushes the fresh counts to `window.Next.context.live_results`. A signal receiver publishes the change to the broker with the request id. |
 
@@ -110,6 +111,12 @@ polls/pages/
     │   └── component.css
     └── [int:id]/
         ├── layout.djx                <- nested layout, poll question header, back link
+        ├── embed/                    <- root layout with its own shell, widget page
+        │   ├── layout.djx
+        │   ├── layout.css
+        │   ├── page.py
+        │   ├── page.vue              <- re-imports the parent mount entry
+        │   └── template.djx
         ├── page.py                   <- @context poll inherit, live_results serialize
         ├── page.vue                  <- mount entry, registers Next.partial.onMount
         ├── page.test.js              <- Vitest cover for the mount entry
@@ -269,6 +276,12 @@ def poll_meta(poll: Poll) -> MetadataDict:
 ```
 
 The parameter is named after the context key, so the callable receives the row that context resolved through `DPoll[Poll]` and the tab reads `Tabs or spaces? · next.dj polls`. The index dict still reaches the vote page as a parent, and the callable's title overrides it. The bare root is a redirect and the stream endpoint hands its response back verbatim from `render()`, so neither renders a head. Every poll is public, so no page carries a robots directive. One parametrized integration test pins both titles.
+
+### 11. An embeddable widget with its own document
+
+[`embed/layout.djx`](polls/pages/polls/[int:id]/embed/layout.djx) opens with `{% layout root %}`. That marker makes it the root of its chain, so neither `[int:id]/layout.djx`, `polls/layout.djx` nor the `studio/` envelope wraps the page. The layout writes its own `<html>`, pulls `page_head` for `{% metadata %}` and `{% collect_styles %}`, and ends with `{% collect_scripts %}`. Its `layout.css` is served and the studio chain adds nothing.
+
+What a cut layout used to provide is still there where it comes from `page.py`. The `poll` context is `inherit_context`, so the shell prints the question. The page declares its own `@page.metadata` for the tab title and a `live_results` provider, because the vote handler patches that key on the origin page and the parent's provider does not reach a page of its own. The template repeats the `poll-results` zone and the `data-next-sse` element, and `page.vue` imports the parent mount entry, so a vote on the poll page repaints the widget over the same stream. A cross-site `<iframe>` also needs the `X-Frame-Options` header lifted, which this example leaves at Django's default.
 
 ## Gotchas
 

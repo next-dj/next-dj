@@ -353,9 +353,10 @@ class TestBenchDispatchUnderTreeAccess:
         request = _tree_post(f"/guarded/{STAND_IN_PK}/")
         request.user = QuietHolder("auth.change_user")
 
-        def forget() -> None:
+        def forget() -> tuple[tuple[object, ...], dict[str, object]]:
             forget_page_access()
             _trees.clear()
+            return (backend, request, "bench_action", meta), {}
 
         with routed(root):
             response = FormActionDispatch.dispatch(
@@ -363,9 +364,5 @@ class TestBenchDispatchUnderTreeAccess:
             )
             assert isinstance(response, HttpResponseRedirect)
             benchmark.pedantic(
-                FormActionDispatch.dispatch,
-                args=(backend, request, "bench_action", meta),
-                setup=forget,
-                rounds=200,
-                iterations=1,
+                FormActionDispatch.dispatch, setup=forget, rounds=200, iterations=1
             )

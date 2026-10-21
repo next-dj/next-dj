@@ -70,6 +70,10 @@ compat = [
     "django-allauth>=65.18",
     "rules>=3.5",
 ]
+codspeed = [
+    "pytest-codspeed==5.0.3",
+    "pytest-test-groups==1.2.1",
+]
 e2e = [
     "pytest-playwright==0.9.0",
     "playwright==1.63.0",
@@ -159,6 +163,7 @@ addopts = [
     "--cov-fail-under=100",
     "--ignore=tests/benchmarks",
     "-p", "no:benchmark",
+    "-p", "no:codspeed",
 ]
 
 [tool.coverage.run]

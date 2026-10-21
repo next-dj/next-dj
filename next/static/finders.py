@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import posixpath
 from datetime import UTC, datetime
@@ -18,40 +19,90 @@ from django.core.files.storage import Storage
 from next.components import component_watch_roots, get_component_paths_for_watch
 from next.pages.watch import (
     get_layout_djx_paths_for_watch,
-    get_pages_directories_for_watch,
+    get_page_root_keys_for_watch,
     get_template_djx_paths_for_watch,
 )
 from next.utils import stat_mtime_ns, template_edits_watched
 
 from .assets import StaticNamespace, default_kinds
-from .discovery import PathResolver, default_stems, find_role_files
+from .discovery import PageRootKeys, PathResolver, default_stems, find_role_files
 from .runtime import CHUNK_STATIC_PATHS, NEXT_JS_STATIC_PATH
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
-    from .discovery import StemRegistry
+
+logger = logging.getLogger(__name__)
 
 
-def _collect_stem_static_files(
-    out: dict[str, Path],
-    directory: Path,
-    logical_name: str,
-    role: str,
-    stems: StemRegistry,
-) -> None:
-    """Add the `{stem}.<kind>` files of a role directory to the output map.
+class PageTreeScan(NamedTuple):
+    """The co-located page-tree assets by logical path, and the names that collided.
+
+    Each collision holds the logical path, the file kept and the file dropped.
+    """
+
+    mapping: dict[str, Path]
+    collisions: tuple[tuple[str, Path, Path], ...]
+
+
+def _add_stem_static_files(
+    out: dict[str, Path], directory: Path, logical_name: str, role: str
+) -> list[tuple[str, Path, Path]]:
+    """Add the `{stem}.<kind>` files of a role directory, the first name winning.
 
     The probe is the one request-time discovery runs, so a logical name means one file.
     """
+    dropped: list[tuple[str, Path, Path]] = []
     for found in find_role_files(
-        directory, logical_name=logical_name, role=role, stems=stems
+        directory, logical_name=logical_name, role=role, stems=default_stems
     ):
         suffix = default_kinds.extension(found.kind)
-        out.setdefault(
-            f"{StaticNamespace.NEXT}/{found.logical_name}{suffix}", found.source_path
-        )
+        logical_path = f"{StaticNamespace.NEXT}/{found.logical_name}{suffix}"
+        kept = out.setdefault(logical_path, found.source_path)
+        if kept != found.source_path:
+            dropped.append((logical_path, kept, found.source_path))
+    return dropped
+
+
+def scan_page_tree_assets() -> PageTreeScan:
+    """Map the co-located layout and template assets of every page tree.
+
+    Paths are visited sorted, so a shared name always goes to the same file.
+    """
+    out: dict[str, Path] = {}
+    collisions: list[tuple[str, Path, Path]] = []
+    # Resolved already, because that is what the watch layer promises.
+    page_roots = tuple(get_page_root_keys_for_watch())
+    resolver = PathResolver(lambda: page_roots)
+    roles = (
+        (
+            "template",
+            get_template_djx_paths_for_watch,
+            resolver.logical_name_for_template,
+        ),
+        ("layout", get_layout_djx_paths_for_watch, resolver.logical_name_for_layout),
+    )
+    for role, paths_for_watch, name_for in roles:
+        for path in sorted(paths_for_watch()):
+            page_root = resolver.find_page_root(path)
+            if page_root is None:
+                continue
+            directory = path.parent.resolve()
+            logical_name = name_for(directory, page_root)
+            if logical_name is None:
+                continue
+            for logical_path, kept, lost in _add_stem_static_files(
+                out, directory, logical_name, role
+            ):
+                logger.warning(
+                    "%s and %s share the static name %s, so only the first is served.",
+                    kept,
+                    lost,
+                    logical_path,
+                )
+                collisions.append((logical_path, kept, lost))
+    return PageTreeScan(out, tuple(collisions))
 
 
 def discover_colocated_static_assets() -> dict[str, Path]:
@@ -59,30 +110,7 @@ def discover_colocated_static_assets() -> dict[str, Path]:
 
     Every page tree and every component is scanned.
     """
-    out: dict[str, Path] = {}
-    # Resolved already, because that is what the watch layer promises.
-    page_roots = tuple(get_pages_directories_for_watch())
-    resolver = PathResolver(lambda: page_roots)
-
-    for template_path in get_template_djx_paths_for_watch():
-        page_root = resolver.find_page_root(template_path)
-        if page_root is None:
-            continue
-        template_dir = template_path.parent.resolve()
-        logical_name = resolver.logical_name_for_template(template_dir, page_root)
-        _collect_stem_static_files(
-            out, template_dir, logical_name, "template", default_stems
-        )
-
-    for layout_path in get_layout_djx_paths_for_watch():
-        page_root = resolver.find_page_root(layout_path)
-        if page_root is None:  # pragma: no cover
-            continue
-        layout_dir = layout_path.parent.resolve()
-        logical_name = resolver.logical_name_for_layout(layout_dir, page_root)
-        _collect_stem_static_files(
-            out, layout_dir, logical_name, "layout", default_stems
-        )
+    out = scan_page_tree_assets().mapping
 
     seen_component_dirs: set[Path] = set()
     for component_source in get_component_paths_for_watch():
@@ -91,9 +119,7 @@ def discover_colocated_static_assets() -> dict[str, Path]:
             continue
         seen_component_dirs.add(component_dir)
         logical_name = f"components/{component_dir.name}"
-        _collect_stem_static_files(
-            out, component_dir, logical_name, "component", default_stems
-        )
+        _add_stem_static_files(out, component_dir, logical_name, "component")
     return out
 
 
@@ -190,7 +216,7 @@ class _ScanRoots(NamedTuple):
     A reconfigured tree changes no recorded mtime, so the roots are stored and compared.
     """
 
-    pages: tuple[Path, ...]
+    pages: PageRootKeys
     components: tuple[Path, ...]
 
 
@@ -233,7 +259,7 @@ def _registry_generation() -> tuple[int, int, int]:
 def _scan_roots() -> _ScanRoots:
     """Return the page trees and the component trees a scan reads."""
     return _ScanRoots(
-        tuple(get_pages_directories_for_watch()), tuple(component_watch_roots())
+        tuple(get_page_root_keys_for_watch()), tuple(component_watch_roots())
     )
 
 
@@ -273,7 +299,7 @@ def _scan_directories(roots: _ScanRoots) -> tuple[tuple[Path, int | None], ...]:
     """
     out: dict[Path, int | None] = {}
     seen: set[tuple[int, int]] = set()
-    stack = [*roots.pages, *roots.components]
+    stack = [*(root for root, _key in roots.pages), *roots.components]
     while stack:
         directory = stack.pop()
         if directory in out:

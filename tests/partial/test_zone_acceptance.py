@@ -33,14 +33,14 @@ class TestZoneGetAssetsManifest:
     def test_collected_zone_asset_url_in_manifest(self) -> None:
         response = NextClient().get_zones("/zoned/", "alpha")
         urls = [asset["url"] for asset in envelope_of(response).assets]
-        assert "/static/next/zoned.css" in urls
+        assert "/static/next/tests/site_pages/zoned.css" in urls
 
     def test_asset_entry_declares_kind(self) -> None:
         response = NextClient().get_zones("/zoned/", "alpha")
         css = next(
             asset
             for asset in envelope_of(response).assets
-            if asset["url"] == "/static/next/zoned.css"
+            if asset["url"] == "/static/next/tests/site_pages/zoned.css"
         )
         assert css["kind"] == "css"
 
@@ -55,8 +55,8 @@ class TestZoneAssetsFollowTheBackendRewrite:
         with override_next_settings(**PREFIXED_BACKENDS):
             response = NextClient().get_zones("/zoned/", "alpha")
         urls = [asset["url"] for asset in envelope_of(response).assets]
-        assert "/pfx/static/next/zoned.css" in urls
-        assert "/static/next/zoned.css" not in urls
+        assert "/pfx/static/next/tests/site_pages/zoned.css" in urls
+        assert "/static/next/tests/site_pages/zoned.css" not in urls
 
 
 class TestEarlyRenderResponseIsVerbatim:

@@ -81,7 +81,7 @@ Pages
 ~~~~~
 
 The package splits by subject, one submodule per group of codes.
-``access`` covers the access a ``page.py`` declares, a ``public()`` beside a requirement of the same file, a declaration made from any other module, and the declaring ``page.py`` files without a page below them, ``contexts`` covers the ``@context`` callables of a routed ``page.py``, ``layouts`` the page-body placeholder of a ``layout.djx``, ``loaders`` the ``TEMPLATE_LOADERS`` entries, ``metadata`` the ``METADATA`` settings scope and the metadata of every routed ``page.py``, split further under `Metadata and responses`_ below, ``modules`` what a ``page.py`` declares, ``processors`` the context processors a render runs, ``structure`` the shape of a tree on disk, and ``zones`` a ``@context`` reading a key another callable bound to a zone.
+``access`` covers the access a ``page.py`` declares, a ``public()`` beside a requirement of the same file, a declaration made from any other module, and the declaring ``page.py`` files without a page below them, ``contexts`` covers the ``@context`` callables of a routed ``page.py``, ``layouts`` the page-body placeholder and the root marker of a ``layout.djx``, ``loaders`` the ``TEMPLATE_LOADERS`` entries, ``metadata`` the ``METADATA`` settings scope and the metadata of every routed ``page.py``, split further under `Metadata and responses`_ below, ``modules`` what a ``page.py`` declares, ``processors`` the context processors a render runs, ``structure`` the shape of a tree on disk, and ``zones`` a ``@context`` reading a key another callable bound to a zone.
 ``composed`` carries no check and holds the one walk of the composed page templates that ``next.W085`` and the partial checks share, a ``RunMemo`` that ``forget_run_memos`` drops.
 
 .. automodule:: next.pages.checks
@@ -129,7 +129,7 @@ Scripts and consent
 
 ``next.scripts.checks`` reads every ``scripts.py``, the consent categories, and the composed pages that render ``{% #consented %}``, and ``next.consent.checks`` the rest of the ``CONSENT`` scope.
 ``next.static.checks`` owns ``next.W117`` for the tag templates the nonce reaches and ``next.W120`` for the shared pages a nonce makes private, since the nonce is a static option.
-It also owns ``next.E130`` for the injection policy, ``next.E139`` for a tag template ``.format`` cannot fill, and ``next.W090`` for a runtime bundle the storage cannot serve.
+It also owns ``next.E130`` for the injection policy, ``next.E139`` for a tag template ``.format`` cannot fill, ``next.E167`` for two co-located files that share one static name, ``next.W090`` for a runtime bundle the storage cannot serve, ``next.W132`` for a page tree that has no static key, and ``next.W135`` for the co-located assets of a layout above the page tree root.
 
 .. automodule:: next.scripts.checks
    :members:
@@ -816,6 +816,16 @@ Errors
        A directory with such an action passes, since the declaration guards that action.
        The hint asks for ``inherit=True`` to guard the pages below, or for a ``render`` function, a ``template`` attribute, or a ``template.djx`` to make the file a page.
      - ``next.forms.checks.actions``
+   * - ``next.E167``
+     - Two co-located ``layout`` or ``template`` assets of the page trees get the same static name, so only the first, in sorted path order, reaches ``collectstatic`` and the page.
+       Two trees that share a key or two stems of one role in one directory produce it, and the message names both files.
+       Renaming a key or dropping one of the files clears it, see :ref:`topics-static-name-resolution-colocated`.
+     - ``next.static.checks``
+   * - ``next.E168``
+     - A ``{% layout root %}`` marker stands after something other than ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, ASCII whitespace, and a leading byte order mark, or a layout carries the marker more than once.
+       The framework ignores such a marker, so the layout is no root, and the check fails the project so the marker does not go missing unnoticed.
+       Moving the marker to the top of the file and keeping one of them clears it, see :ref:`topics-layouts-root`.
+     - ``next.pages.checks.layouts``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -832,6 +842,8 @@ Warnings
    * - ``next.W001``
      - A ``layout.djx`` carries no ``{% template %}`` placeholder, so composition drops the layout and the pages under it render without its markup.
        The paired ``{% #template %}`` form, whose body is a fallback, counts as the placeholder too.
+       The check judges every layout that composition wraps a scanned page in, so it reaches a folder without a page, a ``DIRS`` root, and a layout above the page tree.
+       A layout that a ``{% layout root %}`` cuts away from every chain renders for no page and is not checked.
      - ``next.pages.checks.layouts``
    * - ``next.W002``
      - A directory named by ``PAGES_DIR`` sits beside the working directory, holds pages, and no configured router routes it, so nothing under it is served.
@@ -929,6 +941,7 @@ Warnings
      - A ``layout.djx`` carries more than one ``{% template %}`` placeholder.
        Composition fills the first one and every other renders its own fallback instead of the page.
        It carries its own code rather than sharing ``next.W001``, so silencing one layout mistake never silences the other.
+       It reaches the same layouts as ``next.W001``.
      - ``next.pages.checks.layouts``
    * - ``next.W079``
      - The ``JS_CONTEXT_SERIALIZER`` dotted path cannot be imported.
@@ -1140,6 +1153,28 @@ Warnings
    * - ``next.W131``
      - ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` is ``True`` while ``django.contrib.auth`` is not installed or ``MIDDLEWARE`` lists no ``AuthenticationMiddleware`` or a subclass, so no request carries a signed-in user and every page and action that declares no access sends each visitor to the login.
      - ``next.permissions.checks``
+   * - ``next.W132``
+     - A page tree has no static key, so its co-located ``layout`` and ``template`` assets are not served.
+       The tree is a ``DIRS`` root outside ``BASE_DIR``, any ``DIRS`` root while ``BASE_DIR`` is unset, or a ``PageRoot`` of a third-party router that gives no ``key``.
+       The site keeps running and the pages render, only their co-located files are missing from the static tree.
+       Moving the root under ``BASE_DIR``, setting ``BASE_DIR``, or giving the ``PageRoot`` a ``key`` clears it, see :ref:`topics-static-name-resolution-colocated`.
+     - ``next.static.checks``
+   * - ``next.W133``
+     - A ``layout.djx`` writes an ``<html`` element in text outside a ``{% comment %}``, a ``{% verbatim %}`` block, and an HTML comment, and carries no working ``{% layout root %}`` marker, while a layout further out in its chain exists, so the page renders two documents.
+       When the layout carries a marker that ``next.E168`` rejects, the message points at that error.
+       Opening the layout with the marker clears it, see :ref:`topics-layouts-root`.
+     - ``next.pages.checks.layouts``
+   * - ``next.W134``
+     - A ``{% layout root %}`` marker stands in a ``template.djx`` or in a component template, where the tag does nothing.
+       Only a ``layout.djx`` can be a root, so the marker belongs in the layout of the section.
+     - ``next.pages.checks.layouts``
+   * - ``next.W135``
+     - A ``layout.djx`` that sits above every page tree and wraps a scanned page has co-located assets, such as a ``layout.css``.
+       A layout that a ``{% layout root %}`` below it cuts away wraps no page and draws no warning.
+       The layout wraps the pages, but its files are not served.
+       The message names the files.
+       Moving the layout into the page tree or the assets to a layout inside it clears it, see :ref:`topics-layouts`.
+     - ``next.static.checks``
 
 Codes are assigned per check and are not contiguous.
 

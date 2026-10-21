@@ -189,3 +189,30 @@ EMPTY_ASSET_CASES: tuple[EmptyAssetCase, ...] = (
     EmptyAssetCase("integer", 123),
     EmptyAssetCase("bytes", b"css/app.css"),
 )
+
+
+@dataclass(frozen=True, slots=True)
+class NestedRootCase:
+    """Two nested page trees keyed as given, and the names the inner page gets."""
+
+    id: str
+    outer_key: str | None
+    inner_key: str | None
+    expected: tuple[str, ...]
+
+
+NESTED_ROOT_CASES: tuple[NestedRootCase, ...] = (
+    NestedRootCase(
+        "deepest_root_names_the_page",
+        "outer",
+        "inner",
+        ("next/inner/about.css", "next/inner/layout.css"),
+    ),
+    NestedRootCase("keyless_inner_root_serves_nothing", "outer", None, ()),
+    NestedRootCase(
+        "keyless_outer_root_leaves_the_inner_one",
+        None,
+        "inner",
+        ("next/inner/about.css", "next/inner/layout.css"),
+    ),
+)

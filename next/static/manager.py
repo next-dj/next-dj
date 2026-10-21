@@ -11,12 +11,12 @@ from django.utils.functional import LazyObject, empty
 from next.backends import BackendListManager, backend_entries, load_backends
 from next.conf import import_class_cached, next_framework_settings
 from next.diagnostics import Capture, FailureLog, isolated_build, mark_degraded
-from next.pages.watch import get_pages_directories_for_watch
+from next.pages.watch import get_page_root_keys_for_watch
 
 from .assets import with_version
 from .backends import DEFAULT_STATIC_BACKEND, MANIFEST_SETTINGS, StaticBackend
 from .collector import StaticCollector
-from .discovery import AssetDiscovery, PathResolver
+from .discovery import AssetDiscovery, PageRootKeys, PathResolver
 from .inject import PlaceholderInjector
 from .runtime import (
     CHUNK_STATIC_PATHS,
@@ -142,7 +142,7 @@ class StaticManager(BackendListManager[StaticBackend]):
         """Initialise empty backend and discovery caches, loaded lazily."""
         super().__init__()
         self._discovery: AssetDiscovery | None = None
-        self._cached_page_roots: tuple[Path, ...] | None = None
+        self._cached_page_roots: PageRootKeys | None = None
         self._script_builder: tuple[NextScriptBuilder, bool] | None = None
         self._chunk_urls: dict[str, str | None] = {}
         self._dedup_factory: Callable[[], DedupStrategy] | None = None
@@ -340,13 +340,13 @@ class StaticManager(BackendListManager[StaticBackend]):
         for backend in self._backends:
             backend.forget_urls()
 
-    def page_roots(self) -> tuple[Path, ...]:
-        """Return absolute page-tree roots from configured page backends.
+    def page_roots(self) -> PageRootKeys:
+        """Return absolute page-tree roots and their keys from the page backends.
 
         Taken already resolved, as the watch layer spells them, so no lookup repeats it.
         """
         if self._cached_page_roots is None:
-            self._cached_page_roots = tuple(get_pages_directories_for_watch())
+            self._cached_page_roots = tuple(get_page_root_keys_for_watch())
         return self._cached_page_roots
 
     def forget_page_roots(self) -> None:

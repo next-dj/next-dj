@@ -247,7 +247,7 @@ class TestARouterReloadDropsThePageRootMemos:
 
             assert get_pages_directories_for_watch() == [tree]
             assert pages_loaders._page_roots() == (tree,)
-            assert manager.page_roots() == (tree,)
+            assert manager.page_roots() == ((tree, "pages"),)
 
     def test_a_reload_drops_the_memos_keyed_by_a_callable(self) -> None:
         """A saved `page.py` mints new functions, so the DI memos go with it."""

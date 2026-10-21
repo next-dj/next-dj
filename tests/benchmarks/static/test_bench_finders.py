@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 # Enough page directories that a tree walk stands out against per-lookup work.
 _PAGES = 60
 _SECTION_SIZE = 10
-_ASSET = "next/sec0/page0.css"
+_ASSET = "next/pages/sec0/page0.css"
 
 
 def _build_tree(root: Path) -> None:
@@ -43,7 +43,9 @@ def pages_tree(tmp_path: Path) -> Iterator[Path]:
     root.mkdir()
     _build_tree(root)
     with override_settings(
-        NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(root)}, DEBUG=True
+        BASE_DIR=tmp_path,
+        NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(root)},
+        DEBUG=True,
     ):
         yield root
 
@@ -55,7 +57,8 @@ def collected_tree(tmp_path: Path) -> Iterator[Path]:
     root.mkdir()
     _build_tree(root)
     with override_settings(
-        NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(root)}
+        BASE_DIR=tmp_path,
+        NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(root)},
     ):
         yield root
 

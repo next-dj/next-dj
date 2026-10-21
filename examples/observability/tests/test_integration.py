@@ -474,11 +474,11 @@ class TestMetricPulseVerb:
         body = next_client.get("/stats/").content.decode()
         assert "data-metric-pulse-target" in body
         assert 'data-next-zone="live-totals"' in body
-        assert "/static/next/stats.js" in body
+        assert "/static/next/obs/pages/stats.js" in body
 
     def test_pulse_handler_is_scoped_to_the_live_page(self, next_client) -> None:
         body = next_client.get("/stats/pages/").content.decode()
-        assert "/static/next/stats.js" not in body
+        assert "/static/next/obs/pages/stats.js" not in body
         assert "data-next-target" not in body
 
 

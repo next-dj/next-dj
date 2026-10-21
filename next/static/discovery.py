@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import posixpath
+from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 from urllib.parse import urlsplit
@@ -18,6 +19,7 @@ from next.pages import loaders as pages_loaders
 from next.utils import (
     LAYOUT_TEMPLATE,
     MAX_ANCESTOR_WALK_DEPTH,
+    is_within,
     resolved_tree,
     stat_mtime_ns,
     template_edits_watched,
@@ -61,13 +63,7 @@ class _AssetPlan(NamedTuple):
     module_assets: tuple[StaticAsset, ...]
     directory_mtimes: tuple[tuple[Path, int | None], ...]
     registries: tuple[int, int, int]
-
-
-class _LayoutWalk(NamedTuple):
-    """The directories holding a layout, and the mtimes of the watched ones."""
-
-    layouts: tuple[Path, ...]
-    mtimes: tuple[tuple[Path, int | None], ...]
+    file_mtimes: tuple[tuple[Path, int | None], ...] = ()
 
 
 def _url_suffix(url: str) -> str:
@@ -100,6 +96,19 @@ def _directory_mtimes(
     return tuple((directory, stat_mtime_ns(directory)) for directory in directories)
 
 
+def _unwatched_layout_directories(
+    chain: Sequence[Path], watched: tuple[tuple[Path, int | None], ...]
+) -> tuple[tuple[Path, int | None], ...]:
+    """Snapshot the directories of chain layouts the ancestor walk left out.
+
+    A `DIRS` root layout wraps every page without being an ancestor of one.
+    """
+    seen = {directory for directory, _ in watched}
+    return _directory_mtimes(
+        [d for d in dict.fromkeys(layout.parent for layout in chain) if d not in seen]
+    )
+
+
 def _resolved_parent(path: Path) -> Path:
     """Return the resolved directory holding `path`, or its own spelling on OSError."""
     parent = path.parent
@@ -117,8 +126,8 @@ class BackendProvider(Protocol):
         """Return the primary backend used for file registration."""
         raise NotImplementedError
 
-    def page_roots(self) -> tuple[Path, ...]:
-        """Return the configured page-tree roots as resolved absolute paths."""
+    def page_roots(self) -> PageRootKeys:
+        """Return the configured page-tree roots, resolved, with their static keys."""
         raise NotImplementedError
 
 
@@ -170,23 +179,27 @@ def find_role_files(
     return found
 
 
+type PageRootKeys = tuple[tuple[Path, str | None], ...]
+"""Resolved page roots, each with the key its co-located assets are named by."""
+
+
 class PathResolver:
     """Resolve page root and logical names for page, layout, and component paths.
 
     Discovery and the staticfiles finder share it to agree on logical names.
     """
 
-    def __init__(self, page_roots_provider: Callable[[], tuple[Path, ...]]) -> None:
+    def __init__(self, page_roots_provider: Callable[[], PageRootKeys]) -> None:
         """Store the page-roots provider callable consulted on every lookup."""
         self._provider = page_roots_provider
         self._find_page_root_cache: BoundedCache[Path, Path | None] = BoundedCache()
 
-    def page_roots(self) -> tuple[Path, ...]:
-        """Return the current tuple of page tree roots from the provider."""
+    def page_roots(self) -> PageRootKeys:
+        """Return the current page tree roots with their keys from the provider."""
         return self._provider()
 
     def find_page_root(self, path: Path) -> Path | None:
-        """Return the page tree root that contains the path, or None."""
+        """Return the deepest page tree root that contains the path, or None."""
         # Subscript rather than `get`, because a cached `None` is a real answer.
         try:
             return self._find_page_root_cache[path]
@@ -194,32 +207,50 @@ class PathResolver:
             pass
         found: Path | None = None
         resolved_parent = path.parent.resolve()
-        for root in self.page_roots():
-            if resolved_parent.is_relative_to(root):
+        for root, _key in self.page_roots():
+            if resolved_parent.is_relative_to(root) and (
+                found is None or len(root.parts) > len(found.parts)
+            ):
                 found = root
-                break
         self._find_page_root_cache[path] = found
         return found
 
+    def root_key(self, page_root: Path) -> str | None:
+        """Return the key of a page root, or None when it has none."""
+        for root, key in self.page_roots():
+            if root is page_root or root == page_root:
+                return key
+        return None
+
     def logical_name_for_template(
         self, template_dir: Path, page_root: Path | None
-    ) -> str:
-        """Return the logical URL name for a resolved page template directory."""
-        if page_root is None:
-            return self._fallback(template_dir)
-        rel = _rel_path_str(template_dir, page_root)
-        if rel is None:  # pragma: no cover
-            return self._fallback(template_dir)
-        return rel or "index"
+    ) -> str | None:
+        """Return the logical URL name for a resolved page template directory.
 
-    def logical_name_for_layout(self, layout_dir: Path, page_root: Path | None) -> str:
-        """Return the logical URL name for a resolved layout directory."""
+        A page root with no key names nothing.
+        """
+        if page_root is None:
+            return self._fallback(template_dir)
+        key = self.root_key(page_root)
+        rel = _rel_path_str(template_dir, page_root)
+        if key is None or rel is None:
+            return None
+        return f"{key}/{rel or 'index'}"
+
+    def logical_name_for_layout(
+        self, layout_dir: Path, page_root: Path | None
+    ) -> str | None:
+        """Return the logical URL name for a resolved layout directory.
+
+        A page root with no key names nothing.
+        """
         if page_root is None:
             return f"{self._fallback(layout_dir)}/layout"
+        key = self.root_key(page_root)
         rel = _rel_path_str(layout_dir, page_root)
-        if rel is None:  # pragma: no cover
-            return f"{self._fallback(layout_dir)}/layout"
-        return f"{rel}/layout" if rel else "layout"
+        if key is None or rel is None:
+            return None
+        return f"{key}/{rel}/layout" if rel else f"{key}/layout"
 
     @staticmethod
     def _fallback(directory: Path) -> str:
@@ -281,32 +312,43 @@ class AssetDiscovery:
         page_root = self._resolver.find_page_root(resolved)
         # Imported before the walk, because the import writes `__pycache__`.
         lists = self._module_lists(resolved)
-        walk = self._walk_layouts(resolved, page_root)
+        directories = self._watched_directories(resolved)
+        stamps = pages_loaders.layout_stamps(file_path, page_root)
+        chain = [layout for layout, _ in stamps]
+        directories += _unwatched_layout_directories(chain, directories)
         files: list[FoundAsset] = []
-        for layout_dir in walk.layouts:
-            files += find_role_files(
-                layout_dir,
-                logical_name=self._resolver.logical_name_for_layout(
-                    layout_dir, page_root
-                ),
-                role="layout",
-                stems=self._stems,
-            )
+        for layout_file in reversed(chain):
+            layout_dir = layout_file.parent
+            layout_root = self._root_of_layout(layout_dir, page_root)
+            if layout_root is None and page_root is not None:
+                continue
+            name = self._resolver.logical_name_for_layout(layout_dir, layout_root)
+            if name is not None:
+                files += find_role_files(
+                    layout_dir, logical_name=name, role="layout", stems=self._stems
+                )
         template_dir = resolved.parent
-        files += find_role_files(
-            template_dir,
-            logical_name=self._resolver.logical_name_for_template(
-                template_dir, page_root
-            ),
-            role="template",
-            stems=self._stems,
-        )
+        name = self._resolver.logical_name_for_template(template_dir, page_root)
+        if name is not None:
+            files += find_role_files(
+                template_dir, logical_name=name, role="template", stems=self._stems
+            )
         return _AssetPlan(
             files=tuple(files),
             module_assets=self._module_assets(lists),
-            directory_mtimes=walk.mtimes,
+            directory_mtimes=directories,
             registries=registries,
+            file_mtimes=stamps,
         )
+
+    def _root_of_layout(self, layout_dir: Path, page_root: Path | None) -> Path | None:
+        """Return the deepest page tree root holding the resolved `layout_dir`.
+
+        A directory inside the page's own root shares it, so only others are looked up.
+        """
+        if page_root is not None and is_within(layout_dir, page_root):
+            return page_root
+        return self._resolver.find_page_root(layout_dir / LAYOUT_TEMPLATE)
 
     def _planned[K](
         self,
@@ -336,8 +378,8 @@ class AssetDiscovery:
         if not template_edits_watched():
             return False
         return any(
-            stat_mtime_ns(directory) != mtime
-            for directory, mtime in plan.directory_mtimes
+            stat_mtime_ns(path) != mtime
+            for path, mtime in chain(plan.directory_mtimes, plan.file_mtimes)
         )
 
     def discover_component_assets(
@@ -457,26 +499,40 @@ class AssetDiscovery:
         if collector.add(asset):
             asset_registered.send(sender=asset, collector=collector, backend=backend)
 
-    def _walk_layouts(self, file_path: Path, page_root: Path | None) -> _LayoutWalk:
+    def _watched_directories(
+        self, file_path: Path
+    ) -> tuple[tuple[Path, int | None], ...]:
         """Walk up from the page directory, outermost first, and stat as it goes.
 
-        Inside a page tree every directory is watched, outside only those read.
+        Inside a page tree every directory up to the outermost root is watched.
         """
-        layouts: list[Path] = []
         watched: list[tuple[Path, int | None]] = []
-        inside_a_tree = page_root is not None
         current_dir = file_path.parent
+        outer_root = self._outer_page_root(current_dir)
         for depth in range(MAX_ANCESTOR_WALK_DEPTH):
             # Stat first, so a file created in between leaves the plan stale.
             mtime = stat_mtime_ns(current_dir)
-            holds_layout = (current_dir / LAYOUT_TEMPLATE).exists()
-            if holds_layout:
-                layouts.append(current_dir)
-            if inside_a_tree or holds_layout or depth == 0:
+            if (
+                outer_root is not None
+                or depth == 0
+                or (current_dir / LAYOUT_TEMPLATE).exists()
+            ):
                 watched.append((current_dir, mtime))
             parent = current_dir.parent
-            # The tree root ends the walk, and so does the filesystem root.
-            if current_dir in (page_root, parent):
+            # The outermost root ends the walk, and so does the filesystem root.
+            if current_dir in (outer_root, parent):
                 break
             current_dir = parent
-        return _LayoutWalk(tuple(reversed(layouts)), tuple(reversed(watched)))
+        return tuple(reversed(watched))
+
+    def _outer_page_root(self, directory: Path) -> Path | None:
+        """Return the outermost page root holding the resolved `directory`, or None.
+
+        A layout between nested roots wraps the page, so its directory is watched too.
+        """
+        holding = [
+            root
+            for root, _key in self._resolver.page_roots()
+            if directory.is_relative_to(root)
+        ]
+        return min(holding, key=lambda root: len(root.parts), default=None)

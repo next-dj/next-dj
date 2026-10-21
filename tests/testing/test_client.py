@@ -196,7 +196,7 @@ class TestEnvelopeHelpers:
         envelope = envelope_of(NextClient().get_zones("/zoned/", "alpha"))
         assert {
             "kind": "css",
-            "url": "/static/next/zoned.css",
+            "url": "/static/next/tests/site_pages/zoned.css",
             "load": "link",
         } in envelope.assets
 

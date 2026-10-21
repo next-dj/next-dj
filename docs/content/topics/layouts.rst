@@ -33,6 +33,8 @@ The collected layouts are composed in order, with the closest layout wrapping th
 The walk does not stop at the page root.
 A ``layout.djx`` in a directory above the page root, such as the application package directory, also joins the chain and wraps every page below it.
 Keep layout files inside the page tree unless that wrapping is intended.
+A layout above the page tree root wraps the page but serves no co-located assets, and :ref:`next.W135 <ref-system-checks>` reports a ``layout.css`` or ``layout.js`` there.
+A ``{% layout root %}`` marker in a layout ends the walk, see :ref:`topics-layouts-root`.
 
 .. code-block:: text
    :caption: layout discovery
@@ -65,6 +67,104 @@ A ``page.py`` with no ``render``, no ``template``, and no template a loader find
 A ``layout.djx`` in a directory with no page and no action at any depth wraps nothing, and :ref:`next.W128 <ref-system-checks>` names the outermost such directory.
 A landing route whose whole markup belongs in the layout shell gets a ``template.djx``, and an empty one is enough.
 
+.. _topics-layouts-root:
+
+Root layout
+-----------
+
+A page under a section such as an embeddable widget or a print view needs its own document shell, and the outer site shell must not wrap it.
+A layout that opens with ``{% layout root %}`` becomes the root of its chain.
+Composition stops at that layout, and no layout further out wraps the page.
+
+.. code-block:: text
+   :caption: a section with its own shell
+
+   notes/pages/
+     layout.djx                site shell
+     page.py
+     template.djx
+     embed/
+       layout.djx              root layout, starts with {% layout root %}
+       [id]/
+         page.py
+         template.djx
+
+.. code-block:: jinja
+   :caption: notes/pages/embed/layout.djx
+
+   {% layout root %}
+   <!doctype html>
+   <html>
+     <head>
+       {% metadata %}
+       {% collect_styles %}
+     </head>
+     <body class="embed">
+       {% template %}
+       {% collect_scripts %}
+     </body>
+   </html>
+
+A request to ``/embed/42/`` composes the page body and ``embed/layout.djx``, and ``notes/pages/layout.djx`` stays out of the result.
+Pages elsewhere in the tree compose as before.
+
+The marker rule
+~~~~~~~~~~~~~~~
+
+Only ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, ASCII whitespace, and a leading byte order mark may stand before the marker.
+Any other tag or text before it, or a second marker in the same file, is ``next.E168``, and the framework ignores that marker.
+A marker written under ``{% verbatim %}`` is text to the template lexer and counts as no marker.
+The tag renders nothing and accepts the single argument ``root``, see :doc:`/content/ref/template-tags`.
+
+What the cut removes
+~~~~~~~~~~~~~~~~~~~~
+
+The cut removes every layout further out than the root layout from the chain of the page.
+That covers the ancestor ``layout.djx`` files inside the page tree and the layouts above the page tree root.
+It covers the root layouts collected from ``DIRS`` too, and when the layout of one ``DIRS`` root carries a marker, it cuts the layouts of the ``DIRS`` roots that come after it.
+
+A root layout writes the whole document shell itself.
+The outer shell no longer runs for the page, so the root layout carries its own ``{% metadata %}``, ``{% collect_styles %}``, and ``{% collect_scripts %}`` tags.
+A page under the root renders no title, no stylesheet, and no script without them.
+
+The cut touches the layout chain and nothing else.
+
+Metadata.
+   The metadata of the ancestor ``page.py`` files still applies, so a ``title_template`` declared above the root still formats the title.
+   A title that the page itself declares overrides it, as it does without the marker, see :doc:`seo/metadata`.
+
+Access.
+   The access declared with ``inherit=True`` in an ancestor ``page.py`` still guards the pages below the root layout, see :doc:`access`.
+
+Inherited context.
+   The ``inherit_context=True`` callables of ancestor ``page.py`` files still run and publish their values.
+   The framework computes them even where the layout that reads them was cut away, and the root layout and the page read them as usual.
+
+Zones.
+   A zone written in a cut layout is not part of the composed template of a page under the root.
+   A partial request from such a page that names that zone gets the unknown zone answer.
+
+Static assets.
+   The co-located ``layout.css`` and ``layout.js`` of a cut layout are not collected for the page, because discovery reads the same cut chain composition does.
+   Each layout is named after the deepest page tree root that holds it, so a layout of a ``DIRS`` root keeps its own key on a page of an application tree.
+   The root layout keeps its own co-located assets, and so do the layouts between the page and the root.
+
+The root layout in a ``DIRS`` directory
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A page composes its own ancestor layouts first and the ``layout.djx`` files of the ``DIRS`` roots after them, in the order of the settings.
+A marker in one of those ``DIRS`` layouts ends the chain there, so the ``DIRS`` layouts that come after it wrap no page.
+Ancestor layouts that stand nearer to the page than the marker still wrap it.
+
+Checks
+~~~~~~
+
+:ref:`next.E168 <ref-system-checks>` reports a marker that stands in the wrong place or repeats.
+:ref:`next.W133 <ref-system-checks>` reports a layout that writes ``<html`` without a working marker while a layout further out exists, since the page would carry two documents.
+:ref:`next.W134 <ref-system-checks>` reports a marker in a ``template.djx`` or a component template, where the tag has no effect.
+:ref:`next.W135 <ref-system-checks>` reports co-located assets on a layout above the page tree root.
+See :doc:`/content/howto/give-a-section-its-own-document-shell` for the full recipe.
+
 Layout template contract
 ------------------------
 
@@ -93,8 +193,8 @@ Composition fills the first placeholder a layout carries, so keep exactly one pe
 
 Without the placeholder that layout is skipped during composition, so its own markup vanishes from the output while the page body and every inner layout still render, with no error raised.
 The ``check_layout_templates`` system check emits ``next.W001`` for a ``layout.djx`` sitting next to a discovered page when it carries no placeholder, and ``next.W078`` when it carries more than one.
-The check scans every page root each router serves, so both codes surface for layouts under any page-bearing application, not only one of them.
-A layout in an intermediate segment directory without a sibling page is not covered, so ``uv run python manage.py check`` does not catch every broken layout.
+The check walks every layout of the chain of every page, so both codes surface for a layout in a folder with no page of its own, in a ``DIRS`` root, and above the page tree root, under any application.
+A layout that a root layout cuts away from every chain is judged too, because the check reads the whole ancestry and ignores the cut.
 
 Layouts can declare layout-level CSS and JS through the static collector tags shown above.
 The tags also live in inner layouts when you want a section-scoped style sheet.
@@ -215,7 +315,10 @@ Co-locate ``layout.css`` next to ``layout.djx`` to ship styles that apply only t
 The static collector emits the file only when a request reaches a page below that layout.
 
 The root layout is the site-wide case of the same rule, because every page sits below it.
-A ``layout.css`` beside the root ``layout.djx`` reaches every page, and a ``{% use_style %}`` tag in that layout adds a file staticfiles serves or a URL a third party hosts, see :doc:`/content/howto/ship-a-site-wide-stylesheet`.
+A ``layout.css`` beside the root ``layout.djx`` of the page tree reaches every page of that tree, except the pages under a ``{% layout root %}`` layout that cuts it away.
+A ``layout.css`` beside the ``layout.djx`` of a ``DIRS`` root that has a key reaches the pages of every tree too, under a name that starts with the key of that root, see :ref:`topics-static-name-resolution-colocated`.
+A layout under no page tree root, or under a root with no key, wraps pages but serves no assets to a page inside a tree.
+A ``{% use_style %}`` tag in the root layout adds a file staticfiles serves or a URL a third party hosts, see :doc:`/content/howto/ship-a-site-wide-stylesheet`.
 
 Multiple backends and layout roots
 ----------------------------------

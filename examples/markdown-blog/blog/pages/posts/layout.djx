@@ -22,7 +22,10 @@
         <time datetime="{{ article.published|date:'Y-m-d' }}">{{ article.published|date:"j M Y" }}</time>
         · ~ {{ article.reading_minutes }} min read · <code class="font-mono">/posts/{{ article.slug }}/</code>
       </span>
-      {% component "share_button" %}
+      <span class="flex items-center gap-2">
+        <a href="/posts/{{ article.slug }}/print/" class="text-xs font-medium text-foreground hover:underline">Print view</a>
+        {% component "share_button" %}
+      </span>
     </div>
   </header>
 

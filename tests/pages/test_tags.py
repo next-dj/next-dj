@@ -5,6 +5,7 @@ from django.template import Context, TemplateSyntaxError
 from django.template.base import Template
 
 from next.pages.metadata.nodes import MetadataNode
+from next.templatetags.pages import RootLayoutNode
 
 
 def _render(source: str, **ctx) -> str:
@@ -41,6 +42,40 @@ class TestTemplatePlaceholderTag:
         ids=["single", "paired"],
     )
     def test_arguments_are_rejected(self, source, message) -> None:
+        with pytest.raises(TemplateSyntaxError, match=re.escape(message)):
+            Template(source)
+
+
+class TestRootLayoutTag:
+    """``{% layout root %}`` marks a root layout and renders nothing."""
+
+    @pytest.mark.parametrize(
+        "source",
+        ["a{% layout root %}b", "a{%  layout   root  %}b", "a{%\n layout\n root\n%}b"],
+        ids=["tight", "padded", "multiline"],
+    )
+    def test_the_marker_renders_nothing(self, source) -> None:
+        assert _render(source) == "ab"
+
+    def test_the_marker_compiles_to_its_node(self) -> None:
+        template = Template("{% layout root %}")
+
+        assert template.nodelist.get_nodes_by_type(RootLayoutNode)
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "{% layout %}",
+            "{% layout leaf %}",
+            '{% layout "root" %}',
+            "{% layout root extra %}",
+            "{% layout root root %}",
+            "{% layout x=1 %}",
+        ],
+        ids=["none", "wrong", "quoted", "extra", "twice", "kwarg"],
+    )
+    def test_any_other_form_is_rejected(self, source) -> None:
+        message = "{% layout %} tag takes the single argument 'root'"
         with pytest.raises(TemplateSyntaxError, match=re.escape(message)):
             Template(source)
 
