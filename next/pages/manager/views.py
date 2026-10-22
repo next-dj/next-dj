@@ -92,7 +92,12 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
         intent = shaper.intent(request)
         if intent.zones:
             zone = shaper.zone_response(
-                file_path, request, intent, dynamic_body=False, url_kwargs=dict(kwargs)
+                file_path,
+                request,
+                intent,
+                dynamic_body=False,
+                url_kwargs=dict(kwargs),
+                dep_cache=dep_cache,
             )
             return finish_zone_response(zone, zone_policy(page, file_path), request)
         policy = response_policy(
@@ -147,6 +152,7 @@ def _resolving_view(
                     intent,
                     dynamic_body=resolution.dynamic,
                     url_kwargs=dict(kwargs),
+                    dep_cache=dep_cache,
                 )
             return finish_zone_response(zone, zone_policy(page, file_path), request)
         policy = response_policy(

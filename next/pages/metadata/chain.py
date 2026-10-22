@@ -12,6 +12,7 @@ from next.diagnostics import FailureLog, exception_text, type_name
 from next.introspect import callable_name
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.loaders import AncestorStamps, load_page_module
+from next.utils import is_intercept_name, is_route_group, strip_route_groups
 
 from .fold import (
     EMPTY_STATE,
@@ -101,7 +102,7 @@ class ChainEntry:
     tail: tuple[ChainSource, ...]
     static: Metadata
     folded: Metadata | None
-    trail: str = ""
+    trail: str | None = ""
     refusal: ChainRefusal | None = None
 
     @property
@@ -138,7 +139,7 @@ def _page_source(
     ancestor: Path,
     module: types.ModuleType | None,
     file_path: Path,
-    trail: str,
+    trail: str | None,
 ) -> ChainSource | None:
     """Return what the load of the `page.py` at `ancestor` adds to the chain."""
     raw, entry = _declaration(registry, ancestor, module)
@@ -152,9 +153,21 @@ def _page_source(
     return None
 
 
-def _trail(directory: Path, root: Path) -> str:
-    """Return the path of `directory` below the tree `root`, empty for the root."""
-    return "" if directory == root else directory.relative_to(root).as_posix()
+def _trail(directory: Path, root: Path) -> str | None:
+    """Return the URL trail of `directory` below the tree `root`, empty for the root.
+
+    A group and all inside an intercept serve no URL of their own, so give no crumb.
+    """
+    if directory == root:
+        return ""
+    if is_route_group(directory.name):
+        return None
+    raw = directory.relative_to(root).as_posix()
+    if "(" not in raw:
+        return raw
+    if any(is_intercept_name(segment) for segment in raw.split("/")):
+        return None
+    return strip_route_groups(raw)
 
 
 def _build_chain(
@@ -167,7 +180,7 @@ def _build_chain(
     paths = walk.ancestors.paths
     root = paths[0].parent
     sources: list[ChainSource] = []
-    trail = ""
+    trail: str | None = ""
     for ancestor, module in zip(paths, walk.modules, strict=True):
         trail = _trail(ancestor.parent, root)
         found = _page_source(registry, ancestor, module, file_path, trail)

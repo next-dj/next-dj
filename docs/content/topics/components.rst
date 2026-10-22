@@ -242,16 +242,25 @@ Number literal.
 Boolean literal.
    ``pinned=True`` and ``pinned=False`` pass the boolean.
 
+Interpolated string.
+   A quoted string with ``{{ ... }}`` inside resolves each expression against the surrounding context.
+   ``title="Rows ({{ total }})"`` passes ``Rows (3)`` when ``total`` is ``3``, and filters work inside the braces, as in ``{{ name|upper }}``.
+   A string that holds one expression and nothing else passes the value as it is, so ``count="{{ notes|length }}"`` is an integer and ``items="{{ notes }}"`` is the list.
+   A string that mixes text and expressions is a plain string, and the component autoescapes it like any literal.
+   A filter on the string itself, as in ``title="{{ n }}"|upper``, keeps the Django meaning and leaves the braces as text.
+   An empty ``{{ }}`` raises ``TemplateSyntaxError`` when the template compiles.
+
 Template expression.
    An unquoted token is resolved against the surrounding context, exactly like ``{{ ... }}``.
    ``title=note.title`` performs the attribute lookup, ``count=notes|length`` applies a filter.
    When the lookup fails the prop resolves to the empty string.
 
 .. code-block:: jinja
-   :caption: literal vs context lookup
+   :caption: literal, context lookup and interpolation
 
    {% component "card" title="Hello" %}
    {% component "card" title=note.title %}
+   {% component "card" title="{{ note.title }} ({{ note.pk }})" %}
    {% component "card" pinned=True %}
 
 A quoted string prop is always passed as an unescaped plain string.

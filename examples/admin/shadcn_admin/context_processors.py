@@ -9,9 +9,6 @@ from shadcn_admin import utils
 from shadcn_admin.services import admin_nav
 
 
-_AUTH_PREFIXES = (utils.LOGIN_URL, utils.LOGOUT_URL)
-
-
 def app_list(request: HttpRequest) -> list[dict[str, Any]]:
     """Return the app/model tree visible to `request` for sidebar and dashboard."""
     grouped: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -49,8 +46,4 @@ def app_list(request: HttpRequest) -> list[dict[str, Any]]:
 
 def admin_shell(request: HttpRequest) -> dict[str, Any]:
     """Feed the shell in `chrome/layout.djx` on every page of every app tree."""
-    return {
-        "app_list": app_list(request),
-        "admin_nav": admin_nav(request.user),
-        "is_auth_page": request.path.startswith(_AUTH_PREFIXES),
-    }
+    return {"app_list": app_list(request), "admin_nav": admin_nav(request.user)}

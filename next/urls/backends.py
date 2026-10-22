@@ -14,10 +14,14 @@ from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
 from next.backends import instantiate_backend, resolve_backend_class
 from next.caches import DEFAULT_CACHE_SIZE
 from next.conf import next_framework_settings
+from next.intercept import Intercept, intercepts
 from next.pages import page
+from next.pages.loaders import has_body, load_page_module, renders_itself
 from next.utils import (
+    InterceptPage,
     PageRoot,
     classify_dirs_entries,
+    is_within,
     on_forget_resolved_trees,
     resolve_base_dir,
     resolved_tree,
@@ -25,12 +29,12 @@ from next.utils import (
 
 from .dispatcher import FilesystemTreeDispatcher
 from .parser import default_url_parser
-from .signals import route_registered
+from .signals import intercept_registered, route_registered
 from .urlconf import urlconf_mounts
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Mapping
+    from collections.abc import Callable, Generator, Mapping
 
     from django.apps import AppConfig
     from django.urls import URLPattern, URLResolver
@@ -442,15 +446,68 @@ class FileRouterBackend(RouterBackend):
     ) -> Generator[URLPattern, None, None]:
         """Yield one `URLPattern` per discovered page under `pages_path`.
 
-        Each view keeps its trail, so its crumbs reverse under any outer include.
+        Each view keeps its trail for crumbs, and the intercepts publish after the walk.
         """
-        for url_path, file_path in self._scan_pages_directory(pages_path):
+        generation = intercepts.generation
+        found: list[InterceptPage] = []
+        routed: dict[str, Path] = {}
+        for url_path, file_path in self._scan_pages_directory(
+            pages_path, on_intercept=found.append
+        ):
             if pattern := self._page_pattern(url_path, file_path):
                 cast("_RoutedView", pattern.callback).next_route_trail = url_path
                 route_registered.send(
                     sender=FileRouterBackend, url_path=url_path, file_path=file_path
                 )
+                routed.setdefault(url_path, file_path)
                 yield pattern
+        self._publish_intercepts(pages_path, found, routed, generation)
+
+    def _publish_intercepts(
+        self,
+        pages_path: Path,
+        found: list[InterceptPage],
+        routed: dict[str, Path],
+        generation: int,
+    ) -> None:
+        """Publish every intercept of `pages_path` over a page the same walk routed.
+
+        A tree with none publishes an empty set, so a reload drops its vanished rules.
+        """
+        nested = self._nested_roots(pages_path) if found else ()
+        rules: list[Intercept] = []
+        for hit in found:
+            target_file = routed.get(hit.target_trail)
+            if target_file is None or any(is_within(hit.file, root) for root in nested):
+                continue
+            if renders_itself(hit.file):
+                logger.warning(
+                    "The intercept page %s defines render(), which no zone request "
+                    "runs, so it is not served. manage.py check reports it.",
+                    hit.file,
+                )
+                continue
+            module, error = load_page_module(hit.file)
+            if error is None and not has_body(hit.file, module):
+                continue
+            rules.append(Intercept(target_file, hit.file, hit.marker))
+        if not intercepts.publish(pages_path, rules, generation=generation):
+            return
+        for rule in rules:
+            intercept_registered.send(
+                sender=FileRouterBackend,
+                target_file=rule.target_file,
+                file_path=rule.file,
+                marker=rule.marker,
+            )
+
+    def _nested_roots(self, pages_path: Path) -> tuple[Path, ...]:
+        """Return the page trees this router reports strictly inside `pages_path`."""
+        return tuple(
+            root.path
+            for root in self.page_roots()
+            if root.path != pages_path and is_within(root.path, pages_path)
+        )
 
     def _page_pattern(self, trail: str, file_path: Path) -> URLPattern | None:
         """Return the pattern of one page, `None` for a trail the parser refuses.
@@ -466,7 +523,11 @@ class FileRouterBackend(RouterBackend):
             return None
 
     def _scan_pages_directory(
-        self, pages_path: Path, *, register_components: bool = True
+        self,
+        pages_path: Path,
+        *,
+        register_components: bool = True,
+        on_intercept: Callable[[InterceptPage], None] | None = None,
     ) -> Generator[tuple[str, Path], None, None]:
         """Yield `(url_path, page_file)` pairs discovered under `pages_path`."""
         dispatcher = FilesystemTreeDispatcher(
@@ -474,7 +535,7 @@ class FileRouterBackend(RouterBackend):
             components_folder_name=self._components_folder_name,
             register_components=register_components,
         )
-        yield from dispatcher.walk(pages_path)
+        yield from dispatcher.walk(pages_path, on_intercept=on_intercept)
 
 
 class RouterFactory:

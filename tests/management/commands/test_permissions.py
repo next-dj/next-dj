@@ -9,11 +9,13 @@ from django.test import override_settings
 from tests.support import routed, write_page
 from tests.support.access import (
     COMPONENTS,
+    PAGE_HEAD,
     login_required_middleware,
     page_source,
     write_access_project,
     write_guard,
 )
+from tests.support.cases.intercepts import zone_body
 
 
 pytestmark = pytest.mark.usefixtures("form_registries")
@@ -255,3 +257,116 @@ class TestPermissionsOfViews:
                 "login_not_required (tests.permissions.urls_views.secret)"
             )
         ]
+
+
+class TestPermissionsThroughAGroup:
+    """A group directory passes its inherited rule to the pages below it."""
+
+    def test_the_page_names_the_group_file_that_closed_it(self, tmp_path) -> None:
+        root = tmp_path / "pages"
+        write_guard(root / "(app)", "page.login_required(inherit=True)\n")
+        write_page(root, "(app)/dash")
+        out = StringIO()
+
+        with routed(root), override_settings(BASE_DIR=tmp_path):
+            call_command("permissions", "/dash/", stdout=out)
+
+        assert out.getvalue().splitlines()[1].split() == [
+            "page",
+            "/dash/",
+            "login",
+            "pages/(app)/page.py",
+        ]
+
+
+class TestPermissionsOfIntercepts:
+    """An intercept row follows its target page row and names the zones it serves."""
+
+    @pytest.fixture()
+    def site(self, tmp_path) -> Path:
+        root = tmp_path / "pages"
+        write_page(root, "other")
+        write_page(root, "feed/photo", page_source("page.public()\n"))
+        write_page(
+            root,
+            "feed/(.)photo",
+            f'{PAGE_HEAD}page.permission_required("auth.add_user")\n',
+            body=zone_body("peek", "info"),
+        )
+        return root
+
+    def _lines(self, root: Path, *args: str) -> list[str]:
+        out = StringIO()
+        with routed(root), override_settings(BASE_DIR=root.parent):
+            call_command("permissions", *args, stdout=out)
+        return out.getvalue().splitlines()
+
+    def test_the_full_listing_places_the_row_right_after_its_target(self, site) -> None:
+        lines = self._lines(site)
+
+        rows = [line.split() for line in lines[1:]]
+        assert [row[:2] for row in rows if row[0] in ("page", "intercept")] == [
+            ["page", "/other/"],
+            ["page", "/feed/photo/"],
+            ["intercept", "/feed/photo/"],
+        ]
+        assert rows[2] == [
+            "intercept",
+            "/feed/photo/",
+            "(peek,",
+            "info)",
+            "perm",
+            "auth.add_user",
+            "pages/feed/(.)photo/page.py",
+        ]
+
+    def test_a_page_url_keeps_its_intercept_row(self, site) -> None:
+        lines = self._lines(site, "/feed/photo/")
+
+        assert [line.split()[:2] for line in lines[1:]] == [
+            ["page", "/feed/photo/"],
+            ["intercept", "/feed/photo/"],
+        ]
+        assert lines[1].split()[2:] == [
+            "public",
+            "public",
+            "(pages/feed/photo/page.py)",
+        ]
+
+    def test_a_page_url_lists_the_actions_of_its_intercepts(self, tmp_path) -> None:
+        root = tmp_path / "pages"
+        write_page(root, "other", f"{_ACTION_HEAD}{_ping('other_ping')}")
+        write_page(
+            root,
+            "feed/photo",
+            f"{_ACTION_HEAD}page.public()\ntemplate = 'ok'\n{_ping('photo_ping')}",
+        )
+        write_page(
+            root,
+            "feed/(.)photo",
+            f'{_ACTION_HEAD}page.permission_required("auth.add_user")\n'
+            f"{_ping('peek_ping')}",
+            body=zone_body("peek"),
+        )
+
+        lines = self._lines(root, "/feed/photo/")
+
+        assert [line.split()[:2] for line in lines[1:]] == [
+            ["page", "/feed/photo/"],
+            ["intercept", "/feed/photo/"],
+            ["action", "photo_ping"],
+            ["action", "peek_ping"],
+        ]
+        assert lines[4].split()[2:] == [
+            "(pages/feed/(.)photo/page.py)",
+            "perm",
+            "auth.add_user",
+            "pages/feed/(.)photo/page.py",
+        ]
+
+
+_ACTION_HEAD = "from next.forms import action\nfrom next.pages import page\n\n"
+
+
+def _ping(name: str) -> str:
+    return f'\n\n@action("{name}")\ndef {name}():\n    return None\n'

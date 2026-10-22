@@ -27,13 +27,87 @@ A cancelled confirm stops the click before it reaches the opener, so the layer n
 An accepted confirm lets the click through and the layer opens.
 The same gate protects every click-driven trigger, so a prompt fronts a layer open the same way it fronts a pagination merge.
 
+Opening another page's zone over the honest URL
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+An intercepting route lets a link open a different page in the modal while the address bar shows the honest URL of the link target, see :ref:`topics-file-router-intercepts` for the directory layout.
+The opt-in stays the link.
+``<a href="/photo/7/" data-next-layer="photo-modal">`` sends a zone GET of ``/photo/7/`` with ``X-Next-Zone: photo-modal``, and the zone name selects which page renders it.
+The client needs no extra attribute, and the zone name on ``data-next-layer`` stays mandatory.
+The markers ``(.)``, ``(..)``, and ``(...)`` of the directory name only the target and give the intercept its inherited layouts, context, access, and components.
+They do not restrict where the modal opens from, so any page can link with that zone.
+
+The selection runs on a GET or a HEAD and follows two rules.
+The target keeps every zone it declares as a standalone zone itself.
+Otherwise the first intercept of the target, in file order, whose page declares every requested zone as a standalone zone serves the request.
+The zone sets come from the compiled template of each page, so the selection renders nothing.
+A request names the zones of one page only.
+A set that mixes a zone of the target with a zone of an intercept is served by no intercept, so the target renders the zones it declares and a server-side render of the intercept zone raises ``UnknownZoneError``.
+A target without intercepts pays one dictionary lookup.
+
+The URL stays the real address of the target.
+A reload renders the real target page with its own head, Back closes the layer, and a plain link without ``data-next-layer`` navigates to the target page.
+
+``Patches.layer_open(href="/photo/7/", zone="photo-modal")`` makes the client issue the same GET, so it selects the intercept the same way.
+
+The modal title comes from the intercept page.
+The zone response carries one ``meta`` patch with the folded metadata of the intercept page, the title, the description, the canonical link, and the robots meta, and a key the page leaves out removes its tag.
+The request is the honest target GET, so a self canonical names the target URL.
+The layer restores the host head on close, see `Titles under a layer`_.
+A metadata callable that fails is logged, the patch is left out, and the zone still answers 200.
+A zone GET served by the target itself carries no ``meta`` patch.
+
+A request from inside the modal runs the same selection and both access checks every time.
+A refresh, a poll, a lazy zone, a stream, and a pagination link GET the layer URL, or the href of the pagination link, with ``X-Next-Zone`` only.
+A pagination href is therefore rendered on the target path, and a query string is fine.
+A nested zone of the intercept page is selected like its outer zone.
+The target and the intercept each climb their own file-system ancestors for access, and the stricter chain wins.
+An object permission on the intercept reads the URL kwargs of the target.
+
+Forms and actions in the modal
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A form posts with the ``X-Next-Zone`` of the intercept zone.
+The server resolves the served page from the posted origin and that zone, so an invalid form re-renders the intercept zone, and an action that returns ``None`` morphs it.
+``Patches.morph_zone(zone)`` on such a request renders an intercept zone the origin page lacks, after the intercept page authorizes the request.
+A POST never selects an intercept on the page view, so no mutation reaches an intercept through it.
+An intercept that refuses on the form or action path answers 403, also for a login rule and for an ``Http404``, since that path has no redirect and the action may have run.
+A broken chain of intercepts answers 403 too, except for the import error it shows under ``DEBUG``.
+``Patches.morph_foreign_zone`` does not consult intercepts and raises ``UnknownZoneError`` for an intercept zone.
+The action owner and its guard protect a mutation, the modal does not.
+A wizard step inside a modal is not supported.
+
+Response order of a zone GET
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A zone GET of a target with intercepts answers with the first step that applies.
+
+#. The access chain of the target refuses, and its response is the answer.
+#. The ``render()`` of a target that resolves a body runs, and an ``HttpResponse`` it returns is the answer.
+#. The intercept is picked.
+#. The access chain of the intercept refuses, and its response is the answer with no fallback to the target.
+   A 403, a 404, or a login redirect arrives carrying ``private, no-store`` and the partial ``Vary``, since the same URL serves the target in full.
+   The project ``handler403`` and ``handler404`` render the 403 and the 404 inside the page view, so ``process_exception`` of a middleware never sees them, and ``intercept_access_denied`` announces each refusal instead, see :doc:`/content/ref/signals`.
+#. A dynamic body answers 400, only when no intercept serves.
+#. A stale asset version answers 409.
+#. The zone renders over the intercept page, and a zone the page does not declare answers 400.
+
+The browser follows a login redirect with the zone headers kept, so the login page answers 400 for a zone it does not declare, and the runtime then navigates to the login page in full.
+
+Zone names are public markup and no secret.
+A requester who passes the target sees a 403 or a login redirect for a real intercept zone and a 400 for an unknown one.
+A ``render()`` that returns a soft-denial string does not stop an intercept, which still serves.
+Deny by raising ``PermissionDenied`` or ``Http404``, or by returning an ``HttpResponse``.
+The intercept declares its own access, and a check reports one that leaves a public target's modal behind the default login, see :doc:`/content/ref/system-checks`.
+:doc:`/content/howto/open-a-page-as-a-modal-over-another` walks the whole setup.
+
 Titles under a layer
 --------------------
 
 Every layer keeps the head underneath it, the title, the description, the canonical link, and the robots meta, and restores them when it closes, whichever way it closes, by accept, dismiss, Back, or reset.
 A ``meta`` patch syncs the head of the page whose envelope carried it.
 
-A title from the layer's own page, carried by the layer body, a zone GET inside the layer, or a mutation fired from it, lasts as long as the layer.
+A title from the layer's own page, carried by the layer body (the ``meta`` patch of an intercept page included, see `Opening another page's zone over the honest URL`_), a zone GET inside the layer, or a mutation fired from it, lasts as long as the layer.
 A title from the host page or a lower layer, carried by a poll of the base page, a lazy zone GET, or a stream the host subscribed, becomes the title the covering layer restores, so the newest title of the page underneath survives the close.
 That title shows at once when the covering layers set no title of their own, and otherwise the layer title stays in the tab until they close.
 With nested layers each one restores the newest title of the layer below it.

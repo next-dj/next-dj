@@ -32,6 +32,16 @@ A submission is authorized by the page its origin names, which means that page's
 The dynamic ``check_permissions`` and ``has_object_permission`` hooks read the user the same way, from application code the dispatcher calls.
 A permission registered in a ``permissions.py`` runs its predicate on the user and the bound row, through ``ObjectPermissionBackend`` in ``AUTHENTICATION_BACKENDS``, see :doc:`/content/topics/permissions`.
 
+Intercepting routes
+-------------------
+
+An intercepting page serves a zone of its target page, and a zone request over the target runs both access chains, the stricter winning.
+A denial of the intercept is the response, with no fallback to the target.
+The form and action path answers a denied intercept with 403 and no redirect.
+An action guard protects a mutation, and the modal needs a rule of its own on the intercept ``page.py``.
+Zone names are public markup, so the rule is the protection and the name is not.
+Under the default login an intercept that declares nothing requires a login even over a public target, and ``page.public()`` on the intercept opens it, see :ref:`topics-access-intercepts`.
+
 Where the framework writes to the session
 -----------------------------------------
 

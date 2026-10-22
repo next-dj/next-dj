@@ -285,6 +285,30 @@ class TestStandaloneVerbs:
             )
         assert exc.value.href == "https://evil.example.com/x"
 
+    @pytest.mark.parametrize(
+        "href",
+        [
+            "javascript:alert(1)",
+            "//evil.example.com/x",
+            "/\\evil.example.com/x",
+            "https://other.example.com/x",
+            "/\r\n/evil.example.com/x",
+            "\r\n//evil.example.com/x",
+        ],
+        ids=[
+            "scheme",
+            "network_path",
+            "backslash",
+            "other_host",
+            "crlf_inside",
+            "crlf",
+        ],
+    )
+    def test_layer_open_refuses_an_href_that_leaves_the_site(self, href: str) -> None:
+        with pytest.raises(CrossSiteHrefError) as exc:
+            Patches(partial_request()).layer_open(href=href, zone="peek")
+        assert exc.value.href == href
+
     def test_toast_default_variant(self) -> None:
         envelope = Patches.versioned("v1").toast("Saved").envelope()
         assert envelope.ops[0].as_dict() == {

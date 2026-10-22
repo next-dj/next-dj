@@ -958,3 +958,65 @@ class TestOpenActions:
 
     def test_the_declared_access_leaves_no_action_unguarded(self) -> None:
         assert "next.W129" not in {message.id for message in run_checks()}
+
+
+class TestProductPeek:
+    """`catalog/[category]/(.)[slug]/` serves the `product-peek` zone."""
+
+    def test_cards_open_the_peek_over_the_honest_url(
+        self, next_client, demo_data
+    ) -> None:
+        body = next_client.get("/catalog/electronics/").content.decode()
+        anchor = find_anchor(body, href="/catalog/electronics/iphone-15/")
+        assert 'data-next-layer="product-peek"' in anchor
+
+    def test_a_plain_get_renders_the_real_page(self, next_client, demo_data) -> None:
+        body = next_client.get("/catalog/electronics/iphone-15/").content.decode()
+        assert "data-product-peek" not in body
+        assert "<h1" in body
+
+    def test_the_zone_get_serves_the_intercept_with_its_title(
+        self, next_client, demo_data
+    ) -> None:
+        response = next_client.get_zones(
+            "/catalog/electronics/iphone-15/", "product-peek"
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph", "meta"]
+        html = envelope.html_for_zone("product-peek")
+        assert "data-product-peek" in html
+        assert "iPhone 15" in html
+        assert "Flagship handset used by routing tests." in html
+        meta = next(op for op in envelope.ops if op["op"] == "meta")
+        assert meta["title"] == "Quick view · iPhone 15 · next.dj catalog"
+        assert meta["robots"] == "noindex"
+
+    def test_the_peek_links_to_the_full_page(self, next_client, lamps) -> None:
+        response = next_client.get_zones("/catalog/lamps/desk/", "product-peek")
+        anchor = find_anchor(
+            envelope_of(response).html_for_zone("product-peek"),
+            text="Open the product page",
+        )
+        assert 'href="/catalog/lamps/desk/"' in anchor
+        assert "data-next-layer" not in anchor
+
+    def test_a_sold_out_product_shows_the_stock_badge(self, next_client, lamps) -> None:
+        response = next_client.get_zones("/catalog/lamps/wall/", "product-peek")
+        html = envelope_of(response).html_for_zone("product-peek")
+        assert "Out of stock" in html
+        assert "In stock" not in html
+
+    def test_a_product_of_another_category_is_a_404(self, next_client, lamps) -> None:
+        response = next_client.get_zones("/catalog/lamps/iphone-15/", "product-peek")
+        assert response.status_code == 404
+
+    def test_the_intercept_is_listed_under_its_target(self) -> None:
+        out = StringIO()
+        call_command("routes", stdout=out)
+        row = next(line for line in out.getvalue().splitlines() if "(.)[slug]" in line)
+        assert "/catalog/<str:category>/<str:slug>/" in row
+        assert row.rstrip().endswith("product-peek")
+
+    def test_the_checks_stay_clean(self) -> None:
+        assert not [m for m in run_checks() if m.id.startswith("next.")]

@@ -1,0 +1,12 @@
+{% zone "link-peek" %}
+<div data-link-peek class="w-full max-w-[28rem] space-y-3">
+  {% component "link_card" %}
+  <div class="grid gap-3 sm:grid-cols-2">
+    {% component "stat_card" label="Persisted clicks" value=link.clicks %}
+    {% component "stat_card" label="Pending clicks" value=pending %}
+  </div>
+  <p class="text-right">
+    <a href="{{ request.path }}" class="text-sm font-medium text-primary hover:underline">Open the link page</a>
+  </p>
+</div>
+{% endzone %}

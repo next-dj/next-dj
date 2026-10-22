@@ -1,0 +1,11 @@
+{% zone "embed-code" %}
+<div data-embed-code class="w-full max-w-[34rem] space-y-3">
+  <h2 class="text-lg font-semibold tracking-tight text-foreground">Embed this poll</h2>
+  <p class="text-sm text-muted-foreground">Paste the snippet into any page. The widget keeps counting live.</p>
+  <textarea readonly rows="3" aria-label="Embed snippet"
+            class="w-full rounded-md border border-input bg-muted/40 p-2 font-mono text-xs">{{ embed_code }}</textarea>
+  <p class="text-right">
+    <a href="{{ request.path }}" class="text-sm font-medium text-primary hover:underline">Preview the widget</a>
+  </p>
+</div>
+{% endzone %}

@@ -12,7 +12,7 @@ This is the example to read first. It is the smallest complete project in the ca
 | `/s/<slug>/` | 302 redirect to the original URL, bumps the click counter. |
 | `/admin/` | Top ten links with an inline edit form and a delete button per row, plus the unflushed click counters. Nested admin layout with a subnav. |
 | `/admin/stats/` | Totals for links, persisted clicks, and pending clicks, plus the live per-action dispatch counters. |
-| `/admin/links/<slug>/` | Link detail, resolved through a custom `DLink[Link]` DI provider. Resets the cached clicks for that slug. |
+| `/admin/links/<slug>/` | Link detail, resolved through a custom `DLink[Link]` DI provider. Resets the cached clicks for that slug. The `View details` link on `/admin/` opens it as a quick look modal over the list. |
 | `/robots.txt` | Served as written from a static `robots.txt`, keeps crawlers off the `/s/` redirects. |
 
 ## How to run
@@ -378,6 +378,21 @@ The file's presence switches `/robots.txt` on, served byte for byte as `text/pla
 
 `NEXT_FRAMEWORK["SITE"]` in [`config/settings.py`](config/settings.py) names `https://short.example` as the origin and pins `INDEXABLE` to `True`. The default `"auto"` follows `DEBUG`, so the dev server would put `noindex` on every page and send `/robots.txt` under `X-Robots-Tag: noindex, nofollow`. The pinned value shows the pages and the headers a deploy serves.
 
+### 15. A quick look as an intercepting route
+
+The `View details` link of a row on `/admin/` carries `data-next-layer="link-peek"`. The click asks for `/admin/links/peeked/` with the zone name, and the address bar keeps that URL while a modal opens over the list. A reload, a shared link and a visit without the attribute render the real link page with its reset button, and Back closes the modal.
+
+The modal is the directory [`admin/(.)links/[slug]`](shortener/pages/admin/%28.%29links/%5Bslug%5D/). The scope of an intercept is the URL trail of the directory that holds it, here `admin`, and `(.)` appends `links/[slug]` to it, so the target is the link page and the brackets spell it exactly. The intercept routes nothing and `uv run python manage.py routes` lists it under its target with the zone it serves:
+
+```
+URL                       Name  File                                            Access  Intercept
+/admin/links/<str:slug>/  -     shortener/pages/admin/(.)links/[slug]/page.py  public  link-peek
+```
+
+The intercept [`page.py`](shortener/pages/admin/%28.%29links/%5Bslug%5D/page.py) declares `page.public()` like every page of this example, resolves the row through `DLink[Link]` from the `slug` of the target URL, and adds the clicks still waiting in the cache. Its metadata titles the tab `Quick look · peeked · next.dj shortener` until the modal closes. The [`template.djx`](shortener/pages/admin/%28.%29links/%5Bslug%5D/template.djx) wraps the `link_card` and two `stat_card` tiles in `{% zone "link-peek" %}` and leaves the reset form out, so the destructive action lives on the full page only.
+
+`TestLinkPeek` pins the server side and [`tests/e2e/test_peek.py`](tests/e2e/test_peek.py) drives the modal in a browser, the URL and title on open and close, Back, Escape, reload and the link to the full page.
+
 ## Gotchas
 
 ### PEP 563 and DI annotations
@@ -402,3 +417,4 @@ Two rules:
 - [next/pages/loaders.py](../../next/pages/loaders.py): layout composition logic.
 - [next/partial/](../../next/partial/): zones, patch envelopes, and the fallback contract used in section 6.
 - [next/seo/](../../next/seo/): the robots view that serves the static file of section 14.
+- [next/intercept.py](../../next/intercept.py) and [next/partial/intercept.py](../../next/partial/intercept.py): the intercept table and the zone selection of section 15.

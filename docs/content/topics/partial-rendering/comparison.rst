@@ -144,6 +144,11 @@ Reach for Turbo when accelerating whole-application navigation is the goal rathe
 next.dj intercepts only elements carrying a ``data-next-*`` attribute and ships no client router, so it never turns every link in the document into a partial navigation, which is exactly what Turbo Drive is for.
 Turbo is also the established choice for a project that already follows Hotwire idioms or wraps its web views in a native shell.
 
+Next.js offers intercepting routes that a client router applies to every matching link.
+In next.dj an intercepting route is opt-in per link.
+It takes a ``data-next-layer`` link plus an intercept directory, and the zone name on the link selects the page that renders in the modal, see :ref:`topics-file-router-intercepts`.
+The opt-in stays a ``data-next-*`` attribute, the address bar shows the honest URL, and there is no client router and no URL masking.
+
 Django Unicorn
 ~~~~~~~~~~~~~~
 

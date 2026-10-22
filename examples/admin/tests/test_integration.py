@@ -2,11 +2,16 @@ import re
 import warnings
 from dataclasses import dataclass
 from io import StringIO
+from pathlib import Path
 
 import pytest
 from admin_audit.models import AdminActivityLog
+from django.conf import settings
 from django.contrib import admin
+from django.contrib.admin.models import CHANGE, LogEntry
 from django.contrib.auth.models import Group, Permission
+from django.contrib.contenttypes.models import ContentType
+from django.contrib.staticfiles import finders
 from django.core.checks import run_checks
 from django.core.management import call_command
 from django.db import connection
@@ -21,6 +26,7 @@ from next.testing import (
     NextClient,
     assert_metadata,
     envelope_of,
+    find_anchor,
     find_form,
     form_action,
     form_fields,
@@ -31,6 +37,8 @@ from next.urls import page_reverse
 
 pytestmark = pytest.mark.django_db
 
+EXAMPLE_DIR = Path(__file__).resolve().parent.parent
+STATIC_URL = settings.STATIC_URL
 ELEMENT_ID_RE = re.compile(r'\sid="([^"]+)"')
 CRUMB_NAV_RE = re.compile(r'<nav aria-label="Breadcrumb"[^>]*>(.*?)</nav>', re.DOTALL)
 CRUMB_LINK_RE = re.compile(r'<a href="([^"]*)"( aria-current="page")?[^>]*>([^<]*)</a>')
@@ -277,13 +285,16 @@ MANUSCRIPT_ACCESS = (
 
 
 def permission_rows(*args: str) -> dict[str, tuple[str, str, str]]:
-    """Return the rows `manage.py permissions` prints, keyed by URL or action name."""
+    """Return the rows `manage.py permissions` prints, keyed by URL or action name.
+
+    An intercept row keeps its zones in the key, since it shares its target's URL.
+    """
     out = StringIO()
     call_command("permissions", *args, stdout=out)
     _header, *lines = out.getvalue().splitlines()
     rows = (re.split(r"\s{2,}", line.strip()) for line in lines)
     return {
-        name.partition(" ")[0]: (kind, access, sources)
+        name if kind == "intercept" else name.partition(" ")[0]: (kind, access, sources)
         for kind, name, access, sources in rows
     }
 
@@ -344,7 +355,7 @@ class TestTreeAccess:
         assert rows["/admin/login/"] == (
             "page",
             "public",
-            "public (shadcn_admin/pages/login/page.py)",
+            "public (shadcn_admin/pages/(auth)/page.py)",
         )
         assert rows["admin:login"][1] == "public"
         assert rows["admin:logout"][1:] == ("login (default)", "LOGIN_REQUIRED")
@@ -1705,18 +1716,28 @@ class TestActivityLog:
         assert "library.tag" in body
 
 
-ROUTE_COLUMNS = ("url", "name", "file", "access")
+ROUTE_COLUMNS = ("url", "name", "file", "access", "intercept")
 
 
-def route_rows() -> dict[str, dict[str, str]]:
-    """Return the rows `manage.py routes` prints, keyed by URL."""
+def route_table() -> list[dict[str, str]]:
+    """Return every row `manage.py routes` prints, a routed row without `intercept`."""
     out = StringIO()
     call_command("routes", stdout=out)
     _header, *lines = out.getvalue().splitlines()
-    rows = (
-        dict(zip(ROUTE_COLUMNS, line.split(maxsplit=3), strict=True)) for line in lines
-    )
-    return {row["url"]: row for row in rows}
+    return [
+        dict(zip(ROUTE_COLUMNS, re.split(r"\s{2,}", line.strip()), strict=False))
+        for line in lines
+    ]
+
+
+def route_rows() -> dict[str, dict[str, str]]:
+    """Return the routed rows `manage.py routes` prints, keyed by URL."""
+    return {row["url"]: row for row in route_table() if "intercept" not in row}
+
+
+def intercept_rows() -> dict[str, dict[str, str]]:
+    """Return the intercept rows `manage.py routes` prints, keyed by their zones."""
+    return {row["intercept"]: row for row in route_table() if "intercept" in row}
 
 
 class TestAppPageTrees:
@@ -1759,7 +1780,7 @@ class TestAppPageTrees:
             "url": self.HISTORY_URL,
             "name": f"next:{self.HISTORY_NAME}",
             "file": (
-                "shadcn_admin/pages/[str:app_label]/[str:model_name]/[int:pk]/"
+                "shadcn_admin/pages/(app)/[str:app_label]/[str:model_name]/[int:pk]/"
                 "history/page.py"
             ),
             "access": "login, perm shadcn_admin.use_admin",
@@ -1769,7 +1790,7 @@ class TestAppPageTrees:
         rows = route_rows()
         files = {row["file"] for row in rows.values()}
         assert {"admin_audit/pages/page.py", "library/pages/page.py"}.isdisjoint(files)
-        assert rows["/admin/"]["file"] == "shadcn_admin/pages/page.py"
+        assert rows["/admin/"]["file"] == "shadcn_admin/pages/(app)/page.py"
         assert admin_client.get("/admin/").status_code == 200
 
     def test_the_admin_tree_holds_the_auth_pages(self):
@@ -1779,7 +1800,9 @@ class TestAppPageTrees:
         ]
         assert len(admin_rows) == 8
         assert rows["/admin/"]["name"] == "next:page_"
-        assert rows["/admin/login/"]["file"] == "shadcn_admin/pages/login/page.py"
+        assert (
+            rows["/admin/login/"]["file"] == "shadcn_admin/pages/(auth)/login/page.py"
+        )
         assert rows["/admin/logout/"]["name"] == "next:page_logout"
 
     @pytest.mark.parametrize(
@@ -1793,10 +1816,43 @@ class TestAppPageTrees:
         assert body.count(f'action="{logout_url}"') == 1
         assert body.count(">Library<") == 1
 
-    def test_the_auth_pages_keep_the_centered_chrome(self, next_client):
-        body = next_client.get("/admin/login/").content.decode()
+    @pytest.mark.parametrize("path", ["/admin/login/", "/admin/logout/"])
+    def test_the_auth_pages_keep_the_centered_chrome(self, next_client, path):
+        body = next_client.get(path).content.decode()
+        assert body.count("<!DOCTYPE html>") == 1
         assert "<aside" not in body
+        assert "<header" not in body
+        assert "Breadcrumb" not in body
+        assert "Sign out" not in body
         assert body.count("<main") == 1
+        assert (
+            'class="flex min-h-screen items-center justify-center px-4 py-12"' in body
+        )
+
+    def test_the_dashboard_keeps_the_sidebar_shell(self, admin_client):
+        body = admin_client.get("/admin/").content.decode()
+        assert body.count("<aside") == 1
+        assert body.count("<main") == 1
+
+    def test_no_source_of_the_example_reads_the_removed_auth_flag(self):
+        flag = "is_auth_page"
+        sources = [
+            path
+            for pattern in ("*.djx", "*.py")
+            for root in (EXAMPLE_DIR / "chrome", EXAMPLE_DIR / "shadcn_admin")
+            for path in root.rglob(pattern)
+        ]
+        assert sources
+        assert [p for p in sources if flag in p.read_text()] == []
+
+    def test_the_login_page_links_the_auth_stylesheet_from_the_group(self, next_client):
+        body = next_client.get("/admin/login/").content.decode()
+        (href,) = re.findall(r'href="([^"]*\(auth\)/layout\.css)[^"]*"', body)
+        assert href == STATIC_URL + "next/shadcn_admin/pages/(auth)/layout.css"
+        assert finders.find(href.removeprefix(STATIC_URL)).endswith("(auth)/layout.css")
+
+    def test_the_dashboard_does_not_load_the_auth_stylesheet(self, admin_client):
+        assert "(auth)" not in admin_client.get("/admin/").content.decode()
 
 
 class TestBreadcrumbs:
@@ -2440,3 +2496,359 @@ class TestObjectPermissions:
     def test_the_permission_checks_find_nothing(self, db):
         found = {message.id for message in run_checks()}
         assert found.isdisjoint(PERMISSION_CHECKS)
+
+
+QUICK_EDIT = "quick-edit"
+HISTORY_PEEK = "history-peek"
+MANUSCRIPT_PEEK = "manuscript-peek"
+CHANGELIST = "changelist"
+INTERCEPT_CHECKS = frozenset(
+    [f"next.E{number}" for number in range(169, 177)]
+    + [f"next.W{number}" for number in range(136, 141)]
+)
+REQUIRED = "This field is required."
+
+
+def change_url(book: Book) -> str:
+    return f"/admin/library/book/{book.pk}/change/"
+
+
+def history_url(book: Book) -> str:
+    return f"/admin/library/book/{book.pk}/history/"
+
+
+def meta_op(response) -> dict:
+    (op,) = [op for op in envelope_of(response).ops if op["op"] == "meta"]
+    return op
+
+
+def quick_save(client: NextClient, book: Book, **fields: str):
+    return client.post_action(
+        "admin:change",
+        _book_payload(book, **fields),
+        origin=change_url(book),
+        partial=True,
+        zones=QUICK_EDIT,
+    )
+
+
+def log_changes(user, book: Book, count: int) -> None:
+    content_type = ContentType.objects.get_for_model(Book)
+    for number in range(1, count + 1):
+        LogEntry.objects.create(
+            user=user,
+            content_type=content_type,
+            object_id=str(book.pk),
+            object_repr=str(book),
+            action_flag=CHANGE,
+            change_message=f"Revision {number}",
+        )
+
+
+class TestInterceptChecks:
+    def test_the_intercept_checks_find_nothing(self, db):
+        found = {message.id for message in run_checks()}
+        assert found.isdisjoint(INTERCEPT_CHECKS)
+
+    def test_the_route_map_lists_each_intercept_after_its_target(self):
+        rows = intercept_rows()
+        pages = "shadcn_admin/pages/(app)/[str:app_label]/[str:model_name]"
+        admin_access = "login, perm shadcn_admin.use_admin"
+        assert rows[QUICK_EDIT] == {
+            "url": "/admin/<str:app_label>/<str:model_name>/<int:pk>/change/",
+            "name": "-",
+            "file": f"{pages}/(.)[int:pk]/change/page.py",
+            "access": admin_access,
+            "intercept": QUICK_EDIT,
+        }
+        assert rows[HISTORY_PEEK]["file"] == (
+            f"{pages}/[int:pk]/change/(..)history/page.py"
+        )
+        assert rows[HISTORY_PEEK]["url"] == (
+            "/admin/<str:app_label>/<str:model_name>/<int:pk>/history/"
+        )
+        assert rows[MANUSCRIPT_PEEK]["access"] == (
+            f"{admin_access}, perm library.view_book on library.Book"
+        )
+        urls = [row["url"] for row in route_table()]
+        target = urls.index(rows[QUICK_EDIT]["url"])
+        assert urls[target + 1] == urls[target]
+
+
+class TestQuickEdit:
+    """`(.)[int:pk]/change/` serves the change form as a modal over the changelist."""
+
+    def test_each_row_offers_the_quick_editor_beside_the_plain_link(
+        self, admin_client, make_book
+    ):
+        book = make_book("Dracula")
+        body = admin_client.get("/admin/library/book/").content.decode()
+        quick = find_anchor(body, href=change_url(book), text="Quick edit")
+        assert f'data-next-layer="{QUICK_EDIT}"' in quick
+        assert f'data-next-accepted="{CHANGELIST}"' in quick
+        plain = find_anchor(body, href=change_url(book), text="Dracula")
+        assert "data-next-layer" not in plain
+        assert f'data-next-key="{book.pk}"' in body
+
+    def test_the_changelist_rows_render_as_their_own_zone(
+        self, admin_client, make_book
+    ):
+        make_book("Dracula")
+        r = admin_client.get_zones("/admin/library/book/?q=Drac", CHANGELIST)
+        assert r.status_code == 200
+        assert "Dracula" in envelope_of(r).html_for_zone(CHANGELIST)
+
+    def test_a_zone_request_serves_the_quick_editor(self, admin_client, make_book):
+        book = make_book("Dracula")
+        r = admin_client.get_zones(change_url(book), QUICK_EDIT)
+        assert r.status_code == 200
+        assert envelope_of(r).op_verbs() == ["morph", "meta"]
+        html = envelope_of(r).html_for_zone(QUICK_EDIT)
+        form = action_form(admin_client, html, "admin:change")
+        assert f'data-next-target="{QUICK_EDIT}"' in form
+        assert hidden_fields(form)["_next_form_origin"] == change_url(book)
+        assert 'value="Dracula"' in form
+        assert "Save and continue editing" not in html
+        assert "Add chapter" not in html
+        assert f'data-next-layer="{HISTORY_PEEK}"' in html
+
+    def test_the_quick_editor_titles_the_tab_after_the_row(
+        self, admin_client, make_book
+    ):
+        r = admin_client.get_zones(change_url(make_book("Dracula")), QUICK_EDIT)
+        assert meta_op(r) == {
+            "op": "meta",
+            "title": "Quick edit · Dracula · next.dj admin",
+            "description": None,
+            "canonical": None,
+            "robots": "noindex, nofollow",
+        }
+
+    def test_the_quick_editor_is_never_cached(self, admin_client, book):
+        r = admin_client.get_zones(change_url(book), QUICK_EDIT)
+        assert r["Cache-Control"] == "private, no-store"
+        assert "X-Next-Zone" in r["Vary"]
+
+    def test_a_plain_visit_renders_the_real_change_page(self, admin_client, book):
+        r = admin_client.get(change_url(book))
+        body = r.content.decode()
+        assert 'data-next-zone="record"' in body
+        assert f'data-next-zone="{QUICK_EDIT}"' not in body
+        assert "Save and continue editing" in body
+        assert "Add chapter" in body
+        assert_metadata(r, title="Books · next.dj admin")
+
+    def test_the_record_zone_stays_the_change_page_own(self, admin_client, book):
+        r = admin_client.get_zones(change_url(book), "record")
+        assert envelope_of(r).op_verbs() == ["morph"]
+        form = action_form(
+            admin_client, envelope_of(r).html_for_zone("record"), "admin:change"
+        )
+        assert 'data-next-target="record"' in form
+
+    def test_an_invalid_save_rerenders_the_quick_editor(self, admin_client, make_book):
+        book = make_book("Dracula")
+        r = quick_save(admin_client, book, title="")
+        assert r.status_code == 200
+        assert r["X-Next-Form"] == "invalid"
+        assert envelope_of(r).zone_targets() == [QUICK_EDIT]
+        html = envelope_of(r).html_for_zone(QUICK_EDIT)
+        assert REQUIRED in html
+        assert "Quick edit" in html
+        book.refresh_from_db()
+        assert book.title == "Dracula"
+
+    def test_a_valid_save_closes_the_editor_as_accepted(self, admin_client, make_book):
+        book = make_book("Dracula")
+        r = quick_save(admin_client, book, title="Dracula, revised")
+        envelope = envelope_of(r)
+        assert envelope.op_verbs() == ["layer.close", "toast"]
+        assert envelope.ops[0]["result"] == {"pk": book.pk}
+        assert envelope.toasts()[0]["text"] == (
+            "The book Dracula, revised was updated successfully."
+        )
+        book.refresh_from_db()
+        assert book.title == "Dracula, revised"
+        later = admin_client.get("/admin/library/book/").content.decode()
+        assert "was updated successfully" not in later
+
+    def test_a_save_without_the_runtime_still_redirects(self, admin_client, book):
+        r = admin_client.post_action(
+            "admin:change", _book_payload(book, title="Plain"), origin=change_url(book)
+        )
+        assert r.status_code == 302
+        assert r["Location"] == "/admin/library/book/"
+
+    def test_the_editor_reads_a_published_book_without_save(
+        self, editor_client, make_book
+    ):
+        published = make_book("Dracula", status=Book.PUBLISHED)
+        r = editor_client.get_zones(change_url(published), QUICK_EDIT)
+        html = envelope_of(r).html_for_zone(QUICK_EDIT)
+        assert "data-read-only" in html
+        assert ">Save<" not in html
+
+    def test_the_editor_cannot_save_a_published_book(self, editor_client, make_book):
+        published = make_book("Dracula", status=Book.PUBLISHED)
+        assert quick_save(editor_client, published, title="X").status_code == 403
+        published.refresh_from_db()
+        assert published.title == "Dracula"
+
+    def test_an_anonymous_zone_request_redirects_to_the_login(self, next_client, book):
+        r = next_client.get_zones(change_url(book), QUICK_EDIT)
+        assert r.status_code == 302
+        assert r["Location"] == f"/admin/login/?next={change_url(book)}"
+
+
+class TestHistoryPeek:
+    """`[int:pk]/change/(..)history/` peeks at the history from the change page."""
+
+    def test_the_change_page_links_the_peek(self, admin_client, book):
+        body = admin_client.get(change_url(book)).content.decode()
+        link = find_anchor(body, href=history_url(book), text="History")
+        assert f'data-next-layer="{HISTORY_PEEK}"' in link
+
+    def test_the_add_page_offers_no_history(self, admin_client):
+        body = admin_client.get("/admin/library/book/add/").content.decode()
+        assert HISTORY_PEEK not in body
+
+    def test_a_zone_request_serves_the_latest_entries(
+        self, admin_client, admin_user, make_book
+    ):
+        book = make_book("Dracula")
+        log_changes(admin_user, book, 7)
+        r = admin_client.get_zones(history_url(book), HISTORY_PEEK)
+        assert r.status_code == 200
+        html = envelope_of(r).html_for_zone(HISTORY_PEEK)
+        assert "Revision 7" in html
+        assert "Revision 3" in html
+        assert "Revision 2" not in html
+        assert "2 older entries not shown" in html
+        assert find_anchor(html, href=history_url(book), text="Open the full history")
+        assert meta_op(r)["title"] == "History · Dracula · next.dj admin"
+
+    def test_one_hidden_entry_reads_in_the_singular(
+        self, admin_client, admin_user, book
+    ):
+        log_changes(admin_user, book, 6)
+        r = admin_client.get_zones(history_url(book), HISTORY_PEEK)
+        assert "1 older entry not shown" in envelope_of(r).html_for_zone(HISTORY_PEEK)
+
+    def test_an_empty_history_says_so(self, admin_client, book):
+        r = admin_client.get_zones(history_url(book), HISTORY_PEEK)
+        html = envelope_of(r).html_for_zone(HISTORY_PEEK)
+        assert "No history yet" in html
+        assert "not shown" not in html
+
+    def test_a_plain_visit_renders_the_full_history(
+        self, admin_client, admin_user, book
+    ):
+        log_changes(admin_user, book, 7)
+        body = admin_client.get(history_url(book)).content.decode()
+        assert "Revision 1" in body
+        assert f'data-next-zone="{HISTORY_PEEK}"' not in body
+
+    def test_a_quick_save_shows_up_in_the_peek(self, admin_client, make_book):
+        book = make_book("Dracula")
+        quick_save(admin_client, book, title="Dracula, revised")
+        r = admin_client.get_zones(history_url(book), HISTORY_PEEK)
+        assert "Changed via shadcn-admin form" in envelope_of(r).html_for_zone(
+            HISTORY_PEEK
+        )
+
+    def test_a_hidden_row_is_not_found(self, admin_client):
+        r = admin_client.get_zones("/admin/library/book/999/history/", HISTORY_PEEK)
+        assert r.status_code == 404
+
+
+def peek(client: NextClient, book: Book):
+    return client.get_zones(manuscript_url(book), MANUSCRIPT_PEEK)
+
+
+class TestManuscriptPeek:
+    """`(.)manuscript/` asks `view_book` and its target asks `change_book`, both run."""
+
+    def test_the_outline_links_the_peek_beside_the_manuscript(
+        self, editor_client, editor, make_book
+    ):
+        draft = make_book(status=Book.DRAFT, editor=editor)
+        body = editor_client.get(outline_url(draft)).content.decode()
+        link = find_anchor(
+            body, href=manuscript_url(draft), text="Peek at the manuscript"
+        )
+        assert f'data-next-layer="{MANUSCRIPT_PEEK}"' in link
+
+    def test_the_editor_peeks_at_an_own_draft(
+        self, editor_client, editor, make_book, make_chapter
+    ):
+        draft = make_book("Mathilda", status=Book.DRAFT, editor=editor, summary="Held")
+        make_chapter(draft, 1, "Intro", 100)
+        make_chapter(draft, 2, "Rising", 250)
+        r = peek(editor_client, draft)
+        assert r.status_code == 200
+        html = envelope_of(r).html_for_zone(MANUSCRIPT_PEEK)
+        assert "data-peek-chapters>2<" in html
+        assert "data-peek-words>350<" in html
+        assert "2. Rising" in html
+        assert "Held" in html
+        assert APPEND not in html
+        assert meta_op(r)["title"] == "Manuscript peek · Mathilda · next.dj admin"
+
+    def test_an_empty_draft_peeks_as_empty(self, editor_client, editor, make_book):
+        r = peek(editor_client, make_book(status=Book.DRAFT, editor=editor))
+        html = envelope_of(r).html_for_zone(MANUSCRIPT_PEEK)
+        assert "No chapters yet." in html
+        assert "data-peek-words>0<" in html
+
+    @pytest.mark.parametrize(
+        ("status", "owner", "page_status"),
+        [
+            (Book.PUBLISHED, "editor", 403),
+            (Book.DRAFT, None, 200),
+            (Book.DRAFT, "copyeditor", 403),
+        ],
+        ids=["target-refuses", "intercept-refuses", "both-refuse"],
+    )
+    def test_each_chain_refuses_on_its_own(
+        self,
+        request,
+        editor_client,
+        make_book,
+        make_chapter,
+        status,
+        owner,
+        page_status,
+    ):
+        editor = owner and request.getfixturevalue(owner)
+        target = make_book(status=status, editor=editor)
+        make_chapter(target, title="Secret")
+        r = peek(editor_client, target)
+        assert r.status_code == 403
+        assert b"Secret" not in r.content
+        assert editor_client.get(manuscript_url(target)).status_code == page_status
+
+    def test_an_intercept_refusal_is_never_cached(self, editor_client, make_book):
+        r = peek(editor_client, make_book(status=Book.DRAFT))
+        assert r.status_code == 403
+        assert r["Cache-Control"] == "private, no-store"
+        assert "X-Next-Zone" in r["Vary"]
+
+    def test_the_superuser_peeks_at_a_published_book(
+        self, admin_client, copyeditor, make_book
+    ):
+        published = make_book("Dracula", status=Book.PUBLISHED, editor=copyeditor)
+        assert peek(admin_client, published).status_code == 200
+
+    def test_an_anonymous_peek_redirects_to_the_login(self, next_client, book):
+        r = peek(next_client, book)
+        assert r.status_code == 302
+        assert r["Location"] == f"/admin/login/?next={manuscript_url(book)}"
+
+    def test_the_permission_table_lists_the_peek_after_its_page(self):
+        rows = permission_rows("/admin/library/book/1/manuscript/")
+        endpoint = f"/admin/library/book/<int:book>/manuscript/ ({MANUSCRIPT_PEEK})"
+        assert rows[endpoint] == (
+            "intercept",
+            "login, perm shadcn_admin.use_admin, perm library.view_book on library.Book",
+            f"{LIBRARY_RULE}, library/pages/library/book/[int:book]/(.)manuscript/page.py",
+        )

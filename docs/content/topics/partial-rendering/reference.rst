@@ -112,6 +112,7 @@ Pass ``request`` whenever one exists, so the asset URLs of the envelope stay sco
    * - ``layer.open``
      - ``layer_open()``
      - Open a layer from the server, optionally seeding a zone to fill later or an href whose zone loads into the modal.
+       The GET of the href selects an intercepting route the same way a ``data-next-layer`` link does, see :doc:`layers`.
        See :ref:`partial-server-layers`.
      - none
    * - ``layer.close``
@@ -134,6 +135,7 @@ Pass ``request`` whenever one exists, so the asset URLs of the envelope stay sco
        The operation carries ``title``, ``description``, ``canonical``, and ``robots``, a ``null`` removing the tag and an absent key leaving it alone.
        No markup travels, see :doc:`/content/topics/seo/metadata`.
        An inherited metadata callable of an ancestor runs as in the render, after the guard of the origin page.
+       A zone GET served by an intercept page carries one ``meta`` patch with the head of that page.
        The tags belong to the page whose envelope carried them, and a ``meta`` for a URL that is neither the page nor an open layer is dropped, see :doc:`layers`.
      - none
 
@@ -236,6 +238,7 @@ A target off that origin is refused before any request leaves, with a ``partial:
    * - ``X-Next-Zone``
      - Zone GET, poll, refresh, filter, and a zoned form submission
      - The zones to render, comma-joined for a batch.
+       On a GET or a HEAD the zone names also select an intercepting route of the page, see :ref:`topics-file-router-intercepts`.
    * - ``X-Next-Validate``
      - Inline validation
      - The field names to validate without saving.

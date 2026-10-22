@@ -1,12 +1,20 @@
 import base64
 import re
+from io import StringIO
 from unittest.mock import patch
 
 import pytest
+from django.core.management import call_command
 from django.urls import reverse
 from kanban.models import Board, BoardQuerySet, Card, Column
 
-from next.testing import NextClient, assert_metadata, init_payload
+from next.testing import (
+    NextClient,
+    assert_metadata,
+    envelope_of,
+    find_anchor,
+    init_payload,
+)
 
 
 pytestmark = pytest.mark.django_db
@@ -592,3 +600,66 @@ class TestPageMetadata:
         assert_metadata(
             _settings_html(next_client, board), title="Roadmap · next.dj Kanban"
         )
+
+
+class TestBoardPeek:
+    """`(.)board/[int:board]/` serves the `board-peek` zone."""
+
+    def test_the_index_offers_the_peek_beside_the_plain_link(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        body = next_client.get("/").content.decode()
+        anchor = find_anchor(body, text="Peek at columns")
+        assert f'href="/board/{board.pk}/"' in anchor
+        assert 'data-next-layer="board-peek"' in anchor
+        assert body.count(f'href="/board/{board.pk}/"') == 2
+
+    def test_a_plain_get_renders_the_real_board(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        body = _board_html(next_client, board)
+        assert "data-board-peek" not in body
+        assert 'id="kanban-board"' in body
+
+    def test_the_zone_get_serves_the_summary_with_its_title(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        response = next_client.get_zones(f"/board/{board.pk}/", "board-peek")
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph", "meta"]
+        html = envelope.html_for_zone("board-peek")
+        assert "data-board-peek" in html
+        assert f">{board.title}</h2>" in html
+        assert html.count("data-peek-lane") == 3
+        assert "2 cards" in html
+        assert "1 card of 2" in html
+        meta = next(op for op in envelope.ops if op["op"] == "meta")
+        assert meta["title"] == "Peek · Roadmap · next.dj Kanban"
+
+    def test_a_board_without_columns_says_so(self, next_client: NextClient) -> None:
+        empty = Board.objects.create(title="Empty", slug="empty")
+        response = next_client.get_zones(f"/board/{empty.pk}/", "board-peek")
+        html = envelope_of(response).html_for_zone("board-peek")
+        assert "No columns yet." in html
+
+    def test_the_peek_links_to_the_full_board(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        response = next_client.get_zones(f"/board/{board.pk}/", "board-peek")
+        anchor = find_anchor(
+            envelope_of(response).html_for_zone("board-peek"), text="Open the board"
+        )
+        assert f'href="/board/{board.pk}/"' in anchor
+        assert "data-next-layer" not in anchor
+
+    def test_an_unknown_board_is_a_404(self, next_client: NextClient) -> None:
+        response = next_client.get_zones("/board/9999/", "board-peek")
+        assert response.status_code == 404
+
+    def test_the_intercept_is_listed_under_its_target(self) -> None:
+        out = StringIO()
+        call_command("routes", stdout=out)
+        row = next(line for line in out.getvalue().splitlines() if "(.)board" in line)
+        assert "/board/<int:board>/" in row
+        assert row.rstrip().endswith("board-peek")

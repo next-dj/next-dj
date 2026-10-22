@@ -155,6 +155,25 @@ class TestBenchMetadataChain:
         resolve_page_metadata(page, leaf)
         benchmark(resolve_page_metadata, page, leaf)
 
+    @pytest.mark.parametrize("warm", [False, True], ids=["cold", "warm"])
+    @pytest.mark.benchmark(group="pages.metadata")
+    def test_under_route_groups(self, tmp_path: Path, benchmark, *, warm: bool) -> None:
+        """The chain of a page below nested groups, whose trail yields no crumb."""
+        page = Page()
+        specs = [("(site)", _ANCESTOR % (0, 0)), ("blog", _ANCESTOR % (1, 1))]
+        specs += [("(deep)", _ANCESTOR % (2, 2)), ("leaf", _LEAF)]
+        leaf = write_page_chain(tmp_path, specs)[-1]
+        assert resolve_page_metadata(page, leaf).title == "Leaf | S2"
+        if warm:
+            benchmark(resolve_page_metadata, page, leaf)
+            return
+
+        def run() -> None:
+            reset_metadata_registry()
+            resolve_page_metadata(page, leaf)
+
+        benchmark(run)
+
     @pytest.mark.benchmark(group="pages.metadata")
     def test_rotation(self, tmp_path: Path, benchmark) -> None:
         page = Page()
@@ -208,6 +227,17 @@ class TestBenchMetadataRender:
         request = RequestFactory().get("/blog/hello/")
         with routed(root, **WITH_BASE):
             request.resolver_match = resolve("/blog/hello/")
+            benchmark(_render, _CRUMBS, request)
+
+    @pytest.mark.benchmark(group="pages.metadata")
+    def test_render_crumbs_under_a_group(self, tmp_path: Path, benchmark) -> None:
+        root = tmp_path / "pages"
+        for trail in ("", "(site)/blog", "(site)/blog/[slug]"):
+            write_page(root, trail)
+        request = RequestFactory().get("/blog/hello/")
+        with routed(root, **WITH_BASE):
+            request.resolver_match = resolve("/blog/hello/")
+            assert '"item": "https://acme.example/blog/"' in _render(_CRUMBS, request)
             benchmark(_render, _CRUMBS, request)
 
     @pytest.mark.parametrize("matched", [True, False], ids=["page_view", "unmatched"])

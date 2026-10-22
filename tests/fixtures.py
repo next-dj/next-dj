@@ -19,10 +19,12 @@ from next.conf import NextFrameworkSettings, next_framework_settings
 from next.deps.objects import forget_object_rows
 from next.diagnostics import reset_failure_logs, watch_degraded
 from next.forms.wizard import SessionFormWizardBackend, wizard_backend_manager
+from next.intercept import intercepts
 from next.pages import Page
 from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
 from next.pages.metadata.hreflang import forget_translated_urls
 from next.pages.registry import PageContextRegistry
+from next.permissions.access import _listed_middleware, login_by_default
 from next.permissions.manager import PermissionManager
 from next.ports import partial_shaper_slot
 from next.server import NextStatReloader
@@ -104,6 +106,24 @@ def _reset_check_caches() -> Generator[None, None, None]:
     reset_check_caches()
     yield
     reset_check_caches()
+
+
+@pytest.fixture(autouse=True)
+def _reset_access_memos() -> Generator[None, None, None]:
+    """Drop the login-default memos, since tests write MIDDLEWARE without a signal."""
+    login_by_default.cache_clear()
+    _listed_middleware.cache_clear()
+    yield
+    login_by_default.cache_clear()
+    _listed_middleware.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_intercepts() -> Generator[None, None, None]:
+    """Empty the intercept table around each test, since a router walk fills it."""
+    intercepts.clear()
+    yield
+    intercepts.clear()
 
 
 @pytest.fixture(autouse=True)

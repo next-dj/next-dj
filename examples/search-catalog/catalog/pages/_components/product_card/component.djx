@@ -1,6 +1,6 @@
 <article data-product-card data-product-slug="{{ product.slug }}"
          class="rounded-md border border-border bg-card p-4 shadow-sm hover:shadow-md transition-shadow">
-  <a href="{{ detail_url }}" class="block">
+  <a href="{{ detail_url }}" data-next-layer="product-peek" class="block">
     <h3 class="text-base font-semibold text-foreground">{{ product.name }}</h3>
     <p class="text-sm text-muted-foreground">{{ product.brand }}</p>
     <div class="mt-3 flex items-center justify-between">

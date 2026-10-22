@@ -513,6 +513,88 @@ class TestComponentTag:
             )
         assert result == "<h1>a b</h1>"
 
+    @pytest.mark.parametrize(
+        ("call_site", "body", "context_extra", "expected"),
+        [
+            ('title="Rows ({{ n }})"', "{{ title }}", {"n": 3}, "Rows (3)"),
+            ('title="{{ a }}-{{ b }}"', "{{ title }}", {"a": 1, "b": 2}, "1-2"),
+            ('title="{{ name|upper }}!"', "{{ title }}", {"name": "ada"}, "ADA!"),
+            ('title="  {{  n  }}  "', "{{ title }}", {"n": 3}, "  3  "),
+            ('title="{{ n }}"', "{{ title|add:1 }}", {"n": 5}, "6"),
+            ('title="{{ items }}"', "{{ title|length }}", {"items": [1, 2, 3]}, "3"),
+            ('title="x {{ gone }} y"', "{{ title }}", {}, "x  y"),
+            ('title="{{ raw }}"', "{{ title }}", {"raw": "<b>"}, "&lt;b&gt;"),
+            ('title="a {{ raw }}"', "{{ title }}", {"raw": "<b>"}, "a &lt;b&gt;"),
+            ('title="{{ n }}"|upper', "{{ title }}", {"n": 3}, "{{ N }}"),
+            ('title="no braces"', "{{ title }}", {}, "no braces"),
+        ],
+        ids=[
+            "text-around",
+            "two-expressions",
+            "filter-inside",
+            "whitespace-kept",
+            "lone-expression-keeps-type",
+            "lone-expression-keeps-list",
+            "missing-variable-is-empty",
+            "lone-value-escapes-once",
+            "mixed-value-escapes-once",
+            "filter-on-the-literal-keeps-django-meaning",
+            "plain-literal-untouched",
+        ],
+    )
+    def test_component_prop_interpolates_double_braces(
+        self,
+        tmp_path: Path,
+        call_site: str,
+        body: str,
+        context_extra: dict[str, object],
+        expected: str,
+    ) -> None:
+        """A string prop resolves each ``{{ expr }}`` against the calling context."""
+        (tmp_path / "card.djx").write_text(body)
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        ctx = {"current_template_path": str(tmp_path / "page.djx"), **context_extra}
+        with patch.object(components_manager, "get_component", return_value=info):
+            t = Template(
+                "{% load components %}" + '{% component "card" ' + call_site + " %}"
+            )
+            result = t.render(Context(ctx))
+        assert result == expected
+
+    def test_component_prop_interpolates_in_the_block_form(
+        self, tmp_path: Path
+    ) -> None:
+        """The block form reads the same interpolation in its props."""
+        (tmp_path / "card.djx").write_text("{{ title }}|{{ children }}")
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        ctx = {"current_template_path": str(tmp_path / "page.djx"), "n": 2}
+        with patch.object(components_manager, "get_component", return_value=info):
+            t = Template(
+                "{% load components %}"
+                '{% #component "card" title="Rows ({{ n }})" %}body{% /component %}'
+            )
+            result = t.render(Context(ctx))
+        assert result == "Rows (2)|body"
+
+    def test_component_prop_with_an_empty_expression_raises(self) -> None:
+        """An empty ``{{ }}`` in a prop is a template syntax error at compile time."""
+        with pytest.raises(TemplateSyntaxError, match="Empty"):
+            Template('{% load components %}{% component "card" title="a {{  }}" %}')
+
     def test_component_tag_resolves_variable_prop_from_context(
         self, tmp_path: Path
     ) -> None:

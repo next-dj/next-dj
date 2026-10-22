@@ -6,6 +6,7 @@
         {% form "admin:discard" class="discard-in-layer" %}
           {% component "button" type="submit" text="Discard" variant="ghost" %}
         {% endform %}
+        <a href="{{ form_state.history_url }}" data-next-layer="history-peek" class="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground">History</a>
         {% for label, url in form_state.object_links %}
           {% component "button" href=url text=label variant="outline" %}
         {% endfor %}
@@ -18,7 +19,7 @@
     {% endif %}
   {% /component %}
 
-  {% form form_state.action_name %}
+  {% form form_state.action_name zone=form_state.zone %}
     <div class="space-y-4">
       {% if form_state.form_spec.non_field_errors %}
         {% #component "alert" variant="destructive" %}

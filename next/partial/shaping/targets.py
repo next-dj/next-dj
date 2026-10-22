@@ -3,11 +3,15 @@
 import types
 from typing import TYPE_CHECKING
 
+from django.core.exceptions import PermissionDenied
+from django.http import Http404
+
 from next.forms.origin import resolve_origin, resolve_url_to_match
-from next.pages import page
+from next.partial.errors import ForeignPageNotAuthorizedError
 from next.partial.headers import partial_intent
+from next.partial.intercept import resolve_served_page
 from next.partial.manager import partial_backend_manager
-from next.partial.registry import zones_of
+from next.partial.registry import standalone_zones
 
 
 if TYPE_CHECKING:
@@ -23,20 +27,37 @@ _PUSH_WIZARD_STEPS_OPTION = "PUSH_WIZARD_STEPS"
 
 
 def _origin_target(request: "HttpRequest") -> "tuple[Path | None, dict[str, object]]":
-    """Resolve the request origin to its page path and URL kwargs.
+    """Resolve the request origin to the page serving its zones and its URL kwargs.
 
     Shared by the validate pass and the success funnel, so both share one resolution.
     """
     match = resolve_origin(request)
     if match is None:
         return None, {}
-    return match.page_path, dict(match.url_kwargs)
+    url_kwargs = dict(match.url_kwargs)
+    return _served_target(request, match.page_path, url_kwargs), url_kwargs
+
+
+def _served_target(
+    request: "HttpRequest", page_path: "Path | None", url_kwargs: dict[str, object]
+) -> "Path | None":
+    """Return the page serving the zones the request names over the origin page.
+
+    A refusing intercept is a 403 whatever its rule raises, as the action may have run.
+    """
+    if page_path is None:
+        return None
+    zones = partial_intent(request).zones
+    try:
+        return resolve_served_page(page_path, zones, request, url_kwargs)
+    except (ForeignPageNotAuthorizedError, Http404) as exc:
+        raise PermissionDenied from exc
 
 
 def _form_zone(request: "HttpRequest", page_path: "Path | None") -> str | None:
     """Return the zone the failed form lives in, or None for the form-by-uid path.
 
-    The zone named by the intent wins when the origin page declares it.
+    The zone named by the intent wins when the serving page declares it.
     """
     if page_path is None:
         return None
@@ -48,11 +69,8 @@ def _form_zone(request: "HttpRequest", page_path: "Path | None") -> str | None:
 
 
 def _declared_zones(page_path: "Path") -> frozenset[str]:
-    """Return the zone names the origin page declares that render on their own."""
-    template = page.composed_template_for(page_path)
-    return frozenset(
-        name for name, info in zones_of(template, page_path).items() if info.standalone
-    )
+    """Return the zone names the page declares that render on their own."""
+    return frozenset(standalone_zones(page_path))
 
 
 def _zone_overrides(

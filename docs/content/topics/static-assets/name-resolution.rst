@@ -157,6 +157,11 @@ A page outside every root keeps the fallback names, which come from the director
    ``components/<name>``, where the name is the component directory name and no key is involved.
    A ``component.css`` in ``_components/note_card/`` is published as ``next/components/note_card.css``.
 
+A logical name follows the file-system path, so it keeps a route group segment and the name of an intercept directory.
+A ``layout.css`` in ``notes/pages/(auth)/`` is published as ``next/notes/pages/(auth)/layout.css``, and one in ``(app)/`` as ``next/notes/pages/(app)/layout.css``, so the two never collide.
+The parentheses stay in the ``static()`` URL as Django staticfiles writes them.
+Moving a page into or out of a group leaves its URL alone and renames its assets, see :ref:`topics-file-router-route-groups`.
+
 The stem is no part of the name, so two stems of one role in one directory compete for a single path, see :doc:`/content/howto/add-a-custom-stem`.
 The finder keeps the first file in sorted path order, logs a warning for the other, and ``manage.py check`` reports ``next.E167``.
 

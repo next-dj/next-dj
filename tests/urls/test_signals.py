@@ -6,10 +6,16 @@ from unittest.mock import Mock, patch
 import pytest
 from django.dispatch import Signal
 
+import next.signals as framework_signals
 from next.conf import next_framework_settings
 from next.testing import SignalRecorder, capture_signals
 from next.urls import FileRouterBackend, RouterManager, router_manager
-from next.urls.signals import route_registered, router_backend_loaded, router_reloaded
+from next.urls.signals import (
+    intercept_registered,
+    route_registered,
+    router_backend_loaded,
+    router_reloaded,
+)
 from tests.support import SignalSender, file_router
 
 
@@ -17,6 +23,13 @@ from tests.support import SignalSender, file_router
 def capture_route_registered() -> Generator[SignalRecorder, None, None]:
     """Record ``route_registered`` emissions."""
     with capture_signals(route_registered) as recorder:
+        yield recorder
+
+
+@pytest.fixture()
+def capture_intercept_registered() -> Generator[SignalRecorder, None, None]:
+    """Record ``intercept_registered`` emissions."""
+    with capture_signals(intercept_registered) as recorder:
         yield recorder
 
 
@@ -126,6 +139,34 @@ class TestRouteRegisteredFromBackend:
         ):
             list(router._generate_patterns_from_directory(Mock()))
         assert len(capture_route_registered) == 0
+
+
+class TestInterceptRegisteredSignal:
+    """``intercept_registered`` announces each intercept the file router publishes."""
+
+    def test_signal_is_a_django_signal(self) -> None:
+        assert isinstance(intercept_registered, Signal)
+
+    def test_kwargs_and_sender_are_passed_through(
+        self, capture_intercept_registered: SignalRecorder
+    ) -> None:
+        sentinel = SignalSender()
+
+        intercept_registered.send(
+            sender=sentinel, target_file=Path("a"), file_path=Path("b"), marker="(.)"
+        )
+
+        event = capture_intercept_registered.events[0]
+        assert event.sender is sentinel
+        assert event.kwargs == {
+            "target_file": Path("a"),
+            "file_path": Path("b"),
+            "marker": "(.)",
+        }
+
+    def test_the_umbrella_module_re_exports_it(self) -> None:
+        assert framework_signals.intercept_registered is intercept_registered
+        assert "intercept_registered" in framework_signals.__all__
 
 
 class TestRouterReloadedSignal:

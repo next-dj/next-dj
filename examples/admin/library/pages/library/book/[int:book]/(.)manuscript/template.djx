@@ -1,0 +1,29 @@
+{% zone "manuscript-peek" %}
+<div class="w-full max-w-[32rem] space-y-4">
+  {% #component "page_header" eyebrow="Manuscript" title=peek.book.title description=peek.book.author.full_name %}{% /component %}
+
+  <dl class="grid grid-cols-2 gap-3 text-sm">
+    <div class="rounded-lg border border-border bg-card px-3 py-2">
+      <dt class="text-xs uppercase tracking-wide text-muted-foreground">Chapters</dt>
+      <dd class="text-lg font-semibold tabular-nums" data-peek-chapters>{{ peek.count }}</dd>
+    </div>
+    <div class="rounded-lg border border-border bg-card px-3 py-2">
+      <dt class="text-xs uppercase tracking-wide text-muted-foreground">Words</dt>
+      <dd class="text-lg font-semibold tabular-nums" data-peek-words>{{ peek.words }}</dd>
+    </div>
+  </dl>
+
+  {% if peek.latest %}
+    <p class="text-sm">Written last: <span class="font-medium">{{ peek.latest.number }}. {{ peek.latest.title }}</span></p>
+  {% else %}
+    <p class="text-sm text-muted-foreground">No chapters yet.</p>
+  {% endif %}
+  {% if peek.book.summary %}
+    <p class="text-sm text-muted-foreground">{{ peek.book.summary }}</p>
+  {% endif %}
+
+  <div class="flex justify-end">
+    <a href="{{ request.path }}" class="text-sm font-medium text-primary hover:underline">Open the manuscript</a>
+  </div>
+</div>
+{% endzone %}

@@ -13,10 +13,13 @@ class TestRouterAccessPort:
         assert port_methods(RouterAccess) == [
             "create_backend",
             "create_manager",
+            "page_kwargs",
             "url_parser",
         ]
 
-    @pytest.mark.parametrize("name", ["create_backend", "create_manager", "url_parser"])
+    @pytest.mark.parametrize(
+        "name", ["create_backend", "create_manager", "page_kwargs", "url_parser"]
+    )
     def test_implementation_parameters_match_the_port(self, name) -> None:
         assert call_shape(RouterAccessImpl, name) == call_shape(RouterAccess, name)
 

@@ -1,10 +1,14 @@
 <div class="flex items-center justify-end gap-2 pt-2">
-  {% component "button" href=form_state.changelist_url text="Cancel" variant="outline" %}
+  {% if not form_state.quick %}
+    {% component "button" href=form_state.changelist_url text="Cancel" variant="outline" %}
+  {% endif %}
   {% if read_only %}
     <p data-read-only class="text-sm text-muted-foreground">You may view this {{ form_state.verbose_name }} but not change it.</p>
   {% else %}
-    {% component "button" type="submit" name="_save_addanother" text="Save and add another" variant="outline" %}
-    {% component "button" type="submit" name="_save_continue" text="Save and continue editing" variant="outline" %}
+    {% if not form_state.quick %}
+      {% component "button" type="submit" name="_save_addanother" text="Save and add another" variant="outline" %}
+      {% component "button" type="submit" name="_save_continue" text="Save and continue editing" variant="outline" %}
+    {% endif %}
     {% component "button" type="submit" text="Save" variant="default" %}
   {% endif %}
 </div>

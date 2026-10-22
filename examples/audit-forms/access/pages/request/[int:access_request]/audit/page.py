@@ -27,3 +27,9 @@ def entries(access_request: DObject[AccessRequest]) -> list[AuditEntry]:
 @context("just_submitted")
 def just_submitted(request: HttpRequest) -> bool:
     return request.GET.get("just") == "1"
+
+
+@context("filed")
+def filed(access_request: DObject[AccessRequest]) -> bool:
+    """Offer the receipt only once the backend recorded the filing dispatch."""
+    return access_request.is_filed()

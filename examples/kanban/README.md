@@ -6,7 +6,7 @@ A drag-and-drop Kanban board powered by co-located React components and a Vite b
 
 | URL | Description |
 | --- | --- |
-| `/` | List of active boards. Archived boards are hidden. |
+| `/` | List of active boards. Archived boards are hidden. A `Peek at columns` link on each card opens the column summary as a modal over the list. |
 | `/board/<id>/` | Every column, card, and "New card" form rendered by the server, with React mounting drag-and-drop and optimistic create over the same markup. |
 | `/board/<id>/settings/` | Forms to rename a board, archive it, or add a column with a WIP limit. |
 | `POST move_card_form` | Move a card across columns. The card arrives through `DCard[Card]` and the target column is a `ModelChoiceField` that `get_form_kwargs` narrows to that card's board, so a foreign column never validates. Renumbers card positions inside an atomic transaction. |
@@ -235,6 +235,21 @@ def board_meta(board: DObject[Board]) -> MetadataDict:
 
 `board` loads through the `visible_to` of section 9, so the board tab reads `Roadmap · next.dj Kanban`. A metadata callable runs for its own page only unless it says `inherit=True`, and this one has to say it. `board/<id>/settings/` is a virtual page, a `template.djx` with no `page.py` beside it, so it has nowhere to register a callable of its own. `inherit=True` puts the board callable into the metadata chain of every page below it, `DObject` reads the same `board` URL kwarg there, and the settings tab carries the board title instead of the site default. The integration tests pin the index, board and settings titles.
 
+### 11. A column summary as an intercepting route
+
+Each board card on the index carries two links to the same URL. The title link is plain and navigates to the board, and `Peek at columns` carries `data-next-layer="board-peek"`, so a click asks for `/board/10/` with the zone name and a modal opens over the list while the address bar shows the board URL. A reload, a shared link and the plain link render the real board with its React island, and Back closes the modal.
+
+The modal is the directory [`(.)board/[int:board]`](kanban/pages/%28.%29board/%5Bint%3Aboard%5D/) at the root of the page tree. The scope of an intercept is the URL trail of the directory that holds it, empty here, and `(.)` appends `board/[int:board]` to it, so the target is the board page and the brackets spell it exactly. The intercept routes nothing, so `uv run python manage.py routes` lists it under its target with the zone it serves:
+
+```
+URL                  Name  File                                           Access  Intercept
+/board/<int:board>/  -     kanban/pages/(.)board/[int:board]/page.py     -       board-peek
+```
+
+The intercept [`page.py`](kanban/pages/%28.%29board/%5Bint%3Aboard%5D/page.py) resolves the board through `DObject[Board]` from the `board` kwarg of the target URL, loads its columns with their cards, and titles the tab `Peek · Engineering roadmap · next.dj Kanban` until the modal closes. The [`template.djx`](kanban/pages/%28.%29board/%5Bint%3Aboard%5D/template.djx) wraps one row per column in `{% zone "board-peek" %}` with the card count and the WIP limit, and ends in a plain link to the board. The board page, its React island and its payload stay untouched, since the zone response never renders them.
+
+`TestBoardPeek` pins the server side and [`tests/e2e/test_peek.py`](tests/e2e/test_peek.py) drives the modal in a browser, the URL and title on open and close, Back, Escape, the link to the board and the plain title link.
+
 ## Gotchas
 
 ### The asset-version guard needs an explicit version
@@ -264,3 +279,4 @@ The settings page hosts three independent `<form>` blocks. Each one posts to its
 - [`next/deps/objects.py`](../../next/deps/objects.py): `DObject` and the provider that loads its row through `visible_to(scope)`.
 - [`next/pages/metadata/`](../../next/pages/metadata/): the metadata chain behind `@page.metadata(inherit=True)` in section 10.
 - [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst): `next.E153` to `next.E158` and `next.W126` for `DObject` and the `scope` dependency.
+- [`next/intercept.py`](../../next/intercept.py) and [`next/partial/intercept.py`](../../next/partial/intercept.py): the intercept table and the zone selection of section 11.

@@ -70,9 +70,10 @@ class IntentOnlyShaper:
         *,
         dynamic_body: bool,
         url_kwargs: dict[str, object],
+        dep_cache: dict[str, object],
     ) -> NoReturn:
         """Fail because a request naming no zone must never reach here."""
-        del page_path, request, intent, dynamic_body, url_kwargs
+        del page_path, request, intent, dynamic_body, url_kwargs, dep_cache
         _shaping_refused("zone_response")
 
     def shape_response(

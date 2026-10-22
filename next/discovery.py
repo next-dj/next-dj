@@ -13,7 +13,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 from next.diagnostics import FailureLog, exception_text
 from next.ports import page_scan_slot, router_access_slot
-from next.utils import PageRoot, page_roots_shape_error, walk_page_tree
+from next.utils import PageRoot, is_within, page_roots_shape_error, walk_page_tree
 
 
 if TYPE_CHECKING:
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from next.urls import RouterBackend, RouterManager
+    from next.utils import InterceptPage
 
 
 logger = logging.getLogger(__name__)
@@ -41,12 +42,13 @@ _router_manager_cache = _RouterManagerCache()
 
 @dataclass(frozen=True, slots=True)
 class _ScannedTrees:
-    """The pages, their trees and the component folders one walk of a router found.
+    """The pages, intercept pages and component folders one walk of a router found.
 
     All three come from one walk, since a second walk might disagree with the first.
     """
 
     pages: tuple[tuple[PageRoot, str, Path], ...]
+    intercepts: tuple[tuple[PageRoot, str, Path], ...]
     component_folders: tuple[tuple[Path, Path, str], ...]
 
 
@@ -334,26 +336,47 @@ def _tree_root(reported: dict[Path, PageRoot], pages_dir: Path) -> PageRoot:
 
 
 def _walk_page_trees(router: RouterBackend) -> _ScannedTrees:
-    """Walk every tree `router` reports once, keeping both things checks read."""
+    """Walk every tree `router` reports once, keeping what checks read."""
     components_folder = _router_contract(router).components_folder
     skip_names = page_tree_skip_names(router)
     folders: list[tuple[Path, Path, str]] = []
 
-    def collect_folder(folder: Path, tree_root: Path, route_trail: str) -> None:
+    def collect_folder(folder: Path, tree_root: Path, scope_trail: str) -> None:
         if folder.name == components_folder:
-            folders.append((folder, tree_root, route_trail))
+            folders.append((folder, tree_root, scope_trail))
 
     reported: dict[Path, PageRoot] = {}
     for root in get_page_roots(router):
         reported.setdefault(root.path, root)
-    pages = tuple(
-        (_tree_root(reported, pages_dir), url_path, page_path)
-        for pages_dir in get_pages_directories(router)
-        for url_path, page_path in walk_page_tree(
-            pages_dir, skip_names, on_skipped_dir=collect_folder
+    pages: list[tuple[PageRoot, str, Path]] = []
+    intercepts: list[tuple[PageRoot, str, Path]] = []
+    for pages_dir in get_pages_directories(router):
+        tree = _tree_root(reported, pages_dir)
+        nested = [
+            other
+            for other in reported
+            if other != pages_dir and is_within(other, pages_dir)
+        ]
+        found: list[InterceptPage] = []
+        pages.extend(
+            (tree, url_path, page_path)
+            for url_path, page_path in walk_page_tree(
+                pages_dir,
+                skip_names,
+                on_skipped_dir=collect_folder,
+                on_intercept=found.append,
+            )
         )
+        intercepts.extend(
+            (tree, hit.target_trail, hit.file)
+            for hit in found
+            if not any(is_within(hit.file, root) for root in nested)
+        )
+    return _ScannedTrees(
+        pages=tuple(pages),
+        intercepts=tuple(intercepts),
+        component_folders=tuple(folders),
     )
-    return _ScannedTrees(pages=pages, component_folders=tuple(folders))
 
 
 def _scanned_trees(router: RouterBackend) -> _ScannedTrees:
@@ -368,9 +391,10 @@ def _scanned_trees(router: RouterBackend) -> _ScannedTrees:
 def iter_scanned_page_pairs(router: RouterBackend) -> Iterator[tuple[str, Path]]:
     """Yield `(url_path, page_file)` for every page under the trees `router` routes.
 
-    The walk is the framework's own, so a backend reporting `page_roots` is checked.
+    An intercept page comes with the trail of its target, after the routed ones.
     """
-    for _root, url_path, page_path in _scanned_trees(router).pages:
+    scanned = _scanned_trees(router)
+    for _root, url_path, page_path in (*scanned.pages, *scanned.intercepts):
         yield url_path, page_path
 
 
@@ -382,10 +406,20 @@ def iter_scanned_pages(router: RouterBackend) -> Iterator[tuple[PageRoot, str, P
     yield from _scanned_trees(router).pages
 
 
+def iter_scanned_intercepts(
+    router: RouterBackend,
+) -> Iterator[tuple[PageRoot, str, Path]]:
+    """Yield `(root, target_trail, page_file)` per intercept page of the trees.
+
+    The trail is that of the page the intercept serves over, relative to `root`.
+    """
+    yield from _scanned_trees(router).intercepts
+
+
 def iter_page_tree_component_folders(
     router: RouterBackend,
 ) -> Iterator[tuple[Path, Path, str]]:
-    """Yield `(folder, tree_root, route_trail)` per components folder in the trees.
+    """Yield `(folder, tree_root, scope_trail)` per components folder in the trees.
 
     The walk is the router's own, so a check finds the folders that walk registers.
     """
@@ -400,6 +434,7 @@ __all__ = [
     "get_pages_directories",
     "get_router_manager",
     "iter_page_tree_component_folders",
+    "iter_scanned_intercepts",
     "iter_scanned_page_pairs",
     "iter_scanned_pages",
     "page_tree_skip_names",

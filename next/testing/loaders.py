@@ -59,9 +59,9 @@ def _register_page_tree_components() -> None:
     if router_manager is None:
         return
     for router in router_manager.backends:
-        for folder, tree_root, route_trail in iter_page_tree_component_folders(router):
+        for folder, tree_root, scope_trail in iter_page_tree_component_folders(router):
             components_manager.register_router_walk_folder(
-                folder, tree_root, route_trail
+                folder, tree_root, scope_trail
             )
 
 

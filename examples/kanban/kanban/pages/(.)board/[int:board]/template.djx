@@ -1,0 +1,20 @@
+{% zone "board-peek" %}
+<div data-board-peek class="w-full max-w-[30rem] space-y-3">
+  <h2 class="text-lg font-semibold tracking-tight text-foreground">{{ board.title }}</h2>
+  <ul class="divide-y divide-border rounded-md border border-border text-sm">
+    {% for lane in lanes %}
+      <li class="flex items-center justify-between px-3 py-2" data-peek-lane>
+        <span class="font-medium">{{ lane.title }}</span>
+        <span class="text-muted-foreground">
+          {{ lane.cards.all|length }} card{{ lane.cards.all|length|pluralize }}{% if lane.wip_limit %} of {{ lane.wip_limit }}{% endif %}
+        </span>
+      </li>
+    {% empty %}
+      <li class="px-3 py-2 text-muted-foreground">No columns yet.</li>
+    {% endfor %}
+  </ul>
+  <p class="text-right">
+    <a href="{{ request.path }}" class="text-sm font-medium text-primary hover:underline">Open the board</a>
+  </p>
+</div>
+{% endzone %}

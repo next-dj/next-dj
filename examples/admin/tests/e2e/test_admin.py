@@ -100,6 +100,61 @@ def test_an_anonymous_visit_lands_on_the_login_form_and_signing_in_returns(
     expect(page.get_by_role("button", name="Sign out")).to_be_visible()
 
 
+def test_the_login_page_wears_the_bare_shell_with_its_group_stylesheet(
+    page: Page, base_url: str, next_probe: PageProbe
+) -> None:
+    page.goto(f"{base_url}/admin/login/")
+    wait_for_runtime(page)
+
+    expect(page.locator("aside")).to_have_count(0)
+    expect(page.locator("main")).to_have_count(1)
+    expect(page.get_by_role("button", name="Sign out")).to_have_count(0)
+    sheet = page.locator("link[rel='stylesheet'][href*='(auth)/layout.css']")
+    expect(sheet).to_have_count(1)
+    assert "/(auth)/layout.css" in (sheet.get_attribute("href") or "")
+    served = [
+        response
+        for response in next_probe.responses
+        if "/(auth)/layout.css" in response.url
+    ]
+    assert [response.status for response in served] == [200]
+    assert page.evaluate(
+        "() => [...document.styleSheets].some(s => s.href.includes('(auth)/layout.css')"
+        " && s.cssRules.length > 0)"
+    )
+
+
+def test_signing_in_swaps_the_bare_shell_for_the_sidebar(
+    page: Page, base_url: str, admin_user: User
+) -> None:
+    page.goto(f"{base_url}/admin/login/")
+    wait_for_runtime(page)
+    expect(page.locator("aside")).to_have_count(0)
+
+    page.fill("#id_username", "admin")
+    page.fill("#id_password", "admin-pass")
+    page.get_by_role("button", name="Sign in").click()
+
+    expect(page).to_have_url(f"{base_url}/admin/")
+    expect(page.locator("aside")).to_be_visible()
+    expect(page.locator("main")).to_have_count(1)
+
+
+def test_the_logout_page_wears_the_bare_shell(
+    page: Page, base_url: str, signed_in: None
+) -> None:
+    page.goto(f"{base_url}/admin/")
+    wait_for_runtime(page)
+    expect(page.locator("aside")).to_be_visible()
+
+    page.get_by_role("button", name="Sign out").click()
+
+    expect(page).to_have_url(f"{base_url}/admin/logout/")
+    expect(page.get_by_text("You have been signed out.")).to_be_visible()
+    expect(page.locator("aside")).to_have_count(0)
+    expect(page.locator("main")).to_have_count(1)
+
+
 def test_signing_out_clears_the_session_and_relocks_the_dashboard(
     page: Page, base_url: str, signed_in: None
 ) -> None:

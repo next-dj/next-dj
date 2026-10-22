@@ -346,6 +346,67 @@ class TestSearch:
         assert response.status_code == 200
 
 
+class TestArticlePeek:
+    """`search/(..)wiki/[slug]/` serves the `article-peek` zone."""
+
+    def test_article_results_open_the_preview_over_the_honest_url(
+        self, next_client: NextClient, routing_doc: Article
+    ) -> None:
+        body = next_client.get(reverse("next:page_search"), {"q": "routing"}).content
+        anchor = find_anchor(body.decode(), href="/wiki/routing-internals/")
+        assert 'data-next-layer="article-peek"' in anchor
+
+    def test_file_results_stay_plain_links(
+        self, next_client: NextClient, routing_doc: Article
+    ) -> None:
+        body = next_client.get(reverse("next:page_search"), {"q": "routing"}).content
+        assert "data-next-layer" not in find_anchor(
+            body.decode(), href="/docs/routing/"
+        )
+
+    def test_a_plain_get_renders_the_real_page(
+        self, next_client: NextClient, routing_doc: Article
+    ) -> None:
+        body = next_client.get("/wiki/routing-internals/").content.decode()
+        assert "data-article-peek" not in body
+        assert "Edit this article" in body
+
+    def test_the_zone_get_serves_the_intercept_with_its_title(
+        self, next_client: NextClient, routing_doc: Article
+    ) -> None:
+        response = next_client.get_zones("/wiki/routing-internals/", "article-peek")
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph", "meta"]
+        html = envelope.html_for_zone("article-peek")
+        assert "data-article-peek" in html
+        assert "Deep dive on the URL pipeline." in html
+        assert "Edit this article" not in html
+        meta = next(op for op in envelope.ops if op["op"] == "meta")
+        assert meta["title"] == "Preview · Routing internals · next.dj Wiki"
+
+    def test_the_peek_links_to_the_full_article(
+        self, next_client: NextClient, routing_doc: Article
+    ) -> None:
+        response = next_client.get_zones("/wiki/routing-internals/", "article-peek")
+        anchor = find_anchor(
+            envelope_of(response).html_for_zone("article-peek"), text="Open the article"
+        )
+        assert 'href="/wiki/routing-internals/"' in anchor
+        assert "data-next-layer" not in anchor
+
+    def test_an_unknown_slug_is_a_404(self, next_client: NextClient) -> None:
+        response = next_client.get_zones("/wiki/missing/", "article-peek")
+        assert response.status_code == 404
+
+    def test_the_intercept_is_listed_under_its_target(self) -> None:
+        out = StringIO()
+        call_command("routes", stdout=out)
+        row = next(line for line in out.getvalue().splitlines() if "(..)wiki" in line)
+        assert "/wiki/<str:slug>/" in row
+        assert row.rstrip().endswith("article-peek")
+
+
 class TestSearchAutoSubmit:
     """The search box auto-submits into a results zone with debounce."""
 

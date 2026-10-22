@@ -23,11 +23,14 @@
             {% endif %}
           </th>
         {% endfor %}
+        {% if quick_edit %}
+          <th class="w-24 px-3 py-2"><span class="sr-only">Quick edit</span></th>
+        {% endif %}
       </tr>
     </thead>
     <tbody class="divide-y divide-border">
       {% for row in rows %}
-        <tr class="hover:bg-accent/30">
+        <tr data-next-key="{{ row.pk }}" class="hover:bg-accent/30">
           {% if selectable %}
             <td class="w-10 px-3 py-2">
               <input type="checkbox" name="_selected_action" value="{{ row.pk }}" form="{{ select_form_id|default:'bulk-action-form' }}">
@@ -42,6 +45,11 @@
               {% endif %}
             </td>
           {% endfor %}
+          {% if quick_edit %}
+            <td class="px-3 py-2 text-right">
+              <a href="{{ row.change_url }}" data-next-layer="quick-edit" data-next-accepted="changelist" class="text-sm text-muted-foreground hover:text-primary">Quick edit</a>
+            </td>
+          {% endif %}
         </tr>
       {% empty %}
         <tr>

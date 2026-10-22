@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, Tags, register
@@ -24,7 +24,7 @@ from next.csrf import csrf_url, csrf_view
 from next.forms.uid import URL_NAME_FORM_ACTION, reverse_form_action
 from next.pages.access import routed_pages
 from next.ports import form_routes_slot
-from next.utils import UNMOUNTED, PageRoot
+from next.utils import UNMOUNTED, PageRoot, is_route_group
 
 from .backends import FILE_ROUTER_CONFIG_KEYS, FileRouterBackend, RouterBackend
 from .dispatcher import scan_pages_tree
@@ -47,8 +47,23 @@ _FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset({"BACKEND", *FILE_ROUTER_CONFIG_KEYS})
 
 _NON_FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset({"BACKEND"})
 
-_CollectedPattern = tuple[str, str, str, frozenset[str], str]
-"""`(django_pattern, url_path, source, parameter_names, namespace)` for one route."""
+
+class _CollectedPattern(NamedTuple):
+    """One route as the URL checks compare it, and whether its page sits in a group."""
+
+    pattern: str
+    url_path: str
+    source: str
+    parameters: frozenset[str]
+    namespace: str
+    grouped: bool
+
+
+_GROUP_CLASH_HINT = (
+    "A route group leaves the URL, so two groups, or a group page and the page of "
+    "its parent, serve one URL. Keep one page there, or move the other under a "
+    "segment of its own."
+)
 
 type _TreeKey = tuple[Path, str, str]
 """A mounted tree by its path, the route it is included under and its namespace."""
@@ -345,7 +360,7 @@ def check_reverse_name_collisions(*args, **kwargs) -> list[CheckMessage]:
 
     # reverse() picks by arguments, so a collision needs name and parameters both.
     grouped: dict[tuple[str, str, frozenset[str]], dict[str, list[str]]] = {}
-    for _pattern, url_path, source, parameters, namespace in all_patterns:
+    for _pattern, url_path, source, parameters, namespace, _grouped in all_patterns:
         full_name = next_framework_settings.URL_NAME_TEMPLATE.format(
             name=default_url_parser.prepare_url_name(url_path)
         )
@@ -537,19 +552,19 @@ def _check_url_conflicts(
     all_patterns: list[_CollectedPattern], errors: list[CheckMessage]
 ) -> None:
     """Report an error when the same Django path string comes from multiple sources."""
-    pattern_dict: dict[str, list[str]] = {}
-    for pattern, _url_path, source, _parameters, _namespace in all_patterns:
-        if pattern in pattern_dict:
-            pattern_dict[pattern].append(source)
-        else:
-            pattern_dict[pattern] = [source]
+    pattern_dict: dict[str, list[_CollectedPattern]] = {}
+    for collected in all_patterns:
+        pattern_dict.setdefault(collected.pattern, []).append(collected)
 
-    for pattern, sources in pattern_dict.items():
-        if len(sources) > 1:
+    for pattern, clashing in pattern_dict.items():
+        if len(clashing) > 1:
+            sources = ", ".join(collected.source for collected in clashing)
+            grouped = any(collected.grouped for collected in clashing)
             errors.append(
                 Error(
                     f'URL pattern conflict: "{pattern}" is defined in '
-                    f"multiple locations: {', '.join(sources)}",
+                    f"multiple locations: {sources}",
+                    hint=_GROUP_CLASH_HINT if grouped else None,
                     obj=settings,
                     id="next.E015",
                 )
@@ -588,14 +603,15 @@ def _collect_url_patterns(
         if clash:
             errors.append(_prefix_clash_error(head, clash, page_file))
             continue
-        source = f"{context}: {page_file.relative_to(pages_path)}"
+        relative = page_file.relative_to(pages_path)
         patterns.append(
-            (
+            _CollectedPattern(
                 f"{head}{django_pattern}",
                 url_path,
-                source,
+                f"{context}: {relative}",
                 frozenset(parameters),
                 root.namespace,
+                any(is_route_group(part) for part in relative.parts),
             )
         )
 

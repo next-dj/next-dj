@@ -22,6 +22,7 @@ Forms
 
    Optional ``attr="value"`` arguments after the action name render as HTML attributes on the ``<form>`` element, for example ``{% form "upload_form" class="stack" %}``.
    Attribute values are escaped, and an unquoted value resolves as a context variable.
+   A quoted value with ``{{ ... }}`` inside resolves each expression against the context, as in ``class="card {{ variant }}"``.
 
    The opening tag emits its attributes in a fixed order.
 

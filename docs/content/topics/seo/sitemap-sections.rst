@@ -36,6 +36,13 @@ A tree a URLconf includes twice through ``pages()`` is still one section, which 
 The tree serves ``/sitemap-shop.xml`` for its static pages and ``/sitemap-products.xml`` for the products.
 Two sources serving one section name, two trees or a tree and a backend, list only the first, and ``manage.py check`` reports the collision.
 
+Route groups and intercepts
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The trail that ``@sitemap.items`` takes names the URL, so it leaves out the route groups, see :ref:`topics-file-router-route-groups`.
+The items of ``(shop)/products/[slug]`` register under ``"products/[slug]"``.
+An intercept page serves no URL of its own and never appears in the sitemap.
+
 The index
 ---------
 

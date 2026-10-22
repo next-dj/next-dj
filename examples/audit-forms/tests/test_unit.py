@@ -594,3 +594,45 @@ class TestLazyAuditEntries:
         )
         assert rows is not None
         assert [r.kind for r in rows] == [AuditEntry.KIND_VALIDATION_FAILED]
+
+
+class TestReceipt:
+    """The receipt reads one set of lines in both formats, gated on the filing row."""
+
+    def test_filings_keep_only_linked_backend_dispatches(
+        self, create_access_request, create_audit_entry
+    ) -> None:
+        linked = create_access_request()
+        filing = create_audit_entry(request=linked)
+        create_audit_entry()
+        create_audit_entry(request=linked, source=AuditEntry.SOURCE_SIGNAL)
+        create_audit_entry(request=linked, kind=AuditEntry.KIND_REQUEST_STARTED)
+        assert list(AuditEntry.objects.filings()) == [filing]
+
+    def test_a_request_is_filed_once_its_dispatch_is_linked(
+        self, create_access_request, create_audit_entry
+    ) -> None:
+        access_request = create_access_request()
+        assert access_request.is_filed() is False
+        create_audit_entry(request=access_request)
+        assert access_request.is_filed() is True
+
+    def test_the_text_receipt_aligns_every_value(self, create_access_request) -> None:
+        access_request = create_access_request(expires_in_days=1)
+        access_request.created_at = datetime(2026, 10, 22, 9, 30, tzinfo=UTC)
+        assert access_request.receipt_text().splitlines() == [
+            "ACCESS REQUEST RECEIPT",
+            "",
+            f"Receipt     AR-{access_request.pk:05d}",
+            "Requester   Grace Hopper <grace@example.com>",
+            "Team        Compilers",
+            "Project     compilers",
+            "Access for  1 day",
+            "Status      pending",
+            "Filed       2026-10-22 09:30 UTC",
+            "Reason      docs",
+        ]
+
+    def test_the_access_period_pluralises(self, create_access_request) -> None:
+        lines = dict(create_access_request(expires_in_days=3).receipt_lines())
+        assert lines["Access for"] == "3 days"

@@ -1,6 +1,6 @@
 """Partial shaper implementation bound into the `next.ports` slot at app startup."""
 
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, override
 
 from next.ports import PartialShaper
 
@@ -39,10 +39,16 @@ class PartialShaperImpl(PartialShaper):
         *,
         dynamic_body: bool,
         url_kwargs: dict[str, object],
+        dep_cache: dict[str, Any],
     ) -> "HttpResponse":
         """Return the envelope for the zones the intent named."""
         return zone_response(
-            page_path, intent, request, dynamic_body=dynamic_body, url_kwargs=url_kwargs
+            page_path,
+            intent,
+            request,
+            dynamic_body=dynamic_body,
+            url_kwargs=url_kwargs,
+            dep_cache=dep_cache,
         )
 
     @override

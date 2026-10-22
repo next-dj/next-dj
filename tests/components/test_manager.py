@@ -42,6 +42,7 @@ from next.components.renderers import (
 from next.components.signals import component_backend_loaded
 from next.conf import next_framework_settings
 from next.testing import capture_signals
+from next.utils import walk_page_tree
 from tests.support import (
     BOOM_COMPONENTS_BACKEND,
     DUMMY_COMPONENTS_BACKEND,
@@ -1784,3 +1785,78 @@ class TestGetComponentPathsForWatch:
         ):
             assert get_component_paths_for_watch() == set()
         next_framework_settings.reload()
+
+
+def _walked(root: Path) -> list[tuple[Path, Path, str]]:
+    found: list[tuple[Path, Path, str]] = []
+
+    def collect(folder: Path, tree_root: Path, scope: str) -> None:
+        found.append((folder, tree_root, scope))
+
+    list(walk_page_tree(root, ("_components",), on_skipped_dir=collect))
+    return found
+
+
+@pytest.mark.usefixtures("installed_file_backend")
+class TestRouteGroupComponentScope:
+    """A group folder scopes its components by the file-system tree, not the URL."""
+
+    @staticmethod
+    def _tree(root: Path) -> dict[str, Path]:
+        pages = {
+            "global": root / "page.djx",
+            "app": root / "(app)" / "page.djx",
+            "dash": root / "(app)" / "dash" / "page.djx",
+            "sibling": root / "marketing" / "page.djx",
+        }
+        for name, folder in {
+            "root_card": root / "_components",
+            "app_card": root / "(app)" / "_components",
+            "dash_card": root / "(app)" / "dash" / "_components",
+        }.items():
+            folder.mkdir(parents=True)
+            (folder / f"{name}.djx").write_text("x")
+        for template in pages.values():
+            template.parent.mkdir(parents=True, exist_ok=True)
+            template.write_text("x")
+        for folder, _root, scope in _walked(root):
+            components_manager.register_router_walk_folder(folder, root, scope)
+        return pages
+
+    @staticmethod
+    def _visible(template: Path) -> set[str]:
+        return set(components_manager.collect_visible_components(template))
+
+    def test_a_group_folder_is_registered_with_its_file_system_trail(
+        self, tmp_path: Path
+    ) -> None:
+        self._tree(tmp_path)
+
+        assert sorted(scope for _folder, _root, scope in _walked(tmp_path)) == [
+            "",
+            "(app)",
+            "(app)/dash",
+        ]
+
+    def test_a_group_folder_reaches_the_templates_below_the_group(
+        self, tmp_path: Path
+    ) -> None:
+        pages = self._tree(tmp_path)
+
+        assert self._visible(pages["app"]) == {"root_card", "app_card"}
+        assert self._visible(pages["dash"]) == {"root_card", "app_card", "dash_card"}
+
+    def test_a_group_folder_is_hidden_from_a_page_outside_the_group(
+        self, tmp_path: Path
+    ) -> None:
+        pages = self._tree(tmp_path)
+
+        assert self._visible(pages["sibling"]) == {"root_card"}
+        assert self._visible(pages["global"]) == {"root_card"}
+
+    def test_a_folder_in_a_nested_directory_of_a_group_stays_below_it(
+        self, tmp_path: Path
+    ) -> None:
+        pages = self._tree(tmp_path)
+
+        assert "dash_card" not in self._visible(pages["app"])

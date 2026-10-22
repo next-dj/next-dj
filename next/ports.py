@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from next.partial.headers import PartialIntent
     from next.static import StaticCollector
     from next.urls import RouterBackend, RouterManager, URLPatternParser
+    from next.utils import PageRoot
 
 
 class PortSlot[T]:
@@ -71,8 +72,12 @@ class PartialShaper(Protocol):
         *,
         dynamic_body: bool,
         url_kwargs: dict[str, object],
+        dep_cache: dict[str, Any],
     ) -> HttpResponse:
-        """Return the envelope for the zones the intent named."""
+        """Return the envelope for the zones the intent named.
+
+        An intercept refusal reuses `dep_cache`, the one the page refusal resolved with.
+        """
         ...
 
     def shape_response(
@@ -140,6 +145,10 @@ class RouterAccess(Protocol):
 
     def url_parser(self) -> URLPatternParser:
         """Return the parser the file router routes bracket segments through."""
+        ...
+
+    def page_kwargs(self, root: PageRoot, trail: str) -> frozenset[str] | None:
+        """Return the kwargs a page at `trail` of `root` answers, `None` if refused."""
         ...
 
 

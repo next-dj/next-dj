@@ -23,6 +23,8 @@ CHART_APP = "[data-poll-chart-app]"
 VUE_ROW = f"{CHART_APP} li[data-just-updated]"
 TOTAL = "[data-poll-chart-total]"
 STREAM = "/stream/"
+DIALOG = "dialog[data-next-dialog]"
+MODAL = "dialog[data-next-dialog]:modal"
 
 TAG_VUE_APP = f"() => {{ document.querySelector('{CHART_APP}').__vue_app__.kept = 1; }}"
 READ_VUE_APP = f"() => document.querySelector('{CHART_APP}').__vue_app__?.kept ?? null"
@@ -280,6 +282,46 @@ def test_the_poll_page_links_to_its_embed_widget(
     open_poll(page, base_url, tabs_or_spaces)
 
     page.get_by_role("link", name="Embed").click()
+    page.get_by_role("link", name="Preview the widget").click()
 
     expect(page).to_have_url(f"{base_url}/polls/{tabs_or_spaces.pk}/embed/")
     expect(page.get_by_text("next.dj Live polls")).to_have_count(0)
+
+
+def test_the_embed_link_opens_the_snippet_over_the_vote_page_and_back_closes_it(
+    page: Page, base_url: str, tabs_or_spaces: Poll
+) -> None:
+    open_poll(page, base_url, tabs_or_spaces)
+    mark_document(page)
+    detail_url = page.url
+
+    page.get_by_role("link", name="Embed").click()
+
+    dialog = page.locator(DIALOG)
+    expect(dialog).to_have_count(1)
+    expect(page.locator(MODAL)).to_have_count(1)
+    expect(page).to_have_url(f"{base_url}/polls/{tabs_or_spaces.pk}/embed/")
+    expect(page).to_have_title("Embed · Tabs or spaces? · next.dj polls")
+    expect(dialog.get_by_label("Embed snippet")).to_contain_text(
+        f"/polls/{tabs_or_spaces.pk}/embed/"
+    )
+
+    page.go_back()
+
+    expect(page.locator(DIALOG)).to_have_count(0)
+    expect(page).to_have_url(detail_url)
+    expect(page).to_have_title("Tabs or spaces? · next.dj polls")
+    assert_same_document(page)
+
+
+def test_escape_closes_the_embed_snippet(
+    page: Page, base_url: str, tabs_or_spaces: Poll
+) -> None:
+    open_poll(page, base_url, tabs_or_spaces)
+    page.get_by_role("link", name="Embed").click()
+    expect(page.locator(MODAL)).to_have_count(1)
+
+    page.keyboard.press("Escape")
+
+    expect(page.locator(DIALOG)).to_have_count(0)
+    expect(page).to_have_url(f"{base_url}/polls/{tabs_or_spaces.pk}/")

@@ -81,7 +81,7 @@ Pages
 ~~~~~
 
 The package splits by subject, one submodule per group of codes.
-``access`` covers the access a ``page.py`` declares, a ``public()`` beside a requirement of the same file, a declaration made from any other module, and the declaring ``page.py`` files without a page below them, ``contexts`` covers the ``@context`` callables of a routed ``page.py``, ``layouts`` the page-body placeholder and the root marker of a ``layout.djx``, ``loaders`` the ``TEMPLATE_LOADERS`` entries, ``metadata`` the ``METADATA`` settings scope and the metadata of every routed ``page.py``, split further under `Metadata and responses`_ below, ``modules`` what a ``page.py`` declares, ``processors`` the context processors a render runs, ``structure`` the shape of a tree on disk, and ``zones`` a ``@context`` reading a key another callable bound to a zone.
+``access`` covers the access a ``page.py`` declares, a ``public()`` beside a requirement of the same file, a declaration made from any other module, and the declaring ``page.py`` files without a page below them, ``contexts`` covers the ``@context`` callables of a routed ``page.py``, ``layouts`` the page-body placeholder and the root marker of a ``layout.djx``, ``groups`` the parenthesised directory names and the route groups they spell, ``intercepts`` the intercepting routes, whose zone checks live in ``next.partial.checks.intercepts``, ``loaders`` the ``TEMPLATE_LOADERS`` entries, ``metadata`` the ``METADATA`` settings scope and the metadata of every routed ``page.py``, split further under `Metadata and responses`_ below, ``modules`` what a ``page.py`` declares, ``processors`` the context processors a render runs, ``structure`` the shape of a tree on disk, and ``zones`` a ``@context`` reading a key another callable bound to a zone.
 ``composed`` carries no check and holds the one walk of the composed page templates that ``next.W085`` and the partial checks share, a ``RunMemo`` that ``forget_run_memos`` drops.
 
 .. automodule:: next.pages.checks
@@ -282,6 +282,8 @@ Errors
      - ``next.urls.checks``
    * - ``next.E015``
      - The same URL pattern is defined in more than one location.
+       When a conflicting source passes through a route group, the hint explains that a group leaves the URL, so two groups, or a group page and the page of its parent, serve one URL.
+       Keeping one page there or moving the other under a segment of its own clears it.
      - ``next.urls.checks``
    * - ``next.E016``
      - An error was raised while collecting patterns from a router.
@@ -797,6 +799,7 @@ Errors
    * - ``next.E162``
      - A ``permission_required(..., obj=DObject[Model])`` in a ``page.py`` loads its row by the URL kwarg named after the ``model_name`` of the model, and the route of a page the declaration binds, its own or one below under ``inherit=True``, does not capture it, so every request to that page raises ``UnboundObjectError``.
        The message names the declaring file, the page, and the kwargs its route captures, and a page whose ``public()`` lifts the declaration is not judged.
+       An ``obj=DObject[Model]`` of an intercept page is judged against the route of its target, the kwargs of a ``pages()`` mount included.
      - ``next.deps.checks``
    * - ``next.E163``
      - A ``page.py`` declares ``public()`` beside its own ``login_required()`` or ``permission_required()``, with or without ``inherit=True`` on either, and the requirements still bind, so the ``public()`` opens nothing.
@@ -826,6 +829,52 @@ Errors
        The framework ignores such a marker, so the layout is no root, and the check fails the project so the marker does not go missing unnoticed.
        Moving the marker to the top of the file and keeping one of them clears it, see :ref:`topics-layouts-root`.
      - ``next.pages.checks.layouts``
+   * - ``next.E169``
+     - A directory name carries a parenthesis the router cannot read, so the router skips the directory and every page in it, or routes it literally, parentheses and all.
+       A route group is ``(name)`` with an identifier inside, a letter or ``_`` first and then letters, digits, ``_`` or ``-``.
+       A name that starts with ``(.)``, ``(..)`` or ``(...)`` is reserved for an intercepting route and must be one marker followed by the segment it targets, with the marker kinds never mixed.
+       Renaming the directory to a valid group or intercept name clears it.
+     - ``next.pages.checks.groups``
+   * - ``next.E170``
+     - An intercepting route targets a trail that no page of its own page tree serves, so the router drops it and it never serves a zone.
+       The hint says whether the tree routes the same trail with differently spelled bracket parameters, whether another page tree routes it, or how the marker counts levels.
+       Pointing the marker at a directory that serves a page clears it, with ``(.)`` beside the intercept, one ``(..)`` per level up, or ``(...)`` from the tree root.
+       A ``page.py`` with no body inside an intercept only passes its inherited declarations down and is never flagged.
+     - ``next.pages.checks.intercepts``
+   * - ``next.E171``
+     - A ``(..)`` intercept counts more levels up than the URL trail of its parent holds, so it climbs above its tree root and the router drops it.
+       Using one ``(..)`` per level up to the target, or ``(...)`` to target from the tree root, clears it.
+     - ``next.pages.checks.intercepts``
+   * - ``next.E172``
+     - An intercept directory sits inside another intercept directory.
+       The router reads no intercept nested in another, so it never serves a zone.
+       Moving it out beside the outer intercept, over the page it targets, clears it.
+     - ``next.pages.checks.intercepts``
+   * - ``next.E173``
+     - An intercept page serves a zone that a sibling intercept of the same target serves too, or re-declares a standalone zone its target keeps.
+       A zone inside a condition or a component that binds it is no claim, since no zone request serves it.
+       The served zones of an intercept are its standalone zones, less the zones of the layouts above it and the standalone zones of the target.
+       Of two intercepts sharing a served zone the one first in file order wins, so the other never serves it.
+       Giving each intercept of one target zones of its own clears it.
+     - ``next.partial.checks.intercepts``
+   * - ``next.E174``
+     - An intercept page has neither a ``template.djx`` nor a template string, or declares no zone it can render on its own, so no zone request over its target ever selects it.
+       Wrapping the content in ``{% zone "name" %}`` outside any component that binds it, and opening it with ``data-next-layer="name"``, clears it.
+       A body-less ``page.py`` that passes access rules, context, metadata or actions to the intercept pages below it is a carrier and stays silent.
+     - ``next.partial.checks.intercepts``
+   * - ``next.E175``
+     - An intercept page defines ``render()``, which never runs, since an intercept answers zone requests only and renders the zone from its template.
+       The router never publishes such an intercept, so with the check silenced the page still serves no zone.
+       Moving the work into ``@page.context`` callables, or into the ``render()`` of the target page, clears it.
+     - ``next.pages.checks.intercepts``
+   * - ``next.E176``
+     - An intercept page reads a URL kwarg that its target trail does not capture.
+       The intercept sits under bracket directories that the target trail lacks.
+       The kwargs come from the URL parser of the router, so a mixed segment such as ``photo-[group]`` and the kwargs of a ``pages()`` mount count.
+       An ``obj=DObject[Model]`` of the intercept is judged by ``next.E162`` against the route of the target.
+       A zone request carries the kwargs of the target URL alone, so the context or the access of the intercept never receives the value.
+       Targeting a page whose URL captures the kwarg, or moving the intercept out from under the brackets, clears it.
+     - ``next.pages.checks.intercepts``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -1175,6 +1224,32 @@ Warnings
        The message names the files.
        Moving the layout into the page tree or the assets to a layout inside it clears it, see :ref:`topics-layouts`.
      - ``next.static.checks``
+   * - ``next.W136``
+     - A ``page.py`` inside a route group declares a breadcrumb.
+       A route group serves the URL of its parent and gives no crumb, so the breadcrumb is dropped.
+       Declaring it in the ``page.py`` of the parent directory, or of a routed directory inside the group, clears it.
+     - ``next.pages.checks.metadata.crumbs``
+   * - ``next.W137``
+     - A route group holds a single routed directory and nothing else, no layout, page, components or other file.
+       The group leaves the URL, so it changes nothing for the pages below it.
+       Moving the directory up a level and dropping the group, or giving the group the ``layout.djx`` or ``page.py`` its pages share, clears it.
+     - ``next.pages.checks.groups``
+   * - ``next.W138``
+     - An intercept page declares a breadcrumb, ``headers`` or ``cache``, which never take effect.
+       Its zone response carries the headers of its target, is never cached and builds no breadcrumbs.
+       The title and the other metadata stay live on the intercept and are not reported.
+       Dropping the declarations from the intercept, or declaring them on the target, clears it.
+     - ``next.pages.checks.intercepts``
+   * - ``next.W139``
+     - A ``layout.djx`` sits inside an intercept directory.
+       No layout wraps a zone response, so its markup never renders.
+       Moving the markup into the intercept template, or into a layout above the intercept, clears it.
+     - ``next.pages.checks.intercepts``
+   * - ``next.W140``
+     - An intercept page declares no access while the default login applies, through ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware``, and its target admits anonymous users.
+       An anonymous visitor opening the modal gets a login redirect over a public page.
+       Declaring ``page.public()`` in the intercept ``page.py`` clears it, or ``page.login_required()`` keeps the login on purpose.
+     - ``next.pages.checks.intercepts``
 
 Codes are assigned per check and are not contiguous.
 

@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 from django.urls import URLPattern
 
 from next.conf import next_framework_settings
+from next.intercept import intercepts
+from next.pages.loaders import PAGE_MODULE
 from next.utils import PageRoot, walk_page_tree
 
 from .backends import FileRouterBackend
@@ -19,17 +21,23 @@ from .urlconf import outer_kwargs, tree_route, urlconf_mounts
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
     from pathlib import Path
+
+    from next.intercept import Intercept
 
 
 @dataclass(frozen=True, slots=True)
 class Route:
-    """One routed page, with its absolute route, its namespaced name and its file."""
+    """One routed page, with its absolute route, its namespaced name and its file.
+
+    An intercept row carries its rule, the URL of its target and no name.
+    """
 
     url: str
     name: str
     file: Path
+    intercept: Intercept | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,4 +135,19 @@ def collect_routes() -> list[Route]:
     return [*mounted_rows(mounted[:split]), *auto, *mounted_rows(mounted[split:])]
 
 
-__all__ = ["PageRoute", "Route", "collect_routes", "page_route"]
+def with_intercepts(routes: Iterable[Route]) -> list[Route]:
+    """Return `routes` with a row per intercept rule right after the row of its target.
+
+    The rules are read as published, so `routes` comes from `collect_routes` first.
+    """
+    rows: list[Route] = []
+    for route in routes:
+        rows.append(route)
+        rows.extend(
+            Route(url=route.url, name="", file=_page_file(rule.file), intercept=rule)
+            for rule in intercepts.of(route.file.with_name(PAGE_MODULE))
+        )
+    return rows
+
+
+__all__ = ["PageRoute", "Route", "collect_routes", "page_route", "with_intercepts"]

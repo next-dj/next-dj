@@ -149,9 +149,9 @@ class _StubManager:
         return self._backends
 
     def register_router_walk_folder(
-        self, folder: Path, tree_root: Path, route_trail: str
+        self, folder: Path, tree_root: Path, scope_trail: str
     ) -> None:
-        self.walked.append((folder, tree_root, route_trail))
+        self.walked.append((folder, tree_root, scope_trail))
 
 
 class TestEagerLoadComponents:

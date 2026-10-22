@@ -18,6 +18,7 @@ from next.checks.common import (
 )
 from next.components.context import component
 from next.components.sources import components_listed, import_component_modules
+from next.discovery import iter_scanned_intercepts
 from next.forms.checks.sources import iter_registered_actions
 from next.introspect import describe_callable
 from next.pages.access import page_access, routed
@@ -178,11 +179,13 @@ def _loaded_pages(
 ) -> Iterator[tuple[PageRoot, str, Path]]:
     """Yield each page that loaded once, with the tree the walk found it in.
 
-    A `page.py` with no body serves no route, so it is left out.
+    An intercept page comes under its target trail. A `page.py` with no body serves no
+    route, so it is left out.
     """
     loaded = {path for _url_path, path in discover_page_registrations(router_manager)}
     for router in router_manager.backends:
-        for root, url_path, page_path in iter_scanned_pages(router):
+        scanned = (*iter_scanned_pages(router), *iter_scanned_intercepts(router))
+        for root, url_path, page_path in scanned:
             if page_path in loaded and routed(page_path):
                 loaded.discard(page_path)
                 yield root, url_path, page_path

@@ -146,6 +146,27 @@ class TestComponentWidgetRender:
         assert "id=id_slug" in html
         assert "required=True" in html
 
+    def test_interpolates_kwargs_and_attrs_against_the_widget_scope(
+        self, echo_component: Path
+    ) -> None:
+        widget = ComponentWidget(
+            "echo", placeholder="Enter {{ name|upper }}", rows="{{ value }}"
+        )
+        widget._frame = RenderFrame(template_path=echo_component)
+        html = widget.render("slug", "12", attrs={"aria-label": "{{ name }} field"})
+        assert "placeholder=Enter SLUG" in html
+        assert "rows=12" in html
+        assert "slug field" in html
+
+    def test_leaves_plain_and_non_string_values_alone(
+        self, echo_component: Path
+    ) -> None:
+        widget = ComponentWidget("echo", placeholder="plain", rows=3)
+        widget._frame = RenderFrame(template_path=echo_component)
+        html = widget.render("slug", "v", attrs={})
+        assert "placeholder=plain" in html
+        assert "rows=3" in html
+
     def test_errors_default_to_empty(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
         widget._frame = RenderFrame(template_path=echo_component)

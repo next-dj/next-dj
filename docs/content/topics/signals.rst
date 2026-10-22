@@ -74,6 +74,9 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``route_registered``
      - URLs
      - After a URL pattern is created for a discovered page.
+   * - ``intercept_registered``
+     - URLs
+     - After the file router publishes an intercepting route over its target page.
    * - ``router_reloaded``
      - URLs
      - After the router manager rebuilds its pattern set.
@@ -128,6 +131,9 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``field_validated``
      - Partial
      - After a validate-only blur pass runs, always behind the action guard.
+   * - ``intercept_access_denied``
+     - Partial
+     - When the access chain of an intercept page refuses a zone GET over its target.
    * - ``sse_stream_opened``
      - Partial
      - When a patch event stream starts.

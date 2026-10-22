@@ -26,6 +26,7 @@ from .targets import (
     _form_zone,
     _origin_target,
     _resolve_step_target,
+    _served_target,
     _should_push_steps,
     _zone_overrides,
 )
@@ -88,13 +89,14 @@ def _shape_invalid(
     patches = Patches(request)
     form = outcome.form
     uid = outcome.uid or ""
-    zone = _form_zone(request, outcome.page_path)
+    page_path = _served_target(request, outcome.page_path, outcome.url_kwargs or {})
+    zone = _form_zone(request, page_path)
     if zone is not None:
         overrides = _zone_overrides(form, outcome.wizard, outcome.action_name)
         patches.morph(zone=zone, overrides=overrides)
     else:
         html = backend.render_invalid_page(
-            request, outcome.action_name, form, outcome.page_path, outcome.url_kwargs
+            request, outcome.action_name, form, page_path, outcome.url_kwargs
         )
         patches.morph_form(uid, html)
     if form is not None:

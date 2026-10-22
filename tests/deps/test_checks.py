@@ -840,3 +840,46 @@ class TestObjectDeclarations:
             root, check_object_managers, (GROUP_ROUTE, ""), (f"{GROUP_ROUTE}/more", "")
         )
         assert check_ids(messages) == ["next.E153"]
+
+
+class TestInterceptPages:
+    """An intercept page is judged over the URL kwargs of the page it serves over."""
+
+    def _site(self, root: Path, source: str) -> None:
+        write_page(root, "photo/[int:pk]", HEADER)
+        write_page(root, "photo/(.)[int:pk]", HEADER + source)
+
+    def test_a_kwarg_the_target_captures_is_silent(self, tmp_path: Path) -> None:
+        source = (
+            '\n@context("row")\ndef row(pk: DObject[Group]) -> Group:\n    return pk\n'
+        )
+        self._site(tmp_path / "pages", source)
+        with routed(tmp_path / "pages"):
+            assert check_object_page_bindings() == []
+
+    def test_a_kwarg_the_target_lacks_warns(self, tmp_path: Path) -> None:
+        self._site(tmp_path / "pages", GROUP_CONTEXT)
+        with routed(tmp_path / "pages"):
+            messages = check_object_page_bindings()
+        assert check_ids(messages) == ["next.W126"]
+        assert "captures pk." in messages[0].msg
+
+    def test_an_object_permission_the_target_lacks_is_unbound(
+        self, tmp_path: Path
+    ) -> None:
+        self._site(tmp_path / "pages", DECLARES_GROUP)
+        with routed(tmp_path / "pages"):
+            messages = check_object_declarations()
+        assert check_ids(messages) == ["next.E162"]
+        assert 'route "/photo/<int:pk>/"' in messages[0].msg
+
+    def test_a_kwarg_the_include_captures_is_silent(self, tmp_path: Path) -> None:
+        write_app(tmp_path, "wallets", {"pages": ()})
+        pages = tmp_path / "wallets" / "pages"
+        write_page(pages, "photo", HEADER)
+        write_page(pages, "(.)photo", HEADER + GROUP_CONTEXT)
+        urlconf = write_urlconf(
+            tmp_path, "wallet_urls", 'path("w/<int:group>/", pages("wallets"))'
+        )
+        with installed_apps(tmp_path, "wallets", urlconf=urlconf):
+            assert check_object_page_bindings() == []

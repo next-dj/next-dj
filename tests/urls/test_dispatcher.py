@@ -2,8 +2,12 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
-from next.urls.dispatcher import scan_pages_tree
-from tests.support import file_router
+import pytest
+
+from next.components import FileComponentsBackend, components_manager
+from next.urls.dispatcher import FilesystemTreeDispatcher, scan_pages_tree
+from next.utils import InterceptPage
+from tests.support import file_router, write_page
 
 
 class TestScanPagesDirectory:
@@ -190,3 +194,147 @@ class TestRouteOrder:
         )
         assert match.kwargs == {}
         assert match.route == "blog/about/"
+
+
+class TestRouteGroups:
+    """A group folder adds nothing to the trail and keeps its file-system scope."""
+
+    def test_trails_leave_the_group_out(self, tmp_path) -> None:
+        write_page(tmp_path, "(auth)/login", body="<p>in</p>")
+        write_page(tmp_path, "(auth)/(deep)/signup", body="<p>up</p>")
+        write_page(tmp_path, "about", body="<p>about</p>")
+
+        trails = [trail for trail, _file in scan_pages_tree(tmp_path)]
+
+        assert sorted(trails) == ["about", "login", "signup"]
+
+    def test_a_group_page_yields_at_the_parent_trail(self, tmp_path) -> None:
+        page_file = write_page(tmp_path, "(app)", body="<p>app</p>")
+
+        assert list(scan_pages_tree(tmp_path)) == [("", page_file)]
+
+    def test_a_components_folder_in_a_group_registers_its_file_system_trail(
+        self, tmp_path
+    ) -> None:
+        folder = tmp_path / "(app)" / "dash" / "_components"
+        folder.mkdir(parents=True)
+        write_page(tmp_path, "(app)/dash", body="<p>dash</p>")
+        calls: list[tuple[Path, Path, str]] = []
+
+        def capture(folder: Path, root: Path, scope: str) -> None:
+            calls.append((folder, root, scope))
+
+        with patch(
+            "next.urls.dispatcher.register_components_folder_from_router_walk", capture
+        ):
+            trails = [
+                trail
+                for trail, _file in scan_pages_tree(
+                    tmp_path,
+                    skip_dir_names=("_components",),
+                    register_components=True,
+                    components_folder_name="_components",
+                )
+            ]
+
+        assert trails == ["dash"]
+        assert calls == [(folder, tmp_path, "(app)/dash")]
+
+
+@pytest.fixture()
+def file_components(monkeypatch: pytest.MonkeyPatch) -> FileComponentsBackend:
+    backend = FileComponentsBackend({"DIRS": [], "COMPONENTS_DIR": "_components"})
+    monkeypatch.setattr(components_manager, "_backends", [backend])
+    monkeypatch.setattr(components_manager, "_loaded", True)
+    monkeypatch.setattr(components_manager, "_walk_registered_folders", set())
+    return backend
+
+
+class TestInterceptWalk:
+    """An intercept page is handed to the callback and never yielded as a route."""
+
+    def test_the_callback_gets_the_page_with_the_resolved_trail(self, tmp_path) -> None:
+        feed = write_page(tmp_path, "feed", body="<p>feed</p>")
+        photo = write_page(tmp_path, "feed/(.)photo/[id]", body="<p>modal</p>")
+        found: list[InterceptPage] = []
+
+        routes = list(scan_pages_tree(tmp_path, on_intercept=found.append))
+
+        assert routes == [("feed", feed)]
+        assert found == [
+            InterceptPage(
+                "feed/photo/[id]", photo, tmp_path / "feed" / "(.)photo", "(.)"
+            )
+        ]
+
+    def test_the_dispatcher_walk_forwards_the_callback(self, tmp_path) -> None:
+        photo = write_page(tmp_path, "(.)photo")
+        found: list[InterceptPage] = []
+        dispatcher = FilesystemTreeDispatcher(
+            skip_dir_names=("_components",),
+            components_folder_name="_components",
+            register_components=False,
+        )
+
+        routes = list(dispatcher.walk(tmp_path, on_intercept=found.append))
+
+        assert routes == []
+        assert [hit.file for hit in found] == [photo]
+
+    def test_without_a_callback_nothing_is_routed_from_an_intercept(
+        self, tmp_path
+    ) -> None:
+        write_page(tmp_path, "feed/(.)photo")
+
+        assert list(scan_pages_tree(tmp_path)) == []
+
+    def test_a_components_folder_in_an_intercept_registers_its_file_system_trail(
+        self, tmp_path
+    ) -> None:
+        folder = tmp_path / "feed" / "(.)photo" / "_components"
+        folder.mkdir(parents=True)
+        write_page(tmp_path, "feed/(.)photo", body="<p>modal</p>")
+        calls: list[tuple[Path, Path, str]] = []
+
+        def capture(folder: Path, root: Path, scope: str) -> None:
+            calls.append((folder, root, scope))
+
+        with patch(
+            "next.urls.dispatcher.register_components_folder_from_router_walk", capture
+        ):
+            list(
+                scan_pages_tree(
+                    tmp_path,
+                    skip_dir_names=("_components",),
+                    register_components=True,
+                    components_folder_name="_components",
+                )
+            )
+
+        assert calls == [(folder, tmp_path, "feed/(.)photo")]
+
+    def test_the_components_registry_serves_the_intercept_subtree_only(
+        self, tmp_path, file_components
+    ) -> None:
+        card = tmp_path / "feed" / "(.)photo" / "_components"
+        card.mkdir(parents=True)
+        (card / "modal_card.djx").write_text("x")
+        modal = write_page(tmp_path, "feed/(.)photo/[id]", body="x")
+        sibling = write_page(tmp_path, "feed", body="x")
+        sibling_template = sibling.parent / "template.djx"
+        scan = scan_pages_tree(
+            tmp_path,
+            skip_dir_names=("_components",),
+            register_components=True,
+            components_folder_name="_components",
+        )
+
+        list(scan)
+
+        assert set(
+            components_manager.collect_visible_components(modal.parent / "template.djx")
+        ) == {"modal_card"}
+        assert (
+            set(components_manager.collect_visible_components(sibling_template))
+            == set()
+        )

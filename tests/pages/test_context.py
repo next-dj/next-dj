@@ -4,7 +4,7 @@ import pytest
 
 from next.introspect import defining_file
 from next.pages.registry import PageContextRegistry
-from tests.support import counting_provider
+from tests.support import counting_provider, routed, write_page
 
 
 class TestZoneScopedContext:
@@ -224,3 +224,25 @@ class TestUrlKwargNamedLikeTheBatch:
         assert context_data["requested_zones"] == "abc"
         assert context_data["a"] == "a-value"
         assert "b" not in context_data
+
+
+class TestInheritedContextThroughGroups:
+    """A group `page.py` hands its inherited context to the pages inside the group."""
+
+    def test_the_pages_in_a_group_read_the_group_context(self, root, client) -> None:
+        write_page(
+            root,
+            "(app)",
+            "from next.pages import context\n\n\n"
+            '@context("section", inherit_context=True)\n'
+            "def section():\n"
+            '    return "from-group"\n',
+        )
+        write_page(root, "(app)/dash", "template = 'dash={{ section }}'\n")
+        write_page(root, "other", "template = \"other={{ section|default:'none' }}\"\n")
+
+        with routed(root):
+            inside = client.get("/dash/").content.decode().strip()
+            outside = client.get("/other/").content.decode().strip()
+
+        assert (inside, outside) == ("dash=from-group", "other=none")

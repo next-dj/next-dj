@@ -1,0 +1,29 @@
+{% zone "history-peek" %}
+<div class="w-full max-w-[36rem] space-y-4">
+  {% #component "page_header" eyebrow="Recent changes" title="History" description="The latest entries the admin wrote for this record." %}{% /component %}
+
+  {% if history_peek.rows %}
+    <ol class="divide-y divide-border rounded-lg border border-border bg-card text-sm">
+      {% for row in history_peek.rows %}
+        <li class="flex items-start justify-between gap-4 px-3 py-2">
+          <div>
+            <span class="rounded-full bg-muted px-2 py-0.5 text-xs">{{ row.action }}</span>
+            <span class="ml-2">{{ row.message|default:"—" }}</span>
+          </div>
+          <div class="text-right text-xs text-muted-foreground">
+            <div>{{ row.user|default:"—" }}</div>
+            <time datetime="{{ row.time|date:'c' }}">{{ row.time|date:"Y-m-d H:i" }}</time>
+          </div>
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    {% #component "empty_state" title="No history yet" description="Changes to this record will appear here." %}{% /component %}
+  {% endif %}
+
+  <div class="flex items-center justify-between text-sm">
+    <span class="text-muted-foreground">{% if history_peek.hidden %}{{ history_peek.hidden }} older entr{{ history_peek.hidden|pluralize:"y,ies" }} not shown{% endif %}</span>
+    <a href="{{ request.path }}" class="font-medium text-primary hover:underline">Open the full history</a>
+  </div>
+</div>
+{% endzone %}

@@ -1,0 +1,12 @@
+{% layout root %}
+<!DOCTYPE html>
+<html lang="en">
+{% component "page_head" %}
+<body class="min-h-screen bg-background text-foreground">
+  <main class="flex min-h-screen items-center justify-center px-4 py-12">
+    {% component "flash_messages" %}
+    {% template %}
+  </main>
+  {% collect_scripts %}
+</body>
+</html>

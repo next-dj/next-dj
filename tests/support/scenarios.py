@@ -37,7 +37,7 @@ def tick_scenario_route_set_grows(reloader: NextStatReloader):
         call_count[0] += 1
         return [] if call_count[0] == 1 else [Path("/fake/pages")]
 
-    def scan_side_effect(pages_path):
+    def scan_side_effect(pages_path, **_options):
         if call_count[0] < 2:
             return iter([])
         return iter([("home", pages_path / "home" / "page.py")])
@@ -61,7 +61,7 @@ def tick_scenario_no_notify_first_tick(reloader: NextStatReloader):
     with (
         route_watch_layer_patches(
             get_pages_directories_for_watch=lambda: [fake_dir],
-            scan_pages_tree=lambda _p: iter([("home", fake_page)]),
+            scan_pages_tree=lambda _p, **_o: iter([("home", fake_page)]),
         ),
         patch.object(reloader, "snapshot_files", return_value=iter([])),
         patch.object(reloader, "notify_file_changed") as mock_notify,
@@ -75,7 +75,7 @@ def tick_scenario_route_set_unchanged(reloader: NextStatReloader):
     fake_dir = Path("/fake")
     fake_page = fake_dir / "page.py"
 
-    def route_iter(_path):
+    def route_iter(_path, **_options):
         return iter([("home", fake_page)])
 
     with (
@@ -116,7 +116,8 @@ def tick_scenario_mtime_change(reloader: NextStatReloader):
 
     with (
         route_watch_layer_patches(
-            get_pages_directories_for_watch=list, scan_pages_tree=lambda _p: iter([])
+            get_pages_directories_for_watch=list,
+            scan_pages_tree=lambda _p, **_o: iter([]),
         ),
         patch.object(reloader, "snapshot_files", side_effect=snapshot_side_effect),
         patch.object(reloader, "notify_file_changed") as mock_notify,

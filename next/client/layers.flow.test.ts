@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
 import type { DialogAdapter } from "./layers";
-import { chunkModules } from "./test-doubles";
+import { chunkModules, manualPollClock } from "./test-doubles";
 
 interface Dispatched {
   event: string;
@@ -90,6 +90,7 @@ describe("layer flow through the partial surface", () => {
 
   afterEach(() => {
     partial._reset();
+    window.history.replaceState(null, "", "/");
   });
 
   function headerOf(call: Call, name: string): string | null {
@@ -394,5 +395,223 @@ describe("layer flow through the partial surface", () => {
     partial.layers.close({ result: undefined });
     expect(location.pathname + location.search).toBe("/feed/?page=2");
     window.history.replaceState(null, "", "/");
+  });
+
+  function photoBody(extra = ""): string {
+    return JSON.stringify(
+      envelope([
+        {
+          op: "morph",
+          target: { zone: "photo-modal" },
+          html: `<div data-next-zone="photo-modal">photo${extra}</div>`,
+        },
+      ]),
+    );
+  }
+
+  function photoLink(attrs: Record<string, string>): HTMLAnchorElement {
+    const link = document.createElement("a");
+    link.setAttribute("href", "/photo/7/");
+    for (const [name, value] of Object.entries(attrs)) link.setAttribute(name, value);
+    document.body.append(link);
+    return link;
+  }
+
+  function click(el: Element): MouseEvent {
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    el.dispatchEvent(event);
+    return event;
+  }
+
+  it("a zone link click GETs its own href with the zone and host origin and pushes it", async () => {
+    window.history.replaceState(null, "", "/feed/");
+    respond = () => envelopeResponse(photoBody());
+    const event = click(photoLink({ "data-next-layer": "photo-modal" }));
+    await flush();
+    expect(event.defaultPrevented).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(`${location.origin}/photo/7/`);
+    expect(calls[0]!.init.method).toBe("GET");
+    expect(headerOf(calls[0]!, "X-Next-Zone")).toBe("photo-modal");
+    expect(headerOf(calls[0]!, "X-Next-Origin")).toBe("/feed/");
+    expect(location.pathname).toBe("/photo/7/");
+    expect(
+      document.querySelector('dialog [data-next-zone="photo-modal"]'),
+    ).not.toBeNull();
+  });
+
+  it("a plain link to the same URL is neither prevented nor fetched", async () => {
+    const event = click(photoLink({}));
+    await flush();
+    expect(event.defaultPrevented).toBe(false);
+    expect(calls).toHaveLength(0);
+    expect(partial.layers.size()).toBe(0);
+  });
+
+  it("a server layer.open op GETs its href with the zone and host origin and pushes it", async () => {
+    window.history.replaceState(null, "", "/feed/");
+    respond = () => envelopeResponse(photoBody());
+    partial.apply(
+      envelope([{ op: "layer.open", href: "/photo/7/", zone: "photo-modal" }]),
+    );
+    await flush();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(`${location.origin}/photo/7/`);
+    expect(headerOf(calls[0]!, "X-Next-Zone")).toBe("photo-modal");
+    expect(headerOf(calls[0]!, "X-Next-Origin")).toBe("/feed/");
+    expect(location.pathname).toBe("/photo/7/");
+    expect(partial.layers.size()).toBe(1);
+  });
+
+  describe("requests made from inside an open layer", () => {
+    async function openPhoto(extra: string): Promise<void> {
+      window.history.replaceState(null, "", "/feed/");
+      respond = () => envelopeResponse(photoBody(extra));
+      await partial.layers.open(null, "/photo/7/", "photo-modal");
+      calls.length = 0;
+      respond = () => envelopeResponse(zoneMorphBody("none", "<div></div>"));
+    }
+
+    it("a refresh op GETs the layer URL with its zone and no origin", async () => {
+      await openPhoto('<div data-next-zone="comments">c</div>');
+      partial.apply(envelope([{ op: "refresh", zone: "comments" }]));
+      await flush();
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.url).toBe(`${location.origin}/photo/7/`);
+      expect(headerOf(calls[0]!, "X-Next-Zone")).toBe("comments");
+      expect(headerOf(calls[0]!, "X-Next-Origin")).toBeNull();
+    });
+
+    it("a lazy load zone in the layer body GETs the layer URL with its zone and no origin", async () => {
+      window.history.replaceState(null, "", "/feed/");
+      respond = (call) =>
+        headerOf(call, "X-Next-Zone") === "photo-modal"
+          ? envelopeResponse(
+              photoBody('<div data-next-zone="comments" data-next-lazy="load"></div>'),
+            )
+          : envelopeResponse(zoneMorphBody("none", "<div></div>"));
+      await partial.layers.open(null, "/photo/7/", "photo-modal");
+      await flush();
+      expect(calls).toHaveLength(2);
+      expect(calls[1]!.url).toBe(`${location.origin}/photo/7/`);
+      expect(headerOf(calls[1]!, "X-Next-Zone")).toBe("comments");
+      expect(headerOf(calls[1]!, "X-Next-Origin")).toBeNull();
+    });
+
+    it("a poll tick of a zone in the layer GETs the layer URL with its zone and no origin", async () => {
+      const clock = manualPollClock();
+      partial._configure({
+        document,
+        clock,
+        dialog: mockDialog().adapter,
+        navigate: () => undefined,
+        fetch: async (url, init) => {
+          const call = { url, init };
+          calls.push(call);
+          return respond(call);
+        },
+      });
+      await openPhoto('<div data-next-zone="comments" data-next-poll="5000"></div>');
+      clock.tick();
+      await flush();
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.url).toBe(`${location.origin}/photo/7/`);
+      expect(headerOf(calls[0]!, "X-Next-Zone")).toBe("comments");
+      expect(headerOf(calls[0]!, "X-Next-Origin")).toBeNull();
+    });
+
+    it("a pagination link in the layer GETs its own href with the zone and merge intent", async () => {
+      await openPhoto(
+        '<div data-next-zone="comments"><a href="/photo/7/?page=2" ' +
+          'data-next-merge="append" data-next-target="comments">more</a></div>',
+      );
+      click(document.querySelector("dialog a")!);
+      await flush();
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.url).toBe(`${location.origin}/photo/7/?page=2`);
+      expect(headerOf(calls[0]!, "X-Next-Zone")).toBe("comments");
+      expect(headerOf(calls[0]!, "X-Next-Merge")).toBe("append");
+      expect(headerOf(calls[0]!, "X-Next-Origin")).toBeNull();
+    });
+  });
+
+  describe("a meta op in the layer body titles the tab while the layer is open", () => {
+    function metaBody(): string {
+      return JSON.stringify(
+        envelope([
+          {
+            op: "morph",
+            target: { zone: "photo-modal" },
+            html: '<div data-next-zone="photo-modal">photo</div>',
+          },
+          { op: "meta", title: "Photo 7", description: "A photo" },
+        ]),
+      );
+    }
+
+    function description(): string | null | undefined {
+      return document.head
+        .querySelector('meta[name="description"]')
+        ?.getAttribute("content");
+    }
+
+    beforeEach(() => {
+      window.history.replaceState(null, "", "/feed/");
+      document.head.innerHTML =
+        '<title>Feed</title><meta name="description" content="Feed list">';
+      respond = () => envelopeResponse(metaBody());
+    });
+
+    afterEach(() => {
+      document.head.innerHTML = "";
+    });
+
+    it("sets the title and description once the body lands", async () => {
+      await partial.layers.open(null, "/photo/7/", "photo-modal");
+      expect(document.title).toBe("Photo 7");
+      expect(description()).toBe("A photo");
+    });
+
+    it("a later refresh response for the layer URL retitles the tab", async () => {
+      await partial.layers.open(null, "/photo/7/", "photo-modal");
+      respond = () =>
+        envelopeResponse(
+          JSON.stringify(
+            envelope([
+              { op: "morph", target: { zone: "photo-modal" }, html: "<div>x</div>" },
+              { op: "meta", title: "Photo 7 (2)", description: null },
+            ]),
+          ),
+        );
+      await partial.fetch({
+        url: "/photo/7/",
+        zone: "photo-modal",
+        headers: { "X-Next-Zone": "photo-modal" },
+      });
+      expect(document.title).toBe("Photo 7 (2)");
+      expect(description()).toBeUndefined();
+      partial.layers.close({ result: 1 });
+      expect(document.title).toBe("Feed");
+      expect(description()).toBe("Feed list");
+    });
+
+    it.each([
+      ["accept", () => partial.layers.close({ result: 1 })],
+      ["dismiss gesture", () => dismissers[dismissers.length - 1]!("escape")],
+      [
+        "Back",
+        () => {
+          window.history.replaceState(null, "", "/feed/");
+          window.dispatchEvent(new PopStateEvent("popstate"));
+        },
+      ],
+      ["reset", () => partial.layers._reset()],
+    ])("restores the host title and description on %s", async (_name, closeLayer) => {
+      await partial.layers.open(null, "/photo/7/", "photo-modal");
+      closeLayer();
+      expect(partial.layers.size()).toBe(0);
+      expect(document.title).toBe("Feed");
+      expect(description()).toBe("Feed list");
+    });
   });
 });

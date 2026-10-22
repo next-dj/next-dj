@@ -54,9 +54,11 @@ Modules
 
 ``next.urls.dispatcher``.
    ``FilesystemTreeDispatcher`` walks the pages directory tree and yields ``(url_path, page_file)`` pairs that the router turns into URL patterns.
+   The ``url_path`` is the group-free URL trail, see `Route groups and intercepting routes`_ below.
    The module-level helper ``scan_pages_tree`` instantiates the dispatcher with the configured skip set and returns the same pairs as an iterator.
    The walk itself is ``next.utils.walk_page_tree``, which sits below both this package and the checks layer because the system checks run the same walk over the trees a backend reports.
-   The dispatcher adds the one thing the checks do not want, a callback on each skipped directory that registers the component folders the router passes.
+   The dispatcher adds the one thing the checks do not want, a callback on each skipped directory that registers the component folders the router passes, under the raw file-system trail of the directory that holds them.
+   It forwards an ``on_intercept`` callback to the walk, which the file router uses to collect the intercepting pages.
 
 ``next.urls.markers``.
    Hosts the ``DUrl`` and ``DQuery`` annotation markers, the four request/URL/query parameter providers, and the ``get_multi_values`` helper.
@@ -73,6 +75,10 @@ Modules
 
 ``next.urls.routes``.
    ``collect_routes`` and ``Route``, the route table that ``manage.py routes`` prints.
+   ``with_intercepts(routes)`` returns the table with one extra row after each routed page that has intercepting pages, and ``Route.intercept`` holds the rule of such a row and is ``None`` on a routed one.
+
+``next.intercept``.
+   Holds ``Intercept``, ``InterceptTable``, and the process-wide ``intercepts`` table, see `Route groups and intercepting routes`_ below.
 
 URL name computation
 --------------------
@@ -128,10 +134,11 @@ The lazy sequence lists the framework routes first, the CSRF token endpoint at `
 A page tree with a root catch-all such as ``[[rest]]`` matches every path, so a framework route listed after it would never answer, and every deferred token fetch and form post would reach that page instead.
 The ``next.E149`` system check resolves both addresses and compares the resolved view with the framework view, so a pattern of the root URLconf listed above the include is caught even when it reuses the framework URL name.
 
-Inside one page tree the walker yields the page of a directory first, real or virtual, and then descends into its subdirectories.
-The subdirectories are ranked by kind, static names first, then names holding a ``[param]`` segment, then names holding a ``[[catch-all]]`` segment.
+Inside one page tree the walker yields the page of a directory first, real or virtual, then the pages of the route groups inside it, and then descends into the routed subdirectories.
+Those subdirectories are the directory's own and those of every group inside it, ranked together by kind, static names first, then names holding a ``[param]`` segment, then names holding a ``[[catch-all]]`` segment.
 Within a kind, a name with more literal text comes first, so ``post-[id]`` precedes ``[slug]``, then the narrower converters, ``int`` and ``uuid`` ahead of ``slug``, ``slug`` and a project converter ahead of ``str``, and ``str`` ahead of ``path``, and the name decides the rest.
 The rank reads a name through ``ROUTE_BRACKET_PATTERN``, the expression the URL parser converts, so ``blog/about`` always precedes ``blog/[slug]``.
+The ranking is stable, so a child of the directory itself stays ahead of a child of a group when both rank equally.
 The pattern list is therefore the same on every file system, whatever order ``os.scandir`` returns the entries in.
 
 Across trees the page routes list the application trees in ``INSTALLED_APPS`` order, then the ``DIRS`` roots.
@@ -139,6 +146,49 @@ A ``pages()`` tree sits outside this list, where its URLconf includes it.
 
 A trail the parser refuses, such as a repeated parameter name, does not abort the build.
 ``FileRouterBackend`` logs a warning naming the ``page.py``, leaves that page unrouted, and routes the rest, so ``manage.py check`` runs and reports it.
+
+Route groups and intercepting routes
+------------------------------------
+
+One walk of a page tree classifies each subdirectory of a directory by its name, through a single function, into four kinds.
+A routed directory contributes a URL segment and is walked.
+A group, a name such as ``(auth)``, contributes nothing to the URL or to the URL name.
+An intercept, a name that starts with ``(.``, is walked on its own and never routed, and a malformed one is dropped.
+A skipped directory, one that starts with an underscore or is named in ``skip_dir_names``, is reported to ``on_skipped_dir`` and not entered.
+Any other parenthesised name is routed literally, and ``next.E169`` reports it.
+
+The walk flattens a group into the level that holds it.
+It collects the page of the directory, then the pages of its groups, which come in name order with a nested group depth-first, and then the routed children of the directory and of every group.
+The children are sorted again by the route rank only when a group contributed, so a tree without groups pays no sort.
+The walk yields the group-free URL trail, so ``pages/(app)/[id]/page.py`` and ``pages/new/page.py`` rank as siblings, and ``new/`` is tried before ``[id]/``.
+Two pages on one URL, whether from a group and its parent or from two groups, are the ``next.E015`` duplicate, and its hint explains that a group leaves the URL when a source passes through one.
+Alongside the URL trail the walk carries the raw file-system trail, which keeps the groups, and reports it to ``on_skipped_dir`` so a ``_components`` folder scopes to the subtree below the group that holds it.
+
+An intercepting directory is named by a marker and a segment.
+The scope of an intercept is the group-free URL trail of the directory that holds it.
+``(.)x`` targets the scope plus ``x``, ``(..)x`` the scope minus its last segment plus ``x`` with one more segment dropped for each repeated ``(..)``, and ``(...)x`` targets ``x`` from the tree root.
+A ``(..)`` that climbs past the root drops the intercept and ``next.E171`` reports it.
+The subtree under the directory walks with its trail seeded to the target, so ``feed/(.)photo/[id]/page.py`` targets ``feed/photo/[id]``.
+Groups inside the directory flatten, and an intercept inside an intercept is never read.
+Each page found is handed to the ``on_intercept`` callback as an ``InterceptPage`` and never yielded as a route, so it gets no URL pattern, no URL name, no ``next.E015`` and no sitemap entry.
+
+The file router publishes the intercepts after the walk of a page root, in ``next.intercept.intercepts``, an ``InterceptTable``.
+A rule is published only when its target trail matches exactly a trail the same walk routed, so ``[id]`` does not match ``[int:id]``, and ``next.E170`` reports a rule without a target.
+A rule whose directory lies under a nested page root belongs to the inner root and is left out here.
+A body-less ``page.py`` that only carries rules to the intercepts below it publishes no rule.
+The router imports the page module of each published intercept, as it does for a routed page, so its context, metadata, actions, and access rules register.
+``publish(root, rules, generation=)`` replaces every rule of that root in one assignment, and a root with no intercepts publishes an empty set, so a rule deleted on disk vanishes at the next reload.
+``generation`` guards against a race with a reload.
+The walk reads the table's ``generation`` before it starts, a reload bumps it, and a walk that began before the reload is refused at publish, so its stale rules never overwrite the cleared table.
+``intercepts.of(target_file)`` returns the rules over one routed page in file order with a single dictionary lookup, and ``all()`` returns every rule.
+``RouterManager.reload()`` clears the table before it installs the new backends, so a build inside ``router_reloaded`` publishes into the fresh table and the rebuild publishes it again.
+
+Each published rule sends ``intercept_registered``, only when the publish was accepted.
+The table is read at request time to pick the intercepting page that serves a zone request over its target.
+
+``manage.py routes`` lists an intercepting page as an extra row right after the row of its target.
+``manage.py permissions`` lists it with the kind ``intercept`` and the access rule of its own chain.
+:doc:`/content/ref/management` describes both tables.
 
 Trees placed by pages()
 -----------------------
@@ -169,6 +219,7 @@ Reload mechanics
 ``notify=False`` suppresses three of those effects, the per-entry ``router_backend_loaded``, the URL-cache clear, and ``router_reloaded``.
 The version bump and the rebuild itself always happen, which is what lets a receiver of ``router_reloaded`` reload the backends without re-entering its own signal.
 The next request observes the new patterns without a process restart.
+The ``router_reloaded`` receivers also drop the intercept table, which the rebuild fills again.
 Long lived processes such as websocket subscribers listen for the signal to refresh cached URL references.
 
 The manager also reloads on two signals of its own accord.
@@ -218,7 +269,10 @@ Extension points
   ``reload(notify=False)`` builds the backends without sending it.
 - Subscribe to ``router_reloaded`` to observe the rebuild itself, sent by the ``RouterManager`` class with no keyword arguments.
 
-The three signals above are the whole signal surface of the URL area.
+- Subscribe to ``intercept_registered`` to observe each intercept rule the file router publishes.
+  It fires once per rule with ``sender=FileRouterBackend`` and the ``target_file``, ``file_path``, and ``marker`` keyword arguments, and only after the table accepted the publish.
+
+The four signals above are the whole signal surface of the URL area.
 See :doc:`/content/ref/signals` for their payloads and :doc:`/content/topics/signals` for the wider catalog.
 
 See also

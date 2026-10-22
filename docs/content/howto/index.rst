@@ -41,6 +41,12 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`give-a-section-its-own-document-shell`
    Cut the layout chain so an embed or print view renders its own document.
 
+:doc:`open-a-page-as-a-modal-over-another`
+   Serve a page as a modal over the page that links to it with an intercepting route.
+
+:doc:`group-pages-by-section`
+   Scope layouts and access to a section of pages with a route group that leaves the URL alone.
+
 .. rubric:: SEO
 
 :doc:`/content/topics/seo/quickstart` covers titles, the head, the sitemap, and the robots file of a new site.
@@ -169,6 +175,8 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    internationalize-routes
    customize-error-pages
    give-a-section-its-own-document-shell
+   open-a-page-as-a-modal-over-another
+   group-pages-by-section
    audit-seo-before-deploy
    cache-pages-on-a-cdn
    move-and-remove-pages

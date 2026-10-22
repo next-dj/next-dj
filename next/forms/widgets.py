@@ -4,7 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, override
 
-from django import forms as django_forms
+from django import forms as django_forms, template
 from django.forms import widgets as _django_widgets
 from django.forms.renderers import BaseRenderer
 from django.http import HttpRequest
@@ -13,6 +13,7 @@ from django.utils.safestring import SafeString
 from next.components.facade import get_component, render_component
 from next.components.manager import components_manager
 from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY
+from next.interpolation import interpolation_of, scoped
 from next.ports import static_assets_slot
 from next.seeding import EMPTY_FRAME, RenderFrame, current_ambient_frame
 from next.utils import resolve_base_dir
@@ -40,6 +41,15 @@ def _project_anchor() -> Path:
     The name is synthetic, because a lookup walks outward from the directory of a file.
     """
     return (resolve_base_dir() or Path.cwd()) / _UNBOUND_ANCHOR_NAME
+
+
+def _interpolate(values: dict[str, Any], scope: template.Context) -> dict[str, Any]:
+    """Return `values` with each `{{ expr }}` string resolved against `scope`."""
+    resolved: dict[str, Any] = {}
+    for key, item in values.items():
+        interpolation = interpolation_of(item) if isinstance(item, str) else None
+        resolved[key] = item if interpolation is None else interpolation.resolve(scope)
+    return resolved
 
 
 class ComponentWidget(django_forms.Widget):
@@ -111,7 +121,9 @@ class ComponentWidget(django_forms.Widget):
                 components_manager.collect_visible_components(Path(anchor)),
             )
         static_assets_slot.get().collect_component_assets(info, frame.collector)
-        merged = self.build_attrs(self.attrs, attrs or {})
+        formatted = self.format_value(value)
+        scope = scoped({"name": name, "value": formatted, "errors": self._errors})
+        merged = _interpolate(self.build_attrs(self.attrs, attrs or {}), scope)
         # Hyphenated keys like aria-invalid alias to underscores unless already taken.
         aliased = {
             k.replace("-", "_"): v
@@ -122,10 +134,10 @@ class ComponentWidget(django_forms.Widget):
         context = {
             **merged,
             **aliased,
-            **self.extra_kwargs,
+            **_interpolate(self.extra_kwargs, scope),
             "attrs": merged,
             "name": name,
-            "value": self.format_value(value),
+            "value": formatted,
             "errors": self._errors,
         }
         # A keyless component context must not take over any name set by this widget.

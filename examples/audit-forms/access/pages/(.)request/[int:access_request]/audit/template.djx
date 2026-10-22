@@ -1,0 +1,41 @@
+{% zone "audit-peek" %}
+<article class="w-full max-w-[40rem] space-y-4" data-audit-peek>
+  <header class="flex items-start justify-between gap-4">
+    <div class="space-y-1">
+      <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Request #{{ access_request.pk }} · {{ access_request.status }}
+      </p>
+      <h2 class="text-lg font-semibold tracking-tight">{{ access_request.full_name }}</h2>
+      <p class="text-sm text-muted-foreground">
+        team {{ access_request.team }} · project {{ access_request.project_slug }}
+      </p>
+    </div>
+    <form method="dialog">
+      <button type="submit" aria-label="Close"
+              class="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground">✕</button>
+    </form>
+  </header>
+
+  <section class="space-y-2">
+    <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Linked audit rows, live</h3>
+    {% zone "audit-peek-entries" poll="5s" tag="ol" %}
+      {% for entry in entries %}
+        <li data-next-key="{{ entry.pk }}" data-audit-peek-row
+            class="flex items-center gap-2 border-b border-border py-1.5 text-sm last:border-0">
+          <span class="font-mono text-xs text-muted-foreground">{{ entry.created_at|date:"H:i:s" }}</span>
+          {% component "badge" text=entry.source variant="muted" %}
+          {% component "badge" text=entry.kind variant="outline" %}
+          <span class="truncate font-mono text-xs">{{ entry.action_name }}</span>
+        </li>
+      {% empty %}
+        <li class="text-sm text-muted-foreground">No rows linked yet, the backend links the final dispatch.</li>
+      {% endfor %}
+    {% endzone %}
+  </section>
+
+  <footer class="flex justify-end">
+    <a href="{% url 'next:page_request_int_access_request_audit' access_request=access_request.pk %}"
+       class="text-sm font-medium underline hover:text-foreground">Open full page</a>
+  </footer>
+</article>
+{% endzone %}

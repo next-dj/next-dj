@@ -1,3 +1,4 @@
+import pytest
 from django.test import Client
 
 from next.partial.headers import CONTENT_TYPE
@@ -62,6 +63,27 @@ class TestZoneGetBadRequests:
         response = NextClient().get_zones("/dynamic/", "ghost")
         assert response.status_code == 400
         assert response.content == b"zone in dynamic body"
+
+
+class TestZoneGetRefusalsAreNeverStored:
+    """A 400 or a 409 depends on the zone header, so no cache may keep it."""
+
+    @pytest.mark.parametrize(
+        ("url", "zone", "version"),
+        [
+            ("/zoned/", "ghost", None),
+            ("/dynamic/", "ghost", None),
+            ("/zoned/", "alpha", "stale"),
+        ],
+        ids=["unknown_zone", "dynamic_body", "stale_version"],
+    )
+    def test_the_refusal_is_private_and_varies_on_the_zone(
+        self, url: str, zone: str, version: str | None
+    ) -> None:
+        response = NextClient().get_zones(url, zone, version=version)
+        assert response.status_code in {400, 409}
+        assert response["Cache-Control"] == "private, no-store"
+        assert "X-Next-Zone" in response["Vary"]
 
 
 class TestZoneGetVersionConflict:

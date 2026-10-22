@@ -14,13 +14,12 @@ def pytest_ignore_collect(config: pytest.Config) -> bool | None:
     return ignore_browser_suite(config)
 
 
-@pytest.fixture()
-def signed_in(context, live_server, admin_user) -> None:
-    """Hand the browser a session cookie for the superuser."""
+def hand_session(context, live_server, user) -> None:
+    """Hand the browser a session cookie signed in as `user`."""
     session = SessionStore()
-    session[SESSION_KEY] = str(admin_user.pk)
+    session[SESSION_KEY] = str(user.pk)
     session[BACKEND_SESSION_KEY] = settings.AUTHENTICATION_BACKENDS[0]
-    session[HASH_SESSION_KEY] = admin_user.get_session_auth_hash()
+    session[HASH_SESSION_KEY] = user.get_session_auth_hash()
     session.save()
     context.add_cookies(
         [
@@ -32,3 +31,15 @@ def signed_in(context, live_server, admin_user) -> None:
             }
         ]
     )
+
+
+@pytest.fixture()
+def signed_in(context, live_server, admin_user) -> None:
+    """Hand the browser a session cookie for the superuser."""
+    hand_session(context, live_server, admin_user)
+
+
+@pytest.fixture()
+def editor_signed_in(context, live_server, editor) -> None:
+    """Hand the browser a session cookie for the seeded staff editor."""
+    hand_session(context, live_server, editor)

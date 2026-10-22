@@ -2233,6 +2233,35 @@ class TestLayoutChainCut:
         assert chain == (root_layout,)
 
 
+class TestLayoutChainThroughGroups:
+    """A group folder is a real directory, so its layout wraps what it holds."""
+
+    def test_a_group_layout_wraps_the_pages_inside_the_group(self, tmp_path) -> None:
+        outer = _write_layout(tmp_path, "outer")
+        group = _write_layout(tmp_path / "(app)", "group")
+        near = _write_layout(tmp_path / "(app)" / "dash", "near")
+
+        assert layout_chain(tmp_path / "(app)" / "dash" / "page.py") == (
+            near,
+            group,
+            outer,
+        )
+
+    def test_a_sibling_outside_the_group_is_not_wrapped_by_it(self, tmp_path) -> None:
+        outer = _write_layout(tmp_path, "outer")
+        group = _write_layout(tmp_path / "(app)", "group")
+        (tmp_path / "other").mkdir()
+
+        assert layout_chain(tmp_path / "other" / "page.py") == (outer,)
+        assert group not in layout_chain(tmp_path / "other" / "page.py")
+
+    def test_a_root_layout_in_a_group_ends_the_chain(self, tmp_path) -> None:
+        _write_layout(tmp_path, "outer")
+        group = _write_layout(tmp_path / "(app)", "group", root=True)
+
+        assert layout_chain(tmp_path / "(app)" / "dash" / "page.py") == (group,)
+
+
 class TestRootLayoutWatchedDirectories:
     """The watched directories end at the root layout's own directory."""
 

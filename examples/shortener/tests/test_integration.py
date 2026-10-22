@@ -385,6 +385,64 @@ class TestResetClicksMorphsForeignBadge:
         assert cache.get(f"{CLICK_PREFIX}hot") is None
 
 
+class TestLinkPeek:
+    """`admin/(.)links/[slug]/` serves the `link-peek` zone."""
+
+    def test_the_admin_list_opens_the_peek_over_the_honest_url(
+        self, next_client, make_link
+    ) -> None:
+        make_link("peeked")
+        body = next_client.get("/admin/").content.decode()
+        anchor = find_anchor(body, href="/admin/links/peeked/")
+        assert 'data-next-layer="link-peek"' in anchor
+
+    def test_a_plain_get_renders_the_real_page(self, next_client, make_link) -> None:
+        make_link("peeked")
+        body = next_client.get("/admin/links/peeked/").content.decode()
+        assert "data-link-peek" not in body
+        assert "Reset cached clicks" in body
+
+    def test_the_zone_get_serves_the_intercept_with_its_title(
+        self, next_client, make_link
+    ) -> None:
+        make_link("peeked", url="https://example.com/p", clicks=7)
+        increment_clicks("peeked")
+        increment_clicks("peeked")
+        response = next_client.get_zones("/admin/links/peeked/", "link-peek")
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph", "meta"]
+        html = envelope.html_for_zone("link-peek")
+        assert "data-link-peek" in html
+        assert "https://example.com/p" in html
+        assert _stat_value(html, "Persisted clicks") == "7"
+        assert _stat_value(html, "Pending clicks") == "2"
+        assert "Reset cached clicks" not in html
+        meta = next(op for op in envelope.ops if op["op"] == "meta")
+        assert meta["title"] == "Quick look · peeked · next.dj shortener"
+
+    def test_the_peek_links_to_the_full_page(self, next_client, make_link) -> None:
+        make_link("peeked")
+        response = next_client.get_zones("/admin/links/peeked/", "link-peek")
+        anchor = find_anchor(
+            envelope_of(response).html_for_zone("link-peek"), text="Open the link page"
+        )
+        assert 'href="/admin/links/peeked/"' in anchor
+        assert "data-next-layer" not in anchor
+
+    def test_an_unknown_slug_is_a_404(self, next_client) -> None:
+        response = next_client.get_zones("/admin/links/ghost/", "link-peek")
+        assert response.status_code == 404
+
+    def test_the_intercept_is_listed_as_public_under_its_target(self) -> None:
+        out = StringIO()
+        call_command("routes", stdout=out)
+        row = next(line for line in out.getvalue().splitlines() if "(.)links" in line)
+        assert "/admin/links/<str:slug>/" in row
+        assert "public" in row
+        assert row.rstrip().endswith("link-peek")
+
+
 class TestPageMetadata:
     """The admin subtree inherits `noindex` from its root `page.py`."""
 

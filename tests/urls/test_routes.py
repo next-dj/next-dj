@@ -2,7 +2,8 @@ from pathlib import Path
 
 from django.urls import reverse
 
-from next.urls.routes import Route, collect_routes
+from next.intercept import Intercept, intercepts
+from next.urls.routes import Route, collect_routes, with_intercepts
 from tests.support import (
     ENTRY_ROUTER,
     installed_apps,
@@ -11,6 +12,8 @@ from tests.support import (
     write_page,
     write_urlconf,
 )
+from tests.support.access import PAGE_HEAD
+from tests.support.cases.intercepts import zone_body
 
 
 def _rows(root: Path) -> list[tuple[str, str, str]]:
@@ -138,3 +141,116 @@ class TestOnlyRoutedPages:
             rows = [route.url for route in collect_routes()]
 
         assert rows == ["/"]
+
+
+class TestRouteGroups:
+    """The table lists a grouped page at its group-free URL and name."""
+
+    def test_the_row_leaves_the_group_out_and_the_file_keeps_it(self, tmp_path) -> None:
+        site = tmp_path / "site"
+        page_file = write_page(site, "(auth)/login")
+
+        with installed_apps(tmp_path, dirs=[site]):
+            routes = collect_routes()
+
+        assert routes == [
+            Route(url="/login/", name="next:page_login", file=page_file.resolve())
+        ]
+
+
+def _intercept_site(root: Path) -> tuple[Path, Path]:
+    target = write_page(root, "feed/photo")
+    rule = write_page(root, "feed/(.)photo", PAGE_HEAD, body=zone_body("peek"))
+    return target, rule
+
+
+class TestWithIntercepts:
+    """An intercept row follows the row of its target and carries its rule."""
+
+    def test_the_row_follows_its_target(self, tmp_path) -> None:
+        site = tmp_path / "site"
+        target, rule = _intercept_site(site)
+        write_page(site, "about")
+
+        with installed_apps(tmp_path, dirs=[site]):
+            routes = with_intercepts(collect_routes())
+
+        assert [(route.url, route.name, route.file) for route in routes] == [
+            ("/about/", "next:page_about", site.resolve() / "about" / "page.py"),
+            ("/feed/photo/", "next:page_feed_photo", target.resolve()),
+            ("/feed/photo/", "", rule.resolve()),
+        ]
+        assert routes[2].intercept == Intercept(target.resolve(), rule.resolve(), "(.)")
+        assert routes[1].intercept is None
+
+    def test_a_virtual_intercept_is_listed_by_its_template(self, tmp_path) -> None:
+        site = tmp_path / "site"
+        target = write_page(site, "feed/photo")
+        directory = site / "feed" / "(.)photo"
+        directory.mkdir(parents=True)
+        (directory / "template.djx").write_text(zone_body("peek"))
+
+        with installed_apps(tmp_path, dirs=[site]):
+            routes = with_intercepts(collect_routes())
+
+        assert [route.file for route in routes] == [
+            target.resolve(),
+            directory.resolve() / "template.djx",
+        ]
+
+    def test_rules_over_one_target_follow_in_file_order(self, tmp_path) -> None:
+        site = tmp_path / "site"
+        write_page(site, "feed/photo")
+        near = write_page(site, "feed/(.)photo", PAGE_HEAD, body=zone_body("a"))
+        far = write_page(site, "(...)feed/photo", PAGE_HEAD, body=zone_body("b"))
+
+        with installed_apps(tmp_path, dirs=[site]):
+            routes = with_intercepts(collect_routes())
+
+        assert [route.file for route in routes[1:]] == [far.resolve(), near.resolve()]
+
+    def test_a_tree_without_intercepts_comes_back_unchanged(self, tmp_path) -> None:
+        site = tmp_path / "site"
+        write_page(site, "feed/photo")
+
+        with installed_apps(tmp_path, dirs=[site]):
+            routes = collect_routes()
+
+        assert with_intercepts(routes) == routes
+
+    def test_a_tree_mounted_twice_lists_the_intercept_under_both_urls(
+        self, tmp_path
+    ) -> None:
+        write_app(tmp_path, "blog", {"pages": ("feed/photo",)})
+        write_page(
+            tmp_path / "blog" / "pages",
+            "feed/(.)photo",
+            PAGE_HEAD,
+            body=zone_body("peek"),
+        )
+        urlconf = write_urlconf(
+            tmp_path,
+            "twice_urls",
+            'path("a/", pages("blog", namespace="a"))',
+            'path("b/", pages("blog", namespace="b"))',
+        )
+
+        with installed_apps(tmp_path, "blog", urlconf=urlconf):
+            routes = with_intercepts(collect_routes())
+
+        assert [(route.url, route.intercept is not None) for route in routes] == [
+            ("/a/feed/photo/", False),
+            ("/a/feed/photo/", True),
+            ("/b/feed/photo/", False),
+            ("/b/feed/photo/", True),
+        ]
+
+    def test_a_cleared_table_lists_no_intercept(self, tmp_path) -> None:
+        site = tmp_path / "site"
+        _intercept_site(site)
+
+        with installed_apps(tmp_path, dirs=[site]):
+            routes = collect_routes()
+            intercepts.clear()
+
+            assert [route.intercept for route in with_intercepts(routes)] == [None]

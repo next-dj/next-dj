@@ -67,6 +67,32 @@ A ``page.py`` with no ``render``, no ``template``, and no template a loader find
 A ``layout.djx`` in a directory with no page and no action at any depth wraps nothing, and :ref:`next.W128 <ref-system-checks>` names the outermost such directory.
 A landing route whose whole markup belongs in the layout shell gets a ``template.djx``, and an empty one is enough.
 
+Layouts in a route group
+------------------------
+
+A ``layout.djx`` in a route group wraps every page below the group and adds no URL segment, see :ref:`topics-file-router-route-groups`.
+Sibling sections therefore wear different layouts without a directory in the URL.
+
+.. code-block:: text
+   :caption: two sections with their own layouts
+
+   notes/pages/
+     layout.djx                outer wrapper for every page
+     (app)/
+       layout.djx              navigation and footer for /notes/
+       notes/
+         page.py
+         template.djx
+     (auth)/
+       layout.djx              plain form frame for /login/
+       login/
+         page.py
+         template.djx
+
+``/notes/`` composes ``(app)/layout.djx`` inside the outer layout, and ``/login/`` composes ``(auth)/layout.djx`` inside it.
+A group layout that opens with ``{% layout root %}`` is a section shell.
+It cuts the outer layouts and writes the whole document of the section, see :ref:`topics-layouts-root`.
+
 .. _topics-layouts-root:
 
 Root layout

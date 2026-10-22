@@ -11,6 +11,17 @@ from .contexts import (
     check_context_registration_files,
     check_single_keyless_context,
 )
+from .groups import check_parenthesised_directory_names, check_pointless_route_groups
+from .intercepts import (
+    check_intercept_default_login,
+    check_intercept_inert_declarations,
+    check_intercept_layouts,
+    check_intercept_render,
+    check_intercept_scope,
+    check_intercept_targets,
+    check_intercept_url_kwargs,
+    check_nested_intercepts,
+)
 from .layouts import check_layout_templates, check_root_marker_outside_layouts
 from .loaders import check_template_loaders
 from .metadata import (
@@ -28,6 +39,7 @@ from .metadata import (
     check_metadata_tag_rendered,
     check_metadata_title_templates,
     check_page_metadata_shape,
+    check_route_group_breadcrumbs,
 )
 from .modules import check_page_functions, check_page_module_imports
 from .processors import (
@@ -57,6 +69,13 @@ __all__ = [
     "check_csrf_endpoint_reversible",
     "check_csrf_in_session",
     "check_declaring_modules",
+    "check_intercept_default_login",
+    "check_intercept_inert_declarations",
+    "check_intercept_layouts",
+    "check_intercept_render",
+    "check_intercept_scope",
+    "check_intercept_targets",
+    "check_intercept_url_kwargs",
     "check_layout_templates",
     "check_metadata_callable_returns_mapping",
     "check_metadata_enum_values",
@@ -71,14 +90,18 @@ __all__ = [
     "check_metadata_social_folds",
     "check_metadata_tag_rendered",
     "check_metadata_title_templates",
+    "check_nested_intercepts",
     "check_page_functions",
     "check_page_metadata_shape",
     "check_page_module_imports",
     "check_page_response_declarations",
     "check_pages_structure",
+    "check_parenthesised_directory_names",
+    "check_pointless_route_groups",
     "check_public_beside_requirements",
     "check_request_in_context",
     "check_root_marker_outside_layouts",
+    "check_route_group_breadcrumbs",
     "check_shared_page_responses",
     "check_single_keyless_context",
     "check_template_loaders",

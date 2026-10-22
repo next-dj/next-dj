@@ -6,6 +6,7 @@ from django.dispatch import Signal
 zone_registered: Signal = Signal(use_caching=True)
 zone_rendered: Signal = Signal(use_caching=True)
 patch_op_registered: Signal = Signal(use_caching=True)
+intercept_access_denied: Signal = Signal(use_caching=True)
 field_validated: Signal = Signal(use_caching=True)
 sse_stream_opened: Signal = Signal(use_caching=True)
 sse_stream_closed: Signal = Signal(use_caching=True)
@@ -14,6 +15,7 @@ partial_backend_loaded: Signal = Signal(use_caching=True)
 
 __all__ = [
     "field_validated",
+    "intercept_access_denied",
     "partial_backend_loaded",
     "patch_op_registered",
     "sse_stream_closed",

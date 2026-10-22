@@ -95,6 +95,22 @@ Modules
 ``next.pages.watch``.
    Reports the page roots of each router backend and the components folder name each root carries, which ``next.server.watcher`` turns into the ``(path, glob)`` watch specs the autoreloader consumes.
 
+Groups and intercepts
+---------------------
+
+The walk that discovery shares with the router reports a group-free URL trail with each page.
+A directory named ``(name)`` is a route group, so its page serves the URL of its parent and its subdirectories route as if they sat in the parent.
+A group page with no body source is not routed, yet its declarations still fold into every page below the group, because the context, access, metadata, and layout chains climb file-system ancestors and a group is one of them.
+A group has no trail of its own, so a ``page.py`` in a group directory gives no breadcrumb while its other metadata still folds.
+
+An intercept directory, named with a ``(.)``, ``(..)``, or ``(...)`` marker, is walked with its trail seeded to the page it targets and is never routed.
+Discovery reports each page under it through ``on_intercept`` as an ``InterceptPage``, and the router imports its module like a routed page.
+The layout, context, access, and metadata chains of an intercept page climb its own file-system ancestors.
+The ``on_skipped_dir`` callback receives each skipped directory with a ``scope_trail``, the raw file-system trail of the directory that holds it, groups kept.
+Component scope reads that trail, so the ``_components`` folder of a group is visible below the group only, and the folder of an intercept directory is visible to the pages inside it.
+The folder at the root of the tree stays global.
+:doc:`url-router` describes the walk and the intercept table.
+
 Render path
 -----------
 

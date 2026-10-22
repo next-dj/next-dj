@@ -319,6 +319,38 @@ class TestFormTagRender:
         )
         assert 'data-info="a&amp;b &quot;quoted&quot;">' in html
 
+    @pytest.mark.parametrize(
+        ("call_site", "expected"),
+        [
+            ('class="card {{ variant }}"', 'class="card wide"'),
+            ('data-id="{{ pk }}"', 'data-id="7"'),
+            ('data-info="{{ info }}"', 'data-info="a&amp;b"'),
+            ('aria-label="{{ name|upper }}!"', 'aria-label="ADA!"'),
+            ('zone="z-{{ pk }}"', 'data-next-target="z-7"'),
+        ],
+        ids=["text-around", "lone-expression", "escaped-once", "filter", "partial"],
+    )
+    def test_attribute_value_interpolates_double_braces(
+        self, form_engine, csrf_request, call_site: str, expected: str
+    ) -> None:
+        """A quoted attribute value resolves each ``{{ expr }}`` in its string."""
+        t = form_engine.from_string(
+            '{% form "simple_form" ' + call_site + " %}x{% endform %}"
+        )
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                    "variant": "wide",
+                    "pk": 7,
+                    "info": "a&b",
+                    "name": "ada",
+                }
+            )
+        )
+        assert expected in html
+
     def test_attribute_value_resolves_from_context(
         self, form_engine, csrf_request
     ) -> None:

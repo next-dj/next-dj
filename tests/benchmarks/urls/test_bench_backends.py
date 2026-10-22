@@ -4,9 +4,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from next.intercept import intercepts
 from next.urls.urlconf import urlconf_mounts
 from tests.benchmarks.factories import build_pages_tree
-from tests.support import file_router, importable_dir
+from tests.support import file_router, importable_dir, write_page
+from tests.support.cases.intercepts import zone_body
 
 
 if TYPE_CHECKING:
@@ -90,6 +92,40 @@ def installed_many_apps(tmp_path: Path, settings) -> Iterator[None]:
         yield
 
 
+_PEEK_BODY = zone_body("peek")
+_SECTIONS = 3
+
+
+def _write_grouped_tree(root: Path, sections: int = _SECTIONS) -> int:
+    """Write a tree of route groups and intercepts, returning the pages it routes.
+
+    Each section holds nested groups, a group page, a parameter below a group and one
+    intercept of every marker, the `(...)` one over the page at the tree root.
+    """
+    write_page(root, "photo/[int:pk]")
+    routed_pages = 1
+    for index in range(sections):
+        section = f"s_{index}"
+        for trail in (
+            f"{section}/(marketing)",
+            f"{section}/(marketing)/(deep)/about",
+            f"{section}/(shop)/[slug]",
+            f"{section}/(shop)/cart",
+            f"{section}/feed",
+            f"{section}/feed/photo/[int:pk]",
+            f"{section}/feed/sub",
+        ):
+            write_page(root, trail)
+            routed_pages += 1
+        for trail in (
+            f"{section}/feed/(.)photo/[int:pk]",
+            f"{section}/feed/sub/(..)photo/[int:pk]",
+            f"{section}/feed/sub/deep/(...)photo/[int:pk]",
+        ):
+            write_page(root, trail, body=_PEEK_BODY)
+    return routed_pages
+
+
 class TestBenchFileRouter:
     """A fresh backend per round, because the second call is a cache copy.
 
@@ -109,6 +145,32 @@ class TestBenchFileRouter:
     @pytest.mark.benchmark(group="urls.backends")
     def test_filerouter_discover_large(self, tmp_path: Path, benchmark) -> None:
         build_pages_tree(tmp_path, depth=4, fanout=6, leaf="page.py")  # 1296 leaves
+        benchmark(lambda: _router_for(tmp_path).generate_urls())
+
+
+class TestBenchGroupedAndInterceptedTree:
+    """Route groups and intercept directories, against the plain trees above."""
+
+    @pytest.mark.benchmark(group="urls.backends")
+    def test_filerouter_discover_groups_and_intercepts(
+        self, tmp_path: Path, benchmark
+    ) -> None:
+        pages = _write_grouped_tree(tmp_path)
+        patterns = _router_for(tmp_path).generate_urls()
+        assert len(patterns) == pages
+        assert len(intercepts.all()) == _SECTIONS * 3
+        benchmark(lambda: _router_for(tmp_path).generate_urls())
+
+    @pytest.mark.benchmark(group="urls.backends")
+    def test_filerouter_discover_groups_only(self, tmp_path: Path, benchmark) -> None:
+        for index in range(_SECTIONS):
+            write_page(tmp_path, f"s_{index}/(marketing)")
+            write_page(tmp_path, f"s_{index}/(marketing)/(deep)/about")
+            write_page(tmp_path, f"s_{index}/(shop)/[slug]")
+            write_page(tmp_path, f"s_{index}/(shop)/cart")
+        patterns = _router_for(tmp_path).generate_urls()
+        assert len(patterns) == _SECTIONS * 4
+        assert intercepts.all() == ()
         benchmark(lambda: _router_for(tmp_path).generate_urls())
 
 

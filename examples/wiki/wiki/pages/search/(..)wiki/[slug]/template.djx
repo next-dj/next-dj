@@ -1,0 +1,11 @@
+{% zone "article-peek" %}
+<article data-article-peek class="w-full max-w-[40rem] space-y-4">
+  {% component "page_header" eyebrow="Preview" title=peek.title %}
+  <div class="prose prose-slate max-w-none text-foreground">
+    {{ peek_html }}
+  </div>
+  <p class="text-right">
+    <a href="{{ request.path }}" class="text-sm font-medium text-primary hover:underline">Open the article</a>
+  </p>
+</article>
+{% endzone %}
