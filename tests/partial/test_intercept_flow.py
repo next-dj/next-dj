@@ -731,7 +731,6 @@ class TestForms:
 
     @pytest.fixture(autouse=True)
     def _base_dir(self, root: Path) -> Generator[None, None, None]:
-        # A form registers only from a file below BASE_DIR, and the tree is in tmp.
         with override_settings(BASE_DIR=root.parent):
             yield
 
@@ -900,7 +899,6 @@ class TestMorphZone:
         served = root / "(.)photo" / "[int:pk]" / "page.py"
 
         with _mounted(root):
-            # The router never publishes a page defining render(), so publish it here.
             intercepts.publish(root, [Intercept(target, served, "(.)")])
             envelope = (
                 Patches(_origin_post(AnonymousUser())).morph_zone("peek").envelope()

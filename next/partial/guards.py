@@ -28,6 +28,7 @@ from next.caches import BoundedCache
 from next.components.nodes import ComponentTagNode, SetSlotTagNode, SlotTagNode
 from next.components.renderers import SLOT_KEY_PREFIX
 from next.components.sources import Position, TemplateWalk
+from next.interpolation import Interpolation
 from next.pages.paths import page_template_path
 from next.permissions.nodes import HasPermNode
 from next.utils import child_nodelists, template_edits_watched
@@ -104,6 +105,10 @@ def _arguments(expression: FilterExpression) -> Iterator[str]:
 
 def _names(value: object) -> Iterator[str]:
     """Yield every variable name an expression or a bare variable reads."""
+    if isinstance(value, Interpolation):
+        for part in value.parts:
+            yield from _names(part)
+        return
     root = _root(value)
     if root is not None:
         yield root

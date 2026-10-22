@@ -392,6 +392,14 @@ class TestAdminAuditPage:
         assert "data-audit-table" not in body
         assert 'data-source="backend"' not in body
 
+    def test_the_header_counts_the_rows_of_each_channel(self, next_client) -> None:
+        _post_step(next_client, "identity", IDENTITY)
+
+        body = next_client.get("/admin/audit/").content.decode()
+
+        assert re.search(r"Backend rows \(\d+\) and signal rows \(\d+\)", body)
+        assert "{{" not in body
+
     def test_zone_request_morphs_the_audit_table(self, next_client) -> None:
         _post_step(next_client, "identity", IDENTITY)
         _post_step(next_client, "identity", {**IDENTITY, "email": ""})

@@ -64,6 +64,18 @@ Every other ``key="value"`` argument after the action name lands on the ``<form>
    {% endform %}
 
 Attribute values are escaped, and an unquoted value resolves as a context variable.
+A quoted value with ``{{ ... }}`` inside resolves each expression against the context, filters included.
+The framework parameters ``validate``, ``trigger``, ``debounce``, ``zone``, and ``key`` read the same way.
+
+.. code-block:: jinja
+   :caption: interpolated attributes
+
+   {% form "note_form" class="card {{ variant }}" data-id="{{ note.pk }}" zone="note-{{ note.pk }}" %}
+     {{ form.as_div }}
+   {% endform %}
+
+A value that mixes text and expressions is a plain string, and the tag escapes it once when it writes the attribute.
+The action name stays a literal or a plain variable.
 An explicit ``enctype="..."`` argument suppresses the automatic multipart value, for the rare form that needs a different encoding.
 The ``action`` and ``method`` attributes belong to the tag, as does every attribute starting with ``data-next-``, and passing any of them raises ``TemplateSyntaxError`` at parse time.
 ``data-next-*`` is the single framework namespace in rendered markup, so user attributes never collide with framework ones.

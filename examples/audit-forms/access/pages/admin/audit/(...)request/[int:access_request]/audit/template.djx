@@ -1,5 +1,5 @@
 {% zone "audit-log-peek" %}
-<article class="w-[min(32rem,90vw)] space-y-4 p-6" data-audit-log-peek>
+<article class="w-full max-w-[32rem] space-y-4" data-audit-log-peek>
   <header class="flex items-start justify-between gap-4">
     <div class="space-y-1">
       <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">

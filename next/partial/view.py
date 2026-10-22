@@ -154,7 +154,7 @@ def _build_envelope(
         _patch_zone(patches, name, result, intent.merge)
     patches.absorb_zone_result(result)
     if served is not None:
-        patches._page_meta(served, url_kwargs, result.context)
+        patches.page_meta(served, url_kwargs, result.context)
     return patches.envelope()
 
 

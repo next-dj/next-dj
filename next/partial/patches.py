@@ -52,7 +52,7 @@ from .headers import (
 )
 from .intercept import pick_intercept, refuse_access, refuse_intercept
 from .manager import asset_version, partial_backend_manager
-from .registry import BUILTIN_OPS, patch_op_registry
+from .registry import BUILTIN_OPS, patch_op_registry, zones_served
 from .render import render_zone
 
 
@@ -271,7 +271,7 @@ class Patches:
         On a zone request an intercept of the origin serves a zone the origin lacks.
         """
         self._authorize_origin()
-        served = self._served_page()
+        served = self._served_page(zone)
         if served is not None:
             refuse_intercept(served, self._require_request(), self._origin_url_kwargs())
         result = self._render_zone(zone, overrides, served)
@@ -570,7 +570,7 @@ class Patches:
         )
         self._ops.append(Patch(op="meta", extras=_head_extras(resolved)))
 
-    def _page_meta(
+    def page_meta(
         self,
         page_path: "Path",
         url_kwargs: "Mapping[str, Any]",
@@ -762,16 +762,19 @@ class Patches:
             raise ForeignPageNotAuthorizedError(page_path, denial.status_code)
         self._origin_authorized = True
 
-    def _served_page(self) -> "Path | None":
-        """Return the intercept page serving the zones the request names, else None.
+    def _served_page(self, zone: str) -> "Path | None":
+        """Return the intercept page serving `zone` of the request, else None.
 
-        It picks over the whole zone set, as the zone GET and the form target do.
+        It picks over the whole zone set, as the zone GET does. A zone that page does
+        not serve renders from the origin.
         """
         zones = partial_intent(self._require_request()).zones
         if not zones:
             return None
         rule = pick_intercept(self._resolve_page_path(), zones)
-        return None if rule is None else rule.file
+        if rule is None or zone not in zones_served(rule.file, rule.target_file):
+            return None
+        return rule.file
 
     def _metadata_context(self) -> dict[str, object]:
         """Return the origin render context for an inherited metadata callable.

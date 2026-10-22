@@ -7,6 +7,7 @@ from django import template
 from next.forms.errors import FormActionNotFoundError
 from next.forms.manager import form_action_manager
 from next.forms.nodes import FormNode, anchor_lookup_from_context
+from next.interpolation import Interpolation, interpolated
 from next.partial.keys import FORM_KEY_ATTR, FORM_ZONE_ATTR
 
 
@@ -41,12 +42,12 @@ def do_form(parser: template.base.Parser, token: template.base.Token) -> FormNod
         msg = f"{bits[0]!r} tag requires the action name as its first argument"
         raise template.TemplateSyntaxError(msg)
     action_expr = parser.compile_filter(bits[1])
-    attrs: list[tuple[str, FilterExpression]] = []
-    partial_attrs: dict[str, FilterExpression] = {}
+    attrs: list[tuple[str, FilterExpression | Interpolation]] = []
+    partial_attrs: dict[str, FilterExpression | Interpolation] = {}
     for bit in bits[2:]:
         name, eq, value = bit.partition("=")
         if eq and name in _PARTIAL_FORM_PARAMS:
-            partial_attrs[_PARTIAL_FORM_PARAMS[name]] = parser.compile_filter(value)
+            partial_attrs[_PARTIAL_FORM_PARAMS[name]] = _compile_attr(parser, value)
             continue
         attrs.append(_parse_form_attr(parser, bits[0], bit))
     nodelist = parser.parse(("endform",))
@@ -74,9 +75,17 @@ def action_url(context: template.Context, action_name: str) -> str:
     return form_action_manager.get_action_url(name, page_path=anchor)
 
 
+def _compile_attr(
+    parser: template.base.Parser, value: str
+) -> "FilterExpression | Interpolation":
+    """Compile an attribute value, reading `{{ }}` inside a string literal."""
+    expr = parser.compile_filter(value)
+    return interpolated(parser, expr) or expr
+
+
 def _parse_form_attr(
     parser: template.base.Parser, tag_name: str, bit: str
-) -> "tuple[str, FilterExpression]":
+) -> "tuple[str, FilterExpression | Interpolation]":
     """Parse one `key="value"` tag argument into an attribute name and value."""
     name, eq, value = bit.partition("=")
     if not eq or not name or not value:
@@ -88,4 +97,4 @@ def _parse_form_attr(
     if name in _RESERVED_FORM_ATTRS or name.startswith(_RESERVED_FORM_ATTR_PREFIX):
         msg = f"{tag_name!r} tag reserves the {name!r} attribute for the framework"
         raise template.TemplateSyntaxError(msg)
-    return name, parser.compile_filter(value)
+    return name, _compile_attr(parser, value)

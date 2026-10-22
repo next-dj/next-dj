@@ -41,7 +41,7 @@
             <ul class="space-y-2">
               {% for article in results.articles %}
                 <li class="rounded-md border border-border bg-card p-3 shadow-sm">
-                  <a href="{{ article.url }}" class="text-sm font-medium text-foreground hover:underline">
+                  <a href="{{ article.url }}" data-next-layer="article-peek" class="text-sm font-medium text-foreground hover:underline">
                     {{ article.title }}
                   </a>
                 </li>

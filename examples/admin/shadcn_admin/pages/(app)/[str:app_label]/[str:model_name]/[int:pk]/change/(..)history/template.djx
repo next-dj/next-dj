@@ -1,5 +1,5 @@
 {% zone "history-peek" %}
-<div class="w-[min(36rem,90vw)] space-y-4">
+<div class="w-full max-w-[36rem] space-y-4">
   {% #component "page_header" eyebrow="Recent changes" title="History" description="The latest entries the admin wrote for this record." %}{% /component %}
 
   {% if history_peek.rows %}

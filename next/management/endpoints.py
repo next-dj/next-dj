@@ -322,9 +322,9 @@ def endpoints(page_path: Path | None = None) -> tuple[Endpoint, ...]:
         rows = tuple(route for route in routes if _target_path(route) == page_path)
         pages = tuple(_page_row(route, broken=infos is None) for route in rows)
         owners = dict.fromkeys((page_path, *map(_page_path, rows)))
-        declared = _actions()
+        all_actions = _actions()
         actions = tuple(
-            meta for owner in owners for meta in declared if _owned(meta, owner)
+            meta for owner in owners for meta in all_actions if _owned(meta, owner)
         )
     return (
         *pages,

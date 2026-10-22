@@ -65,6 +65,10 @@ The constructor accepts a keyword-only ``attrs`` dict for persistent HTML attrib
 The ``attrs`` dict is merged Django-style through :meth:`~django.forms.Widget.build_attrs`, the same as on any Django widget, and render-time attributes win on a collision.
 Every other keyword argument is a component prop spread to the top level of the component context.
 
+A string in ``attrs`` or in a component prop may carry ``{{ ... }}``, which resolves at render time against ``name``, ``value``, and ``errors`` of the field.
+``ComponentWidget("input", placeholder="Enter {{ name }}")`` hands the component ``Enter slug`` for a field named ``slug``, and a filter such as ``{{ name|upper }}`` applies inside the braces.
+A string that holds one expression and nothing else passes the value as it is, so its type survives.
+
 The context contract
 --------------------
 

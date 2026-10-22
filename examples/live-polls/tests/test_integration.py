@@ -23,6 +23,7 @@ from next.testing import (
     assert_metadata,
     build_form_for,
     envelope_of,
+    find_anchor,
     init_payload,
     resolve_action_url,
 )
@@ -664,3 +665,51 @@ class TestEmbedWidget:
         )
         assert response.status_code == 200
         assert envelope_of(response).zone_targets() == ["poll-results"]
+
+
+class TestEmbedCode:
+    """`[int:id]/(.)embed/` serves the `embed-code` zone."""
+
+    def test_the_embed_link_opens_the_snippet_over_the_honest_url(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        anchor = find_anchor(
+            _detail_html(next_client, poll), href=f"/polls/{poll.pk}/embed/"
+        )
+        assert 'data-next-layer="embed-code"' in anchor
+
+    def test_a_plain_get_renders_the_real_widget(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        body = next_client.get(f"/polls/{poll.pk}/embed/").content.decode()
+        assert "data-embed-code" not in body
+        assert f'data-poll-chart="{poll.pk}"' in body
+
+    def test_the_zone_get_serves_the_snippet_with_its_title(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        response = next_client.get_zones(f"/polls/{poll.pk}/embed/", "embed-code")
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph", "meta"]
+        html = envelope.html_for_zone("embed-code")
+        assert "data-embed-code" in html
+        assert f"&lt;iframe src=&quot;http://testserver/polls/{poll.pk}/embed/" in html
+        meta = next(op for op in envelope.ops if op["op"] == "meta")
+        assert meta["title"] == f"Embed · {poll.question} · next.dj polls"
+
+    def test_the_snippet_links_to_the_real_widget(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        response = next_client.get_zones(f"/polls/{poll.pk}/embed/", "embed-code")
+        anchor = find_anchor(
+            envelope_of(response).html_for_zone("embed-code"), text="Preview the widget"
+        )
+        assert f'href="/polls/{poll.pk}/embed/"' in anchor
+        assert "data-next-layer" not in anchor
+
+    def test_an_unknown_poll_is_a_404(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        response = next_client.get_zones("/polls/9999/embed/", "embed-code")
+        assert response.status_code == 404

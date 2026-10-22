@@ -18,7 +18,7 @@
                 {% endif %}
               {% endform %}
               <div class="flex items-center gap-3">
-                <a href="{% url 'next:page_admin_links_slug' slug=link.slug %}" class="text-xs text-muted-foreground hover:underline">
+                <a href="{% url 'next:page_admin_links_slug' slug=link.slug %}" data-next-layer="link-peek" class="text-xs text-muted-foreground hover:underline">
                   View details →
                 </a>
                 {% form "delete_link" key=link.slug class="inline" %}

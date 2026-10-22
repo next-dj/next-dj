@@ -1,5 +1,5 @@
 {% zone "manuscript-peek" %}
-<div class="w-[min(32rem,90vw)] space-y-4">
+<div class="w-full max-w-[32rem] space-y-4">
   {% #component "page_header" eyebrow="Manuscript" title=peek.book.title description=peek.book.author.full_name %}{% /component %}
 
   <dl class="grid grid-cols-2 gap-3 text-sm">

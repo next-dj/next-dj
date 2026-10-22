@@ -193,7 +193,6 @@ class TestBodyLessCarrier:
 
     @pytest.fixture()
     def carrier(self, root: Path) -> Path:
-        # The carrier sits at the routed trail `request` and passes down to the peek.
         write_page(root, "request")
         write_page(root, "request/[int:group]/audit")
         page_file = write_page(root, "(.)request", _CARRIER)

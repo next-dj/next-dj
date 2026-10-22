@@ -9,7 +9,7 @@ A polling app where the results on every open tab refresh the moment someone vot
 | `/` | Redirects to `/polls/` so the bare site root is never empty. |
 | `/polls/` | Server-rendered list of polls. Each card shows choice count and total votes. |
 | `/polls/<id>/` | Vote page with the live chart, a button-per-choice form, and a `data-next-sse` element. |
-| `/polls/<id>/embed/` | The same live chart in a widget with its own bare document shell, linked as "Embed" from the vote page. |
+| `/polls/<id>/embed/` | The same live chart in a widget with its own bare document shell, linked as "Embed" from the vote page, where the link first opens the snippet to copy as a modal. |
 | `/polls/<id>/stream/` | The patch event stream. Each poll change emits a `next-patches` event carrying a `refresh` of the `poll-results` zone. |
 | `POST vote_form` | Atomically increments a choice via `F("votes") + 1`, then morphs the `poll-results` zone and pushes the fresh counts to `window.Next.context.live_results`. A signal receiver publishes the change to the broker with the request id. |
 
@@ -111,6 +111,9 @@ polls/pages/
     │   └── component.css
     └── [int:id]/
         ├── layout.djx                <- nested layout, poll question header, back link
+        ├── (.)embed/                 <- intercept, the copyable snippet as a modal over the vote page
+        │   ├── page.py
+        │   └── template.djx
         ├── embed/                    <- root layout with its own shell, widget page
         │   ├── layout.djx
         │   ├── layout.css
@@ -283,6 +286,22 @@ The parameter is named after the context key, so the callable receives the row t
 
 What a cut layout used to provide is still there where it comes from `page.py`. The `poll` context is `inherit_context`, so the shell prints the question. The page declares its own `@page.metadata` for the tab title and a `live_results` provider, because the vote handler patches that key on the origin page and the parent's provider does not reach a page of its own. The template repeats the `poll-results` zone and the `data-next-sse` element, and `page.vue` imports the parent mount entry, so a vote on the poll page repaints the widget over the same stream. A cross-site `<iframe>` also needs the `X-Frame-Options` header lifted, which this example leaves at Django's default.
 
+### 12. The embed snippet as an intercepting route
+
+The "Embed" link of the vote page carries `data-next-layer="embed-code"`. A click asks for `/polls/1/embed/` with the zone name, and a modal with the iframe snippet opens over the live vote page while the address bar shows the widget URL. The chart keeps counting behind the modal, a reload or a shared link renders the real widget of section 11, and Back closes the snippet. The modal ends in a plain "Preview the widget" link, which navigates to the widget.
+
+The modal is the directory [`(.)embed`](polls/pages/polls/%5Bint%3Aid%5D/%28.%29embed/) beside `embed/`. The scope of an intercept is the URL trail of the directory that holds it, `polls/[int:id]`, and `(.)` appends `embed` to it, so the target is the widget page. The intercept routes nothing, so `uv run python manage.py routes` lists it right under its target with the zone it serves:
+
+```
+URL                   Name                          File                                         Access  Intercept
+/polls/<int:id>/embed/  next:page_polls_int_id_embed  polls/pages/polls/[int:id]/embed/page.py     -
+/polls/<int:id>/embed/  -                             polls/pages/polls/[int:id]/(.)embed/page.py  -       embed-code
+```
+
+The intercept [`page.py`](polls/pages/polls/%5Bint%3Aid%5D/%28.%29embed/page.py) builds the snippet from the `poll` context it inherits from `[int:id]/page.py` and `request.build_absolute_uri`, and titles the tab `Embed · Tabs or spaces? · next.dj polls`. The [`template.djx`](polls/pages/polls/%5Bint%3Aid%5D/%28.%29embed/template.djx) wraps a read-only textarea in `{% zone "embed-code" %}` with no layout around it. The widget page is untouched and carries no `embed-code` zone, so the intercept answers that zone name alone.
+
+`TestEmbedCode` pins the server side and the e2e tests in [`tests/e2e/test_polls.py`](tests/e2e/test_polls.py) open the snippet, close it with Back and Escape, and follow its link to the widget.
+
 ## Gotchas
 
 ### The asset-version guard needs an explicit version
@@ -309,3 +328,4 @@ Vite hashes the filenames it builds, so the asset URLs need no `v` parameter and
 - [`next/components/context.py`](../../next/components/context.py): `@component.context` and the `serialize=True` flag.
 - [`next/pages/metadata/`](../../next/pages/metadata/): the metadata chain behind the index dict and the `@page.metadata` callable of section 10.
 - [`docs/content/ref/system-checks.rst`](../../docs/content/ref/system-checks.rst): `next.W074` for a kind with no insertion verb.
+- [`next/intercept.py`](../../next/intercept.py) and [`next/partial/intercept.py`](../../next/partial/intercept.py): the intercept table and the zone selection of section 12.

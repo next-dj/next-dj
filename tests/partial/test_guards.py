@@ -408,6 +408,22 @@ class TestBodyFlow:
     def test_children_of_one_template(self, page_file: Path, text, guarding) -> None:
         assert _components(page_file, card=text).guarding("card") is guarding
 
+    @pytest.mark.parametrize(
+        ("prop", "guarding"),
+        [
+            pytest.param("title=children", True, id="plain"),
+            pytest.param('title="{{ children }}"', True, id="interpolated"),
+            pytest.param('title="a {{ children|upper }}"', True, id="text-and-filter"),
+            pytest.param('title="{{ other }}"', False, id="interpolated-unrelated"),
+            pytest.param('title="plain"', False, id="literal"),
+        ],
+    )
+    def test_children_bound_through_a_prop(
+        self, page_file: Path, prop: str, *, guarding: bool
+    ) -> None:
+        text = '{% component "leaf" ' + prop + " %}{% if title %}{{ title }}{% endif %}"
+        assert _components(page_file, card=text, leaf="x").guarding("card") is guarding
+
     @pytest.mark.usefixtures("guard_tags")
     def test_a_third_party_context_tag_decides(self, page_file: Path) -> None:
         text = "{% load guard_tags %}{% peek %}{{ children }}"

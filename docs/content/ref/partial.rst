@@ -242,7 +242,7 @@ Exceptions
 ``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, and ``LayerHrefWithoutZoneError`` are curated ``next.partial`` exceptions.
 ``UnknownZoneError`` is raised when a partial request names a zone the template does not declare, or one that may not render on its own, as ``ZoneInfo.standalone`` above describes, under an ``{% if %}``, a ``{% for %}``, or a ``{% has_perm %}`` of the composed page, or in the body of a component that decides whether that part shows, surfacing as a 400 before any render.
 A server-side render of such a zone, ``Patches.morph_zone`` included, raises it as well.
-``Patches.morph_foreign_zone`` raises it for a zone only an intercepting route serves, while ``morph_zone`` on a zone request renders that zone over the intercept page.
+``Patches.morph_foreign_zone`` raises it for a zone only an intercepting route serves, while ``morph_zone`` on a zone request renders that zone over the intercept page that serves the request, and a zone that page does not serve over the origin page.
 ``ForeignPageNotAuthorizedError`` is raised when a zone morph names a page that denies the request, whether the handler named that page itself or ``morph_zone`` took it from the posted origin, so a zone never travels in a response the page would have denied.
 A refused intercepting route raises it from ``morph_zone`` too, and the form and action path turns it into a 403.
 ``meta()`` raises it too when the fold runs an inherited metadata callable of an origin page that denies the request.

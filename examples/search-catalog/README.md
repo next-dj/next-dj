@@ -17,7 +17,7 @@ Every category also has a landing page a CDN may cache, with a sign-up form that
 | `/catalog/?brand=Acme,Globex` | Comma-delimited filter for compact URLs. |
 | `/catalog/?q=iPhone&page=2` | Search and pagination preserved across query overrides. |
 | `/catalog/electronics/` | Category-scoped listing. Inherited `Category` shows in the breadcrumb. |
-| `/catalog/electronics/iphone-15/` | Product detail. The `Category` instance comes through inherited context, no extra query, and the head carries `Product` JSON-LD. |
+| `/catalog/electronics/iphone-15/` | Product detail. The `Category` instance comes through inherited context, no extra query, and the head carries `Product` JSON-LD. A click on a card opens the same URL as a quick view modal over the listing. |
 | `/shop/electronics/` | Category landing. Cheapest offers, a sign-up form, a consent-gated video and an FAQ with `FAQPage` JSON-LD, cached publicly for five minutes. |
 | `/sitemap.xml` | The home page, the listing, one landing and one listing per category and one entry per product, cached for five minutes. |
 
@@ -309,6 +309,21 @@ async function driveBanner() {
 
 The browser suite in [`tests/e2e/test_landing.py`](tests/e2e/test_landing.py) stubs the vendor hosts and drives the banner, the page views on load and after a live filter, and the runtime-only sign-up.
 
+### 15. A quick view as an intercepting route
+
+A product card links to the product page with `data-next-layer="product-peek"`. The click asks for the same URL as the link, `/catalog/electronics/iphone-15/`, with the zone name, and the address bar keeps that URL while a modal opens over the listing. A reload, a shared link and a visit without the attribute render the real product page, and Back closes the modal.
+
+The modal is an intercepting route, the directory [`(.)[slug]`](catalog/pages/catalog/%5Bcategory%5D/%28.%29%5Bslug%5D/) beside the product directory. It routes nothing, adds no URL and no URL name, and `uv run python manage.py routes` lists it under its target with the zone it serves:
+
+```
+URL                                  Name  File                                                Access  Intercept
+/catalog/<str:category>/<str:slug>/  -     catalog/pages/catalog/[category]/(.)[slug]/page.py  -       product-peek
+```
+
+The marker counts from the URL trail of the directory that holds the intercept, `catalog/[category]`. `(.)` appends `[slug]` to it, so the target is the product page, and the brackets spell the target exactly. The product page itself is untouched. The intercept [`page.py`](catalog/pages/catalog/%5Bcategory%5D/%28.%29%5Bslug%5D/page.py) reads the product the same way the target does, from the `category` its parent `page.py` resolves with `inherit_context=True` and the `slug` of the URL, and titles the tab `Quick view · iPhone 15 · next.dj catalog` while the modal is open. Its [`template.djx`](catalog/pages/catalog/%5Bcategory%5D/%28.%29%5Bslug%5D/template.djx) wraps the summary in `{% zone "product-peek" %}` with no layout around it and ends in a plain link to the full page.
+
+`TestProductPeek` in the integration suite pins the server side, the plain GET against the zone GET, the `meta` op, the 404 for a product of another category and the row in `manage.py routes`. [`tests/e2e/test_peek.py`](tests/e2e/test_peek.py) drives the modal in a browser, the URL and title on open and close, Back, Escape, reload and the link to the full page.
+
 ## Further reading
 
 - [`next/urls/markers.py`](../../next/urls/markers.py) ships both the `DUrl` provider for URL path segments and the `DQuery` provider for query-string parameters. The narrative section lives in [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst).
@@ -319,3 +334,4 @@ The browser suite in [`tests/e2e/test_landing.py`](tests/e2e/test_landing.py) st
 - [`next/seo/`](../../next/seo/) hosts `@sitemap.items` and `SitemapEntry` of section 12, with the `cache` attribute wrapping its views.
 - [`next/pages/responses.py`](../../next/pages/responses.py) hosts `CacheDict` and the shared-cache rules of section 13.
 - [`next/scripts/`](../../next/scripts/) and [`next/consent/`](../../next/consent/) host `scripts.py` and the consent gate of section 14.
+- [`next/intercept.py`](../../next/intercept.py) and [`next/partial/intercept.py`](../../next/partial/intercept.py): the intercept table and the zone selection of section 15.

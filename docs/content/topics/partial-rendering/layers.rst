@@ -41,6 +41,8 @@ The selection runs on a GET or a HEAD and follows two rules.
 The target keeps every zone it declares as a standalone zone itself.
 Otherwise the first intercept of the target, in file order, whose page declares every requested zone as a standalone zone serves the request.
 The zone sets come from the compiled template of each page, so the selection renders nothing.
+A request names the zones of one page only.
+A set that mixes a zone of the target with a zone of an intercept is served by no intercept, so the target renders the zones it declares and a server-side render of the intercept zone raises ``UnknownZoneError``.
 A target without intercepts pays one dictionary lookup.
 
 The URL stays the real address of the target.

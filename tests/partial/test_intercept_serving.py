@@ -143,19 +143,33 @@ class TestMorphPicksOverTheRequestZones:
                 root, [Intercept(target, narrow, "(.)"), Intercept(target, wide, "(.)")]
             )
             patches = Patches(_origin_post("peek,extra"))
-            served = patches._served_page()
+            served = patches._served_page("peek")
             envelope = patches.morph_zone("peek").envelope()
 
         assert served == wide
         assert envelope.ops[0].html == '<div data-next-zone="peek">peek</div>'
         assert len(patches._render_contexts) == 1
 
+    def test_a_zone_the_intercept_lacks_renders_from_the_origin(
+        self, root: Path
+    ) -> None:
+        target = write_page(root, "photo/[int:pk]", PAGE_HEAD, body=zone_body("count"))
+        modal = write_page(root, "modal", PAGE_HEAD, body=zone_body("peek"))
+
+        with routed(root):
+            resolve("/photo/3/")
+            intercepts.publish(root, [Intercept(target, modal, "(.)")])
+            patches = Patches(_origin_post("peek"))
+            envelope = patches.morph_zone("count").envelope()
+
+        assert envelope.ops[0].html == '<div data-next-zone="count">count</div>'
+
     def test_a_request_naming_no_zone_picks_nothing(self, root: Path) -> None:
         _site(root)
 
         with routed(root):
             resolve("/photo/3/")
-            assert Patches(_origin_post(None))._served_page() is None
+            assert Patches(_origin_post(None))._served_page("peek") is None
 
 
 class TestRefusingInterceptOnTheActionPath:

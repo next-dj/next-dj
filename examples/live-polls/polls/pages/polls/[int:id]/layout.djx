@@ -10,7 +10,7 @@
     </div>
     <div class="shrink-0 text-right text-xs uppercase tracking-wide text-muted-foreground">
       <p>Poll #{{ poll.pk }}</p>
-      <a href="/polls/{{ poll.pk }}/embed/" class="hover:text-foreground">Embed</a>
+      <a href="/polls/{{ poll.pk }}/embed/" data-next-layer="embed-code" class="hover:text-foreground">Embed</a>
     </div>
   </header>
 

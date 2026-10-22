@@ -851,7 +851,7 @@ Errors
        Moving it out beside the outer intercept, over the page it targets, clears it.
      - ``next.pages.checks.intercepts``
    * - ``next.E173``
-     - An intercept page serves a zone that a sibling intercept of the same target serves too.
+     - An intercept page serves a zone that a sibling intercept of the same target serves too, or re-declares a standalone zone its target keeps.
        A zone inside a condition or a component that binds it is no claim, since no zone request serves it.
        The served zones of an intercept are its standalone zones, less the zones of the layouts above it and the standalone zones of the target.
        Of two intercepts sharing a served zone the one first in file order wins, so the other never serves it.

@@ -122,7 +122,6 @@ class RouterManager:
         It clears the URL caches and sends both signals unless `notify=False`.
         """
         with self._lock:
-            self._bump()
             self._config_cache = None
 
             # Recorded for the whole build, so a backend reading the manager is served.
@@ -136,10 +135,12 @@ class RouterManager:
             finally:
                 self._building_thread = None
 
-            if notify:
-                intercepts.clear()
             # One-step publish, so a mid-build read never sees a partial list.
             self._backends = built
+            # Moved with the clear, so a walk that sees the new token sees both.
+            if notify:
+                intercepts.clear()
+            self._bump()
             # Set before the signal, so a receiver reading `backends` stays out.
             self._loaded = True
             if notify:

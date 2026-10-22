@@ -28,6 +28,7 @@ from next.components import collect_visible_components, get_component, render_co
 from next.components.nodes import ComponentTagNode, SetSlotTagNode, SlotTagNode
 from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY, SLOT_KEY_PREFIX
 from next.conf import fail_loudly, next_framework_settings
+from next.interpolation import Interpolation, interpolated
 from next.seeding import COLLECTOR_KEY, REQUEST_KEY, TEMPLATE_PATH_KEY
 from next.static import collect_component_assets
 from next.utils import on_forget_resolved_trees
@@ -84,7 +85,7 @@ def _comment_safe(text: str) -> str:
 
 def _parse_component(
     parser: Parser, token: Token, tag: str
-) -> tuple[str, dict[str, FilterExpression]]:
+) -> tuple[str, dict[str, FilterExpression | Interpolation]]:
     """Parse ``tag "name" key=expr …`` into the component name and its props.
 
     Django reads the props, so each value compiles to a render-time `FilterExpression`.
@@ -100,11 +101,14 @@ def _parse_component(
     return name, _parse_props(parser, bits)
 
 
-def _parse_props(parser: Parser, bits: list[str]) -> dict[str, FilterExpression]:
+def _parse_props(
+    parser: Parser, bits: list[str]
+) -> dict[str, FilterExpression | Interpolation]:
     """Parse the `key=expr` props a component tag carries, consuming `bits`."""
-    props: dict[str, FilterExpression] = {}
+    props: dict[str, FilterExpression | Interpolation] = {}
     while bits:
-        props.update(token_kwargs(bits, parser))
+        for key, expr in token_kwargs(bits, parser).items():
+            props[key] = interpolated(parser, expr) or expr
         if bits:
             # Django stops at the first non-pair bit, an unmeant word, so it is dropped.
             del bits[0]
@@ -181,7 +185,10 @@ class ComponentNode(ComponentTagNode):
     """Looks up the component, gathers slots and free children, then renders HTML."""
 
     def __init__(
-        self, name: str, props: dict[str, FilterExpression], nodelist: NodeList
+        self,
+        name: str,
+        props: dict[str, FilterExpression | Interpolation],
+        nodelist: NodeList,
     ) -> None:
         """Store component name, prop expressions, and nested nodes."""
         self.name = name
@@ -206,6 +213,9 @@ class ComponentNode(ComponentTagNode):
         """
         resolved: dict[str, Any] = {}
         for key, expr in self.props.items():
+            if isinstance(expr, Interpolation):
+                resolved[key] = expr.resolve(context)
+                continue
             value = expr.resolve(context)
             is_literal = not isinstance(expr.var, Variable)
             if is_literal and not expr.filters and isinstance(value, SafeString):

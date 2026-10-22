@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from django.template.base import FilterExpression
 
     from next.forms.backends import ActionMeta
+    from next.interpolation import Interpolation
 
 
 def _page_path_from_context(context: template.Context) -> str | None:
@@ -97,8 +98,8 @@ class FormNode(template.Node):
         self,
         action_expr: "FilterExpression",
         nodelist: template.NodeList,
-        attrs: "tuple[tuple[str, FilterExpression], ...]" = (),
-        partial_attrs: "dict[str, FilterExpression] | None" = None,
+        attrs: "tuple[tuple[str, FilterExpression | Interpolation], ...]" = (),
+        partial_attrs: "dict[str, FilterExpression | Interpolation] | None" = None,
     ) -> None:
         """Initialize with the action, nodelist, HTML attrs, and partial attrs."""
         self.action_expr = action_expr

@@ -12,7 +12,7 @@ A wiki served from two stores at once. Some pages live as files in `wiki/pages/`
 | `/articles/new/` | Create form with a live Markdown preview pane. |
 | `/articles/edit/<slug>/` | Edit form for the given article with a live Markdown preview. |
 | `/wiki/<slug>/` | Public article view rendered from the database row. |
-| `/search/?q=routing` | Mixed search across the file catalogue and article titles plus bodies. |
+| `/search/?q=routing` | Mixed search across the file catalogue and article titles plus bodies. A click on an article result opens a preview modal over the results. |
 | `/sitemap.xml` | The three documentation routes plus one entry per article row with its save date as `lastmod`, paged by the database. |
 | `/robots.txt` | Rendered from `robots.py`, keeps crawlers off the search and two AI training crawlers off the wiki, names the sitemap. |
 
@@ -151,6 +151,21 @@ The first group fences the search for every crawler, the second keeps two crawle
 
 The two mechanisms split the work by what each can do. A `Disallow` stops the fetch, which is right for the search, every query is a URL of its own and none of them has content to rank. A `noindex` needs the fetch, the tag is inside the page, so the two form pages of section 11 stay crawlable and carry the tag instead. The framework never derives one from the other.
 
+### 14. An article preview as an intercepting route
+
+An article result on the search page links to the article with `data-next-layer="article-peek"`. The click asks for the article URL `/wiki/routing-internals/` with that zone name, and the address bar keeps that URL while a preview opens over the results. A reload, a shared link and a file result without the attribute render the real page, and Back closes the modal.
+
+The preview is the directory [`search/(..)wiki/[slug]`](wiki/pages/search/%28..%29wiki/%5Bslug%5D/). The scope of an intercept is the URL trail of the directory that holds it, here `search`, and `(..)` drops one segment of it, so `(..)wiki` targets `wiki` at the root of the tree and the `[slug]` below it extends the target to `wiki/[slug]`. The intercept sits beside the search page and its target sits one level up, which is the case `(..)` is for, where `(.)` would reach only below `search`. It routes nothing, and `uv run python manage.py routes` lists it under its target with the zone it serves:
+
+```
+URL                 Name  File                                       Access  Intercept
+/wiki/<str:slug>/   -     wiki/pages/search/(..)wiki/[slug]/page.py  -       article-peek
+```
+
+The intercept [`page.py`](wiki/pages/search/%28..%29wiki/%5Bslug%5D/page.py) reads the article through `DArticle[Article]`, the provider of section 3, since the zone request carries the `slug` of the target URL. Its metadata titles the tab `Preview · Routing internals · next.dj Wiki` and the client restores `Search · next.dj Wiki` when the modal closes. The [`template.djx`](wiki/pages/search/%28..%29wiki/%5Bslug%5D/template.djx) wraps the rendered Markdown in `{% zone "article-peek" %}` with no layout around it and ends in a plain link to the article.
+
+`TestArticlePeek` pins the server side and [`tests/e2e/test_peek.py`](tests/e2e/test_peek.py) drives the modal in a browser, the URL and title on open and close, Back, Escape, reload, the link to the article and a file result that still navigates.
+
 ## Further reading
 
 - [next/urls/manager.py](../../next/urls/manager.py): `RouterManager.reload` emits the `router_reloaded` signal.
@@ -161,3 +176,4 @@ The two mechanisms split the work by what each can do. A `Disallow` stops the fe
 - [next/testing/](../../next/testing/): `assert_metadata` and `parse_sitemap`, which the integration tests read the head and the sitemap back through.
 - [next/components/context.py](../../next/components/context.py): `@component.context` wiring used by `markdown_preview`.
 - [next/templatetags/components.py](../../next/templatetags/components.py): the `{% #component %}` tag that collects slots and free children.
+- [next/intercept.py](../../next/intercept.py) and [next/partial/intercept.py](../../next/partial/intercept.py): the intercept table and the zone selection of section 14.
