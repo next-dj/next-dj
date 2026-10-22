@@ -8,12 +8,13 @@ The example focuses on the form-action subsystem of next-dj: a custom backend wi
 
 | URL | Description |
 | --- | --- |
-| `/` | Landing page. "Start a new request" opens the wizard in a modal layer and refreshes the recent-requests list when it closes. Recent requests link to their per-request audit. |
+| `/` | Landing page. "Start a new request" opens the wizard in a modal layer and refreshes the recent-requests list when it closes. Each recent request opens its audit trail as a modal peek over the landing, with the honest `/request/<id>/audit/` URL in the address bar (section 12). |
 | `/request/identity/` | Step 1: full name, email, team. Saved sections show "✓ saved" pills. |
 | `/request/scope/` | Step 2: project slug, free-form reason, expiry days. |
 | `/request/approval/` | Step 3: read-only confirmation summary. |
-| `/request/<id>/audit/` | Per-request audit trail, opened on submit with a "✅ Submitted" banner. |
-| `/admin/audit/` | Global audit log. The heavy table is a lazy `audit-table` zone behind a skeleton. Filter by `kind` via `?kind=…` (`access_denied` included). Backend rows link to their per-request page. |
+| `/request/<id>/audit/` | Per-request audit trail, opened on submit with a "✅ Submitted" banner. Once the filing is recorded, "View the receipt" opens the receipt as a modal. |
+| `/request/<id>/receipt/` | The receipt of a filed request, a page whose body comes from `render()`. `?format=txt` downloads it as plain text. |
+| `/admin/audit/` | Global audit log. The heavy table is a lazy `audit-table` zone behind a skeleton. Filter by `kind` via `?kind=…` (`access_denied` included). Backend rows linked to a request open a summary of that request as a modal over the log. |
 
 The user flow:
 
@@ -166,7 +167,7 @@ The example ships three composite components, each pairing one `.djx` with a `co
 
 - **`step_section/`: one context callable driving a loop in the template.** Lives next to `progress_bar`. Its `sections` context takes `form` and `wizard` via DI and returns one dict per step: the state (`active`, `errors`, `saved`, `pending`), the border classes, the badge props, the bound fields to render, and the stored values to list. The `.djx` walks that list and owns every tag, so the shared `badge` component draws the pill and `|truncatechars` shortens a long saved value. Field labels are read off the step form classes rather than restated, and the page template calls `{% component "step_section" %}` once for all three steps.
 
-- **`audit_row/`: `@component.context` deriving display data.** Lives at `pages/_components/audit_row/` (one scope above the admin and per-request pages so both can use it). Takes an `AuditEntry` from the parent loop and exposes `kind_class`, `source_class`, `summary`, `payload_keys`, `request_link`, and `data_attrs`. The template stays markup-only.
+- **`audit_row/`: `@component.context` deriving display data.** Lives at `pages/_components/audit_row/` (one scope above the admin and per-request pages so both can use it). Takes an `AuditEntry` from the parent loop and exposes `kind_class`, `source_class`, `summary`, `payload_keys`, `request_link`, and `data_attrs`. The template stays markup-only. The admin log passes `peek="audit-log-peek"`, which turns the request link into a modal opener (section 12), and the per-request trail passes nothing, since every row there links to the page already open.
 
 ### 6. Per-request audit trail (`AuditEntry.request` FK)
 
@@ -322,7 +323,129 @@ def audit_meta(access_request: DObject[AccessRequest]) -> MetadataDict:
     return {"title": f"Request #{access_request.pk}", "robots": {"index": False}}
 ```
 
-The row carries the requester's name and email, and the title uses the primary key on purpose. A tab title ends up in browser history, bookmarks and screenshots, which is the wrong place for the personal data the audit trail exists to protect. Every page that shows request data says `noindex` for the same reason. One parametrized integration test pins the four titles and which pages carry the robots tag.
+The row carries the requester's name and email, and the title uses the primary key on purpose. A tab title ends up in browser history, bookmarks and screenshots, which is the wrong place for the personal data the audit trail exists to protect. Every page that shows request data says `noindex` for the same reason. One parametrized integration test pins the five titles and which pages carry the robots tag. The modals of section 12 follow the same rule with titles of their own.
+
+### 12. Intercepting routes: modals over honest URLs
+
+Three links open another page's content as a modal while the address bar shows the real URL of that page. A reload, a shared link, or a link without `data-next-layer` renders the real page, and Back closes the modal. Each modal is an intercepting route, a directory whose name starts with `(.)` or `(...)` and names the page it opens over. It is never routed, it adds no URL and no URL name, and `uv run python manage.py routes` lists it right under its target with the zones it serves:
+
+```
+URL                                     Name                                          File                                                                      Access  Intercept
+/request/<int:access_request>/receipt/  next:page_request_int_access_request_receipt  access/pages/request/[int:access_request]/receipt/page.py                 -
+/request/<int:access_request>/receipt/  -                                             access/pages/(.)request/[int:access_request]/receipt/page.py              -       receipt-peek
+/request/<int:access_request>/audit/    next:page_request_int_access_request_audit    access/pages/request/[int:access_request]/audit/page.py                   -
+/request/<int:access_request>/audit/    -                                             access/pages/(.)request/[int:access_request]/audit/page.py                -       audit-peek, audit-peek-entries
+/request/<int:access_request>/audit/    -                                             access/pages/admin/audit/(...)request/[int:access_request]/audit/page.py  -       audit-log-peek
+```
+
+The tree, with the routed targets beside the intercepts that open over them:
+
+```
+access/pages/
+  template.djx                       landing, rows link with data-next-layer="audit-peek"
+  request/
+    [int:access_request]/
+      audit/                         /request/<id>/audit/, the target of two peeks
+      receipt/
+        page.py                      /request/<id>/receipt/, body from render()
+  (.)request/
+    [int:access_request]/
+      page.py                        no body, what both peeks below share
+      audit/                         zone "audit-peek", with "audit-peek-entries" polling inside
+      receipt/                       zone "receipt-peek"
+  admin/
+    audit/                           /admin/audit/, rows link with data-next-layer="audit-log-peek"
+      (...)request/
+        [int:access_request]/
+          audit/                     zone "audit-log-peek"
+```
+
+The marker counts from the URL trail of the directory that holds the intercept. `(.)request` sits at the root of the tree, so it targets `request`, and the directories below it extend the target to `request/[int:access_request]/audit`. `(...)request` always starts at the tree root, so the one under `admin/audit/` targets the same trail. The brackets spell the target exactly, `[int:access_request]` on both sides, and `manage.py check` reports a mismatch as `next.E170`.
+
+#### What the two `(.)` peeks share
+
+`(.)request/[int:access_request]/page.py` has no body, so it serves no zone and the router publishes no intercept for it. It sits on the file-system chain of both peeks below it, so it declares once what they share:
+
+```python
+# access/pages/(.)request/[int:access_request]/page.py
+metadata: MetadataDict = {"robots": {"index": False}}
+
+
+@context("access_request", inherit_context=True)
+def access_request(access_request: DObject[AccessRequest]) -> AccessRequest:
+    return access_request
+```
+
+The audit peek and the receipt peek read `access_request` in their templates without declaring it, and their `meta` ops carry `noindex` without saying so. Each one keeps only what is its own, the rows or the receipt lines and the title. The `(...)` peek under `admin/audit/` lives in another branch of the tree, so it declares its own.
+
+#### The link picks the modal
+
+The link keeps the honest href and names a zone. Nothing else on the client changes:
+
+```html
+<!-- access/pages/template.djx -->
+<a href="{% url 'next:page_request_int_access_request_audit' access_request=r.pk %}"
+   data-next-layer="audit-peek">{{ r.status }} · audit</a>
+```
+
+The runtime sends a GET of `/request/5/audit/` with `X-Next-Zone: audit-peek`. The audit page declares no such zone, so the intercept page that declares it renders the response, a zone with no layout around it. The same URL serves two different modals, because the zone name and not the URL decides which intercept answers. `audit-peek` opens from the landing and `audit-log-peek` from the log, where the lazy `audit-table` zone renders the rows and each linked row carries `data-next-layer="audit-log-peek"` through the `audit_row` component. Each modal ends in a plain link to the full page, which carries no `data-next-layer` and so navigates to the real page.
+
+#### The tab title follows the modal
+
+Each intercept `page.py` declares its own `@page.metadata`, and the zone response carries it as one `meta` op:
+
+```python
+# access/pages/(.)request/[int:access_request]/audit/page.py
+@page.metadata
+def peek_meta(access_request: DObject[AccessRequest]) -> MetadataDict:
+    return {"title": f"Audit peek · Request #{access_request.pk}"}
+```
+
+The tab reads `Audit peek · Request #5 · next.dj audit` while the modal is open, and the layer restores the landing title when it closes, whichever way it closes. A reload of the URL renders the head of the real page, `Request #5 · next.dj audit`.
+
+#### A poll inside the modal
+
+The peek nests a polling zone:
+
+```html
+{% zone "audit-peek" %}
+  ...
+  {% zone "audit-peek-entries" poll="5s" tag="ol" %}
+    {% for entry in entries %}<li data-next-key="{{ entry.pk }}">...</li>{% endfor %}
+  {% endzone %}
+{% endzone %}
+```
+
+Every five seconds the runtime GETs the layer URL `/request/5/audit/` with `X-Next-Zone: audit-peek-entries` and nothing else. The server selects the intercept again by that nested zone name, runs the access chain of the target and of the intercept again, and renders only the list. `entries` is declared as `@context("entries", zone="audit-peek-entries")`, so it is the one query a poll runs. A row the backend links to the request while the modal is open shows up within one tick, with no project JavaScript.
+
+#### A modal over a page whose body comes from `render()`
+
+The receipt page builds its body in Python, because one URL answers in two formats:
+
+```python
+# access/pages/request/[int:access_request]/receipt/page.py
+def render(
+    request: HttpRequest, access_request: DObject[AccessRequest]
+) -> str | HttpResponse:
+    if not access_request.is_filed():
+        msg = "No receipt before the backend records the filing."
+        raise Http404(msg)
+    if request.GET.get("format") != "txt":
+        return RECEIPT
+    ...
+```
+
+A `render()` body has no zones of its own, so a zone GET of the receipt URL answers `400 zone in dynamic body`. The `(.)request/[int:access_request]/receipt/` intercept is what makes the modal possible, its `template.djx` declares `receipt-peek`, and the trail page opens it with `data-next-layer="receipt-peek"`.
+
+The order of a zone GET matters here. `render()` runs before the intercept is picked, once per request, so its gate holds for the modal too. A request whose filing the backend has not recorded raises `Http404` in `render()`, and the modal never opens. A `render()` that returned a refusal string instead would not stop the intercept, which is why the gate raises. A `?format=txt` zone GET gets the text download `render()` returned, as is.
+
+The string `render()` returns is template source, composed into the layout and rendered with the page context. `RECEIPT` is therefore a constant, and the request data reaches it through `@context("receipt")`, escaped like any template variable. Interpolating `access_request.full_name` into the string would let a requester named `{{ ... }}` run template code. `AccessRequest.receipt_lines()` feeds the HTML page, the modal, and the `.txt` download alike.
+
+#### Access
+
+The portal has no accounts and no default login, so neither the targets nor the intercepts declare access and both chains admit everyone. Both still run on every zone GET, so a row `visible_to` hides is a `404` inside the modal too. Under `LoginRequiredMiddleware` an intercept that declares nothing would require a login even over a public target, which `manage.py check` reports as `next.W140`.
+
+`TestAuditPeek`, `TestAuditLogPeek`, and `TestReceipt` in the integration suite pin the server side: the plain GET against the zone GET, the `meta` op, the poll, the `400` for an unknown zone, the `404` for a hidden row, and `render()` running once. [`tests/e2e/test_intercepts.py`](tests/e2e/test_intercepts.py) drives each modal in a browser: the `:modal` dialog, the URL and title on open and close, Back, reload, the plain link, and a poll that brings in a new row.
 
 ## Further reading
 
@@ -335,5 +458,6 @@ The row carries the requester's name and email, and the title uses the primary k
 - [`next/forms/checks/wizards.py`](../../next/forms/checks/wizards.py): `next.W057` (a step form registered as an action) and `next.W059` (a field two steps both declare).
 - [`next/pages/metadata/`](../../next/pages/metadata/): the metadata chain behind the dicts and the `@page.metadata` callable of section 11.
 - [`next/deps/objects.py`](../../next/deps/objects.py): `DObject` and the provider that loads its row through `visible_to(scope)`.
+- [`next/intercept.py`](../../next/intercept.py) and [`next/partial/intercept.py`](../../next/partial/intercept.py): the intercept table and the zone selection of section 12.
 - [`next/testing/capture.py`](../../next/testing/capture.py): `SignalRecorder` and `capture_signals` helpers used in the tests.
 - [`next/testing/plugin.py`](../../next/testing/plugin.py): the pytest plugin behind the `next_pages`, `next_clear_cache`, and `next_client` entries this example's `pytest.ini` uses.

@@ -13,7 +13,7 @@ Like any Django command, each one runs the system checks first, so ``--skip-chec
 routes
 ------
 
-``manage.py routes`` prints one row per routed page, in resolution order, with four columns.
+``manage.py routes`` prints one row per routed page, in resolution order, with four columns, and a fifth when an intercepting page is listed.
 
 .. list-table::
    :header-rows: 1
@@ -29,6 +29,9 @@ routes
      - The ``page.py``, or the ``template.djx`` of a virtual page, relative to ``BASE_DIR`` when it lies under it.
    * - ``Access``
      - The access rule of the page, spelled as in `permissions`_.
+   * - ``Intercept``
+     - The standalone zones an intercepting page serves, joined by ``, `` in declaration order, or ``-`` when it declares none or its template fails to compose.
+       The column appears only when the table lists at least one intercepting page, and a routed row leaves it blank.
 
 .. code-block:: text
    :caption: manage.py routes
@@ -39,15 +42,19 @@ routes
    /                   next:page_                notes/pages/page.py                   -
    /notes/<int:note>/  next:page_notes_int_note  notes/pages/notes/[int:note]/page.py  login
 
+An intercepting page is listed right after the row of the page it sits over, in file order when several do.
+Its row repeats the ``URL`` of that page, reads ``-`` under ``Name`` because the page has no route of its own, names its own ``page.py`` or ``template.djx`` under ``File``, and shows the access rule of its own chain.
+A page inside a route group shows the group in its ``File`` path, while its ``URL`` and ``Name`` leave the group out.
+
 A tree of ``next.urls`` is listed only when the root URLconf includes ``next.urls``.
-The table lists exactly the routed pages, so a page whose route the URL parser refuses and a ``page.py`` with no body source to render are left out.
+Apart from intercepting pages, the table lists exactly the routed pages, so a page whose route the URL parser refuses and a ``page.py`` with no body source to render are left out.
 Under :func:`~django.conf.urls.i18n.i18n_patterns` a URL carries the prefix of ``LANGUAGE_CODE``.
 :ref:`topics-file-router-trees` covers where each tree routes.
 
 permissions
 -----------
 
-``manage.py permissions`` prints the access rule of every page, every action, every component whose ``component.py`` declares access, and every other view of the URLconf, with four columns.
+``manage.py permissions`` prints the access rule of every page, every intercepting page, every action, every component whose ``component.py`` declares access, and every other view of the URLconf, with four columns.
 
 .. list-table::
    :header-rows: 1
@@ -56,9 +63,9 @@ permissions
    * - Column
      - Content
    * - ``Kind``
-     - ``page``, ``action``, ``component``, or ``view``.
+     - ``page``, ``intercept``, ``action``, ``component``, or ``view``.
    * - ``Endpoint``
-     - The URL of a page or a view, the name of an action followed by the file declaring it in parentheses, or the name of a component.
+     - The URL of a page or a view, the URL of the target of an intercepting page followed by its zones in parentheses, the name of an action followed by the file declaring it in parentheses, or the name of a component.
    * - ``Access``
      - The requirements in the order the chain declares them, each once, in the words listed below.
    * - ``Sources``
@@ -134,6 +141,10 @@ The share page lifts the login ``notes/pages/notes/page.py`` passes down through
 The action asks ``notes.edit_note`` twice, on the note the URL names by the rule of its page and on the bound form by its ``Meta`` guard, which is the order the dispatcher checks them in.
 An action carries the path of its file, the same path the ``File`` column of ``manage.py routes`` shows for the page declaring it, since two pages may declare actions of one name.
 
+An ``intercept`` row follows the ``page`` row of its target.
+Its ``Access`` and ``Sources`` come from the chain of the intercepting page, which climbs the file-system ancestors of that page and not those of the target.
+Both chains run on a request, and the stricter one wins.
+
 The ``view`` rows walk the patterns of ``django.urls.get_resolver()`` through every include in URLconf order and leave out the patterns of the page trees, which already have ``page`` rows.
 They show without the middleware too, as ``?`` for a view that decides access in its own code, a view behind Django's :func:`~django.contrib.auth.decorators.login_required` among them, so the table lists everything the project answers.
 ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` closes the pages and the actions alone, so ``/exports/`` above reads ``?`` under the key, and a listed ``LoginRequiredMiddleware`` would make it ``login (middleware)``.
@@ -141,7 +152,7 @@ They show without the middleware too, as ``?`` for a view that decides access in
 The ``/_next/form/<str:uid>/`` endpoint is open to the middleware, yet it reads ``per action``, since the dispatcher applies the rule of each action its ``action`` row shows.
 The dispatch view carries a ``next_access_kind`` attribute naming the kind of rows that decide it, which is how the table tells it from a view that asks no login.
 
-``manage.py permissions <url>`` narrows the table to the page the URL resolves to, the actions declared in its directory, and the declaring components its composed template renders, nested ones included.
+``manage.py permissions <url>`` narrows the table to the page the URL resolves to, the intercepting pages over it, the actions declared in its directory, and the declaring components its composed template renders, nested ones included.
 A URL that resolves to a view outside the page trees prints the row of that view alone, and a URL that resolves to nothing is a ``CommandError``.
 The rule of an action is its owner rule and its ``Meta`` guard, the same rule the dispatcher enforces, since the rule of the posted origin page joins only per request, see :doc:`/content/security/actions`.
 

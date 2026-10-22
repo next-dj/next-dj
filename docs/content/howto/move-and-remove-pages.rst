@@ -63,6 +63,15 @@ Renaming ``blog/pages/guides/`` to ``blog/pages/docs/`` moves every URL under it
 
 ``/guides/setup/`` now answers ``301 Moved Permanently`` with ``Location: /docs/setup/``.
 
+Move a page into or out of a route group
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A route group adds nothing to the URL or the URL name, see :ref:`topics-file-router-route-groups`.
+Moving ``blog/pages/login/`` to ``blog/pages/(auth)/login/`` keeps ``/login/`` and the name ``login``, so it needs no redirect and no ``Redirect`` row.
+The co-located assets are the exception.
+Their static logical names follow the file-system path and keep the group, so ``page.css`` of the moved page gets a new name and, under a manifest, a new hashed URL.
+A hand-written reference to the old name needs the update, see :ref:`topics-static-name-resolution-colocated`.
+
 Follow a renamed slug
 ~~~~~~~~~~~~~~~~~~~~~
 

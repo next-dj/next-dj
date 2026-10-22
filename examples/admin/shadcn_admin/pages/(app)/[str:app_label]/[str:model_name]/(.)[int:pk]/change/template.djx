@@ -1,0 +1,1 @@
+{% zone "quick-edit" %}{% component "admin_form" zone="quick-edit" %}{% endzone %}

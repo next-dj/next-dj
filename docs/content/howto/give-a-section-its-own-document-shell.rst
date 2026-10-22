@@ -60,6 +60,47 @@ Only ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, and blan
 The site layout is cut away for these pages, so this file carries the whole shell.
 Leaving out ``{% metadata %}`` drops the title and the head tags, and leaving out ``{% collect_styles %}`` or ``{% collect_scripts %}`` drops the assets of the page and its layouts.
 
+Use a route group for the section
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A section whose pages share no URL prefix takes a route group instead of a directory, see :ref:`topics-file-router-route-groups`.
+The login and logout pages write a document of their own while the pages of ``(app)`` keep the shared chrome, and the group adds nothing to their URLs.
+
+.. code-block:: text
+   :caption: accounts/pages/
+
+   layout.djx
+   (app)/
+     notes/
+       page.py
+       template.djx
+   (auth)/
+     layout.djx
+     login/
+       page.py
+       template.djx
+     logout/
+       page.py
+       template.djx
+
+.. code-block:: jinja
+   :caption: accounts/pages/(auth)/layout.djx
+
+   {% layout root %}
+   <!doctype html>
+   <html>
+     <head>
+       {% metadata %}
+       {% collect_styles %}
+     </head>
+     <body class="auth">
+       {% template %}
+       {% collect_scripts %}
+     </body>
+   </html>
+
+``/login/`` and ``/logout/`` get this shell and no layout further out, and ``/notes/`` keeps the site layout.
+
 Keep what the ancestors declare
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

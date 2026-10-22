@@ -653,6 +653,11 @@ def _hold_degraded(response: HttpResponseBase) -> None:
     cookies = response.cookies
     if isinstance(cookies, SharedCookies):
         cookies.shared = None
+    never_store(response)
+
+
+def never_store(response: HttpResponseBase) -> None:
+    """Send `response` as `private, no-store` alone, with no CDN cache header."""
     _drop_cache_headers(response)
     NO_STORE.apply(response)
 
@@ -768,6 +773,7 @@ __all__ = [
     "is_header_value",
     "mark_personal_render",
     "mark_shared_render",
+    "never_store",
     "personal_render",
     "prepare_page_render",
     "response_policy",

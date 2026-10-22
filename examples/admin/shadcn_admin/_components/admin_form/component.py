@@ -4,7 +4,12 @@ from typing import Any
 from django.contrib.auth import get_permission_codename
 from django.http import HttpRequest
 from shadcn_admin.admin import RowPermissionAdmin
-from shadcn_admin.forms import AdminFormSpec, AdminInlineSpec, build_inline_formsets
+from shadcn_admin.forms import (
+    QUICK_EDIT_ZONE,
+    AdminFormSpec,
+    AdminInlineSpec,
+    build_inline_formsets,
+)
 
 from next import Depends, component
 from next.forms import form_spec, formset_spec
@@ -13,10 +18,15 @@ from next.forms import form_spec, formset_spec
 @component.context("form_state")
 def form_state(
     request: HttpRequest,
+    zone: str,
     spec: AdminFormSpec = Depends("admin_spec"),
     pk: int | None = None,
 ) -> dict[str, Any]:
-    """Build add/change context, binding the form to POST so re-render shows errors."""
+    """Build add/change context, binding the form to POST so re-render shows errors.
+
+    `zone` is the zone the editor lives in, which its form posts as its target.
+    """
+    quick = zone == QUICK_EDIT_ZONE
     form_cls = spec.model_admin.get_form(
         spec.request, spec.stored, change=spec.is_change
     )
@@ -35,8 +45,11 @@ def form_state(
         object_links = spec.model_admin.get_object_links(spec.request, spec.stored)
     else:
         object_links = []
-    if spec.is_change:
+    if quick:
         inlines: list[Any] = []
+        related_sections = []
+    elif spec.is_change:
+        inlines = []
         related_sections = AdminInlineSpec.build_sections(spec)
     else:
         formsets = build_inline_formsets(spec)
@@ -49,6 +62,8 @@ def form_state(
         "app_label": spec.app_label,
         "model_name": spec.model_name,
         "pk": pk,
+        "zone": zone,
+        "quick": quick,
         "is_change": spec.is_change,
         "instance": spec.stored,
         "row_rules": row_rules,
@@ -61,7 +76,8 @@ def form_state(
         "inlines": inlines,
         "related_sections": related_sections,
         "action_name": "admin:change" if spec.is_change else "admin:add",
-        "title": "Edit" if spec.is_change else "Add",
+        "title": "Quick edit" if quick else "Edit" if spec.is_change else "Add",
         "changelist_url": spec.changelist_url,
         "delete_url": spec.delete_url,
+        "history_url": spec.history_url,
     }

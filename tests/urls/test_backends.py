@@ -1,5 +1,6 @@
 import logging
 import shutil
+from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -8,10 +9,18 @@ from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
 from django.test import Client, RequestFactory, override_settings
 from django.urls import URLPattern, URLResolver, clear_url_caches
 
+from next.intercept import Intercept, intercepts
 from next.pages import page
-from next.testing import override_next_settings
-from next.urls import FileRouterBackend, PageRoot, RouterBackend, RouterFactory
+from next.testing import SignalRecorder, capture_signals, override_next_settings
+from next.urls import (
+    FileRouterBackend,
+    PageRoot,
+    RouterBackend,
+    RouterFactory,
+    router_manager,
+)
 from next.urls.backends import _installed_app_directories, _is_framework_app
+from next.urls.signals import intercept_registered, route_registered
 from next.utils import forget_resolved_trees
 from tests.support import (
     NAMESPACED_URLCONF,
@@ -24,7 +33,14 @@ from tests.support import (
     record_path_calls,
     write_app,
     write_page,
+    write_urlconf,
 )
+
+
+@pytest.fixture()
+def capture_route_registered() -> Generator[SignalRecorder, None, None]:
+    with capture_signals(route_registered) as recorder:
+        yield recorder
 
 
 class NarrowFileRouter(FileRouterBackend):
@@ -1186,3 +1202,384 @@ class TestPageRootKeys:
             keys = self._keys(file_router(app_dirs=True))
 
         assert keys == ["vendored/pages"]
+
+
+class TestRouteGroups:
+    """A group folder serves the URL of its parent and stays out of every name."""
+
+    @staticmethod
+    def _patterns(tmp_path: Path) -> list[URLPattern | URLResolver]:
+        return file_router(app_dirs=False, dirs=[tmp_path]).generate_urls()
+
+    def test_the_route_and_name_leave_the_group_out(self, tmp_path) -> None:
+        write_page(tmp_path, "(auth)/login")
+        write_page(tmp_path, "(auth)/(deep)/signup")
+
+        patterns = self._patterns(tmp_path)
+
+        assert sorted((str(p.pattern), p.name) for p in patterns) == [
+            ("login/", "page_login"),
+            ("signup/", "page_signup"),
+        ]
+
+    def test_a_group_page_serves_the_parent_url(self, tmp_path) -> None:
+        write_page(tmp_path, "(app)")
+
+        patterns = self._patterns(tmp_path)
+
+        assert [(str(p.pattern), p.name) for p in patterns] == [("", "page_")]
+
+    def test_the_view_keeps_the_group_free_route_trail(self, tmp_path) -> None:
+        write_page(tmp_path, "(auth)/login")
+
+        patterns = self._patterns(tmp_path)
+
+        assert [p.callback.next_route_trail for p in patterns] == ["login"]
+
+    def test_the_registered_route_is_the_group_free_one(
+        self, tmp_path, capture_route_registered
+    ) -> None:
+        page_file = write_page(tmp_path, "(auth)/login")
+
+        self._patterns(tmp_path)
+
+        assert [ev.kwargs["url_path"] for ev in capture_route_registered] == ["login"]
+        assert [ev.kwargs["file_path"] for ev in capture_route_registered] == [
+            page_file
+        ]
+
+    def test_a_parameter_in_a_group_does_not_shadow_a_static_sibling(
+        self, tmp_path
+    ) -> None:
+        write_page(tmp_path, "(app)/[id]")
+        write_page(tmp_path, "new")
+
+        patterns = self._patterns(tmp_path)
+
+        assert [str(p.pattern) for p in patterns] == ["new/", "<str:id>/"]
+        matched = next(
+            found for p in patterns if (found := p.resolve("new/")) is not None
+        )
+        assert matched.kwargs == {}
+
+    def test_a_static_page_in_a_group_wins_over_a_parameter_beside_it(
+        self, tmp_path
+    ) -> None:
+        write_page(tmp_path, "shop/[slug]")
+        static = write_page(tmp_path, "(admin)/shop/new")
+
+        patterns = self._patterns(tmp_path)
+
+        assert [str(p.pattern) for p in patterns] == ["shop/new/", "shop/<str:slug>/"]
+        matched = next(
+            found for p in patterns if (found := p.resolve("shop/new/")) is not None
+        )
+        assert matched.func.next_page_path == static
+
+
+_MODAL_CONTEXT_PAGE = (
+    "from next.pages import context\n\n"
+    'template = "modal"\n\n\n'
+    '@context("modal_title")\n'
+    "def modal_title():\n"
+    '    return "t"\n'
+)
+
+
+@pytest.fixture()
+def capture_intercept_registered() -> Generator[SignalRecorder, None, None]:
+    with capture_signals(intercept_registered) as recorder:
+        yield recorder
+
+
+@pytest.fixture()
+def fresh_intercepts() -> Generator[None, None, None]:
+    intercepts.clear()
+    yield
+    intercepts.clear()
+
+
+@pytest.mark.usefixtures("fresh_intercepts")
+class TestInterceptPublish:
+    """The router publishes each intercept over the routed page of its own tree."""
+
+    @staticmethod
+    def _routes(*roots: Path) -> list[URLPattern | URLResolver]:
+        return file_router(app_dirs=False, dirs=list(roots)).generate_urls()
+
+    def test_a_routed_target_publishes_one_rule(self, tmp_path) -> None:
+        feed = write_page(tmp_path, "feed/photo/[id]")
+        photo = write_page(tmp_path, "feed/(.)photo/[id]")
+
+        routes = self._routes(tmp_path)
+
+        assert [str(p.pattern) for p in routes] == ["feed/photo/<str:id>/"]
+        assert intercepts.all() == (
+            Intercept(feed, photo, tmp_path / "feed" / "(.)photo", "(.)"),
+        )
+        assert intercepts.of(feed) == intercepts.all()
+
+    def test_the_rule_is_never_routed(self, tmp_path) -> None:
+        write_page(tmp_path, "feed")
+        write_page(tmp_path, "feed/(.)photo")
+
+        routes = self._routes(tmp_path)
+
+        assert [str(p.pattern) for p in routes] == ["feed/"]
+
+    def test_a_virtual_page_intercept_is_published(self, tmp_path) -> None:
+        feed = write_page(tmp_path, "feed/photo")
+        folder = tmp_path / "feed" / "(.)photo"
+        folder.mkdir()
+        (folder / "template.djx").write_text("<p>modal</p>")
+
+        self._routes(tmp_path)
+
+        assert [rule.file for rule in intercepts.of(feed)] == [folder / "page.py"]
+
+    def test_a_virtual_target_takes_a_rule(self, tmp_path) -> None:
+        target = tmp_path / "feed" / "photo"
+        target.mkdir(parents=True)
+        (target / "template.djx").write_text("<p>photo</p>")
+        photo = write_page(tmp_path, "feed/(.)photo")
+
+        self._routes(tmp_path)
+
+        assert [rule.file for rule in intercepts.of(target / "page.py")] == [photo]
+
+    def test_the_signal_names_the_target_file_and_marker(
+        self, tmp_path, capture_intercept_registered
+    ) -> None:
+        feed = write_page(tmp_path, "feed/photo")
+        photo = write_page(tmp_path, "feed/(.)photo")
+
+        self._routes(tmp_path)
+
+        (event,) = capture_intercept_registered.events
+        assert event.sender is FileRouterBackend
+        assert event.kwargs == {
+            "target_file": feed,
+            "file_path": photo,
+            "marker": "(.)",
+        }
+
+    def test_every_marker_publishes_its_rule(self, tmp_path) -> None:
+        near = write_page(tmp_path, "a/b")
+        up = write_page(tmp_path, "a/x")
+        top = write_page(tmp_path, "top")
+        write_page(tmp_path, "a/b/(..)x")
+        write_page(tmp_path, "a/b/(...)top")
+        write_page(tmp_path, "a/(.)b")
+
+        self._routes(tmp_path)
+
+        assert {rule.target_file: rule.marker for rule in intercepts.all()} == {
+            near: "(.)",
+            up: "(..)",
+            top: "(...)",
+        }
+
+    def test_a_param_spec_mismatch_drops_the_rule(
+        self, tmp_path, capture_intercept_registered
+    ) -> None:
+        write_page(tmp_path, "feed/photo/[int:id]")
+        write_page(tmp_path, "feed/(.)photo/[id]")
+
+        self._routes(tmp_path)
+
+        assert intercepts.all() == ()
+        assert len(capture_intercept_registered) == 0
+
+    def test_a_target_without_a_routed_page_drops_the_rule(self, tmp_path) -> None:
+        write_page(tmp_path, "feed")
+        write_page(tmp_path, "feed/(.)photo")
+        write_page(tmp_path, "(..)gone")
+
+        self._routes(tmp_path)
+
+        assert intercepts.all() == ()
+
+    def test_an_intercept_defining_render_is_never_published(
+        self, tmp_path, caplog, capture_intercept_registered
+    ) -> None:
+        write_page(tmp_path, "feed/photo")
+        photo = write_page(
+            tmp_path,
+            "feed/(.)photo",
+            'def render(request, **kwargs):\n    return "x"\n',
+        )
+
+        with caplog.at_level(logging.WARNING, logger="next.urls.backends"):
+            self._routes(tmp_path)
+
+        assert intercepts.all() == ()
+        assert len(capture_intercept_registered) == 0
+        assert f"The intercept page {photo} defines render()" in caplog.text
+
+    def test_an_intercept_failing_to_import_is_published_to_be_refused(
+        self, tmp_path
+    ) -> None:
+        feed = write_page(tmp_path, "feed/photo")
+        photo = write_page(tmp_path, "feed/(.)photo", "raise RuntimeError('boom')\n")
+
+        self._routes(tmp_path)
+
+        assert [rule.file for rule in intercepts.of(feed)] == [photo]
+
+    def test_a_malformed_intercept_publishes_nothing(self, tmp_path) -> None:
+        write_page(tmp_path, "(.)")
+        write_page(tmp_path, "(..)x")
+
+        routes = self._routes(tmp_path)
+
+        assert routes == []
+        assert intercepts.all() == ()
+
+    def test_the_intercept_module_is_imported_at_publish(self, tmp_path) -> None:
+        write_page(tmp_path, "feed/photo")
+        photo = write_page(tmp_path, "feed/(.)photo", _MODAL_CONTEXT_PAGE)
+
+        self._routes(tmp_path)
+
+        names = {
+            Path(file).resolve(): found
+            for file, found in page.contexts.registered_names().items()
+        }
+        assert names[photo.resolve()] == ("modal_title",)
+
+    def test_a_broken_intercept_module_still_publishes(self, tmp_path) -> None:
+        feed = write_page(tmp_path, "feed/photo")
+        photo = write_page(tmp_path, "feed/(.)photo", "raise RuntimeError('boom')\n")
+
+        self._routes(tmp_path)
+
+        assert [rule.file for rule in intercepts.of(feed)] == [photo]
+
+    def test_a_walk_cleared_midway_publishes_nothing_and_sends_no_signal(
+        self, tmp_path, capture_intercept_registered
+    ) -> None:
+        write_page(tmp_path, "feed/photo")
+        write_page(tmp_path, "feed/(.)photo")
+        write_page(tmp_path, "other")
+        backend = file_router(app_dirs=False, dirs=[tmp_path])
+        walk = backend._generate_patterns_from_directory(tmp_path)
+
+        next(walk)
+        intercepts.clear()
+        list(walk)
+
+        assert intercepts.all() == ()
+        assert len(capture_intercept_registered) == 0
+
+    def test_an_intercept_under_a_nested_root_is_left_to_that_root(
+        self, tmp_path
+    ) -> None:
+        nested = tmp_path / "nested"
+        target = write_page(nested, "photo")
+        write_page(nested, "(.)photo")
+
+        self._routes(tmp_path, nested)
+
+        assert [rule.target_file for rule in intercepts.all()] == [target]
+
+    def test_a_tree_with_no_intercepts_publishes_an_empty_set(self, tmp_path) -> None:
+        feed = write_page(tmp_path, "feed/photo")
+        write_page(tmp_path, "feed/(.)photo")
+        self._routes(tmp_path)
+        shutil.rmtree(tmp_path / "feed" / "(.)photo")
+
+        self._routes(tmp_path)
+
+        assert intercepts.of(feed) == ()
+
+    def test_a_rebuild_forgets_a_vanished_intercept(self, tmp_path) -> None:
+        feed = write_page(tmp_path, "feed/photo")
+        photo = write_page(tmp_path, "feed/(.)photo")
+        self._routes(tmp_path)
+        assert intercepts.of(feed)
+        shutil.rmtree(photo.parent)
+
+        self._routes(tmp_path)
+
+        assert intercepts.of(feed) == ()
+
+    def test_each_publish_bumps_the_table_version(self, tmp_path) -> None:
+        write_page(tmp_path, "feed")
+        before = intercepts.version
+
+        self._routes(tmp_path)
+
+        assert intercepts.version == before + 1
+
+    def test_the_same_trail_in_two_trees_resolves_within_its_own_tree(
+        self, tmp_path
+    ) -> None:
+        one = tmp_path / "one"
+        two = tmp_path / "two"
+        write_page(one, "feed/photo")
+        target_two = write_page(two, "feed/photo")
+        photo_one = write_page(one, "feed/(.)photo")
+        stray = write_page(two, "feed/(.)other")
+
+        self._routes(one, two)
+
+        assert intercepts.of(target_two) == ()
+        assert [rule.file for rule in intercepts.all()] == [photo_one]
+        assert stray not in {rule.file for rule in intercepts.all()}
+
+    def test_two_trees_publish_side_by_side(self, tmp_path) -> None:
+        one = tmp_path / "one"
+        two = tmp_path / "two"
+        target_one = write_page(one, "feed/photo")
+        target_two = write_page(two, "feed/photo")
+        photo_one = write_page(one, "feed/(.)photo")
+        photo_two = write_page(two, "feed/(.)photo")
+
+        self._routes(one, two)
+
+        assert [rule.file for rule in intercepts.of(target_one)] == [photo_one]
+        assert [rule.file for rule in intercepts.of(target_two)] == [photo_two]
+
+    def test_a_tree_mounted_under_two_prefixes_keeps_one_rule_set(
+        self, tmp_path
+    ) -> None:
+        write_app(tmp_path, "audit", {"pages": ()})
+        pages_dir = tmp_path / "audit" / "pages"
+        target = write_page(pages_dir, "log/photo")
+        photo = write_page(pages_dir, "log/(.)photo")
+        urlconf = write_urlconf(
+            tmp_path,
+            "twice_urls",
+            'path("a/", pages("audit"))',
+            'path("b/", pages("audit"))',
+        )
+
+        with installed_apps(tmp_path, "audit", urlconf=urlconf):
+            client = Client()
+            statuses = [
+                client.get(url).status_code
+                for url in ("/a/log/photo/", "/b/log/photo/")
+            ]
+            rules = intercepts.of(target)
+            published = intercepts.all()
+
+        assert statuses == [200, 200]
+        assert [rule.file for rule in rules] == [photo]
+        assert len(published) == 1
+
+
+@pytest.mark.usefixtures("fresh_intercepts")
+class TestInterceptsAfterReload:
+    """A router reload empties the table, and the next build publishes it afresh."""
+
+    def test_a_reload_clears_the_table_through_the_wired_receiver(
+        self, tmp_path
+    ) -> None:
+        feed = write_page(tmp_path, "feed/photo")
+        write_page(tmp_path, "feed/(.)photo")
+        file_router(app_dirs=False, dirs=[tmp_path]).generate_urls()
+        assert intercepts.of(feed)
+
+        router_manager.reload()
+
+        assert intercepts.all() == ()

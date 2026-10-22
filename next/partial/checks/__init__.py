@@ -16,6 +16,8 @@ from .codes import (
     E_COMPOSED_TEMPLATE_SYNTAX,
     E_CONTEXT_ZONE_UNKNOWN,
     E_DUPLICATE_ZONE,
+    E_INTERCEPT_WITHOUT_ZONE,
+    E_INTERCEPT_ZONE_SHARED,
     E_LAZY_WITHOUT_PLACEHOLDER,
     E_NON_ASCII_ZONE,
     E_OP_BAD_NAME,
@@ -31,6 +33,7 @@ from .codes import (
     W_WITH_OVER_ZONE,
 )
 from .forms import check_form_backend_partial_aware, check_repeated_form_has_key
+from .intercepts import check_intercept_bodies, check_intercept_zones_unique
 from .ops import check_custom_patch_ops_well_formed
 from .templates import check_composed_templates_compile
 from .zones import (
@@ -52,6 +55,8 @@ __all__ = [
     "E_COMPOSED_TEMPLATE_SYNTAX",
     "E_CONTEXT_ZONE_UNKNOWN",
     "E_DUPLICATE_ZONE",
+    "E_INTERCEPT_WITHOUT_ZONE",
+    "E_INTERCEPT_ZONE_SHARED",
     "E_LAZY_WITHOUT_PLACEHOLDER",
     "E_NON_ASCII_ZONE",
     "E_OP_BAD_NAME",
@@ -71,6 +76,8 @@ __all__ = [
     "check_custom_patch_ops_well_formed",
     "check_duplicate_zone_names",
     "check_form_backend_partial_aware",
+    "check_intercept_bodies",
+    "check_intercept_zones_unique",
     "check_lazy_zone_has_placeholder",
     "check_manifest_version_has_manifest_storage",
     "check_no_zone_in_component",

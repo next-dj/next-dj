@@ -1,13 +1,18 @@
 """Zone branch of the unified page view and its status short-circuits."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from django.http import HttpResponse
+from django.core.exceptions import PermissionDenied
+from django.core.handlers.exception import response_for_exception
+from django.http import Http404, HttpResponse
+
+from next.pages.responses import never_store
 
 from . import keys
 from .envelope import Envelope
 from .errors import UnknownZoneError
 from .headers import MergeMode, set_partial_vary
+from .intercept import admit, pick_intercept
 from .manager import asset_version, partial_backend_manager
 from .patches import Patches, PatchResponse
 from .render import render_zone
@@ -34,24 +39,71 @@ def zone_response(
     *,
     dynamic_body: bool,
     url_kwargs: dict[str, object],
+    dep_cache: dict[str, Any],
 ) -> HttpResponse:
-    """Build the partial response for a zone GET, or a 400/409 short-circuit.
+    """Build the partial response for a zone GET, or a refusal or 400/409 short-circuit.
 
-    A zone on a dynamic body is a 400 before any render, a version mismatch a 409.
+    An intercept serving the zones refuses on its own rule before any status check.
     """
-    if dynamic_body:
+    served = _served_intercept(page_path, intent, request)
+    if served is not None:
+        denial = _intercept_refusal(served, request, url_kwargs, dep_cache)
+        if denial is not None:
+            set_partial_vary(denial)
+            return denial
+    elif dynamic_body:
         return _bad_request("zone in dynamic body")
     version = asset_version()
     if request.method in _SAFE_METHODS and _version_conflict(intent, version):
         return _conflict()
     backend = partial_backend_manager.get()
     try:
-        result = render_zone(page_path, intent.zones, request, url_kwargs=url_kwargs)
+        result = render_zone(
+            page_path if served is None else served,
+            intent.zones,
+            request,
+            url_kwargs=url_kwargs,
+        )
     except UnknownZoneError:
         return _bad_request("unknown zone")
-    envelope = _build_envelope(result, intent, version, request)
+    envelope = _build_envelope(
+        result, intent, version, request, served=served, url_kwargs=url_kwargs
+    )
     body = backend.serialize_envelope(envelope)
     return PatchResponse(body, content_type=backend.content_type, version=version)
+
+
+def _served_intercept(
+    page_path: "Path", intent: "PartialIntent", request: "HttpRequest"
+) -> "Path | None":
+    """Return the intercept page serving a zone GET of `page_path`, None for the page.
+
+    A POST naming zones keeps the page, so a mutation never reaches an intercept.
+    """
+    if request.method not in _SAFE_METHODS:
+        return None
+    rule = pick_intercept(page_path, intent.zones)
+    return None if rule is None else rule.file
+
+
+def _intercept_refusal(
+    served: "Path",
+    request: "HttpRequest",
+    url_kwargs: dict[str, object],
+    dep_cache: dict[str, Any],
+) -> HttpResponse | None:
+    """Return the response the intercept rule refuses `request` with, None to serve.
+
+    The denial depends on the zone, so it is never stored, even from an error handler.
+    """
+    denial: HttpResponse | None
+    try:
+        denial = admit(served, request, url_kwargs, dep_cache)
+    except (PermissionDenied, Http404) as exc:
+        denial = response_for_exception(request, exc)
+    if denial is not None:
+        never_store(denial)
+    return denial
 
 
 def _version_conflict(intent: "PartialIntent", version: str) -> bool:
@@ -67,15 +119,20 @@ def _build_envelope(
     intent: "PartialIntent",
     version: str,
     request: "HttpRequest",
+    *,
+    served: "Path | None",
+    url_kwargs: dict[str, object],
 ) -> Envelope:
     """Assemble one envelope patching every rendered zone with its assets.
 
-    The verb is server-authored from the parsed intent, never named by the client.
+    The verb is server-authored from the intent, and a serving intercept adds its head.
     """
     patches = Patches.versioned(version, request=request)
     for name in result.html:
         _patch_zone(patches, name, result, intent.merge)
     patches.absorb_zone_result(result)
+    if served is not None:
+        patches._page_meta(served, url_kwargs)
     return patches.envelope()
 
 

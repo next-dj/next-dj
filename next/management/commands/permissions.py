@@ -74,7 +74,7 @@ def _default_name(middleware: str) -> str:
 
 
 def _row(endpoint: Endpoint, base_dir: Path | None, default: str) -> tuple[str, ...]:
-    """Return the cells of a page, action or component.
+    """Return the cells of a page, intercept, action or component.
 
     An action carries its file, since one name may be declared by several pages.
     """

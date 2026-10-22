@@ -26,6 +26,7 @@
                     <p class="text-xs text-muted-foreground">{{ r.email }} · {{ r.project_slug }}</p>
                   </div>
                   <a href="{% url 'next:page_request_int_access_request_audit' access_request=r.pk %}"
+                     data-next-layer="audit-peek"
                      class="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent">
                     {{ r.status }} · audit
                   </a>

@@ -1,5 +1,6 @@
 """System checks for page metadata and its settings tier."""
 
+from .crumbs import check_route_group_breadcrumbs
 from .head import (
     check_metadata_head_literals,
     check_metadata_head_tags,
@@ -35,4 +36,5 @@ __all__ = [
     "check_metadata_tag_rendered",
     "check_metadata_title_templates",
     "check_page_metadata_shape",
+    "check_route_group_breadcrumbs",
 ]

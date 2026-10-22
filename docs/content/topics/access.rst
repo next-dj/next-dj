@@ -103,6 +103,10 @@ The fix is ``inherit=True`` on the declaration or a template that makes the file
 A ``page.py`` without a body that only registers a ``@context(..., inherit_context=True)`` serves its subtree the same way, see :doc:`context`.
 One that only declares an ``@action`` serves that action, which answers to its rule, and one that passes nothing below it and serves no action is ``next.E012``.
 
+A route group is such a directory with a name in parentheses, such as ``(app)/``.
+An inherited rule in its ``page.py`` covers every page below the group and adds no URL segment, see :ref:`topics-file-router-route-groups`.
+A group ``page.py`` without a body follows the rules above, so a declaration without ``inherit=True`` in it is ``next.E166``.
+
 The same file may carry ``metadata``, such as a ``breadcrumb`` for the crumb trail of the pages below, see :doc:`seo/breadcrumbs`.
 
 Overriding with public()
@@ -212,6 +216,41 @@ An ``@action`` in a ``component.py`` answers to the rule of its directory joined
 A component whose check refuses the user also publishes none of its ``serialize=True`` context, because those values reach the page collector only after the grant.
 A POST renders no component, so a permission on a context, ``obj="name"``, finds no object there, the action refuses every user, and ``manage.py check`` reports it as ``next.E165``.
 
+.. _topics-access-intercepts:
+
+Intercepting routes
+-------------------
+
+An intercepting page serves a zone of a target page in place of the target, so a modal can open over the page that links to it.
+The page of an intercept directory such as ``feed/(..)photo/[int:photo]/`` declares its own access, and the framework enforces two chains on every zone request over the target.
+One is the chain of the target and the other is the chain of the intercept, each climbing its own ancestors.
+The stricter wins.
+A denial of the target is the response of the request.
+
+The intercept is chosen after the target passes and after the ``render()`` of the target runs.
+A denial of the intercept is the response as well, a 403, a 404, or a login redirect, and the request never falls back to the target.
+A ``render()`` of the target that returns a refusal string does not stop an intercept.
+The target refuses by raising ``PermissionDenied`` or ``Http404``, or by returning an ``HttpResponse``.
+The ``render()`` of an intercept page never runs.
+
+The URL kwargs of a zone request are the ones of the target URL.
+An object permission on the intercept, ``page.permission_required(perm, obj=DObject[Photo])``, loads the row by the matching kwarg of the target.
+``manage.py check`` reports a kwarg the target lacks as ``next.E176``.
+
+The intercept falls under the default login, see :ref:`topics-access-default-login`.
+An intercept that declares nothing requires a login under ``LOGIN_REQUIRED`` or ``LoginRequiredMiddleware`` even over a target that calls ``page.public()``, and an anonymous visitor then gets a login redirect inside the modal.
+``manage.py check`` warns with ``next.W140``, and ``page.public()`` on the intercept lifts the default.
+
+A form or an action posted from the modal travels the form path, where a denied intercept answers 403, also under a login rule, since that path sends no redirect.
+An action keeps the rule of its owner joined with the rule of the posted origin, so the guard of an action protects a mutation and the modal does not.
+An action declared in the intercept ``page.py`` is owned by the intercept chain.
+
+Zone names are public markup and not secrets.
+A user who passes the target gets a 403 or a login redirect for a real intercept zone and a 400 for an unknown one.
+Only a GET or a HEAD selects an intercept, so a POST naming the zone reaches the target.
+
+See :doc:`/content/howto/open-a-page-as-a-modal-over-another` for a walkthrough and :doc:`/content/topics/partial-rendering/layers` for the layer runtime.
+
 Loading
 -------
 
@@ -239,6 +278,7 @@ A ``page.py`` that raises while importing closes its own page and every page bel
 Their views answer 404, or raise ``PageModuleImportError`` when ``next.conf.fail_loudly`` holds, and the actions of that part of the tree are refused the same way.
 Under the default login an anonymous request meets the login redirect first, the answer ``LoginRequiredMiddleware`` gives before any view runs, so the key and the middleware answer alike and the redirect tells nothing about the broken file.
 A ``Patches.morph`` onto a page under a broken ``page.py`` raises ``PageModuleImportError`` in production too, since a 404 would name the URL of the request in flight rather than the page.
+An intercept page under a broken ``page.py`` is refused as a routed page is, on a zone request and inside ``Patches.morph_zone`` or a form outcome alike.
 The chain is read again on every request while a file in it is broken, so a fixed ``page.py`` serves on the next request.
 ``manage.py check`` reports the failure as ``next.E017``.
 

@@ -716,7 +716,7 @@ class TestPageTreeComponentFolders:
         (folder / "component.djx").write_text("<p>c</p>\n")
         return folder
 
-    def test_folders_carry_their_tree_root_and_route_trail(
+    def test_folders_carry_their_tree_root_and_scope_trail(
         self, tmp_path: Path
     ) -> None:
         tree = tmp_path / "shell"
@@ -728,6 +728,17 @@ class TestPageTreeComponentFolders:
         found = sorted(iter_page_tree_component_folders(router))
 
         assert found == sorted([(top, tree, ""), (nested, tree, "blog")])
+
+    def test_a_group_folder_carries_its_file_system_trail(self, tmp_path: Path) -> None:
+        tree = tmp_path / "shell"
+        write_page(tree, "(app)/dash")
+        group = self._write_component(tree / "(app)" / "_components")
+        nested = self._write_component(tree / "(app)" / "dash" / "_components")
+        router = file_router(app_dirs=False, dirs=[tree])
+
+        found = sorted(iter_page_tree_component_folders(router))
+
+        assert found == sorted([(group, tree, "(app)"), (nested, tree, "(app)/dash")])
 
     def test_a_folder_under_a_skipped_directory_is_not_reached(
         self, tmp_path: Path

@@ -38,7 +38,7 @@ Reach for a hand-written Django view when a URL must stay stable across a refact
 Route shapes
 ------------
 
-The router recognises four directory shapes.
+The router recognises four routed directory shapes, and two more kinds of directory name route nothing, see `Route groups`_ and `Intercepting routes`_.
 
 Plain segment.
    A directory name without brackets becomes a static URL segment.
@@ -409,6 +409,148 @@ A ``COMPONENTS_DIR`` without a leading underscore is skipped as a route all the 
 A ``COMPONENT_BACKENDS`` list that is empty, or whose first entry carries no ``COMPONENTS_DIR``, leaves the router with no name to skip, and every file-router entry then refuses to build.
 The manager logs that refusal and skips the entry, so the symptom is a project that serves no file-routed page at all.
 
+.. _topics-file-router-route-groups:
+
+Route groups
+------------
+
+A directory named with an identifier in parentheses is a route group.
+``(auth)`` and ``(marketing-site)`` are groups.
+The name starts with a letter or an underscore and continues with letters, digits, underscores, or hyphens.
+Any other parenthesised name reports :ref:`next.E169 <ref-system-checks>`, and the router routes it literally, parentheses included, or skips it when it opens with ``(.`` like a malformed intercept.
+
+A group adds nothing to the URL and nothing to the URL name.
+``pages/(auth)/login/page.py`` answers ``/login/`` and registers as ``next:page_login``, so moving a page into or out of a group changes neither.
+Reversing the group spelling, such as ``page_reverse("(auth)/login")``, raises.
+
+.. code-block:: text
+   :caption: pages tree
+
+   pages/
+     (auth)/
+       layout.djx
+       login/
+         page.py                     /login/
+       logout/
+         page.py                     /logout/
+     (app)/
+       page.py                       /
+       [int:id]/
+         page.py                     /<int:id>/
+       new/
+         page.py                     /new/
+
+The router flattens a group into the level that holds it.
+The pages of the directory come first, then the pages of its groups in name order with nested groups depth first, then the children.
+The groups share one level with their siblings, so ``(app)/page.py`` serves the URL of ``pages/`` itself.
+A group page with a body that sits beside a page of its parent serves the same URL, and two groups that route one trail do the same.
+Both report :ref:`next.E015 <ref-system-checks>`, whose hint explains that a group leaves the URL.
+
+What a group scopes follows the file system and not the URL.
+
+Layouts.
+   A ``layout.djx`` in a group wraps every page below the group.
+   A group with a ``{% layout root %}`` layout gives its pages a document of their own, see :ref:`topics-layouts-root`.
+
+Access and context.
+   An ``inherit=True`` access rule and an ``inherit_context=True`` context of a group ``page.py`` reach every page below the group, see :doc:`/content/topics/access` and :doc:`/content/topics/context`.
+   A group ``page.py`` without a body routes nothing, and its declarations still fold into the pages below.
+
+Components.
+   A ``_components`` folder in a group is visible below the group only.
+   The root ``_components`` folder stays global, see :doc:`/content/topics/components`.
+
+A private folder keeps its meaning around a group.
+``_private/(x)`` is never routed and ``(x)/_private`` is skipped.
+A group may sit under a captured segment and a captured segment may sit under a group.
+A group at the top of a ``pages()`` tree adds nothing to the prefix of the include.
+
+Breadcrumb and sitemap trails are URL trails, so they hold no group.
+A group ``page.py`` gives no crumb of its own, and its title and other metadata still fold into the pages below.
+A breadcrumb declared in the ``page.py`` of a group reports ``next.W136``, see :doc:`/content/topics/seo/breadcrumbs`.
+``@sitemap.items`` names the URL trail without the group.
+
+A static logical name keeps the group.
+``pages/(auth)/login/page.css`` is named with ``(auth)`` in its path, so moving a page into a group renames its assets while the URL stays.
+Two groups can each hold a ``layout.css`` without a collision, see :doc:`/content/topics/static-assets/name-resolution`.
+
+``manage.py check`` reports ``next.W137`` for a group that holds one routed directory and nothing else, since the group changes nothing.
+An empty group reports ``next.W128``, as any empty directory does.
+:doc:`/content/ref/system-checks` lists every code.
+
+.. _topics-file-router-intercepts:
+
+Intercepting routes
+-------------------
+
+An intercepting route is a directory that names the page it opens over.
+It lets a link open the page of another URL, such as a photo, as a modal over the current page while the URL stays the honest URL of that page.
+
+The directory name is one marker followed by the segment it targets.
+The marker is ``(.)``, ``(..)`` repeated, or ``(...)``, and the kinds never mix.
+A bare marker or a mixed one reports ``next.E169``.
+
+The scope of an intercept is the URL trail, without groups, of the directory that holds the intercept directory.
+The marker counts levels from that scope.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 40 40
+
+   * - Marker
+     - Directory
+     - Target trail
+   * - ``(.)``
+     - ``feed/(.)photo/``
+     - ``feed/photo``
+   * - ``(..)``
+     - ``feed/(..)photo/``
+     - ``photo``
+   * - ``(..)(..)``
+     - ``a/b/(..)(..)photo/``
+     - ``photo``
+   * - ``(...)``
+     - ``feed/(...)photo/``
+     - ``photo``
+
+A ``(..)`` that climbs above the tree root reports ``next.E171`` and the router drops the intercept.
+``(...)`` always starts at the root of the page tree that holds the intercept.
+
+The subtree below an intercept directory walks with the trail seeded to the target.
+``feed/(.)photo/[id]/page.py`` targets ``feed/photo/[id]``.
+
+.. code-block:: text
+   :caption: pages tree
+
+   pages/
+     feed/
+       page.py                       /feed/
+       photo/
+         [id]/
+           page.py                   /feed/photo/<str:id>/
+       (.)photo/
+         [id]/
+           page.py                   opens over /feed/photo/<str:id>/
+
+The target must match a routed trail of the same page tree exactly.
+``[id]`` does not match ``[int:id]``, and a trail from another tree or a ``pages()`` mount does not match either.
+An intercept with no target reports ``next.E170``, and the hint says why.
+A group inside an intercept directory flattens as anywhere else, and a group around an intercept leaves the scope.
+An intercept directory inside another intercept directory is never read and reports ``next.E172``.
+
+An intercept is never routed.
+It holds no URL pattern, no URL name, no ``next.E015`` conflict, and no sitemap entry.
+The router imports its ``page.py``, so the context, the metadata, the actions, and the access rules it declares register like those of any page.
+
+An intercept answers a zone request of its target.
+A link such as ``<a href="/feed/photo/7/" data-next-layer="photo-modal">`` asks for the target URL with the zone name, and the server renders the zone of the first intercept that declares it, unless the target declares that zone itself.
+The page of the intercept renders the zone alone, with no layout around it, so a ``layout.djx`` inside an intercept directory reports ``next.W139``.
+A full request of the same URL renders the real target page.
+:ref:`topics-partial-rendering-layers` covers the layer that hosts the zone and :doc:`/content/howto/open-a-page-as-a-modal-over-another` walks through a recipe.
+
+The access chains of the target and of the intercept both run on a zone request, and a denial of either is the response.
+:doc:`/content/ref/system-checks` lists the checks of intercepts, ``next.E170`` to ``next.E176`` and ``next.W138`` to ``next.W140``.
+
 Multiple backends
 -----------------
 
@@ -444,6 +586,9 @@ Route order
 Within one tree a static directory always routes before a parameter sibling, and a parameter sibling before a catch-all.
 ``pages/blog/about/`` therefore answers ``/blog/about/`` even though ``pages/blog/[slug]/`` matches that path too.
 Among siblings of the same kind the more specific one routes first, ``post-[id]`` before ``[slug]`` and ``[int:id]`` before ``[str:key]``, and the name decides the rest, so the order is the same on every file system.
+A route group flattens into the level that holds it before the ranking, so the children of a group rank with their siblings and ``(app)/[id]/`` does not shadow ``new/``.
+A child of the directory itself stays ahead of a group child of equal rank, and an intercept directory never ranks because it routes nothing.
+Directories of one segment name, in the plain tree and in groups, rank their children together, so ``(admin)/shop/new/`` still wins over ``shop/[slug]/``.
 Inside ``next.urls`` the framework endpoints under ``/_next/`` route ahead of every page, so a root ``[[rest]]`` page of ``next.urls`` cannot swallow them, while a ``pages()`` tree listed above the include can, which ``next.E149`` reports.
 See :doc:`/content/internals/url-router` for the complete rule.
 
@@ -512,6 +657,8 @@ The router contributes Django system checks that validate the configuration at s
   A page that repeats a name the ``pages()`` prefix of its tree captures reports :ref:`next.E152 <ref-system-checks>` instead.
 - ``check_reverse_name_collisions`` fails when two distinct routes collapse to the same reverse URL name after separator normalisation, such as ``foo-bar`` next to ``foo_bar`` (:ref:`next.E039 <ref-system-checks>`).
   Names collide only within one namespace, so the pages of a ``pages()`` tree are compared with each other and not with ``next``.
+
+- The group and intercept checks report an unreadable parenthesised name (:ref:`next.E169 <ref-system-checks>`), a pointless group (``next.W137``), and an intercept with no target, past the root, or nested (``next.E170``, ``next.E171``, ``next.E172``), see `Route groups`_ and `Intercepting routes`_.
 
 Run them through ``uv run python manage.py check``.
 A clean exit confirms that every page resolves and every name is unique.

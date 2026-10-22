@@ -1,6 +1,6 @@
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -1023,3 +1023,108 @@ class TestThunk:
         (leaf,) = write_page_chain(tmp_path, [("leaf", LEAF)])
         thunk = MetadataThunk(registry, leaf, None, {}, {})
         assert thunk.folded() is thunk.fold({})
+
+
+class TestRouteGroups:
+    """A route group serves the URL of its parent, so it adds no crumb of its own."""
+
+    @pytest.fixture(autouse=True)
+    def page_tree(self, tmp_path: Path) -> Generator[None, None, None]:
+        config = default_page_router_config(tmp_path)
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            yield
+
+    def test_crumbs_below_a_group_carry_group_free_trails(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        *_, leaf = write_page_chain(
+            tmp_path,
+            [
+                ("", PLAIN),
+                ("(app)", 'metadata = {"title": "App"}\n'),
+                ("dash", 'metadata = {"title": "Dash"}\n'),
+                ("(x)", PLAIN),
+                ("stats", 'metadata = {"title": "Stats"}\n'),
+            ],
+        )
+
+        crumbs = static_metadata(registry, leaf).breadcrumbs
+
+        assert [(crumb.label, crumb.trail) for crumb in crumbs] == [
+            ("Dash", "dash"),
+            ("Stats", "dash/stats"),
+        ]
+
+    def test_a_group_ancestor_gives_no_crumb_but_folds_its_other_metadata(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        group = (
+            'metadata = {"title": {"template": "{title} | App"}, '
+            '"description": "Grouped", "breadcrumb": "Group"}\n'
+        )
+        *_, leaf = write_page_chain(
+            tmp_path,
+            [("", PLAIN), ("(app)", group), ("dash", 'metadata = {"title": "Dash"}\n')],
+        )
+
+        meta = static_metadata(registry, leaf)
+
+        assert [crumb.label for crumb in meta.breadcrumbs] == ["Dash"]
+        assert meta.description == "Grouped"
+        assert str(meta.title) == "Dash | App"
+
+    def test_the_breadcrumb_of_a_leaf_group_page_is_dropped(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        *_, leaf = write_page_chain(
+            tmp_path,
+            [
+                ("", PLAIN),
+                ("(app)", 'metadata = {"title": "App", "breadcrumb": "Group"}\n'),
+            ],
+        )
+
+        meta = static_metadata(registry, leaf)
+
+        assert meta.breadcrumbs == ()
+        assert str(meta.title) == "App"
+
+    def test_nested_groups_leave_the_crumb_of_the_page_under_them(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        *_, leaf = write_page_chain(
+            tmp_path,
+            [
+                ("", PLAIN),
+                ("(a)", 'metadata = {"breadcrumb": "A"}\n'),
+                ("(b)", 'metadata = {"breadcrumb": "B", "description": "B"}\n'),
+                ("docs", 'metadata = {"breadcrumb": "Docs"}\n'),
+            ],
+        )
+
+        meta = static_metadata(registry, leaf)
+
+        assert [(crumb.label, crumb.trail) for crumb in meta.breadcrumbs] == [
+            ("Docs", "docs")
+        ]
+        assert meta.description == "B"
+
+    def test_a_folder_inside_an_intercept_gives_no_crumb(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        *_, leaf = write_page_chain(
+            tmp_path,
+            [
+                ("", PLAIN),
+                ("feed", 'metadata = {"breadcrumb": "Feed"}\n'),
+                ("(.)photo", 'metadata = {"breadcrumb": "Photo"}\n'),
+                ("[id]", 'metadata = {"breadcrumb": "One", "description": "Peek"}\n'),
+            ],
+        )
+
+        meta = static_metadata(registry, leaf)
+
+        assert [(crumb.label, crumb.trail) for crumb in meta.breadcrumbs] == [
+            ("Feed", "feed")
+        ]
+        assert meta.description == "Peek"

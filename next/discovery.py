@@ -339,9 +339,9 @@ def _walk_page_trees(router: RouterBackend) -> _ScannedTrees:
     skip_names = page_tree_skip_names(router)
     folders: list[tuple[Path, Path, str]] = []
 
-    def collect_folder(folder: Path, tree_root: Path, route_trail: str) -> None:
+    def collect_folder(folder: Path, tree_root: Path, scope_trail: str) -> None:
         if folder.name == components_folder:
-            folders.append((folder, tree_root, route_trail))
+            folders.append((folder, tree_root, scope_trail))
 
     reported: dict[Path, PageRoot] = {}
     for root in get_page_roots(router):
@@ -385,7 +385,7 @@ def iter_scanned_pages(router: RouterBackend) -> Iterator[tuple[PageRoot, str, P
 def iter_page_tree_component_folders(
     router: RouterBackend,
 ) -> Iterator[tuple[Path, Path, str]]:
-    """Yield `(folder, tree_root, route_trail)` per components folder in the trees.
+    """Yield `(folder, tree_root, scope_trail)` per components folder in the trees.
 
     The walk is the router's own, so a check finds the folders that walk registers.
     """

@@ -146,6 +146,16 @@ class TestDiscoverSeoRoots:
             [seo_root] = _roots()
         assert list(seo_root.trails) == ["", "about", "blog", "team"]
 
+    def test_the_trails_of_a_grouped_tree_are_group_free_and_ordered(
+        self, tmp_path
+    ) -> None:
+        root = write_tree(
+            tmp_path / "pages", pages=("", "team", "(app)/dash", "(app)/(x)/stats")
+        )
+        with routed(root):
+            [seo_root] = _roots()
+        assert list(seo_root.trails) == ["", "dash", "stats", "team"]
+
     def test_the_items_entries_are_those_of_the_root_sitemap(self, tmp_path) -> None:
         root = write_tree(
             tmp_path / "pages", pages=("posts/[slug]",), sitemap=POSTS_ITEMS

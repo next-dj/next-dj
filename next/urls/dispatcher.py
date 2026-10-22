@@ -12,8 +12,10 @@ from next.utils import walk_page_tree
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterable
+    from collections.abc import Callable, Generator, Iterable
     from pathlib import Path
+
+    from next.utils import InterceptPage
 
 
 class FilesystemTreeDispatcher:
@@ -31,15 +33,25 @@ class FilesystemTreeDispatcher:
         self._components_folder_name = components_folder_name
         self._register_components = register_components
 
-    def walk(self, pages_path: Path) -> Generator[tuple[str, Path], None, None]:
-        """Yield `(url_path, page_file)`, where `url_path` is the route trail."""
+    def walk(
+        self,
+        pages_path: Path,
+        *,
+        on_intercept: Callable[[InterceptPage], None] | None = None,
+    ) -> Generator[tuple[str, Path], None, None]:
+        """Yield `(url_path, page_file)`, `url_path` the group-free route trail."""
         on_skipped = self._register_folder if self._register_components else None
-        yield from walk_page_tree(pages_path, self._skip_set, on_skipped_dir=on_skipped)
+        yield from walk_page_tree(
+            pages_path,
+            self._skip_set,
+            on_skipped_dir=on_skipped,
+            on_intercept=on_intercept,
+        )
 
-    def _register_folder(self, folder: Path, tree_root: Path, url_path: str) -> None:
-        """Register a skipped folder when it is the components folder."""
+    def _register_folder(self, folder: Path, tree_root: Path, scope_trail: str) -> None:
+        """Register a skipped components folder under its file-system trail."""
         if folder.name == self._components_folder_name:
-            register_components_folder_from_router_walk(folder, tree_root, url_path)
+            register_components_folder_from_router_walk(folder, tree_root, scope_trail)
 
 
 def scan_pages_tree(
@@ -48,6 +60,7 @@ def scan_pages_tree(
     *,
     components_folder_name: str = "_components",
     register_components: bool = False,
+    on_intercept: Callable[[InterceptPage], None] | None = None,
 ) -> Generator[tuple[str, Path], None, None]:
     """Walk a tree for `page.py` (and virtual pages) without a router instance."""
     dispatcher = FilesystemTreeDispatcher(
@@ -55,7 +68,7 @@ def scan_pages_tree(
         components_folder_name=components_folder_name,
         register_components=register_components,
     )
-    yield from dispatcher.walk(pages_path)
+    yield from dispatcher.walk(pages_path, on_intercept=on_intercept)
 
 
 __all__ = ["FilesystemTreeDispatcher", "scan_pages_tree"]

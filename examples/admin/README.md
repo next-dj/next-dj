@@ -2,7 +2,7 @@
 
 A full Django admin UI rebuilt on next.dj. Every page reads data straight from `django.contrib.admin` (`AdminSite._registry`, `ModelAdmin.get_changelist_instance`, `ModelAdmin.get_form`, `get_inline_instances`, `get_action_choices`, `save_model`, `delete_model`, `log_addition` / `log_change` / `log_deletions`), and none of `django/contrib/admin/templates/` ends up in the response. The HTML is shadcn-style Tailwind from the shared kit in [`../_shared/_components/`](../_shared/_components/).
 
-The example shows eight reusable patterns. A request-aware `@action(form_class=...)` factory that turns each `ModelAdmin.get_form` result into a per-request `Form` class. A shared actions module ([`shadcn_admin/forms.py`](shadcn_admin/forms.py)) that owns the add and change factories and handlers, with all per-request state collapsed into one frozen `AdminFormSpec` dataclass shared through `Depends("admin_spec")`. The `admin_form` composite keeps only the template and its `form_state` render context. Access declared on the page tree, a staff login the dashboard `page.py` passes down its tree with `inherit=True` over a login that `NEXT_FRAMEWORK["LOGIN_REQUIRED"]` asks of every page, with the sign-in pages lifted out of both through `page.public()`. Declarative guards on every mutating action, `login_required=True` at registration plus the matching `ModelAdmin` permission check inside the handler. Inline-formset validation that runs inside the main form's `clean()`, so failures route through the framework's re-render path instead of a 400. A single project-level layout that branches between admin chrome and the centered auth chrome through one `{% if is_auth_page %}` and one `{% template %}`. An audit feed wired to `action_dispatched`, recording every admin dispatch through a single receiver without touching the handlers themselves, with its feed page served from the `pages/` tree of the app that owns the log. And `django.contrib.messages` plumbed end-to-end, where handlers write through `messages.success` / `messages.error`, `ModelAdmin.message_user` from custom bulk actions flows through the same channel, and one `flash_messages` component drains the queue at the top of every page.
+The example shows nine reusable patterns. A request-aware `@action(form_class=...)` factory that turns each `ModelAdmin.get_form` result into a per-request `Form` class. A shared actions module ([`shadcn_admin/forms.py`](shadcn_admin/forms.py)) that owns the add and change factories and handlers, with all per-request state collapsed into one frozen `AdminFormSpec` dataclass shared through `Depends("admin_spec")`. The `admin_form` composite keeps only the template and its `form_state` render context. Access declared on the page tree, a staff login the root `page.py` passes down its tree with `inherit=True` over a login that `NEXT_FRAMEWORK["LOGIN_REQUIRED"]` asks of every page, with the sign-in pages lifted out of both through `page.public(inherit=True)`. Declarative guards on every mutating action, `login_required=True` at registration plus the matching `ModelAdmin` permission check inside the handler. Inline-formset validation that runs inside the main form's `clean()`, so failures route through the framework's re-render path instead of a 400. A single project-level layout that owns the admin chrome, with the sign-in pages cut out of it by an `(auth)` route group that carries its own root layout. An audit feed wired to `action_dispatched`, recording every admin dispatch through a single receiver without touching the handlers themselves, with its feed page served from the `pages/` tree of the app that owns the log. And `django.contrib.messages` plumbed end-to-end, where handlers write through `messages.success` / `messages.error`, `ModelAdmin.message_user` from custom bulk actions flows through the same channel, and one `flash_messages` component drains the queue at the top of every page. And intercepting routes, which open the change form, the history of a row and a manuscript peek as modals over the page that links them, while the address bar keeps the honest URL of the page in the modal.
 
 ## What you will see
 
@@ -12,12 +12,12 @@ The example shows eight reusable patterns. A request-aware `@action(form_class=.
 | `/admin/login/` | Username and password sign-in. Every other page redirects an anonymous visit here, and a signed-in user without staff gets `403` (section 12). |
 | `/admin/logout/` | Signed-out farewell page. The topbar Sign out form posts `admin:logout`, which clears the session and lands here. |
 | `/admin/` | Dashboard with one card per registered app, quick links to each model's changelist and Add page, and a Recent activity panel that refreshes every five seconds for accounts that may read the audit log. |
-| `/admin/<app_label>/<model_name>/` | Changelist with `list_display` columns, sortable headers (`?o=<n>`), search box (`search_fields`), `list_filter` aside, pagination, bulk-action bar. |
+| `/admin/<app_label>/<model_name>/` | Changelist with `list_display` columns, sortable headers (`?o=<n>`), search box (`search_fields`), `list_filter` aside, pagination, bulk-action bar. Each row links its change view and offers a Quick edit modal over the list (section 16). |
 | `/admin/<app_label>/<model_name>/add/` | Add view. Fieldsets from `ModelAdmin.get_fieldsets`, widgets from `ModelAdmin.get_form`, inline formsets. |
-| `/admin/<app_label>/<model_name>/<pk>/change/` | Change view. Bound main form plus a keyed `admin:inline_change` form per existing related row and an `admin:inline_add` form for new ones. |
+| `/admin/<app_label>/<model_name>/<pk>/change/` | Change view. Bound main form plus a keyed `admin:inline_change` form per existing related row and an `admin:inline_add` form for new ones. Its History link opens a peek at the latest entries as a modal (section 16). |
 | `/admin/<app_label>/<model_name>/<pk>/delete/` | Confirmation page. Lists protected references and dependent objects from `admin.utils.get_deleted_objects`. |
 | `/admin/<app_label>/<model_name>/<pk>/history/` | `LogEntry` rows for the object with Added / Changed / Deleted labels and the change message. |
-| `/admin/library/book/<book>/outline/` | The chapters of one book in reading order, opened from the Outline button on the book's change view and open to every admin, with a link to the manuscript wherever the user may change the book (section 15). |
+| `/admin/library/book/<book>/outline/` | The chapters of one book in reading order, opened from the Outline button on the book's change view and open to every admin, with a link to the manuscript and a peek at it wherever the user may change the book (sections 15 and 16). |
 | `/admin/library/book/<book>/manuscript/` | The same chapters with an Append chapter form. An editor reaches it on drafts of their own or of nobody, and everything else answers `403` (section 15). |
 | `/admin/activity/` | Activity feed from `admin_audit.AdminActivityLog`, written by an `action_dispatched` receiver. One row per `admin:add` / `admin:change` / `admin:delete` / `admin:bulk_action`. Staff without `admin_audit.view_adminactivitylog` get `403`. |
 
@@ -47,25 +47,30 @@ Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_componen
 The router walks two kinds of roots, listed in [`config/settings.py`](config/settings.py) under `NEXT_FRAMEWORK["PAGE_BACKENDS"]`:
 
 - `DIRS = ["chrome"]`: the project-level page root. It contains a single [`chrome/layout.djx`](chrome/layout.djx) with the HTML envelope (`<!DOCTYPE html>`, `<body>`, `{% component "page_head" %}`, `{% collect_scripts %}`) and the admin shell inside it. Every page of every tree is wrapped by this file and by no other layout.
-- `APP_DIRS = True` and `PAGES_DIR = "pages"`: each installed app may ship page trees. `shadcn_admin/pages/` owns the dashboard, changelist, add, change, delete and history pages, plus the login and logout pages, which lift the rule of the tree with `page.public()` (section 12). `admin_audit/pages/` owns the activity feed and `library/pages/` the book outline and manuscript, each under the URL its directories spell.
+- `APP_DIRS = True` and `PAGES_DIR = "pages"`: each installed app may ship page trees. `shadcn_admin/pages/` owns the dashboard, changelist, add, change, delete and history pages, split into two route groups, `(auth)/` for the login and logout pages and `(app)/` for the dashboard and the model pages (section 1). The `(auth)` group lifts the rule of the tree with `page.public(inherit=True)` (section 12). `admin_audit/pages/` owns the activity feed and `library/pages/` the book outline and manuscript, each under the URL its directories spell.
 
-The shell sits at project level because a `layout.djx` wraps only the pages of its own tree, and `inherit_context` reaches only the `page.py` files above a page in that tree. A shell in `shadcn_admin/pages/layout.djx` would leave the `admin_audit` pages bare, while the project root is the one layer every tree shares. The layout keeps a single `{% template %}` wrapped differently based on a context flag. A layout carries exactly one placeholder. Composition fills the first and `next.W078` flags the rest, so the chrome branches sit **around** the placeholder, not inside two competing branches.
+The shell sits at project level because a `layout.djx` wraps only the pages of its own tree, and `inherit_context` reaches only the `page.py` files above a page in that tree. A shell in `shadcn_admin/pages/layout.djx` would leave the `admin_audit` pages bare, while the project root is the one layer every tree shares. The layout has one `{% template %}` and always wraps it in the sidebar, the header with the sign-out form and the breadcrumbs.
 
-```djx
-{% if is_auth_page %}
-  <main class="flex min-h-screen items-center justify-center">
-{% else %}
-  <div class="flex min-h-screen">
-    {% component "admin_sidebar" app_list=app_list %}
-    ...topbar...
-    <main class="flex-1">
-{% endif %}
+`app_list` comes from `admin_shell` in [`shadcn_admin/context_processors.py`](shadcn_admin/context_processors.py), listed under the router's `OPTIONS["context_processors"]`, so it reaches every page whichever tree it lives in. The dashboard template reads the same `app_list` for its cards, so its `page.py` declares only the panels context, while the breadcrumb label (section 13) and the access rule of its tree (section 12) sit one directory up in [`shadcn_admin/pages/page.py`](shadcn_admin/pages/page.py). The price is that `shadcn_admin` no longer carries its own look, and a project installing it lists the processor and owns the layout.
 
-{% component "flash_messages" %}
-{% template %}
+The page tree of `shadcn_admin` is split by route groups. A directory named in parentheses adds nothing to the URL and nothing to the URL name, so the files move without a single address changing and `next:page_login` and `next:page_` still reverse.
+
+```text
+shadcn_admin/pages/
+  page.py                         breadcrumb "Dashboard", login and staff rule
+  (auth)/
+    page.py                       page.public(inherit=True)
+    layout.djx                    {% layout root %} and the whole bare document
+    layout.css                    the sign-in card shadow
+    login/                        /admin/login/
+    logout/                       /admin/logout/
+  (app)/
+    page.py, template.djx         /admin/, a group page serves the URL of its parent
+    [str:app_label]/[str:model_name]/
+                                  changelist, add, change, delete and history
 ```
 
-`is_auth_page` and `app_list` come from `admin_shell` in [`shadcn_admin/context_processors.py`](shadcn_admin/context_processors.py), listed under the router's `OPTIONS["context_processors"]`, so they reach every page whichever tree it lives in. `is_auth_page` tests `request.path.startswith` against `/admin/login/` and `/admin/logout/`. The dashboard template reads the same `app_list` for its cards, so its `page.py` declares only its breadcrumb label (section 13) and the access rule of its tree (section 12). The price is that `shadcn_admin` no longer carries its own look, and a project installing it lists the processor and owns the layout.
+The `(auth)` group exists for the one thing a login screen needs and the dashboard does not, a different document. Its [`layout.djx`](shadcn_admin/pages/%28auth%29/layout.djx) opens with `{% layout root %}`, which cuts `chrome/layout.djx` out of the chain, and writes the whole page itself, the doctype, `page_head`, one centered `<main>`, the flash messages, `{% template %}` and `{% collect_scripts %}`. The login and logout pages therefore compose no sidebar and no header, and `chrome/layout.djx` has no branch for them. Access still folds through `(auth)/page.py` and the cut changes only the shell. The sibling [`layout.css`](shadcn_admin/pages/%28auth%29/layout.css) is a co-located asset like any other, so the login page links it from `/static/next/shadcn_admin/pages/(auth)/layout.css`, the group parentheses staying literal in the URL, and the dashboard never loads it.
 
 Component lookup is configured the same way: `shadcn_admin/_components/` (admin-specific composites: `admin_form`, `admin_sidebar`, `data_table`, …) plus the shared shadcn kit in [`../_shared/_components/`](../_shared/_components/).
 
@@ -77,7 +82,7 @@ Component lookup is configured the same way: `shadcn_admin/_components/` (admin-
 
 ### 3. Changelist via `ModelAdmin.get_changelist_instance`
 
-[`shadcn_admin/pages/[str:app_label]/[str:model_name]/page.py`](shadcn_admin/pages/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/page.py) asks `ModelAdmin.get_changelist_instance(request)` and packs the result for the template. The `changelist_state` callable is a thin orchestrator that delegates to `_columns`, `_rows`, `_pagination`, `_filters`, and `_actions` helpers in the same file, so the response shape fits on one screen. The synthetic `action_checkbox` column that Django injects into `cl.list_display` is filtered out because we render selection ourselves through the `selectable=` prop on `data_table`. The bulk-action list comes from `ModelAdmin.get_action_choices(request, default_choices=[])` rather than `get_actions`, because that method already interpolates the model's `verbose_name` and `verbose_name_plural` (`mark_as_published`'s `%(verbose_name_plural)s` placeholder arrives as `Mark selected books as published`), and its `(name, description)` pairs read the same on every supported Django version, while `get_actions` answers a `(callable, name, description)` tuple on 5.2 and an `Action` dataclass from 6.0 on.
+[`shadcn_admin/pages/[str:app_label]/[str:model_name]/page.py`](shadcn_admin/pages/%28app%29/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/page.py) asks `ModelAdmin.get_changelist_instance(request)` and packs the result for the template. The `changelist_state` callable is a thin orchestrator that delegates to `_columns`, `_rows`, `_pagination`, `_filters`, and `_actions` helpers in the same file, so the response shape fits on one screen. The synthetic `action_checkbox` column that Django injects into `cl.list_display` is filtered out because we render selection ourselves through the `selectable=` prop on `data_table`. The bulk-action list comes from `ModelAdmin.get_action_choices(request, default_choices=[])` rather than `get_actions`, because that method already interpolates the model's `verbose_name` and `verbose_name_plural` (`mark_as_published`'s `%(verbose_name_plural)s` placeholder arrives as `Mark selected books as published`), and its `(name, description)` pairs read the same on every supported Django version, while `get_actions` answers a `(callable, name, description)` tuple on 5.2 and an `Action` dataclass from 6.0 on.
 
 `_pagination` repacks the page `ChangeList` already sliced from `ModelAdmin.list_per_page`, so the page size stays a `ModelAdmin` decision rather than a template constant. The [`data_table`](shadcn_admin/_components/data_table/component.djx) component renders rows plus selection checkboxes. Its [`.mjs`](shadcn_admin/_components/data_table/component.mjs) wires a header checkbox that flips every row selection in vanilla DOM, no framework. The [`filters_panel`](shadcn_admin/_components/filters_panel/component.djx), [`search_box`](shadcn_admin/_components/search_box/component.djx), and [`admin_pagination`](shadcn_admin/_components/admin_pagination/component.djx) components consume the same packed specs.
 
@@ -88,17 +93,20 @@ Component lookup is configured the same way: `shadcn_admin/_components/` (admin-
 ```python
 @action("admin:add", form_class=admin_add_form_factory, login_required=True)
 def handle_add(form, spec=Depends("admin_spec")):
-    if not spec.model_admin.has_add_permission(spec.request):
-        raise PermissionDenied
-    return _persist(form, spec, change=False)
+    obj, message = _persist(form, spec, change=False)
+    messages.success(spec.request, message)
+    return _redirect_after_save(spec, obj)
 
 
 @action("admin:change", form_class=admin_change_form_factory, login_required=True)
 def handle_change(form, spec=Depends("admin_spec")):
-    if not spec.model_admin.has_change_permission(spec.request, spec.instance):
+    if not spec.model_admin.has_change_permission(spec.request, spec.stored):
         raise PermissionDenied
-    return _persist(form, spec, change=True)
+    obj, message = _persist(form, spec, change=True)
+    ...
 ```
+
+`AdminFormSpec.resolve` refuses a user without the add right before the add handler runs, and the change handler asks the row question itself. The part elided above answers a save from the quick editor of section 16.
 
 The factories, the handlers, and the `form_state` render context all route through one frozen dataclass, `AdminFormSpec(request, app_label, model_name, model, model_admin, instance)`. `AdminFormSpec.resolve(...)` calls `apps.get_model`, reads `admin.site._registry`, and calls `ModelAdmin.get_object(request, pk)` exactly once per dispatch: it is registered as a named dependency (`@resolver.dependency("admin_spec")` in [`shadcn_admin/deps.py`](shadcn_admin/deps.py), which the framework imports at startup), so every `Depends("admin_spec")` parameter within the same POST shares a single resolution. Both factories call `_build_form_class`, which derives an `AdminForm` from `ModelAdmin.get_form(...)` and `BaseModelForm`. Its `get_initial()` returns the instance, so the dispatcher passes it to the ModelForm as `instance=`, and its `clean()` rebuilds the inline formsets against the same POST so a broken row surfaces on the main form.
 
@@ -106,7 +114,7 @@ The [`admin_form` component](shadcn_admin/_components/admin_form/component.py) k
 
 `FieldSpec` names the shape of a field, not the constraints its form field derived, so a hand-written input would drop them. The co-located [`form_field/component.py`](shadcn_admin/_components/form_field/component.py) flattens `widget.attrs` into the tag and skips the handful of names the template spells out itself, so the shadcn class survives while `step="0.01"` on a `DecimalField` and `maxlength` on a `CharField` reach the browser. Without the `step` an `<input type="number">` falls back to whole numbers and the browser silently refuses to submit a price like `12.50`.
 
-The single template file [`admin_form/component.djx`](shadcn_admin/_components/admin_form/component.djx) uses one `{% form form_state.action_name %}` block. The tag takes the action name as its positional argument. Here it is a context variable, so the action name resolves at render time (see core change below).
+The single template file [`admin_form/component.djx`](shadcn_admin/_components/admin_form/component.djx) uses one `{% form form_state.action_name zone=form_state.zone %}` block. The tag takes the action name as its positional argument. Here it is a context variable, so the action name resolves at render time (see core change below). The component takes the zone it lives in as a prop, `record` on the add and change pages and `quick-edit` in the modal of section 16, and the form posts that zone, so an invalid save re-renders the zone alone.
 
 ### 5. Inlines: batch on add, live keyed forms on change
 
@@ -158,7 +166,7 @@ The form template renders three submit buttons:
 - **Save and continue editing** (`name="_save_continue"`) redirects to the change view for the just-saved object.
 - **Save and add another** (`name="_save_addanother"`) redirects to the add view so the operator can enter another record.
 
-`_redirect_after_save(spec, obj)` reads `request.POST` for the two button names and branches accordingly. Both add and change handlers share the same routing through `_persist`, so the buttons work in either flow.
+`_redirect_after_save(spec, obj)` reads `request.POST` for the two button names and branches accordingly. Both handlers save through `_persist` and route through `_redirect_after_save`, so the buttons work in either flow. The quick editor of section 16 offers Save alone.
 
 ### 7. Custom bulk action `mark_as_published`
 
@@ -203,15 +211,15 @@ The [`flash_messages` component](../_shared/_components/flash_messages/component
 
 ### 10. Delete with `get_deleted_objects`
 
-[`.../[int:pk]/delete/page.py`](shadcn_admin/pages/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/%5Bint%3Apk%5D/delete/page.py) calls `admin.utils.get_deleted_objects([obj], request, model_admin.admin_site)` to compute the dependency tree, protected references, and missing permissions. The confirmation template disables the submit button when the action is blocked. On confirm, `ModelAdmin.log_deletions` plus `delete_model` run and the user lands on the changelist.
+[`.../[int:pk]/delete/page.py`](shadcn_admin/pages/%28app%29/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/%5Bint%3Apk%5D/delete/page.py) calls `admin.utils.get_deleted_objects([obj], request, model_admin.admin_site)` to compute the dependency tree, protected references, and missing permissions. The confirmation template disables the submit button when the action is blocked. On confirm, `ModelAdmin.log_deletions` plus `delete_model` run and the user lands on the changelist.
 
 ### 11. History from `LogEntry`
 
-[`.../[int:pk]/history/page.py`](shadcn_admin/pages/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/%5Bint%3Apk%5D/history/page.py) takes the row through `Depends("admin_object")`, which [`shadcn_admin/deps.py`](shadcn_admin/deps.py) registers on top of the `admin_spec` of section 4, so an unknown pk answers `404` and a row the user may not view answers `403` exactly as on the change view. `object_history` in [`shadcn_admin/services.py`](shadcn_admin/services.py) then reads `LogEntry.objects.filter(content_type=..., object_id=...).select_related("user")` and returns frozen `HistoryEntry` rows labelled by `action_flag` (1 Added, 2 Changed, 3 Deleted). The history belongs to the admin, as `ModelAdmin.history_view` does in Django, so the page sits next to the change and delete views and the query lives in a function of the admin app rather than in its page tree.
+[`.../[int:pk]/history/page.py`](shadcn_admin/pages/%28app%29/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/%5Bint%3Apk%5D/history/page.py) takes the row through `Depends("admin_object")`, which [`shadcn_admin/deps.py`](shadcn_admin/deps.py) registers on top of the `admin_spec` of section 4, so an unknown pk answers `404` and a row the user may not view answers `403` exactly as on the change view. `object_history` in [`shadcn_admin/services.py`](shadcn_admin/services.py) then reads `LogEntry.objects.filter(content_type=..., object_id=...).select_related("user")` and returns frozen `HistoryEntry` rows labelled by `action_flag` (1 Added, 2 Changed, 3 Deleted). The history belongs to the admin, as `ModelAdmin.history_view` does in Django, so the page sits next to the change and delete views and the query lives in a function of the admin app rather than in its page tree.
 
 ### 12. Access on the page tree
 
-Every admin page asks for a signed-in staff account, and the rule sits in the page tree next to the pages it closes. The dashboard's [`shadcn_admin/pages/page.py`](shadcn_admin/pages/page.py) declares it for itself and every page below it in two lines:
+Every admin page asks for a signed-in staff account, and the rule sits in the page tree next to the pages it closes. The root [`shadcn_admin/pages/page.py`](shadcn_admin/pages/page.py) declares it for the dashboard and every page below it in two lines:
 
 ```python
 page.login_required(inherit=True)
@@ -222,38 +230,41 @@ A declaration without `inherit=True` binds only the page of its own file. With i
 
 `shadcn_admin.use_admin` is a registered permission with no database row behind it. [`shadcn_admin/permissions.py`](shadcn_admin/permissions.py) binds it to the `is_staff` predicate through `add_perm`, so the superuser and every staff account hold it and nobody else does. An anonymous visit to any page of the tree redirects to `/admin/login/?next=<path>`, and a signed-in user without staff gets `403`, the way Django's `PermissionRequiredMixin` answers. An inherited rule reaches the pages of its own tree and stops at its edge, as a `layout.djx` does. Each of the other two trees therefore carries a `page.py` at its root that only declares. [`admin_audit/pages/page.py`](admin_audit/pages/page.py) repeats the two requirements with `inherit=True` and adds `page.permission_required("admin_audit.view_adminactivitylog", inherit=True)`, the right to read the audit log, for every page the app serves, and [`library/pages/page.py`](library/pages/page.py) repeats the two. Such a file has no template and no `render`, so it serves no URL of its own, while `/admin/` stays the dashboard of `shadcn_admin` and `manage.py routes` lists no row for either file. Its declarations still bind every page below it, and it may carry the `metadata` of its directory, the `Dashboard` crumb of section 13.
 
-[`config/settings.py`](config/settings.py) sets `NEXT_FRAMEWORK["LOGIN_REQUIRED"] = True`, so a page, action or zone that declares nothing asks for a login as well. Listing Django's `LoginRequiredMiddleware` in `MIDDLEWARE` switches on the same behaviour, and every page tree answers the same way under either. The key reaches only what the page trees serve, so the site root redirect in [`config/urls.py`](config/urls.py), a plain Django view, stays open and `/` still leads to `/admin/` with the login link carrying `next=/admin/`. The sign-in and farewell pages have to stay open too. [`pages/login/page.py`](shadcn_admin/pages/login/page.py) and [`pages/logout/page.py`](shadcn_admin/pages/logout/page.py) call `page.public()`, which lifts the inherited rule and the login by default for their own page and marks their views `login_not_required`. Without `inherit=True` the lift stops there, so a page added under `login/` would be closed again.
+[`config/settings.py`](config/settings.py) sets `NEXT_FRAMEWORK["LOGIN_REQUIRED"] = True`, so a page, action or zone that declares nothing asks for a login as well. Listing Django's `LoginRequiredMiddleware` in `MIDDLEWARE` switches on the same behaviour, and every page tree answers the same way under either. The key reaches only what the page trees serve, so the site root redirect in [`config/urls.py`](config/urls.py), a plain Django view, stays open and `/` still leads to `/admin/` with the login link carrying `next=/admin/`. The sign-in and farewell pages have to stay open too. [`(auth)/page.py`](shadcn_admin/pages/%28auth%29/page.py) calls `page.public(inherit=True)`, which lifts the inherited rule and the login by default for every page of the group and marks their views `login_not_required`. The login and logout pages carry no `page.py` rule of their own, and a page added to the group is open as well.
 
 An action POST goes to `/admin/_next/form/<uid>/` rather than to the page URL, so the dispatcher applies the rule of the file that declares the action and the rule of the posted origin page before the handler runs. The add, change and delete pages sit under the closed tree, so an anonymous POST from any of them redirects to the login and a non-staff POST answers `403` before any data is read. Every mutating action (`admin:add`, `admin:change`, `admin:delete`, `admin:bulk_action`) also registers with `@action(..., login_required=True)` and re-checks the matching `ModelAdmin` permission before it writes (`has_add_permission` when `AdminFormSpec.resolve` builds the add spec, `has_change_permission`, `has_delete_permission` and `has_view_or_change_permission` inside the handlers), raising `PermissionDenied` for a staff account without the model right. The custom bulk action `mark_as_published` additionally declares `permissions=["change"]`, so `ModelAdmin.response_action` filters it out of `get_actions(request)` for users who cannot change books. `admin:login` is declared in a public page and stays open. `admin:logout` lives in `shadcn_admin/forms.py`, outside any page tree, and declares nothing, so `LOGIN_REQUIRED` asks it for a login unless the page it was posted from is public.
 
-`uv run python manage.py permissions` prints the rule of every endpoint and the files it comes from, and `manage.py permissions /admin/activity/` narrows the table to one page and what it renders. The table reads what each file declares, so an action of `shadcn_admin/forms.py` shows only its own `login_required=True`, and the origin page adds its rule at dispatch. Every action names the file that declares it, and the `view` rows at the end cover what the URLconf serves beside the pages, the site root redirect, a plain Django view whose rule the framework cannot read, so it shows `?`, the CSRF endpoint, a view of the framework open to anyone and so `public`, and the form endpoint, whose rule is that of each action:
+`uv run python manage.py permissions` prints the rule of every endpoint and the files it comes from, and `manage.py permissions /admin/activity/` narrows the table to one page and what it renders. The table reads what each file declares, so an action of `shadcn_admin/forms.py` shows only its own `login_required=True`, and the origin page adds its rule at dispatch. Every action names the file that declares it, and the `view` rows at the end cover what the URLconf serves beside the pages, the site root redirect, a plain Django view whose rule the framework cannot read, so it shows `?`, the CSRF endpoint, a view of the framework open to anyone and so `public`, and the form endpoint, whose rule is that of each action. An `intercept` row follows the row of the page it intercepts and shows the chain of the intercept itself:
 
 ```text
-Kind    Endpoint                                                                                    Access                                                                        Sources
-page    /admin/                                                                                     login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py
-page    /admin/logout/                                                                              public                                                                        public (shadcn_admin/pages/logout/page.py)
-page    /admin/login/                                                                               public                                                                        public (shadcn_admin/pages/login/page.py)
-page    /admin/<str:app_label>/<str:model_name>/                                                    login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py
-page    /admin/<str:app_label>/<str:model_name>/add/                                                login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py
-page    /admin/<str:app_label>/<str:model_name>/<int:pk>/history/                                   login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py
-page    /admin/<str:app_label>/<str:model_name>/<int:pk>/change/                                    login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py
-page    /admin/<str:app_label>/<str:model_name>/<int:pk>/delete/                                    login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py
-page    /admin/library/book/<int:book>/manuscript/                                                  login, perm shadcn_admin.use_admin, perm library.change_book on library.Book  library/pages/page.py, library/pages/library/book/[int:book]/manuscript/page.py
-page    /admin/library/book/<int:book>/outline/                                                     login, perm shadcn_admin.use_admin                                            library/pages/page.py
-page    /admin/activity/                                                                            login, perm shadcn_admin.use_admin, perm admin_audit.view_adminactivitylog    admin_audit/pages/page.py
-action  admin:add (shadcn_admin/forms.py)                                                           login                                                                         shadcn_admin/forms.py
-action  admin:change (shadcn_admin/forms.py)                                                        login                                                                         shadcn_admin/forms.py
-action  admin:inline_change (shadcn_admin/forms.py)                                                 login                                                                         shadcn_admin/forms.py
-action  admin:inline_add (shadcn_admin/forms.py)                                                    login                                                                         shadcn_admin/forms.py
-action  admin:discard (shadcn_admin/forms.py)                                                       login                                                                         shadcn_admin/forms.py
-action  admin:logout (shadcn_admin/forms.py)                                                        login (default)                                                               LOGIN_REQUIRED
-action  admin:login (shadcn_admin/pages/login/page.py)                                              public                                                                        public (shadcn_admin/pages/login/page.py)
-action  admin:bulk_action (shadcn_admin/pages/[str:app_label]/[str:model_name]/page.py)             login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py, shadcn_admin/pages/[str:app_label]/[str:model_name]/page.py
-action  admin:delete (shadcn_admin/pages/[str:app_label]/[str:model_name]/[int:pk]/delete/page.py)  login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py, shadcn_admin/pages/[str:app_label]/[str:model_name]/[int:pk]/delete/page.py
-action  add_chapter_form (library/pages/library/book/[int:book]/manuscript/page.py)                 login, perm shadcn_admin.use_admin, perm library.change_book on library.Book  library/pages/page.py, library/pages/library/book/[int:book]/manuscript/page.py
-view    /                                                                                           ?                                                                             django.views.generic.base.RedirectView
-view    /admin/_next/csrf/                                                                          public                                                                        public (next.csrf.csrf_view)
-view    /admin/_next/form/<str:uid>/                                                                per action                                                                    see the action rows
+Kind       Endpoint                                                                                          Access                                                                        Sources
+page       /admin/                                                                                           login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py
+page       /admin/logout/                                                                                    public                                                                        public (shadcn_admin/pages/(auth)/page.py)
+page       /admin/login/                                                                                     public                                                                        public (shadcn_admin/pages/(auth)/page.py)
+page       /admin/<str:app_label>/<str:model_name>/                                                          login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py
+page       /admin/<str:app_label>/<str:model_name>/add/                                                      login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py
+page       /admin/<str:app_label>/<str:model_name>/<int:pk>/history/                                         login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py
+intercept  /admin/<str:app_label>/<str:model_name>/<int:pk>/history/ (history-peek)                          login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py
+page       /admin/<str:app_label>/<str:model_name>/<int:pk>/change/                                          login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py
+intercept  /admin/<str:app_label>/<str:model_name>/<int:pk>/change/ (quick-edit)                             login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py
+page       /admin/<str:app_label>/<str:model_name>/<int:pk>/delete/                                          login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py
+page       /admin/library/book/<int:book>/manuscript/                                                        login, perm shadcn_admin.use_admin, perm library.change_book on library.Book  library/pages/page.py, library/pages/library/book/[int:book]/manuscript/page.py
+intercept  /admin/library/book/<int:book>/manuscript/ (manuscript-peek)                                      login, perm shadcn_admin.use_admin, perm library.view_book on library.Book    library/pages/page.py, library/pages/library/book/[int:book]/(.)manuscript/page.py
+page       /admin/library/book/<int:book>/outline/                                                           login, perm shadcn_admin.use_admin                                            library/pages/page.py
+page       /admin/activity/                                                                                  login, perm shadcn_admin.use_admin, perm admin_audit.view_adminactivitylog    admin_audit/pages/page.py
+action     admin:add (shadcn_admin/forms.py)                                                                 login                                                                         shadcn_admin/forms.py
+action     admin:change (shadcn_admin/forms.py)                                                              login                                                                         shadcn_admin/forms.py
+action     admin:inline_change (shadcn_admin/forms.py)                                                       login                                                                         shadcn_admin/forms.py
+action     admin:inline_add (shadcn_admin/forms.py)                                                          login                                                                         shadcn_admin/forms.py
+action     admin:discard (shadcn_admin/forms.py)                                                             login                                                                         shadcn_admin/forms.py
+action     admin:logout (shadcn_admin/forms.py)                                                              login (default)                                                               LOGIN_REQUIRED
+action     admin:login (shadcn_admin/pages/(auth)/login/page.py)                                             public                                                                        public (shadcn_admin/pages/(auth)/page.py)
+action     admin:bulk_action (shadcn_admin/pages/(app)/[str:app_label]/[str:model_name]/page.py)             login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py, shadcn_admin/pages/(app)/[str:app_label]/[str:model_name]/page.py
+action     admin:delete (shadcn_admin/pages/(app)/[str:app_label]/[str:model_name]/[int:pk]/delete/page.py)  login, perm shadcn_admin.use_admin                                            shadcn_admin/pages/page.py, shadcn_admin/pages/(app)/[str:app_label]/[str:model_name]/[int:pk]/delete/page.py
+action     add_chapter_form (library/pages/library/book/[int:book]/manuscript/page.py)                       login, perm shadcn_admin.use_admin, perm library.change_book on library.Book  library/pages/page.py, library/pages/library/book/[int:book]/manuscript/page.py
+view       /                                                                                                 ?                                                                             django.views.generic.base.RedirectView
+view       /admin/_next/csrf/                                                                                public                                                                        public (next.csrf.csrf_view)
+view       /admin/_next/form/<str:uid>/                                                                      per action                                                                    see the action rows
 ```
 
 **Plug-in points instead of a cycle.** The admin knows nothing about the apps that plug into it. [`shadcn_admin/services.py`](shadcn_admin/services.py) keeps two lists of functions, filled through `register_nav` and `register_panel` the way `admin.site.register` fills the model registry, and `admin_nav(user)` and `dashboard_panels(user)` call every registered function and gather what it returns, `NavLink` rows for the sidebar and `Panel` values for the dashboard. The `admin_shell` context processor hands the links to the `admin_sidebar` component, which groups them under their section, and the dashboard renders every panel through its own `dashboard_panel` component inside one polling zone:
@@ -274,7 +285,7 @@ The superuser sees the five newest admin actions, and an action logged in anothe
 
 The integration suite pins each answer for an anonymous visitor, a non-staff account, the editor and the superuser, and [`tests/e2e/test_permissions.py`](tests/e2e/test_permissions.py) drives them in a browser, from the login redirect and the refused anonymous POST and zone request to the editor's dashboard without the panel and the superuser's feed picking up a new entry on its next poll.
 
-Login runs Django's own `AuthenticationForm`, which the dispatcher cannot build directly: its `__init__(self, request, data=...)` takes the request positionally, while dispatch calls `form_class(post_data, files, ...)`. `admin_login_form_factory` bridges the gap by returning the tuple `(AuthenticationForm, {"request": request})`, so the dispatcher constructs the form with `data=` plus that keyword and the handler only calls `form.get_user()`. Bad credentials fail the form's own validation before the handler runs, and the login page re-renders with the non-field error [`pages/login/template.djx`](shadcn_admin/pages/login/template.djx) already prints. The `login_state` context supplies the `?next=` target the template writes into a hidden field, which `admin_login` reads back from `request.POST` to pick the post-login destination.
+Login runs Django's own `AuthenticationForm`, which the dispatcher cannot build directly: its `__init__(self, request, data=...)` takes the request positionally, while dispatch calls `form_class(post_data, files, ...)`. `admin_login_form_factory` bridges the gap by returning the tuple `(AuthenticationForm, {"request": request})`, so the dispatcher constructs the form with `data=` plus that keyword and the handler only calls `form.get_user()`. Bad credentials fail the form's own validation before the handler runs, and the login page re-renders with the non-field error [`pages/login/template.djx`](shadcn_admin/pages/%28auth%29/login/template.djx) already prints. The `login_state` context supplies the `?next=` target the template writes into a hidden field, which `admin_login` reads back from `request.POST` to pick the post-login destination.
 
 ### 13. A private site in the head
 
@@ -299,7 +310,7 @@ Every tag the admin puts in `<head>` comes from `NEXT_FRAMEWORK["SITE"]` and `NE
 
 [`chrome/layout.djx`](chrome/layout.djx) calls the shared `page_head` component without a title, and the component renders the builtin `{% metadata %}` tag. The site rule sits over every fold, so every page, the login screen included, carries `<meta name="robots" content="noindex, nofollow">`, and every response carries the same `X-Robots-Tag` header. `nofollow` matters on the one page a crawler can reach. The rules of section 12 send every anonymous request under `/admin/` to `/admin/login/`, and the tag stops a crawler that arrives there from following its links any further.
 
-The one dynamic tier is `changelist_meta` in [`[str:model_name]/page.py`](shadcn_admin/pages/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/page.py):
+The one dynamic tier is `changelist_meta` in [`[str:model_name]/page.py`](shadcn_admin/pages/%28app%29/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/page.py):
 
 ```python
 @page.metadata(inherit=True)
@@ -380,7 +391,7 @@ Both pages give the template their book with `@context("book")` over a `book: DO
 {% endzone %}
 ```
 
-A zone request renders the zone on its own, so the tag inside it asks again for the user of every request. The reverse nesting, a zone under `{% has_perm %}`, would hand a partial request a zone whose decision never ran, and `manage.py check` reports it as `next.E161`. The link and the rule ask the same question, so the outline never offers a manuscript that answers `403`.
+A zone request renders the zone on its own, so the tag inside it asks again for the user of every request. The reverse nesting, a zone under `{% has_perm %}`, would hand a partial request a zone whose decision never ran, and `manage.py check` reports it as `next.E161`. The link and the rule ask the same question, so the outline never offers a manuscript that answers `403`. The peek beside it asks one rule more, see section 16.
 
 `AddChapterForm` is a `ModelForm` declared in the manuscript page, so its action carries the rule of the page. Its `get_form_kwargs` binds a new chapter of the book, `{"instance": Chapter(book=book)}`, and `on_valid` hands it to `services.append_chapter` in [`library/services.py`](library/services.py), which numbers it one past the end through `chapter.book.chapters.next_number()`, then morphs the `manuscript` zone, and without the runtime it answers `303` back to the manuscript.
 
@@ -390,9 +401,88 @@ The trails read `Dashboard › Outline` and `Dashboard › Manuscript`, the crum
 
 `manage.py permissions /admin/library/book/1/manuscript/` narrows the table to the page and its action, each with `perm library.change_book on library.Book` from `manuscript/page.py`, while the outline row carries only the admin rule of `library/pages/page.py`. The integration suite drives the manuscript page, its zone through `NextClient.get_zones` and its action under the editor on an own, an unassigned and a foreign draft and a published book, under the superuser and anonymously, and renders the outline zone for each case to pin where the link shows. `tests/e2e/test_permissions.py` has the editor reading a published book and a foreign draft without the link and refused on every manuscript path, the editor appending a chapter to an own draft under its trail, and the superuser appending one to a published book.
 
+### 16. Intercepting routes
+
+Three links open another page as a modal over the page that holds them, while the address bar shows the honest URL of the page in the modal. A directory whose name starts with `(.)` or `(..)` is an intercept. It routes nothing, names a target page relative to the directory that holds it, and serves a zone of that target when a link asks for the zone by name. A reload, a shared link and a link without `data-next-layer` all render the target page itself.
+
+```text
+shadcn_admin/pages/(app)/[str:app_label]/[str:model_name]/
+  page.py, template.djx         the changelist, its rows in the "changelist" zone
+  (.)[int:pk]/change/           intercepts [int:pk]/change, zone "quick-edit"
+    page.py, template.djx
+  [int:pk]/change/
+    template.djx                the change page, zone "record"
+    (..)history/                intercepts [int:pk]/history, zone "history-peek"
+      page.py, template.djx
+  [int:pk]/history/             the history page of section 11
+
+library/pages/library/book/[int:book]/
+  outline/                      links the peek
+  manuscript/                   the target, change_book on the row
+  (.)manuscript/                intercepts manuscript, zone "manuscript-peek"
+    page.py, template.djx
+```
+
+The scope of an intercept is the URL trail of the directory that holds it, with route groups left out. `(.)[int:pk]` inside `[str:model_name]` appends `[int:pk]` to `[str:app_label]/[str:model_name]`, and the `change/` below it extends the target to `[int:pk]/change`. `(..)history` inside `[int:pk]/change` drops `change` and appends `history`. The brackets spell the target exactly, `[int:pk]` on both sides, and `manage.py check` reports a target no page routes as `next.E170`. An intercept climbs its own directories for access, context and metadata, so all three inherit the admin rule of their tree root, and its own `@page.metadata` titles the modal over the inherited `changelist_meta`.
+
+**Quick edit, a form in the modal.** Each changelist row keeps its plain link in the first cell and gains a Quick edit link in the last, written by [`data_table`](shadcn_admin/_components/data_table/component.djx):
+
+```djx
+<a href="{{ row.change_url }}" data-next-layer="quick-edit" data-next-accepted="changelist">Quick edit</a>
+```
+
+The click sends a zone GET of the change URL with `X-Next-Zone: quick-edit`. The change page declares `record` and not `quick-edit`, so the intercept that declares it serves the request. Its [`template.djx`](shadcn_admin/pages/%28app%29/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/%28.%29%5Bint%3Apk%5D/change/template.djx) is one line:
+
+```djx
+{% zone "quick-edit" %}{% component "admin_form" zone="quick-edit" %}{% endzone %}
+```
+
+In that zone `admin_form` drops the live inline sections, Cancel and the two extra save buttons, and keeps the header of the change view, Discard, History, the object links and Delete. The intercept [`page.py`](shadcn_admin/pages/%28app%29/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/%28.%29%5Bint%3Apk%5D/change/page.py) holds one `@page.metadata` callable over `Depends("admin_object")` that returns `{"title": f"Quick edit · {obj}"}`. The zone response carries it as a `meta` patch, so the tab reads `Quick edit · Dracula · next.dj admin` while the modal is open, and the client restores `Books · next.dj admin` when it closes.
+
+The form posts `admin:change` with `X-Next-Zone: quick-edit`, and its `_next_form_origin` is the change URL. An invalid save never reaches the handler. The framework resolves which page serves that zone over the origin, finds the intercept, runs its access rule, and morphs the `quick-edit` zone with the bound form, so an unparsable publication date shows its error inside the modal. A valid save reaches `handle_change` in [`shadcn_admin/forms.py`](shadcn_admin/forms.py), which asks whether the request names the quick editor:
+
+```python
+obj, message = _persist(form, spec, change=True)
+if zone_requested(spec.request, QUICK_EDIT_ZONE):
+    return (
+        Patches(spec.request)
+        .layer_close(result={"pk": obj.pk})
+        .toast(message, variant="success")
+        .response()
+    )
+messages.success(spec.request, message)
+return _redirect_after_save(spec, obj)
+```
+
+`layer_close(result=...)` is an accept. The client closes the modal and re-GETs the `changelist` zone named by the opener's `data-next-accepted`, from the host URL with its filters and page, and morphs the table under the closed modal. The rows carry `data-next-key`, so the morph matches each row by primary key. The toast stands in for the flash message the full-page path queues, so no stale message waits for the next page. Without the runtime the form posts natively, names no zone, and redirects as before.
+
+**A history peek through `(..)`.** The header of `admin_form` gains a History link to the history URL of the row, `<a href="{{ form_state.history_url }}" data-next-layer="history-peek">`. The [`(..)history` page](shadcn_admin/pages/%28app%29/%5Bstr%3Aapp_label%5D/%5Bstr%3Amodel_name%5D/%5Bint%3Apk%5D/change/%28..%29history/page.py) renders the five latest entries from the `object_history` service of section 11, says how many older ones it leaves out, and links the full history through a plain `<a href="{{ request.path }}">`, the target URL of the zone request. The link lives in `admin_form`, so it shows inside the quick editor as well, and a click there stacks the peek over the quick editor. Escape closes the top layer, the tab returns to `Quick edit · Dracula` and the address bar to the change URL, and a second Escape returns to the changelist.
+
+**Object permissions on both chains.** The outline offers Peek at the manuscript beside Open the manuscript, inside the same `{% has_perm "library.change_book" book %}`. The [peek page](library/pages/library/book/%5Bint%3Abook%5D/%28.%29manuscript/page.py) shows the chapter count, the word count and the chapter written last, and declares a row rule of its own:
+
+```python
+page.permission_required("library.view_book", obj=DObject[Book])
+```
+
+`library.view_book` is `reads_book` in [`library/permissions.py`](library/permissions.py). Every admin reads a published or archived book, and a draft only its assigned editor reads. A zone request for the peek runs the target chain first, the admin rule and `change_book` from `manuscript/page.py`, then the intercept chain, the admin rule and `view_book`. Both load the book through `DObject` from the `book` kwarg of the target URL, and a refusal of either is the response, with no fallback to the other.
+
+| Visitor and book | Target `change_book` | Intercept `view_book` | Zone request |
+| --- | --- | --- | --- |
+| editor, own draft | holds | holds | `200`, the peek |
+| editor, draft of nobody | holds | refused | `403` |
+| editor, published book | refused | holds | `403` |
+| editor, draft of `copyeditor` | refused | refused | `403` |
+| anonymous | login | not asked | `302` to `/admin/login/?next=<manuscript>` |
+
+The Peek link shows for any editor holding `library.change_book`, because it sits inside the same `{% has_perm %}` as the Open link. The peek itself asks `library.view_book`, which refuses a draft nobody is assigned to, so clicking Peek on such a draft demonstrates the intercept denial.
+
+The runtime renders no refusal inside a modal. A zone request that answers something other than a patch envelope, here Django's `403` page, falls back to a full navigation of the same URL. For a draft of nobody that navigation lands on the full manuscript, which `change_book` admits, so the editor ends up on the page with the Append chapter form instead of the peek. The refusal of an intercept carries `private, no-store` and the partial `Vary`, so no cache keeps it. A session that ended while the outline stayed open sends the peek to the login. The browser follows the `302` with the zone header still set, the login page answers that request `400` because it declares no such zone, and the runtime then navigates to `/admin/login/?next=<manuscript>`.
+
+**Checking it.** `manage.py routes` lists each intercept right after its target, with the same URL, the name `-`, the intercept `page.py` and its zone in the `Intercept` column. `manage.py permissions /admin/library/book/1/manuscript/` lists an `intercept` row with `perm library.view_book on library.Book` between the page and its action. `manage.py check` reports nothing, and the integration suite pins that no intercept check fires. The integration suite drives every zone request, the invalid and the valid quick save, the plain visit of each target URL and the table above through `NextClient`. [`tests/e2e/test_intercepts.py`](tests/e2e/test_intercepts.py) opens each modal by a click in a real browser and checks the honest URL, the title and its restore, Back and Escape, a reload, the plain link, the error inside the modal, the refreshed row, the stacked history peek, the refused peek falling back to the full manuscript and the ended session.
+
 ## What is in core for this example
 
-Seven pieces of next.dj carry the example.
+Eight pieces of next.dj carry the example.
 
 - **Access on the page tree.** [`next/pages/access.py`](../../next/pages/access.py) joins what the `page.py` files above a page declare with `inherit=True`, from the tree root down, with what its own `page.py` declares, where a `public()` lifts what sits above it and the login by default, and loads the row an `obj=DObject[Model]` names through `visible_to(scope)` before it asks, [`next/forms/dispatch/permissions.py`](../../next/forms/dispatch/permissions.py) applies the same rule to an action POST. `manage.py permissions` reads the result back.
 - **`@action(form_class=callable)`.** [`next/forms/dispatch/build.py`](../../next/forms/dispatch/build.py) accepts a callable beside a `Form` subclass. `_resolve_form_class` runs the factory through `resolver.resolve_dependencies` once per request, so admin pages produce a class shaped by `ModelAdmin.get_form()` on the fly. A factory may also return a `(form_class, init_kwargs)` tuple. That branch skips `get_initial` and forwards the extra kwargs to the constructor, which is how the login action drives a form whose signature the dispatcher could not otherwise satisfy (see section 12).
@@ -400,6 +490,7 @@ Seven pieces of next.dj carry the example.
 - **`{% form key=... %}` distinguishes repeated forms.** A form rendered once per row shares one action UID, so `key=` writes `data-next-key` and the client morphs the submitted instance rather than the first. The change view's per-row `admin:inline_change` forms key on the child primary key. The `next.W070` system check flags a looped `{% form %}` that carries neither a `key=` nor a wrapping `zone=`.
 - **`action_dispatched` carries `form` and `url_kwargs`.** [`next/forms/dispatch/`](../../next/forms/dispatch/) sends both fields on every successful dispatch (the form is `None` for handlers without a `form_class`). [`admin_audit.signals.log_admin_action`](admin_audit/signals.py) reads them to write one `AdminActivityLog` row per dispatch without ever touching the handlers it observes.
 - **`Form.clean()` → `ValidationError` re-renders the origin page.** The same path the framework already uses for field-level errors lets `AdminForm.clean()` validate inline formsets and surface their errors on the bound form, with the user's typed data preserved.
+- **Intercepting routes.** [`next/intercept.py`](../../next/intercept.py) keeps the table of intercepts the file router fills, [`next/partial/intercept.py`](../../next/partial/intercept.py) picks the intercept that declares the requested zones and runs its access rule, and [`next/partial/view.py`](../../next/partial/view.py) serves its zone with a `meta` patch built from its metadata. On the form path [`next/partial/shaping/targets.py`](../../next/partial/shaping/targets.py) resolves the same page from the posted zone, so an invalid save re-renders the modal.
 - **Virtual pages survive form re-render.** The dispatcher resolves the posted `_next_form_origin` URL against the URLconf and reads the page identity from the matched view, so a page that exists only as a `template.djx` directory (no `page.py` anchor) re-renders correctly on validation failure. That lets the add and change views in this example live as `template.djx`-only directories.
 
 ## Further reading
@@ -412,6 +503,7 @@ Seven pieces of next.dj carry the example.
 - [`docs/content/topics/components.rst`](../../docs/content/topics/components.rst) for the component lookup configured under `_components/`.
 - [`docs/content/topics/context.rst`](../../docs/content/topics/context.rst) for the `@context` callables the pages declare and the context processors the router runs.
 - [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst) for `@resolver.dependency` and `Depends("name")` used by the `admin_spec` registration in section 4.
-- [`docs/content/topics/file-router.rst`](../../docs/content/topics/file-router.rst) for the `[str:app_label]/[int:pk]/` directory naming under `pages/`.
+- [`docs/content/topics/file-router.rst`](../../docs/content/topics/file-router.rst) for the `[str:app_label]/[int:pk]/` directory naming under `pages/`, route groups and intercepting routes.
+- [`docs/content/howto/open-a-page-as-a-modal-over-another.rst`](../../docs/content/howto/open-a-page-as-a-modal-over-another.rst) and [`docs/content/topics/partial-rendering/layers.rst`](../../docs/content/topics/partial-rendering/layers.rst) for the intercepting modals of section 16.
 - [`next/pages/metadata/`](../../next/pages/metadata/) for the metadata chain behind the settings tier and `@page.metadata(inherit=True)` in section 13.
 - [`docs/content/topics/permissions.rst`](../../docs/content/topics/permissions.rst) for the predicates, the backend and the `{% has_perm %}` tag of section 14.

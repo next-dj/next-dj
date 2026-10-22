@@ -10,7 +10,10 @@
       {% component "chapter_table" chapters=outline.chapters words=outline.words %}
 
       {% has_perm "library.change_book" book %}
-        {% component "button" href=manuscript_url text="Open the manuscript" %}
+        <div class="flex items-center gap-3">
+          {% component "button" href=manuscript_url text="Open the manuscript" %}
+          <a href="{{ manuscript_url }}" data-next-layer="manuscript-peek" class="text-sm font-medium text-primary hover:underline">Peek at the manuscript</a>
+        </div>
       {% else %}
         <p class="text-sm text-muted-foreground" data-outline-read-only>The book is not a draft of yours, so its outline is read-only.</p>
       {% endhas_perm %}

@@ -17,6 +17,13 @@ def holds_draft(user: Visitor, book: Book) -> bool:
     return book.status == Book.DRAFT and book.editor_id in {None, user.pk}
 
 
+def reads_book(user: Visitor, book: Book | None) -> bool:
+    """Return whether `user` may read `book`, a draft only when assigned to them."""
+    return uses_admin(user) and (
+        book is None or book.status != Book.DRAFT or book.editor_id == user.pk
+    )
+
+
 def edits_book(user: Visitor, book: Book | None) -> bool:
     """Return whether `user` may edit `book`, any book at model level, else a draft."""
     return uses_admin(user) and (book is None or holds_draft(user, book))
@@ -41,6 +48,7 @@ add_perm("library.change_tag", uses_admin)
 add_perm("library.delete_tag", deletes_tag)
 
 add_perm("library.add_book", uses_admin)
+add_perm("library.view_book", reads_book)
 add_perm("library.change_book", edits_book)
 add_perm("library.delete_book", edits_book)
 add_perm("library.add_chapter", uses_admin)

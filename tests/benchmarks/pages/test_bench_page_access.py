@@ -6,10 +6,10 @@ import pytest
 from django.core.exceptions import PermissionDenied
 from django.urls import resolve
 
-from next.pages.access import forget_page_access
+from next.pages.access import forget_page_access, refusal
 from tests.benchmarks.factories import STAND_IN_PK
-from tests.support import PermissionHolder, QuietHolder, plain_get, routed
-from tests.support.access import write_guard
+from tests.support import PermissionHolder, QuietHolder, plain_get, routed, write_page
+from tests.support.access import PAGE_HEAD, write_guard
 
 
 if TYPE_CHECKING:
@@ -133,3 +133,64 @@ class TestBenchPageAccess:
             ]
             request.user = QuietHolder("auth.view_user")
             assert benchmark(_refused, match.func, request, match.kwargs) is True
+
+
+_PHOTO_URL = "/photo/3/"
+_INTERCEPT_RULE = 'page.permission_required("auth.view_user")\n'
+_TARGET_RULE = 'page.permission_required("auth.add_user")\n'
+
+
+def _refused_file(file_path: Path, request: object) -> bool:
+    """Return whether the page at `file_path` refuses `request` with a 403."""
+    try:
+        refusal(file_path, request, {"pk": 3}, {})
+    except PermissionDenied:
+        return True
+    return False
+
+
+def _write_photo_site(root: Path) -> tuple[Path, Path]:
+    """Write a guarded target and the guarded intercept over it, returned in order."""
+    target = write_page(
+        root, "photo/[int:pk]", f"{PAGE_HEAD}{_TARGET_RULE}", body="<p>x</p>"
+    )
+    intercept = write_page(
+        root, "(.)photo/[int:pk]", f"{PAGE_HEAD}{_INTERCEPT_RULE}", body="<p>y</p>"
+    )
+    return target, intercept
+
+
+class TestBenchInterceptRefusal:
+    """The refusal an intercept page owes a request, against its target's."""
+
+    @pytest.mark.benchmark(group="pages.page_access")
+    def test_intercept_refusal_allowed(self, tmp_path: Path, benchmark) -> None:
+        _target, intercept = _write_photo_site(tmp_path)
+        request = plain_get(_PHOTO_URL)
+        request.user = PermissionHolder("auth.view_user", "auth.add_user")
+        with routed(tmp_path):
+            assert refusal(intercept, request, {"pk": 3}, {}) is None
+            assert _asked(request.user.asked) == [("auth.view_user",)]
+            request.user = QuietHolder("auth.view_user", "auth.add_user")
+            benchmark(refusal, intercept, request, {"pk": 3}, {})
+
+    @pytest.mark.benchmark(group="pages.page_access")
+    def test_target_refusal_allowed(self, tmp_path: Path, benchmark) -> None:
+        target, _intercept = _write_photo_site(tmp_path)
+        request = plain_get(_PHOTO_URL)
+        request.user = PermissionHolder("auth.view_user", "auth.add_user")
+        with routed(tmp_path):
+            assert refusal(target, request, {"pk": 3}, {}) is None
+            assert _asked(request.user.asked) == [("auth.add_user",)]
+            request.user = QuietHolder("auth.view_user", "auth.add_user")
+            benchmark(refusal, target, request, {"pk": 3}, {})
+
+    @pytest.mark.benchmark(group="pages.page_access")
+    def test_intercept_refusal_denied(self, tmp_path: Path, benchmark) -> None:
+        _target, intercept = _write_photo_site(tmp_path)
+        request = plain_get(_PHOTO_URL)
+        request.user = PermissionHolder("auth.add_user")
+        with routed(tmp_path):
+            assert _refused_file(intercept, request) is True
+            request.user = QuietHolder("auth.add_user")
+            assert benchmark(_refused_file, intercept, request) is True

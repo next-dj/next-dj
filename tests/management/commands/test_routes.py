@@ -15,9 +15,11 @@ from tests.support import (
 )
 from tests.support.access import (
     COMPONENTS,
+    PAGE_HEAD,
     login_required_middleware,
     write_access_project,
 )
+from tests.support.cases.intercepts import zone_body
 
 
 def _project(root: Path) -> str:
@@ -124,3 +126,101 @@ class TestRoutesAccessColumn:
 
     def test_the_setting_closes_an_open_page(self, access_lines) -> None:
         assert access_lines(LOGIN_REQUIRED=True)[3] == "login (default)"
+
+
+class TestRoutesRouteGroups:
+    """A grouped page shows its group-free URL and name, and the group in its file."""
+
+    def test_the_row_leaves_the_group_out_and_the_file_keeps_it(self, tmp_path) -> None:
+        write_page(tmp_path / "site", "(auth)/login")
+        out = StringIO()
+
+        with installed_apps(tmp_path, dirs=[tmp_path / "site"], BASE_DIR=tmp_path):
+            call_command("routes", stdout=out)
+
+        [row] = out.getvalue().splitlines()[1:]
+        assert row.split() == [
+            "/login/",
+            "next:page_login",
+            "site/(auth)/login/page.py",
+            "-",
+        ]
+
+
+class TestRoutesIntercepts:
+    """An intercept page is listed under its target with the zones it serves."""
+
+    @staticmethod
+    def _site(root: Path, source: str = PAGE_HEAD) -> None:
+        write_page(root / "site", "feed/photo")
+        write_page(
+            root / "site", "feed/(.)photo", source, body=zone_body("peek", "info")
+        )
+
+    def _lines(self, root: Path) -> list[str]:
+        out = StringIO()
+        with installed_apps(root, dirs=[root / "site"], BASE_DIR=root):
+            call_command("routes", stdout=out)
+        return out.getvalue().splitlines()
+
+    def test_the_table_gains_an_intercept_column(self, tmp_path) -> None:
+        self._site(tmp_path, f"{PAGE_HEAD}page.login_required()\n")
+
+        assert self._lines(tmp_path) == [
+            (
+                "URL           Name                  "
+                "File                        Access  Intercept"
+            ),
+            ("/feed/photo/  next:page_feed_photo  site/feed/photo/page.py     -"),
+            (
+                "/feed/photo/  -                     "
+                "site/feed/(.)photo/page.py  login   peek, info"
+            ),
+        ]
+
+    def test_a_virtual_intercept_is_listed_by_its_template(self, tmp_path) -> None:
+        write_page(tmp_path / "site", "feed/photo")
+        directory = tmp_path / "site" / "feed" / "(.)photo"
+        directory.mkdir(parents=True)
+        (directory / "template.djx").write_text(zone_body("peek"))
+
+        row = self._lines(tmp_path)[2]
+
+        assert row.split()[2] == "site/feed/(.)photo/template.djx"
+
+    def test_a_tree_without_intercepts_keeps_the_four_columns(self, tmp_path) -> None:
+        write_page(tmp_path / "site", "feed/photo")
+
+        lines = self._lines(tmp_path)
+
+        assert lines[0].split() == ["URL", "Name", "File", "Access"]
+        assert all(line == line.rstrip() for line in lines)
+
+    def test_a_tree_mounted_twice_lists_the_intercept_under_both_urls(
+        self, tmp_path
+    ) -> None:
+        write_app(tmp_path, "blog", {"pages": ("feed/photo",)})
+        write_page(
+            tmp_path / "blog" / "pages",
+            "feed/(.)photo",
+            PAGE_HEAD,
+            body=zone_body("peek"),
+        )
+        urlconf = write_urlconf(
+            tmp_path,
+            "twice_urls",
+            'path("a/", pages("blog", namespace="a"))',
+            'path("b/", pages("blog", namespace="b"))',
+        )
+        out = StringIO()
+
+        with installed_apps(tmp_path, "blog", urlconf=urlconf, BASE_DIR=tmp_path):
+            call_command("routes", stdout=out)
+
+        rows = [line.split() for line in out.getvalue().splitlines()[1:]]
+        assert [(row[0], row[1], row[-1]) for row in rows] == [
+            ("/a/feed/photo/", "a:page_feed_photo", "-"),
+            ("/a/feed/photo/", "-", "peek"),
+            ("/b/feed/photo/", "b:page_feed_photo", "-"),
+            ("/b/feed/photo/", "-", "peek"),
+        ]

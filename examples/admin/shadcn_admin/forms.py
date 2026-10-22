@@ -22,16 +22,19 @@ from fragments import render_fragment
 
 from next import Depends, action
 from next.forms import BaseModelForm, cleanup_extra_initial, form_spec
-from next.partial import Patches, is_partial_request
+from next.partial import Patches, is_partial_request, zone_requested
 from shadcn_admin import utils
 from shadcn_admin.admin import ParentRowPermissions
 
 
 _LOG_CHANGE_MESSAGE = "Changed via shadcn-admin form"
 
+QUICK_EDIT_ZONE = "quick-edit"
+
 _CHANGE_TEMPLATE_PATH = (
     Path(__file__).resolve().parent
     / "pages"
+    / "(app)"
     / "[str:app_label]"
     / "[str:model_name]"
     / "[int:pk]"
@@ -113,6 +116,13 @@ class AdminFormSpec:
         if self.instance is None:
             return None
         return utils.delete_url(self.app_label, self.model_name, self.instance.pk)
+
+    @property
+    def history_url(self) -> str | None:
+        """URL of the history page when this spec carries an instance."""
+        if self.instance is None:
+            return None
+        return utils.history_url(self.app_label, self.model_name, self.instance.pk)
 
 
 def build_inline_formsets(spec: AdminFormSpec) -> list[BaseInlineFormSet]:
@@ -396,7 +406,7 @@ def admin_change_form_factory(
 
 def _persist(
     form: django_forms.ModelForm, spec: AdminFormSpec, *, change: bool
-) -> HttpResponse:
+) -> tuple[Model, str]:
     obj = form.save(commit=False)
     formsets = build_inline_formsets(spec)
     for fs in formsets:
@@ -411,11 +421,7 @@ def _persist(
     else:
         spec.model_admin.log_addition(spec.request, obj, [{"added": {}}])
     verb = "updated" if change else "added"
-    messages.success(
-        spec.request,
-        f"The {spec.model._meta.verbose_name} {obj} was {verb} successfully.",
-    )
-    return _redirect_after_save(spec, obj)
+    return obj, f"The {spec.model._meta.verbose_name} {obj} was {verb} successfully."
 
 
 def _redirect_after_save(spec: AdminFormSpec, obj: Model) -> HttpResponseRedirect:
@@ -435,17 +441,31 @@ def handle_add(
 
     `AdminFormSpec.resolve` has already refused a user without the add right.
     """
-    return _persist(form, spec, change=False)
+    obj, message = _persist(form, spec, change=False)
+    messages.success(spec.request, message)
+    return _redirect_after_save(spec, obj)
 
 
 @action("admin:change", form_class=admin_change_form_factory, login_required=True)
 def handle_change(
     form: django_forms.ModelForm, spec: AdminFormSpec = Depends("admin_spec")
 ) -> HttpResponse:
-    """Persist main form and inline formsets via `ModelAdmin.save_model`."""
+    """Persist main form and inline formsets via `ModelAdmin.save_model`.
+
+    A quick editor save closes it as accepted, so its opener refreshes the list.
+    """
     if not spec.model_admin.has_change_permission(spec.request, spec.stored):
         raise PermissionDenied
-    return _persist(form, spec, change=True)
+    obj, message = _persist(form, spec, change=True)
+    if zone_requested(spec.request, QUICK_EDIT_ZONE):
+        return (
+            Patches(spec.request)
+            .layer_close(result={"pk": obj.pk})
+            .toast(message, variant="success")
+            .response()
+        )
+    messages.success(spec.request, message)
+    return _redirect_after_save(spec, obj)
 
 
 def admin_inline_change_form_factory(

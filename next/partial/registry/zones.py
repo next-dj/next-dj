@@ -1,10 +1,13 @@
 """Registry of the zones one compiled page template declares."""
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Final, cast
 from weakref import WeakKeyDictionary
 
+from django.template import TemplateDoesNotExist, TemplateSyntaxError
+
 from next.components.manager import components_manager
+from next.pages import page
 from next.partial.guards import Components, Stamps, bound_zones, fresh
 from next.partial.headers import partial_intent
 from next.partial.signals import zone_registered
@@ -122,9 +125,33 @@ def zones_of(template: "Template", page_path: "Path") -> "Mapping[str, ZoneInfo]
     return zones
 
 
+COMPOSE_FAILURES: Final = (
+    TemplateSyntaxError,
+    TemplateDoesNotExist,
+    OSError,
+    ValueError,
+)
+"""What composing a page template raises, for a reader that tolerates a broken page."""
+
+
+def standalone_zones(page_path: "Path") -> tuple[str, ...]:
+    """Return the zones of a page that render on their own, in declaration order.
+
+    A zone inside a component that binds it is left out, as no zone request serves it.
+    """
+    declared = zones_of(page.composed_template_for(page_path), page_path)
+    return tuple(name for name, info in declared.items() if info.standalone)
+
+
 def zone_requested(request: "HttpRequest", name: str) -> bool:
     """Return True when the partial intent of the request names the zone."""
     return name in partial_intent(request).zones
 
 
-__all__ = ["ZoneInfo", "zone_requested", "zones_of"]
+__all__ = [
+    "COMPOSE_FAILURES",
+    "ZoneInfo",
+    "standalone_zones",
+    "zone_requested",
+    "zones_of",
+]

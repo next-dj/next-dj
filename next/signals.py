@@ -46,7 +46,12 @@ from next.static.signals import (
     html_injected,
     static_backend_loaded,
 )
-from next.urls.signals import route_registered, router_backend_loaded, router_reloaded
+from next.urls.signals import (
+    intercept_registered,
+    route_registered,
+    router_backend_loaded,
+    router_reloaded,
+)
 
 
 __all__ = [
@@ -65,6 +70,7 @@ __all__ = [
     "form_backend_loaded",
     "form_validation_failed",
     "html_injected",
+    "intercept_registered",
     "metadata_registered",
     "page_rendered",
     "partial_backend_loaded",

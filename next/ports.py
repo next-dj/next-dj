@@ -71,8 +71,12 @@ class PartialShaper(Protocol):
         *,
         dynamic_body: bool,
         url_kwargs: dict[str, object],
+        dep_cache: dict[str, Any],
     ) -> HttpResponse:
-        """Return the envelope for the zones the intent named."""
+        """Return the envelope for the zones the intent named.
+
+        An intercept refusal reuses `dep_cache`, the one the page refusal resolved with.
+        """
         ...
 
     def shape_response(

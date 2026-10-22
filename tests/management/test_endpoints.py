@@ -13,17 +13,20 @@ from next.management.endpoints import (
     page_endpoint,
     resolve_page,
     resolve_view,
+    served_zones,
     view_endpoints,
 )
 from next.permissions import add_perm
 from next.permissions.markers import AccessRule, Requirement
-from next.urls.routes import collect_routes
+from next.urls.routes import collect_routes, with_intercepts
 from tests.support import owns_group, routed, write_page
 from tests.support.access import (
     COMPONENTS,
+    PAGE_HEAD,
     login_required_middleware,
     write_access_project,
 )
+from tests.support.cases.intercepts import guarded_zone_body, zone_body
 
 
 pytestmark = pytest.mark.usefixtures("form_registries")
@@ -66,6 +69,24 @@ def _summary(found: tuple[Endpoint, ...], root: Path) -> list[tuple[str, str, st
         (endpoint.kind, endpoint.name, endpoint.access)
         for endpoint in found
         if endpoint.file.is_relative_to(root)
+    ]
+
+
+def _site(root: Path, body: str, target_body: str = "<p>x</p>") -> tuple[Path, Path]:
+    target = write_page(
+        root, "feed/photo", f"{PAGE_HEAD}page.public()\n", body=target_body
+    )
+    rule = write_page(
+        root, "feed/(.)photo", f"{PAGE_HEAD}page.login_required()\n", body=body
+    )
+    return target, rule
+
+
+def _rows(root: Path):
+    return [
+        route
+        for route in with_intercepts(collect_routes())
+        if root in route.file.parents
     ]
 
 
@@ -219,6 +240,127 @@ class TestEndpoints:
             "broken",
             (page_path,),
         )
+
+
+class TestInterceptEndpoints:
+    """An intercept row is named by its target and zones and answers to its own chain."""
+
+    def test_the_row_names_its_target_and_zones(self, tmp_path) -> None:
+        root = tmp_path / "pages"
+        _target, rule = _site(root, zone_body("b", "a"))
+
+        with routed(root, COMPONENT_BACKENDS=COMPONENTS):
+            [_target_route, row] = _rows(root)
+            found = page_endpoint(row)
+
+        assert (found.kind, found.name, found.file) == (
+            "intercept",
+            "/feed/photo/ (b, a)",
+            rule.resolve(),
+        )
+        assert (found.access, found.sources) == ("login", (rule.resolve(),))
+
+    def test_the_target_row_keeps_its_page_kind(self, tmp_path) -> None:
+        root = tmp_path / "pages"
+        target, _rule = _site(root, zone_body("a"))
+
+        with routed(root, COMPONENT_BACKENDS=COMPONENTS):
+            [route, _row] = _rows(root)
+            found = page_endpoint(route)
+
+        assert (found.kind, found.name, found.access) == (
+            "page",
+            "/feed/photo/",
+            "public",
+        )
+        assert found.file == target.resolve()
+
+    def test_the_whole_project_lists_the_row_after_its_target(self, tmp_path) -> None:
+        root = tmp_path / "pages"
+        _site(root, zone_body("a"))
+
+        with routed(root, COMPONENT_BACKENDS=COMPONENTS):
+            found = _summary(endpoints(), root)
+
+        assert found == [
+            ("page", "/feed/photo/", "public"),
+            ("intercept", "/feed/photo/ (a)", "login"),
+        ]
+
+    def test_one_page_keeps_its_intercepts(self, tmp_path) -> None:
+        root = tmp_path / "pages"
+        target, _rule = _site(root, zone_body("a"))
+        write_page(root, "other")
+
+        with routed(root, COMPONENT_BACKENDS=COMPONENTS):
+            found = _summary(endpoints(target.resolve()), root)
+
+        assert found == [
+            ("page", "/feed/photo/", "public"),
+            ("intercept", "/feed/photo/ (a)", "login"),
+        ]
+
+    def test_a_broken_target_marks_its_row_and_not_the_intercept(
+        self, tmp_path
+    ) -> None:
+        root = tmp_path / "pages"
+        target, _rule = _site(root, zone_body("a"), target_body="{% if %}")
+
+        with routed(root, COMPONENT_BACKENDS=COMPONENTS):
+            routed_row, intercept_row = endpoints(target.resolve())
+
+        assert (routed_row.kind, routed_row.access, routed_row.broken) == (
+            "page",
+            "broken",
+            target.resolve(),
+        )
+        assert (intercept_row.kind, intercept_row.access, intercept_row.broken) == (
+            "intercept",
+            "login",
+            None,
+        )
+
+    def test_a_healthy_target_marks_nothing(self, tmp_path) -> None:
+        root = tmp_path / "pages"
+        target, _rule = _site(root, zone_body("a"))
+
+        with routed(root, COMPONENT_BACKENDS=COMPONENTS):
+            found = endpoints(target.resolve())
+
+        assert [row.broken for row in found] == [None, None]
+
+
+class TestServedZones:
+    """The zones column lists the standalone zones an intercept serves in order."""
+
+    @pytest.mark.parametrize(
+        ("body", "zones"),
+        [
+            (zone_body("b", "a"), "b, a"),
+            (zone_body("a") + guarded_zone_body("hidden"), "a"),
+            (guarded_zone_body("hidden"), "-"),
+            ("<p>x</p>", "-"),
+            ("{% if %}", "-"),
+        ],
+        ids=["declaration_order", "guarded_filtered", "only_guarded", "none", "broken"],
+    )
+    def test_the_zones_of_an_intercept_row(self, tmp_path, body, zones) -> None:
+        root = tmp_path / "pages"
+        _site(root, body)
+
+        with routed(root, COMPONENT_BACKENDS=COMPONENTS):
+            [_target_route, row] = _rows(root)
+
+            assert served_zones(row) == zones
+
+    def test_a_routed_row_reads_blank(self, tmp_path) -> None:
+        root = tmp_path / "pages"
+        _site(root, zone_body("a"))
+
+        with routed(root, COMPONENT_BACKENDS=COMPONENTS):
+            [route, _row] = _rows(root)
+
+            assert served_zones(route) == ""
 
 
 @pytest.mark.usefixtures("isolated_permissions")

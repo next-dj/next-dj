@@ -1,6 +1,5 @@
-{% with title=changelist_state.verbose_name_plural|capfirst has_filters=changelist_state.filters %}
 <div class="space-y-6">
-  {% #component "page_header" title=title description="" %}
+  {% #component "page_header" title=changelist_state.verbose_name_plural|capfirst description="" %}
     {% #slot "actions" %}
       {% if changelist_state.has_add_permission %}
         {% component "button" href=changelist_state.add_url text="Add" variant="default" %}
@@ -8,8 +7,8 @@
     {% /slot %}
   {% /component %}
 
-  <div class="flex flex-col gap-6 {% if has_filters %}md:flex-row{% endif %}">
-    {% if has_filters %}
+  <div class="flex flex-col gap-6 {% if changelist_state.filters %}md:flex-row{% endif %}">
+    {% if changelist_state.filters %}
       {% component "filters_panel" filters=changelist_state.filters %}
     {% endif %}
 
@@ -19,9 +18,10 @@
         {% component "action_bar" actions=changelist_state.actions action_name="admin:bulk_action" %}
       </div>
 
-      {% component "data_table" columns=changelist_state.columns rows=changelist_state.rows selectable=changelist_state.actions %}
-      {% component "admin_pagination" pagination=changelist_state.pagination %}
+      {% zone "changelist" %}
+        {% component "data_table" columns=changelist_state.columns rows=changelist_state.rows selectable=changelist_state.actions quick_edit=changelist_state.has_change_permission %}
+        {% component "admin_pagination" pagination=changelist_state.pagination %}
+      {% endzone %}
     </div>
   </div>
 </div>
-{% endwith %}

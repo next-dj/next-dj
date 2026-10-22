@@ -33,7 +33,7 @@
           </thead>
           <tbody class="divide-y divide-border">
             {% for entry in entries %}
-              {% component "audit_row" %}
+              {% component "audit_row" peek="audit-log-peek" %}
             {% endfor %}
           </tbody>
         </table>

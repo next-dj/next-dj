@@ -39,6 +39,7 @@ from tests.support import (
     write_urlconf,
 )
 from tests.support.access import PAGE_HEAD, page_source
+from tests.support.cases.groupnames import CLASH_CASES, ClashCase
 
 
 def _write_virtual_page(tree: Path, route: str) -> Path:
@@ -123,6 +124,30 @@ class TestDoublyMountedTree:
         assert len(e015) == 1
         assert "App 'shop'" in e015[0].msg
         assert "Root" in e015[0].msg
+
+
+class TestUrlConflictHint:
+    """next.E015 carries a hint only where a conflicting source passes through a group."""
+
+    @pytest.mark.parametrize("case", CLASH_CASES, ids=lambda case: case.id)
+    def test_the_hint_follows_the_route_groups(self, tmp_path, case: ClashCase) -> None:
+        trees = []
+        for index, trails in enumerate(case.trees):
+            tree = tmp_path / f"tree_{index}"
+            tree.mkdir()
+            for trail in trails:
+                write_page(tree, trail)
+            trees.append(tree)
+        router = _TreeRouter(root_trees=trees)
+
+        with patch_checks_router_manager_with_routers(routers=[router]):
+            messages = check_url_patterns(None)
+
+        [error] = [m for m in messages if m.id == "next.E015"]
+        if case.hinted:
+            assert "A route group leaves the URL" in error.hint
+        else:
+            assert error.hint is None
 
 
 class TestCheckUrlPatterns:
@@ -400,6 +425,20 @@ class TestCollectUrlPatterns:
         assert patterns == []
         assert [error.id for error in errors] == ["next.E082"]
         assert "no valid Python identifier" in errors[0].msg
+
+    def test_a_group_is_read_from_the_page_path_whatever_the_tree_label(
+        self, tmp_path
+    ) -> None:
+        """A label holding `": "` cannot hide the group the page path passes through."""
+        write_page(tmp_path, "(g)/x")
+        write_page(tmp_path, "y")
+
+        patterns = _collect_url_patterns(tmp_path, "App 'a: b'", [])
+
+        assert [(p.url_path, p.grouped) for p in patterns] == [
+            ("x", True),
+            ("y", False),
+        ]
 
 
 class TestPagesConfigurationCodes:
@@ -829,3 +868,21 @@ class TestDeclarativePageUrlChecks:
         messages = _url_messages(tmp_path, "shop", "audit", urlconf=urlconf)
 
         assert check_ids(messages) == expected
+
+
+class TestRouteGroupConflict:
+    """Two groups serving one URL are the same path conflict as two trees."""
+
+    def test_pages_from_two_groups_on_one_url_report_e015(self, tmp_path) -> None:
+        write_page(tmp_path, "(auth)/login")
+        write_page(tmp_path, "(public)/login")
+        router = _TreeRouter(root_trees=[tmp_path])
+
+        with patch_checks_router_manager_with_routers(routers=[router]):
+            messages = check_url_patterns(None)
+
+        e015 = [m for m in messages if m.id == "next.E015"]
+        assert len(e015) == 1
+        assert '"login/"' in e015[0].msg
+        assert "(auth)/login/page.py" in e015[0].msg
+        assert "(public)/login/page.py" in e015[0].msg

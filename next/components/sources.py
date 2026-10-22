@@ -72,8 +72,8 @@ def _register_page_tree_component_folders(manager: ComponentsManager) -> None:
     if router_manager is None:
         return
     for router in router_manager.backends:
-        for folder, tree_root, route_trail in iter_page_tree_component_folders(router):
-            manager.register_router_walk_folder(folder, tree_root, route_trail)
+        for folder, tree_root, scope_trail in iter_page_tree_component_folders(router):
+            manager.register_router_walk_folder(folder, tree_root, scope_trail)
 
 
 def reset_components_manager_cache(**kwargs) -> None:

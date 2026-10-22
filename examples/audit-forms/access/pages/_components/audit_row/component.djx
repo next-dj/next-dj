@@ -15,7 +15,7 @@
   <td class="px-4 py-2 align-top font-mono text-xs text-slate-700">
     {{ entry.action_name }}
     {% if request_link %}
-      <a href="{{ request_link }}" data-request-link
+      <a href="{{ request_link }}" data-request-link{% if peek %} data-next-layer="{{ peek }}"{% endif %}
          class="ml-2 text-[10px] text-slate-500 underline hover:text-slate-800">
         request #{{ entry.request_id }}
       </a>

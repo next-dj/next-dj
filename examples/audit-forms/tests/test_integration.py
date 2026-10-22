@@ -4,7 +4,7 @@ from io import StringIO
 from pathlib import Path
 
 import pytest
-from access.models import AccessRequest, AuditEntry
+from access.models import AccessRequest, AccessRequestQuerySet, AuditEntry
 from django.core.cache import caches
 from django.core.checks import run_checks
 from django.core.management import call_command
@@ -20,6 +20,7 @@ from next.testing import (
     SignalRecorder,
     assert_metadata,
     envelope_of,
+    find_anchor,
     hidden_fields,
     resolve_action_url,
 )
@@ -772,8 +773,9 @@ class TestPageMetadata:
             ("/request/identity/", "Request access · next.dj audit", True),
             ("/request/{pk}/audit/", "Request #{pk} · next.dj audit", True),
             ("/admin/audit/", "Audit log · next.dj audit", True),
+            ("/request/{pk}/receipt/", "Receipt · Request #{pk} · next.dj audit", True),
         ],
-        ids=["landing", "wizard", "request-audit", "audit-log"],
+        ids=["landing", "wizard", "request-audit", "audit-log", "receipt"],
     )
     def test_each_page_carries_its_title_and_robots(
         self,
@@ -814,3 +816,273 @@ class TestOpenActions:
 
     def test_the_declared_access_leaves_no_action_unguarded(self) -> None:
         assert "next.W129" not in {message.id for message in run_checks()}
+
+
+def _unfiled_request() -> AccessRequest:
+    return AccessRequest.objects.create(
+        full_name="Grace Hopper",
+        email="grace@example.com",
+        team="Compilers",
+        project_slug="compilers",
+        reason="docs",
+        expires_in_days=3,
+    )
+
+
+def _meta_ops(response) -> list[dict]:
+    return [op for op in envelope_of(response).ops if op["op"] == "meta"]
+
+
+class TestAuditPeek:
+    """`(.)request/[int:access_request]/audit/` serves the `audit-peek` zone."""
+
+    def test_landing_rows_open_the_peek_over_the_honest_url(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        anchor = find_anchor(
+            next_client.get("/").content.decode(),
+            href=f"/request/{submitted_request.pk}/audit/",
+        )
+        assert 'data-next-layer="audit-peek"' in anchor
+
+    def test_a_plain_get_renders_the_real_page(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        body = next_client.get(f"/request/{submitted_request.pk}/audit/").content
+        assert b"data-audit-table" in body
+        assert b"data-audit-peek" not in body
+
+    def test_the_zone_get_serves_the_intercept_with_its_title(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        pk = submitted_request.pk
+        response = next_client.get_zones(f"/request/{pk}/audit/", "audit-peek")
+
+        assert response.status_code == 200
+        assert "no-store" in response["Cache-Control"]
+        assert "X-Next-Zone" in response["Vary"]
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph", "meta"]
+        html = envelope.html_for_zone("audit-peek")
+        assert "data-audit-peek" in html
+        assert "Ada Lovelace" in html
+        assert 'data-next-poll="5000"' in html
+        assert "data-audit-table" not in html
+        assert [op["title"] for op in _meta_ops(response)] == [
+            f"Audit peek · Request #{pk} · next.dj audit"
+        ]
+        assert _meta_ops(response)[0]["robots"] == "noindex"
+
+    def test_the_peek_links_to_the_full_page(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        pk = submitted_request.pk
+        response = next_client.get_zones(f"/request/{pk}/audit/", "audit-peek")
+        anchor = find_anchor(
+            envelope_of(response).html_for_zone("audit-peek"), text="Open full page"
+        )
+        assert f'href="/request/{pk}/audit/"' in anchor
+        assert "data-next-layer" not in anchor
+
+    def test_a_poll_of_the_nested_zone_keeps_serving_the_intercept(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        pk = submitted_request.pk
+        url = f"/request/{pk}/audit/"
+        before = next_client.get_zones(url, "audit-peek-entries")
+        AuditEntry.objects.create(
+            action_name="reviewer_note",
+            kind=AuditEntry.KIND_DISPATCHED,
+            source=AuditEntry.SOURCE_BACKEND,
+            request=submitted_request,
+        )
+        after = next_client.get_zones(url, "audit-peek-entries")
+
+        assert after.status_code == 200
+        envelope = envelope_of(after)
+        assert envelope.zone_targets() == ["audit-peek-entries"]
+        html = envelope.html_for_zone("audit-peek-entries")
+        assert "reviewer_note" in html
+        assert "reviewer_note" not in envelope_of(before).html_for_zone(
+            "audit-peek-entries"
+        )
+        assert (
+            html.count("data-audit-peek-row") == submitted_request.audit_entries.count()
+        )
+        assert [op["title"] for op in _meta_ops(after)] == [
+            f"Audit peek · Request #{pk} · next.dj audit"
+        ]
+
+    def test_an_empty_trail_says_so(self, next_client) -> None:
+        unfiled = _unfiled_request()
+        response = next_client.get_zones(
+            f"/request/{unfiled.pk}/audit/", "audit-peek-entries"
+        )
+        html = envelope_of(response).html_for_zone("audit-peek-entries")
+        assert "No rows linked yet" in html
+
+    def test_an_unknown_zone_is_a_400(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        response = next_client.get_zones(
+            f"/request/{submitted_request.pk}/audit/", "no-such-zone"
+        )
+        assert response.status_code == 400
+        assert response.content == b"unknown zone"
+
+    def test_a_row_hidden_by_visible_to_is_a_404(
+        self, next_client, submitted_request: AccessRequest, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(
+            AccessRequestQuerySet, "visible_to", lambda rows, _user: rows.none()
+        )
+        response = next_client.get_zones(
+            f"/request/{submitted_request.pk}/audit/", "audit-peek"
+        )
+        assert response.status_code == 404
+
+    def test_an_unknown_request_is_a_404(self, next_client) -> None:
+        response = next_client.get_zones("/request/9999/audit/", "audit-peek")
+        assert response.status_code == 404
+
+
+class TestAuditLogPeek:
+    """`admin/audit/(...)request/[int:access_request]/audit/` peeks from the log."""
+
+    def test_linked_log_rows_open_the_peek(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        html = envelope_of(
+            next_client.get_zones("/admin/audit/", "audit-table")
+        ).html_for_zone("audit-table")
+        anchor = find_anchor(html, href=f"/request/{submitted_request.pk}/audit/")
+        assert 'data-next-layer="audit-log-peek"' in anchor
+
+    def test_the_trail_page_links_its_rows_without_a_peek(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        pk = submitted_request.pk
+        body = next_client.get(f"/request/{pk}/audit/").content.decode()
+        anchor = find_anchor(body, text=f"request #{pk}")
+        assert "data-next-layer" not in anchor
+
+    def test_the_zone_get_serves_the_request_summary(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        pk = submitted_request.pk
+        response = next_client.get_zones(f"/request/{pk}/audit/", "audit-log-peek")
+
+        assert response.status_code == 200
+        html = envelope_of(response).html_for_zone("audit-log-peek")
+        assert "data-audit-log-peek" in html
+        assert "Need read access for analysis." in html
+        assert "1 linked row" in html
+        assert [op["title"] for op in _meta_ops(response)] == [
+            f"Request #{pk} from the log · next.dj audit"
+        ]
+
+
+class TestReceipt:
+    """`request/[int:access_request]/receipt/` has a `render()` body and a peek."""
+
+    def test_the_trail_offers_the_receipt_peek_once_filed(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        pk = submitted_request.pk
+        body = next_client.get(f"/request/{pk}/audit/").content.decode()
+        anchor = find_anchor(body, href=f"/request/{pk}/receipt/")
+        assert 'data-next-layer="receipt-peek"' in anchor
+
+    def test_an_unfiled_trail_offers_no_receipt(self, next_client) -> None:
+        unfiled = _unfiled_request()
+        body = next_client.get(f"/request/{unfiled.pk}/audit/").content.decode()
+        assert f"/request/{unfiled.pk}/receipt/" not in body
+
+    def test_a_plain_get_renders_the_render_body_in_the_layout(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        response = next_client.get(f"/request/{submitted_request.pk}/receipt/")
+        body = response.content.decode()
+        assert response.status_code == 200
+        assert "data-receipt" in body
+        assert "data-receipt-peek" not in body
+        assert f"AR-{submitted_request.pk:05d}" in body
+        assert "<!DOCTYPE html>" in body
+
+    def test_the_receipt_keeps_request_data_out_of_the_template_source(
+        self, next_client
+    ) -> None:
+        unfiled = _unfiled_request()
+        unfiled.full_name = "{{ 7|add:1 }}"
+        unfiled.save()
+        AuditEntry.objects.create(
+            action_name=WIZARD_ACTION,
+            kind=AuditEntry.KIND_DISPATCHED,
+            source=AuditEntry.SOURCE_BACKEND,
+            request=unfiled,
+        )
+        body = next_client.get(f"/request/{unfiled.pk}/receipt/").content.decode()
+        assert "{{ 7|add:1 }} &lt;grace@example.com&gt;" in body
+
+    def test_text_format_downloads_the_receipt(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        pk = submitted_request.pk
+        response = next_client.get(f"/request/{pk}/receipt/?format=txt")
+        assert response["Content-Type"] == "text/plain; charset=utf-8"
+        assert response["Content-Disposition"] == (
+            f'attachment; filename="access-request-{pk}.txt"'
+        )
+        assert response.content.decode().startswith("ACCESS REQUEST RECEIPT")
+
+    def test_an_unfiled_request_has_no_receipt(self, next_client) -> None:
+        unfiled = _unfiled_request()
+        assert next_client.get(f"/request/{unfiled.pk}/receipt/").status_code == 404
+
+    def test_the_peek_zone_get_runs_render_once_then_serves_the_intercept(
+        self, next_client, submitted_request: AccessRequest, monkeypatch
+    ) -> None:
+        calls: list[int] = []
+        is_filed = AccessRequest.is_filed
+
+        def counted(access_request: AccessRequest) -> bool:
+            calls.append(access_request.pk)
+            return is_filed(access_request)
+
+        monkeypatch.setattr(AccessRequest, "is_filed", counted)
+        pk = submitted_request.pk
+        response = next_client.get_zones(f"/request/{pk}/receipt/", "receipt-peek")
+
+        assert calls == [pk]
+        assert response.status_code == 200
+        html = envelope_of(response).html_for_zone("receipt-peek")
+        assert "data-receipt-peek" in html
+        assert f"AR-{pk:05d}" in html
+        assert [op["title"] for op in _meta_ops(response)] == [
+            f"Receipt preview · Request #{pk} · next.dj audit"
+        ]
+        assert _meta_ops(response)[0]["robots"] == "noindex"
+
+    def test_a_render_denial_stops_the_peek(self, next_client) -> None:
+        unfiled = _unfiled_request()
+        response = next_client.get_zones(
+            f"/request/{unfiled.pk}/receipt/", "receipt-peek"
+        )
+        assert response.status_code == 404
+
+    def test_a_render_response_answers_the_zone_get_as_is(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        response = next_client.get_zones(
+            f"/request/{submitted_request.pk}/receipt/?format=txt", "receipt-peek"
+        )
+        assert response["Content-Type"] == "text/plain; charset=utf-8"
+
+    def test_a_zone_no_intercept_declares_is_a_dynamic_body_400(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        response = next_client.get_zones(
+            f"/request/{submitted_request.pk}/receipt/", "no-such-zone"
+        )
+        assert response.status_code == 400
+        assert response.content == b"zone in dynamic body"

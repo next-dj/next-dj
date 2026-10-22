@@ -74,11 +74,21 @@ A bare ``def render(request)`` therefore receives ``None``.
    from django.http import HttpRequest
    from notes.models import Report
 
+   from next import context
    from next.urls import DUrl
 
-   def render(request: HttpRequest, report_id: DUrl[int]) -> str:
-       report = Report.objects.get(pk=report_id)
-       return f"<section>Report {report.title}</section>"
+   @context("report")
+   def report(report_id: DUrl[int]) -> Report:
+       return Report.objects.get(pk=report_id)
+
+   def render(request: HttpRequest) -> str:
+       return "<section>Report {{ report.title }}</section>"
+
+.. warning::
+
+   The string that ``render`` returns is compiled as template source.
+   Request, user, and model data therefore belongs in ``@context`` callables and is read in the string with ``{{ ... }}``.
+   Interpolating such data into the string with an f-string, ``%``, ``str.format``, or concatenation lets a value that contains template syntax run as template code.
 
 The return value follows a strict contract.
 

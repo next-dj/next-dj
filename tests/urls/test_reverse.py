@@ -4,7 +4,7 @@ from django.urls import NoReverseMatch
 
 from next.testing import override_next_settings
 from next.urls import page_reverse, page_reverse_lazy, with_query
-from tests.support import NAMESPACED_URLCONF
+from tests.support import NAMESPACED_URLCONF, default_page_router_config, write_page
 
 
 CUSTOM_NAMESPACE_URLCONF = "tests.urls.urls_custom_namespace"
@@ -123,3 +123,24 @@ class TestPageReverseLazy:
 
         with override_settings(ROOT_URLCONF=NAMESPACED_URLCONF):
             assert str(value) == "/items/7/"
+
+
+class TestPageReverseRouteGroups:
+    """A route group is a directory name only, so the template leaves it out."""
+
+    @pytest.fixture(autouse=True)
+    def grouped_tree(self, tmp_path):
+        write_page(tmp_path, "(auth)/login")
+        with override_next_settings(PAGE_BACKENDS=default_page_router_config(tmp_path)):
+            yield
+
+    def test_the_template_without_the_group_reverses(self) -> None:
+        with override_settings(ROOT_URLCONF=NAMESPACED_URLCONF):
+            assert page_reverse("login") == "/login/"
+
+    def test_the_template_naming_the_group_raises_no_reverse_match(self) -> None:
+        with (
+            override_settings(ROOT_URLCONF=NAMESPACED_URLCONF),
+            pytest.raises(NoReverseMatch),
+        ):
+            page_reverse("(auth)/login")

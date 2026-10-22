@@ -1,0 +1,31 @@
+{% zone "audit-log-peek" %}
+<article class="w-[min(32rem,90vw)] space-y-4 p-6" data-audit-log-peek>
+  <header class="flex items-start justify-between gap-4">
+    <div class="space-y-1">
+      <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Request #{{ access_request.pk }} · {{ linked_rows }} linked row{{ linked_rows|pluralize }}
+      </p>
+      <h2 class="text-lg font-semibold tracking-tight">{{ access_request.full_name }}</h2>
+      <p class="text-sm text-muted-foreground">{{ access_request.email }}</p>
+    </div>
+    <form method="dialog">
+      <button type="submit" aria-label="Close"
+              class="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground">✕</button>
+    </form>
+  </header>
+
+  <dl class="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-1 text-sm">
+    <dt class="text-muted-foreground">Team</dt><dd>{{ access_request.team }}</dd>
+    <dt class="text-muted-foreground">Project</dt><dd class="font-mono">{{ access_request.project_slug }}</dd>
+    <dt class="text-muted-foreground">Access for</dt>
+    <dd>{{ access_request.expires_in_days }} day{{ access_request.expires_in_days|pluralize }}</dd>
+    <dt class="text-muted-foreground">Status</dt><dd>{{ access_request.status }}</dd>
+    <dt class="text-muted-foreground">Reason</dt><dd class="whitespace-pre-line">{{ access_request.reason }}</dd>
+  </dl>
+
+  <footer class="flex justify-end">
+    <a href="{% url 'next:page_request_int_access_request_audit' access_request=access_request.pk %}"
+       class="text-sm font-medium underline hover:text-foreground">Open the request trail</a>
+  </footer>
+</article>
+{% endzone %}

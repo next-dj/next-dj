@@ -13,6 +13,8 @@ import os
 import re
 from contextlib import suppress
 from dataclasses import dataclass
+from enum import Enum
+from itertools import groupby
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple, TypeGuard, override
 from urllib.parse import unquote_to_bytes
@@ -57,6 +59,14 @@ ROUTE_BRACKET_PATTERN: Final[re.Pattern[str]] = re.compile(
 )
 """The bracket segments of a trail, a double-bracket wildcard or a typed parameter."""
 
+ROUTE_GROUP_PATTERN: Final[re.Pattern[str]] = re.compile(r"\(([^\W\d][\w-]*)\)")
+"""A route group directory name, an identifier in parentheses the URL leaves out."""
+
+INTERCEPT_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"(?P<marker>\(\.\)|(?:\(\.\.\))+|\(\.\.\.\))(?P<rest>[^()\s/]+)"
+)
+"""An intercept directory name, one marker kind then the segment it targets."""
+
 
 _DJANGO_PARAMETER: Final[re.Pattern[str]] = re.compile(r"<([^<>]+)>")
 
@@ -97,6 +107,57 @@ def join_trail(head: str, tail: str) -> str:
 def is_dynamic_trail(url_path: str) -> bool:
     """Whether `url_path` carries a bracket segment, so it routes with parameters."""
     return ROUTE_BRACKET_PATTERN.search(url_path) is not None
+
+
+def is_route_group(name: str) -> bool:
+    """Whether the directory `name` is a route group, which adds nothing to the URL."""
+    return name[:1] == "(" and ROUTE_GROUP_PATTERN.fullmatch(name) is not None
+
+
+def strip_route_groups(raw_trail: str) -> str:
+    """Return a file-system trail with its route group segments left out."""
+    if "(" not in raw_trail:
+        return raw_trail
+    return "/".join(
+        segment for segment in raw_trail.split("/") if not is_route_group(segment)
+    )
+
+
+def parse_intercept(name: str) -> tuple[str, str] | None:
+    """Return the marker and the targeted segment of an intercept directory `name`."""
+    if name[:2] != "(.":
+        return None
+    match = INTERCEPT_PATTERN.fullmatch(name)
+    return None if match is None else (match["marker"], match["rest"])
+
+
+def resolve_intercept(scope_trail: str, marker: str, rest: str) -> str | None:
+    """Return the URL trail an intercept targets, `None` when `(..)` passes the root.
+
+    `scope_trail` is the group-free URL trail of the directory holding the intercept.
+    """
+    if marker == "(.)":
+        return join_trail(scope_trail, rest)
+    if marker == "(...)":
+        return rest
+    segments = scope_trail.split("/") if scope_trail else []
+    up = len(marker) // len("(..)")
+    if up > len(segments):
+        return None
+    return "/".join([*segments[: len(segments) - up], rest])
+
+
+@dataclass(frozen=True, slots=True)
+class InterceptPage:
+    """A page found under an intercept directory and the routed trail it serves over.
+
+    `file` is a `page.py`, virtual beside a lone `template.djx`, as the walk yields one.
+    """
+
+    target_trail: str
+    file: Path
+    source: Path
+    marker: str
 
 
 def normalise_route_name(raw_name: str) -> str:
@@ -350,14 +411,16 @@ def walk_page_tree(
     skip_dir_names: Iterable[str] = (),
     *,
     on_skipped_dir: Callable[[Path, Path, str], None] | None = None,
+    on_intercept: Callable[[InterceptPage], None] | None = None,
 ) -> Generator[tuple[str, Path], None, None]:
-    """Yield `(url_path, page_file)` for every page under `tree_root`.
+    """Yield `(url_path, page_file)` for every page under `tree_root`, groups left out.
 
-    A lone `template.djx` is a virtual page, and a `_name` folder is a skipped one.
+    A group joins the level holding it, and an intercept page goes to `on_intercept`.
     """
-    yield from _visit_page_dir(
-        tree_root, tree_root, "", frozenset(skip_dir_names), on_skipped_dir
+    walk = _PageTreeWalk(
+        tree_root, frozenset(skip_dir_names), on_skipped_dir, on_intercept
     )
+    yield from walk.visit(((tree_root, ""),), "")
 
 
 _CONVERTER_RANK: Final[dict[str, int]] = {"int": 0, "uuid": 0, "slug": 1, "path": 3}
@@ -417,29 +480,135 @@ def routes_into(name: str, skip_dir_names: frozenset[str]) -> bool:
     return not name.startswith("_") and name not in skip_dir_names
 
 
-def _visit_page_dir(
-    current_path: Path,
-    tree_root: Path,
-    url_path: str,
-    skip_dir_names: frozenset[str],
-    on_skipped_dir: Callable[[Path, Path, str], None] | None,
-) -> Generator[tuple[str, Path], None, None]:
-    """Yield the page of one directory, then descend into its route children.
+class _ChildKind(Enum):
+    """How the walk treats one subdirectory of a page-tree directory."""
 
-    The children follow in `_route_rank` order, so every file system yields one order.
+    ROUTED = "routed"
+    GROUP = "group"
+    INTERCEPT = "intercept"
+    SKIPPED = "skipped"
+
+
+def _child_kind(name: str, skip_dir_names: frozenset[str]) -> _ChildKind:
+    """Classify the subdirectory `name`, the one place the walk reads a child name."""
+    if not routes_into(name, skip_dir_names):
+        return _ChildKind.SKIPPED
+    if name[:1] != "(":
+        return _ChildKind.ROUTED
+    if name[1:2] == ".":
+        return _ChildKind.INTERCEPT
+    if ROUTE_GROUP_PATTERN.fullmatch(name) is not None:
+        return _ChildKind.GROUP
+    return _ChildKind.ROUTED
+
+
+@dataclass(frozen=True, slots=True)
+class _PageTreeWalk:
+    """One walk of a page tree and what every directory of it shares.
+
+    A skipped folder is reported with its file-system trail, as component scope reads.
     """
-    listing = list_page_dir(current_path)
-    if not listing.files.isdisjoint(PAGE_FILES):
-        yield url_path, current_path / "page.py"
-    for child in listing.children:
-        if not routes_into(child.name, skip_dir_names):
-            if on_skipped_dir is not None:
-                on_skipped_dir(child, tree_root, url_path)
-            continue
-        child_url = f"{url_path}/{child.name}" if url_path else child.name
-        yield from _visit_page_dir(
-            child, tree_root, child_url, skip_dir_names, on_skipped_dir
-        )
+
+    tree_root: Path
+    skip_dir_names: frozenset[str]
+    on_skipped_dir: Callable[[Path, Path, str], None] | None
+    on_intercept: Callable[[InterceptPage], None] | None
+
+    def visit(
+        self, directories: tuple[tuple[Path, str], ...], url_trail: str
+    ) -> Generator[tuple[str, Path], None, None]:
+        """Yield the pages of one URL level, then descend into its routed children.
+
+        The same-named children of its directories descend together, ranked as one.
+        """
+        pages: list[Path] = []
+        kids: list[tuple[Path, str]] = []
+        marked: list[tuple[Path, str]] = []
+        merged = len(directories) > 1
+        for directory, raw_trail in directories:
+            merged = self.flatten(directory, raw_trail, pages, kids, marked) or merged
+        for page in pages:
+            yield url_trail, page
+        for source, source_raw in marked:
+            self.intercept(source, url_trail, source_raw)
+        if not merged:
+            # One listing names each child once, already in `_route_rank` order.
+            for kid in kids:
+                yield from self.visit((kid,), join_trail(url_trail, kid[0].name))
+            return
+        # Stable, so a directory's own child stays ahead of a group's equal one, and
+        # the name closing the rank puts every child of one segment side by side.
+        kids.sort(key=lambda kid: _route_rank(kid[0].name))
+        for name, segment in groupby(kids, key=lambda kid: kid[0].name):
+            yield from self.visit(tuple(segment), join_trail(url_trail, name))
+
+    def flatten(
+        self,
+        directory: Path,
+        raw_trail: str,
+        pages: list[Path],
+        kids: list[tuple[Path, str]],
+        marked: list[tuple[Path, str]] | None,
+    ) -> bool:
+        """Collect the page, routed children and intercepts of `directory` and groups.
+
+        It returns whether a group contributed, and `marked=None` drops an intercept.
+        """
+        listing = list_page_dir(directory)
+        if not listing.files.isdisjoint(PAGE_FILES):
+            pages.append(directory / "page.py")
+        groups: list[Path] = []
+        for child in listing.children:
+            kind = _child_kind(child.name, self.skip_dir_names)
+            if kind is _ChildKind.ROUTED:
+                kids.append((child, join_trail(raw_trail, child.name)))
+            elif kind is _ChildKind.GROUP:
+                groups.append(child)
+            elif kind is _ChildKind.INTERCEPT:
+                if marked is not None:
+                    marked.append((child, join_trail(raw_trail, child.name)))
+            elif self.on_skipped_dir is not None:
+                self.on_skipped_dir(child, self.tree_root, raw_trail)
+        if not groups:
+            return False
+        groups.sort(key=lambda group: group.name)
+        for group in groups:
+            self.flatten(group, join_trail(raw_trail, group.name), pages, kids, marked)
+        return True
+
+    def intercept(self, source: Path, scope_trail: str, raw_trail: str) -> None:
+        """Walk the intercept directory `source` when its name resolves to a target.
+
+        A malformed name or a `(..)` past the root is left for the system checks.
+        """
+        if self.on_intercept is None and self.on_skipped_dir is None:
+            return
+        parsed = parse_intercept(source.name)
+        if parsed is None:
+            return
+        marker, rest = parsed
+        target_trail = resolve_intercept(scope_trail, marker, rest)
+        if target_trail is not None:
+            self.mark(source, source, marker, target_trail, raw_trail)
+
+    def mark(
+        self,
+        directory: Path,
+        source: Path,
+        marker: str,
+        target_trail: str,
+        raw_trail: str,
+    ) -> None:
+        """Report the pages under one directory of an intercept, never routing them."""
+        pages: list[Path] = []
+        kids: list[tuple[Path, str]] = []
+        self.flatten(directory, raw_trail, pages, kids, None)
+        if self.on_intercept is not None:
+            for page in pages:
+                self.on_intercept(InterceptPage(target_trail, page, source, marker))
+        for child, child_raw in kids:
+            child_trail = join_trail(target_trail, child.name)
+            self.mark(child, source, marker, child_trail, child_raw)
 
 
 _MIDDLEWARE_CLASSES: dict[str, type] = {}

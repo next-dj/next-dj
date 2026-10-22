@@ -202,11 +202,17 @@ The organic page answers ``Cache-Control: public, max-age=60, s-maxage=600, stal
 Partial responses
 -----------------
 
-Every zone response carries ``Cache-Control: private, no-store`` together with the ``headers`` of its page, the answer to a zone GET, a lazy zone, and a refused zone request alike.
+Every zone response carries ``Cache-Control: private, no-store`` together with the ``headers`` of its page, the answer to a zone GET, a lazy zone, and a 400 or 409 refusal alike.
+A denial by the access rule of the page itself is the response a plain GET of the URL gets, since it does not depend on the zone.
 A response that the page's ``render()`` function returns to a zone GET carries ``private, no-store`` too, unless it sets a ``Cache-Control`` of its own.
 A zone response whose render contained a failure carries ``private, no-store`` whatever it sets.
 Every patch envelope an action answers carries ``private, no-store`` as well, and a stream carries ``no-cache, no-transform``.
 Many CDNs ignore ``Vary``, so a cached zone response would reach a visitor who asked for the full page at the same URL.
+A zone response that an intercepting route serves follows the same rules.
+It carries ``private, no-store`` and ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, and no ``ETag``.
+A refusal of the intercept carries them as well, even when a custom ``handler403`` or ``handler404`` sets a ``Cache-Control`` of its own.
+The ``cache`` and ``headers`` of an intercept page never apply to its zone response, and a check reports one that declares them.
+A CDN therefore keys on ``X-Next-Zone`` or bypasses partial requests, because one URL answers a different page per zone name.
 A CDN in front of a shared page therefore bypasses its cache for every request that carries ``X-Next-Request``, see :doc:`/content/howto/cache-pages-on-a-cdn`.
 
 See also

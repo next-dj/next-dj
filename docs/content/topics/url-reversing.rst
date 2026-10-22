@@ -53,6 +53,25 @@ The default ``page_{name}`` yields ``next:page_posts_slug``.
 Changing ``URL_NAME_TEMPLATE`` changes the name ``page_reverse`` resolves against without any call-site edits.
 See :doc:`file-router` for the setting and the segment-naming rules.
 
+Route groups
+~~~~~~~~~~~~
+
+A route group is a directory name that leaves the URL and the URL name, see :ref:`topics-file-router-route-groups`.
+The template names the directory without the group.
+
+.. code-block:: python
+   :caption: route groups
+
+   # pages/(auth)/login/page.py
+   page_reverse("login")           # "/login/"
+
+The spelling that includes the group computes a name no page has and raises ``NoReverseMatch``.
+
+.. code-block:: python
+   :caption: the group spelling
+
+   page_reverse("(auth)/login")    # raises NoReverseMatch
+
 Namespace override
 ~~~~~~~~~~~~~~~~~~
 

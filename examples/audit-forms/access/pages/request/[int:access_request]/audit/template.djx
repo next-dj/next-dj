@@ -48,7 +48,11 @@
     {% endif %}
   </div>
 
-  <p class="text-xs text-muted-foreground">
+  <p class="flex gap-4 text-xs text-muted-foreground">
+    {% if filed %}
+      <a href="{% url 'next:page_request_int_access_request_receipt' access_request=access_request.pk %}"
+         data-next-layer="receipt-peek" class="underline hover:text-foreground">View the receipt</a>
+    {% endif %}
     <a href="{% url 'next:page_admin_audit' %}" class="underline hover:text-foreground">View the global audit log →</a>
   </p>
 </div>

@@ -121,6 +121,12 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - After placeholder replacement completes.
        ``placeholders_replaced`` is the tuple of replaced slot names.
        ``injected_bytes`` is the length delta.
+   * - ``intercept_registered``
+     - ``FileRouterBackend``
+     - ``target_file``, ``file_path``, ``marker``
+     - Once per intercept rule, after the file router publishes the rules of a page tree to the intercept table.
+       ``target_file`` is the ``page.py`` of the routed page the rule sits over, ``file_path`` is the page of the intercept, and ``marker`` is the prefix of its directory name, ``(.)``, ``(..)`` repeated once per level, or ``(...)``.
+       A walk that began before a router reload and finished after it publishes nothing and sends nothing.
    * - ``metadata_registered``
      - ``PageMetadataRegistry``
      - ``file_path``, ``inherit``

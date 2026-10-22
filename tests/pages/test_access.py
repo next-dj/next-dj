@@ -212,6 +212,34 @@ class TestInheritedAccess:
         assert rule.requirements == ()
 
 
+class TestAccessThroughGroups:
+    """A group `page.py` binds the pages inside the group and none outside it."""
+
+    def test_an_inherited_guard_in_a_group_binds_the_pages_below_it(
+        self, root, client
+    ) -> None:
+        write_guard(root / "(app)", _LOGIN_INHERIT)
+        write_page(root, "(app)/dash", page_source())
+        write_page(root, "open", page_source())
+
+        with routed(root):
+            inside = client.get("/dash/")
+            outside = client.get("/open/")
+
+        assert (inside.status_code, outside.status_code) == (302, 200)
+
+    def test_the_rule_names_the_group_file_as_its_source(self, root) -> None:
+        guard = write_guard(root / "(app)", _LOGIN_INHERIT)
+        page_path = write_page(root, "(app)/dash", page_source())
+
+        with routed(root):
+            rule = page_access(page_path).rule
+
+        assert [(item.kind, item.source) for item in rule.requirements] == [
+            ("login", guard)
+        ]
+
+
 class TestMountedTrees:
     """A `pages()` tree starts its chain at its own root, never at the host."""
 

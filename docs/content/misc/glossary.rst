@@ -107,6 +107,11 @@ Terms used throughout the next.dj documentation.
       The ``inherit_context=True`` flag on ``@context`` in ``page.py``.
       Publishes the context value to every descendant page under that directory, not only to the page that declares it.
 
+   intercepting route
+      A directory named with a ``(.)``, ``(..)`` or ``(...)`` marker and a segment, whose page answers a zone request of the page it targets.
+      The router never routes it.
+      See :ref:`topics-file-router-intercepts`.
+
    layer
       A server-initiated overlay stacked above the current page, opened by the ``layer.open`` patch verb or a ``data-next-layer`` link.
       The client runtime hosts each layer in its own ``<dialog>`` element and closes the top layer on accept, dismissal, or Back.
@@ -200,6 +205,11 @@ Terms used throughout the next.dj documentation.
       The Django URL name string inside the ``next`` namespace (``app_name`` on ``next.urls``).
       Values come from ``NEXT_FRAMEWORK["URL_NAME_TEMPLATE"]``, default ``"page_{name}"``, where ``{name}`` is derived from the normalized filesystem path.
       Reverse from templates as ``{% url 'next:page_notes_id' id=note.id %}`` or from Python through :doc:`/content/topics/url-reversing`.
+
+   route group
+      A directory named with an identifier in parentheses, such as ``(auth)``.
+      It adds nothing to the URL or the URL name and scopes layouts, access, context, and components below it.
+      See :ref:`topics-file-router-route-groups`.
 
    scope
       The keying rule for an action name, ``page`` or ``shared``.

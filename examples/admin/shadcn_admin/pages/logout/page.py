@@ -1,4 +1,0 @@
-from next import page
-
-
-page.public()

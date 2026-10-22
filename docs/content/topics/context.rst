@@ -308,6 +308,26 @@ Every callable that runs after it and asks for that name receives the object it 
 
 ``offers`` is declared after ``category``, so it receives the ``Category`` row, and the annotation of each parameter stays honest.
 
+Inherited context in a route group
+----------------------------------
+
+A ``page.py`` in a route group publishes inherited context to every page below the group, since the walk climbs the directories on disk and a group is one of them, see :ref:`topics-file-router-route-groups`.
+The group page needs no body for it.
+A ``page.py`` with only an ``@context(..., inherit_context=True)`` callable serves no URL and still feeds the pages of the group.
+
+.. code-block:: python
+   :caption: notes/pages/(app)/page.py
+
+   from notes.models import Note
+
+   from next import context
+
+   @context("note_count", inherit_context=True)
+   def note_count() -> int:
+       return Note.objects.count()
+
+Every page under ``(app)/`` reads ``note_count``, and a page under ``(auth)/`` does not.
+
 .. _topics-context-serialization:
 
 Serialization for the browser

@@ -44,8 +44,9 @@ The table runs roughly in order of how much it assumes.
    * - :repo:`audit-forms <tree/main/examples/audit-forms>`
      - Records an audit trail of every submission through two independent channels, a custom form action backend and receivers on ``action_dispatched`` and ``form_validation_failed``.
        Runs a multi-step wizard inside a modal layer above a lazily loaded audit table.
+       Opens three intercepting routes as modals over the real pages, a ``(.)request/[int:access_request]/audit/`` peek with a polling zone inside the modal, a ``(...)`` peek of the same request from ``/admin/audit/``, and a receipt modal over a target whose body is a ``render()`` function.
        Titles its pages, keeps the wizard and the audit pages ``noindex``, and titles a request audit by its primary key through ``@page.metadata``, so no personal data reaches a tab title.
-     - :doc:`/content/topics/forms/wizard`, :doc:`/content/topics/forms/backends`, :doc:`/content/topics/forms/signals`, :doc:`/content/topics/partial-rendering/index`
+     - :doc:`/content/topics/forms/wizard`, :doc:`/content/topics/forms/backends`, :doc:`/content/topics/forms/signals`, :doc:`/content/topics/partial-rendering/index`, :ref:`topics-file-router-intercepts`
    * - :repo:`search-catalog <tree/main/examples/search-catalog>`
      - Filters a catalog from the query string with faceted filters that submit themselves and a list that extends as the visitor scrolls, across three levels of nested layouts sharing inherited context and a cached search.
        Carries one title template across the layouts, a self canonical that drops the filter query, a ``meta`` patch after a preset filter, and a ``sitemap.py`` over categories and products.
@@ -79,8 +80,10 @@ The table runs roughly in order of how much it assumes.
        The crumbs of each page come from its own tree, so the activity feed reads ``Dashboard › Activity`` and the outline ``Dashboard › Outline``.
        Titles every model page, the changelist, the add, change, and delete forms, and the history, after its model through ``@page.metadata(inherit=True)``, and keeps the whole site out of search through ``SITE["INDEXABLE"] = False``, publishing no sitemap or robots file.
        Its ``admin_audit`` application serves its activity feed from its own ``pages/activity/`` and plugs its sidebar link and dashboard panel into ``shadcn_admin`` from its ``admin.py`` through ``register_nav`` and ``register_panel``, a registry in ``shadcn_admin/services.py`` that works the way ``admin.register`` does, so the base never imports the plugin.
+       Splits the pages of ``shadcn_admin`` into the route groups ``(auth)`` and ``(app)``, which add nothing to any URL, and gives ``(auth)`` a root layout that opens with ``{% layout root %}`` and cuts the admin chrome out of the login and logout pages.
+       Opens a quick-edit modal through the intercept ``(.)[int:pk]/change/`` over the changelist with the change form inside it, a ``(..)history/`` peek of the latest entries of a row, and a manuscript peek in ``library/pages/library/book/[int:book]/(.)manuscript/`` whose target and intercept each check an object permission.
        Its object permissions in ``permissions.py`` are plain functions that combine their conditions with ``and`` and ``or``, and the seeded ``editor`` account shows them narrowing a staff user.
-     - :doc:`/content/howto/integrate-django-admin`, :doc:`/content/topics/multi-project`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/file-router`, :doc:`/content/topics/access`, :doc:`/content/topics/permissions`
+     - :doc:`/content/howto/integrate-django-admin`, :doc:`/content/topics/multi-project`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/file-router`, :ref:`topics-file-router-route-groups`, :ref:`topics-file-router-intercepts`, :doc:`/content/topics/access`, :doc:`/content/topics/permissions`
 
 Shared assets
 -------------

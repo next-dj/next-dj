@@ -103,6 +103,42 @@ An anonymous visitor is redirected to ``LOGIN_URL``, and a user without the perm
 A branded 403 page needs a ``403.html`` template or a ``handler403`` in the root URLconf, see :doc:`/content/howto/customize-error-pages`.
 A tree that a ``pages()`` include places under a prefix of this one inherits nothing of it, so it declares its own, see :ref:`topics-access-tree-boundary`.
 
+Split the site with route groups
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Route groups put the closed pages and the open ones in directories of their own without a segment in the URL, see :ref:`topics-file-router-route-groups`.
+The ``page.py`` of each group declares the rule of its side.
+
+.. code-block:: text
+   :caption: accounts/pages/
+
+   (app)/
+     page.py
+     notes/
+       page.py
+   (auth)/
+     page.py
+     login/
+       page.py
+
+.. code-block:: python
+   :caption: accounts/pages/(app)/page.py
+
+   from next import page
+
+   page.login_required(inherit=True)
+
+.. code-block:: python
+   :caption: accounts/pages/(auth)/page.py
+
+   from next import page
+
+   page.public(inherit=True)
+
+``/notes/`` requires a login and ``/login/`` stays open, and neither URL carries the group.
+Neither ``page.py`` has a body, so they route nothing and only bind the pages below them.
+Without ``inherit=True`` such a rule protects nothing, and ``next.E166`` reports it, see :ref:`ref-system-checks`.
+
 Wire the login route
 ~~~~~~~~~~~~~~~~~~~~
 

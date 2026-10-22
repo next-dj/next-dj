@@ -58,6 +58,18 @@ A tree that a ``pages()`` include places under a prefix starts its trail at its 
 A ``page.py`` that serves no page and declares the access of the pages below it may still set a ``breadcrumb``, see :ref:`topics-access-declaring-page`.
 Its crumb reverses the route of its directory like any other, so it links to whatever page answers that route in the namespace of the request, and renders as plain text when none does.
 
+Route groups and intercepts
+---------------------------
+
+Crumb trails are URL trails, so a route group leaves them like it leaves the URL, see :ref:`topics-file-router-route-groups`.
+A ``page.py`` whose own directory is a group gives no crumb.
+Its other metadata, the title and the description among them, still folds into the pages below it.
+A ``breadcrumb`` declared in the metadata of a group ``page.py`` is dropped, and :ref:`next.W136 <ref-system-checks>` reports it.
+The crumbs of a page below a group link to the group-free URLs.
+
+An intercept page builds no breadcrumbs, since its zone response renders no layout.
+:ref:`next.W138 <ref-system-checks>` reports a ``breadcrumb`` declared on one.
+
 The tag
 -------
 

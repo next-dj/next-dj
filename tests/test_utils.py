@@ -14,6 +14,9 @@ from django.test import override_settings
 from next.errors import InvalidDirsError
 from next.urls.dispatcher import scan_pages_tree
 from next.utils import (
+    INTERCEPT_PATTERN,
+    ROUTE_GROUP_PATTERN,
+    InterceptPage,
     PageRoot,
     TreeSource,
     child_nodelists,
@@ -22,20 +25,30 @@ from next.utils import (
     is_dynamic_trail,
     is_int,
     is_middleware,
+    is_route_group,
     is_within,
     join_trail,
     load_tree_source,
     middleware_listed,
     page_roots_shape_error,
+    parse_intercept,
     prefix_trail,
     redirect_or_fallback,
     regex_trail,
     resolve_base_dir,
+    resolve_intercept,
     stat_mtime_ns,
+    strip_route_groups,
     template_edits_watched,
     walk_page_tree,
 )
 from tests.support import write_page
+from tests.support.cases.grammar import (
+    INTERCEPT_NAME_CASES,
+    INTERCEPT_RESOLVE_CASES,
+    InterceptNameCase,
+    InterceptResolveCase,
+)
 
 
 _OVERSIZE_TARGET = "/search/?q=" + "\u044f" * 3000
@@ -394,6 +407,496 @@ class TestPrivateDirectories:
 
         assert routes == ["", "about"]
         assert registered == [("_components", tmp_path, "")]
+
+
+class TestRouteGroupNames:
+    """A directory named as an identifier in parentheses is a route group."""
+
+    @pytest.mark.parametrize(
+        "name", ["(app)", "(a-b)", "(a_b)", "(x1)", "(_x)"], ids=str
+    )
+    def test_a_group_name(self, name: str) -> None:
+        assert is_route_group(name) is True
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "()",
+            "(a b)",
+            "((x))",
+            "(x",
+            "x)",
+            "([id])",
+            "(1x)",
+            "(.)x",
+            "(..)x",
+            "(...)x",
+            "(x)y",
+            "x",
+            "[id]",
+            "",
+        ],
+        ids=repr,
+    )
+    def test_not_a_group_name(self, name: str) -> None:
+        assert is_route_group(name) is False
+
+    def test_the_pattern_matches_a_whole_name_only(self) -> None:
+        assert ROUTE_GROUP_PATTERN.fullmatch("(app)") is not None
+        assert ROUTE_GROUP_PATTERN.fullmatch("(app)x") is None
+        assert ROUTE_GROUP_PATTERN.fullmatch("x(app)") is None
+
+    @pytest.mark.parametrize(
+        ("raw", "stripped"),
+        [
+            ("", ""),
+            ("dash/stats", "dash/stats"),
+            ("(app)", ""),
+            ("(app)/dash/(x)/y", "dash/y"),
+            ("[id]/(g)/k", "[id]/k"),
+            ("(1x)/y", "(1x)/y"),
+        ],
+    )
+    def test_stripping_a_trail(self, raw: str, stripped: str) -> None:
+        assert strip_route_groups(raw) == stripped
+
+    def test_a_trail_without_parentheses_comes_back_as_is(self) -> None:
+        raw = "dash/stats"
+
+        assert strip_route_groups(raw) is raw
+
+
+class TestRouteGroupWalk:
+    """A group page and children merge into the URL level of the folder holding it."""
+
+    def _walk(self, root: Path, *skip: str) -> list[str]:
+        return [trail for trail, _page in walk_page_tree(root, skip)]
+
+    def test_a_group_at_the_root_serves_the_root_url(self, tmp_path: Path) -> None:
+        write_page(tmp_path, "(app)")
+        write_page(tmp_path, "(app)/dash")
+
+        assert self._walk(tmp_path) == ["", "dash"]
+
+    def test_a_group_page_yields_its_own_file_at_the_parent_trail(
+        self, tmp_path: Path
+    ) -> None:
+        write_page(tmp_path, "docs")
+        grouped = write_page(tmp_path, "docs/(g)")
+
+        assert list(walk_page_tree(tmp_path)) == [
+            ("docs", tmp_path / "docs" / "page.py"),
+            ("docs", grouped),
+        ]
+
+    def test_a_lone_template_in_a_group_is_a_page_at_the_parent_trail(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "(g)").mkdir()
+        (tmp_path / "(g)" / "template.djx").write_text("hi")
+
+        assert list(walk_page_tree(tmp_path)) == [("", tmp_path / "(g)" / "page.py")]
+
+    def test_nested_groups_flatten(self, tmp_path: Path) -> None:
+        write_page(tmp_path, "(a)/(b)/bbb")
+        write_page(tmp_path, "(a)/(b)")
+        write_page(tmp_path, "(a)/(c)/ccc")
+
+        assert self._walk(tmp_path) == ["", "bbb", "ccc"]
+
+    def test_a_parameter_below_a_group_and_a_group_below_a_parameter(
+        self, tmp_path: Path
+    ) -> None:
+        write_page(tmp_path, "(app)/[int:id]")
+        write_page(tmp_path, "[slug]/(g)/edit")
+
+        assert self._walk(tmp_path) == ["[int:id]", "[slug]/edit"]
+
+    def test_a_private_folder_hides_the_groups_inside_it(self, tmp_path: Path) -> None:
+        write_page(tmp_path, "_private/(x)/page")
+        write_page(tmp_path, "about")
+
+        assert self._walk(tmp_path) == ["about"]
+
+    def test_a_private_folder_inside_a_group_is_skipped(self, tmp_path: Path) -> None:
+        write_page(tmp_path, "(x)/_private/page")
+        write_page(tmp_path, "(x)/about")
+        skipped: list[str] = []
+
+        routes = [
+            trail
+            for trail, _page in walk_page_tree(
+                tmp_path,
+                on_skipped_dir=lambda folder, _root, _trail: skipped.append(
+                    folder.name
+                ),
+            )
+        ]
+
+        assert routes == ["about"]
+        assert skipped == ["_private"]
+
+    def test_the_merged_level_ranks_a_literal_before_a_parameter(
+        self, tmp_path: Path
+    ) -> None:
+        write_page(tmp_path, "(app)/[id]")
+        write_page(tmp_path, "new")
+
+        assert self._walk(tmp_path) == ["new", "[id]"]
+
+    def test_equal_names_follow_the_group_name_order_after_the_own_folder(
+        self, tmp_path: Path
+    ) -> None:
+        own = write_page(tmp_path, "item")
+        beta = write_page(tmp_path, "(beta)/item")
+        alpha = write_page(tmp_path, "(alpha)/item")
+
+        assert [page for _trail, page in walk_page_tree(tmp_path)] == [own, alpha, beta]
+
+    @pytest.mark.parametrize(
+        ("static", "dynamic"),
+        [("(admin)/shop/new", "shop/[slug]"), ("shop/new", "(admin)/shop/[slug]")],
+    )
+    def test_a_segment_split_across_groups_ranks_its_children_together(
+        self, tmp_path: Path, static: str, dynamic: str
+    ) -> None:
+        write_page(tmp_path, dynamic)
+        write_page(tmp_path, static)
+
+        assert self._walk(tmp_path) == ["shop/new", "shop/[slug]"]
+
+    def test_a_catch_all_below_a_split_segment_ranks_last(self, tmp_path: Path) -> None:
+        write_page(tmp_path, "docs/[[rest]]")
+        write_page(tmp_path, "(a)/docs/[slug]")
+        write_page(tmp_path, "(b)/docs/intro")
+
+        assert self._walk(tmp_path) == ["docs/intro", "docs/[slug]", "docs/[[rest]]"]
+
+    def test_a_segment_split_across_nested_groups_merges_at_every_depth(
+        self, tmp_path: Path
+    ) -> None:
+        write_page(tmp_path, "shop/item/[id]")
+        write_page(tmp_path, "(a)/(b)/shop/item/new")
+        write_page(tmp_path, "(a)/shop/(c)/item/latest")
+
+        assert self._walk(tmp_path) == [
+            "shop/item/latest",
+            "shop/item/new",
+            "shop/item/[id]",
+        ]
+
+    def test_the_pages_of_a_split_segment_keep_the_folder_order(
+        self, tmp_path: Path
+    ) -> None:
+        own = write_page(tmp_path, "shop")
+        alpha = write_page(tmp_path, "(alpha)/shop")
+        beta = write_page(tmp_path, "(beta)/shop")
+        inner = write_page(tmp_path, "shop/(g)")
+
+        assert list(walk_page_tree(tmp_path)) == [
+            ("shop", own),
+            ("shop", inner),
+            ("shop", alpha),
+            ("shop", beta),
+        ]
+
+    def test_a_split_segment_reports_each_skipped_folder_with_its_own_trail(
+        self, tmp_path: Path
+    ) -> None:
+        write_page(tmp_path, "shop/new")
+        write_page(tmp_path, "(admin)/shop/[slug]")
+        for folder in ("shop/_components", "(admin)/shop/_components"):
+            (tmp_path / folder).mkdir()
+        skipped: list[str] = []
+
+        list(
+            walk_page_tree(
+                tmp_path,
+                on_skipped_dir=lambda _folder, _root, trail: skipped.append(trail),
+            )
+        )
+
+        assert skipped == ["shop", "(admin)/shop"]
+
+    def test_an_intercept_in_a_split_segment_targets_the_url_trail(
+        self, tmp_path: Path
+    ) -> None:
+        write_page(tmp_path, "feed/photo")
+        source = tmp_path / "(app)" / "feed" / "(.)photo"
+        page = write_page(tmp_path, "(app)/feed/(.)photo")
+        found: list[InterceptPage] = []
+
+        list(walk_page_tree(tmp_path, on_intercept=found.append))
+
+        assert found == [InterceptPage("feed/photo", page, source, "(.)")]
+
+    def test_groups_without_anything_in_them_add_nothing(self, tmp_path: Path) -> None:
+        write_page(tmp_path, "about")
+        (tmp_path / "(empty)").mkdir()
+        (tmp_path / "(other)" / "(inner)").mkdir(parents=True)
+
+        assert self._walk(tmp_path) == ["about"]
+
+    def test_a_tree_without_groups_keeps_its_order(self, tmp_path: Path) -> None:
+        for trail in ("", "zeta", "[id]", "alpha", "alpha/[slug]", "alpha/new"):
+            write_page(tmp_path, trail)
+
+        assert self._walk(tmp_path) == [
+            "",
+            "alpha",
+            "alpha/new",
+            "alpha/[slug]",
+            "zeta",
+            "[id]",
+        ]
+
+    def test_a_skipped_folder_is_reported_with_its_file_system_trail(
+        self, tmp_path: Path
+    ) -> None:
+        write_page(tmp_path, "(app)/dash")
+        for folder in ("(app)/_components", "(app)/dash/_components"):
+            (tmp_path / folder).mkdir()
+        skipped: list[tuple[Path, str]] = []
+
+        list(
+            walk_page_tree(
+                tmp_path,
+                on_skipped_dir=lambda folder, root, trail: skipped.append(
+                    (folder.relative_to(root), trail)
+                ),
+            )
+        )
+
+        assert sorted(skipped) == [
+            (Path("(app)/_components"), "(app)"),
+            (Path("(app)/dash/_components"), "(app)/dash"),
+        ]
+
+
+class TestInterceptNames:
+    """An intercept name is one marker kind followed by the segment it targets."""
+
+    @pytest.mark.parametrize("case", INTERCEPT_NAME_CASES, ids=lambda c: repr(c.name))
+    def test_parsing_a_name(self, case: InterceptNameCase) -> None:
+        assert parse_intercept(case.name) == case.parsed
+
+    def test_the_pattern_matches_a_whole_name_only(self) -> None:
+        assert INTERCEPT_PATTERN.fullmatch("(.)photo") is not None
+        assert INTERCEPT_PATTERN.fullmatch("x(.)photo") is None
+        assert INTERCEPT_PATTERN.fullmatch("(.)photo)") is None
+
+    @pytest.mark.parametrize(
+        "case", INTERCEPT_RESOLVE_CASES, ids=lambda c: f"{c.scope}|{c.marker}{c.rest}"
+    )
+    def test_resolving_a_target(self, case: InterceptResolveCase) -> None:
+        assert resolve_intercept(case.scope, case.marker, case.rest) == case.target
+
+
+class TestInterceptWalk:
+    """An intercept page is reported with the trail it serves over and never routed."""
+
+    @staticmethod
+    def _scan(
+        root: Path, *skip: str
+    ) -> tuple[list[tuple[str, Path]], list[InterceptPage]]:
+        found: list[InterceptPage] = []
+        routes = list(walk_page_tree(root, skip, on_intercept=found.append))
+        return routes, found
+
+    def test_a_page_below_an_intercept_targets_the_resolved_trail(
+        self, tmp_path: Path
+    ) -> None:
+        feed = write_page(tmp_path, "feed")
+        photo = write_page(tmp_path, "feed/(.)photo/[id]")
+
+        routes, found = self._scan(tmp_path)
+
+        assert routes == [("feed", feed)]
+        assert found == [
+            InterceptPage(
+                "feed/photo/[id]", photo, tmp_path / "feed" / "(.)photo", "(.)"
+            )
+        ]
+
+    def test_the_intercept_directory_page_targets_the_resolved_trail(
+        self, tmp_path: Path
+    ) -> None:
+        own = write_page(tmp_path, "feed/(.)photo")
+
+        routes, found = self._scan(tmp_path)
+
+        assert routes == []
+        assert found == [
+            InterceptPage("feed/photo", own, tmp_path / "feed" / "(.)photo", "(.)")
+        ]
+
+    def test_a_virtual_page_inside_an_intercept_is_reported(
+        self, tmp_path: Path
+    ) -> None:
+        folder = tmp_path / "feed" / "(.)photo"
+        folder.mkdir(parents=True)
+        (folder / "template.djx").write_text("hi")
+
+        routes, found = self._scan(tmp_path)
+
+        assert routes == []
+        assert found == [InterceptPage("feed/photo", folder / "page.py", folder, "(.)")]
+
+    @pytest.mark.parametrize(
+        ("trail", "marker", "target"),
+        [
+            ("a/b/(..)x", "(..)", "a/x"),
+            ("a/b/c/(..)(..)x", "(..)(..)", "a/x"),
+            ("a/b/c/(...)x", "(...)", "x"),
+            ("(.)x", "(.)", "x"),
+            ("(...)x", "(...)", "x"),
+        ],
+    )
+    def test_every_marker_resolves_from_its_directory(
+        self, tmp_path: Path, trail: str, marker: str, target: str
+    ) -> None:
+        file = write_page(tmp_path, trail)
+
+        _routes, found = self._scan(tmp_path)
+
+        assert found == [InterceptPage(target, file, tmp_path / trail, marker)]
+
+    def test_a_group_inside_an_intercept_flattens(self, tmp_path: Path) -> None:
+        own = write_page(tmp_path, "feed/(.)photo/(g)")
+        deep = write_page(tmp_path, "feed/(.)photo/(g)/(h)/[id]")
+
+        _routes, found = self._scan(tmp_path)
+
+        source = tmp_path / "feed" / "(.)photo"
+        assert sorted(found, key=lambda hit: hit.target_trail) == [
+            InterceptPage("feed/photo", own, source, "(.)"),
+            InterceptPage("feed/photo/[id]", deep, source, "(.)"),
+        ]
+
+    @pytest.mark.parametrize(
+        "trail", ["(app)/feed/(.)photo", "feed/(g)/(.)photo", "(app)/feed/(g)/(.)photo"]
+    )
+    def test_an_intercept_inside_a_group_leaves_the_group_out_of_the_scope(
+        self, tmp_path: Path, trail: str
+    ) -> None:
+        write_page(tmp_path, trail)
+
+        _routes, found = self._scan(tmp_path)
+
+        assert [hit.target_trail for hit in found] == ["feed/photo"]
+
+    def test_an_intercept_inside_a_root_group_resolves_from_the_root(
+        self, tmp_path: Path
+    ) -> None:
+        write_page(tmp_path, "(g)/(..)x")
+        write_page(tmp_path, "(g)/(.)y")
+
+        _routes, found = self._scan(tmp_path)
+
+        assert [hit.target_trail for hit in found] == ["y"]
+
+    def test_a_nested_intercept_is_dropped(self, tmp_path: Path) -> None:
+        own = write_page(tmp_path, "feed/(.)photo")
+        write_page(tmp_path, "feed/(.)photo/(.)inner")
+        write_page(tmp_path, "feed/(.)photo/[id]/(...)deep")
+        write_page(tmp_path, "feed/(.)photo/(g)/(.)other")
+
+        routes, found = self._scan(tmp_path)
+
+        assert routes == []
+        assert [hit.file for hit in found] == [own]
+
+    def test_a_malformed_name_and_a_marker_past_the_root_are_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        write_page(tmp_path, "(.)")
+        write_page(tmp_path, "(..)x")
+        write_page(tmp_path, "(.)(..)x")
+        write_page(tmp_path, "feed/(..)(..)x")
+
+        routes, found = self._scan(tmp_path)
+
+        assert routes == []
+        assert found == []
+
+    def test_a_parenthesised_name_that_is_no_group_is_routed(
+        self, tmp_path: Path
+    ) -> None:
+        odd = write_page(tmp_path, "(1x)")
+        spaced = write_page(tmp_path, "(a b)")
+
+        routes, found = self._scan(tmp_path)
+
+        assert sorted(routes) == [("(1x)", odd), ("(a b)", spaced)]
+        assert found == []
+
+    def test_without_a_callback_an_intercept_is_never_routed(
+        self, tmp_path: Path
+    ) -> None:
+        about = write_page(tmp_path, "about")
+        write_page(tmp_path, "feed/(.)photo/[id]")
+        write_page(tmp_path, "(.)")
+
+        assert list(walk_page_tree(tmp_path)) == [("about", about)]
+
+    def test_a_skipped_folder_inside_an_intercept_keeps_the_file_system_trail(
+        self, tmp_path: Path
+    ) -> None:
+        write_page(tmp_path, "feed/(.)photo/(g)/[id]")
+        for folder in (
+            "feed/(.)photo/_components",
+            "feed/(.)photo/(g)/_components",
+            "feed/(.)photo/(g)/[id]/_components",
+        ):
+            (tmp_path / folder).mkdir(parents=True, exist_ok=True)
+        skipped: list[tuple[Path, str]] = []
+
+        for callbacks in ({"on_intercept": lambda _hit: None}, {}):
+            skipped.clear()
+            list(
+                walk_page_tree(
+                    tmp_path,
+                    ("_components",),
+                    on_skipped_dir=lambda folder, root, trail: skipped.append(
+                        (folder.relative_to(root), trail)
+                    ),
+                    **callbacks,
+                )
+            )
+
+            assert sorted(skipped) == [
+                (Path("feed/(.)photo/(g)/[id]/_components"), "feed/(.)photo/(g)/[id]"),
+                (Path("feed/(.)photo/(g)/_components"), "feed/(.)photo/(g)"),
+                (Path("feed/(.)photo/_components"), "feed/(.)photo"),
+            ]
+
+    def test_a_malformed_intercept_reports_nothing_but_the_walk_goes_on(
+        self, tmp_path: Path
+    ) -> None:
+        write_page(tmp_path, "(.)")
+        (tmp_path / "(.)" / "_components").mkdir()
+        skipped: list[Path] = []
+
+        list(
+            walk_page_tree(
+                tmp_path,
+                ("_components",),
+                on_skipped_dir=lambda folder, _root, _trail: skipped.append(folder),
+            )
+        )
+
+        assert skipped == []
+
+    def test_intercepts_do_not_change_the_sibling_order(self, tmp_path: Path) -> None:
+        for trail in ("zeta", "[id]", "alpha", "alpha/new", "alpha/[slug]"):
+            write_page(tmp_path, trail)
+        plain = [trail for trail, _page in walk_page_tree(tmp_path)]
+        for trail in ("(.)a", "(..)b", "(...)c", "alpha/(.)new/[x]", "(g)/(.)q"):
+            write_page(tmp_path, trail)
+
+        routes, _found = self._scan(tmp_path)
+
+        assert [trail for trail, _page in routes] == plain
 
 
 class _SourceError(Exception):

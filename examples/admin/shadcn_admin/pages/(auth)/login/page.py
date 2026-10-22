@@ -6,10 +6,7 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from shadcn_admin import utils
 
-from next import action, context, page
-
-
-page.public()
+from next import action, context
 
 
 def admin_login_form_factory(

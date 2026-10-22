@@ -88,3 +88,13 @@ def delete_url(app_label: str, model_name: str, pk: int | str) -> str:
         model_name=model_name,
         pk=pk,
     )
+
+
+def history_url(app_label: str, model_name: str, pk: int | str) -> str:
+    """URL of the history page for one model instance."""
+    return page_reverse(
+        "[str:app_label]/[str:model_name]/[int:pk]/history",
+        app_label=app_label,
+        model_name=model_name,
+        pk=pk,
+    )

@@ -32,9 +32,10 @@ from next.pages.access import default_login, page_access
 from next.pages.loaders import PAGE_MODULE
 from next.pages.manager import page
 from next.pages.paths import page_template_path
+from next.partial.registry import COMPOSE_FAILURES, standalone_zones
 from next.permissions.access import declared, login_middleware
 from next.permissions.markers import AccessRule, Requirement, joined
-from next.urls.routes import collect_routes
+from next.urls.routes import collect_routes, with_intercepts
 
 
 if TYPE_CHECKING:
@@ -43,7 +44,7 @@ if TYPE_CHECKING:
     from next.urls.routes import Route
 
 
-type EndpointKind = Literal["page", "action", "component"]
+type EndpointKind = Literal["page", "intercept", "action", "component"]
 
 type Includes = Sequence[URLResolver]
 
@@ -187,11 +188,31 @@ def _page_path(route: "Route") -> Path:
 
 
 def page_endpoint(route: "Route") -> Endpoint:
-    """Return the access of the page a route serves, the `page.py` chain included."""
+    """Return the access of the page a route serves, the `page.py` chain included.
+
+    An intercept row answers to its own chain and is named by its target and zones.
+    """
     held = page_access(_page_path(route))
     rule = held.rule
     closed = default_login(rule)
-    return Endpoint("page", route.url, route.file, rule, closed, held.broken)
+    if route.intercept is None:
+        return Endpoint("page", route.url, route.file, rule, closed, held.broken)
+    name = f"{route.url} ({served_zones(route)})"
+    return Endpoint("intercept", name, route.file, rule, closed, held.broken)
+
+
+def served_zones(route: "Route") -> str:
+    """Return the standalone zones an intercept row serves, joined in declaration order.
+
+    A routed row reads blank, an intercept declaring none or failing to compose `-`.
+    """
+    if route.intercept is None:
+        return ""
+    try:
+        zones = standalone_zones(route.intercept.file)
+    except COMPOSE_FAILURES:
+        return "-"
+    return ", ".join(zones) or "-"
 
 
 def action_endpoint(meta: "ActionMeta") -> Endpoint:
@@ -292,28 +313,41 @@ def resolve_view(url: str) -> ViewEndpoint | None:
 def endpoints(page_path: Path | None = None) -> tuple[Endpoint, ...]:
     """Return every page, action and declaring component, or those of one page.
 
-    A page keeps the actions of its directory and the components its template renders.
+    A page keeps its intercepts, the actions beside it or them, and its components.
     """
-    routes = collect_routes()
+    routes = with_intercepts(collect_routes())
     if page_path is None:
         pages = tuple(page_endpoint(route) for route in routes)
         actions = _actions()
         infos: tuple[ComponentInfo, ...] | None = _components()
     else:
-        pages = tuple(
-            page_endpoint(route) for route in routes if _page_path(route) == page_path
-        )
-        actions = tuple(meta for meta in _actions() if _owned(meta, page_path))
         infos = _page_components(page_path)
-        if infos is None:
-            pages = tuple(
-                replace(found, broken=found.broken or page_path) for found in pages
-            )
+        rows = tuple(route for route in routes if _target_path(route) == page_path)
+        pages = tuple(_page_row(route, broken=infos is None) for route in rows)
+        owners = dict.fromkeys((page_path, *map(_page_path, rows)))
+        declared = _actions()
+        actions = tuple(
+            meta for owner in owners for meta in declared if _owned(meta, owner)
+        )
     return (
         *pages,
         *(action_endpoint(meta) for meta in actions),
         *_declaring(infos or ()),
     )
+
+
+def _target_path(route: "Route") -> Path:
+    """Return the `page.py` path of the routed page a row lists under."""
+    rule = route.intercept
+    return _page_path(route) if rule is None else rule.target_file
+
+
+def _page_row(route: "Route", *, broken: bool) -> Endpoint:
+    """Return the endpoint of a row, a routed page marked broken when `broken` holds."""
+    found = page_endpoint(route)
+    if not broken or route.intercept is not None:
+        return found
+    return replace(found, broken=found.broken or _page_path(route))
 
 
 def _declaring(infos: tuple["ComponentInfo", ...]) -> tuple[Endpoint, ...]:
@@ -329,5 +363,6 @@ __all__ = [
     "page_endpoint",
     "resolve_page",
     "resolve_view",
+    "served_zones",
     "view_endpoints",
 ]

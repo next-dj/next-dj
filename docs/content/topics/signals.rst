@@ -74,6 +74,9 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``route_registered``
      - URLs
      - After a URL pattern is created for a discovered page.
+   * - ``intercept_registered``
+     - URLs
+     - After the file router publishes an intercepting route over its target page.
    * - ``router_reloaded``
      - URLs
      - After the router manager rebuilds its pattern set.

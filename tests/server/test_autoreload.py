@@ -116,6 +116,37 @@ class TestTreeDirSignature:
         assert count == 1
         assert latest > 0
 
+    def test_a_directory_inside_a_group_changes_the_signature(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "(app)").mkdir()
+        before = _tree_dir_signature(tmp_path)
+
+        (tmp_path / "(app)" / "dash").mkdir()
+
+        assert _tree_dir_signature(tmp_path)[1] == before[1] + 1
+
+    def test_adding_an_intercept_directory_changes_the_signature(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "feed").mkdir()
+        before = _tree_dir_signature(tmp_path)
+
+        (tmp_path / "feed" / "(.)photo").mkdir()
+
+        assert _tree_dir_signature(tmp_path)[1] == before[1] + 1
+
+    def test_removing_an_intercept_directory_changes_the_signature(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "feed" / "(.)photo" / "[id]").mkdir(parents=True)
+        before = _tree_dir_signature(tmp_path)
+
+        (tmp_path / "feed" / "(.)photo" / "[id]").rmdir()
+        (tmp_path / "feed" / "(.)photo").rmdir()
+
+        assert _tree_dir_signature(tmp_path)[1] == before[1] - 2
+
 
 class TestDjxNotInStatReloaderGlobMatches:
     """``.djx`` files are not among paths matched by next's ``watch_dir`` globs."""
@@ -253,3 +284,30 @@ class TestTickReadsTheWatchedTrees:
             next(gen)
 
         assert notified == [(page_dir / "page.py").resolve()]
+
+    def test_a_page_created_inside_a_group_notifies(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "shell"
+        (root / "(app)").mkdir(parents=True)
+        reloader = NextStatReloader()
+        notified: list[Path] = []
+        monkeypatch.setattr(
+            reloader, "notify_file_changed", lambda p: notified.append(Path(p))
+        )
+
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={
+                    "PAGE_BACKENDS": [file_router_config_entry(pages_dir=root)]
+                }
+            ),
+            patch.object(reloader, "snapshot_files", return_value=iter([])),
+        ):
+            gen = reloader.tick()
+            next(gen)
+            (root / "(app)" / "hello").mkdir()
+            (root / "(app)" / "hello" / "page.py").write_text("#")
+            next(gen)
+
+        assert notified == [(root / "(app)" / "hello" / "page.py").resolve()]
