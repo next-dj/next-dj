@@ -17,8 +17,10 @@ from next.urls.dispatcher import scan_pages_tree
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Iterator
     from pathlib import Path
+
+    from next.utils import InterceptPage
 
 
 logger = logging.getLogger(__name__)
@@ -56,6 +58,14 @@ def _tree_dir_signature(root: Path) -> tuple[float, int]:
     return (latest, count)
 
 
+def _scan_with_intercepts(pages_path: Path) -> Iterator[tuple[str, Path]]:
+    """Yield the routed pages of a tree, then its intercept pages by target trail."""
+    found: list[InterceptPage] = []
+    yield from scan_pages_tree(pages_path, on_intercept=found.append)
+    for hit in found:
+        yield hit.target_trail, hit.file
+
+
 class NextStatReloader(StatReloader):
     """Reload on route set changes in addition to `.py` mtime changes."""
 
@@ -89,7 +99,7 @@ class NextStatReloader(StatReloader):
         routes = {
             (url_path, file_path.resolve(), has_body(file_path, None))
             for pages_path in pages_paths
-            for url_path, file_path in scan_pages_tree(pages_path)
+            for url_path, file_path in _scan_with_intercepts(pages_path)
         }
         self._dir_signatures = new_signatures
         self._cached_routes = routes

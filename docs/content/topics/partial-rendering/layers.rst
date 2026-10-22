@@ -69,7 +69,8 @@ A form posts with the ``X-Next-Zone`` of the intercept zone.
 The server resolves the served page from the posted origin and that zone, so an invalid form re-renders the intercept zone, and an action that returns ``None`` morphs it.
 ``Patches.morph_zone(zone)`` on such a request renders an intercept zone the origin page lacks, after the intercept page authorizes the request.
 A POST never selects an intercept on the page view, so no mutation reaches an intercept through it.
-An intercept that refuses on the form or action path answers 403, also for a login rule, since that path has no redirect.
+An intercept that refuses on the form or action path answers 403, also for a login rule and for an ``Http404``, since that path has no redirect and the action may have run.
+A broken chain of intercepts answers 403 too, except for the import error it shows under ``DEBUG``.
 ``Patches.morph_foreign_zone`` does not consult intercepts and raises ``UnknownZoneError`` for an intercept zone.
 The action owner and its guard protect a mutation, the modal does not.
 A wizard step inside a modal is not supported.
@@ -83,7 +84,8 @@ A zone GET of a target with intercepts answers with the first step that applies.
 #. The ``render()`` of a target that resolves a body runs, and an ``HttpResponse`` it returns is the answer.
 #. The intercept is picked.
 #. The access chain of the intercept refuses, and its response is the answer with no fallback to the target.
-   A 403, a 404, or a login redirect arrives carrying ``private, no-store`` and the partial ``Vary``.
+   A 403, a 404, or a login redirect arrives carrying ``private, no-store`` and the partial ``Vary``, since the same URL serves the target in full.
+   The project ``handler403`` and ``handler404`` render the 403 and the 404 inside the page view, so ``process_exception`` of a middleware never sees them, and ``intercept_access_denied`` announces each refusal instead, see :doc:`/content/ref/signals`.
 #. A dynamic body answers 400, only when no intercept serves.
 #. A stale asset version answers 409.
 #. The zone renders over the intercept page, and a zone the page does not declare answers 400.

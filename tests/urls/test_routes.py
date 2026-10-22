@@ -180,9 +180,7 @@ class TestWithIntercepts:
             ("/feed/photo/", "next:page_feed_photo", target.resolve()),
             ("/feed/photo/", "", rule.resolve()),
         ]
-        assert routes[2].intercept == Intercept(
-            target.resolve(), rule.resolve(), rule.parent.resolve(), "(.)"
-        )
+        assert routes[2].intercept == Intercept(target.resolve(), rule.resolve(), "(.)")
         assert routes[1].intercept is None
 
     def test_a_virtual_intercept_is_listed_by_its_template(self, tmp_path) -> None:

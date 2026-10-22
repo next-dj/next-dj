@@ -13,8 +13,8 @@ from next.pages.checks.intercepts import (
 from next.partial.checks.intercepts import (
     check_intercept_bodies,
     check_intercept_zones_unique,
-    own_zones,
 )
+from next.partial.registry import own_zones
 from next.ports import action_owners_slot
 from tests.pages.checks.metadata.trees import component_template
 from tests.support import write_page
@@ -277,3 +277,22 @@ class TestOwnZones:
         page_file = write_page(root, "photo", PAGE_HEAD, body="{% if %}")
 
         assert own_zones(page_file) is None
+
+
+class TestCarrierOwnerOrder:
+    """next.E174 reads the action owners after the intercept modules ran."""
+
+    def test_an_action_only_carrier_is_silent_on_a_cold_start(self, root: Path) -> None:
+        action = (
+            "from django.http import HttpResponse\n\n"
+            "from next import action\n\n\n"
+            '@action("owner_order_act")\n'
+            "def owner_order_act() -> HttpResponse:\n"
+            "    return HttpResponse('ok')\n"
+        )
+        write_page(root, "feed/photo")
+        write_page(root, "feed/photo/[int:id]")
+        write_page(root, "feed/(.)photo", action)
+        write_page(root, "feed/(.)photo/[int:id]", PAGE_HEAD, body=zone_body("peek"))
+
+        assert run_check(check_intercept_bodies, root) == []

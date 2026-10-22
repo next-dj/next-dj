@@ -20,6 +20,7 @@ from next.discovery import (
     get_pages_directories,
     get_router_manager,
     iter_page_tree_component_folders,
+    iter_scanned_intercepts,
     iter_scanned_page_pairs,
     iter_scanned_pages,
     page_tree_skip_names,
@@ -28,6 +29,7 @@ from next.discovery import (
     routed_page_trees,
 )
 from next.pages import page
+from next.pages.checks.modules import check_page_module_imports
 from next.pages.ports import PageScanImpl
 from next.ports import PortSlot
 from next.urls import (
@@ -49,6 +51,7 @@ from tests.support import (
     SkippingRouter,
     file_router,
     file_router_config_entry,
+    routed,
     write_page,
 )
 
@@ -468,6 +471,57 @@ class TestScannedPageTrees:
             ((root, url_path, _page),) = iter_scanned_pages(router)
 
         assert (root.path, root.prefix, url_path) == (tmp_path, None, "ops")
+
+
+class TestScannedInterceptPages:
+    """An intercept page is scanned beside the routed ones, under its target trail."""
+
+    def test_the_page_comes_with_the_trail_of_its_target(self, tmp_path: Path) -> None:
+        write_page(tmp_path, "feed/photo")
+        zone = write_page(tmp_path, "feed/(.)photo", body="<p/>")
+        router = _RootTreeRouter([tmp_path])
+
+        ((root, target, file),) = iter_scanned_intercepts(router)
+
+        assert (root.path, target, file) == (tmp_path, "feed/photo", zone)
+
+    def test_the_pairs_hold_it_and_the_routed_pages_do_not(
+        self, tmp_path: Path
+    ) -> None:
+        photo = write_page(tmp_path, "feed/photo")
+        zone = write_page(tmp_path, "feed/(.)photo", body="<p/>")
+        router = _RootTreeRouter([tmp_path])
+
+        assert list(iter_scanned_page_pairs(router)) == [
+            ("feed/photo", photo),
+            ("feed/photo", zone),
+        ]
+        assert [page for _root, _trail, page in iter_scanned_pages(router)] == [photo]
+
+    def test_a_tree_nested_in_another_owns_its_intercepts(self, tmp_path: Path) -> None:
+        inner = tmp_path / "inner"
+        write_page(tmp_path, "inner/photo")
+        zone = write_page(tmp_path, "inner/(.)photo", body="<p/>")
+        router = _RootTreeRouter([tmp_path, inner])
+
+        found = [
+            (root.path, target, file)
+            for root, target, file in iter_scanned_intercepts(router)
+        ]
+
+        assert found == [(inner, "photo", zone)]
+
+    def test_a_broken_intercept_page_is_reported_by_the_import_check(
+        self, tmp_path: Path
+    ) -> None:
+        write_page(tmp_path, "feed/photo")
+        zone = write_page(
+            tmp_path, "feed/(.)photo", "raise RuntimeError('boom')\n", body="<p/>"
+        )
+        with routed(tmp_path):
+            messages = check_page_module_imports(None)
+
+        assert [(m.id, m.obj) for m in messages] == [("next.E017", str(zone))]
 
 
 class TestEveryPagesRootIsScanned:

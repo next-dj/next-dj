@@ -16,7 +16,7 @@ from next.caches import DEFAULT_CACHE_SIZE
 from next.conf import next_framework_settings
 from next.intercept import Intercept, intercepts
 from next.pages import page
-from next.pages.loaders import load_page_module
+from next.pages.loaders import has_body, load_page_module, renders_itself
 from next.utils import (
     InterceptPage,
     PageRoot,
@@ -192,15 +192,6 @@ def _narrow_file_router_options(options: object) -> dict[str, Any]:
     if not cp:
         return {}
     return {"context_processors": cp}
-
-
-def _defines_render(page_file: Path) -> bool:
-    """Return whether an intercept page defines `render()`, importing it as a route.
-
-    The import registers its context, actions and access, as a routed page's does.
-    """
-    module, _error = load_page_module(page_file)
-    return callable(getattr(module, "render", None))
 
 
 class FileRouterBackend(RouterBackend):
@@ -489,14 +480,17 @@ class FileRouterBackend(RouterBackend):
             target_file = routed.get(hit.target_trail)
             if target_file is None or any(is_within(hit.file, root) for root in nested):
                 continue
-            if _defines_render(hit.file):
+            if renders_itself(hit.file):
                 logger.warning(
                     "The intercept page %s defines render(), which no zone request "
                     "runs, so it is not served. manage.py check reports it.",
                     hit.file,
                 )
                 continue
-            rules.append(Intercept(target_file, hit.file, hit.source, hit.marker))
+            module, error = load_page_module(hit.file)
+            if error is None and not has_body(hit.file, module):
+                continue
+            rules.append(Intercept(target_file, hit.file, hit.marker))
         if not intercepts.publish(pages_path, rules, generation=generation):
             return
         for rule in rules:

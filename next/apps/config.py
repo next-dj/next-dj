@@ -26,7 +26,6 @@ from next.forms.backends import forget_action_urls
 from next.forms.manager import form_action_manager
 from next.forms.ports import ActionOwnersImpl
 from next.forms.wizard import forget_wizard_backend
-from next.intercept import forget_intercepts
 from next.pages.access import forget_page_access
 from next.pages.loaders import (
     forget_app_page_roots,
@@ -140,7 +139,6 @@ _SETTINGS_RELOADED: Final[tuple[Callable[..., None], ...]] = (
 
 # A reload from code keeps the settings, so memos derived from old routers drop.
 _ROUTER_RELOADED: Final[tuple[Callable[..., None], ...]] = (
-    forget_intercepts,
     forget_watch_state,
     forget_shared_layouts,
     forget_page_roots,

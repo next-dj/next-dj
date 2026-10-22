@@ -30,6 +30,7 @@ from next.pages.signals import (
 )
 from next.partial.signals import (
     field_validated,
+    intercept_access_denied,
     partial_backend_loaded,
     patch_op_registered,
     sse_stream_closed,
@@ -70,6 +71,7 @@ __all__ = [
     "form_backend_loaded",
     "form_validation_failed",
     "html_injected",
+    "intercept_access_denied",
     "intercept_registered",
     "metadata_registered",
     "page_rendered",

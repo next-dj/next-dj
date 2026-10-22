@@ -121,6 +121,13 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - After placeholder replacement completes.
        ``placeholders_replaced`` is the tuple of replaced slot names.
        ``injected_bytes`` is the length delta.
+   * - ``intercept_access_denied``
+     - ``Intercept``
+     - ``file_path``, ``target_file``, ``request``, ``status``, ``reason``
+     - When the access chain of an intercept page refuses a zone GET over its target, after the refusal is rendered.
+       ``file_path`` is the page of the intercept and ``target_file`` the ``page.py`` of the target.
+       ``status`` is the status code of the answer, and ``reason`` is ``"raised"`` for a ``PermissionDenied`` or an ``Http404`` the project handler rendered and ``"redirect"`` for a login redirect.
+       A refusal on the form or action path raises ``PermissionDenied`` instead and sends nothing.
    * - ``intercept_registered``
      - ``FileRouterBackend``
      - ``target_file``, ``file_path``, ``marker``

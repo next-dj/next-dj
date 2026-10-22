@@ -901,9 +901,7 @@ class TestMorphZone:
 
         with _mounted(root):
             # The router never publishes a page defining render(), so publish it here.
-            intercepts.publish(
-                root, [Intercept(target, served, served.parent.parent, "(.)")]
-            )
+            intercepts.publish(root, [Intercept(target, served, "(.)")])
             envelope = (
                 Patches(_origin_post(AnonymousUser())).morph_zone("peek").envelope()
             )

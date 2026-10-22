@@ -12,7 +12,7 @@ from next.diagnostics import FailureLog, exception_text, type_name
 from next.introspect import callable_name
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.loaders import AncestorStamps, load_page_module
-from next.utils import is_route_group, strip_route_groups
+from next.utils import is_intercept_name, is_route_group, strip_route_groups
 
 from .fold import (
     EMPTY_STATE,
@@ -165,7 +165,7 @@ def _trail(directory: Path, root: Path) -> str | None:
     raw = directory.relative_to(root).as_posix()
     if "(" not in raw:
         return raw
-    if any(segment[:2] == "(." for segment in raw.split("/")):
+    if any(is_intercept_name(segment) for segment in raw.split("/")):
         return None
     return strip_route_groups(raw)
 

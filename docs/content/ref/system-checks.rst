@@ -799,6 +799,7 @@ Errors
    * - ``next.E162``
      - A ``permission_required(..., obj=DObject[Model])`` in a ``page.py`` loads its row by the URL kwarg named after the ``model_name`` of the model, and the route of a page the declaration binds, its own or one below under ``inherit=True``, does not capture it, so every request to that page raises ``UnboundObjectError``.
        The message names the declaring file, the page, and the kwargs its route captures, and a page whose ``public()`` lifts the declaration is not judged.
+       An ``obj=DObject[Model]`` of an intercept page is judged against the route of its target, the kwargs of a ``pages()`` mount included.
      - ``next.deps.checks``
    * - ``next.E163``
      - A ``page.py`` declares ``public()`` beside its own ``login_required()`` or ``permission_required()``, with or without ``inherit=True`` on either, and the requirements still bind, so the ``public()`` opens nothing.
@@ -850,10 +851,10 @@ Errors
        Moving it out beside the outer intercept, over the page it targets, clears it.
      - ``next.pages.checks.intercepts``
    * - ``next.E173``
-     - An intercept page declares a standalone zone that its target page declares as a standalone zone too, or that a sibling intercept of the same target declares.
+     - An intercept page serves a zone that a sibling intercept of the same target serves too.
        A zone inside a condition or a component that binds it is no claim, since no zone request serves it.
-       The target serves a zone it declares, and of two intercepts sharing a zone the one first in file order wins, so the other never serves it.
-       Zones that the layouts around the intercept declare are left out, since the target shares them.
+       The served zones of an intercept are its standalone zones, less the zones of the layouts above it and the standalone zones of the target.
+       Of two intercepts sharing a served zone the one first in file order wins, so the other never serves it.
        Giving each intercept of one target zones of its own clears it.
      - ``next.partial.checks.intercepts``
    * - ``next.E174``
@@ -868,9 +869,11 @@ Errors
      - ``next.pages.checks.intercepts``
    * - ``next.E176``
      - An intercept page reads a URL kwarg that its target trail does not capture.
-       Either the intercept sits under bracket directories that the target trail lacks, or it checks a permission on a ``DObject`` model whose row kwarg the target URL does not name.
+       The intercept sits under bracket directories that the target trail lacks.
+       The kwargs come from the URL parser of the router, so a mixed segment such as ``photo-[group]`` and the kwargs of a ``pages()`` mount count.
+       An ``obj=DObject[Model]`` of the intercept is judged by ``next.E162`` against the route of the target.
        A zone request carries the kwargs of the target URL alone, so the context or the access of the intercept never receives the value.
-       Targeting a page whose URL captures the kwarg, or moving the intercept out from under the brackets, or dropping ``obj=`` from the intercept, clears it.
+       Targeting a page whose URL captures the kwarg, or moving the intercept out from under the brackets, clears it.
      - ``next.pages.checks.intercepts``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.

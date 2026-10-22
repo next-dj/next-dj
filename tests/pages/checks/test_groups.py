@@ -68,7 +68,7 @@ class TestParenthesisedDirectoryNames:
 
 
 class TestPointlessRouteGroups:
-    """next.W137 warns about a group that wraps one routed directory and adds nothing."""
+    """next.W137 warns about a group that wraps one directory and adds nothing."""
 
     @pytest.mark.parametrize("case", POINTLESS_GROUP_CASES, ids=lambda c: c.id)
     def test_a_group_is_flagged_or_silent(

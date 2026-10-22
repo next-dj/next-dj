@@ -8,9 +8,7 @@ from django.http import Http404, HttpRequest
 from next.urls import page_reverse
 
 
-# Literals, because a lazy reverse cannot answer the per-request `startswith`.
 LOGIN_URL = "/admin/login/"
-LOGOUT_URL = "/admin/logout/"
 
 
 def resolve_model_admin(

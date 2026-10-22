@@ -19,6 +19,7 @@ from django.template.base import TextNode
 
 from next.checks import NEXT, SEO
 from next.pages.checks.composed import iter_composed_pages
+from next.pages.loaders import renders_itself
 from next.pages.metadata.resolve import (
     MISSPELT_OG_LOCALES,
     OG_LOCALE,
@@ -29,7 +30,7 @@ from next.pages.metadata.resolve import (
 
 from .pages import folded_pages, loaded_metadata_pages, static_pages
 from .scope import declared_segments
-from .templates import TemplateSearch, page_template_path, renders_itself
+from .templates import TemplateSearch, page_template_path
 
 
 if TYPE_CHECKING:

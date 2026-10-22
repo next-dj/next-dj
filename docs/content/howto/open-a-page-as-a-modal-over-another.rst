@@ -126,8 +126,9 @@ The row of the intercept follows the row of its target, with the same URL, the `
    uv run python manage.py check
 
 The checks name a mistake that would leave the intercept silent.
-``next.E170`` reports a target no page of the tree routes, and ``next.E173`` a zone the target or a sibling intercept shares.
-``next.E174`` reports an intercept without a standalone zone, and ``next.E176`` a kwarg or an object permission the target URL cannot supply.
+``next.E170`` reports a target no page of the tree routes, and ``next.E173`` a zone a sibling intercept of the target serves too.
+``next.E174`` reports an intercept without a standalone zone, and ``next.E176`` a kwarg the target URL cannot supply.
+``next.E162`` reports an ``obj=DObject[Model]`` whose kwarg the target route does not capture.
 ``next.W138`` reports a breadcrumb, ``headers``, or ``cache`` that a zone response never carries, and ``next.W139`` a ``layout.djx`` inside the intercept directory.
 ``next.W140`` reports an intercept that falls under the default login while its target is public.
 

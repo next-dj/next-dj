@@ -6,6 +6,7 @@ from django.core.exceptions import PermissionDenied
 from django.core.handlers.exception import response_for_exception
 from django.http import Http404, HttpResponse
 
+from next.intercept import Intercept
 from next.pages.responses import never_store
 
 from . import keys
@@ -16,6 +17,7 @@ from .intercept import admit, pick_intercept
 from .manager import asset_version, partial_backend_manager
 from .patches import Patches, PatchResponse
 from .render import render_zone
+from .signals import intercept_access_denied
 
 
 if TYPE_CHECKING:
@@ -47,7 +49,7 @@ def zone_response(
     """
     served = _served_intercept(page_path, intent, request)
     if served is not None:
-        denial = _intercept_refusal(served, request, url_kwargs, dep_cache)
+        denial = _intercept_refusal(served, page_path, request, url_kwargs, dep_cache)
         if denial is not None:
             set_partial_vary(denial)
             return denial
@@ -88,22 +90,42 @@ def _served_intercept(
 
 def _intercept_refusal(
     served: "Path",
+    target: "Path",
     request: "HttpRequest",
     url_kwargs: dict[str, object],
     dep_cache: dict[str, Any],
 ) -> HttpResponse | None:
     """Return the response the intercept rule refuses `request` with, None to serve.
 
-    The denial depends on the zone, so it is never stored, even from an error handler.
+    The denial depends on the zone, so it is rendered here to be never stored.
     """
     denial: HttpResponse | None
+    reason = "raised"
     try:
         denial = admit(served, request, url_kwargs, dep_cache)
+        reason = "redirect"
     except (PermissionDenied, Http404) as exc:
         denial = response_for_exception(request, exc)
-    if denial is not None:
-        never_store(denial)
+    if denial is None:
+        return None
+    never_store(denial)
+    _announce_denial(served, target, request, denial.status_code, reason)
     return denial
+
+
+def _announce_denial(
+    served: "Path", target: "Path", request: "HttpRequest", status: int, reason: str
+) -> None:
+    """Send `intercept_access_denied` when a receiver listens for it."""
+    if intercept_access_denied.has_listeners(Intercept):
+        intercept_access_denied.send(
+            sender=Intercept,
+            file_path=served,
+            target_file=target,
+            request=request,
+            status=status,
+            reason=reason,
+        )
 
 
 def _version_conflict(intent: "PartialIntent", version: str) -> bool:
@@ -132,7 +154,7 @@ def _build_envelope(
         _patch_zone(patches, name, result, intent.merge)
     patches.absorb_zone_result(result)
     if served is not None:
-        patches._page_meta(served, url_kwargs)
+        patches._page_meta(served, url_kwargs, result.context)
     return patches.envelope()
 
 

@@ -236,7 +236,8 @@ A page that loads the row through ``DObject[Note]`` names the directory after th
 Two things are special about this tree.
 
 - ``pages/`` is the page root.
-  Every directory below it becomes a URL, except a private one whose name starts with an underscore.
+  Every directory below it becomes a URL segment, except a private one whose name starts with an underscore, a route group ``(name)/`` that adds no segment, and an intercept directory ``(.)name/`` that serves a modal over the page it names.
+  See :ref:`topics-file-router-route-groups` and :ref:`topics-file-router-intercepts`.
 - ``_components/`` lives inside the page root.
   Every directory below it becomes a reusable component.
 

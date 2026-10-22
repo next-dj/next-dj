@@ -12,7 +12,7 @@ from next.pages.access import page_access, refusal
 from next.pages.loaders import last_load_error
 
 from .errors import ForeignPageNotAuthorizedError
-from .registry import standalone_zones
+from .registry import zones_served
 
 
 if TYPE_CHECKING:
@@ -47,12 +47,14 @@ class _Grant:
 def pick_intercept(target_file: "Path", zones: tuple[str, ...]) -> "Intercept | None":
     """Return the rule whose page serves `zones` over `target_file`, never rendering.
 
-    The target keeps any zone it declares, else the first rule declaring them all wins.
+    The first rule serving them all wins, and one that fails to compose is skipped.
     """
     rules = intercepts.of(target_file)
-    if not rules or not zones or _declares_any(target_file, zones):
+    if not rules or not zones:
         return None
-    return next((rule for rule in rules if _declares_all(rule.file, zones)), None)
+    return next(
+        (rule for rule in rules if _serves_all(rule.file, target_file, zones)), None
+    )
 
 
 def admit(
@@ -79,17 +81,10 @@ def admit(
 def refuse_intercept(
     page_path: "Path", request: "HttpRequest", url_kwargs: "Mapping[str, Any]"
 ) -> None:
-    """Raise when the rule of an intercept page refuses `request`, never rendering it.
+    """Raise `ForeignPageNotAuthorizedError` when the rule of a page refuses `request`.
 
     A broken chain is refused as a routed page's is, its failure under DEBUG, else 404.
     """
-    _refuse(page_path, request, url_kwargs)
-
-
-def _refuse(
-    page_path: "Path", request: "HttpRequest", url_kwargs: "Mapping[str, Any]"
-) -> None:
-    """Raise what `admit` refuses with as a `ForeignPageNotAuthorizedError`."""
     try:
         redirect = admit(page_path, request, url_kwargs)
     except PermissionDenied:
@@ -126,7 +121,7 @@ def refuse_access(
     error = None if broken is None else last_load_error(broken)
     if error is not None:
         raise error
-    _refuse(page_path, request, url_kwargs)
+    refuse_intercept(page_path, request, url_kwargs)
 
 
 def _grants(request: "HttpRequest") -> list[_Grant]:
@@ -139,16 +134,10 @@ def _grants(request: "HttpRequest") -> list[_Grant]:
     return fresh
 
 
-def _declares_any(page_path: "Path", zones: tuple[str, ...]) -> bool:
-    """Return True when the page declares one of `zones` as a standalone zone."""
-    declared = standalone_zones(page_path)
-    return any(name in declared for name in zones)
-
-
-def _declares_all(page_path: "Path", zones: tuple[str, ...]) -> bool:
-    """Return True when the page declares every one of `zones` as a standalone zone."""
-    declared = standalone_zones(page_path)
-    return all(name in declared for name in zones)
+def _serves_all(page_path: "Path", target_file: "Path", zones: tuple[str, ...]) -> bool:
+    """Return True when the intercept page serves every one of `zones` over a target."""
+    served = zones_served(page_path, target_file)
+    return all(name in served for name in zones)
 
 
 __all__ = [

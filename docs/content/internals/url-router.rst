@@ -78,7 +78,7 @@ Modules
    ``with_intercepts(routes)`` returns the table with one extra row after each routed page that has intercepting pages, and ``Route.intercept`` holds the rule of such a row and is ``None`` on a routed one.
 
 ``next.intercept``.
-   Holds ``Intercept``, ``InterceptTable``, the process-wide ``intercepts`` table, and the ``forget_intercepts`` receiver, see `Route groups and intercepting routes`_ below.
+   Holds ``Intercept``, ``InterceptTable``, and the process-wide ``intercepts`` table, see `Route groups and intercepting routes`_ below.
 
 URL name computation
 --------------------
@@ -175,12 +175,13 @@ Each page found is handed to the ``on_intercept`` callback as an ``InterceptPage
 The file router publishes the intercepts after the walk of a page root, in ``next.intercept.intercepts``, an ``InterceptTable``.
 A rule is published only when its target trail matches exactly a trail the same walk routed, so ``[id]`` does not match ``[int:id]``, and ``next.E170`` reports a rule without a target.
 A rule whose directory lies under a nested page root belongs to the inner root and is left out here.
+A body-less ``page.py`` that only carries rules to the intercepts below it publishes no rule.
 The router imports the page module of each published intercept, as it does for a routed page, so its context, metadata, actions, and access rules register.
 ``publish(root, rules, generation=)`` replaces every rule of that root in one assignment, and a root with no intercepts publishes an empty set, so a rule deleted on disk vanishes at the next reload.
 ``generation`` guards against a race with a reload.
 The walk reads the table's ``generation`` before it starts, a reload bumps it, and a walk that began before the reload is refused at publish, so its stale rules never overwrite the cleared table.
 ``intercepts.of(target_file)`` returns the rules over one routed page in file order with a single dictionary lookup, and ``all()`` returns every rule.
-A router reload clears the table through the ``forget_intercepts`` receiver of ``router_reloaded``, and the rebuild publishes it again.
+``RouterManager.reload()`` clears the table before it installs the new backends, so a build inside ``router_reloaded`` publishes into the fresh table and the rebuild publishes it again.
 
 Each published rule sends ``intercept_registered``, only when the publish was accepted.
 The table is read at request time to pick the intercepting page that serves a zone request over its target.

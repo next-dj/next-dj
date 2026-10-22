@@ -17,7 +17,9 @@ from next.checks.common import (
 )
 from next.utils import (
     PAGE_FILES,
+    is_intercept_name,
     is_route_group,
+    is_within,
     join_trail,
     list_page_dir,
     parse_intercept,
@@ -35,10 +37,9 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class InterceptScope:
-    """The intercept directory a directory lies in and the trail its marker targets."""
+    """The intercept directory a directory lies in and the trail it targets."""
 
     source: Path
-    marker: str
     target_trail: str
 
 
@@ -49,9 +50,7 @@ class TreeDirectory:
     `url_trail` is `None` where the router walks no further, `within` the scope above.
     """
 
-    root: PageRoot
     path: Path
-    raw_trail: str
     scope_trail: str
     url_trail: str | None
     within: InterceptScope | None
@@ -61,13 +60,12 @@ class TreeDirectory:
 
 @dataclass(frozen=True, slots=True)
 class TreeIntercept:
-    """One page under an intercept directory, the trail it targets and its tree."""
+    """One page under an intercept directory and the trail it targets."""
 
     root: PageRoot
     file: Path
     raw_trail: str
     target_trail: str
-    scope: InterceptScope
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,11 +74,6 @@ class TreeWalk:
 
     directories: tuple[TreeDirectory, ...] = ()
     intercepts: tuple[TreeIntercept, ...] = ()
-
-
-def is_intercept_name(name: str) -> bool:
-    """Whether the router reads `name` as an intercept, valid or malformed."""
-    return name[:2] == "(."
 
 
 def _entered(
@@ -93,41 +86,46 @@ def _entered(
     parsed = parse_intercept(directory.name)
     if parsed is None or within is not None:
         return None
-    marker, rest = parsed
-    target_trail = resolve_intercept(url_trail, marker, rest)
+    target_trail = resolve_intercept(url_trail, *parsed)
     if target_trail is None:
         return None
-    return InterceptScope(directory, marker, target_trail)
+    return InterceptScope(directory, target_trail)
 
 
 class _Walker:
-    """Collect the directories of every tree, each once, under the deepest root."""
+    """Collect the directories of one tree as the router walks it.
 
-    def __init__(self, roots: frozenset[Path]) -> None:
-        """Start empty over the resolved paths of every reported tree."""
-        self.roots = roots
-        self.seen: set[Path] = set()
-        self.directories: list[TreeDirectory] = []
-        self.intercepts: list[TreeIntercept] = []
+    Only a tree its own router reports inside it is left to that tree's walk.
+    """
 
-    def level(
+    def __init__(
         self,
         root: PageRoot,
         skip_names: frozenset[str],
+        nested: frozenset[Path],
+        directories: list[TreeDirectory],
+        intercepts: list[TreeIntercept],
+    ) -> None:
+        """Start over a tree, the resolved trees inside it and the lists to fill."""
+        self.root = root
+        self.skip_names = skip_names
+        self.nested = nested
+        self.directories = directories
+        self.intercepts = intercepts
+
+    def level(
+        self,
         directory: Path,
         raw_trail: str,
         url_trail: str,
         within: InterceptScope | None,
     ) -> None:
-        """Record each routed child of `directory`, entering the ones the router enters.
-
-        A tree reported inside this one is left to its own walk, as the router does.
-        """
+        """Record each routed child of `directory`, entering those the router enters."""
         for child in list_page_dir(directory).children:
             name = child.name
-            if not routes_into(name, skip_names) or child.resolve() in self.roots:
+            if not routes_into(name, self.skip_names):
                 continue
-            if not first_visit(child, self.seen):
+            if self.nested and child.resolve() in self.nested:
                 continue
             raw = join_trail(raw_trail, name)
             scope = within
@@ -142,16 +140,14 @@ class _Walker:
                 child_trail = join_trail(url_trail, name)
             self.directories.append(
                 TreeDirectory(
-                    root, child, raw, url_trail, child_trail, within, scope, skip_names
+                    child, url_trail, child_trail, within, scope, self.skip_names
                 )
             )
             if child_trail is not None:
-                self.enter(root, skip_names, child, raw, child_trail, scope)
+                self.enter(child, raw, child_trail, scope)
 
     def enter(
         self,
-        root: PageRoot,
-        skip_names: frozenset[str],
         directory: Path,
         raw_trail: str,
         url_trail: str,
@@ -162,26 +158,32 @@ class _Walker:
             PAGE_FILES
         ):
             self.intercepts.append(
-                TreeIntercept(root, directory / "page.py", raw_trail, url_trail, scope)
+                TreeIntercept(self.root, directory / "page.py", raw_trail, url_trail)
             )
-        self.level(root, skip_names, directory, raw_trail, url_trail, scope)
+        self.level(directory, raw_trail, url_trail, scope)
 
 
 def _walk(router_manager: RouterManager) -> TreeWalk:
-    """Walk every tree each router reports, a tree reached twice walked once."""
+    """Walk every tree each router reports, a tree two routers share walked once."""
     reached: set[Path] = set()
-    trees: list[tuple[PageRoot, frozenset[str]]] = []
+    directories: list[TreeDirectory] = []
+    intercepts: list[TreeIntercept] = []
     for router in router_manager.backends:
         skip_names = page_tree_skip_names(router)
-        trees.extend(
-            (root, skip_names)
-            for root in get_page_roots(router)
-            if first_visit(root.path, reached)
-        )
-    walker = _Walker(frozenset(reached))
-    for root, skip_names in trees:
-        walker.level(root, skip_names, root.path, "", "", None)
-    return TreeWalk(tuple(walker.directories), tuple(walker.intercepts))
+        roots = get_page_roots(router)
+        for root in roots:
+            if not first_visit(root.path, reached):
+                continue
+            here = root.path.resolve()
+            nested = frozenset(
+                other
+                for other in (found.path.resolve() for found in roots)
+                if other != here and is_within(other, here)
+            )
+            _Walker(root, skip_names, nested, directories, intercepts).level(
+                root.path, "", "", None
+            )
+    return TreeWalk(tuple(directories), tuple(intercepts))
 
 
 _walks: RunMemo[TreeWalk] = RunMemo()
@@ -195,11 +197,4 @@ def tree_walk() -> TreeWalk:
     return _walks.get(router_manager, lambda: _walk(router_manager))
 
 
-__all__ = [
-    "InterceptScope",
-    "TreeDirectory",
-    "TreeIntercept",
-    "TreeWalk",
-    "is_intercept_name",
-    "tree_walk",
-]
+__all__ = ["InterceptScope", "TreeDirectory", "TreeIntercept", "TreeWalk", "tree_walk"]

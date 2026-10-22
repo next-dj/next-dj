@@ -235,7 +235,7 @@ The ``render()`` of an intercept page never runs.
 
 The URL kwargs of a zone request are the ones of the target URL.
 An object permission on the intercept, ``page.permission_required(perm, obj=DObject[Photo])``, loads the row by the matching kwarg of the target.
-``manage.py check`` reports a kwarg the target lacks as ``next.E176``.
+``manage.py check`` reports a kwarg the target lacks as ``next.E162``.
 
 The intercept falls under the default login, see :ref:`topics-access-default-login`.
 An intercept that declares nothing requires a login under ``LOGIN_REQUIRED`` or ``LoginRequiredMiddleware`` even over a target that calls ``page.public()``, and an anonymous visitor then gets a login redirect inside the modal.

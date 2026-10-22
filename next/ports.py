@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from next.partial.headers import PartialIntent
     from next.static import StaticCollector
     from next.urls import RouterBackend, RouterManager, URLPatternParser
+    from next.utils import PageRoot
 
 
 class PortSlot[T]:
@@ -144,6 +145,10 @@ class RouterAccess(Protocol):
 
     def url_parser(self) -> URLPatternParser:
         """Return the parser the file router routes bracket segments through."""
+        ...
+
+    def page_kwargs(self, root: PageRoot, trail: str) -> frozenset[str] | None:
+        """Return the kwargs a page at `trail` of `root` answers, `None` if refused."""
         ...
 
 

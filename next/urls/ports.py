@@ -12,9 +12,12 @@ from next.ports import RouterAccess
 from .backends import RouterFactory
 from .manager import RouterManager
 from .parser import default_url_parser
+from .routes import page_route
 
 
 if TYPE_CHECKING:
+    from next.utils import PageRoot
+
     from .backends import RouterBackend
     from .parser import URLPatternParser
 
@@ -36,6 +39,12 @@ class RouterAccessImpl(RouterAccess):
     def url_parser(self) -> URLPatternParser:
         """Return the parser the file router routes bracket segments through."""
         return default_url_parser
+
+    @override
+    def page_kwargs(self, root: PageRoot, trail: str) -> frozenset[str] | None:
+        """Return the kwargs a page at `trail` of `root` answers, `None` if refused."""
+        route = page_route(root, trail)
+        return None if route is None else route.kwargs
 
 
 __all__ = ["RouterAccessImpl"]

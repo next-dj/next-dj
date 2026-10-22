@@ -3,14 +3,12 @@
 A zone set reads the composed template, so a page that fails to compose is skipped.
 """
 
-from collections.abc import Collection, Mapping
+from collections.abc import Collection
 from pathlib import Path
 
 from django.core.checks import CheckMessage, Error, Tags, register
-from django.template import Template
 
 from next.checks import NEXT
-from next.pages import page
 from next.pages.checks.intercepts import (
     ServedIntercept,
     joined,
@@ -18,73 +16,23 @@ from next.pages.checks.intercepts import (
     targeted_intercepts,
 )
 from next.pages.checks.modules import load_page, serves_nothing
-from next.pages.loaders import LayoutTemplateLoader, has_body
-from next.partial.registry import COMPOSE_FAILURES, ZoneInfo, standalone_zones, zones_of
-from next.partial.zone import ZoneNode
+from next.pages.loaders import has_body
+from next.partial.registry import (
+    own_standalone_zones,
+    own_zones,
+    target_zones,
+    zones_served,
+)
 from next.ports import action_owners_slot
 
 from .codes import E_INTERCEPT_WITHOUT_ZONE, E_INTERCEPT_ZONE_SHARED
-
-
-def _composed(page_path: Path) -> Template | None:
-    """Return the composed template of a page, `None` where it does not compose.
-
-    A compile failure is left to `next.E072`.
-    """
-    try:
-        return page.composed_template_for(page_path)
-    except COMPOSE_FAILURES:
-        return None
-
-
-def _layout_zone_names(page_path: Path) -> frozenset[str] | None:
-    """Return the zones the layouts around a page declare, `None` where they fail."""
-    loader = LayoutTemplateLoader()
-    if not loader.can_load(page_path):
-        return frozenset()
-    try:
-        skeleton = Template(loader.compose_skeleton(page_path))
-    except COMPOSE_FAILURES:
-        return None
-    nodes = skeleton.nodelist.get_nodes_by_type(ZoneNode)
-    return frozenset(node.name for node in nodes if isinstance(node, ZoneNode))
-
-
-def own_zones(page_path: Path) -> Mapping[str, ZoneInfo] | None:
-    """Return the zones the body of a page declares, nested ones included.
-
-    The zones of its layouts are left out, since the target shares them.
-    """
-    template = _composed(page_path)
-    layouts = _layout_zone_names(page_path)
-    if template is None or layouts is None:
-        return None
-    declared = zones_of(template, page_path)
-    return {name: info for name, info in declared.items() if name not in layouts}
-
-
-def _target_zones(page_path: Path) -> frozenset[str] | None:
-    """Return the standalone zones of a target, the ones it keeps from an intercept."""
-    try:
-        return frozenset(standalone_zones(page_path))
-    except COMPOSE_FAILURES:
-        return None
-
-
-def _served_zones(page_path: Path) -> tuple[str, ...]:
-    """Return the standalone zones of an intercept body, the ones it can serve."""
-    zones = own_zones(page_path) or {}
-    return tuple(name for name, info in zones.items() if info.standalone)
 
 
 def _shared_with_target(
     served: ServedIntercept, mine: Collection[str]
 ) -> CheckMessage | None:
     """Return the error for zones an intercept shares with its target, if any."""
-    theirs = _target_zones(served.target)
-    if not mine or theirs is None:
-        return None
-    shared = theirs.intersection(mine)
+    shared = target_zones(served.target).intersection(mine)
     if not shared:
         return None
     return Error(
@@ -106,12 +54,11 @@ def check_intercept_zones_unique(*args, **kwargs) -> list[CheckMessage]:
     errors: list[CheckMessage] = []
     claimed: dict[tuple[Path, str], Path] = {}
     for served in sorted(served_intercepts(), key=lambda served: served.hit.file):
-        mine = _served_zones(served.hit.file)
-        shared = _shared_with_target(served, mine)
+        shared = _shared_with_target(served, own_standalone_zones(served.hit.file))
         if shared is not None:
             errors.append(shared)
         taken: dict[Path, list[str]] = {}
-        for name in mine:
+        for name in zones_served(served.hit.file, served.target):
             first = claimed.setdefault((served.target, name), served.hit.file)
             if first != served.hit.file:
                 taken.setdefault(first, []).append(name)
@@ -178,12 +125,9 @@ def check_intercept_bodies(*args, **kwargs) -> list[CheckMessage]:
 
     A body-less `page.py` passing declarations down is spared, as `next.E012` spares it.
     """
+    intercepts = list(targeted_intercepts())
     owners = action_owners_slot.get().page_files()
-    return [
-        error
-        for served in targeted_intercepts()
-        if (error := _body_error(served, owners)) is not None
-    ]
+    return [error for served in intercepts if (error := _body_error(served, owners))]
 
 
-__all__ = ["check_intercept_bodies", "check_intercept_zones_unique", "own_zones"]
+__all__ = ["check_intercept_bodies", "check_intercept_zones_unique"]

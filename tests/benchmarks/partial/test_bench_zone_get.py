@@ -5,11 +5,13 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
-from django.test import override_settings
+from django.test import RequestFactory, override_settings
 from django.urls import resolve
 
+from next.forms.uid import ORIGIN_FIELD_NAME
 from next.pages.loaders import load_python_module_memo
 from next.pages.manager import page as page_singleton
+from next.partial import Patches, resolve_partial_origin
 from tests.benchmarks.factories import build_layout_page
 from tests.support import partial_meta, plain_get, routed, write_page
 from tests.support.access import PAGE_HEAD
@@ -144,6 +146,26 @@ def _photo_site(
         write_page(root, "(.)photo/[int:pk]", f"{PAGE_HEAD}{meta}", body=intercept)
 
 
+_CALLABLE_META = (
+    "@page.metadata\n"
+    "def head():\n"
+    '    return {"title": "Peek", "description": "A peek", "canonical": True}\n'
+)
+_RULE_COUNT = 5
+_RULE_ZONES = tuple(f"rule_{i}" for i in range(_RULE_COUNT))
+
+
+def _ruled_site(root: Path) -> None:
+    """Write a target with `_RULE_COUNT` rules over it, only the last one serving."""
+    write_page(root, "photo/[int:pk]", PAGE_HEAD, body=_PHOTO)
+    for i, zone in enumerate(_RULE_ZONES):
+        trail = (
+            "(.)photo/[int:pk]" if i == _RULE_COUNT - 1 else f"(.)photo/[int:pk]/r{i}"
+        )
+        body = f'{{% zone "{zone}" %}}<h2>{zone} {{{{ pk }}}}</h2>{{% endzone %}}'
+        write_page(root, trail, PAGE_HEAD, body=body)
+
+
 class TestBenchInterceptZoneGet:
     """A zone GET on a target no rule covers, against one a rule serves."""
 
@@ -161,7 +183,7 @@ class TestBenchInterceptZoneGet:
 
     @pytest.mark.benchmark(group="partial.zone_get")
     def test_zone_get_intercepted(self, tmp_path: Path, benchmark) -> None:
-        """The intercept page serves the zone, with no head to fold."""
+        """The intercept page serves the zone and its envelope closes on a null meta."""
         _photo_site(tmp_path, intercept=_PEEK)
         request = _zone_get("peek")
         with routed(tmp_path):
@@ -169,12 +191,12 @@ class TestBenchInterceptZoneGet:
             response = match.func(request, **match.kwargs)
             assert response.status_code == 200
             assert b"peek 3" in response.content
-            assert b'"op": "meta"' not in response.content
+            assert b'"op":"meta"' in response.content
             benchmark(match.func, request, **match.kwargs)
 
     @pytest.mark.benchmark(group="partial.zone_get")
     def test_zone_get_intercepted_with_meta(self, tmp_path: Path, benchmark) -> None:
-        """The intercept declares metadata, so the envelope closes with a meta op."""
+        """The intercept declares a metadata dict, so its meta op carries the head."""
         _photo_site(tmp_path, intercept=_PEEK, meta=_PEEK_META)
         request = _zone_get("peek")
         with routed(tmp_path):
@@ -184,3 +206,60 @@ class TestBenchInterceptZoneGet:
             assert b"peek 3" in response.content
             assert json.loads(response.content)["ops"][-1]["title"] == "Peek"
             benchmark(match.func, request, **match.kwargs)
+
+    @pytest.mark.benchmark(group="partial.zone_get")
+    def test_zone_get_intercepted_with_callable_meta(
+        self, tmp_path: Path, benchmark
+    ) -> None:
+        """The intercept declares a callable `@page.metadata`, folded on every tick."""
+        _photo_site(tmp_path, intercept=_PEEK, meta=_CALLABLE_META)
+        request = _zone_get("peek")
+        with routed(tmp_path):
+            match = resolve("/photo/3/")
+            response = match.func(request, **match.kwargs)
+            assert response.status_code == 200
+            assert b"peek 3" in response.content
+            assert json.loads(response.content)["ops"][-1]["title"] == "Peek"
+            benchmark(match.func, request, **match.kwargs)
+
+    @pytest.mark.benchmark(group="partial.zone_get")
+    def test_zone_get_among_several_rules(self, tmp_path: Path, benchmark) -> None:
+        """`pick_intercept` scans the rules of one target up to the last that serves."""
+        _ruled_site(tmp_path)
+        request = _zone_get(_RULE_ZONES[-1])
+        with routed(tmp_path):
+            match = resolve("/photo/3/")
+            response = match.func(request, **match.kwargs)
+            assert response.status_code == 200
+            assert f"{_RULE_ZONES[-1]} 3".encode() in response.content
+            benchmark(match.func, request, **match.kwargs)
+
+
+class TestBenchLayerPost:
+    """A POST from a layer, morphing the zone of the host page it opened over."""
+
+    @pytest.mark.benchmark(group="partial.zone_get")
+    def test_layer_post_morphs_host_zone(self, tmp_path: Path, benchmark) -> None:
+        _photo_site(tmp_path, target=_PEEK, intercept=_PEEK)
+        with routed(tmp_path):
+            resolve("/photo/3/")
+
+            def run() -> bytes:
+                request = RequestFactory().post(
+                    "/_next/form/x/",
+                    data={ORIGIN_FIELD_NAME: "/photo/3/"},
+                    **partial_meta("/photo/3/"),
+                )
+                origin = resolve_partial_origin(request)
+                assert origin is not None
+                envelope = (
+                    Patches(request)
+                    .morph(
+                        zone="peek", page=origin.page_path, url_kwargs=origin.url_kwargs
+                    )
+                    .envelope()
+                )
+                return json.dumps(envelope.ops[0].as_dict()).encode()
+
+            assert b"peek 3" in run()
+            benchmark(run)

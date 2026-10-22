@@ -32,7 +32,7 @@ from next.pages.access import default_login, page_access
 from next.pages.loaders import PAGE_MODULE
 from next.pages.manager import page
 from next.pages.paths import page_template_path
-from next.partial.registry import COMPOSE_FAILURES, standalone_zones
+from next.partial.registry import zones_served
 from next.permissions.access import declared, login_middleware
 from next.permissions.markers import AccessRule, Requirement, joined
 from next.urls.routes import collect_routes, with_intercepts
@@ -202,17 +202,14 @@ def page_endpoint(route: "Route") -> Endpoint:
 
 
 def served_zones(route: "Route") -> str:
-    """Return the standalone zones an intercept row serves, joined in declaration order.
+    """Return the zones an intercept row serves over its target, in declaration order.
 
-    A routed row reads blank, an intercept declaring none or failing to compose `-`.
+    A routed row reads blank, an intercept serving none or failing to compose `-`.
     """
     if route.intercept is None:
         return ""
-    try:
-        zones = standalone_zones(route.intercept.file)
-    except COMPOSE_FAILURES:
-        return "-"
-    return ", ".join(zones) or "-"
+    rule = route.intercept
+    return ", ".join(zones_served(rule.file, rule.target_file)) or "-"
 
 
 def action_endpoint(meta: "ActionMeta") -> Endpoint:

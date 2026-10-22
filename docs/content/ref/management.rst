@@ -30,7 +30,9 @@ routes
    * - ``Access``
      - The access rule of the page, spelled as in `permissions`_.
    * - ``Intercept``
-     - The standalone zones an intercepting page serves, joined by ``, `` in declaration order, or ``-`` when it declares none or its template fails to compose.
+     - The zones an intercepting page serves, joined by ``, `` in declaration order, or ``-`` when it serves none.
+       A zone the target declares or a layout above the intercept declares is no zone the intercept serves.
+       A ``page.py`` with no body that only carries rules to the intercepts below it is no row.
        The column appears only when the table lists at least one intercepting page, and a routed row leaves it blank.
 
 .. code-block:: text
@@ -65,7 +67,7 @@ permissions
    * - ``Kind``
      - ``page``, ``intercept``, ``action``, ``component``, or ``view``.
    * - ``Endpoint``
-     - The URL of a page or a view, the URL of the target of an intercepting page followed by its zones in parentheses, the name of an action followed by the file declaring it in parentheses, or the name of a component.
+     - The URL of a page or a view, the URL of the target of an intercepting page followed by the zones it serves in parentheses, the name of an action followed by the file declaring it in parentheses, or the name of a component.
    * - ``Access``
      - The requirements in the order the chain declares them, each once, in the words listed below.
    * - ``Sources``

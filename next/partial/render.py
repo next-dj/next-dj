@@ -1,7 +1,7 @@
 """Standalone zone rendering over the full page context."""
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final
 
 from django.template import Context as DjangoTemplateContext
@@ -40,6 +40,7 @@ class ZoneRenderResult:
     html: dict[str, str]
     bodies: dict[str, str]
     collector: "StaticCollector"
+    context: dict[str, object] = field(default_factory=dict)
 
     def url_assets(self) -> "Iterator[tuple[str, str]]":
         """Yield the (kind, url) pair of each collected asset that has a URL."""
@@ -104,7 +105,9 @@ def render_zone(
         bodies[name] = body
 
     _emit_rendered(page_path, rendered_names, request, start)
-    return ZoneRenderResult(html=html, bodies=bodies, collector=collector)
+    return ZoneRenderResult(
+        html=html, bodies=bodies, collector=collector, context=context_data
+    )
 
 
 def _renderable_zone_names(

@@ -4,6 +4,7 @@ import types
 from typing import TYPE_CHECKING
 
 from django.core.exceptions import PermissionDenied
+from django.http import Http404
 
 from next.forms.origin import resolve_origin, resolve_url_to_match
 from next.partial.errors import ForeignPageNotAuthorizedError
@@ -42,14 +43,14 @@ def _served_target(
 ) -> "Path | None":
     """Return the page serving the zones the request names over the origin page.
 
-    A refusing intercept is a 403, never a 500, since the action may already have run.
+    A refusing intercept is a 403 whatever its rule raises, as the action may have run.
     """
     if page_path is None:
         return None
     zones = partial_intent(request).zones
     try:
         return resolve_served_page(page_path, zones, request, url_kwargs)
-    except ForeignPageNotAuthorizedError as exc:
+    except (ForeignPageNotAuthorizedError, Http404) as exc:
         raise PermissionDenied from exc
 
 

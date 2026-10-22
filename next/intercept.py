@@ -16,12 +16,11 @@ if TYPE_CHECKING:
 class Intercept:
     """One intercept page bound to the routed page whose zone GETs it may serve.
 
-    `source` is the marked directory, `marker` its prefix such as `(.)` or `(...)`.
+    `marker` is the prefix of its marked directory, such as `(.)` or `(...)`.
     """
 
     target_file: Path
     file: Path
-    source: Path
     marker: str
 
 
@@ -32,17 +31,11 @@ class InterceptTable:
     """
 
     def __init__(self) -> None:
-        """Start empty at version zero."""
+        """Start empty."""
         self._by_root: dict[Path, tuple[Intercept, ...]] = {}
         self._by_target: dict[Path, tuple[Intercept, ...]] = {}
-        self._version = 0
         self._generation = 0
         self._lock = threading.Lock()
-
-    @property
-    def version(self) -> int:
-        """Monotonic counter bumped on every publish."""
-        return self._version
 
     @property
     def generation(self) -> int:
@@ -56,7 +49,7 @@ class InterceptTable:
 
         A walk begun before the last clear passes its stale `generation` and is dropped.
         """
-        published = tuple(sorted(set(rules), key=lambda rule: rule.file))
+        published = tuple(set(rules))
         with self._lock:
             if generation is not None and generation != self._generation:
                 return False
@@ -64,19 +57,22 @@ class InterceptTable:
         return True
 
     def _swap(self, root: Path, published: tuple[Intercept, ...]) -> None:
-        """Replace one root and rebuild the target index, the lock already held."""
-        by_root = dict(self._by_root)
-        by_root[root] = published
-        by_target: dict[Path, list[Intercept]] = {}
-        for held in by_root.values():
-            for rule in held:
-                by_target.setdefault(rule.target_file, []).append(rule)
-        self._by_root = by_root
-        self._by_target = {
-            target: tuple(sorted(found, key=lambda rule: rule.file))
-            for target, found in by_target.items()
-        }
-        self._version += 1
+        """Replace one root and reindex only the targets it touches, the lock held."""
+        dropped = frozenset(self._by_root.get(root, ()))
+        by_target = dict(self._by_target)
+        touched = {rule.target_file for rule in (*dropped, *published)}
+        for target in touched:
+            kept = (rule for rule in by_target.get(target, ()) if rule not in dropped)
+            found = sorted(
+                (*kept, *(r for r in published if r.target_file == target)),
+                key=lambda rule: rule.file,
+            )
+            if found:
+                by_target[target] = tuple(found)
+            else:
+                by_target.pop(target, None)
+        self._by_root = {**self._by_root, root: published}
+        self._by_target = by_target
 
     def of(self, target_file: Path) -> tuple[Intercept, ...]:
         """Return the rules over `target_file` in file order, one dict get on a miss."""
@@ -91,7 +87,6 @@ class InterceptTable:
         with self._lock:
             self._by_root = {}
             self._by_target = {}
-            self._version += 1
             self._generation += 1
 
 
@@ -99,9 +94,4 @@ intercepts: Final = InterceptTable()
 """The process-wide table the file router fills and zone GETs read."""
 
 
-def forget_intercepts(**kwargs: object) -> None:
-    """Drop every rule on a router reload, so a tree no longer routed keeps none."""
-    intercepts.clear()
-
-
-__all__ = ["Intercept", "InterceptTable", "forget_intercepts", "intercepts"]
+__all__ = ["Intercept", "InterceptTable", "intercepts"]

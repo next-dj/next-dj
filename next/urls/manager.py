@@ -12,6 +12,7 @@ from django.urls.resolvers import RoutePattern
 from next.backends import backend_entries, load_backends, resolve_setting_class
 from next.csrf import CSRF_URL_NAME, csrf_view
 from next.forms.manager import form_action_manager
+from next.intercept import intercepts
 from next.pages.manager.views import fit_page_caches
 from next.ports import seo_routes_slot
 
@@ -135,6 +136,8 @@ class RouterManager:
             finally:
                 self._building_thread = None
 
+            if notify:
+                intercepts.clear()
             # One-step publish, so a mid-build read never sees a partial list.
             self._backends = built
             # Set before the signal, so a receiver reading `backends` stays out.

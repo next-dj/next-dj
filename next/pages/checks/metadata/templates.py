@@ -16,7 +16,7 @@ from next.checks import NEXT, SEO
 from next.components.nodes import ComponentTagNode
 from next.components.sources import get_components_manager
 from next.pages.checks.composed import iter_composed_pages
-from next.pages.loaders import load_page_module
+from next.pages.loaders import renders_itself
 from next.pages.metadata.nodes import MetadataNode
 from next.pages.paths import page_template_path
 
@@ -31,12 +31,6 @@ _MAX_DEPTH: Final = 8
 
 type _Memo = dict[Path | str, bool | None]
 type NodeTest = Callable[[NodeList], bool]
-
-
-def renders_itself(page_path: Path) -> bool:
-    """Whether the page responds through its own `render()` instead of a template."""
-    module, _error = load_page_module(page_path)
-    return module is not None and callable(getattr(module, "render", None))
 
 
 def _component_names(nodelist: NodeList) -> list[str]:
@@ -157,9 +151,4 @@ def check_metadata_tag_rendered(*args, **kwargs) -> list[CheckMessage]:
     return warnings
 
 
-__all__ = [
-    "TemplateSearch",
-    "check_metadata_tag_rendered",
-    "page_template_path",
-    "renders_itself",
-]
+__all__ = ["TemplateSearch", "check_metadata_tag_rendered", "page_template_path"]

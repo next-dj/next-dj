@@ -127,7 +127,7 @@ class TestDoublyMountedTree:
 
 
 class TestUrlConflictHint:
-    """next.E015 carries a hint only where a conflicting source passes through a group."""
+    """next.E015 carries a hint only where a clash passes through a route group."""
 
     @pytest.mark.parametrize("case", CLASH_CASES, ids=lambda case: case.id)
     def test_the_hint_follows_the_route_groups(self, tmp_path, case: ClashCase) -> None:

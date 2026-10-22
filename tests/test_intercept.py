@@ -2,15 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from next.intercept import Intercept, InterceptTable, forget_intercepts, intercepts
+from next.intercept import Intercept, InterceptTable
 
 
 def _rule(target: str, name: str, marker: str = "(.)") -> Intercept:
     return Intercept(
-        Path(f"/tree/{target}/page.py"),
-        Path(f"/tree/{name}/page.py"),
-        Path(f"/tree/{name}"),
-        marker,
+        Path(f"/tree/{target}/page.py"), Path(f"/tree/{name}/page.py"), marker
     )
 
 
@@ -22,9 +19,8 @@ def table() -> InterceptTable:
 class TestPublish:
     """A publish replaces the rules of one page root in a single swap."""
 
-    def test_a_new_table_is_empty_at_version_zero(self, table: InterceptTable) -> None:
+    def test_a_new_table_is_empty(self, table: InterceptTable) -> None:
         assert table.all() == ()
-        assert table.version == 0
         assert table.of(Path("/tree/x/page.py")) == ()
 
     def test_published_rules_are_found_by_target(self, table: InterceptTable) -> None:
@@ -40,11 +36,29 @@ class TestPublish:
 
         assert table.of(Path("/tree/other/page.py")) == ()
 
-    def test_every_publish_bumps_the_version(self, table: InterceptTable) -> None:
-        table.publish(Path("/tree"), [])
-        table.publish(Path("/tree"), [_rule("feed", "feed/(.)photo")])
+    def test_a_republish_keeps_the_rules_other_roots_hold_over_a_target(
+        self, table: InterceptTable
+    ) -> None:
+        one = _rule("feed", "feed/(.)alpha")
+        two = _rule("feed", "feed/(.)zeta")
+        table.publish(Path("/one"), [one])
+        table.publish(Path("/two"), [two])
 
-        assert table.version == 2
+        table.publish(Path("/one"), [])
+
+        assert table.of(one.target_file) == (two,)
+
+    def test_a_republish_moves_a_rule_to_its_new_target(
+        self, table: InterceptTable
+    ) -> None:
+        old = _rule("feed", "feed/(.)photo")
+        new = _rule("blog", "blog/(.)post")
+        table.publish(Path("/tree"), [old])
+
+        table.publish(Path("/tree"), [new])
+
+        assert table.of(old.target_file) == ()
+        assert table.all() == (new,)
 
     def test_the_rules_of_one_target_follow_the_file_order(
         self, table: InterceptTable
@@ -123,11 +137,9 @@ class TestPublish:
 
 
 class TestClear:
-    """A clear drops every root and counts as a change."""
+    """A clear drops every root."""
 
-    def test_clear_drops_every_rule_and_bumps_the_version(
-        self, table: InterceptTable
-    ) -> None:
+    def test_clear_drops_every_rule(self, table: InterceptTable) -> None:
         rule = _rule("feed", "feed/(.)photo")
         table.publish(Path("/one"), [rule])
         table.publish(Path("/two"), [_rule("blog", "blog/(.)post")])
@@ -136,7 +148,6 @@ class TestClear:
 
         assert table.all() == ()
         assert table.of(rule.target_file) == ()
-        assert table.version == 3
 
     def test_clear_bumps_the_generation(self, table: InterceptTable) -> None:
         before = table.generation
@@ -149,14 +160,6 @@ class TestClear:
         table.publish(Path("/tree"), [_rule("feed", "feed/(.)photo")])
 
         assert table.generation == 0
-
-    def test_forget_intercepts_clears_the_shared_table(self) -> None:
-        rule = _rule("feed", "feed/(.)photo")
-        intercepts.publish(Path("/tree"), [rule])
-
-        forget_intercepts(sender=object)
-
-        assert intercepts.all() == ()
 
 
 class TestGeneration:
@@ -181,7 +184,6 @@ class TestGeneration:
     def test_a_stale_generation_is_refused(self, table: InterceptTable) -> None:
         stale = table.generation
         table.clear()
-        version = table.version
 
         published = table.publish(
             Path("/tree"), [_rule("feed", "feed/(.)photo")], generation=stale
@@ -189,4 +191,3 @@ class TestGeneration:
 
         assert published is False
         assert table.all() == ()
-        assert table.version == version

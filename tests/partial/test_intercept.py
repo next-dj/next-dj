@@ -35,13 +35,6 @@ def root(tmp_path: Path) -> Path:
     return directory
 
 
-@pytest.fixture(autouse=True)
-def _empty_table() -> Generator[None, None, None]:
-    intercepts.clear()
-    yield
-    intercepts.clear()
-
-
 @contextmanager
 def _mounted(root: Path, url: str = "/photo/3/") -> Generator[None, None, None]:
     """Route `root` and build its patterns, which publishes the intercepts."""
@@ -55,7 +48,7 @@ def _page(root: Path, trail: str, body: str, source: str = PAGE_HEAD) -> Path:
 
 
 def _rule(target: Path, file: Path) -> Intercept:
-    return Intercept(target, file, file.parent, "(.)")
+    return Intercept(target, file, "(.)")
 
 
 def _request(codenames: tuple[str, ...] | None = None):

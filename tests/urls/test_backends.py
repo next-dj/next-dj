@@ -20,12 +20,13 @@ from next.urls import (
     router_manager,
 )
 from next.urls.backends import _installed_app_directories, _is_framework_app
-from next.urls.signals import intercept_registered, route_registered
+from next.urls.signals import intercept_registered, route_registered, router_reloaded
 from next.utils import forget_resolved_trees
 from tests.support import (
     NAMESPACED_URLCONF,
     EntryRouter,
     app_snapshot,
+    default_page_router_config,
     file_router,
     file_router_config_entry,
     importable_dir,
@@ -35,6 +36,7 @@ from tests.support import (
     write_page,
     write_urlconf,
 )
+from tests.support.access import PAGE_HEAD
 
 
 @pytest.fixture()
@@ -1292,14 +1294,6 @@ def capture_intercept_registered() -> Generator[SignalRecorder, None, None]:
         yield recorder
 
 
-@pytest.fixture()
-def fresh_intercepts() -> Generator[None, None, None]:
-    intercepts.clear()
-    yield
-    intercepts.clear()
-
-
-@pytest.mark.usefixtures("fresh_intercepts")
 class TestInterceptPublish:
     """The router publishes each intercept over the routed page of its own tree."""
 
@@ -1314,9 +1308,7 @@ class TestInterceptPublish:
         routes = self._routes(tmp_path)
 
         assert [str(p.pattern) for p in routes] == ["feed/photo/<str:id>/"]
-        assert intercepts.all() == (
-            Intercept(feed, photo, tmp_path / "feed" / "(.)photo", "(.)"),
-        )
+        assert intercepts.all() == (Intercept(feed, photo, "(.)"),)
         assert intercepts.of(feed) == intercepts.all()
 
     def test_the_rule_is_never_routed(self, tmp_path) -> None:
@@ -1503,13 +1495,18 @@ class TestInterceptPublish:
 
         assert intercepts.of(feed) == ()
 
-    def test_each_publish_bumps_the_table_version(self, tmp_path) -> None:
-        write_page(tmp_path, "feed")
-        before = intercepts.version
+    def test_a_carrier_page_without_a_body_publishes_no_rule(
+        self, tmp_path, capture_intercept_registered
+    ) -> None:
+        feed = write_page(tmp_path, "feed/photo")
+        write_page(
+            tmp_path, "feed/(.)photo", PAGE_HEAD + "page.login_required(inherit=True)\n"
+        )
 
         self._routes(tmp_path)
 
-        assert intercepts.version == before + 1
+        assert intercepts.of(feed) == ()
+        assert len(capture_intercept_registered) == 0
 
     def test_the_same_trail_in_two_trees_resolves_within_its_own_tree(
         self, tmp_path
@@ -1568,13 +1565,10 @@ class TestInterceptPublish:
         assert len(published) == 1
 
 
-@pytest.mark.usefixtures("fresh_intercepts")
 class TestInterceptsAfterReload:
     """A router reload empties the table, and the next build publishes it afresh."""
 
-    def test_a_reload_clears_the_table_through_the_wired_receiver(
-        self, tmp_path
-    ) -> None:
+    def test_a_reload_clears_the_table(self, tmp_path) -> None:
         feed = write_page(tmp_path, "feed/photo")
         write_page(tmp_path, "feed/(.)photo")
         file_router(app_dirs=False, dirs=[tmp_path]).generate_urls()
@@ -1583,3 +1577,20 @@ class TestInterceptsAfterReload:
         router_manager.reload()
 
         assert intercepts.all() == ()
+
+    def test_a_build_inside_the_reload_signal_keeps_its_rules(self, tmp_path) -> None:
+        feed = write_page(tmp_path, "feed/photo")
+        write_page(tmp_path, "feed/(.)photo")
+
+        def build(**kwargs: object) -> None:
+            list(router_manager)
+
+        router_reloaded.connect(build, dispatch_uid="build_inside_reload")
+        try:
+            with override_next_settings(
+                PAGE_BACKENDS=default_page_router_config(tmp_path)
+            ):
+                router_manager.reload()
+                assert [rule.target_file for rule in intercepts.of(feed)] == [feed]
+        finally:
+            router_reloaded.disconnect(dispatch_uid="build_inside_reload")

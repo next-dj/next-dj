@@ -243,7 +243,7 @@ class TestEndpoints:
 
 
 class TestInterceptEndpoints:
-    """An intercept row is named by its target and zones and answers to its own chain."""
+    """An intercept row is named by its target and zones and answers to its own page."""
 
     def test_the_row_names_its_target_and_zones(self, tmp_path) -> None:
         root = tmp_path / "pages"

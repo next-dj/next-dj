@@ -7,9 +7,15 @@ from typing import TYPE_CHECKING, Final
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
 
 from next.checks import NEXT
-from next.utils import is_route_group, list_page_dir, parse_intercept, routes_into
+from next.utils import (
+    is_intercept_name,
+    is_route_group,
+    list_page_dir,
+    parse_intercept,
+    routes_into,
+)
 
-from .walk import is_intercept_name, tree_walk
+from .walk import tree_walk
 
 
 if TYPE_CHECKING:

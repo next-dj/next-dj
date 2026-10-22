@@ -12,6 +12,7 @@ PARTIAL_SIGNALS = (
     "sse_stream_opened",
     "sse_stream_closed",
     "partial_backend_loaded",
+    "intercept_access_denied",
 )
 
 

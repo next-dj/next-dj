@@ -24,6 +24,7 @@ from next.utils import (
     exec_module_file,
     is_dynamic_trail,
     is_int,
+    is_intercept_name,
     is_middleware,
     is_route_group,
     is_within,
@@ -440,6 +441,21 @@ class TestRouteGroupNames:
     )
     def test_not_a_group_name(self, name: str) -> None:
         assert is_route_group(name) is False
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("(.)photo", True),
+            ("(.x", True),
+            ("(app)", False),
+            ("photo", False),
+            ("", False),
+        ],
+    )
+    def test_a_name_opening_with_the_marker_prefix_is_read_as_an_intercept(
+        self, name: str, *, expected: bool
+    ) -> None:
+        assert is_intercept_name(name) is expected
 
     def test_the_pattern_matches_a_whole_name_only(self) -> None:
         assert ROUTE_GROUP_PATTERN.fullmatch("(app)") is not None

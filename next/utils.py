@@ -123,9 +123,14 @@ def strip_route_groups(raw_trail: str) -> str:
     )
 
 
+def is_intercept_name(name: str) -> bool:
+    """Whether the router reads the directory `name` as an intercept, valid or not."""
+    return name[:2] == "(."
+
+
 def parse_intercept(name: str) -> tuple[str, str] | None:
     """Return the marker and the targeted segment of an intercept directory `name`."""
-    if name[:2] != "(.":
+    if not is_intercept_name(name):
         return None
     match = INTERCEPT_PATTERN.fullmatch(name)
     return None if match is None else (match["marker"], match["rest"])
@@ -495,7 +500,7 @@ def _child_kind(name: str, skip_dir_names: frozenset[str]) -> _ChildKind:
         return _ChildKind.SKIPPED
     if name[:1] != "(":
         return _ChildKind.ROUTED
-    if name[1:2] == ".":
+    if is_intercept_name(name):
         return _ChildKind.INTERCEPT
     if ROUTE_GROUP_PATTERN.fullmatch(name) is not None:
         return _ChildKind.GROUP
@@ -531,14 +536,8 @@ class _PageTreeWalk:
             yield url_trail, page
         for source, source_raw in marked:
             self.intercept(source, url_trail, source_raw)
-        if not merged:
-            # One listing names each child once, already in `_route_rank` order.
-            for kid in kids:
-                yield from self.visit((kid,), join_trail(url_trail, kid[0].name))
-            return
-        # Stable, so a directory's own child stays ahead of a group's equal one, and
-        # the name closing the rank puts every child of one segment side by side.
-        kids.sort(key=lambda kid: _route_rank(kid[0].name))
+        if merged:
+            kids.sort(key=lambda kid: _route_rank(kid[0].name))
         for name, segment in groupby(kids, key=lambda kid: kid[0].name):
             yield from self.visit(tuple(segment), join_trail(url_trail, name))
 

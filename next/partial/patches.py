@@ -57,7 +57,7 @@ from .render import render_zone
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from django.http import HttpResponseBase
 
@@ -170,8 +170,7 @@ class Patches:
         self._origin: OriginMatch | None = None
         self._origin_resolved = False
         self._origin_authorized = False
-        self._render_context: dict[str, object] | None = None
-        self._served_contexts: dict[Path, dict[str, object]] = {}
+        self._render_contexts: dict[Path, dict[str, object]] = {}
 
     @classmethod
     def versioned(
@@ -272,12 +271,10 @@ class Patches:
         On a zone request an intercept of the origin serves a zone the origin lacks.
         """
         self._authorize_origin()
-        served = self._served_page(zone)
-        if served is None:
-            result = self._render_zone(zone, overrides)
-        else:
+        served = self._served_page()
+        if served is not None:
             refuse_intercept(served, self._require_request(), self._origin_url_kwargs())
-            result = self._render_served_zone(served, zone, overrides)
+        result = self._render_zone(zone, overrides, served)
         self._collect_zone_assets(result)
         self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
         return self
@@ -520,33 +517,38 @@ class Patches:
                 for key, value in _head_extras(resolved).items()
                 if value is not None
             }
-        else:
-            visit = visit_request(self._require_request(), self._head_address(match))
-            origin_fold = self._fold_origin_metadata(page_path, match, segment, visit)
-            if origin_fold is None:
-                return self
-            resolved = resolve_metadata(
-                _head_fields(origin_fold, origin_fold.canonical), request=visit
-            )
-            extras = _head_extras(resolved)
-        self._ops.append(Patch(op="meta", extras=extras))
+            self._ops.append(Patch(op="meta", extras=extras))
+            return self
+        visit = visit_request(self._require_request(), self._head_address(match))
+        origin_fold = self._fold_head(
+            page_path,
+            dict(match.url_kwargs),
+            segment,
+            visit,
+            self._metadata_context,
+            "in Patches.meta()",
+        )
+        if origin_fold is not None:
+            self._append_head(origin_fold, visit)
         return self
 
-    def _fold_origin_metadata(
+    def _fold_head(
         self,
         page_path: "Path",
-        match: "OriginMatch",
-        segment: "Segment",
+        url_kwargs: dict[str, object],
+        segment: "Segment | None",
         visit: "HttpRequest",
+        context_data: "Callable[[], dict[str, object]]",
+        during: str,
     ) -> "Metadata | None":
-        """Fold the origin chain under `segment`, or None when an inherited one failed.
+        """Fold the chain of `page_path` under `segment`, None when a callable failed.
 
-        Inherited callables read the origin view's `visit`, failures log as `FailureLog`
+        Inherited callables read the view's `visit`, failures log as `FailureLog`.
         """
         with _failures.guard(
             page_path,
-            "The metadata that %s inherits raised %s in Patches.meta(). The head is "
-            "left unchanged and the rest of the patch applies. Fix the @page.metadata "
+            f"The metadata that %s inherits raised %s {during}. The head is left "
+            "unchanged and the rest of the patch applies. Fix the @page.metadata "
             "callable or the metadata it returns.",
             page_path,
             pass_through=_META_PASSES,
@@ -556,48 +558,39 @@ class Patches:
                 page_path,
                 overlay=segment,
                 request=visit,
-                url_kwargs=dict(match.url_kwargs),
-                context_data=self._metadata_context,
+                url_kwargs=url_kwargs,
+                context_data=context_data,
             )
         return None
 
-    def _page_meta(self, page_path: "Path", url_kwargs: "Mapping[str, Any]") -> None:
-        """Queue the head of a page the caller authorized, folded for the bound request.
-
-        A failing metadata callable is logged and the op is left out of the envelope.
-        """
-        request = self._require_request()
-        folded = self._fold_page_metadata(page_path, request, dict(url_kwargs))
-        if folded is None:
-            return
+    def _append_head(self, folded: "Metadata", request: HttpRequest) -> None:
+        """Queue the meta op resolving the fold against `request`."""
         resolved = resolve_metadata(
             _head_fields(folded, folded.canonical), request=request
         )
         self._ops.append(Patch(op="meta", extras=_head_extras(resolved)))
 
-    def _fold_page_metadata(
-        self, page_path: "Path", request: HttpRequest, url_kwargs: dict[str, object]
-    ) -> "Metadata | None":
-        """Fold the chain of `page_path`, or None when one of its callables failed."""
-        with _failures.guard(
+    def _page_meta(
+        self,
+        page_path: "Path",
+        url_kwargs: "Mapping[str, Any]",
+        context: "Mapping[str, object]",
+    ) -> None:
+        """Queue the head of the intercept page serving a zone response.
+
+        The callable reads the context the zone render built, so it runs none again.
+        """
+        request = self._require_request()
+        folded = self._fold_head(
             page_path,
-            "The metadata of %s raised %s on a zone response it serves. The zone "
-            "renders and the head is left unchanged. Fix the @page.metadata "
-            "callable or the metadata it returns.",
-            page_path,
-            pass_through=_META_PASSES,
-            detail=type_name,
-        ):
-            return page_manager.fold_metadata(
-                page_path,
-                overlay=None,
-                request=request,
-                url_kwargs=url_kwargs,
-                context_data=lambda: page_manager.build_render_context(
-                    page_path, request, _requested_zones=None, **url_kwargs
-                ),
-            )
-        return None
+            dict(url_kwargs),
+            None,
+            request,
+            lambda: dict(context),
+            "on a zone response it serves",
+        )
+        if folded is not None:
+            self._append_head(folded, request)
 
     def _head_address(self, match: "OriginMatch") -> str:
         """Return the address the head describes, the last queued URL if any."""
@@ -769,14 +762,15 @@ class Patches:
             raise ForeignPageNotAuthorizedError(page_path, denial.status_code)
         self._origin_authorized = True
 
-    def _served_page(self, zone: str) -> "Path | None":
-        """Return the intercept page that serves `zone` over the origin, else None.
+    def _served_page(self) -> "Path | None":
+        """Return the intercept page serving the zones the request names, else None.
 
-        Only a request naming zones consults intercepts, as a zone GET of the page does.
+        It picks over the whole zone set, as the zone GET and the form target do.
         """
-        if not partial_intent(self._require_request()).zones:
+        zones = partial_intent(self._require_request()).zones
+        if not zones:
             return None
-        rule = pick_intercept(self._resolve_page_path(), (zone,))
+        rule = pick_intercept(self._resolve_page_path(), zones)
         return None if rule is None else rule.file
 
     def _metadata_context(self) -> dict[str, object]:
@@ -793,53 +787,41 @@ class Patches:
         return dict(match.url_kwargs) if match is not None else {}
 
     def _origin_render_context(self) -> dict[str, object]:
-        """Return the origin page render context, built once per builder.
+        """Return the origin page render context, built once per builder."""
+        return self._page_render_context(self._resolve_page_path())
+
+    def _page_render_context(self, page_path: "Path") -> dict[str, object]:
+        """Return the render context of a page, built once per builder.
 
         Memoised for `context()` and `morph(zone=...)`, copied as consumers mutate it.
         """
-        if self._render_context is None:
+        context = self._render_contexts.get(page_path)
+        if context is None:
             # Pinned so mypy does not read the url kwarg splat as the zone batch.
-            self._render_context = page_manager.build_render_context(
-                self._resolve_page_path(),
+            context = page_manager.build_render_context(
+                page_path,
                 self._require_request(),
                 _requested_zones=None,
                 **self._origin_url_kwargs(),
             )
-        return dict(self._render_context)
+            self._render_contexts[page_path] = context
+        return dict(context)
 
     def _render_zone(
-        self, zone: str, overrides: "Mapping[str, Any] | None"
+        self,
+        zone: str,
+        overrides: "Mapping[str, Any] | None",
+        served: "Path | None" = None,
     ) -> "ZoneRenderResult":
-        """Render the named zone of the origin page with optional overrides."""
+        """Render the named zone of the serving page, else of the origin page."""
+        page_path = self._resolve_page_path() if served is None else served
         return render_zone(
-            self._resolve_page_path(),
+            page_path,
             (zone,),
             self._require_request(),
             url_kwargs=self._origin_url_kwargs(),
             overrides=dict(overrides) if overrides else None,
-            context_data=self._origin_render_context(),
-        )
-
-    def _render_served_zone(
-        self, served: "Path", zone: str, overrides: "Mapping[str, Any] | None"
-    ) -> "ZoneRenderResult":
-        """Render a zone of an authorized intercept page over its own render context."""
-        context = self._served_contexts.get(served)
-        if context is None:
-            context = page_manager.build_render_context(
-                served,
-                self._require_request(),
-                _requested_zones=None,
-                **self._origin_url_kwargs(),
-            )
-            self._served_contexts[served] = context
-        return render_zone(
-            served,
-            (zone,),
-            self._require_request(),
-            url_kwargs=self._origin_url_kwargs(),
-            overrides=dict(overrides) if overrides else None,
-            context_data=dict(context),
+            context_data=self._page_render_context(page_path),
         )
 
     def _serializable_names(self) -> frozenset[str]:

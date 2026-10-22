@@ -4,10 +4,11 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final, cast
 from weakref import WeakKeyDictionary
 
-from django.template import TemplateDoesNotExist, TemplateSyntaxError
+from django.template import Template, TemplateDoesNotExist, TemplateSyntaxError
 
 from next.components.manager import components_manager
 from next.pages import page
+from next.pages.loaders import LayoutTemplateLoader
 from next.partial.guards import Components, Stamps, bound_zones, fresh
 from next.partial.headers import partial_intent
 from next.partial.signals import zone_registered
@@ -20,7 +21,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from django.http import HttpRequest
-    from django.template.base import Template
 
     from next.partial.zone import ZoneOptions, ZonePartial
 
@@ -61,6 +61,7 @@ class _Entry:
 
 
 _zone_cache: "WeakKeyDictionary[Template, _Entry]" = WeakKeyDictionary()
+_layout_cache: "WeakKeyDictionary[Template, frozenset[str]]" = WeakKeyDictionary()
 
 
 def _bound(template: "Template", page_path: "Path") -> tuple[frozenset[str], Stamps]:
@@ -143,6 +144,69 @@ def standalone_zones(page_path: "Path") -> tuple[str, ...]:
     return tuple(name for name, info in declared.items() if info.standalone)
 
 
+def _composed(page_path: "Path") -> Template | None:
+    """Return the composed template of a page, `None` where it does not compose."""
+    try:
+        return page.composed_template_for(page_path)
+    except COMPOSE_FAILURES:
+        return None
+
+
+def _layout_zone_names(template: Template, page_path: "Path") -> frozenset[str]:
+    """Return the zones the layouts around a page declare.
+
+    A read is kept with the composed template, which a layout edit replaces.
+    """
+    cached = _layout_cache.get(template)
+    if cached is not None:
+        return cached
+    loader = LayoutTemplateLoader()
+    if not loader.can_load(page_path):
+        return frozenset()
+    skeleton = Template(loader.compose_skeleton(page_path))
+    nodes = skeleton.nodelist.get_nodes_by_type(ZoneNode)
+    names = frozenset(node.name for node in nodes if isinstance(node, ZoneNode))
+    _layout_cache[template] = names
+    return names
+
+
+def own_zones(page_path: "Path") -> "Mapping[str, ZoneInfo] | None":
+    """Return the zones the body of a page declares, `None` where it does not compose.
+
+    The zones of its layouts are left out, since the page below shares them.
+    """
+    template = _composed(page_path)
+    if template is None:
+        return None
+    layouts = _layout_zone_names(template, page_path)
+    declared = zones_of(template, page_path)
+    return {name: info for name, info in declared.items() if name not in layouts}
+
+
+def own_standalone_zones(page_path: "Path") -> tuple[str, ...]:
+    """Return the standalone zones of a page body, none where it does not compose."""
+    zones = own_zones(page_path) or {}
+    return tuple(name for name, info in zones.items() if info.standalone)
+
+
+def target_zones(page_path: "Path") -> frozenset[str]:
+    """Return the standalone zones of a target, none where it does not compose."""
+    template = _composed(page_path)
+    if template is None:
+        return frozenset()
+    declared = zones_of(template, page_path)
+    return frozenset(name for name, info in declared.items() if info.standalone)
+
+
+def zones_served(page_path: "Path", target_file: "Path") -> tuple[str, ...]:
+    """Return the zones an intercept page serves over its target, in body order.
+
+    The target keeps any zone it declares, and a layout of the intercept never renders.
+    """
+    kept = target_zones(target_file)
+    return tuple(name for name in own_standalone_zones(page_path) if name not in kept)
+
+
 def zone_requested(request: "HttpRequest", name: str) -> bool:
     """Return True when the partial intent of the request names the zone."""
     return name in partial_intent(request).zones
@@ -151,7 +215,11 @@ def zone_requested(request: "HttpRequest", name: str) -> bool:
 __all__ = [
     "COMPOSE_FAILURES",
     "ZoneInfo",
+    "own_standalone_zones",
+    "own_zones",
     "standalone_zones",
+    "target_zones",
     "zone_requested",
     "zones_of",
+    "zones_served",
 ]

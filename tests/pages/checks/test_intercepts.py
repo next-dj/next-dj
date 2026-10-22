@@ -12,7 +12,7 @@ from next.pages.checks.intercepts import (
     check_intercept_url_kwargs,
     check_nested_intercepts,
 )
-from tests.support import routed, write_page
+from tests.support import installed_apps, routed, write_app, write_page, write_urlconf
 from tests.support.access import PAGE_HEAD
 from tests.support.cases.intercepts import TARGET_HINT_CASES, TargetHintCase, zone_body
 from tests.support.checks import located, run_check, write_files
@@ -223,6 +223,24 @@ class TestInterceptRender:
         assert run_check(check_intercept_render, root) == []
 
 
+class TestInterceptUrlKwargsMounted:
+    """next.E176 reads the kwargs of a mount prefix as the target captures them."""
+
+    def test_a_kwarg_the_mount_captures_is_not_named_as_missing(self, tmp_path) -> None:
+        write_app(tmp_path, "blog", {"pages": ()})
+        pages = tmp_path / "blog" / "pages"
+        write_page(pages, "feed/photo")
+        _intercept(pages, "feed/[int:id]/(..)photo")
+        urlconf = write_urlconf(
+            tmp_path, "mount_urls", 'path("<int:group>/", pages("blog"))'
+        )
+
+        with installed_apps(tmp_path, "blog", urlconf=urlconf, BASE_DIR=tmp_path):
+            [message] = check_intercept_url_kwargs(None)
+
+        assert "bracket directories 'id'" in message.msg
+
+
 class TestInterceptUrlKwargs:
     """next.E176 flags a URL kwarg an intercept reads and its target lacks."""
 
@@ -246,24 +264,49 @@ class TestInterceptUrlKwargs:
 
         assert "bracket directories 'id', 'slug'" in message.msg
 
-    def test_an_object_permission_the_target_lacks_is_flagged(self, root: Path) -> None:
+    @pytest.mark.parametrize(
+        ("target", "intercept"),
+        [
+            ("photo-[group]", "(.)photo-[group]"),
+            ("[group]/photo", "[group]/(.)photo"),
+            ("p-[int:a]-[b]", "(.)p-[int:a]-[b]"),
+        ],
+    )
+    def test_a_mixed_segment_the_target_captures_is_silent(
+        self, root: Path, target: str, intercept: str
+    ) -> None:
+        write_page(root, target)
+        _intercept(root, intercept)
+
+        assert run_check(check_intercept_url_kwargs, root) == []
+
+    def test_a_mixed_directory_the_target_lacks_is_flagged(self, root: Path) -> None:
         write_page(root, "photo")
-        _intercept(root, "(.)photo", _OBJECT)
+        _intercept(root, "x-[slug]/(..)photo")
 
-        messages = run_check(check_intercept_url_kwargs, root)
+        [message] = run_check(check_intercept_url_kwargs, root)
 
-        assert located(messages, root) == [("next.E176", "(.)photo/page.py")]
-        assert "DObject[Group]" in messages[0].msg
-        assert "'group'" in messages[0].msg
-        assert "[int:group]" in messages[0].hint
+        assert "bracket directories 'slug'" in message.msg
 
-    def test_both_findings_report_separately(self, root: Path) -> None:
+    def test_a_group_around_the_directories_is_not_read_as_a_kwarg(
+        self, root: Path
+    ) -> None:
         write_page(root, "photo")
-        _intercept(root, "[int:id]/(..)photo", _OBJECT)
+        _intercept(root, "(shop)/(.)photo")
 
-        messages = run_check(check_intercept_url_kwargs, root)
+        assert run_check(check_intercept_url_kwargs, root) == []
 
-        assert [message.id for message in messages] == ["next.E176", "next.E176"]
+    def test_a_target_the_parser_refuses_is_left_alone(self, root: Path) -> None:
+        write_page(root, "[id]/[id]")
+        _intercept(root, "[id]/(.)[id]")
+
+        assert run_check(check_intercept_url_kwargs, root) == []
+
+    def test_an_intercept_the_parser_refuses_reads_no_kwargs(self, root: Path) -> None:
+        write_page(root, "photo")
+        _intercept(root, "[id]/[id]/(..)(..)photo")
+
+        assert run_check(check_intercept_url_kwargs, root) == []
 
     @pytest.mark.parametrize(
         ("target", "intercept", "source"),
@@ -281,31 +324,6 @@ class TestInterceptUrlKwargs:
     ) -> None:
         write_page(root, target)
         _intercept(root, intercept, source)
-
-        assert run_check(check_intercept_url_kwargs, root) == []
-
-    @pytest.mark.parametrize("obj", ['"auth.Group"', '"group"', "Group"])
-    def test_an_obj_other_than_a_dobject_is_left_to_the_import_check(
-        self, root: Path, obj: str
-    ) -> None:
-        # page.permission_required refuses it on import, so no rule ever reads it.
-        write_page(root, "photo")
-        _intercept(
-            root,
-            "(.)photo",
-            "from django.contrib.auth.models import Group\n\n"
-            f'{PAGE_HEAD}page.permission_required("auth.view_group", obj={obj})\n',
-        )
-
-        assert run_check(check_intercept_url_kwargs, root) == []
-
-    def test_a_permission_without_an_object_is_silent(self, root: Path) -> None:
-        write_page(root, "photo")
-        _intercept(
-            root,
-            "(.)photo",
-            f'{PAGE_HEAD}page.permission_required("auth.view_group")\n',
-        )
 
         assert run_check(check_intercept_url_kwargs, root) == []
 

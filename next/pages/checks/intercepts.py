@@ -12,21 +12,22 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 
 from next.checks import NEXT
 from next.checks.common import RunMemo, get_router_manager, iter_scanned_pages
-from next.deps.objects import object_kwarg
 from next.pages.access import anonymous_admitted, default_login, page_access, routed
 from next.pages.errors import PageMetadataShapeError
 from next.pages.loaders import load_page_module, serves
 from next.pages.manager import page
 from next.pages.metadata.normalize import normalize_metadata
+from next.ports import router_access_slot
 from next.utils import (
     LAYOUT_TEMPLATE,
     ROUTE_BRACKET_PATTERN,
     normalise_route_name,
     parse_intercept,
+    strip_route_groups,
 )
 
 from .metadata.crumbs import declares_crumb
-from .walk import is_intercept_name, tree_walk
+from .walk import tree_walk
 
 
 if TYPE_CHECKING:
@@ -86,18 +87,31 @@ def target_of(hit: TreeIntercept) -> Path | None:
     return routed_trails().get(hit.root.path.resolve(), {}).get(hit.target_trail)
 
 
-def targeted_intercepts() -> Iterator[ServedIntercept]:
-    """Yield every intercept page that loads and whose target its tree routes.
-
-    A broken `page.py` is left to the import check, a missing target to `next.E170`.
-    """
+def _read_targeted() -> tuple[ServedIntercept, ...]:
+    """Return every intercept page that loads and whose target its tree routes."""
+    found: list[ServedIntercept] = []
     for hit in tree_walk().intercepts:
         target = target_of(hit)
         if target is None:
             continue
         module, error = load_page_module(hit.file)
         if error is None:
-            yield ServedIntercept(hit, target, module)
+            found.append(ServedIntercept(hit, target, module))
+    return tuple(found)
+
+
+_targeted: RunMemo[tuple[ServedIntercept, ...]] = RunMemo()
+
+
+def targeted_intercepts() -> Iterator[ServedIntercept]:
+    """Yield every intercept page that loads and whose target its tree routes.
+
+    A broken `page.py` is left to the import check, a missing target to `next.E170`.
+    """
+    router_manager, _errors = get_router_manager()
+    if router_manager is None:
+        return
+    yield from _targeted.get(router_manager, _read_targeted)
 
 
 def served_intercepts() -> Iterator[ServedIntercept]:
@@ -124,12 +138,11 @@ def _parameter(segment: str) -> str | None:
     return normalise_route_name(raw.rpartition(":")[2].strip())
 
 
-def parameters(trail: str) -> frozenset[str]:
-    """Return the URL kwargs the bracket segments of `trail` capture."""
-    return frozenset(
-        name
-        for segment in trail.split("/")
-        if (name := _parameter(segment)) is not None
+def _own_trail(raw_trail: str) -> str:
+    """Return an intercept directory trail with its groups and markers left out."""
+    return "/".join(
+        parsed[1] if (parsed := parse_intercept(segment)) else segment
+        for segment in strip_route_groups(raw_trail).split("/")
     )
 
 
@@ -201,7 +214,7 @@ def check_intercept_scope(*args, **kwargs) -> list[CheckMessage]:
         name = directory.path.name
         if directory.within is not None or directory.url_trail is not None:
             continue
-        if not is_intercept_name(name) or parse_intercept(name) is None:
+        if parse_intercept(name) is None:
             continue
         scope = directory.scope_trail
         errors.append(
@@ -261,58 +274,41 @@ def check_intercept_render(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
-def _object_kwargs(file: Path) -> Iterator[tuple[str, str]]:
-    """Yield the model and the URL kwarg each object permission of a page reads."""
-    for requirement in page_access(file).rule.requirements:
-        model = requirement.obj
-        if isinstance(model, type):
-            yield model.__name__, object_kwarg(model)
-
-
 def _kwarg_errors(served: ServedIntercept) -> list[CheckMessage]:
-    """Return the errors for the URL kwargs an intercept reads and its target lacks."""
+    """Return the error for the URL kwargs an intercept sits under and its target lacks.
+
+    Both sides are read by the router's own parser, so a mixed segment counts.
+    """
     hit = served.hit
-    captured = parameters(hit.target_trail)
-    errors: list[CheckMessage] = []
-    missing = parameters(hit.raw_trail) - captured
-    if missing:
-        errors.append(
-            Error(
-                f"The intercept page {hit.file} sits under the bracket directories "
-                f"{joined(missing)}, which its target trail {hit.target_trail!r} "
-                "does not capture, so a zone request passes no such kwarg to its "
-                "context or its access.",
-                hint=(
-                    "Target a page whose URL captures them, or move the intercept "
-                    "out from under those directories."
-                ),
-                obj=str(hit.file),
-                id="next.E176",
-            )
-        )
-    errors.extend(
+    access = router_access_slot.get()
+    captured = access.page_kwargs(hit.root, hit.target_trail)
+    if captured is None:
+        return []
+    own = access.page_kwargs(hit.root, _own_trail(hit.raw_trail))
+    missing = frozenset() if own is None else own - captured
+    if not missing:
+        return []
+    return [
         Error(
-            f"The intercept page {hit.file} checks a permission on DObject[{model}], "
-            f"which loads the row by the URL kwarg {kwarg!r}, but its target trail "
-            f"{hit.target_trail!r} captures no such kwarg.",
+            f"The intercept page {hit.file} sits under the bracket directories "
+            f"{joined(missing)}, which its target trail {hit.target_trail!r} "
+            "does not capture, so a zone request passes no such kwarg to its "
+            "context or its access.",
             hint=(
-                f"Target a page whose URL names the row as [int:{kwarg}], or drop "
-                "obj= from the intercept."
+                "Target a page whose URL captures them, or move the intercept "
+                "out from under those directories."
             ),
             obj=str(hit.file),
             id="next.E176",
         )
-        for model, kwarg in dict.fromkeys(_object_kwargs(hit.file))
-        if kwarg not in captured
-    )
-    return errors
+    ]
 
 
 @register(NEXT)
 def check_intercept_url_kwargs(*args, **kwargs) -> list[CheckMessage]:
-    """Flag a URL kwarg an intercept reads that its target lacks (`next.E176`).
+    """Flag a URL kwarg an intercept sits under that its target lacks (`next.E176`).
 
-    A zone request carries the kwargs of the target URL alone.
+    A zone request carries the target kwargs alone, and `next.E162` judges its `obj=`.
     """
     errors: list[CheckMessage] = []
     for served in served_intercepts():
@@ -434,7 +430,6 @@ __all__ = [
     "check_intercept_url_kwargs",
     "check_nested_intercepts",
     "joined",
-    "parameters",
     "routed_trails",
     "served_intercepts",
     "target_of",

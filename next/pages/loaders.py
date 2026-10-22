@@ -874,6 +874,12 @@ def has_body(file_path: Path, module: types.ModuleType | None) -> bool:
     return any(loader.can_load(file_path) for loader in build_registered_loaders())
 
 
+def renders_itself(file_path: Path) -> bool:
+    """Return whether the page defines `render()`, importing it as a route does."""
+    module, _error = load_page_module(file_path)
+    return module is not None and callable(getattr(module, "render", None))
+
+
 def serves(
     file_path: Path,
     module: types.ModuleType | None,

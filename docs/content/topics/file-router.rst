@@ -548,6 +548,10 @@ The page of the intercept renders the zone alone, with no layout around it, so a
 A full request of the same URL renders the real target page.
 :ref:`topics-partial-rendering-layers` covers the layer that hosts the zone and :doc:`/content/howto/open-a-page-as-a-modal-over-another` walks through a recipe.
 
+An intercept whose template fails to compose is skipped when a zone is requested, and ``next.E072`` reports it.
+Intercept pages are part of discovery, so ``next.E017``, ``next.E072``, and the ``DObject`` checks cover them against the kwargs of the target, and their actions register with the rest.
+The development server restarts when an intercept page is added, removed, or renamed.
+
 The access chains of the target and of the intercept both run on a zone request, and a denial of either is the response.
 :doc:`/content/ref/system-checks` lists the checks of intercepts, ``next.E170`` to ``next.E176`` and ``next.W138`` to ``next.W140``.
 
