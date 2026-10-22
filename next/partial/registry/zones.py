@@ -161,11 +161,11 @@ def _layout_zone_names(template: Template, page_path: "Path") -> frozenset[str]:
     if cached is not None:
         return cached
     loader = LayoutTemplateLoader()
-    if not loader.can_load(page_path):
-        return frozenset()
-    skeleton = Template(loader.compose_skeleton(page_path))
-    nodes = skeleton.nodelist.get_nodes_by_type(ZoneNode)
-    names = frozenset(node.name for node in nodes if isinstance(node, ZoneNode))
+    names: frozenset[str] = frozenset()
+    if loader.can_load(page_path):
+        skeleton = Template(loader.compose_skeleton(page_path))
+        nodes = skeleton.nodelist.get_nodes_by_type(ZoneNode)
+        names = frozenset(node.name for node in nodes if isinstance(node, ZoneNode))
     _layout_cache[template] = names
     return names
 
