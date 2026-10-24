@@ -15,6 +15,13 @@ def results(poll: Poll) -> dict[str, object]:
     return {
         "poll_id": poll.pk,
         "total_votes": total,
+        "is_open": poll.is_open,
+        "accepting_votes": poll.accepts_votes(),
+        "deadline": (
+            int(poll.closes_at.timestamp() * 1000)
+            if poll.closes_at is not None
+            else None
+        ),
         "choices": [
             {"id": choice.pk, "text": choice.text, "votes": choice.votes}
             for choice in choices

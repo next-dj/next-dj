@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import enum
 import functools
+import importlib
 import json
 import logging
 import re
 from html import escape
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, ClassVar, Final
+from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 
 from next.caches import DEFAULT_CACHE_SIZE
 from next.csrf import csrf_payload
@@ -38,8 +39,14 @@ SCRIPTS_CHUNK_STATIC_PATH: Final = "next/next.scripts.min.js"
 DEV_CHUNK_STATIC_PATH: Final = "next/next.dev.min.js"
 """The diagnostics chunk the runtime fetches only when the payload carries `$dev`."""
 
-SSE_CHUNK_STATIC_PATH: Final = "next/next.sse.min.js"
-"""The server-sent events bridge, fetched once a page marks an element to stream."""
+STREAM_CHUNK_STATIC_PATH: Final = "next/next.stream.min.js"
+"""The transport-neutral stream state machine, fetched by stream containers."""
+
+WS_CHUNK_STATIC_PATH: Final = "next/next.ws.min.js"
+"""The optional WebSocket adapter, fetched only when WS is enabled."""
+
+SSE_CHUNK_STATIC_PATH: Final = STREAM_CHUNK_STATIC_PATH
+"""Compatibility alias for the stream bridge under the earlier `sse` key."""
 
 CSRF_CHUNK_STATIC_PATH: Final = "next/next.csrf.min.js"
 """The deferred CSRF token loader, fetched on the first post from a page without one."""
@@ -53,7 +60,9 @@ DEV_CHUNK_KEY: Final = "dev"
 CHUNK_STATIC_PATHS: Final[Mapping[str, str]] = MappingProxyType(
     {
         "scripts": SCRIPTS_CHUNK_STATIC_PATH,
+        "stream": STREAM_CHUNK_STATIC_PATH,
         "sse": SSE_CHUNK_STATIC_PATH,
+        "ws": WS_CHUNK_STATIC_PATH,
         "csrf": CSRF_CHUNK_STATIC_PATH,
         "poll": POLL_CHUNK_STATIC_PATH,
         DEV_CHUNK_KEY: DEV_CHUNK_STATIC_PATH,
@@ -67,6 +76,7 @@ CSRF_PAYLOAD_KEY: Final = "$csrf"
 DEV_PAYLOAD_KEY: Final = "$dev"
 
 CHUNKS_PAYLOAD_KEY: Final = "$chunks"
+REALTIME_PAYLOAD_KEY: Final = "$realtime"
 SCRIPTS_PAYLOAD_KEY: Final = "$scripts"
 CONSENT_PAYLOAD_KEY: Final = "$consent"
 
@@ -76,7 +86,13 @@ CHUNK_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset(
 """The payload keys that make the runtime fetch the scripts chunk."""
 
 RESERVED_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset(
-    {CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY, CHUNKS_PAYLOAD_KEY, *CHUNK_PAYLOAD_KEYS}
+    {
+        CSRF_PAYLOAD_KEY,
+        DEV_PAYLOAD_KEY,
+        CHUNKS_PAYLOAD_KEY,
+        REALTIME_PAYLOAD_KEY,
+        *CHUNK_PAYLOAD_KEYS,
+    }
 )
 
 SCRIPT_ESCAPES: Final[dict[int, str]] = {
@@ -115,6 +131,30 @@ def csrf_payload_for(request: HttpRequest | None) -> dict[str, str] | None:
     if request is None or not isinstance(getattr(request, "META", None), dict):
         return None
     return csrf_payload(request)
+
+
+@functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
+def _realtime_payload_json(content_type: str, transports: tuple[str, ...]) -> str:
+    """Encode the stream negotiation data for the active partial protocol."""
+    return json.dumps(
+        {"protocol": 2, "transports": transports, "content_type": content_type},
+        separators=(",", ":"),
+    )
+
+
+def _active_transports() -> tuple[str, ...]:
+    """Resolve lazy realtime capabilities without importing optional integrations."""
+    realtime = importlib.import_module("next.realtime.transports")
+    return cast("tuple[str, ...]", realtime.active_transports())
+
+
+def _partial_content_type() -> str:
+    """Read the content type from the same protocol backend used for HTTP patches."""
+    # Keep the dependency lazy: partial's patch modules import this runtime module.
+    partial_backend_manager = importlib.import_module(
+        "next.partial.manager"
+    ).partial_backend_manager
+    return cast("str", partial_backend_manager.get().content_type)
 
 
 TAG_FIELDS: Final = ("url", "nonce_attr")
@@ -247,10 +287,17 @@ class NextScriptBuilder:
         serializers = key_serializers or {}
         fragments: list[str] = []
         for k, v in js_context.items():
+            if k == REALTIME_PAYLOAD_KEY and CHUNKS_PAYLOAD_KEY in js_context:
+                continue
             frag = encoded.get(k) if encoded is not None else None
             if frag is None:
                 frag = serializers.get(k, default).dumps(v)
             fragments.append(f"{_encoded_key(k)}:{frag}")
+        if CHUNKS_PAYLOAD_KEY in js_context:
+            realtime = _realtime_payload_json(
+                _partial_content_type(), _active_transports()
+            )
+            fragments.append(f"{_encoded_key(REALTIME_PAYLOAD_KEY)}:{realtime}")
         payload = "{" + ",".join(fragments) + "}"
         if _ESCAPED.search(payload) is not None:
             payload = payload.translate(SCRIPT_ESCAPES)

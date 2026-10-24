@@ -24,18 +24,19 @@ Every context function, component render, and form action runs inside a synchron
 An async workload lives outside the routed page tree, behind a task queue or an ordinary Django view.
 
 The one exception is the Server-Sent Events bridge.
-``PatchEventStream`` accepts an async source of patch builders and streams it under ASGI, which is the framework's only real-time delivery mechanism.
+``TopicStream`` provides broker-backed SSE delivery, while ``PatchEventStream`` remains the manual source escape hatch.
 It refuses a sync source under ASGI and an async source under WSGI, because Django buffers a mismatched iterator fully before the first byte.
 See :doc:`/content/topics/partial-rendering/sse` for the source contract and the heartbeat options.
 
-No suspense, no WebSockets
---------------------------
+No suspense, optional WebSockets
+--------------------------------
 
 Zones are a lazy reveal and a poll, not an asynchronous streaming boundary.
 A ``lazy=`` zone fills through a later client round trip, and a ``poll=`` zone re-fetches on a client timer.
 A slow zone holds its response instead of streaming a placeholder, because there is no server-side suspense flush.
-Real-time delivery is Server-Sent Events only, one direction from server to client.
-There is no WebSocket transport, so client-to-server push over a persistent socket stays outside the model.
+Realtime uses Server-Sent Events by default and supports optional WebSocket delivery through Channels under ASGI.
+Both transports carry server-authored notifications from server to client, and form actions remain the path for client mutations.
+Replay and presence are outside the current model.
 
 Single partial backend
 ----------------------

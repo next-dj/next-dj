@@ -784,7 +784,7 @@ class TestRuntimeBundlesDeployedCheck:
     def test_an_unbuilt_runtime_is_w090_and_the_dev_chunk_is_not_asked(self) -> None:
         with patch.object(checks_module.finders, "find", return_value=[]) as find:
             warnings = check_runtime_bundles_deployed()
-        assert check_ids(warnings) == ["next.W090"] * 5
+        assert check_ids(warnings) == ["next.W090"] * 6
         assert warnings[0].msg.startswith("next/next.min.js: no static files finder")
         assert "collectstatic" in warnings[0].hint
         asked = [call.args[0] for call in find.call_args_list]
@@ -792,7 +792,7 @@ class TestRuntimeBundlesDeployedCheck:
 
     def test_an_uncollected_chunk_is_w090(self) -> None:
         def url(name: str) -> str:
-            if name == "next/next.sse.min.js":
+            if name == "next/next.stream.min.js":
                 msg = "Missing staticfiles manifest entry"
                 raise ValueError(msg)
             return f"/static/{name}"
@@ -802,7 +802,9 @@ class TestRuntimeBundlesDeployedCheck:
             patch.object(checks_module.staticfiles_storage, "url", side_effect=url),
         ):
             [warning] = check_runtime_bundles_deployed()
-        assert warning.msg.startswith("next/next.sse.min.js: the static files storage")
+        assert warning.msg.startswith(
+            "next/next.stream.min.js: the static files storage"
+        )
 
 
 class TestColocatedNameCollisionsCheck:

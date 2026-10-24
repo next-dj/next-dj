@@ -65,10 +65,14 @@ The table runs roughly in order of how much it assumes.
      - Drives a board of React cards, teaching the pipeline a ``.jsx`` asset kind through a custom static backend, deep-merging serialised context across levels, and deduplicating co-located CSS by content hash.
      - :doc:`/content/topics/static-assets/asset-kinds`, :doc:`/content/topics/static-assets/deduplication`, :doc:`/content/topics/partial-rendering/framework-islands`
    * - :repo:`live-polls <tree/main/examples/live-polls>`
-     - Streams poll results to every open browser over server-sent events, fanning out from a signal receiver that reads the bound form, with a locally bundled Vue single-file component subscribing through ``EventSource`` and a custom ``.vue`` asset kind.
+     - Streams poll results to every open browser over SSE by default, with optional WebSocket delivery through Channels under ASGI, fanning out from a signal receiver that reads the bound form.
+       A staff host opens or closes polls and sets a deadline through Django admin.
+       Server-side form validation enforces the deadline, and the live countdown uses the stream's estimated server clock.
+       The runtime opens the stream from ``data-next-sse``.
+       The locally bundled Vue component listens for context and topic events and uses a custom ``.vue`` asset kind.
        Titles the poll list with a ``metadata`` dict and each poll after its question through ``@page.metadata``.
        Serves each poll as an embeddable widget under a root layout with a document shell of its own.
-     - :doc:`/content/topics/partial-rendering/sse`, :doc:`/content/howto/stream-live-updates-with-sse`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/framework-islands`
+     - :doc:`/content/topics/realtime`, :doc:`/content/howto/stream-live-updates-with-sse`, :doc:`/content/howto/stream-over-websockets-with-channels`, :doc:`/content/howto/count-down-to-a-server-deadline`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/framework-islands`
    * - :repo:`observability <tree/main/examples/observability>`
      - Watches a running project through one receiver per signal group, refreshing a dashboard from polling and lazy zones and a patch verb of its own, with a custom components backend, a custom deduplication strategy, a serializer swapped both globally and per decorator, and an opt-in hashed-manifest profile.
        Keeps the whole dashboard ``noindex`` from one root ``metadata`` dict and titles each stats page.

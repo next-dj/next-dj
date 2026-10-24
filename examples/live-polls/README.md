@@ -1,6 +1,6 @@
 # Live polls
 
-A polling app where the results on every open tab refresh the moment someone votes. The framework SSE bridge streams patch envelopes out of an in-process broker. Each event is a `refresh` patch, so every tab re-fetches the results zone with its own cookies through the page view, and no foreign HTML ever travels on the stream. A locally bundled Vue 3 island sits on top of the server-rendered chart. The example demonstrates how a streaming endpoint, a signal-driven fan-out, and a Vite-bundled Vue layer compose into one feature without any ad-hoc plumbing in the framework core.
+A polling app where the results on every open tab refresh the moment someone votes. `TopicStream` fans out `refresh` patches, so each tab re-fetches the results zone with its own cookies through the page view, and no foreign HTML travels on the stream. It also publishes a `poll:votes` event that updates an accessible live announcement. A locally bundled Vue 3 island sits on top of the server-rendered chart. The example demonstrates how framework topic APIs, a signal-driven publish point, and a Vite-bundled Vue layer compose into one feature.
 
 ## What you will see
 
@@ -10,8 +10,9 @@ A polling app where the results on every open tab refresh the moment someone vot
 | `/polls/` | Server-rendered list of polls. Each card shows choice count and total votes. |
 | `/polls/<id>/` | Vote page with the live chart, a button-per-choice form, and a `data-next-sse` element. |
 | `/polls/<id>/embed/` | The same live chart in a widget with its own bare document shell, linked as "Embed" from the vote page, where the link first opens the snippet to copy as a modal. |
-| `/polls/<id>/stream/` | The patch event stream. Each poll change emits a `next-patches` event carrying a `refresh` of the `poll-results` zone. |
-| `POST vote_form` | Atomically increments a choice via `F("votes") + 1`, then morphs the `poll-results` zone and pushes the fresh counts to `window.Next.context.live_results`. A signal receiver publishes the change to the broker with the request id. |
+| `/admin/polls/poll/` | Staff host console for opening or closing a poll and setting its deadline. |
+| `/polls/<id>/stream/` | The topic stream. Each poll change emits a `next-patches` refresh of `poll-results` and a `poll:votes` event with the updated total. |
+| `POST vote_form` | Atomically increments a choice via `F("votes") + 1`, then morphs the `poll-results` zone and pushes the fresh counts to `window.Next.context.live_results`. A signal receiver publishes the zone refresh and vote-count event after commit. |
 
 Two demo polls live in [`polls/demo.py`](polls/demo.py) and load through `manage.py seed_demo` ("Tabs or spaces?" and "Vim or Emacs?", two choices each) so the index page is never empty once seeded.
 
@@ -26,19 +27,26 @@ The vote page wraps its results in a zone and connects the stream with one eleme
 <div data-next-sse="/polls/{{ poll.pk }}/stream/"></div>
 ```
 
-The runtime opens one `EventSource` on the `data-next-sse` URL and routes each `next-patches` event into the same apply pipeline an HTTP partial response uses. There is no hand-written `EventSource` code.
+The runtime negotiates the configured transport from the guarded `data-next-sse` URL. When WebSockets are enabled and available, it opens the socket with a short-lived ticket issued by that page, and otherwise it opens an `EventSource` for SSE. Both transports route `next-patches` into the same apply pipeline as an HTTP partial response. There is no hand-written transport client code.
 
-A vote posts with `X-Next-Request-Id`. A valid partial vote answers the voter's own tab with two ops on one envelope, a morph of the `poll-results` zone with the fresh server-rendered bars and a `context` patch that pushes the new snapshot into `window.Next.context.live_results`. The `live_results` name is a page-level `serialize=True` provider on `[int:id]/page.py`, so `Patches(request).context(live_results=...)` resolves it against the origin page the vote posted from. The Vue island reads the pushed snapshot on `context-updated` and rebinds without re-reading the DOM. A signal receiver then publishes the change to the broker carrying the request id. The stream page yields one `refresh` envelope per change, stamped with the request id as the echo. A bad choice never reaches the handler, so the dispatcher auto-morphs the `poll-results` zone in place because the vote form lives inside it, and the voter keeps the rest of the page. Without the runtime the vote falls back to a redirect to the poll page.
+A vote posts with `X-Next-Request-Id`. A valid partial vote answers the voter's own tab with two ops on one envelope, a morph of the `poll-results` zone with the fresh server-rendered bars and a `context` patch that pushes the new snapshot into `window.Next.context.live_results`. The `live_results` name is a page-level `serialize=True` provider on `[int:id]/page.py`, so `Patches(request).context(live_results=...)` resolves it against the origin page the vote posted from. The Vue island reads the pushed snapshot on `context-updated` and rebinds without re-reading the DOM. A signal receiver publishes a `refresh` after the action transaction commits. The framework copies the originating request id from `Patches(request)`, so the voter's tab drops its echo. A bad choice never reaches the handler, so the dispatcher auto-morphs the `poll-results` zone in place because the vote form lives inside it, and the voter keeps the rest of the page. Without the runtime the vote falls back to a redirect to the poll page.
 
-```python
-def patch_source(request: HttpRequest, poll_id: int) -> Iterator[Patches]:
-    for change in broker.changes(poll_id):
-        yield Patches(request, echo_of=change.request_id).refresh(zone="poll-results")
-```
+Every subscriber receives the refresh and vote-count event. The voter's own tab finds the request id in its echo ring buffer and drops both messages, because its POST already brought the fresh zone. Every other tab executes the `refresh` and re-fetches `poll-results` with its own cookies through the poll page view, so authorization is re-checked per subscriber and the server-rendered bars come back current. The vote-count event updates a screen-reader announcement and carries no chart state.
 
-Every subscriber receives the same envelope. The voter's own tab finds the request id in its echo ring buffer and drops the event, its POST already brought the fresh zone. Every other tab executes the `refresh` and re-fetches `poll-results` with its own cookies through the poll page view, so authorization is re-checked per subscriber and the server-rendered bars come back current.
+The fan-out uses `refresh` because each subscriber must load its own authorized HTML and state. The vote response can still pair a zone morph with a `context` patch because it belongs to the submitting request.
 
-The fan-out is built on `refresh` rather than a context patch on purpose. A context patch carries a serialize provider's value read from the origin page of the request that builds it, and a stream source has no page-render origin to read from. A stream that needs fresh data drives a `refresh`, and the re-fetched zone delivers the new state through its own render. The vote handler, by contrast, runs on a real page-render origin, so it can pair its zone morph with a `context` patch that hands the voter's own tab the snapshot directly. So two update paths coexist, a `context` patch on the voter's own response and a `refresh` for every other tab, and the chart updates by re-rendering the server-side bars in the `poll-results` zone either way.
+## Mechanism map
+
+| App action | Framework path | Result |
+| --- | --- | --- |
+| Staff host saves `is_open` or `closes_at` in Django admin | `ModelAdmin.save_model` publishes `poll:phase` and refreshes `poll-results` with `on_commit=True` | Open tabs update their status, and the result zone is rendered again for each subscriber. |
+| A visitor submits a choice | `VoteForm` validates the poll state, then increments with `F("votes") + 1` | The voter receives a zone morph and context snapshot, and the signal publishes a refresh and vote-count event to other tabs. |
+| A visitor watches updates | `TopicStream` on the guarded stream page | Negotiation prefers a configured Channels WebSocket and falls back to SSE. Both use the guarded stream URL and recheck the topic authorizer once per heartbeat. |
+| Staff delete a poll | `can_subscribe_topic` denies the topic at the next recheck | Each open stream for that poll ends with `next-end` and the tab stops reconnecting. |
+| A tab misses messages or reconnects | Per-topic `(epoch, seq)` cursor and guarded zone resync | A gap or a new broker epoch re-renders current state with that tab's access and cookies. The broker never replays events. |
+| A poll has a deadline | Server-side form validation plus `Next.partial.stream.now()` in the chart island | The browser shows an estimated server-clock countdown, and the server refuses a vote after close. |
+
+Create a staff account with `uv run python manage.py createsuperuser`, then edit the poll at `/admin/polls/poll/`. Check `is_open` and optionally set `closes_at`. The deadline remains authoritative on the server even if a browser is stale or JavaScript is disabled.
 
 ## How to run
 
@@ -81,7 +89,11 @@ To go back to the dev server after a build, set the origin explicitly rather tha
 VITE_DEV_ORIGIN=http://localhost:5173 uv run python manage.py runserver
 ```
 
-The `runserver` command is a single-process toy in both modes. The SSE endpoint blocks one Django dev thread per open subscriber, which is fine for a demo or `pytest` and unsafe for any real workload. The source is sync, so `PatchEventStream` sends no heartbeat, a documented limitation under WSGI. A production deployment runs an ASGI server with an async `changes` generator and an `asyncio` wake primitive, and passes an async source for heartbeat support.
+The `runserver` command is a single-process toy in both modes. Under WSGI, each open stream occupies a worker while waiting for a broker message. A multi-worker deployment needs a shared channel layer and cache for `ChannelsLayerBroker`, or a shared backend such as `RedisBroker`. `TopicStream` selects the broker's sync or async subscription from the request type and emits a heartbeat frame every `NEXT_FRAMEWORK["REALTIME"]["HEARTBEAT"]` seconds, 25 by default. Keep that interval below the idle timeout of any proxy in front of the stream.
+
+The heartbeat also paces access. On both transports the stream rechecks the session and `polls.realtime.can_subscribe_topic`, an importable authorizer that allows a topic only while its poll exists, at most once per heartbeat. Delete a poll in the admin and every open stream for it ends with a `next-end` frame at that recheck, so the tab detaches the stream instead of reconnecting.
+
+The example keeps `TRANSPORTS` at `["sse"]` because `runserver` speaks WSGI. When the optional Channels package is installed, [`config/settings.py`](config/settings.py) adds `channels` to `INSTALLED_APPS` and [`config/asgi.py`](config/asgi.py) wraps the app with `next.contrib.channels.application`. Its WebSocket Origin allowlist comes from `ALLOWED_HOSTS` and ignores ports, so `localhost:8000` and `127.0.0.1:8000` pass with no extra setting. To switch to WebSockets, install `next-dj[channels]`, set `NEXT_FRAMEWORK["REALTIME"]["TRANSPORTS"]` to `["ws", "sse"]`, and serve `config.asgi:application` with an ASGI server such as Daphne. The socket opens with a short-lived session-bound ticket negotiated through the guarded stream page, and SSE stays the fallback. The E2E suite covers both the WSGI SSE path and a Channels WebSocket connection under Daphne.
 
 To peek at the stream from a second terminal:
 
@@ -91,7 +103,7 @@ curl -N http://127.0.0.1:8000/polls/1/stream/
 
 The `-N` flag disables curl output buffering so frames appear as the server flushes them. Vote in the browser, watch the `next-patches` events arrive.
 
-Tests run on two stacks. `uv run pytest` exercises the page modules, the broker, the receiver-driven fan-out, and one envelope off the actual `PatchEventStream`. `npm test` runs Vitest over both co-located suites: `component.test.js` mounts the chart SFC under `@vue/test-utils`, and `page.test.js` imports the mount entry against a stubbed `window.Next` to check that it registers `onMount`, re-reads the DOM snapshot on a second pass, and ignores a `context-updated` event that does not name `live_results`.
+Tests run on two stacks. `uv run pytest` exercises the page modules, topic fan-out, the stream response, and the `next-end` frame a deleted poll sends to its open stream. `npm test` runs Vitest over both co-located suites: `component.test.js` mounts the chart SFC under `@vue/test-utils`, and `page.test.js` imports the mount entry against a stubbed `window.Next` to check that it registers `onMount`, re-reads the DOM snapshot on a second pass, and ignores a `context-updated` event that does not name `live_results`.
 
 ## Walking the code
 
@@ -124,7 +136,7 @@ polls/pages/
         ├── page.vue                  <- mount entry, registers Next.partial.onMount
         ├── page.test.js              <- Vitest cover for the mount entry
         ├── template.djx              <- poll-results zone + data-next-sse element
-        ├── stream/page.py            <- PatchEventStream over broker.changes(poll.pk)
+        ├── stream/page.py            <- TopicStream for poll:<id>
         └── _components/poll_chart/   <- detail composite, owns the Vue layer
             ├── component.py          <- @component.context("results", serialize=True)
             ├── component.djx         <- SSR bars, data-poll-chart-data block, vote form
@@ -146,56 +158,34 @@ class PollsConfig(AppConfig):
         default_stems.register("template", "page")
 ```
 
-The `vue` kind binds the `.vue` extension to the `scripts` slot and reuses the framework built-in `render_module_tag`. Reusing a built-in renderer is what earns the kind a client insertion verb: every asset in a patch envelope carries a `load` field, and the `.vue` files ride out as `load: "module"` while the co-located `component.css` rides as `load: "link"`. A kind registered with a renderer of your own carries no verb and its assets reach the browser only on a full render, which the framework reports as `next.W074`. Nothing else lives in `ready()`. The framework imports the `deps.py` and `signals.py` of every installed app at startup, so [`polls/deps.py`](polls/deps.py) registers the `DPoll` provider and [`polls/signals.py`](polls/signals.py) wires both the Vite dev-asset injector and the `action_dispatched` listener that drives the broker fan-out.
+The `vue` kind binds the `.vue` extension to the `scripts` slot and reuses the framework built-in `render_module_tag`. Reusing a built-in renderer is what earns the kind a client insertion verb: every asset in a patch envelope carries a `load` field, and the `.vue` files ride out as `load: "module"` while the co-located `component.css` rides as `load: "link"`. A kind registered with a renderer of your own carries no verb and its assets reach the browser only on a full render, which the framework reports as `next.W074`. Nothing else lives in `ready()`. The framework imports the `deps.py` and `signals.py` of every installed app at startup, so [`polls/deps.py`](polls/deps.py) registers the `DPoll` provider and [`polls/signals.py`](polls/signals.py) wires the Vite dev-asset injector and the `action_dispatched` listener that publishes through the framework realtime API.
 
-### 3. The stream through the page escape hatch
+### 3. The authorized topic stream
 
 ```python
-def render(request: HttpRequest, poll: DPoll[Poll]) -> PatchEventStream:
-    return PatchEventStream(request, patch_source(request, poll.pk))
+from django.http import HttpRequest
+from polls.deps import DPoll
+from polls.models import Poll
+from polls.realtime import can_subscribe_topic
+from next.realtime import TopicStream
+
+
+def render(request: HttpRequest, poll: DPoll[Poll]) -> TopicStream:
+    return TopicStream(request, f"poll:{poll.pk}", authorize=can_subscribe_topic)
 ```
 
-The page module returns a `PatchEventStream` directly. The framework escape hatch in `next/pages/manager/` returns any `HttpResponseBase` subclass verbatim, so the layout chain and the static collector are bypassed for the streaming endpoint. `PatchEventStream` sets `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no` on construction so a proxy or `GZipMiddleware` does not eat the flush, and emits a leading `retry` hint from the `SSE.RETRY_MS` option.
+The page's normal guards and DI run before the subscription opens. The authorizer runs at subscription and again once per heartbeat on either transport, and a denial ends the stream with `next-end`. `TopicStream` handles transport negotiation, SSE framing, cache and proxy headers, retry hints, heartbeat frames, and stream cleanup. It selects `subscribe` under WSGI or `asubscribe` under ASGI.
 
-The endpoint stays sync because the broker waits on `threading.Condition`. An ASGI deployment swaps the wake primitive for an `asyncio.Condition` and passes an async source for heartbeat support without touching the page or the signal layer.
-
-### 4. Broker on `threading.Condition` and LocMemCache
+### 4. Signal-driven publish
 
 ```python
-class PollBroker:
-    def publish(self, snapshot, request_id=None):
-        store_snapshot(snapshot)
-        condition = self._conditions[snapshot.poll_id]
-        with condition:
-            self._revisions[snapshot.poll_id] += 1
-            self._request_ids[snapshot.poll_id] = request_id
-            condition.notify_all()
+from django.dispatch import receiver
 
-    def changes(self, poll_id):
-        condition = self._conditions[poll_id]
-        last_revision = self._revisions[poll_id]
-        while True:
-            current_revision = self._wait_for_new_revision(
-                poll_id, condition, last_revision
-            )
-            if current_revision == last_revision:
-                continue
-            last_revision = current_revision
-            payload = read_snapshot(poll_id)
-            if payload is None:
-                continue
-            yield Change(snapshot=payload, request_id=self._request_ids.get(poll_id))
-```
+from next.forms.signals import action_dispatched
+from next.partial import Patches
+from next.realtime import publish
 
-The cache holds the latest snapshot per poll. Each `publish` bumps a monotonic revision, records the mutation's request id, and `notify_all` wakes every subscriber. The broker yields `Change` value objects, the snapshot plus the request id, not wire bytes. The framework `PatchEventStream` owns the SSE framing, so the broker stays a plain pub/sub of domain events.
 
-Each subscriber captures its own `last_revision` _before_ yielding so a publish that lands while the consumer is still holding a frame wakes it on the next `next()` instead of being absorbed silently. A wake timeout loops without yielding. The sync source under WSGI sends no keepalive, the documented limitation the framework stream notes. The pattern is single-process by design. A multi-process deployment swaps the broker for Redis Pub/Sub or Postgres `LISTEN`/`NOTIFY` without touching the page or the signal layer.
-
-A naive `threading.Event` plus `clear()` looks attractive here but loses events under fan-out: the first subscriber to clear the flag hides the wake from the others. The condition + revision pair is the canonical fix and costs the same number of lines.
-
-### 5. Signal-driven fan-out carrying the request id
-
-```python
 @receiver(action_dispatched)
 def broadcast_vote(action_name="", form=None, request=None, **kwargs):
     if action_name != VOTE_ACTION_NAME or form is None:
@@ -203,11 +193,11 @@ def broadcast_vote(action_name="", form=None, request=None, **kwargs):
     poll = form.cleaned_data.get("poll")
     if poll is None:
         return
-    request_id = request.headers.get(REQUEST_ID) if request is not None else None
-    broker.publish(build_snapshot(poll), request_id=request_id)
+    if request is not None:
+        publish(f"poll:{poll.pk}", Patches(request).refresh(zone="poll-results"))
 ```
 
-The `action_dispatched` signal carries the bound form post-validation plus the request, so the receiver knows which poll changed and reads the mutation's `X-Next-Request-Id`. Threading that id to `broker.publish` lets the stream stamp it as the envelope echo, so the voter's own tab drops the fan-out. The receiver is the single publish point for the broker. Concentrating the publish here keeps the write path observable through one signal hook.
+The `action_dispatched` signal carries the bound form and request. `publish` waits for the transaction to commit, and the builder supplies the echo id automatically. The app does not read request headers or implement broker queues.
 
 ### 6. Vue layer driven by `Next.partial.onMount`
 
@@ -316,12 +306,12 @@ Vite hashes the filenames it builds, so the asset URLs need no `v` parameter and
 
 - [`polls/apps.py`](polls/apps.py): `PollsConfig.ready()` with the two registry calls.
 - [`polls/signals.py`](polls/signals.py): `broadcast_vote` receiver plus the dev-mode Vite injector.
-- [`polls/broker.py`](polls/broker.py): `PollBroker`, `Snapshot`, and the `Change` value object.
+- [`polls/snapshots.py`](polls/snapshots.py): the snapshot builder used by page rendering.
 - [`polls/backends.py`](polls/backends.py): `ViteManifestBackend` dev/prod URL routing.
 - [`polls/deps.py`](polls/deps.py): the `DPoll` marker and the `PollProvider` that resolves it.
-- [`polls/pages/polls/[int:id]/stream/page.py`](polls/pages/polls/[int:id]/stream/page.py): the `PatchEventStream` page module.
+- [`polls/pages/polls/[int:id]/stream/page.py`](polls/pages/polls/%5Bint%3Aid%5D/stream/page.py): the `TopicStream` page module.
 - [`polls/pages/polls/[int:id]/_components/poll_chart/component.vue`](polls/pages/polls/[int:id]/_components/poll_chart/component.vue): the chart Vue SFC.
-- [`next/partial/sse.py`](../../next/partial/sse.py): `PatchEventStream`, the politeness headers, and the heartbeat contract.
+- [`next/partial/sse.py`](../../next/partial/sse.py): the SSE framing, cache headers, and heartbeat contract.
 - [`next/partial/patches.py`](../../next/partial/patches.py): the `Patches` builder and the `refresh` verb.
 - [`next/forms/signals.py`](../../next/forms/signals.py): `action_dispatched` payload contract used by the receiver.
 - [`next/static/signals.py`](../../next/static/signals.py): `collector_finalized` signal that drives the Vite dev preamble.

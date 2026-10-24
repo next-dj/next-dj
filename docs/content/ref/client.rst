@@ -12,9 +12,9 @@ The runtime applies the patch envelopes the server authors, drives the ``data-ne
 It never invents a target or a swap strategy, so this page records what the runtime accepts rather than what it decides.
 
 The TypeScript sources live in ``next/client/`` and are not part of the installed package.
-``make build-js`` bundles, in one esbuild call, ``next/client/next.ts`` into ``next/static/next/next.min.js``, and each entry of ``next/client/entries/``, ``scripts.ts``, ``sse.ts``, ``csrf.ts``, ``poll.ts``, and ``dev.ts``, into ``next/static/next/next.<name>.min.js``, the six minified artefacts the wheel ships.
+``make build-js`` bundles, in one esbuild call, ``next/client/next.ts`` into ``next/static/next/next.min.js``, and each entry of ``next/client/entries/``, ``scripts.ts``, ``stream.ts``, ``csrf.ts``, ``poll.ts``, and ``dev.ts``, into ``next/static/next/next.<name>.min.js``, the six minified artefacts the wheel ships.
 The scripts chunk carries consent and third-party scripts, and the runtime fetches it only for a page that needs it, see :doc:`client-extras`.
-The sse chunk carries the stream bridge, fetched once a scan finds a ``data-next-sse`` container.
+The stream chunk carries the shared stream state and SSE transport, fetched once a scan finds a ``data-next-stream`` or ``data-next-sse`` container.
 The csrf chunk carries the fetch of a deferred CSRF token, fetched on the first need of a page that shipped only the endpoint.
 The poll chunk carries the zone poller, fetched once a scan finds a ``data-next-poll`` zone.
 The dev chunk carries the diagnostics of a ``DEBUG`` render, and a production page never fetches it.
@@ -32,7 +32,8 @@ The surface splits into tiers that describe the intended audience for each name.
 A member whose name starts with an underscore is a bootstrap or test seam rather than application API.
 
 Stable.
-   ``Next.context``, ``Next.on``, ``Next.use``, ``Next.ready``, ``Next.navigation``, ``Next.consent``, ``Next.scripts``, ``Next.partial.onMount``, ``Next.partial.mount``, ``Next.partial.apply``, ``Next.partial.fetch``, ``Next.partial.setCsrf``, ``Next.partial.layers``, and ``Next.partial.sse``.
+   ``Next.context``, ``Next.on``, ``Next.use``, ``Next.ready``, ``Next.navigation``, ``Next.consent``, ``Next.scripts``, ``Next.partial.onMount``, ``Next.partial.mount``, ``Next.partial.apply``, ``Next.partial.fetch``, ``Next.partial.setCsrf``, ``Next.partial.layers``, and ``Next.partial.stream``.
+   ``Next.partial.sse`` remains an alias for the stream API.
    The ``next:*`` events and the ``partial:*`` document events belong to the same tier.
    Use these from a co-located asset, an island adapter, or a page script.
 
@@ -231,7 +232,8 @@ The partial surface
 ~~~~~~~~~~~~~~~~~~~
 
 ``Next.partial`` is a ``PartialSurface``, one object built when the bundle evaluates and never replaced.
-``layers`` and ``sse`` are getters over live sub-modules, so a held reference to the surface keeps reaching the current stack and registry.
+``layers``, ``stream``, and ``sse`` are getters over live sub-modules, so a held reference to the surface keeps reaching the current stack and registry.
+``stream`` is the transport-neutral API, and ``sse`` remains an alias.
 
 .. list-table::
    :header-rows: 1
@@ -270,7 +272,13 @@ The partial surface
      - The live stack of open layers, for driving a modal from script, see :doc:`/content/topics/partial-rendering/layers`.
    * - ``sse``
      - ``Sse``
-     - The registry of open stream connections, see :doc:`/content/topics/partial-rendering/sse`.
+     - Compatibility alias for ``stream``.
+   * - ``stream``
+     - ``Sse``
+     - The stream registry and clock API.
+       ``on(topic, name, callback)`` adds a topic listener, and ``meta()`` reads metadata during synchronous delivery.
+       ``now()``/``offset()`` estimate server time.
+       See `The stream API`_ and :doc:`/content/topics/realtime`.
    * - ``mount(nodes: readonly Element[])``
      - ``void``
      - Run the mount pass over elements inserted outside an envelope.
@@ -313,10 +321,33 @@ A body no hook claims and no envelope content type covers becomes a full navigat
      return { name: "msgpack-wire" };
    });
 
+The stream API
+~~~~~~~~~~~~~~
+
+``Next.partial.stream`` keeps one connection per distinct ``data-next-stream`` URL and an ``(epoch, seq)`` cursor per topic on it.
+``on(topic, name, callback)`` calls ``callback(detail, meta)`` for each ``event`` patch of that name on that topic and returns the function that removes the listener.
+``meta`` is a ``StreamMeta`` of ``topic``, ``epoch``, ``seq``, and ``serverTime``, and ``meta()`` returns the same object while a delivery runs and ``undefined`` outside it.
+``now()`` adds the median ``offset()`` of the last five ``server_time`` samples to the local clock.
+
+Every change of a connection's state fires ``next:stream-state`` with ``url``, ``transport``, and ``state``.
+A connection is ``connecting`` while it opens and again while a dropped socket or ``EventSource`` waits to reconnect, ``open`` once the transport is up, and ``closed`` when it is paused, removed, or ended.
+A ``next-end`` frame, sent when the topic authorizer denies a grant, is terminal, so the connection closes for good, its ``next:stream-state`` detail also carries the frame's ``code``, and ``partial:error`` of kind ``network`` fires with that code as its ``error``.
+A ``next:stream-gap`` event with ``topic``, ``from``, and ``to`` fires for every gap or epoch change that triggers a zone resync.
+A change between two non-empty epochs resets the cursor and resyncs, while a change from the empty epoch of a never-published topic is contiguous at ``seq`` ``1`` and a gap above it.
+
+With WebSockets enabled, the client first sends the stream URL a GET with ``X-Next-Transport: ws`` and ``Accept: application/json``.
+It opens the socket only for a ``200`` reply whose content type is ``application/json``.
+A ``401``, ``403``, or ``406`` reply, any other content type, no reply within five seconds, an ``auth`` error frame, a ``4401`` or ``4403`` close, or three failed attempts in a row sends that connection to SSE for good.
+
+The failure count resets only after a socket stayed open for one heartbeat past its ``hello``, so a server that drops every socket right after ``hello`` still ends on SSE.
+A socket that sends no ``hello`` within five seconds of opening is closed as a transient failure.
+The ``hello`` frame names the server's ``heartbeat`` in seconds, and a socket that receives no frame for two and a half heartbeats counts as dropped, is closed, and reconnects.
+A ``patches`` frame hands its ``data`` text to the registered parse hook unchanged, the same text an ``EventSource`` would deliver.
+
 The attribute contract
 ~~~~~~~~~~~~~~~~~~~~~~
 
-The runtime reads one attribute namespace, ``data-next-*``, and nineteen names make up the whole contract.
+The runtime reads one attribute namespace, ``data-next-*``, and twenty names make up the whole contract.
 They fall into authorship groups, and a reader needs the split to know which are theirs to write.
 The server writes five of them from ``{% zone %}`` and ``{% form %}`` parameters alone, the runtime writes four as styling and state hooks, and six are hand-authored on plain markup.
 The remaining four carry both authors, written by a ``{% form %}`` parameter on a form and by hand on the link or control that drives the same behaviour without one.
@@ -369,7 +400,10 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
      - The morph engine, which leaves the node and its subtree untouched so a mounted island root survives.
    * - ``data-next-sse``
      - Hand-written on a container
-     - The stream bridge, which opens one ``EventSource`` per distinct URL and rescans each inserted subtree.
+     - Compatibility alias for ``data-next-stream``.
+   * - ``data-next-stream``
+     - Hand-written on a container
+     - The stream bridge, which opens one stream per distinct URL, over WebSocket when negotiation succeeds and over ``EventSource`` otherwise, and rescans each inserted subtree.
    * - ``data-next-layer``
      - Hand-written on an ``<a>``
      - The layer stack, which opens the href in a modal and names the zone the dialog hosts.
@@ -399,10 +433,10 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
 Exported types
 ~~~~~~~~~~~~~~
 
-The entry module exports sixteen type names.
+The entry module exports seventeen type names.
 ``NextContext``, ``NextEventMap``, and ``NextChunks`` are its own, and ``PartialError`` and ``PartialErrorKind`` come from the protocol module, which is where the client and the server agree on the wire vocabulary.
 ``Envelope``, ``Patch``, ``Asset``, ``AssetLoad``, and ``FormMeta`` come from the apply module and type the envelope a parse hook or a ``partial:before-apply`` listener handles.
-``NavigatedDetail``, ``NavigationState``, ``NavigationAction``, ``ConsentChange``, ``ScriptsChunk``, and ``ScriptStatus`` come from the navigation, consent, chunk, and scripts modules, see :doc:`client-extras`.
+``NavigatedDetail``, ``NavigationState``, ``NavigationAction``, ``ConsentChange``, ``ScriptsChunk``, ``ScriptStatus``, and ``StreamMeta`` come from the navigation, consent, chunk, scripts, and stream modules, see :doc:`client-extras` and :doc:`/content/topics/realtime`.
 A page written in TypeScript reaches them through the bundle's declaration output rather than by importing ``next/client/``.
 
 .. code-block:: typescript
@@ -428,6 +462,12 @@ A page written in TypeScript reaches them through the bundle's declaration outpu
      "partial:layer-opened": { opener: HTMLElement | null };
      "partial:layer-accepted": { result: unknown };
      "partial:layer-dismissed": { reason: string };
+     "next:stream-gap": { topic: string; from: number; to: number };
+     "next:stream-state": {
+       url: string;
+       transport: "sse" | "websocket";
+       state: "connecting" | "open" | "closed";
+     };
      "next:toast": { text: string; variant: string };
      "next:navigated": NavigatedDetail;
      "next:consent": ConsentChange;
@@ -441,6 +481,7 @@ A page written in TypeScript reaches them through the bundle's declaration outpu
    export type { ConsentChange } from "./consent";
    export type { ScriptsChunk } from "./chunks";
    export type { ScriptStatus } from "./scripts";
+   export type { StreamMeta } from "./sse";
 
 ``PartialError`` is the discriminated union every ``partial:error`` payload inhabits, over the ``network``, ``http``, ``parse``, ``op``, ``asset``, and ``csrf`` kinds.
 ``PartialErrorKind`` is its discriminant, aliased for a listener that switches on it.
@@ -499,7 +540,7 @@ None of these modules is reachable from application code, so the names serve rea
      - Consent and the script manifest loader, shipped in the scripts chunk.
    * - ``poll.ts``
      - The zone poller, its interval groups, and the pause and resume on tab visibility, shipped in the poll chunk.
-   * - ``entries/scripts.ts``, ``entries/sse.ts``, ``entries/csrf.ts``, ``entries/poll.ts``, ``entries/dev.ts``
+   * - ``entries/scripts.ts``, ``entries/stream.ts``, ``entries/ws.ts``, ``entries/csrf.ts``, ``entries/poll.ts``, ``entries/dev.ts``
      - The entry of each lazy chunk, one module per chunk named after it.
 
 Configuration

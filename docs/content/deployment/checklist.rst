@@ -111,6 +111,27 @@ An entry that names the sentinel ``"manifest"`` states the manifest as a require
 
 See :doc:`/content/topics/partial-rendering/reference` for the header and the status codes.
 
+Realtime streams
+----------------
+
+Review these when the project publishes ``TopicStream`` updates.
+
+- Use a shared broker across workers.
+  ``MemoryBroker`` is process-local, so choose ``RedisBroker`` or configure Channels with a shared channel layer and shared atomic cache for ``ChannelsLayerBroker`` sequence numbers.
+  ``next.W143`` and ``next.W144`` flag a ``ChannelsLayerBroker`` that lacks either.
+- Under ASGI, keep the proxy upgrade enabled when ``channels`` is installed and set read and send timeouts above the intended connection lifetime.
+  Keep ``NEXT_FRAMEWORK["REALTIME"]["HEARTBEAT"]``, 25 seconds by default, below the shortest intermediary idle timeout.
+- Keep SSE available as the fallback transport and verify a route through the production proxy.
+- Keep authorization on the guarded stream page and provide a stable topic authorizer for WebSocket subscriptions.
+  The authorizer and the session are rechecked at most once per heartbeat, so a revocation takes effect within about two heartbeat intervals.
+- List concrete hosts in ``ALLOWED_HOSTS``, or pass an explicit ``origins`` list, because the WebSocket Origin check refuses ``*``.
+  A leading-dot entry allows the domain and its subdomains on any port.
+- Store sessions on the server when WebSockets are enabled, because ``next.W145`` reports the signed-cookie engine.
+- Treat topic delivery as best-effort notification.
+  Verify reconnect and guarded zone resync, and do not use it as durable event history.
+
+See :doc:`/content/topics/realtime` and :doc:`/content/howto/stream-over-websockets-with-channels`.
+
 Database
 --------
 

@@ -66,13 +66,13 @@ The lists below are representative.
 The autodoc blocks under `Public API`_ are the exhaustive surface of every name the tiers list, apart from the ``signals`` and ``checks`` submodules, which are documented on the pages `Signals`_ and `System checks`_ point at.
 
 Stable.
-   ``Patches``, ``PatchResponse``, ``PatchEventStream``, ``render_zone``, ``ZoneRenderResult``, ``zone_requested``, ``is_partial_request``, ``partial_intent``, ``register_patch_op``, ``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, and ``LayerHrefWithoutZoneError``.
+   ``Patches``, ``PatchResponse``, ``PatchEventStream``, ``render_zone``, ``ZoneRenderResult``, ``zone_requested``, ``is_partial_request``, ``partial_intent``, ``register_patch_op``, ``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, ``LayerHrefWithoutZoneError``, and ``OriginUnavailableError``.
    ``Envelope``, ``Patch``, ``Asset``, and ``FormMeta`` are the frozen value objects of the wire contract.
    Import all of these from ``next.partial``.
    Use them in page modules, action handlers, and stream sources.
 
 Advanced.
-   ``shape_partial``, ``PartialProtocolBackend``, and ``JsonPartialProtocolBackend`` are imported from ``next.partial``.
+   ``shape_partial``, ``PartialProtocolBackend``, ``JsonPartialProtocolBackend``, and ``StreamMeta`` are imported from ``next.partial``.
    ``resolve_partial_origin`` stays in ``next.partial`` as a thin helper that reads the host page out of the ``X-Next-Origin`` header so a ``done`` step can pass it to ``morph(zone=, page=)``.
    ``OriginSource`` lives in ``next.partial.origin``.
    ``ZoneInfo`` and ``zones_of`` live in ``next.partial.registry``.
@@ -230,6 +230,46 @@ Protocol backend
 ``JsonPartialProtocolBackend`` is the shipped implementation and the default first entry of ``PARTIAL_BACKENDS``.
 Subclass the root and serialize a different envelope shape to support another wire format, or subclass the JSON backend to keep its serialization and change one part of it.
 
+.. list-table:: The protocol-backend contract
+   :header-rows: 1
+   :widths: 34 16 50
+
+   * - Member
+     - Kind
+     - Role
+   * - ``content_type``
+     - Attribute
+     - The MIME type stamped on every patch response, which the client keys its parse hook on.
+   * - ``serialize_envelope(envelope)``
+     - Abstract
+     - The HTTP response body of one envelope.
+   * - ``deserialize_envelope(body)``
+     - Abstract
+     - The inverse of ``serialize_envelope``, used by readers such as the test-client helper.
+   * - ``sse_event(envelope)``
+     - Abstract
+     - One ``next-patches`` frame of a manual stream, with no topic metadata.
+   * - ``sse_stream_event(envelope, meta)``
+     - Concrete
+     - One ``next-patches`` frame carrying a ``StreamMeta``, used for every stream frame and for the ``data`` of a WebSocket ``patches`` frame.
+       The root implementation drops ``meta`` and returns ``sse_event``.
+   * - ``sse_hello(frame)``, ``sse_skip(frame)``, ``sse_end(frame)``
+     - Concrete
+     - The ``next-hello``, ``next-skip``, and ``next-end`` control frames, compact JSON in a fixed schema.
+   * - ``options``
+     - Property
+     - The ``OPTIONS`` mapping of the ``PARTIAL_BACKENDS`` entry.
+
+``JsonPartialProtocolBackend.sse_stream_event`` merges the ``StreamMeta`` keys into the JSON envelope.
+A JSON subclass that overrides ``sse_event`` keeps that format, because the metadata merge then steps aside and the frame drops the metadata.
+Such a subclass, and any backend with a non-JSON format, overrides ``sse_stream_event`` to carry ``meta`` in its own encoding, or the client loses gap detection and topic listeners.
+
+The control frames are part of the protocol, not of the wire format.
+The client parses ``next-hello``, ``next-skip``, and ``next-end`` as JSON in the schema :doc:`/content/topics/partial-rendering/reference` lists, and WebSocket control frames bypass these hooks entirely, so a backend leaves the three hooks alone.
+
+.. autoclass:: next.partial.StreamMeta
+   :members:
+
 .. autoclass:: next.partial.PartialProtocolBackend
    :members:
 
@@ -239,7 +279,7 @@ Subclass the root and serialize a different envelope shape to support another wi
 Exceptions
 ~~~~~~~~~~
 
-``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, and ``LayerHrefWithoutZoneError`` are curated ``next.partial`` exceptions.
+``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, ``LayerHrefWithoutZoneError``, and ``OriginUnavailableError`` are curated ``next.partial`` exceptions.
 ``UnknownZoneError`` is raised when a partial request names a zone the template does not declare, or one that may not render on its own, as ``ZoneInfo.standalone`` above describes, under an ``{% if %}``, a ``{% for %}``, or a ``{% has_perm %}`` of the composed page, or in the body of a component that decides whether that part shows, surfacing as a 400 before any render.
 A server-side render of such a zone, ``Patches.morph_zone`` included, raises it as well.
 ``Patches.morph_foreign_zone`` raises it for a zone only an intercepting route serves, while ``morph_zone`` on a zone request renders that zone over the intercept page that serves the request, and a zone that page does not serve over the origin page.
@@ -247,6 +287,8 @@ A server-side render of such a zone, ``Patches.morph_zone`` included, raises it 
 A refused intercepting route raises it from ``morph_zone`` too, and the form and action path turns it into a 403.
 ``meta()`` raises it too when the fold runs an inherited metadata callable of an origin page that denies the request.
 ``LayerHrefWithoutZoneError`` is raised when a layer seeds an ``href`` but names no ``zone=`` to load it into, so the builder refuses the layer instead of opening an empty one on the client.
+``OriginUnavailableError`` is raised when a builder operation needs a page origin but the request has none, as with ``Patches(None)`` or a GET stream request.
+Use ``refresh`` or ``event`` for stream and background messages.
 
 The remaining nine are rarely caught and stay out of the curated surface.
 They guard the custom-verb contract, the event-name, context-key, and dedupe vocabularies, and the foreign-page and href rules, and live in ``next.partial.errors``.
@@ -258,6 +300,9 @@ They guard the custom-verb contract, the event-name, context-key, and dedupe voc
    :members:
 
 .. autoexception:: next.partial.LayerHrefWithoutZoneError
+   :members:
+
+.. autoexception:: next.partial.OriginUnavailableError
    :members:
 
 .. autoexception:: next.partial.errors.UnknownPatchOpError

@@ -6,6 +6,7 @@ from .envelope import Asset, Envelope, FormMeta, Patch
 from .errors import (
     ForeignPageNotAuthorizedError,
     LayerHrefWithoutZoneError,
+    OriginUnavailableError,
     UnknownZoneError,
 )
 from .headers import is_partial_request, partial_intent
@@ -15,6 +16,7 @@ from .registry import register_patch_op, zone_requested
 from .render import ZoneRenderResult, render_zone
 from .shaping import shape_partial
 from .sse import PatchEventStream
+from .stream import StreamMeta
 
 
 __all__ = [
@@ -24,11 +26,13 @@ __all__ = [
     "FormMeta",
     "JsonPartialProtocolBackend",
     "LayerHrefWithoutZoneError",
+    "OriginUnavailableError",
     "PartialProtocolBackend",
     "Patch",
     "PatchEventStream",
     "PatchResponse",
     "Patches",
+    "StreamMeta",
     "UnknownZoneError",
     "ZoneRenderResult",
     "checks",

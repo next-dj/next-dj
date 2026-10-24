@@ -48,7 +48,7 @@ Write the whole entry, ``BACKEND`` included.
 Each key accepts one shape, and a value of any other type is dropped in favour of the default rather than merged into it.
 
 - The list keys (``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``PARTIAL_BACKENDS``, ``TEMPLATE_LOADERS``, ``FORM_ANCHOR_FILES``) accept a list.
-- The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``, ``METADATA``, ``SITE``, ``SEO``, ``CONSENT``) accept a dict.
+- The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``, ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, ``CONSENT``) accept a dict.
 - The dotted-path keys (``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string naming an importable class, and ``JS_CONTEXT_SERIALIZER`` accepts such a dotted path or ``None``.
 - ``CSRF_DELIVERY`` accepts a string naming a mode.
 - ``STATIC_VERSION`` accepts a string or ``None``.
@@ -221,9 +221,82 @@ Any other string pins a release tag by hand.
 The resolved string is memoised for the life of the configuration, so a manifest replaced under a running process keeps serving the version resolved before it until a settings reload or a restart.
 A version that never changes leaves the version guard silent at runtime, so a deploy of new assets cannot ask a connected client to reload.
 ``PUSH_WIZARD_STEPS`` is the global default for pushing wizard steps to browser history, which a wizard's ``Meta.push_steps`` overrides per wizard.
-``SSE.HEARTBEAT_SECONDS`` is the keepalive period in seconds for an async stream source, and ``SSE.RETRY_MS`` is the ``EventSource`` reconnect hint in milliseconds sent in the leading stream frame.
+``SSE.HEARTBEAT_SECONDS`` is the keepalive period in seconds of a ``PatchEventStream`` with an async source, and ``SSE.RETRY_MS`` is the ``EventSource`` reconnect hint in milliseconds sent in the leading stream frame.
+A ``TopicStream`` takes its keepalive from ``REALTIME['HEARTBEAT']`` instead, see `REALTIME`_.
 
 See :doc:`/content/topics/partial-rendering/reference` for the wire protocol and :doc:`/content/topics/partial-rendering/sse` for the stream contract.
+
+REALTIME
+~~~~~~~~
+
+Mapping for broker and stream settings.
+
+Default value.
+
+.. code-block:: python
+
+   {
+       "BROKER": {
+           "BACKEND": "next.realtime.MemoryBroker",
+           "OPTIONS": {"QUEUE_SIZE": 256},
+       },
+       "TRANSPORTS": None,
+       "TICKET_MAX_AGE": 60,
+       "WS_PATH": "/_next/ws/",
+       "HEARTBEAT": 25.0,
+   }
+
+``BROKER.BACKEND`` names a ``BrokerBackend`` subclass, and ``BROKER.OPTIONS`` belongs to that backend.
+
+.. list-table:: Broker options per shipped backend
+   :header-rows: 1
+   :widths: 30 26 44
+
+   * - Backend
+     - Option and default
+     - Meaning
+   * - ``next.realtime.MemoryBroker``
+     - ``QUEUE_SIZE``, ``256``
+     - The bound of each subscriber queue, a positive integer.
+       A full queue drops its oldest message.
+   * - ``next.realtime.RedisBroker``
+     - ``URL``, ``"redis://localhost:6379/0"``
+     - The Redis connection URL.
+   * - ``next.realtime.RedisBroker``
+     - ``PREFIX``, ``"next"``
+     - The prefix of every counter key and Pub/Sub channel.
+   * - ``next.realtime.RedisBroker``
+     - ``HEALTH_CHECK_INTERVAL``, ``10.0``
+     - Seconds a Redis connection may stay idle before the client pings it before its next command.
+       Zero turns this client-side check off.
+       Subscriptions run their own liveness ping regardless, see :doc:`/content/howto/fan-out-across-processes-with-redis`.
+   * - ``next.contrib.channels.ChannelsLayerBroker``
+     - ``CHANNEL_LAYER``, ``"default"``
+     - The alias in ``CHANNEL_LAYERS`` that fans messages out.
+   * - ``next.contrib.channels.ChannelsLayerBroker``
+     - ``CACHE_ALIAS``, ``"default"``
+     - The alias in ``CACHES`` that holds topic counters and epochs, which needs an ``incr()`` atomic across processes.
+   * - ``next.contrib.channels.ChannelsLayerBroker``
+     - ``PREFIX``, ``"next.rt"``
+     - The prefix of counter keys and group names, 1 to 40 ASCII letters, digits, dots or hyphens.
+
+``MemoryBroker`` serves one process and does not coordinate sequence numbers across processes.
+``RedisBroker`` needs the ``broker`` extra, and ``ChannelsLayerBroker`` needs the ``channels`` extra plus a layer and a cache that every worker shares.
+A custom backend reads its own ``OPTIONS`` keys, which ``manage.py check`` leaves alone.
+
+``TRANSPORTS`` defaults to ``None`` and selects ``["ws", "sse"]`` when Channels is installed in Django, or ``["sse"]`` otherwise.
+Set it to ``["sse"]`` to disable WebSocket negotiation.
+``TICKET_MAX_AGE`` is the lifetime of a session-bound WebSocket grant in seconds and accepts values from 1 to 600.
+``WS_PATH`` sets the same-origin WebSocket route and defaults to ``/_next/ws/``.
+
+``HEARTBEAT`` is the realtime keepalive and recheck interval in seconds, a positive finite number that ``next.E187`` enforces.
+It drives every ``TopicStream`` over SSE, under WSGI and ASGI alike, and every WebSocket served by the Channels consumer.
+At that interval a quiet stream writes a heartbeat comment or a WebSocket ``ping`` frame, and a live connection rechecks its session and topic grants.
+``TopicStream(heartbeat_seconds=...)`` overrides it for one SSE stream.
+The ``SSE.HEARTBEAT_SECONDS`` option of ``PARTIAL_BACKENDS`` is a separate setting that times only a manual ``PatchEventStream`` with an async source, while ``SSE.RETRY_MS`` stays the reconnect hint of both stream kinds.
+Keep ``HEARTBEAT`` below the shortest idle timeout of every proxy and load balancer in front of the streams.
+
+See :doc:`realtime` for the broker API and :doc:`/content/howto/stream-over-websockets-with-channels` for setup.
 
 Application modules
 -------------------

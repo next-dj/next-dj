@@ -354,6 +354,26 @@ describe("a scripts chunk past its moment", () => {
 });
 
 describe("a single-module chunk", () => {
+  it("loads the stream chunk from the legacy sse payload key", async () => {
+    const doc = document.implementation.createHTMLDocument("");
+    const chunk = lazyChunk<string>(
+      {
+        dispatch: () => undefined,
+        document: doc,
+        nonce: undefined,
+        context: () => ({ $chunks: { sse: "/legacy-stream.js" } }),
+      },
+      "stream",
+    );
+
+    const loading = chunk.load();
+    expect(doc.head.querySelector("script")?.getAttribute("src")).toBe(
+      "/legacy-stream.js",
+    );
+    chunk.land("stream module");
+    await expect(loading).resolves.toBe("stream module");
+  });
+
   function makeDev() {
     const doc = document.implementation.createHTMLDocument("");
     const errors: Record<string, unknown>[] = [];

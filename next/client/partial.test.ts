@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPartial } from "./partial";
 import { createDiagnostics } from "./diagnostics";
-import type { PartialAdapters, PartialSurface } from "./partial";
+import type { PartialAdapters, PartialDeps, PartialSurface } from "./partial";
 import type { DialogAdapter } from "./layers";
 import { createSse } from "./sse";
-import type { EventSourceAdapter, SourceControl, SseFactory } from "./sse";
+import type { EventSourceAdapter, SourceControl, SseFactory, StreamMeta } from "./sse";
+import type { WsTransportFactory } from "./ws";
 import {
   manualPollClock,
   manualVisibility,
   chunkModules,
+  landed,
   unloaded,
 } from "./test-doubles";
 
@@ -28,23 +30,44 @@ function mockDialog(): DialogAdapter {
 // A controllable EventSource adapter, since jsdom models no EventSource.
 function mockSource(): {
   adapter: EventSourceAdapter;
-  opened: { url: string; message(data: string): void }[];
+  opened: {
+    url: string;
+    message(data: string): void;
+    control(name: string, data: string): void;
+    closed: boolean;
+  }[];
 } {
-  const opened: { url: string; message(data: string): void }[] = [];
+  const opened: {
+    url: string;
+    message(data: string): void;
+    control(name: string, data: string): void;
+    closed: boolean;
+  }[] = [];
   const adapter: EventSourceAdapter = {
-    open(url, onMessage): SourceControl {
-      opened.push({ url, message: onMessage });
-      return { close: () => undefined };
+    open(url, onMessage, _onError, onControl): SourceControl {
+      const connection = {
+        url,
+        message: onMessage,
+        control: (name: string, data: string) => onControl?.(name, data),
+        closed: false,
+      };
+      opened.push(connection);
+      return {
+        close() {
+          connection.closed = true;
+        },
+      };
     },
   };
   return { adapter, opened };
 }
 
-function makeSurface() {
+function makeSurface(context: Record<string, unknown> = {}) {
   const dispatched: { event: string; detail: Record<string, unknown> }[] = [];
   const merged: Record<string, unknown>[] = [];
   const partial = createPartial({
     ...chunkModules,
+    context: () => context,
     dispatch: (event, detail) => dispatched.push({ event, detail }),
     mergeContext: (data) => merged.push(data),
   });
@@ -205,6 +228,74 @@ describe("createPartial surface", () => {
     }));
     await partial.fetch({ url: "/list/", zone: "z" });
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("hooked");
+  });
+
+  it("parseHook decodes stream frames with the backend content type", () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const { partial } = makeSurface({
+      $realtime: { content_type: "text/vnd.next.stream+html; charset=utf-8" },
+    });
+    const source = mockSource();
+    partial._configure({ document, source: source.adapter });
+    partial.parseHook("text/vnd.next.stream+html", () => ({
+      version: "v1",
+      ops: [{ op: "inner", target: { zone: "z" }, html: "streamed" }],
+      assets: [],
+      form: null,
+    }));
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<div data-next-sse="/stream/"></div>',
+    );
+    partial.sse.scan(document);
+    source.opened[0]!.message("stream-body");
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe(
+      "streamed",
+    );
+  });
+
+  it("preserves stream metadata when parseHook unwraps a frame", () => {
+    const { partial } = makeSurface({
+      $realtime: { content_type: "text/vnd.next.stream+html" },
+    });
+    const source = mockSource();
+    partial._configure({ document, source: source.adapter });
+    partial.parseHook("text/vnd.next.stream+html", (_response, body) => {
+      const wrapped = JSON.parse(body) as {
+        envelope: Record<string, unknown>;
+      };
+      return wrapped.envelope;
+    });
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<div data-next-stream="/stream/"></div>',
+    );
+    const received: unknown[] = [];
+    partial.stream.on("updates", "item", (detail, meta) =>
+      received.push({ detail, meta }),
+    );
+    partial.stream.scan(document);
+    source.opened[0]!.message(
+      JSON.stringify({
+        envelope: {
+          version: "v1",
+          ops: [{ op: "event", name: "item", detail: { id: 3 } }],
+          assets: [],
+          form: null,
+          topic: "updates",
+          epoch: "a1",
+          seq: 7,
+          server_time: 1700000000,
+        },
+      }),
+    );
+
+    expect(received).toEqual([
+      {
+        detail: { id: 3 },
+        meta: { topic: "updates", epoch: "a1", seq: 7, serverTime: 1700000000 },
+      },
+    ]);
   });
 
   it.each(["{}", "[]", '"text"'])(
@@ -589,6 +680,7 @@ describe("createPartial surface", () => {
       document,
       source: source.adapter,
       visibility: manualVisibility(),
+      websocket: { open: () => ({ close: () => undefined }) },
     });
     document.head.innerHTML = "";
     document.body.innerHTML = '<div data-next-zone="z"></div>';
@@ -601,6 +693,86 @@ describe("createPartial surface", () => {
     sse.land(createSse);
     expect(source.opened).toHaveLength(1);
     expect(lazy.sse.size()).toBe(1);
+    lazy._reset();
+  });
+
+  it("builds the stream bridge from default seams when the page is not configured", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        onopen: ((event: Event) => void) | null = null;
+        onerror: ((event: Event) => void) | null = null;
+        addEventListener(): void {}
+        close(): void {}
+      },
+    );
+    const modules: PartialDeps = {
+      ...chunkModules,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    };
+    delete modules.ws;
+    const lazy = createPartial({
+      ...modules,
+      context: () => ({}),
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
+    lazy.stream.scan(document);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(lazy.stream.size()).toBe(1);
+    lazy._reset();
+    vi.unstubAllGlobals();
+  });
+
+  it("loads the stream chunk from the transport-neutral attribute", () => {
+    const stream = unloaded<SseFactory>("stream");
+    const lazy = createPartial({
+      ...chunkModules,
+      sse: stream,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    const source = mockSource();
+    lazy._configure({ document, source: source.adapter });
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
+    lazy.sse.scan(document);
+    expect(stream.tags()).toBe(1);
+    stream.land(createSse);
+    expect(source.opened).toHaveLength(1);
+    lazy._reset();
+  });
+
+  it("waits for the websocket module before loading the stream bridge", async () => {
+    const source = mockSource();
+    let usedWebSocket = false;
+    const websocket: WsTransportFactory = (deps) => ({
+      name: "websocket",
+      open(url, sink, lastSeq) {
+        usedWebSocket = true;
+        return deps.fallback.open(url, sink, lastSeq);
+      },
+    });
+    const lazy = createPartial({
+      ...chunkModules,
+      context: () => ({ $realtime: { transports: ["ws"] } }),
+      ws: landed(websocket),
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    lazy._configure({
+      document,
+      source: source.adapter,
+      visibility: manualVisibility(),
+    });
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
+    lazy.sse.scan(document);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(usedWebSocket).toBe(true);
+    expect(source.opened).toHaveLength(1);
     lazy._reset();
   });
 
@@ -724,6 +896,87 @@ describe("createPartial surface", () => {
       }),
     );
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("live");
+  });
+
+  it("a completed stream resync does not abort a later GET on teardown", async () => {
+    window.history.replaceState(null, "", "/");
+    document.body.innerHTML =
+      '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
+    const source = mockSource();
+    const signals: AbortSignal[] = [];
+    let finishLatest: (() => void) | undefined;
+    partial._configure({
+      document,
+      source: source.adapter,
+      visibility: manualVisibility(),
+      fetch: async (_url, init) => {
+        signals.push(init.signal!);
+        if (signals.length === 1) {
+          return patchesResponse(
+            JSON.stringify({
+              version: "v1",
+              ops: [{ op: "inner", target: { zone: "z" }, html: "synced" }],
+              assets: [],
+              form: null,
+            }),
+          );
+        }
+        return new Promise<Response>((resolve) => {
+          finishLatest = () => resolve(patchesResponse());
+        });
+      },
+      navigate: () => undefined,
+    });
+    partial.sse.scan(document);
+    source.opened[0]!.control(
+      "next-hello",
+      JSON.stringify({ topics: { room: { epoch: "e", seq: 1 } } }),
+    );
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe(
+        "synced",
+      ),
+    );
+    await Promise.resolve();
+    const newer = partial.fetch({ url: "/", zone: "z" });
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    document.querySelector('[data-next-sse="/stream/"]')!.remove();
+    await vi.waitFor(() => expect(source.opened[0]!.closed).toBe(true));
+    expect(signals[1]!.aborted).toBe(false);
+    finishLatest!();
+    await newer;
+  });
+
+  it("teardown aborts a still pending stream resync", async () => {
+    window.history.replaceState(null, "", "/");
+    document.body.innerHTML =
+      '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
+    const source = mockSource();
+    let signal: AbortSignal | undefined;
+    partial._configure({
+      document,
+      source: source.adapter,
+      visibility: manualVisibility(),
+      fetch: (_url, init) => {
+        signal = init.signal!;
+        return new Promise<Response>((resolve) => {
+          signal!.addEventListener("abort", () => resolve(patchesResponse()), {
+            once: true,
+          });
+        });
+      },
+      navigate: () => undefined,
+    });
+    partial.sse.scan(document);
+    source.opened[0]!.control(
+      "next-hello",
+      JSON.stringify({ topics: { room: { epoch: "e", seq: 1 } } }),
+    );
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    document.querySelector('[data-next-sse="/stream/"]')!.remove();
+    await vi.waitFor(() => expect(source.opened[0]!.closed).toBe(true));
+    expect(signal!.aborted).toBe(true);
   });
 
   it("a host meta from a stream or a zone GET under a layer survives its close", async () => {
@@ -932,9 +1185,93 @@ describe("createPartial surface", () => {
   });
 
   it("layers and sse getters expose the live sub-surfaces", () => {
-    partial._configure({ document, dialog: mockDialog() });
+    partial._configure({
+      document,
+      dialog: mockDialog(),
+      source: mockSource().adapter,
+      visibility: manualVisibility(),
+    });
     expect(typeof partial.layers.open).toBe("function");
     expect(typeof partial.sse.scan).toBe("function");
+    expect(partial.stream).toBe(partial.sse);
+    expect(partial.stream.offset()).toBe(0);
+  });
+
+  it("exposes topic listeners, stream metadata, and clock through the lazy facade", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const source = mockSource();
+    partial._configure({
+      document,
+      source: source.adapter,
+      visibility: manualVisibility(),
+    });
+    const received: {
+      detail: Record<string, unknown>;
+      meta: StreamMeta;
+      current: StreamMeta | undefined;
+    }[] = [];
+    expect(partial.stream.now()).toBeGreaterThan(0);
+    partial.sse.remember("queued-id");
+    const off = partial.stream.on("room:1", "room:update", (detail, meta) => {
+      received.push({ detail, meta, current: partial.stream.meta() });
+    });
+    partial.stream.on("room:1", "another", () => undefined);
+    partial.stream.remember("live-id");
+    expect(partial.stream.now()).toBeGreaterThan(0);
+    partial.stream.scan(document);
+    source.opened[0]!.message(
+      JSON.stringify({
+        version: "v1",
+        ops: [{ op: "event", name: "room:update", detail: { count: 2 } }],
+        assets: [],
+        form: null,
+        topic: "room:1",
+        seq: 1,
+        server_time: Date.now(),
+      }),
+    );
+    expect(received[0]?.detail).toEqual({ count: 2 });
+    expect(received[0]?.meta).toMatchObject({ topic: "room:1", seq: 1 });
+    expect(received[0]?.current).toEqual(received[0]?.meta);
+    expect(partial.stream.meta()).toBeUndefined();
+    off();
+    partial._reset();
+  });
+
+  it("ignores a stream chunk that lands after its scan was reset", () => {
+    const sseChunk = unloaded<SseFactory>("sse");
+    const late = createPartial({
+      ...chunkModules,
+      sse: sseChunk,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    const source = mockSource();
+    late._configure({
+      document,
+      source: source.adapter,
+      visibility: manualVisibility(),
+    });
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    late.stream.scan(document);
+    late._reset();
+    sseChunk.land(createSse);
+    expect(source.opened).toEqual([]);
+  });
+
+  it("ignores a stream listener whose lazy chunk lands after reset", () => {
+    const sse = unloaded<SseFactory>("sse");
+    const lazy = createPartial({
+      ...chunkModules,
+      sse,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    const seen: unknown[] = [];
+    lazy.stream.on("room:1", "room:update", (...args) => seen.push(args));
+    lazy._reset();
+    sse.land(createSse);
+    expect(seen).toEqual([]);
   });
 
   it("_configure swaps in the injected history seam", () => {

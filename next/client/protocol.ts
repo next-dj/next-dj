@@ -13,6 +13,14 @@ export const HEADER_MERGE = "X-Next-Merge";
 export const HEADER_VERSION = "X-Next-Version";
 export const HEADER_REQUEST_ID = "X-Next-Request-Id";
 export const HEADER_ORIGIN = "X-Next-Origin";
+/** Stream metadata and control-frame event names mirrored by next.partial.keys. */
+export const TOPIC = "topic";
+export const SEQ = "seq";
+export const EPOCH = "epoch";
+export const SERVER_TIME = "server_time";
+export const SSE_HELLO = "next-hello";
+export const SSE_SKIP = "next-skip";
+export const SSE_END = "next-end";
 // The last 25 own request ids, matching the server-side echo window. Overflow is
 // safe, since a dropped id only causes an extra refresh.
 export const ECHO_LIMIT = 25;
@@ -52,6 +60,7 @@ export const ATTR_ZONE = "data-next-zone";
 export const ATTR_ACTION = "data-next-action";
 export const ATTR_KEY = "data-next-key";
 export const ATTR_SSE = "data-next-sse";
+export const ATTR_STREAM = "data-next-stream";
 export const ATTR_POLL = "data-next-poll";
 
 /** A partial:error, a discriminated union so a listener branches on kind. */

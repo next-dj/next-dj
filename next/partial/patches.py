@@ -37,6 +37,7 @@ from .errors import (
     DynamicForeignPageError,
     ForeignPageNotAuthorizedError,
     LayerHrefWithoutZoneError,
+    OriginUnavailableError,
     ReservedContextKeyError,
     ReservedEventNameError,
     UnknownContextNameError,
@@ -190,6 +191,11 @@ class Patches:
     def version(self) -> str:
         """Return the asset version stamped on the envelope."""
         return self._version
+
+    @property
+    def request(self) -> HttpRequest | None:
+        """Return the request the builder is bound to, or None for a detached one."""
+        return self._request
 
     @overload
     def morph(self, target: "Mapping[str, Any]", html: str = "") -> "Patches": ...
@@ -710,8 +716,7 @@ class Patches:
     def _require_request(self) -> HttpRequest:
         """Return the bound request or raise when the builder has none."""
         if self._request is None:
-            msg = "This builder operation needs a request-bound Patches(request)."
-            raise RuntimeError(msg)
+            raise OriginUnavailableError
         return self._request
 
     def _queued_url(self) -> str | None:
@@ -737,8 +742,7 @@ class Patches:
         match = self._origin_match()
         page_path = None if match is None else match.page_path
         if page_path is None:
-            msg = "The request origin does not resolve to a page."
-            raise RuntimeError(msg)
+            raise OriginUnavailableError
         return page_path
 
     def _authorize_origin(self) -> None:

@@ -1,15 +1,18 @@
 import asyncio
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.test import AsyncRequestFactory, RequestFactory, override_settings
 
-from next.partial import Patches, PatchEventStream
+from next.partial import Envelope, Patches, PatchEventStream
 from next.partial.manager import partial_backend_manager
 from next.partial.signals import sse_stream_closed, sse_stream_opened
 from next.partial.sse import _heartbeat_seconds, _retry_ms
+from next.partial.stream import StreamEnd
+from next.testing import capture_signals
 
 
 @contextmanager
@@ -76,6 +79,19 @@ class TestSyncStream:
         response = PatchEventStream(request_obj, [_patches(echo_of="r1")])
         frames = _consume(response)
         assert b'"request_id":"r1"' in frames[1]
+
+    def test_event_frame_accepts_an_envelope_value(self, request_obj: object) -> None:
+        response = PatchEventStream(request_obj, iter(()))
+        frame = response._event_frame(Envelope(version="v1"))
+        assert frame.startswith(b"event: next-patches")
+        assert b'"server_time":' in frame
+
+    def test_event_frame_rejects_an_unsupported_source_item(
+        self, request_obj: object
+    ) -> None:
+        response = PatchEventStream(request_obj, iter(()))
+        with pytest.raises(TypeError, match="must yield a patch"):
+            response._event_frame(object())
 
 
 class TestPolitenessHeaders:
@@ -184,8 +200,9 @@ class TestSignals:
         sse_stream_closed.connect(closed, weak=False)
         try:
             response = PatchEventStream(request_obj, [_patches()])
-            assert len(opened.events) == 1
+            assert len(opened.events) == 0
             _consume(response)
+            assert len(opened.events) == 1
             assert len(closed.events) == 1
             assert closed.events[0]["envelopes_sent"] == 1
             assert closed.events[0]["duration_ms"] >= 0
@@ -262,6 +279,17 @@ class TestAsyncHeartbeat:
         assert frames[0].startswith(b"retry: ")
         assert frames[1] == b": heartbeat\n\n"
         assert frames[2].startswith(b"event: next-patches")
+
+    def test_async_source_can_request_a_heartbeat(
+        self, async_request_obj: object
+    ) -> None:
+        async def source():
+            yield None
+
+        async def consume() -> list[bytes]:
+            return await _aconsume(PatchEventStream(async_request_obj, source()))
+
+        assert asyncio.run(consume()) == [b"retry: 3000\n\n", b": heartbeat\n\n"]
 
     def test_async_close_counts_only_events(self, async_request_obj: object) -> None:
         closed = _Recorder()
@@ -429,3 +457,95 @@ class TestAsyncSourceWithoutAclose:
             sse_stream_closed.disconnect(closed)
         assert len(frames) == 3
         assert closed.events[0]["envelopes_sent"] == 2
+
+
+class _FailingCloseSource:
+    """Sync source whose close fails, as a broken broker connection would."""
+
+    def __iter__(self) -> Iterator[Patches]:
+        return iter([_patches()])
+
+    def close(self) -> None:
+        msg = "broker gone"
+        raise ConnectionError(msg)
+
+
+class _FailingAcloseSource:
+    """Async source whose aclose fails, as a broken broker connection would."""
+
+    def __init__(self) -> None:
+        self.left = 1
+
+    def __aiter__(self) -> "_FailingAcloseSource":
+        return self
+
+    async def __anext__(self) -> Patches:
+        if self.left == 0:
+            raise StopAsyncIteration
+        self.left -= 1
+        return _patches()
+
+    async def aclose(self) -> None:
+        msg = "broker gone"
+        raise ConnectionError(msg)
+
+
+class TestCleanupFailure:
+    """A failing source cleanup still announces the close and then propagates."""
+
+    def test_sync_close_failure_still_fires_the_close_signal(
+        self, request_obj: object
+    ) -> None:
+        response = PatchEventStream(request_obj, _FailingCloseSource())
+        with (
+            capture_signals(sse_stream_closed) as recorder,
+            pytest.raises(ConnectionError, match="broker gone"),
+        ):
+            _consume(response)
+        assert recorder.first_for(sse_stream_closed).kwargs["envelopes_sent"] == 1
+
+    def test_async_aclose_failure_still_fires_the_close_signal(
+        self, async_request_obj: object
+    ) -> None:
+        response = PatchEventStream(async_request_obj, _FailingAcloseSource())
+        with (
+            capture_signals(sse_stream_closed) as recorder,
+            pytest.raises(ConnectionError, match="broker gone"),
+        ):
+            asyncio.run(_aconsume(response))
+        assert recorder.first_for(sse_stream_closed).kwargs["envelopes_sent"] == 1
+
+
+class TestOpenedSignalListeners:
+    """The open signal is only built when someone listens."""
+
+    def test_open_signal_is_skipped_without_receivers(
+        self, request_obj: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sent: list[object] = []
+        monkeypatch.setattr(sse_stream_opened, "send", lambda **kw: sent.append(kw))
+        monkeypatch.setattr(sse_stream_opened, "has_listeners", lambda _s=None: False)
+        _consume(PatchEventStream(request_obj, [_patches()]))
+        assert sent == []
+
+
+class TestTopicFrameMetadata:
+    """A topic message carries its epoch into the stream metadata."""
+
+    def test_topic_message_frame_includes_epoch(self, request_obj: object) -> None:
+        message = SimpleNamespace(
+            envelope=_patches().envelope(), topic="room:1", seq=3, epoch="e9"
+        )
+        frames = _consume(PatchEventStream(request_obj, [message]))
+        assert b'"topic":"room:1","epoch":"e9","seq":3' in frames[1]
+
+
+class TestEndFrame:
+    """The terminal frame is a control frame and never counts as an envelope."""
+
+    def test_end_frame_is_written_and_not_counted(self, request_obj: object) -> None:
+        source = [_patches(), StreamEnd("auth")]
+        with capture_signals(sse_stream_closed) as recorder:
+            frames = _consume(PatchEventStream(request_obj, source))
+        assert frames[-1] == b'event: next-end\ndata: {"code":"auth"}\n\n'
+        assert recorder.first_for(sse_stream_closed).kwargs["envelopes_sent"] == 1

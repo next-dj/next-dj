@@ -25,6 +25,18 @@ class UnknownZoneError(LookupError):
         super().__init__(message)
 
 
+class OriginUnavailableError(RuntimeError):
+    """Raised when an operation needs a page origin the request cannot supply."""
+
+    def __init__(self) -> None:
+        """Explain why a request origin is unavailable and name stream-safe verbs."""
+        super().__init__(
+            "This render helper needs a request-bound builder whose page origin "
+            "resolves to a page. A stream or background builder has no page origin "
+            "and does not resolve to a page. Build a refresh or event patch instead."
+        )
+
+
 class UnknownPatchOpError(LookupError):
     """Raised when the builder is asked to emit an unregistered verb.
 
@@ -209,6 +221,7 @@ __all__ = [
     "DynamicForeignPageError",
     "ForeignPageNotAuthorizedError",
     "LayerHrefWithoutZoneError",
+    "OriginUnavailableError",
     "ReservedContextKeyError",
     "ReservedEventNameError",
     "ReservedPatchKeyError",

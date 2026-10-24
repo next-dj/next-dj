@@ -57,6 +57,8 @@ from next.ports import (
     seo_routes_slot,
     static_assets_slot,
 )
+from next.realtime.manager import forget_realtime_broker
+from next.realtime.transports import forget_transports
 from next.scripts.manager import forget_script_srcs, forget_scripts
 from next.scripts.ports import PageScriptsImpl
 from next.seo.manager import forget_seo_sources
@@ -91,6 +93,7 @@ if TYPE_CHECKING:
 
 _SETTING_CHANGED: Final[tuple[Callable[..., None], ...]] = (
     reload_on_setting_changed,
+    forget_transports,
     forget_app_page_roots,
     forget_urlconf_translations,
     forget_template_processors,
@@ -135,6 +138,8 @@ _SETTINGS_RELOADED: Final[tuple[Callable[..., None], ...]] = (
     forget_seo_sources,
     forget_scripts,
     forget_consent_settings,
+    forget_realtime_broker,
+    forget_transports,
 )
 
 # A reload from code keeps the settings, so memos derived from old routers drop.

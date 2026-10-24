@@ -152,6 +152,7 @@ if TYPE_CHECKING:
         check_permission_predicates,
         check_permissions_known,
     )
+    from next.realtime.checks import check_realtime_settings
     from next.scripts.checks import (
         check_consented_categories,
         check_consented_needs_consent,
@@ -348,6 +349,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_permission_predicates",
         "check_permissions_known",
     ),
+    "next.realtime.checks": ("check_realtime_settings",),
     "next.scripts.checks": (
         "check_consented_categories",
         "check_consented_needs_consent",
@@ -527,6 +529,7 @@ __all__ = [
     "check_pointless_route_groups",
     "check_public_actions",
     "check_public_beside_requirements",
+    "check_realtime_settings",
     "check_repeated_form_has_key",
     "check_request_in_context",
     "check_reserved_js_context_keys",

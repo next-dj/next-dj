@@ -280,33 +280,24 @@ A live stream
 -------------
 
 A poll page shows live results to every open tab.
-The same patch envelope rides Server-Sent Events, the fan-out carries no foreign HTML, and the voter does not receive an echo of their own vote.
+The topic carries refresh instructions rather than HTML, and the voter does not receive an echo of their own vote.
 
-The stream page is a neighbour of the vote page and uses the page render escape hatch.
+The guarded stream page authorizes each subscriber and returns a ``TopicStream``.
 
 .. code-block:: python
    :caption: polls/pages/polls/[int:id]/stream/page.py
 
-   from collections.abc import Iterator
-
    from django.http import HttpRequest
-   from polls.broker import broker
    from polls.deps import DPoll
    from polls.models import Poll
+   from polls.realtime import can_subscribe_topic
 
-   from next.partial import Patches, PatchEventStream
+   from next.realtime import TopicStream
 
-   def patch_source(request: HttpRequest, poll_id: int) -> Iterator[Patches]:
-       """Yield one refresh envelope for every poll change."""
-       for change in broker.changes(poll_id):
-           yield Patches(request, echo_of=change.request_id).refresh(zone="poll-results")
+   def render(request: HttpRequest, poll: DPoll[Poll]) -> TopicStream:
+       return TopicStream(request, f"poll:{poll.pk}", authorize=can_subscribe_topic)
 
-
-   def render(request: HttpRequest, poll: DPoll[Poll]) -> PatchEventStream:
-       """Open the patch event stream for one poll."""
-       return PatchEventStream(request, patch_source(request, poll.pk))
-
-The vote page wraps its results in a zone and connects the stream with a ``data-next-sse`` element.
+The vote page wraps its results in a zone and connects the negotiated stream endpoint with a ``data-next-sse`` element.
 
 .. code-block:: jinja
    :caption: polls/[int:id]/template.djx
@@ -316,43 +307,13 @@ The vote page wraps its results in a zone and connects the stream with a ``data-
    {% endzone %}
    <div data-next-sse="/polls/{{ poll.pk }}/stream/"></div>
 
-The vote form lives inside the chart component and carries no partial markup of its own.
-The broker carries one extra field.
-Each change event ships the request id of the mutation that produced it.
-Threading that id is the application channel's job, the framework does not smuggle it.
-
-A vote from the initiating tab posts with a request id.
-
-.. code-block:: http
-   :caption: request
-
-   POST /_next/form/9e4ab17c52d03f66/ HTTP/1.1
-   X-Next-Request: 1
-   X-Next-Request-Id: 1c9f…-r1
-
-The vote handler here returns ``None`` and the vote form carries no ``zone=``, so the dispatcher funnels the POST into an extract-morph of the vote form by its uid and the tab stays in place.
-A handler that redirects on success would full-navigate the initiator instead.
-Then every subscriber receives the same envelope over the stream.
-
-.. code-block:: text
-   :caption: stream event
-
-   event: next-patches
-   data: {"version":"9f3c2e1b","request_id":"1c9f…-r1","ops":[{"op":"refresh","zone":"poll-results"}]}
-
-The initiator finds ``1c9f…-r1`` in its ring buffer of recent request ids and drops the echo, its own POST already brought the fresh zone.
-Every other tab executes the ``refresh`` and re-fetches the zone with its own cookies.
-
-.. code-block:: http
-   :caption: each other tab
-
-   GET /polls/7/ HTTP/1.1
-   X-Next-Request: 1
-   X-Next-Zone: poll-results
-
-Authorization runs in the page view on every tab, so the stream never broadcasts one user's HTML to another.
-The Vue island that owns the chart re-reads ``window.Next.context`` on the zone morph and keeps its state.
-See :doc:`sse` for the WSGI and ASGI contract behind the stream.
+The vote signal publishes a ``refresh`` patch through ``next.realtime.publish`` after the transaction commits.
+The framework adds the originating request id to the envelope, so the initiating tab drops its echo after its POST response already updated the zone.
+Every other subscriber executes ``refresh`` and re-fetches the zone through its own guarded page request and cookies.
+The stream never broadcasts one user's HTML to another.
+The Vue island that owns the chart re-reads the server snapshot on the zone morph and keeps its state.
+The transport can be SSE or the optional Channels WebSocket backend, and both use the same topic envelope and authorization rules.
+See :doc:`sse` and :doc:`../realtime` for transport and broker contracts.
 
 Without the runtime the page is current at load time and a refresh is a manual reload.
 

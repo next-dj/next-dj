@@ -20,12 +20,13 @@ A ``lazy=`` zone defers its first render behind a placeholder, but the deferral 
 That round trip is the runtime's, so a page without it shows the placeholder and nothing more.
 A lazy zone is the one zone mode with no server-rendered fallback, and content that has to reach a reader without JavaScript renders inline instead.
 
-Real time is server-sent events only
-------------------------------------
+Realtime transports
+-------------------
 
-The streaming transport is Server-Sent Events, one direction from server to client, see :doc:`sse`.
-There is no WebSocket transport, so client-to-server push over a persistent socket is outside the current model.
-A client that needs to send state changes uses the same forms and actions every page already has.
+Server-Sent Events is the default transport.
+Optional WebSocket delivery uses Channels under ASGI, see :doc:`/content/howto/stream-over-websockets-with-channels`.
+Both transports send server-authored topic notifications to the browser, while a client that needs to change state uses the same forms and actions every page already has.
+Replay and presence are outside the current model.
 The bridge that opens the stream is the runtime, so a page without it never subscribes and sees whatever its last full render carried.
 
 Polling zones are client-timed

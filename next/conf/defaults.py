@@ -50,6 +50,16 @@ DEFAULTS: dict[str, Any] = {
             },
         }
     ],
+    "REALTIME": {
+        "BROKER": {
+            "BACKEND": "next.realtime.MemoryBroker",
+            "OPTIONS": {"QUEUE_SIZE": 256},
+        },
+        "TRANSPORTS": None,
+        "TICKET_MAX_AGE": 60,
+        "WS_PATH": "/_next/ws/",
+        "HEARTBEAT": 25.0,
+    },
     "TEMPLATE_LOADERS": ["next.pages.loaders.DjxTemplateLoader"],
     "NEXT_JS_OPTIONS": {},
     "METADATA": {

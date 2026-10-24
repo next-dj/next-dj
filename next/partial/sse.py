@@ -4,23 +4,45 @@ import asyncio
 import contextlib
 import time
 from collections.abc import AsyncIterable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from django.core.exceptions import ImproperlyConfigured
 from django.core.handlers.asgi import ASGIRequest
 from django.http import StreamingHttpResponse
 
+from .envelope import Envelope
 from .headers import set_partial_vary
 from .manager import partial_backend_manager
 from .signals import sse_stream_closed, sse_stream_opened
+from .stream import StreamEnd, StreamHello, StreamMeta, StreamSkip
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterable, Iterator
+    from typing import Protocol
 
     from django.http import HttpRequest
 
     from .patches import Patches
+
+    class _TopicMessage(Protocol):
+        @property
+        def envelope(self) -> Envelope: ...
+
+        @property
+        def topic(self) -> str: ...
+
+        @property
+        def seq(self) -> int: ...
+
+        @property
+        def epoch(self) -> str: ...
+
+    type ControlFrame = StreamHello | StreamSkip | StreamEnd
+    type PatchItem = (
+        Patches | Envelope | _TopicMessage | StreamHello | StreamSkip | StreamEnd | None
+    )
+    PatchSource = Iterable[PatchItem] | AsyncIterable[PatchItem]
 
 
 _EVENT_STREAM = "text/event-stream"
@@ -32,10 +54,11 @@ _HEARTBEAT_OPTION = "HEARTBEAT_SECONDS"
 _SSE_OPTION = "SSE"
 _DEFAULT_RETRY_MS = 3000
 _DEFAULT_HEARTBEAT_SECONDS = 25.0
+_CONTROL_FRAMES = (StreamHello, StreamSkip, StreamEnd)
 
 
-class PatchEventStream(StreamingHttpResponse):
-    """SSE response that emits patch envelopes as `next-patches` events.
+class PatchStreamWriter(StreamingHttpResponse):
+    """Shared SSE writer for manual patches and broker topic messages.
 
     Django buffers a mismatched sync/async iterator, so the constructor refuses it.
     """
@@ -43,10 +66,11 @@ class PatchEventStream(StreamingHttpResponse):
     def __init__(
         self,
         request: "HttpRequest",
-        source: "Iterable[Patches] | AsyncIterable[Patches]",
+        source: "PatchSource",
         *,
         heartbeat_seconds: float | None = None,
         clock: "Callable[[], float] | None" = None,
+        server_clock: "Callable[[], float] | None" = None,
     ) -> None:
         """Build the stream over a sync or async source of patch builders.
 
@@ -54,6 +78,7 @@ class PatchEventStream(StreamingHttpResponse):
         """
         self._request = request
         self._clock = clock if clock is not None else time.monotonic
+        self._server_clock = server_clock if server_clock is not None else time.time
         self._heartbeat_seconds = (
             heartbeat_seconds if heartbeat_seconds is not None else _heartbeat_seconds()
         )
@@ -65,11 +90,8 @@ class PatchEventStream(StreamingHttpResponse):
         self["Cache-Control"] = _CACHE_CONTROL
         self[_ACCEL_BUFFERING] = "no"
         set_partial_vary(self)
-        sse_stream_opened.send(sender=type(self), request=request)
 
-    def _guard_source_kind(
-        self, source: "Iterable[Patches] | AsyncIterable[Patches]"
-    ) -> None:
+    def _guard_source_kind(self, source: "PatchSource") -> None:
         """Refuse a source kind the request's server kind would buffer.
 
         Django reads a mismatched iterator fully before the first byte, hanging it.
@@ -93,30 +115,38 @@ class PatchEventStream(StreamingHttpResponse):
             raise ImproperlyConfigured(msg)
 
     def _build_content(
-        self, source: "Iterable[Patches] | AsyncIterable[Patches]"
+        self, source: "PatchSource"
     ) -> "Iterator[bytes] | AsyncIterator[bytes]":
         """Return a sync or async byte stream matching the source kind."""
         if isinstance(source, AsyncIterable):
             return self._async_stream(source)
         return self._sync_stream(source)
 
-    def _sync_stream(self, source: "Iterable[Patches]") -> "Iterator[bytes]":
-        """Yield SSE bytes for a sync source, with no heartbeat.
+    def _sync_stream(self, source: "Iterable[PatchItem]") -> "Iterator[bytes]":
+        """Yield SSE bytes for a sync source, including source-requested heartbeats.
 
-        A blocked `next()` cannot be cut without a thread, so keepalive is the source's.
+        A blocked `next()` needs a thread to interrupt, so the source yields keepalives.
         """
         sent = 0
-        yield self._retry_frame()
         try:
-            for patches in source:
-                yield self._event_frame(patches)
-                sent += 1
+            self._announce_opened()
+            yield self._retry_frame()
+            for item in source:
+                if item is None:
+                    yield _HEARTBEAT_COMMENT.encode("utf-8")
+                    continue
+                frame = self._event_frame(item)
+                if not isinstance(item, _CONTROL_FRAMES):
+                    sent += 1
+                yield frame
         finally:
-            self._close_source(source)
-            self._announce_closed(sent)
+            try:
+                self._close_source(source)
+            finally:
+                self._announce_closed(sent)
 
     @staticmethod
-    def _close_source(source: "Iterable[Patches]") -> None:
+    def _close_source(source: "Iterable[PatchItem]") -> None:
         """Close a generator source so a disconnect leaves nothing suspended.
 
         A plain iterable has no `close`, and closing a spent generator twice is a no-op.
@@ -126,17 +156,18 @@ class PatchEventStream(StreamingHttpResponse):
             close()
 
     async def _async_stream(
-        self, source: "AsyncIterable[Patches]"
+        self, source: "AsyncIterable[PatchItem]"
     ) -> "AsyncIterator[bytes]":
         """Yield SSE bytes for an async source, interleaving heartbeats.
 
         One pull task is held across heartbeats so the generator is never re-entered.
         """
         sent = 0
-        yield self._retry_frame()
         iterator = source.__aiter__()
-        task: asyncio.Future[Patches] | None = None
+        task: asyncio.Future[PatchItem] | None = None
         try:
+            self._announce_opened()
+            yield self._retry_frame()
             while True:
                 if task is None:
                     task = asyncio.ensure_future(iterator.__anext__())
@@ -150,14 +181,23 @@ class PatchEventStream(StreamingHttpResponse):
                     break
                 finally:
                     task = None
-                yield self._event_frame(patches)
-                sent += 1
+                if patches is None:
+                    yield _HEARTBEAT_COMMENT.encode("utf-8")
+                    continue
+                frame = self._event_frame(patches)
+                if not isinstance(patches, _CONTROL_FRAMES):
+                    sent += 1
+                yield frame
         finally:
-            await self._cleanup_async(task, iterator)
-            self._announce_closed(sent)
+            try:
+                await self._cleanup_async(task, iterator)
+            finally:
+                self._announce_closed(sent)
 
     async def _cleanup_async(
-        self, task: "asyncio.Future[Patches] | None", iterator: "AsyncIterator[Patches]"
+        self,
+        task: "asyncio.Future[PatchItem] | None",
+        iterator: "AsyncIterator[PatchItem]",
     ) -> None:
         """Cancel an in-flight pull and close the source generator.
 
@@ -172,10 +212,42 @@ class PatchEventStream(StreamingHttpResponse):
             with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
                 await aclose()
 
-    def _event_frame(self, patches: "Patches") -> bytes:
-        """Serialize one builder's envelope as an SSE event frame."""
+    def _event_frame(
+        self, item: "Patches | Envelope | _TopicMessage | ControlFrame"
+    ) -> bytes:
+        """Serialize a patch envelope or stream control object as an SSE frame."""
         backend = partial_backend_manager.get()
-        return backend.sse_event(patches.envelope()).encode("utf-8")
+        if isinstance(item, StreamHello):
+            return backend.sse_hello(item.as_dict()).encode("utf-8")
+        if isinstance(item, StreamSkip):
+            return backend.sse_skip(item.as_dict()).encode("utf-8")
+        if isinstance(item, StreamEnd):
+            return backend.sse_end(item.as_dict()).encode("utf-8")
+        message_envelope = getattr(item, "envelope", None)
+        meta = StreamMeta(server_time=int(self._server_clock() * 1000))
+        if isinstance(item, Envelope):
+            envelope = item
+        elif isinstance(message_envelope, Envelope):
+            envelope = message_envelope
+            message = cast("_TopicMessage", item)
+            meta = StreamMeta(
+                server_time=int(self._server_clock() * 1000),
+                topic=message.topic,
+                seq=message.seq,
+                epoch=message.epoch,
+            )
+        elif callable(message_envelope):
+            envelope = cast("Callable[[], Envelope]", message_envelope)()
+        else:
+            msg = "SSE patch sources must yield a patch, envelope, or message."
+            raise TypeError(msg)
+        return backend.sse_stream_event(envelope, meta).encode("utf-8")
+
+    def _announce_opened(self) -> None:
+        """Report that streaming starts when iteration produces its first frame."""
+        sender = type(self)
+        if sse_stream_opened.has_listeners(sender):
+            sse_stream_opened.send(sender=sender, request=self._request)
 
     def _retry_frame(self) -> bytes:
         """Return the leading SSE `retry` hint frame."""
@@ -217,4 +289,21 @@ def _heartbeat_seconds() -> float:
     return _sse_interval(_HEARTBEAT_OPTION, _DEFAULT_HEARTBEAT_SECONDS)
 
 
-__all__ = ["PatchEventStream"]
+class PatchEventStream(PatchStreamWriter):
+    """SSE response that emits manually supplied patch envelopes."""
+
+    def __init__(
+        self,
+        request: "HttpRequest",
+        source: "Iterable[Patches] | AsyncIterable[Patches]",
+        *,
+        heartbeat_seconds: float | None = None,
+        clock: "Callable[[], float] | None" = None,
+    ) -> None:
+        """Build a compatible manual stream from a sync or async patch source."""
+        super().__init__(
+            request, source, heartbeat_seconds=heartbeat_seconds, clock=clock
+        )
+
+
+__all__ = ["PatchEventStream", "PatchStreamWriter"]

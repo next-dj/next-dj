@@ -1,5 +1,6 @@
 import os
 import sys
+from importlib.util import find_spec
 from pathlib import Path
 
 from next.conf import extend_default_backend
@@ -20,9 +21,10 @@ SECRET_KEY = "django-insecure-live-polls-replace-me"
 
 DEBUG = True
 
-ALLOWED_HOSTS: list[str] = ["*"]
+ALLOWED_HOSTS: list[str] = ["localhost", "127.0.0.1", "testserver"]
 
 INSTALLED_APPS = [
+    "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -31,6 +33,8 @@ INSTALLED_APPS = [
     "next",
     "polls",
 ]
+if find_spec("channels") is not None:
+    INSTALLED_APPS.append("channels")
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -60,6 +64,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 
 DATABASES = {
     "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
@@ -119,6 +124,7 @@ NEXT_FRAMEWORK = {
     "PARTIAL_BACKENDS": extend_default_backend(
         "PARTIAL_BACKENDS", OPTIONS={"VERSION": "v1"}
     ),
+    "REALTIME": {"TRANSPORTS": ["sse"]},
     "SITE": {"URL": "https://polls.example", "NAME": "next.dj polls"},
     "METADATA": {
         "DEFAULTS": {

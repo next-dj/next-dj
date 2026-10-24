@@ -142,7 +142,7 @@ A vendor adapter counts the page it loads on from ``Next.navigation.current()``,
 The init payload
 ----------------
 
-The framework reserves three keys of the ``Next._init`` payload for this surface, beside ``$csrf`` and ``$dev``.
+The framework reserves four keys of the ``Next._init`` payload for this surface, beside ``$csrf`` and ``$dev``.
 
 .. list-table::
    :header-rows: 1
@@ -151,7 +151,9 @@ The framework reserves three keys of the ``Next._init`` payload for this surface
    * - Key
      - Value
    * - ``$chunks``
-     - ``{scripts, sse, csrf, poll}``, the URLs of ``next.scripts.min.js``, ``next.sse.min.js``, ``next.csrf.min.js``, and ``next.poll.min.js`` through the staticfiles storage, in every payload, and under ``DEBUG`` ``dev`` too, the URL of ``next.dev.min.js``.
+     - ``{scripts, stream, sse, csrf, poll}``, the URLs of ``next.scripts.min.js``, ``next.stream.min.js`` under both current ``stream`` and compatibility ``sse`` keys, ``next.csrf.min.js``, and ``next.poll.min.js`` through the staticfiles storage, in every payload, and under ``DEBUG`` ``dev`` too, the URL of ``next.dev.min.js``.
+   * - ``$realtime``
+     - ``{protocol, transports, content_type}``, the stream protocol advertised by the server and the selected partial response content type used by registered stream parse hooks.
    * - ``$scripts``
      - The manifest, one ``{name, src?, init?, strategy, category, attrs, nonce?}`` per script the server did not write, in declaration order.
        The runtime drops an ``attrs`` name outside the set :doc:`/content/topics/scripts/declaring` lists.

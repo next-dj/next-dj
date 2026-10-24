@@ -154,9 +154,9 @@ The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, ch
    * - ``next.scripts.min.js``
      - ``next/client/entries/scripts.ts``
      - Only when the init payload carries ``$scripts`` or ``$consent``, or page code calls ``Next.ready("scripts")``, for consent and third-party scripts.
-   * - ``next.sse.min.js``
-     - ``next/client/entries/sse.ts``
-     - Only once a scan finds a ``data-next-sse`` container, for the stream bridge.
+   * - ``next.stream.min.js``
+     - ``next/client/entries/stream.ts``
+     - Only once a scan finds a ``data-next-stream`` or ``data-next-sse`` container.
    * - ``next.csrf.min.js``
      - ``next/client/entries/csrf.ts``
      - Only when a mutation or the first focus in an action form needs a deferred CSRF token, for the fetch that mints it.
@@ -167,9 +167,9 @@ The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, ch
      - ``next/client/entries/dev.ts``
      - Only under ``DEBUG``, when the payload carries ``$dev``, for the development diagnostics.
 
-The job then enforces a gzip budget on every bundle, 14336 bytes for ``next.min.js``, which ships on every page, and 3584, 1536, 768, 1024, and 2048 bytes for the scripts, sse, csrf, poll, and dev chunks, and that budget check runs in continuous integration only.
-The five chunks carry no budget of their own, since a page that never asks for them never downloads them.
-Growth past the budget calls for a lazily loaded chunk rather than a larger single file.
+The job then enforces a gzip budget on every bundle, 15360 bytes for ``next.min.js``, which ships on every page, and 3584, 3072, 768, 1024, and 2048 bytes for the scripts, stream, csrf, poll, and dev chunks, and that budget check runs in continuous integration only.
+Each of the six bundles has its own gzip budget, including the core bundle that every page loads.
+Growth past a budget calls for a lazily loaded chunk rather than a larger core file.
 The job finishes with the vitest run and its coverage thresholds.
 
 ``next/client/next.ts`` is the entry point that mounts ``window.Next`` and pulls in the morph, apply, wire, layer, trigger, asset, and stream modules, and each chunk entry point hands itself to it when it evaluates.

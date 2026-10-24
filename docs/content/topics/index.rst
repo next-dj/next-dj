@@ -50,6 +50,9 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`partial-rendering/index`
    Zones, patches, forms, the modal wizard, lazy zones, co-located JavaScript, and the SSE bridge.
 
+:doc:`realtime`
+   Topic publication, broker selection, authorized streams, and delivery guarantees.
+
 .. rubric:: Cross-cutting concerns
 
 :doc:`dependency-injection`
@@ -95,6 +98,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
    forms/index
    static-assets/index
    partial-rendering/index
+   realtime
    dependency-injection
    permissions
    signals

@@ -8,6 +8,7 @@ import type { Lazy, LazyModule } from "./chunks";
 import { mintCsrf } from "./csrf";
 import { createPoller } from "./poll";
 import { createSse } from "./sse";
+import { createWebSocketTransport } from "./ws";
 import type { VisibilityAdapter } from "./sse";
 import type { Clock } from "./wire";
 
@@ -112,7 +113,9 @@ export function unloaded<T>(key: string): Lazy<T> & { tags(): number } {
 
 // The modules of the sse, csrf, and poll chunks, as createPartial takes them.
 export const chunkModules = {
+  context: () => ({}),
   sse: landed(createSse),
+  ws: landed(createWebSocketTransport),
   csrf: landed(mintCsrf),
   poll: landed(createPoller),
 };

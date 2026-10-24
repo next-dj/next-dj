@@ -167,6 +167,14 @@ export class Wire {
     this.#parseHooks.set(contentType, hook);
   }
 
+  /** Decode an SSE envelope with the hook registered for its protocol content type. */
+  parseStream(contentType: string, body: string): unknown {
+    const baseType = contentType.replace(/;.*$/, "").trim();
+    const hook = this.#parseHooks.get(baseType);
+    const response = new Response(body, { headers: { "content-type": baseType } });
+    return hook === undefined ? JSON.parse(body) : hook(response, body);
+  }
+
   /**
    * Abort the in-flight request on a queue without starting a new one, so a form submit
    * can cancel its own inline validation and a late reply to it is dropped.

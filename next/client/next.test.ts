@@ -3,7 +3,8 @@ import "./next";
 // The scripts chunk registers on evaluation, as it does once the runtime fetches it.
 import "./entries/scripts";
 // The single-module chunks register the same way.
-import "./entries/sse";
+import "./entries/stream";
+import "./entries/ws";
 import "./entries/csrf";
 import "./entries/poll";
 
