@@ -109,6 +109,164 @@ The comparison runs on a single Python and Django combination so matrix noise st
 
 On ``main`` the workflow pushes the head numbers to the ``gh-pages`` branch with an informational alert threshold of 200 percent that never blocks.
 
+The realtime benchmarks live in ``tests/benchmarks/realtime/`` and need no running Redis.
+Only the ``realtime.publish``, ``realtime.fanout``, and ``realtime.hello`` groups touch a broker.
+``realtime.publish`` runs on both the in-process ``MemoryBroker`` and a ``RedisBroker`` backed by ``fakeredis``, and ``realtime.fanout`` runs on the memory broker alone.
+In ``realtime.hello`` only the position read goes to a broker, on both of them, while the handshake frame benchmark uses the memory broker in its setup and never calls a broker in the measured body.
+The other groups run without a broker.
+Each benchmark checks its own result outside the measured body, so a call that degrades into an early exit fails the test instead of looking fast.
+Each group measures one step of the publish and delivery path.
+
+.. list-table:: Realtime benchmark groups
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Group
+     - What it measures
+   * - ``realtime.publish``
+     - Numbering and storing one envelope on the memory and Redis brokers, and the public ``publish`` call through the configured broker with its validation, snapshot, and signal.
+   * - ``realtime.fanout``
+     - One publish on the memory broker reaching 1, 100, and 1000 synchronous subscribers of the same topic.
+   * - ``realtime.frame``
+     - Serialising one small or medium envelope into an SSE event frame, and delivering one message as a WebSocket patches frame.
+   * - ``realtime.hello``
+     - Reading the latest position of 1 or 64 topics in one batch, and building and serialising the handshake frame from positions read beforehand, without touching a broker while it measures.
+   * - ``realtime.access``
+     - Rechecking topic grants for one live connection with the synchronous ``check()``, inside the throttle window where the cached verdict answers and outside it where the authorizer runs again.
+       Live connections under ASGI go through ``acheck()``, which this group does not measure.
+   * - ``realtime.ticket``
+     - Signing and verifying a session-bound WebSocket grant over 1 or 64 topics.
+   * - ``realtime.transports``
+     - Resolving the transports a deployment offers, from the warm cache and cold after a cache clear that re-reads the settings and installed apps.
+   * - ``partial.sse``
+     - Draining a finite stream through ``PatchStreamWriter`` to its last byte.
+       The cases are a stream of 50 heartbeat frames, a stream of 20 topic message frames that each carry the topic, sequence, epoch, and server time, and an empty stream that opens and closes.
+       The benchmark lives in ``tests/benchmarks/partial/``.
+
+Realtime load harness
+---------------------
+
+``make load`` runs an end-to-end load scenario that the micro-benchmarks cannot cover.
+It spawns a uvicorn server with Channels and configures ``RedisBroker`` against a real Redis.
+It starts ``K`` publisher processes that publish through ``next.realtime.publish``, and it opens ``M`` SSE clients and ``N`` WebSocket clients spread over client processes.
+The harness then reports whether every subscriber received every message and how long delivery took.
+
+The scenario is opt-in.
+``pytest`` ignores ``tests/benchmarks`` and ``tests/load`` by default, and neither ``make test`` nor continuous integration runs it.
+It needs the ``load`` dependency group, which ``make load`` pulls in through ``uv run --group load``.
+The group adds ``httpx``, ``websockets``, and ``psutil``, and the server comes from ``uvicorn`` in the ``dev`` group.
+
+Profiles
+~~~~~~~~
+
+``PROFILE`` selects the shape and defaults to ``small``.
+An unknown name fails the run.
+
+.. list-table:: Load profiles
+   :header-rows: 1
+   :widths: 40 30 30
+
+   * - Setting
+     - ``small``
+     - ``medium``
+   * - Publisher processes
+     - 2
+     - 4
+   * - SSE clients
+     - 50
+     - 500
+   * - WebSocket clients
+     - 50
+     - 500
+   * - Topics
+     - 5
+     - 20
+   * - Publish rate per publisher
+     - 20 messages per second
+     - 50 messages per second
+   * - Duration
+     - 20 seconds
+     - 30 seconds
+   * - Client processes
+     - 1
+     - 4
+   * - Allowed lost ratio
+     - 0
+     - 0.001
+   * - Allowed lost ratio per client
+     - 0
+     - 0.01
+   * - Allowed error ratio
+     - 0
+     - 0.01
+   * - Allowed resync ratio
+     - 0
+     - 0.01
+
+``LOAD_DURATION`` overrides the duration of the chosen profile with a positive number of seconds, which suits a quick smoke run.
+
+.. code-block:: bash
+
+   make load
+   make load PROFILE=medium
+   make load LOAD_DURATION=5
+
+Redis source
+~~~~~~~~~~~~
+
+With ``REDIS_URL`` set, the target uses that Redis and leaves it running.
+Without it, the target starts a throwaway ``redis:7-alpine`` container bound to a free local port and reads the port back from ``docker port``.
+It fails with an error when Docker reports no host port.
+It waits until ``docker exec`` runs ``redis-cli ping`` inside the container and gets an answer, and gives up after 50 tries 0.2 seconds apart.
+When the run ends, it stops that container by its id, and it never stops a container it did not start.
+That path needs Docker.
+The harness raises the Redis client pool through ``max_connections`` in the URL, because each subscription holds one connection and the library default of 100 is too small.
+Every run keys its data under a unique prefix and purges it afterwards.
+
+Metrics and pass criteria
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The run prints a short summary and writes the full result to ``tests/load/results/<timestamp>-<profile>.json``, a directory that git ignores.
+The result carries the machine description, the publish totals, and one section per transport with:
+
+* Clients that opened and clients that received the ``hello`` handshake.
+* Messages delivered against messages expected, and the lost, excess, and skipped counts.
+* The worst lost ratio, which is the largest share of its expected messages that any single client lost.
+* Resyncs, restarts, reconnects, clients that gave up reconnecting, duplicates, gaps, and errors.
+* End-to-end latency, server-to-client latency, and handshake latency, each as ``p50``, ``p95``, ``p99``, and ``max`` in milliseconds.
+
+The server section holds the average and peak CPU percentage and the peak resident memory of the server process.
+A sampler thread in the harness process watches only the server process through ``psutil``.
+It starts once the server reports its port, before the client processes spawn, and stops when publishing and draining finish, so the window also covers client opening.
+It takes one sample every 0.5 seconds.
+Each CPU sample is the share of one core the server used since the previous sample, so a busy multi-threaded server can exceed 100 percent.
+Each memory sample is the resident set size at that moment.
+The average is the mean of the CPU samples, and the peak values are the maximum over all samples.
+A run too short to take a sample reports no server figures.
+The result also records the time spent opening clients, publishing, and draining.
+
+The test fails when published messages plus publish errors differ from the scheduled total of publishers times the ceiling of rate times duration.
+It also fails when a publisher hits a broker error, when a client on either transport gets no ``hello``, or when a transport delivers nothing.
+Skipped, duplicate, and excess counts must be zero on every transport.
+It also fails when the number of clients on a transport differs from the profile.
+It also fails when the lost count or the gap count on a transport exceeds the allowed lost ratio times the expected count, or when the worst lost ratio of any single client exceeds the allowed lost ratio per client.
+It also fails when the resync count exceeds the allowed resync ratio times the client count.
+A resync is a reconnect that resumed past the saved position or a jump in the sequence.
+A restart is an epoch that changed inside an open stream, and the test fails on any restart, which is counted apart from resyncs.
+It also fails when the error count exceeds the allowed error ratio times the client count, or when any client gave up reconnecting.
+The ``small`` profile allows no loss, resyncs, or errors.
+The ``medium`` profile allows aggregate loss up to 0.1 percent of the expected messages, up to 1 percent of the messages of any one client, and resyncs and errors up to 1 percent of the client count.
+The latency figures are reported and never gated, so compare them only between runs on the same machine.
+
+End-to-end latency is the receive time on the client minus the send time the publisher stamped into the message.
+Server-to-client latency is the receive time on the client minus the ``server_time`` the server wrote into the frame.
+The server reads its wall clock when it builds the frame and truncates it to whole milliseconds, so the stamp can sit up to 1 ms before the true instant.
+The server-to-client figure therefore has a resolution of 1 ms and is an upper bound, and small values near zero mean less than 1 ms.
+Both figures compare wall clocks, which is sound because the publishers, server, and clients run on one machine.
+Handshake latency runs from the start of the connection attempt to the first ``hello`` frame and uses the monotonic clock.
+For a WebSocket client the attempt starts before the HTTP negotiation that mints the ticket, so the figure includes that request and the upgrade.
+Each reconnect starts a new attempt and the sample comes from the attempt that received the first ``hello``, so later reconnects add no sample.
+
 Documentation build
 -------------------
 

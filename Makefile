@@ -1,4 +1,4 @@
-.PHONY: help install test bench bench-codspeed test-compat lint format type-check clean build docs docs-lint docs-serve docs-clean docs-linkcheck install-js build-js test-js test-js-coverage lint-js format-js format-js-check type-check-js test-examples test-examples-e2e ci pre-commit-install pre-commit-run dev-setup
+.PHONY: help install test bench bench-codspeed load test-compat lint format type-check clean build docs docs-lint docs-serve docs-clean docs-linkcheck install-js build-js test-js test-js-coverage lint-js format-js format-js-check type-check-js test-examples test-examples-e2e ci pre-commit-install pre-commit-run dev-setup
 
 # Allow CI to point at a prebuilt venv's pytest (bypassing `uv run` and its sync step)
 PYTEST ?= uv run pytest
@@ -25,6 +25,7 @@ help: # show this help message
 	@echo "  test            - run tests in parallel with 100% coverage requirement"
 	@echo "  bench           - run performance benchmarks (opt-in, no coverage)"
 	@echo "  bench-codspeed  - run the benchmarks under pytest-codspeed, as the CodSpeed job does"
+	@echo "  load            - run the realtime load harness against Redis (PROFILE=small|medium)"
 	@echo "  test-compat     - run ecosystem compatibility tests (no coverage)"
 	@echo "  test-examples   - run Python + JS tests for examples with coverage"
 	@echo "  test-examples-e2e - run the browser suites for examples that ship one"
@@ -107,6 +108,31 @@ bench-codspeed: # run the benchmarks under pytest-codspeed (walltime off Linux C
 	uv run --group codspeed pytest tests/benchmarks -m perf --codspeed \
 		-W "ignore:Simulation instrument ignores rounds:UserWarning" \
 		-p no:randomly --no-cov --override-ini=addopts= $(BENCH_EXTRA)
+
+PROFILE ?= small
+
+load: # run the realtime load harness against REDIS_URL or a throwaway Redis container
+	@set -e; \
+	url="$(REDIS_URL)"; \
+	if [ -z "$$url" ]; then \
+		name="nextdj-load-redis-$$$$"; \
+		cid=""; \
+		trap 'status=$$?; if [ -n "$$cid" ]; then docker stop "$$cid" > /dev/null 2>&1 || true; fi; exit $$status' EXIT; \
+		trap 'exit 130' INT TERM; \
+		cid=$$(docker run -d --rm --name "$$name" -p 127.0.0.1::6379 redis:7-alpine); \
+		mapping=$$(docker port "$$cid" 6379/tcp); \
+		port=$$(printf '%s\n' "$$mapping" | head -n 1 | sed 's/.*://'); \
+		case "$$port" in ''|*[!0-9]*) echo "ERROR: no host port for Redis in '$$mapping'"; exit 1;; esac; \
+		url="redis://127.0.0.1:$$port/0"; \
+		tries=0; \
+		until docker exec "$$cid" redis-cli ping > /dev/null 2>&1; do \
+			tries=$$((tries + 1)); \
+			if [ $$tries -ge 50 ]; then echo "ERROR: Redis never answered PING"; exit 1; fi; \
+			sleep 0.2; \
+		done; \
+	fi; \
+	LOAD_PROFILE=$(PROFILE) REDIS_URL="$$url" uv run --group load pytest tests/load -m load -s \
+		-p no:randomly --no-cov --override-ini=addopts= -p no:cacheprovider
 
 test-compat:
 	uv run --group compat pytest tests/compat -q --no-cov
