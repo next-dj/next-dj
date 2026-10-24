@@ -889,35 +889,33 @@ Errors
      - ``NEXT_FRAMEWORK['REALTIME']['BROKER']['OPTIONS']`` is not a mapping.
      - ``next.realtime.checks``
    * - ``next.E181``
-     - ``ChannelsLayerBroker`` is selected without Django Channels installed.
-       Installing the ``channels`` extra clears it.
-     - ``next.realtime.checks``
-   * - ``next.E182``
      - ``REALTIME['TRANSPORTS']`` is not a unique non-empty list of supported transports.
      - ``next.realtime.checks``
-   * - ``next.E183``
-     - The WebSocket transport is enabled without Django Channels installed.
-     - ``next.realtime.checks``
-   * - ``next.E184``
+   * - ``next.E182``
      - The WebSocket ticket lifetime is outside the supported range of 1 to 600 seconds.
      - ``next.realtime.checks``
-   * - ``next.E185``
+   * - ``next.E183``
      - The WebSocket path is not absolute or includes a query or fragment.
      - ``next.realtime.checks``
-   * - ``next.E186``
+   * - ``next.E184``
      - The configured broker backend is not an importable ``BrokerBackend`` subclass.
      - ``next.realtime.checks``
-   * - ``next.E187``
+   * - ``next.E185``
      - ``NEXT_FRAMEWORK['REALTIME']['HEARTBEAT']`` is not a positive finite number of seconds.
        A boolean, a string, zero, a negative value, ``inf`` and ``nan`` all fail it.
      - ``next.realtime.checks``
-   * - ``next.E188``
+   * - ``next.E186``
      - The ``HEALTH_CHECK_INTERVAL`` option of ``RedisBroker`` is negative, infinite or not a number.
        Zero is accepted and turns the client-side health check off.
      - ``next.realtime.checks``
-   * - ``next.E189``
-     - ``REALTIME['TRANSPORTS']`` enables ``ws`` while Channels is installed but ``channels`` is not in ``INSTALLED_APPS``.
-       Without the app the transport resolver drops WebSocket silently.
+   * - ``next.E187``
+     - The ``CLIENT`` option of ``RedisBroker`` is not a mapping with string keys, or it sets ``decode_responses`` to anything but ``True``.
+       The broker reads text and forces ``decode_responses``, so the option is rejected rather than silently overridden.
+     - ``next.realtime.checks``
+   * - ``next.E188``
+     - The ticket introspection endpoint is routed with its stock caller check, and ``REALTIME['GATEWAY_TOKEN']`` is missing or empty.
+       The endpoint refuses every gateway until a token is set.
+       Setting a long random token, or overriding ``authorize`` in a subclass, clears it.
      - ``next.realtime.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
@@ -1295,28 +1293,14 @@ Warnings
        Declaring ``page.public()`` in the intercept ``page.py`` clears it, or ``page.login_required()`` keeps the login on purpose.
      - ``next.pages.checks.intercepts``
    * - ``next.W141``
-     - The WebSocket transport is enabled without ``ASGI_APPLICATION`` configured.
-       The transport counts as enabled when ``TRANSPORTS`` lists ``"ws"``, or when ``TRANSPORTS`` is unset and ``channels`` is installed and in ``INSTALLED_APPS``.
+     - WebSocket ticket issuance is configured without ``SessionMiddleware``.
+       A ``WebSocketApp`` logs the same warning when it is created.
      - ``next.realtime.checks``
    * - ``next.W142``
-     - WebSocket ticket issuance is configured without ``SessionMiddleware``.
-     - ``next.realtime.checks``
-   * - ``next.W143``
-     - ``ChannelsLayerBroker`` or a subclass of it is the selected broker and its channel layer is ``InMemoryChannelLayer``, which cannot fan out between processes.
-       It fires whatever ``TRANSPORTS`` says, because SSE streams read through the same broker.
-       Configuring a shared layer such as ``channels_redis`` clears it.
-     - ``next.realtime.checks``
-   * - ``next.W144``
-     - ``ChannelsLayerBroker`` or a subclass of it is the selected broker and ``CACHE_ALIAS`` names a cache whose ``incr()`` is not atomic across processes.
-       ``LocMemCache``, ``DummyCache``, ``DatabaseCache`` and ``FileBasedCache`` all count, and an alias missing from ``CACHES`` counts as the local-memory default.
-       It fires whatever ``TRANSPORTS`` says.
-       A shared Redis or Memcached cache clears it.
-       That cache must also never evict realtime keys, because Django's ``RedisCache.incr`` is not atomic against eviction, so use a dedicated cache or a Redis ``noeviction`` policy.
-     - ``next.realtime.checks``
-   * - ``next.W145``
      - The WebSocket transport is enabled while ``SESSION_ENGINE`` is the signed-cookie engine.
        A socket rechecks its session on the server, and a signed-cookie session has no server-side record to recheck.
        Switching to the ``db``, ``cache``, ``cached_db`` or ``file`` engine clears it.
+       A ``WebSocketApp`` logs the same warning when it is created.
      - ``next.realtime.checks``
 
 Codes are assigned per check and are not contiguous.

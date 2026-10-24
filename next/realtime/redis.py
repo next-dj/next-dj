@@ -24,7 +24,7 @@ from contextlib import (
     asynccontextmanager,
     contextmanager,
 )
-from types import TracebackType
+from types import ModuleType, TracebackType
 from typing import Any, Protocol, override
 from weakref import WeakKeyDictionary
 
@@ -45,6 +45,11 @@ _DEFAULT_HEALTH_CHECK_INTERVAL = 10.0
 _SUBSCRIBE_TIMEOUT = 5.0
 _LIVENESS = "next-realtime-liveness"
 _UNCONFIRMED = "Redis did not confirm the subscription in time."
+_EXHAUSTED = frozenset({"Too many connections", "No connection available."})
+_POOL_EXHAUSTED = (
+    "The Redis connection pool is exhausted, raise max_connections in "
+    "REALTIME.BROKER.OPTIONS.CLIENT."
+)
 _PUBLISH_SCRIPT = """
 redis.call('HINCRBY', KEYS[1], 'seq', 1)
 local state = redis.call('HMGET', KEYS[1], 'seq', 'epoch')
@@ -74,8 +79,11 @@ class _AsyncPubSub(Protocol):
 class _TransportFailures:
     """Re-raise a Redis connection or timeout error as a broker connection error."""
 
-    def __init__(self, errors: tuple[type[Exception], ...]) -> None:
+    def __init__(
+        self, errors: tuple[type[Exception], ...], exhausted: type[Exception]
+    ) -> None:
         self.errors = errors
+        self.exhausted = exhausted
 
     def __enter__(self) -> None:
         """Enter a guarded Redis call."""
@@ -88,6 +96,8 @@ class _TransportFailures:
     ) -> None:
         """Translate a transport failure so callers catch one broker error type."""
         if isinstance(error, self.errors):
+            if isinstance(error, self.exhausted) or str(error) in _EXHAUSTED:
+                logger.warning(_POOL_EXHAUSTED)
             msg = f"The Redis broker connection failed: {error}"
             raise BrokerConnectionError(msg) from error
 
@@ -160,22 +170,50 @@ class RedisBroker(BrokerBackend):
             msg = "REALTIME.BROKER.OPTIONS.PREFIX must contain a non-colon character."
             raise ImproperlyConfigured(msg)
         self._url = url
-        self._client_options: dict[str, object] = {
-            "decode_responses": True,
-            "health_check_interval": interval,
-            "socket_keepalive": True,
-        }
-        self._redis: Any = redis.Redis.from_url(url, **self._client_options)
-        self._publish_script: Any = self._redis.register_script(_PUBLISH_SCRIPT)
-        self._async_redis_class: Any = redis_asyncio.Redis
+        self._client_options = self._merged_client_options(interval)
+        self._modules: tuple[ModuleType, ModuleType] = (redis, redis_asyncio)
         self._failures = _TransportFailures(
-            (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError)
+            (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError),
+            redis.exceptions.MaxConnectionsError,
         )
+        client: Any = self.create_client(
+            url, dict(self._client_options), asynchronous=False
+        )
+        self._redis: Any = client
+        self._publish_script: Any = client.register_script(_PUBLISH_SCRIPT)
         self._async_clients: WeakKeyDictionary[
             asyncio.AbstractEventLoop, tuple[Any, Any]
         ] = WeakKeyDictionary()
         self._async_lock = threading.Lock()
         _BROKERS.add(self)
+
+    def create_client(
+        self, url: str, options: Mapping[str, object], *, asynchronous: bool
+    ) -> object:
+        """Build the sync or the per-loop async client from the URL and client options.
+
+        A subclass overrides it to reach Redis through Sentinel or Cluster instead.
+        """
+        module = self._modules[1] if asynchronous else self._modules[0]
+        return module.Redis.from_url(url, **options)
+
+    def _merged_client_options(self, interval: float) -> dict[str, object]:
+        """Lay the CLIENT option over the defaults, keeping decoded replies."""
+        client = self.options.get("CLIENT", {})
+        if not isinstance(client, Mapping) or not all(
+            isinstance(key, str) for key in client
+        ):
+            msg = "REALTIME.BROKER.OPTIONS.CLIENT must be a mapping of keyword names."
+            raise ImproperlyConfigured(msg)
+        if client.get("decode_responses", True) is not True:
+            msg = "REALTIME.BROKER.OPTIONS.CLIENT cannot turn off decode_responses."
+            raise ImproperlyConfigured(msg)
+        return {
+            "health_check_interval": interval,
+            "socket_keepalive": True,
+            **client,
+            "decode_responses": True,
+        }
 
     @override
     def publish(self, topic: str, envelope: Envelope) -> Message:
@@ -365,8 +403,8 @@ class RedisBroker(BrokerBackend):
                 del self._async_clients[stale]
             entry = self._async_clients.get(loop)
             if entry is None:
-                client = self._async_redis_class.from_url(
-                    self._url, **self._client_options
+                client: Any = self.create_client(
+                    self._url, dict(self._client_options), asynchronous=True
                 )
                 entry = (client, client.register_script(_PUBLISH_SCRIPT))
                 self._async_clients[loop] = entry

@@ -101,7 +101,7 @@ def test_publish_on_commit_registers_on_requested_alias(
     publish("poll:db-alias", Patches(None).refresh(zone="results"), using="analytics")
     assert registered["using"] == "analytics"
     assert registered["options"] == {"robust": True}
-    assert repr(registered["callback"]) == "_DeferredPublication(topic='poll:db-alias')"
+    assert registered["callback"].__qualname__ == "publish('poll:db-alias')"
 
 
 @pytest.mark.django_db()

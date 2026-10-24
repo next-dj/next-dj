@@ -89,11 +89,13 @@ A revoked session ends the SSE stream without that frame, so the ``EventSource``
 Over WebSocket a denial sends ``{"type":"error","code":"auth"}`` and closes the socket with ``4401`` for a session problem or ``4403`` for a topic denial.
 The client then falls back to SSE, where the same rules apply.
 
-With Channels installed and routed through ``next.contrib.channels.application``, the client can negotiate a WebSocket through this same guarded stream URL.
+When the process mounts a ``WebSocketApp``, the client can negotiate a WebSocket through this same guarded stream URL.
 The signed ticket binds the current session to the topics, transform, and importable ``authorize`` callback chosen by the page.
 The client sends the ticket in its first WebSocket frame and never in the URL.
-The ASGI router checks the request Origin, and the consumer rechecks the session and topic access before joining the broker and during the connection.
-WebSocket needs a session engine that stores sessions on the server, so the signed-cookie engine is unsupported and ``next.W145`` reports it.
+The socket checks the request Origin before it accepts, and it rechecks the session and topic access before joining the broker and during the connection.
+WebSocket needs a session engine that stores sessions on the server, so the signed-cookie engine is unsupported and ``next.W142`` reports it.
+The socket loads its session from the cookie at the handshake and on every recheck, so a session cache that evicts live entries closes sockets with ``4401``.
+Size the session cache for the open connections, or use the ``db`` or ``cached_db`` engine.
 
 WebSocket is optional and SSE remains the fallback.
 A stream without a stable, importable ``authorize`` callback answers negotiation with ``406`` and stays on SSE.
@@ -129,7 +131,7 @@ Delivery guarantees
 Delivery is at most once and best-effort.
 The broker does not replay events, and bounded subscriber queues drop their oldest message when full.
 The in-memory broker is process-local.
-Use ``RedisBroker`` for multiple workers or hosts, or ``ChannelsLayerBroker`` when the application already operates a shared Channels layer and a shared Django cache with atomic ``incr``.
+Use ``RedisBroker`` for multiple workers or hosts, so they share publication and sequence state.
 
 The client keeps an ``(epoch, seq)`` cursor per topic.
 On the first ``hello`` with a nonzero sequence, the client revalidates the page's zones because the HTML render may predate the subscription.
@@ -181,6 +183,6 @@ See also
 
    :doc:`/content/howto/stream-live-updates-with-sse` for a short recipe.
    :doc:`/content/howto/fan-out-across-processes-with-redis` for shared broker setup.
-   :doc:`/content/howto/stream-over-websockets-with-channels` for the WebSocket transport.
+   :doc:`/content/howto/stream-over-websockets` for the WebSocket transport.
    :doc:`/content/ref/realtime` for the broker contract and a custom backend.
    :doc:`/content/topics/partial-rendering/sse` for the underlying SSE transport.

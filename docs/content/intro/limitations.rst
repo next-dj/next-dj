@@ -34,7 +34,7 @@ No suspense, optional WebSockets
 Zones are a lazy reveal and a poll, not an asynchronous streaming boundary.
 A ``lazy=`` zone fills through a later client round trip, and a ``poll=`` zone re-fetches on a client timer.
 A slow zone holds its response instead of streaming a placeholder, because there is no server-side suspense flush.
-Realtime uses Server-Sent Events by default and supports optional WebSocket delivery through Channels under ASGI.
+Realtime uses Server-Sent Events by default and supports optional WebSocket delivery under ASGI through the built-in ``WebSocketApp``.
 Both transports carry server-authored notifications from server to client, and form actions remain the path for client mutations.
 Replay and presence are outside the current model.
 

@@ -15,7 +15,9 @@ from next.realtime.errors import InvalidTicketError
 from next.realtime.tickets import (
     _SALT,
     MAX_REFERENCE_LENGTH,
+    TicketClaims,
     issue_ticket,
+    resolve_claims,
     ticket_max_age,
     verify_ticket,
     websocket_path,
@@ -24,10 +26,17 @@ from next.testing import override_next_settings
 
 
 _AUTHORIZER = "tests.realtime.test_tickets.allow_room"
+_TRANSFORM = "tests.realtime.test_tickets.drop_message"
+
+NOT_CALLABLE = "a constant"
 
 
 def allow_room(_user: object, _topic: str) -> bool:
     return True
+
+
+def drop_message(_message: object) -> None:
+    return None
 
 
 @pytest.mark.django_db()
@@ -38,7 +47,7 @@ def test_ticket_issued_for_a_session_verifies_its_topic_grant() -> None:
         request, ("room:3", "news"), transform_ref=None, authorizer_ref=_AUTHORIZER
     )
 
-    claims = verify_ticket(grant.token, request.session)
+    claims = verify_ticket(grant.token, request.session.session_key)
 
     assert grant.topics == ("room:3", "news")
     assert grant.websocket_path == "/_next/ws/"
@@ -61,13 +70,13 @@ def test_ticket_other_session_or_tampered_token_is_rejected() -> None:
     other.create()
 
     with pytest.raises(InvalidTicketError, match="another session"):
-        verify_ticket(grant.token, other)
+        verify_ticket(grant.token, other.session_key)
     with pytest.raises(InvalidTicketError, match="invalid or expired"):
-        verify_ticket(grant.token + "x", request.session)
+        verify_ticket(grant.token + "x", request.session.session_key)
     with pytest.raises(InvalidTicketError, match="non-empty"):
-        verify_ticket(None, request.session)
+        verify_ticket(None, request.session.session_key)
     with pytest.raises(InvalidTicketError, match="no Django session"):
-        verify_ticket(grant.token, object())
+        verify_ticket(grant.token, "")
 
 
 @pytest.mark.django_db()
@@ -81,7 +90,7 @@ def test_ticket_expired_or_malformed_signed_claims_are_rejected() -> None:
         time_machine.travel(datetime(2100, 1, 1, tzinfo=UTC)),
         pytest.raises(InvalidTicketError, match="invalid or expired"),
     ):
-        verify_ticket(grant.token, request.session)
+        verify_ticket(grant.token, request.session.session_key)
 
     # Re-sign malformed payloads so structural validation is isolated from signature
     # failures.
@@ -124,7 +133,7 @@ def test_ticket_expired_or_malformed_signed_claims_are_rejected() -> None:
     for payload in invalid:
         token = signer.sign_object(payload)
         with pytest.raises(InvalidTicketError):
-            verify_ticket(token, request.session)
+            verify_ticket(token, request.session.session_key)
 
 
 def test_ticket_invalid_settings_fall_back_to_safe_defaults() -> None:
@@ -176,7 +185,7 @@ def test_ticket_at_max_topics_and_length_round_trips() -> None:
     )
 
     assert len(grant.token) > 8192
-    claims = verify_ticket(grant.token, request.session)
+    claims = verify_ticket(grant.token, request.session.session_key)
     assert claims.topics == topics
     assert claims.transform_ref == reference
 
@@ -192,7 +201,10 @@ def test_ticket_non_bmp_references_still_verify() -> None:
         request, topics, transform_ref=reference, authorizer_ref=reference
     )
 
-    assert verify_ticket(grant.token, request.session).authorizer_ref == reference
+    assert (
+        verify_ticket(grant.token, request.session.session_key).authorizer_ref
+        == reference
+    )
 
 
 @pytest.mark.parametrize(
@@ -214,3 +226,59 @@ def test_issue_ticket_refuses_a_grant_the_verifier_would_reject(
         issue_ticket(
             request, topics, transform_ref=transform_ref, authorizer_ref=authorizer_ref
         )
+
+
+@pytest.mark.django_db()
+def test_ticket_for_a_persisted_session_keeps_its_key() -> None:
+    request = RequestFactory().get("/updates/")
+    request.session = SessionStore()
+    request.session.create()
+    key = request.session.session_key
+    request.session.modified = False
+
+    grant = issue_ticket(
+        request, ("room",), transform_ref=None, authorizer_ref=_AUTHORIZER
+    )
+
+    assert request.session.session_key == key
+    assert request.session.modified is False
+    assert verify_ticket(grant.token, key).topics == ("room",)
+
+
+@pytest.mark.parametrize("session_key", [None, 42, ""])
+def test_verify_ticket_without_a_string_session_key_is_rejected(
+    session_key: object,
+) -> None:
+    with pytest.raises(InvalidTicketError, match="no Django session"):
+        verify_ticket("token", session_key)
+
+
+@pytest.mark.parametrize(
+    ("transform_ref", "expected"), [(None, None), (_TRANSFORM, drop_message)]
+)
+def test_resolve_claims_imports_the_named_callables(
+    transform_ref: str | None, expected: object
+) -> None:
+    claims = TicketClaims(("room",), transform_ref, _AUTHORIZER)
+    transform, authorizer = resolve_claims(claims)
+    assert transform is expected
+    assert authorizer is allow_room
+
+
+@pytest.mark.parametrize(
+    ("transform_ref", "authorizer_ref"),
+    [
+        (None, "tests.realtime.missing_module.allow"),
+        (None, "tests.realtime.test_tickets.missing_name"),
+        (None, "no_dots"),
+        (None, "tests.realtime.test_tickets.NOT_CALLABLE"),
+        ("tests.realtime.missing_module.drop", _AUTHORIZER),
+        ("tests.realtime.test_tickets.NOT_CALLABLE", _AUTHORIZER),
+    ],
+)
+def test_resolve_claims_unimportable_or_non_callable_reference_is_a_bad_ticket(
+    transform_ref: str | None, authorizer_ref: str
+) -> None:
+    claims = TicketClaims(("room",), transform_ref, authorizer_ref)
+    with pytest.raises(InvalidTicketError, match="does not import"):
+        resolve_claims(claims)

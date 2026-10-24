@@ -1,19 +1,15 @@
 import asyncio
 import multiprocessing
 import os
-import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
-from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pytest
 import redis
 import redis.asyncio
-from django.test import override_settings
 
-from next.contrib.channels.broker import ChannelsLayerBroker
 from next.partial import Envelope, Patches
 from next.realtime import BrokerConnectionError, Message, Position, RedisBroker
 
@@ -202,32 +198,6 @@ def test_redis_async_subscription_killed_by_server_raises_connection_error(
                 await _drain_async(messages)
 
     asyncio.run(scenario())
-
-
-def test_channels_redis_layer_concurrent_sync_subscriptions_all_receive(prefix) -> None:
-    layers = {
-        "default": {
-            "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {"hosts": [REDIS_URL], "prefix": prefix},
-        }
-    }
-    with override_settings(CHANNEL_LAYERS=layers):
-        backend = ChannelsLayerBroker({"OPTIONS": {"PREFIX": prefix}})
-        ready = threading.Barrier(4)
-
-        def subscriber() -> Message | None:
-            with backend.subscribe([_TOPIC], timeout=5) as messages:
-                ready.wait(10)
-                return next(messages)
-
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            pending = [pool.submit(subscriber) for _ in range(3)]
-            ready.wait(10)
-            published = backend.publish(_TOPIC, _envelope())
-            received = [future.result(10) for future in pending]
-        backend.close()
-
-    assert received == [published] * 3
 
 
 @pytest.mark.parametrize("cancel_after", ["socket", "entry"])

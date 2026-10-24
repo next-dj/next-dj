@@ -36,6 +36,7 @@ import { defaultFetch, defaultHistory, defaultNavigate } from "./adapters";
 import {
   ATTR_SSE,
   ATTR_STREAM,
+  CONTENT_TYPE,
   ECHO_LIMIT,
   currentUrl,
   fire,
@@ -282,7 +283,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     const realtime = deps.context().$realtime as
       | { content_type?: string; transports?: unknown[] }
       | undefined;
-    const contentType = realtime?.content_type ?? "application/json";
+    const contentType = realtime?.content_type ?? CONTENT_TYPE;
     const wsFactory = deps.ws?.get();
     return {
       ...streamAdapters,

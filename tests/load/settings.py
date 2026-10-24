@@ -27,7 +27,6 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
-    "channels",
     "next",
 ]
 
@@ -37,8 +36,6 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "tests.load.urls"
-
-ASGI_APPLICATION = "tests.load.asgi.application"
 
 DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}}
 

@@ -1,6 +1,6 @@
 """Framework-level defaults for the `settings.NEXT_FRAMEWORK` mapping.
 
-The values are deep-copied on every reload and nothing here imports the framework.
+The values are frozen once on import and nothing here imports the framework.
 """
 
 from __future__ import annotations
@@ -59,6 +59,7 @@ DEFAULTS: dict[str, Any] = {
         "TICKET_MAX_AGE": 60,
         "WS_PATH": "/_next/ws/",
         "HEARTBEAT": 25.0,
+        "GATEWAY_TOKEN": None,
     },
     "TEMPLATE_LOADERS": ["next.pages.loaders.DjxTemplateLoader"],
     "NEXT_JS_OPTIONS": {},

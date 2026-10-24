@@ -74,6 +74,13 @@ class BrokerManager:
         if backend is not None:
             backend.close()
 
+    async def aclose(self) -> None:
+        """Drop the cached backend and release its resources from an event loop."""
+        with self._lock:
+            backend, self._backend = self._backend, None
+        if backend is not None:
+            await backend.aclose()
+
 
 broker_manager = BrokerManager()
 

@@ -147,7 +147,7 @@ Realtime load harness
 ---------------------
 
 ``make load`` runs an end-to-end load scenario that the micro-benchmarks cannot cover.
-It spawns a uvicorn server with Channels and configures ``RedisBroker`` against a real Redis.
+It spawns a uvicorn server that mounts the built-in WebSocket app and configures ``RedisBroker`` against a real Redis.
 It starts ``K`` publisher processes that publish through ``next.realtime.publish``, and it opens ``M`` SSE clients and ``N`` WebSocket clients spread over client processes.
 The harness then reports whether every subscriber received every message and how long delivery took.
 

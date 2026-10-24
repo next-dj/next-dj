@@ -193,3 +193,28 @@ def test_manager_get_racing_builder_returns_its_backend_without_signal() -> None
     with SignalRecorder(broker_backend_loaded) as recorder:
         assert manager.get() is backend
     assert recorder.events_for(broker_backend_loaded) == []
+
+
+def test_manager_aclose_releases_the_cached_backend_once_and_rebuilds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = BrokerManager()
+    backend = manager.get()
+    closed: list[object] = []
+
+    async def aclose() -> None:
+        closed.append(backend)
+
+    monkeypatch.setattr(backend, "aclose", aclose)
+    asyncio.run(manager.aclose())
+    asyncio.run(manager.aclose())
+    assert closed == [backend]
+    assert manager.get() is not backend
+
+
+def test_manager_aclose_without_a_backend_builds_nothing() -> None:
+    manager = BrokerManager()
+    with SignalRecorder(broker_backend_loaded) as recorder:
+        asyncio.run(manager.aclose())
+    assert manager._backend is None
+    assert recorder.events_for(broker_backend_loaded) == []

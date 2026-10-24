@@ -152,7 +152,7 @@ if TYPE_CHECKING:
         check_permission_predicates,
         check_permissions_known,
     )
-    from next.realtime.checks import check_realtime_settings
+    from next.realtime.checks import check_realtime_settings, check_ticket_introspection
     from next.scripts.checks import (
         check_consented_categories,
         check_consented_needs_consent,
@@ -349,7 +349,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_permission_predicates",
         "check_permissions_known",
     ),
-    "next.realtime.checks": ("check_realtime_settings",),
+    "next.realtime.checks": ("check_realtime_settings", "check_ticket_introspection"),
     "next.scripts.checks": (
         "check_consented_categories",
         "check_consented_needs_consent",
@@ -576,6 +576,7 @@ __all__ = [
     "check_success_message_framework",
     "check_tag_templates_format",
     "check_template_loaders",
+    "check_ticket_introspection",
     "check_unrouted_working_directory_pages",
     "check_url_patterns",
     "check_with_directly_over_zone",

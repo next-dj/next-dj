@@ -727,6 +727,51 @@ describe("createPartial surface", () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([
+    ["no $realtime", {}],
+    ["a $realtime without content_type", { $realtime: { transports: ["sse"] } }],
+  ])("parseHook decodes stream frames with the stock content type on %s", (_, ctx) => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const { partial } = makeSurface(ctx);
+    const source = mockSource();
+    partial._configure({ document, source: source.adapter });
+    partial.parseHook("application/vnd.next.patches+json", () => ({
+      version: "v1",
+      ops: [{ op: "inner", target: { zone: "z" }, html: "stock" }],
+      assets: [],
+      form: null,
+    }));
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<div data-next-stream="/stream/"></div>',
+    );
+    partial.stream.scan(document);
+    source.opened[0]!.message("stream-body");
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("stock");
+  });
+
+  it.each([
+    ["no $realtime", {}],
+    ["an SSE-only $realtime", { $realtime: { transports: ["sse"] } }],
+  ])("opens SSE without fetching the ws chunk on %s", (_, ctx) => {
+    const ws = unloaded<WsTransportFactory>("ws");
+    const lazy = createPartial({
+      ...chunkModules,
+      context: () => ctx,
+      ws,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    const source = mockSource();
+    lazy._configure({ document, source: source.adapter });
+    document.head.innerHTML = "";
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
+    lazy.stream.scan(document);
+    expect(ws.tags()).toBe(0);
+    expect(source.opened).toHaveLength(1);
+    lazy._reset();
+  });
+
   it("loads the stream chunk from the transport-neutral attribute", () => {
     const stream = unloaded<SseFactory>("stream");
     const lazy = createPartial({

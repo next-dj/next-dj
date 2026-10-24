@@ -117,20 +117,21 @@ Realtime streams
 Review these when the project publishes ``TopicStream`` updates.
 
 - Use a shared broker across workers.
-  ``MemoryBroker`` is process-local, so choose ``RedisBroker`` or configure Channels with a shared channel layer and shared atomic cache for ``ChannelsLayerBroker`` sequence numbers.
-  ``next.W143`` and ``next.W144`` flag a ``ChannelsLayerBroker`` that lacks either.
-- Under ASGI, keep the proxy upgrade enabled when ``channels`` is installed and set read and send timeouts above the intended connection lifetime.
+  ``MemoryBroker`` is process-local, so choose ``RedisBroker``.
+- Under ASGI, keep the proxy upgrade enabled when a ``WebSocketApp`` is mounted and set read and send timeouts above the intended connection lifetime.
   Keep ``NEXT_FRAMEWORK["REALTIME"]["HEARTBEAT"]``, 25 seconds by default, below the shortest intermediary idle timeout.
 - Keep SSE available as the fallback transport and verify a route through the production proxy.
 - Keep authorization on the guarded stream page and provide a stable topic authorizer for WebSocket subscriptions.
   The authorizer and the session are rechecked at most once per heartbeat, so a revocation takes effect within about two heartbeat intervals.
-- List concrete hosts in ``ALLOWED_HOSTS``, or pass an explicit ``origins`` list, because the WebSocket Origin check refuses ``*``.
-  A leading-dot entry allows the domain and its subdomains on any port.
-- Store sessions on the server when WebSockets are enabled, because ``next.W145`` reports the signed-cookie engine.
+- Keep ``ALLOWED_HOSTS``, ``CSRF_TRUSTED_ORIGINS`` and ``SECURE_PROXY_SSL_HEADER`` accurate, or pass an explicit ``origins`` list, because the WebSocket Origin check follows Django's CSRF rule and refuses a connection with no Origin.
+  Behind a proxy, enable ``USE_X_FORWARDED_HOST`` when the proxy rewrites ``Host``.
+- Store sessions on the server when WebSockets are enabled, because ``next.W142`` reports the signed-cookie engine.
+  Size a cache-backed session store for the open sockets, since an evicted session closes its socket with ``4401``.
+- Set ``REALTIME['GATEWAY_TOKEN']`` from the environment when a gateway outside Python calls the ticket introspection endpoint.
 - Treat topic delivery as best-effort notification.
   Verify reconnect and guarded zone resync, and do not use it as durable event history.
 
-See :doc:`/content/topics/realtime` and :doc:`/content/howto/stream-over-websockets-with-channels`.
+See :doc:`/content/topics/realtime` and :doc:`/content/howto/stream-over-websockets`.
 
 Database
 --------

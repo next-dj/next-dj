@@ -1,11 +1,7 @@
 from collections.abc import AsyncIterator, Iterator
-from dataclasses import dataclass
-
-from django.contrib.sessions.backends.db import SessionStore
-from django.test import RequestFactory
 
 from next.partial import Envelope, Patches
-from next.realtime.tickets import TicketGrant, issue_ticket
+from next.testing.realtime import SocketTicket, issue_socket_ticket
 
 
 ROOM_AUTHORIZER_REF = "tests.support.realtime.allow_room_topic"
@@ -16,46 +12,21 @@ def allow_room_topic(_user: object, topic: str) -> bool:
     return topic.startswith("room:")
 
 
-@dataclass(frozen=True, slots=True)
-class SessionTicket:
-    """A saved session and the WebSocket ticket issued against it."""
-
-    session: SessionStore
-    grant: TicketGrant
-
-
 def issue_session_ticket(
     topics: tuple[str, ...] = ("room:42",),
     *,
     transform_ref: str | None = None,
     authorizer_ref: str = ROOM_AUTHORIZER_REF,
-) -> SessionTicket:
-    """Create a saved session and issue a WebSocket ticket bound to it."""
-    session = SessionStore()
-    session.create()
-    request = RequestFactory().get("/updates/")
-    request.session = session
-    grant = issue_ticket(
-        request, topics, transform_ref=transform_ref, authorizer_ref=authorizer_ref
+) -> SocketTicket:
+    """Issue a ticket for the ``room:`` topics the realtime tests subscribe to."""
+    return issue_socket_ticket(
+        topics, transform_ref=transform_ref, authorizer_ref=authorizer_ref
     )
-    return SessionTicket(session, grant)
 
 
 def refresh_envelope() -> Envelope:
     """Build the topic-safe refresh envelope most broker tests publish."""
     return Patches(None).refresh(zone="results").envelope()
-
-
-def event_envelope(name: str = "update") -> Envelope:
-    """Build a topic-safe envelope carrying one named event without a detail."""
-    return Envelope.from_dict(
-        {
-            "version": "v1",
-            "ops": [{"op": "event", "name": name}],
-            "assets": [],
-            "form": None,
-        }
-    )
 
 
 def message_payload(**overrides: object) -> dict[str, object]:

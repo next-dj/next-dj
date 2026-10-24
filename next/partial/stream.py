@@ -1,9 +1,9 @@
 """Metadata and control frames used only by streamed partial responses."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Protocol
 
 from . import keys
 
@@ -59,6 +59,35 @@ class StreamHello:
         }
 
 
+class StreamPosition(Protocol):
+    """The `(epoch, seq)` position of one topic, read from any broker's own type."""
+
+    @property
+    def epoch(self) -> str:
+        """Counter epoch that numbered the topic."""
+
+    @property
+    def seq(self) -> int:
+        """Latest sequence within the epoch."""
+
+
+def stream_hello(
+    topics: Iterable[str],
+    positions: Mapping[str, StreamPosition],
+    *,
+    server_time: int,
+    transports: tuple[str, ...],
+) -> StreamHello:
+    """Build the hello frame both stream transports send once a subscription is live."""
+    return StreamHello(
+        server_time=server_time,
+        topics={
+            topic: (positions[topic].epoch, positions[topic].seq) for topic in topics
+        },
+        transports=transports,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class StreamSkip:
     """Sequence acknowledgment for a message filtered for this subscriber."""
@@ -83,4 +112,11 @@ class StreamEnd:
         return {"code": self.code}
 
 
-__all__ = ["StreamEnd", "StreamHello", "StreamMeta", "StreamSkip"]
+__all__ = [
+    "StreamEnd",
+    "StreamHello",
+    "StreamMeta",
+    "StreamPosition",
+    "StreamSkip",
+    "stream_hello",
+]

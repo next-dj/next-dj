@@ -244,6 +244,7 @@ Default value.
        "TICKET_MAX_AGE": 60,
        "WS_PATH": "/_next/ws/",
        "HEARTBEAT": 25.0,
+       "GATEWAY_TOKEN": None,
    }
 
 ``BROKER.BACKEND`` names a ``BrokerBackend`` subclass, and ``BROKER.OPTIONS`` belongs to that backend.
@@ -270,33 +271,33 @@ Default value.
      - Seconds a Redis connection may stay idle before the client pings it before its next command.
        Zero turns this client-side check off.
        Subscriptions run their own liveness ping regardless, see :doc:`/content/howto/fan-out-across-processes-with-redis`.
-   * - ``next.contrib.channels.ChannelsLayerBroker``
-     - ``CHANNEL_LAYER``, ``"default"``
-     - The alias in ``CHANNEL_LAYERS`` that fans messages out.
-   * - ``next.contrib.channels.ChannelsLayerBroker``
-     - ``CACHE_ALIAS``, ``"default"``
-     - The alias in ``CACHES`` that holds topic counters and epochs, which needs an ``incr()`` atomic across processes.
-   * - ``next.contrib.channels.ChannelsLayerBroker``
-     - ``PREFIX``, ``"next.rt"``
-     - The prefix of counter keys and group names, 1 to 40 ASCII letters, digits, dots or hyphens.
+   * - ``next.realtime.RedisBroker``
+     - ``CLIENT``, ``{}``
+     - A mapping of keyword arguments passed whole to the Redis ``from_url`` call, for the synchronous and the asynchronous client alike.
+       It overrides ``health_check_interval`` and ``socket_keepalive``, and ``decode_responses`` stays on whatever it holds, so ``manage.py check`` rejects any other value as ``next.E187``.
+       ``max_connections`` is the usual entry, see :doc:`/content/howto/fan-out-across-processes-with-redis`.
 
 ``MemoryBroker`` serves one process and does not coordinate sequence numbers across processes.
-``RedisBroker`` needs the ``broker`` extra, and ``ChannelsLayerBroker`` needs the ``channels`` extra plus a layer and a cache that every worker shares.
+``RedisBroker`` needs the ``broker`` extra.
 A custom backend reads its own ``OPTIONS`` keys, which ``manage.py check`` leaves alone.
 
-``TRANSPORTS`` defaults to ``None`` and selects ``["ws", "sse"]`` when Channels is installed in Django, or ``["sse"]`` otherwise.
+``TRANSPORTS`` defaults to ``None`` and selects ``["ws", "sse"]`` in a process that mounts a ``WebSocketApp``, or ``["sse"]`` otherwise.
+A process that serves pages without mounting the socket, such as a WSGI worker next to a separate ASGI deployment, needs an explicit ``["ws", "sse"]`` to offer it.
 Set it to ``["sse"]`` to disable WebSocket negotiation.
 ``TICKET_MAX_AGE`` is the lifetime of a session-bound WebSocket grant in seconds and accepts values from 1 to 600.
-``WS_PATH`` sets the same-origin WebSocket route and defaults to ``/_next/ws/``.
+``WS_PATH`` sets the same-origin WebSocket route and defaults to ``/_next/ws/``, and it is the only place the route is configured.
+``GATEWAY_TOKEN`` is the bearer secret of the ticket introspection endpoint, which stays off until a URLconf includes it.
+It defaults to ``None``, and a routed endpoint with no token refuses every caller and is reported as ``next.E188``.
+Read it from the environment rather than committing it.
 
-``HEARTBEAT`` is the realtime keepalive and recheck interval in seconds, a positive finite number that ``next.E187`` enforces.
-It drives every ``TopicStream`` over SSE, under WSGI and ASGI alike, and every WebSocket served by the Channels consumer.
+``HEARTBEAT`` is the realtime keepalive and recheck interval in seconds, a positive finite number that ``next.E185`` enforces.
+It drives every ``TopicStream`` over SSE, under WSGI and ASGI alike, and every WebSocket served by a ``TopicSocket``.
 At that interval a quiet stream writes a heartbeat comment or a WebSocket ``ping`` frame, and a live connection rechecks its session and topic grants.
 ``TopicStream(heartbeat_seconds=...)`` overrides it for one SSE stream.
 The ``SSE.HEARTBEAT_SECONDS`` option of ``PARTIAL_BACKENDS`` is a separate setting that times only a manual ``PatchEventStream`` with an async source, while ``SSE.RETRY_MS`` stays the reconnect hint of both stream kinds.
 Keep ``HEARTBEAT`` below the shortest idle timeout of every proxy and load balancer in front of the streams.
 
-See :doc:`realtime` for the broker API and :doc:`/content/howto/stream-over-websockets-with-channels` for setup.
+See :doc:`realtime` for the broker API and :doc:`/content/howto/stream-over-websockets` for setup.
 
 Application modules
 -------------------

@@ -29,6 +29,7 @@ class _Clients:
         self.sync = fakeredis.FakeRedis(server=self.server, decode_responses=True)
         self.created: list[fakeredis.aioredis.FakeRedis] = []
         self.options: list[dict[str, object]] = []
+        self.async_options: list[dict[str, object]] = []
         self.async_pubsub: object | None = None
         monkeypatch.setattr(redis.Redis, "from_url", self._sync_factory)
         monkeypatch.setattr(redis.asyncio.Redis, "from_url", self._async_factory)
@@ -38,6 +39,7 @@ class _Clients:
         return self.sync
 
     def _async_factory(self, url: str, **kwargs: object):
+        self.async_options.append(kwargs)
         client = fakeredis.aioredis.FakeRedis(server=self.server, decode_responses=True)
         if self.async_pubsub is not None:
             client.pubsub = lambda **_kwargs: self.async_pubsub
@@ -148,6 +150,150 @@ def test_redis_client_options_enable_health_checks_and_keepalive(clients) -> Non
 def test_redis_invalid_health_check_interval_raises(clients, interval) -> None:
     with pytest.raises(ImproperlyConfigured, match="HEALTH_CHECK_INTERVAL"):
         RedisBroker({"OPTIONS": {"HEALTH_CHECK_INTERVAL": interval}})
+
+
+def test_redis_client_option_reaches_sync_and_async_clients(clients) -> None:
+    client = {"max_connections": 500, "socket_keepalive": False, "ssl": True}
+    backend = RedisBroker({"OPTIONS": {"CLIENT": client}})
+    expected = {
+        "decode_responses": True,
+        "health_check_interval": 10.0,
+        "max_connections": 500,
+        "socket_keepalive": False,
+        "ssl": True,
+    }
+
+    async def scenario() -> None:
+        await backend.apositions(["poll:1"])
+
+    asyncio.run(scenario())
+    assert clients.options == [expected]
+    assert clients.async_options == [expected]
+
+
+def test_redis_client_option_overrides_the_health_check_default(clients) -> None:
+    RedisBroker(
+        {
+            "OPTIONS": {
+                "HEALTH_CHECK_INTERVAL": 3,
+                "CLIENT": {"health_check_interval": 7, "decode_responses": True},
+            }
+        }
+    )
+    assert clients.options[0]["health_check_interval"] == 7
+    assert clients.options[0]["decode_responses"] is True
+
+
+@pytest.mark.parametrize(
+    ("client", "match"),
+    [
+        (["max_connections"], "mapping of keyword names"),
+        ({1: 2}, "mapping of keyword names"),
+        ({"decode_responses": False}, "decode_responses"),
+    ],
+)
+def test_redis_invalid_client_option_raises(clients, client, match) -> None:
+    with pytest.raises(ImproperlyConfigured, match=match):
+        RedisBroker({"OPTIONS": {"CLIENT": client}})
+    assert clients.options == []
+
+
+class _FakeServerBroker(RedisBroker):
+    def __init__(self, server: fakeredis.FakeServer, config: dict) -> None:
+        self.server = server
+        self.calls: list[tuple[str, dict[str, object], bool]] = []
+        super().__init__(config)
+
+    def create_client(self, url, options, *, asynchronous):
+        self.calls.append((url, dict(options), asynchronous))
+        factory = fakeredis.aioredis.FakeRedis if asynchronous else fakeredis.FakeRedis
+        return factory(server=self.server, **options)
+
+
+def test_redis_subclass_create_client_builds_both_clients(clients) -> None:
+    server = fakeredis.FakeServer()
+    backend = _FakeServerBroker(
+        server,
+        {
+            "OPTIONS": {
+                "URL": "redis://sentinel/0",
+                "CLIENT": {"db": 0, "health_check_interval": 0},
+            }
+        },
+    )
+    envelope = refresh_envelope()
+
+    async def scenario() -> int:
+        message = await backend.apublish("poll:1", envelope)
+        return message.seq
+
+    assert asyncio.run(scenario()) == 1
+    assert backend.publish("poll:1", envelope).seq == 2
+    options = {
+        "db": 0,
+        "decode_responses": True,
+        "health_check_interval": 0,
+        "socket_keepalive": True,
+    }
+    assert backend.calls == [
+        ("redis://sentinel/0", options, False),
+        ("redis://sentinel/0", options, True),
+    ]
+    assert clients.options == []
+    assert clients.async_options == []
+
+
+def test_redis_sync_pool_exhaustion_logs_a_warning(clients, caplog) -> None:
+    backend = _FakeServerBroker(
+        fakeredis.FakeServer(),
+        {"OPTIONS": {"CLIENT": {"max_connections": 1, "health_check_interval": 0}}},
+    )
+    with (
+        backend.subscribe(["poll:1"], timeout=0.05),
+        pytest.raises(BrokerConnectionError) as caught,
+        backend.subscribe(["poll:2"], timeout=0.05),
+    ):
+        pass
+    assert isinstance(caught.value.__cause__, redis.exceptions.MaxConnectionsError)
+    assert "connection pool is exhausted" in caplog.text
+    assert caplog.records[-1].levelname == "WARNING"
+
+
+def test_redis_async_pool_exhaustion_logs_a_warning(clients, caplog) -> None:
+    backend = _FakeServerBroker(
+        fakeredis.FakeServer(),
+        {"OPTIONS": {"CLIENT": {"max_connections": 1, "health_check_interval": 0}}},
+    )
+
+    async def scenario() -> None:
+        async with backend.asubscribe(["poll:1"], timeout=0.05):
+            with pytest.raises(BrokerConnectionError):
+                async with backend.asubscribe(["poll:2"], timeout=0.05):
+                    pass
+        await backend.aclose()
+
+    asyncio.run(scenario())
+    assert "connection pool is exhausted" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("failure", "warned"),
+    [
+        (redis.ConnectionError("Too many connections"), True),
+        (redis.ConnectionError("No connection available."), True),
+        (redis.ConnectionError("Connection closed by server."), False),
+        (redis.TimeoutError("Timeout reading from socket"), False),
+    ],
+)
+def test_redis_pool_exhaustion_is_told_apart_from_other_failures(
+    clients, caplog, failure, warned
+) -> None:
+    backend = RedisBroker()
+    pubsub = Mock(spec=redis.client.PubSub)
+    pubsub.get_message.side_effect = failure
+    with pytest.raises(BrokerConnectionError):
+        next(backend._sync_messages(pubsub, [], 0.01))
+    assert ("connection pool is exhausted" in caplog.text) is warned
 
 
 def test_redis_publish_fans_out_to_thirty_subscribers(clients) -> None:

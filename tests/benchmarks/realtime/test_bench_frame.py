@@ -2,9 +2,12 @@ import json
 from collections.abc import Callable
 
 import pytest
+from django.contrib.auth.models import AnonymousUser
 
-from next.contrib.channels.consumers import RealtimeConsumer
 from next.partial import Envelope, JsonPartialProtocolBackend, StreamMeta
+from next.realtime import frames
+from next.realtime.socket import Handshake, TopicSocket
+from next.testing.realtime import MemoryPort
 from tests.benchmarks.factories import (
     medium_envelope,
     run_without_loop,
@@ -38,20 +41,23 @@ class TestBenchSseFrame:
 
 
 class TestBenchWebSocketFrame:
-    """Deliver one message as a WebSocket patches frame without an event loop."""
+    """Encode one message as a WebSocket patches frame without an event loop."""
 
     @pytest.mark.benchmark(group="realtime.frame")
-    def test_deliver_message(self, benchmark) -> None:
-        sent: list[dict[str, object]] = []
+    def test_patches_frame(self, benchmark) -> None:
+        backend = JsonPartialProtocolBackend()
+        text = benchmark(
+            frames.patches, _MESSAGE, backend, server_time=_META.server_time
+        )
+        assert json.loads(text)["type"] == "patches"
 
-        async def collect(event: dict[str, object]) -> None:
-            sent[:] = [event]
+    @pytest.mark.benchmark(group="realtime.frame")
+    def test_socket_frame(self, benchmark) -> None:
+        handshake = Handshake("key", AnonymousUser(), None)
+        socket = TopicSocket(MemoryPort(), handshake, heartbeat=25.0)
 
-        consumer = RealtimeConsumer()
-        consumer.base_send = collect
+        def run() -> str:
+            return run_without_loop(socket._frame_for(_MESSAGE))
 
-        def run() -> None:
-            run_without_loop(consumer._deliver_message(_MESSAGE, None))
-
-        benchmark(run)
-        assert json.loads(sent[0]["text"])["type"] == "patches"
+        text = benchmark(run)
+        assert json.loads(text)["type"] == "patches"

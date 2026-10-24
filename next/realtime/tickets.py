@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
 from django.core import signing
+from django.urls import get_script_prefix
 from django.utils.crypto import constant_time_compare, salted_hmac
+from django.utils.module_loading import import_string
 
 from next.conf import next_framework_settings
 
@@ -20,6 +22,14 @@ from .messages import validate_topic
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
+
+    from next.partial.envelope import Envelope
+    from next.partial.patches import Patches
+
+    from .access import TopicAuthorizer
+    from .messages import Message
+
+    type TopicTransform = Callable[[Message], Patches | Envelope | None]
 
 
 _SALT = "next.realtime.websocket.ticket.v1"
@@ -72,7 +82,7 @@ class TicketGrant:
 
 @dataclass(frozen=True, slots=True)
 class TicketClaims:
-    """Validated ticket grants, safe for a consumer to use after handshake."""
+    """Validated ticket grants a WebSocket gateway may act on after its handshake."""
 
     topics: tuple[str, ...]
     transform_ref: str | None
@@ -89,6 +99,7 @@ def issue_ticket(
     """Sign the exact topic grant after the guarded stream view has run.
 
     The grant is held to the verifier's caps, so a ticket it signs always verifies.
+    A stale session cookie gets a fresh session, as a first visit does.
     """
     _require_grant(topics, transform_ref, authorizer_ref)
     session = getattr(request, "session", None)
@@ -97,7 +108,6 @@ def issue_ticket(
         raise InvalidTicketError(msg)
     session_key = session.session_key
     if session_key is None or not session.exists(session_key):
-        # A stale cookie gets a fresh session, as a first visit without one does.
         session.create()
         session.modified = True
         session_key = session.session_key
@@ -113,7 +123,8 @@ def issue_ticket(
         "authorizer": authorizer_ref,
     }
     token = signer.sign_object(payload, compress=True)
-    return TicketGrant(token, topics, websocket_path(), age)
+    url = f"{get_script_prefix().rstrip('/')}{websocket_path()}"
+    return TicketGrant(token, topics, url, age)
 
 
 def _require_grant(
@@ -134,12 +145,14 @@ def _require_grant(
             raise ValueError(msg)
 
 
-def verify_ticket(token: object, session: object) -> TicketClaims:
-    """Verify signature, age, session binding, and the signed topic grant."""
+def verify_ticket(token: object, session_key: str) -> TicketClaims:
+    """Verify signature, age, session binding, and the signed topic grant.
+
+    The key is the one the connection's session cookie carries, never a client field.
+    """
     if not isinstance(token, str) or not token or len(token) > _MAX_TICKET_LENGTH:
         msg = "A non-empty WebSocket ticket is required."
         raise InvalidTicketError(msg)
-    session_key = getattr(session, "session_key", None)
     if not isinstance(session_key, str) or not session_key:
         msg = "The WebSocket connection has no Django session."
         raise InvalidTicketError(msg)
@@ -160,6 +173,37 @@ def verify_ticket(token: object, session: object) -> TicketClaims:
         msg = "The WebSocket ticket belongs to another session."
         raise InvalidTicketError(msg)
     return _ticket_claims(payload)
+
+
+def resolve_claims(
+    claims: TicketClaims,
+) -> tuple[TopicTransform | None, TopicAuthorizer]:
+    """Import the transform and authorizer a verified ticket names.
+
+    A reference that no longer imports a callable fails like a bad ticket.
+    """
+    try:
+        transform = (
+            None
+            if claims.transform_ref is None
+            else _callable(import_string(claims.transform_ref))
+        )
+        authorizer = _callable(import_string(claims.authorizer_ref))
+    except (ImportError, AttributeError, TypeError) as exc:
+        msg = "The WebSocket ticket names a callable that does not import."
+        raise InvalidTicketError(msg) from exc
+    return (
+        cast("TopicTransform | None", transform),
+        cast("TopicAuthorizer", authorizer),
+    )
+
+
+def _callable(value: object) -> Callable[..., object]:
+    """Return an imported reference, or raise when it cannot be called."""
+    if not callable(value):
+        msg = "A WebSocket ticket reference must name a callable."
+        raise TypeError(msg)
+    return value
 
 
 def _ticket_claims(payload: Mapping[str, Any]) -> TicketClaims:
@@ -217,7 +261,7 @@ def ticket_max_age() -> int:
 
 
 def websocket_path() -> str:
-    """Return the configured same-origin WebSocket route."""
+    """Return the configured same-origin WebSocket route below the script prefix."""
     realtime = getattr(next_framework_settings, "REALTIME", {})
     path = (
         realtime.get("WS_PATH", "/_next/ws/")
@@ -246,6 +290,7 @@ __all__ = [
     "TicketClaims",
     "TicketGrant",
     "issue_ticket",
+    "resolve_claims",
     "ticket_max_age",
     "verify_ticket",
     "websocket_path",

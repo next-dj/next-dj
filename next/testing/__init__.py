@@ -46,17 +46,27 @@ from .patching import (
     override_provider,
     patch_static_collector,
 )
+from .realtime import (
+    MemoryPort,
+    SocketTicket,
+    WebsocketCommunicator,
+    issue_socket_ticket,
+    override_websocket_mount,
+)
 from .rendering import render_component_by_name, render_page
 from .seo import SitemapUrl, parse_sitemap
 
 
 __all__ = [
+    "MemoryPort",
     "NextClient",
     "PartialEnvelope",
     "SignalEvent",
     "SignalRecorder",
     "SitemapUrl",
+    "SocketTicket",
     "StaticCollectorProxy",
+    "WebsocketCommunicator",
     "assert_has_class",
     "assert_metadata",
     "assert_missing_class",
@@ -73,12 +83,14 @@ __all__ = [
     "form_fields",
     "hidden_fields",
     "init_payload",
+    "issue_socket_ticket",
     "make_resolution_context",
     "override_component_backends",
     "override_dependency",
     "override_form_action",
     "override_next_settings",
     "override_provider",
+    "override_websocket_mount",
     "parse_sitemap",
     "patch_static_collector",
     "render_component_by_name",

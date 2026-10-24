@@ -94,7 +94,7 @@ Every builder method takes a ``nonce`` keyword, and the three templates take ``{
    :exclude-members: csrf_payload_for
 
 The init payload reserves ``$csrf``, ``$dev``, ``$chunks``, ``$realtime``, ``$scripts``, and ``$consent`` for the framework, so an automatically injected payload drops a project key of any of these names before it reaches ``window.Next.context``.
-``$chunks`` names ``next.scripts.min.js``, ``next.stream.min.js`` under ``stream``, ``next.ws.min.js`` under ``ws``, ``next.csrf.min.js``, and ``next.poll.min.js``, the chunks the finder serves beside ``next.min.js``, and ``$scripts`` and ``$consent`` feed the first, see :doc:`client-extras`.
+``$chunks`` names ``next.scripts.min.js``, ``next.stream.min.js`` under ``stream``, ``next.ws.min.js`` under ``ws`` while the ``ws`` transport is active, ``next.csrf.min.js``, and ``next.poll.min.js``, the chunks the finder serves beside ``next.min.js``, and ``$scripts`` and ``$consent`` feed the first, see :doc:`client-extras`.
 Under ``DEBUG`` it also names ``next.dev.min.js``, the diagnostics bundle the runtime loads only when ``$dev`` is true, so a production payload carries neither key.
 The CSRF payload and the header name are built by ``next.csrf``, see :doc:`site`.
 See :doc:`/content/topics/static-assets/js-context` for the ownership rule and the ``next.W075`` check that reports a collision.

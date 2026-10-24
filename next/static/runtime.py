@@ -8,6 +8,7 @@ import importlib
 import json
 import logging
 import re
+from dataclasses import dataclass
 from html import escape
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
@@ -54,11 +55,17 @@ POLL_CHUNK_STATIC_PATH: Final = "next/next.poll.min.js"
 DEV_CHUNK_KEY: Final = "dev"
 """The `$chunks` key of the diagnostics chunk, listed only under `DEBUG`."""
 
+WS_CHUNK_KEY: Final = "ws"
+"""The `$chunks` key of the WebSocket adapter, listed only while `ws` is active."""
+
+DEFAULT_TRANSPORTS: Final = ("sse",)
+"""The transports the runtime assumes when the payload carries no `$realtime`."""
+
 CHUNK_STATIC_PATHS: Final[Mapping[str, str]] = MappingProxyType(
     {
         "scripts": SCRIPTS_CHUNK_STATIC_PATH,
         "stream": STREAM_CHUNK_STATIC_PATH,
-        "ws": WS_CHUNK_STATIC_PATH,
+        WS_CHUNK_KEY: WS_CHUNK_STATIC_PATH,
         "csrf": CSRF_CHUNK_STATIC_PATH,
         "poll": POLL_CHUNK_STATIC_PATH,
         DEV_CHUNK_KEY: DEV_CHUNK_STATIC_PATH,
@@ -129,28 +136,55 @@ def csrf_payload_for(request: HttpRequest | None) -> dict[str, str] | None:
     return csrf_payload(request)
 
 
-@functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
-def _realtime_payload_json(content_type: str, transports: tuple[str, ...]) -> str:
-    """Encode the stream negotiation data for the active partial protocol."""
-    return json.dumps(
-        {"protocol": 2, "transports": transports, "content_type": content_type},
-        separators=(",", ":"),
-    )
-
-
 def _active_transports() -> tuple[str, ...]:
-    """Resolve lazy realtime capabilities without importing optional integrations."""
+    """Read the realtime transports lazily, as `next.realtime` imports this module."""
     realtime = importlib.import_module("next.realtime.transports")
     return cast("tuple[str, ...]", realtime.active_transports())
 
 
-def _partial_content_type() -> str:
-    """Read the content type from the same protocol backend used for HTTP patches."""
-    # Keep the dependency lazy: partial's patch modules import this runtime module.
+def _partial_content_types() -> tuple[str, str]:
+    """Return the content type of the active partial backend and the stock one.
+
+    The import is lazy, as the partial patch modules import this runtime module.
+    """
     partial_backend_manager = importlib.import_module(
         "next.partial.manager"
     ).partial_backend_manager
-    return cast("str", partial_backend_manager.get().content_type)
+    stock = importlib.import_module("next.partial.headers").CONTENT_TYPE
+    return (cast("str", partial_backend_manager.get().content_type), cast("str", stock))
+
+
+@dataclass(frozen=True, slots=True)
+class RealtimeOffer:
+    """The `$realtime` payload entry and whether the `ws` chunk is listed.
+
+    An empty entry leaves the stock configuration to the runtime defaults.
+    """
+
+    entry: str
+    websocket: bool
+
+
+@functools.cache
+def realtime_offer() -> RealtimeOffer:
+    """Return the realtime negotiation every page carries, memoised per config."""
+    transports = _active_transports()
+    content_type, stock = _partial_content_types()
+    if transports == DEFAULT_TRANSPORTS and content_type == stock:
+        return RealtimeOffer("", websocket=False)
+    payload = json.dumps(
+        {"protocol": 2, "transports": transports, "content_type": content_type},
+        separators=(",", ":"),
+    )
+    return RealtimeOffer(
+        f"{_encoded_key(REALTIME_PAYLOAD_KEY)}:{payload}",
+        websocket=WS_CHUNK_KEY in transports,
+    )
+
+
+def forget_realtime_offer(**kwargs: object) -> None:
+    """Drop the memoised offer when the transports or the partial backend change."""
+    realtime_offer.cache_clear()
 
 
 TAG_FIELDS: Final = ("url", "nonce_attr")
@@ -283,17 +317,12 @@ class NextScriptBuilder:
         serializers = key_serializers or {}
         fragments: list[str] = []
         for k, v in js_context.items():
-            if k == REALTIME_PAYLOAD_KEY and CHUNKS_PAYLOAD_KEY in js_context:
-                continue
             frag = encoded.get(k) if encoded is not None else None
             if frag is None:
                 frag = serializers.get(k, default).dumps(v)
             fragments.append(f"{_encoded_key(k)}:{frag}")
-        if CHUNKS_PAYLOAD_KEY in js_context:
-            realtime = _realtime_payload_json(
-                _partial_content_type(), _active_transports()
-            )
-            fragments.append(f"{_encoded_key(REALTIME_PAYLOAD_KEY)}:{realtime}")
+        if CHUNKS_PAYLOAD_KEY in js_context and (entry := realtime_offer().entry):
+            fragments.append(entry)
         payload = "{" + ",".join(fragments) + "}"
         if _ESCAPED.search(payload) is not None:
             payload = payload.translate(SCRIPT_ESCAPES)

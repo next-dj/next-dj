@@ -6,9 +6,8 @@ import json
 import math
 import time
 from contextlib import suppress
-from dataclasses import replace
 from http import HTTPStatus
-from typing import TYPE_CHECKING, TypeGuard, cast
+from typing import TYPE_CHECKING, TypeGuard
 
 from django.core.handlers.asgi import ASGIRequest
 from django.http import StreamingHttpResponse
@@ -16,7 +15,7 @@ from django.utils.cache import patch_vary_headers
 from django.utils.module_loading import import_string
 
 from next.partial.sse import PatchStreamWriter
-from next.partial.stream import StreamEnd, StreamHello, StreamSkip
+from next.partial.stream import StreamEnd, StreamHello, StreamSkip, stream_hello
 
 from .access import (
     Access,
@@ -25,7 +24,7 @@ from .access import (
     heartbeat_seconds as realtime_heartbeat_seconds,
     run_detached,
 )
-from .delivery import _prepare
+from .delivery import transformed
 from .errors import BrokerConnectionError, InvalidTicketError, InvalidTopicError
 from .manager import broker_manager
 from .messages import validate_topic
@@ -43,12 +42,11 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
     from next.partial.envelope import Envelope
-    from next.partial.patches import Patches
 
     from .backends import BrokerBackend
     from .messages import Message, Position
+    from .tickets import TopicTransform
 
-    TopicTransform = Callable[[Message], Patches | Envelope | None]
     TopicItem = Message | Envelope | StreamHello | StreamSkip | StreamEnd | None
 
 
@@ -197,29 +195,25 @@ class TopicStream(PatchStreamWriter):
         """Transform one message off the event loop, or acknowledge its skip."""
         if message is None or self._transform is None:
             return message
-        result = await run_detached(self._transform, message)
+        result = transformed(message, await run_detached(self._transform, message))
         if result is None:
             return StreamSkip(message.topic, message.seq, message.epoch)
-        return replace(message, envelope=_prepare(result))
+        return result
 
     def _hello(self, positions: Mapping[str, Position]) -> StreamHello:
         """Announce the subscription's starting position on every topic."""
-        return StreamHello(
+        return stream_hello(
+            self.topics,
+            positions,
             server_time=int(self._server_clock() * 1000),
-            topics={
-                topic: (positions[topic].epoch, positions[topic].seq)
-                for topic in self.topics
-            },
+            transports=("sse",),
         )
 
-    def _transform_message(self, message: Message) -> Message | Envelope | None:
+    def _transform_message(self, message: Message) -> Message | None:
         """Apply the subscriber-local transform and validate its output."""
         if self._transform is None:
             return message
-        result = self._transform(message)
-        if result is None:
-            return None
-        return replace(message, envelope=_prepare(result))
+        return transformed(message, self._transform(message))
 
 
 def _closing_frames(verdict: Access) -> tuple[StreamEnd, ...]:
@@ -247,16 +241,14 @@ async def _single_chunk(payload: bytes) -> AsyncIterator[bytes]:
     yield payload
 
 
-def _transform_reference(
-    transform: TopicTransform | None, explicit: str | None
-) -> str | None:
-    """Return an import-stable dotted transform reference or disable WS filtering."""
-    if transform is None:
+def _reference(callback: object, explicit: str | None) -> str | None:
+    """Return the import-stable dotted path of a callback a ticket can name, or None."""
+    if callback is None:
         return None
     candidate = explicit
     if candidate is None:
-        module = getattr(transform, "__module__", None)
-        qualified = getattr(transform, "__qualname__", None)
+        module = getattr(callback, "__module__", None)
+        qualified = getattr(callback, "__qualname__", None)
         if (
             isinstance(module, str)
             and isinstance(qualified, str)
@@ -266,31 +258,7 @@ def _transform_reference(
     if not _storable(candidate):
         return None
     try:
-        return candidate if import_string(candidate) is transform else None
-    except (ImportError, AttributeError, TypeError):
-        return None
-
-
-def _authorizer_reference(
-    authorizer: TopicAuthorizer | None, explicit: str | None
-) -> str | None:
-    """Return an import-stable authorization callback for WebSocket grants."""
-    if authorizer is None:
-        return None
-    candidate = explicit
-    if candidate is None:
-        module = getattr(authorizer, "__module__", None)
-        qualified = getattr(authorizer, "__qualname__", None)
-        if (
-            isinstance(module, str)
-            and isinstance(qualified, str)
-            and "<locals>" not in qualified
-        ):
-            candidate = f"{module}.{qualified}"
-    if not _storable(candidate):
-        return None
-    try:
-        return candidate if import_string(candidate) is authorizer else None
+        return candidate if import_string(candidate) is callback else None
     except (ImportError, AttributeError, TypeError):
         return None
 
@@ -352,14 +320,12 @@ def _ticket_references(
     raw_authorizer_ref: object,
 ) -> tuple[str | None, str] | str:
     """Require import-stable filtering and authorization, or name the SSE reason."""
-    transform = cast("TopicTransform | None", raw_transform)
     transform_ref = raw_transform_ref if isinstance(raw_transform_ref, str) else None
-    resolved_ref = _transform_reference(transform, transform_ref)
-    if transform is not None and resolved_ref is None:
+    resolved_ref = _reference(raw_transform, transform_ref)
+    if raw_transform is not None and resolved_ref is None:
         return "transform"
-    authorizer = cast("TopicAuthorizer | None", raw_authorizer)
     authorizer_ref = raw_authorizer_ref if isinstance(raw_authorizer_ref, str) else None
-    resolved_authorizer = _authorizer_reference(authorizer, authorizer_ref)
+    resolved_authorizer = _reference(raw_authorizer, authorizer_ref)
     if resolved_authorizer is None:
         return "authorization"
     return resolved_ref, resolved_authorizer

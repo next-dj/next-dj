@@ -151,9 +151,11 @@ The framework reserves four keys of the ``Next._init`` payload for this surface,
    * - Key
      - Value
    * - ``$chunks``
-     - ``{scripts, stream, ws, csrf, poll}``, the URLs of ``next.scripts.min.js``, ``next.stream.min.js``, ``next.ws.min.js``, ``next.csrf.min.js``, and ``next.poll.min.js`` through the staticfiles storage, in every payload, and under ``DEBUG`` ``dev`` too, the URL of ``next.dev.min.js``.
+     - ``{scripts, stream, ws, csrf, poll}``, the URLs of ``next.scripts.min.js``, ``next.stream.min.js``, ``next.ws.min.js``, ``next.csrf.min.js``, and ``next.poll.min.js`` through the staticfiles storage.
+       The ``ws`` entry is listed only while the ``ws`` transport is active, and under ``DEBUG`` ``dev`` joins them, the URL of ``next.dev.min.js``.
    * - ``$realtime``
      - ``{protocol, transports, content_type}``, the stream protocol advertised by the server and the selected partial response content type used by registered stream parse hooks.
+       The key is left out while the transports are just ``sse`` and the partial content type is the stock one, and the runtime then assumes those defaults.
    * - ``$scripts``
      - The manifest, one ``{name, src?, init?, strategy, category, attrs, nonce?}`` per script the server did not write, in declaration order.
        The runtime drops an ``attrs`` name outside the set :doc:`/content/topics/scripts/declaring` lists.

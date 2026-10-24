@@ -57,6 +57,7 @@ from next.ports import (
     seo_routes_slot,
     static_assets_slot,
 )
+from next.realtime.asgi import forget_trusted_origins
 from next.realtime.manager import forget_realtime_broker
 from next.realtime.transports import forget_transports
 from next.scripts.manager import forget_script_srcs, forget_scripts
@@ -94,6 +95,7 @@ if TYPE_CHECKING:
 _SETTING_CHANGED: Final[tuple[Callable[..., None], ...]] = (
     reload_on_setting_changed,
     forget_transports,
+    forget_trusted_origins,
     forget_app_page_roots,
     forget_urlconf_translations,
     forget_template_processors,

@@ -5,8 +5,10 @@ A user value replaces the default whole, and a mistyped one is dropped and check
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final
 
+from .defaults import DEFAULTS
 from .frozen import freeze
 from .sentinels import UNSET
 
@@ -62,6 +64,12 @@ BOOL_KEYS: Final[frozenset[str]] = frozenset(
 )
 
 
+FROZEN_DEFAULTS: Final[Mapping[str, Any]] = MappingProxyType(
+    {key: freeze(value) for key, value in DEFAULTS.items()}
+)
+"""`DEFAULTS` frozen once on import, as the framework never mutates its defaults."""
+
+
 def accepted_value(key: str, raw: object) -> object:
     """Return what one user value merges to, or `UNSET` when its type is unusable."""
     if key in STR_KEYS:
@@ -80,8 +88,15 @@ def accepted_value(key: str, raw: object) -> object:
 def merge_user_settings(
     defaults: Mapping[str, Any], user: Mapping[str, Any] | None
 ) -> dict[str, Any]:
-    """Return the frozen defaults with every usable user value laid over them."""
-    merged: dict[str, Any] = {key: freeze(value) for key, value in defaults.items()}
+    """Return the frozen defaults with every usable user value laid over them.
+
+    The framework `DEFAULTS` reuse their import-time freeze, other mappings freeze here.
+    """
+    merged: dict[str, Any] = (
+        dict(FROZEN_DEFAULTS)
+        if defaults is DEFAULTS
+        else {key: freeze(value) for key, value in defaults.items()}
+    )
     if not user:
         return merged
     for key in defaults:
@@ -96,6 +111,7 @@ def merge_user_settings(
 __all__ = [
     "BOOL_KEYS",
     "DICT_KEYS",
+    "FROZEN_DEFAULTS",
     "LIST_KEYS",
     "OPTIONAL_STR_KEYS",
     "STR_KEYS",

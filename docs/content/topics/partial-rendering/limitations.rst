@@ -24,7 +24,7 @@ Realtime transports
 -------------------
 
 Server-Sent Events is the default transport.
-Optional WebSocket delivery uses Channels under ASGI, see :doc:`/content/howto/stream-over-websockets-with-channels`.
+Optional WebSocket delivery runs on the built-in ASGI ``WebSocketApp``, see :doc:`/content/howto/stream-over-websockets`.
 Both transports send server-authored topic notifications to the browser, while a client that needs to change state uses the same forms and actions every page already has.
 Replay and presence are outside the current model.
 The bridge that opens the stream is the runtime, so a page without it never subscribes and sees whatever its last full render carried.

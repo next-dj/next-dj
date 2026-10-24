@@ -29,13 +29,29 @@ Install the optional broker dependency and select ``RedisBroker`` in the framewo
                    "URL": "redis://redis.internal:6379/0",
                    "PREFIX": "myapp:realtime",
                    "HEALTH_CHECK_INTERVAL": 10.0,
+                   "CLIENT": {"max_connections": 200},
                },
            },
        },
    }
 
 Run ``manage.py check`` in each deployment environment before serving requests.
-The check validates the configured backend and its options, reports a missing Redis library as ``next.E179``, and a negative, infinite, or non-numeric ``HEALTH_CHECK_INTERVAL`` as ``next.E188``.
+The check validates the configured backend and its options, reports a missing Redis library as ``next.E179``, a negative, infinite, or non-numeric ``HEALTH_CHECK_INTERVAL`` as ``next.E186``, and a ``CLIENT`` option that is not a mapping of keyword names or that turns ``decode_responses`` off as ``next.E187``.
+
+Tune the Redis client
+---------------------
+
+``OPTIONS['CLIENT']`` is a mapping of keyword arguments that the broker passes whole to the Redis ``from_url`` call, for the synchronous and the asynchronous client alike.
+The broker builds the options in three layers.
+``health_check_interval`` from ``HEALTH_CHECK_INTERVAL`` and ``socket_keepalive`` set to ``True`` come first, then ``CLIENT`` overrides them, and ``decode_responses`` is forced to ``True`` last because the broker reads text.
+Use it for ``max_connections``, timeouts, or TLS settings.
+
+Every open WebSocket and SSE stream holds one Redis connection for its subscription.
+The default pool size is the one redis-py picks, so a process with many open streams raises ``max_connections`` before it runs out.
+An exhausted pool is logged as a warning on the ``next.realtime.redis`` logger and ends the affected stream with ``BrokerConnectionError``, so the browser reconnects.
+
+A project that reaches Redis through Sentinel or Cluster overrides ``RedisBroker.create_client(url, options, *, asynchronous)`` in a subclass and selects the subclass as ``BACKEND``.
+The method returns the synchronous client when ``asynchronous`` is false and the asynchronous one otherwise.
 
 How the broker behaves
 ----------------------

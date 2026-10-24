@@ -215,7 +215,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    observe-framework-signals
    write-a-vendor-adapter
    stream-live-updates-with-sse
-   stream-over-websockets-with-channels
+   stream-over-websockets
    count-down-to-a-server-deadline
    fan-out-across-processes-with-redis
    split-settings-per-environment

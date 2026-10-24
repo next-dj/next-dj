@@ -1,7 +1,8 @@
 """Publish validated, subscriber-safe patch envelopes to realtime topics."""
 
 import json
-from dataclasses import dataclass, field, replace
+from collections.abc import Callable
+from dataclasses import replace
 
 from django.db import transaction
 
@@ -61,6 +62,13 @@ def _validate_topic_payload(envelope: Envelope) -> Envelope:
     return Envelope.from_dict(snapshot)
 
 
+def transformed(message: Message, result: object) -> Message | None:
+    """Return the message carrying a subscriber transform's result, None for a skip."""
+    if result is None:
+        return None
+    return replace(message, envelope=_prepare(result))
+
+
 def _publish_now(topic: str, envelope: Envelope) -> None:
     """Publish once and emit the lifecycle signal after broker acceptance."""
     backend = broker_manager.get()
@@ -68,16 +76,17 @@ def _publish_now(topic: str, envelope: Envelope) -> None:
     message_published.send(sender=type(backend), topic=topic, message=message)
 
 
-@dataclass(frozen=True, slots=True)
-class _DeferredPublication:
-    """Publish after commit, its repr naming the topic in Django's robust error log."""
+def _deferred(topic: str, envelope: Envelope) -> Callable[[], None]:
+    """Build a commit callback whose qualname names the topic in Django's error log.
 
-    topic: str
-    envelope: Envelope = field(repr=False)
+    Django 5.2 reads the qualname of a robust callback without a fallback.
+    """
 
-    def __call__(self) -> None:
-        """Hand the snapshot to the broker once the transaction has committed."""
-        _publish_now(self.topic, self.envelope)
+    def deliver() -> None:
+        _publish_now(topic, envelope)
+
+    deliver.__qualname__ = f"publish({topic!r})"
+    return deliver
 
 
 def publish(
@@ -95,7 +104,7 @@ def publish(
     envelope = _prepare(patches)
     if on_commit:
         transaction.on_commit(
-            _DeferredPublication(validated_topic, envelope), using=using, robust=True
+            _deferred(validated_topic, envelope), using=using, robust=True
         )
     else:
         _publish_now(validated_topic, envelope)
@@ -113,4 +122,4 @@ async def apublish(topic: str, patches: Patches | Envelope) -> Message:
     return message
 
 
-__all__ = ["apublish", "publish"]
+__all__ = ["apublish", "publish", "transformed"]

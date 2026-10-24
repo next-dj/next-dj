@@ -161,8 +161,13 @@ A denied socket closes with ``4401`` for a session problem or ``4403`` for a top
 WebSocket negotiation issues a short-lived session-bound ticket through that guarded page.
 The ticket is sent in the first socket frame, never in the URL, and carries the stream's topics, transform, and authorizer reference.
 If the stream cannot be represented by stable importable callbacks, negotiation falls back to SSE.
-The socket needs a server-side session engine, because a signed-cookie session leaves nothing on the server to recheck, and ``next.W145`` reports it.
-The WebSocket Origin check reads ``ALLOWED_HOSTS`` and refuses a ``*`` entry, see :doc:`/content/deployment/wsgi-asgi`.
+The socket needs a server-side session engine, because a signed-cookie session leaves nothing on the server to recheck, and ``next.W142`` reports it.
+The socket loads its session from the cookie and reads it without writing, so rotating ``SECRET_KEY`` with ``SECRET_KEY_FALLBACKS`` does not log an open socket out.
+The WebSocket Origin check follows Django's CSRF rule, so the Origin has to name the validated ``Host`` or match ``CSRF_TRUSTED_ORIGINS``, and a connection with no Origin is refused, see :doc:`/content/deployment/wsgi-asgi`.
+
+The ticket introspection endpoint for gateways outside Python is off until a URLconf includes it.
+It accepts only a POST with the ``REALTIME['GATEWAY_TOKEN']`` bearer, compares the token in constant time, and answers every refusal with the same ``403`` body.
+See :doc:`/content/howto/stream-over-websockets`.
 
 Published topic operations must not carry rendered HTML.
 Publish a ``refresh`` and let each subscriber's guarded HTTP request render the response for that user.

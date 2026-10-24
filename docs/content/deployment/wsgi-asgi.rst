@@ -18,7 +18,7 @@ Pick WSGI when every response is synchronous and short lived, because a long-liv
 ASGI is the right choice when the project uses any of these features.
 
 - Server Sent Events for real time updates, including the patch streams described in :doc:`/content/topics/partial-rendering/sse`.
-- WebSocket delivery through the optional Channels integration.
+- WebSocket delivery through the built-in ``WebSocketApp``.
 - Async view handlers that await I/O.
 - Streaming responses that hold the connection open.
 
@@ -66,12 +66,13 @@ ASGI configuration
 A standard ``config/asgi.py`` works without modification.
 See Django's :doc:`ASGI deployment guide <django:howto/deployment/asgi/index>`.
 
-To accept realtime WebSockets, wrap Django's HTTP ASGI application with ``next.contrib.channels.application`` and install ``channels``.
-The wrapper checks the WebSocket Origin against concrete ``ALLOWED_HOSTS`` entries, each read as a scheme-less pattern that ignores the port.
-A leading-dot entry such as ``.example.com`` allows ``example.com`` and every subdomain, as it does in Django.
-A ``*`` entry is refused with ``ValueError``, because a wildcard cannot protect a cookie-authenticated socket.
-Pass an explicit ``origins`` list when the public origin differs from those hosts or when policy requires an exact scheme and port.
-See :doc:`/content/howto/stream-over-websockets-with-channels`.
+To accept realtime WebSockets, wrap Django's HTTP ASGI application with ``next.realtime.application``.
+The wrapper serves the socket at ``REALTIME['WS_PATH']`` and sends everything else to Django, so no extra package is needed.
+Creating the ``WebSocketApp`` marks the process as serving WebSocket, and the default ``TRANSPORTS`` then offers ``ws`` before ``sse``.
+The socket accepts an Origin that names its scheme and validated ``Host`` or matches ``CSRF_TRUSTED_ORIGINS``, as Django's CSRF check does, and it refuses a connection with no Origin.
+Behind a TLS-terminating proxy, set ``SECURE_PROXY_SSL_HEADER`` so the ``https`` Origin matches, which CSRF already needs.
+Pass ``WebSocketApp(origins=[...])`` to ``application(..., websocket=...)`` when the public origin differs from those.
+See :doc:`/content/howto/stream-over-websockets`.
 
 .. code-block:: python
    :caption: config/asgi.py
@@ -80,18 +81,43 @@ See :doc:`/content/howto/stream-over-websockets-with-channels`.
 
    from django.core.asgi import get_asgi_application
 
+   from next.realtime import application as realtime_application
+
    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-   application = get_asgi_application()
+   application = realtime_application(get_asgi_application())
 
 A project that split its settings into a package keeps the ``config.settings.dev`` default here and exports ``DJANGO_SETTINGS_MODULE=config.settings.prod`` for the deployed process.
 See :doc:`/content/howto/split-settings-per-environment`.
 
-Run with an ASGI server such as ``daphne`` or ``uvicorn``.
+Run with an ASGI server such as ``uvicorn``.
 
 .. code-block:: bash
    :caption: shell
 
    uv run uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 4
+
+Behind gunicorn, use the uvicorn worker class, ``gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker``.
+Every worker imports ``config/asgi.py`` itself, so each one mounts the socket and offers ``ws``.
+
+Split deployments
+~~~~~~~~~~~~~~~~~
+
+A project may serve its pages from a WSGI deployment and run the socket in a separate ASGI deployment, or put a gateway of its own in front.
+The process that renders the pages never mounts a ``WebSocketApp``, so the automatic selection keeps it on SSE.
+List ``"ws"`` in ``REALTIME['TRANSPORTS']`` there, which the framework trusts as written.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "REALTIME": {
+           "TRANSPORTS": ["ws", "sse"],
+       },
+   }
+
+Route ``WS_PATH`` to the ASGI deployment at the proxy, and share ``SECRET_KEY``, the session store, and the broker between both.
+The explicit list also makes ``manage.py check`` run the WebSocket deployment checks, ``next.W141`` and ``next.W142`` among them, in the WSGI project.
+Put ``"sse"`` alone in the list to turn WebSocket off whatever is mounted.
 
 Worker sizing
 -------------
@@ -117,12 +143,12 @@ It sets ``Cache-Control: no-cache, no-transform`` so no intermediary caches an e
 What the headers cannot state is the connection lifetime, so raise the proxy read and send timeouts above the expected stream duration and turn response buffering off for the streaming route on any proxy that ignores the hint.
 
 A manual ``PatchEventStream`` with an async source sends a comment heartbeat every ``SSE.HEARTBEAT_SECONDS`` to keep a quiet connection from being reaped, and one with a sync source sends none, so a sync source behind an idle timeout supplies its own keepalive.
-A ``TopicStream`` sends its heartbeat every ``REALTIME['HEARTBEAT']`` seconds under WSGI and ASGI alike, and the WebSocket consumer sends a ``ping`` frame at the same interval.
+A ``TopicStream`` sends its heartbeat every ``REALTIME['HEARTBEAT']`` seconds under WSGI and ASGI alike, and the WebSocket sends a ``ping`` frame at the same interval.
 
 For WebSockets, configure the proxy to forward ``Upgrade`` and ``Connection`` headers, set its read timeout above the connection lifetime, and allow heartbeats through without buffering.
 Keep ``REALTIME['HEARTBEAT']``, 25 seconds by default, below the shortest proxy or load balancer idle timeout.
 A WebSocket client closes a socket whose ``hello`` has not arrived within five seconds of opening, and the server sends ``hello`` only once the broker confirms the subscription, so a slow broker shows up as reconnects and then as SSE fallback.
-See :doc:`/content/topics/partial-rendering/sse` and :doc:`/content/howto/stream-over-websockets-with-channels`.
+See :doc:`/content/topics/partial-rendering/sse` and :doc:`/content/howto/stream-over-websockets`.
 
 Health checks
 -------------
@@ -152,8 +178,12 @@ A multi worker deployment must trigger the reload from every worker or restart t
 
 Realtime publication has the same process boundary.
 The default ``MemoryBroker`` reaches subscribers in one process only, so multi-worker deployments need a shared broker.
-Use ``RedisBroker`` from the ``broker`` extra or ``ChannelsLayerBroker`` with a shared Channels layer and shared atomic Django cache.
-The Channels layer's fan-out and the cache sequence increment are separate operations, so a detected sequence gap is repaired by guarded HTTP zone resync rather than broker replay.
+Use ``RedisBroker`` from the ``broker`` extra.
+A detected sequence gap is repaired by a guarded HTTP zone resync rather than broker replay.
+
+A WebSocket loads its session from the cookie at the handshake and on every recheck.
+A recheck also runs at the session's deadline, so a session that ``SESSION_SAVE_EVERY_REQUEST`` renews keeps its socket open.
+Under load a session cache that evicts live entries closes sockets with ``4401``, so size the session cache for the open connections or use the ``db`` or ``cached_db`` engine.
 
 See also
 --------

@@ -312,7 +312,7 @@ The framework adds the originating request id to the envelope, so the initiating
 Every other subscriber executes ``refresh`` and re-fetches the zone through its own guarded page request and cookies.
 The stream never broadcasts one user's HTML to another.
 The Vue island that owns the chart re-reads the server snapshot on the zone morph and keeps its state.
-The transport can be SSE or the optional Channels WebSocket backend, and both use the same topic envelope and authorization rules.
+The transport can be SSE or the optional WebSocket transport, and both use the same topic envelope and authorization rules.
 See :doc:`sse` and :doc:`../realtime` for transport and broker contracts.
 
 Without the runtime the page is current at load time and a refresh is a manual reload.

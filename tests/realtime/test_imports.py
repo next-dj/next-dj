@@ -22,7 +22,7 @@ def test_core_realtime_import_does_not_load_optional_packages() -> None:
                 "loaded = sorted(\n"
                 "    name\n"
                 "    for name in sys.modules\n"
-                "    if name.partition('.')[0] in {'channels', 'redis'}\n"
+                "    if name.partition('.')[0] == 'redis'\n"
                 ")\n"
                 "assert not loaded, loaded\n"
             ),

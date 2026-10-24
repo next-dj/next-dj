@@ -6,7 +6,7 @@ Testing reference
 Module summary
 --------------
 
-``next.testing`` exposes a test client, partial envelope decoding, signal recorder, registry isolation, action helpers, HTML utilities, rendering helpers, loaders, patching helpers, and dependency context builders.
+``next.testing`` exposes a test client, partial envelope decoding, signal recorder, registry isolation, action helpers, HTML utilities, rendering helpers, loaders, patching helpers, dependency context builders, and a WebSocket communicator with a memory port for realtime.
 ``next.testing.plugin`` sits apart from that surface as an opt-in pytest plugin and is the only module in the package that imports pytest.
 The package imports ``defusedxml`` for ``parse_sitemap``, so it needs the ``testing`` extra, ``next.dj[testing]``.
 
@@ -127,6 +127,33 @@ A robots file is plain text, so a test reads ``response.content`` directly.
 .. automodule:: next.testing.seo
    :members:
    :exclude-members: SitemapUrl
+
+Realtime
+~~~~~~~~
+
+``WebsocketCommunicator`` drives any ASGI application through one WebSocket connection, and ``MemoryPort`` plugs a ``TopicSocket`` into a test without a server.
+``issue_socket_ticket`` issues a ticket through the negotiation path under a saved session.
+The ``SocketTicket`` it returns carries the ``cookie`` header for the handshake and builds the ``sub`` frame with ``subscribe_frame()``.
+
+Creating a ``WebSocketApp`` marks the whole process as serving ``ws``, so a test session that starts an ASGI server in process would keep offering ``ws`` to every later WSGI test.
+Wrap such a server in ``override_websocket_mount()``, which hands the flag back on exit, or pass ``mounted=True`` to offer ``ws`` without building the app.
+
+.. code-block:: python
+   :caption: tests/e2e/test_websocket.py
+
+   from collections.abc import Iterator
+
+   import pytest
+
+   from next.testing import override_websocket_mount
+
+   @pytest.fixture()
+   def websocket_mount() -> Iterator[None]:
+       with override_websocket_mount():
+           yield
+
+.. automodule:: next.testing.realtime
+   :members:
 
 Dependencies
 ~~~~~~~~~~~~

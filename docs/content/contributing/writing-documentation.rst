@@ -213,8 +213,8 @@ The table below lists the public package, its primary narrative page, and its re
    * - ``next.partial``
      - :doc:`/content/topics/partial-rendering/index`
      - :doc:`/content/ref/partial`
-   * - ``next.realtime`` and ``next.contrib.channels``
-     - :doc:`/content/topics/realtime`, :doc:`/content/howto/stream-live-updates-with-sse`, :doc:`/content/howto/stream-over-websockets-with-channels`
+   * - ``next.realtime``
+     - :doc:`/content/topics/realtime`, :doc:`/content/howto/stream-live-updates-with-sse`, :doc:`/content/howto/stream-over-websockets`
      - :doc:`/content/ref/realtime`
    * - ``next.seo``
      - :doc:`/content/topics/seo/quickstart`, :doc:`/content/topics/seo/sitemaps`, :doc:`/content/topics/seo/robots`

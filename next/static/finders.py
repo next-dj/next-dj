@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import posixpath
@@ -147,18 +148,40 @@ def _runtime_bundle_source(logical_path: str) -> Path | None:
     return source if source.is_file() else None
 
 
+class _BundleLayout(NamedTuple):
+    """The bundle folder and, per bundle file, its name, logical path and source."""
+
+    folder: Path
+    files: tuple[tuple[str, str, Path], ...]
+
+
+@functools.lru_cache(maxsize=1)
+def _bundle_layout(root: Path) -> _BundleLayout:
+    """Build the bundle paths under `root` once, as each `Path` join is costly."""
+    return _BundleLayout(
+        root / _RUNTIME_BUNDLE_DIR,
+        tuple(
+            (posixpath.basename(logical_path), logical_path, root / logical_path)
+            for logical_path in _RUNTIME_BUNDLE_PATHS
+        ),
+    )
+
+
 def _runtime_bundle_static_files() -> dict[str, Path]:
-    """Map the built runtime, its chunks and their sourcemaps into `next/`."""
-    folder = _RUNTIME_BUNDLE_ROOT / _RUNTIME_BUNDLE_DIR
+    """Map the built runtime, its chunks and their sourcemaps into `next/`.
+
+    The folder is listed per call, so a bundle built while running shows up at once.
+    """
+    layout = _bundle_layout(_RUNTIME_BUNDLE_ROOT)
     try:
-        with os.scandir(folder) as scan:
+        with os.scandir(layout.folder) as scan:
             present = {entry.name for entry in scan if entry.is_file()}
     except OSError:
         return {}
     return {
-        logical_path: _RUNTIME_BUNDLE_ROOT / logical_path
-        for logical_path in _RUNTIME_BUNDLE_PATHS
-        if posixpath.basename(logical_path) in present
+        logical_path: source
+        for name, logical_path, source in layout.files
+        if name in present
     }
 
 

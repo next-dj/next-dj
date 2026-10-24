@@ -27,7 +27,6 @@ SHARED = 'template = "<p>x</p>"\ncache = 60\n'
 LAZY_CHUNKS = {
     "scripts": "/static/next/next.scripts.min.js",
     "stream": "/static/next/next.stream.min.js",
-    "ws": "/static/next/next.ws.min.js",
     "csrf": "/static/next/next.csrf.min.js",
     "poll": "/static/next/next.poll.min.js",
 }

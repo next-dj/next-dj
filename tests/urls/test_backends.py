@@ -718,7 +718,7 @@ class TestInstalledAppSpellings:
             ("django", True),
             ("django.contrib.auth", True),
             ("next", True),
-            ("next.contrib.thing", True),
+            ("next.realtime", True),
             ("django_htmx", False),
             ("django_extensions", False),
             ("nextcloud", False),

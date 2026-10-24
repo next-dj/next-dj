@@ -32,6 +32,7 @@ from next.realtime.errors import BrokerConnectionError, InvalidTicketError
 from next.realtime.manager import broker_manager
 from next.realtime.messages import Position
 from next.realtime.tickets import verify_ticket
+from next.testing.realtime import override_websocket_mount
 from tests.support.realtime import anext_frame, anext_item, next_frame
 
 
@@ -48,12 +49,9 @@ def _allow_topic(_user: object, _topic: str) -> bool:
 
 
 @pytest.fixture()
-def ws_available(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(transports.importlib.util, "find_spec", lambda _name: object())
-    monkeypatch.setattr(transports.apps, "is_installed", lambda _name: True)
-    transports.forget_transports()
-    yield
-    transports.forget_transports()
+def ws_available():
+    with override_websocket_mount(mounted=True):
+        yield
 
 
 def _body(response: TopicStream) -> dict[str, object]:
@@ -97,6 +95,33 @@ def test_sync_topic_stream_published_message_follows_retry_and_hello(
     assert memory_broker._subscribers == {}
 
 
+@pytest.mark.usefixtures("ws_available")
+def test_sse_hello_announces_only_sse_even_with_a_websocket_mounted(
+    memory_broker: MemoryBroker,
+) -> None:
+    publish("poll:2", Patches(None).refresh(zone="results"), on_commit=False)
+    request = RequestFactory().get("/polls/stream/")
+    stream = TopicStream(
+        request, "poll:2", "poll:1", heartbeat_seconds=0.01, server_clock=lambda: 2.5
+    )
+    iterator = stream.streaming_content
+    next(iterator)
+    hello = next_frame(iterator)
+    stream._iterator.close()
+
+    body = json.loads(hello.decode().split("data: ", 1)[1])
+    epoch = memory_broker.positions(["poll:2"])["poll:2"].epoch
+    assert body == {
+        "protocol": 2,
+        "server_time": 2500,
+        "topics": {
+            "poll:2": {"epoch": epoch, "seq": 1},
+            "poll:1": {"epoch": "", "seq": 0},
+        },
+        "transports": ["sse"],
+    }
+
+
 @pytest.mark.django_db()
 def test_topic_stream_negotiates_a_private_session_bound_websocket_ticket(
     ws_available: None,
@@ -111,7 +136,7 @@ def test_topic_stream_negotiates_a_private_session_bound_websocket_ticket(
     assert response["Cache-Control"] == "private, no-store"
     assert "Cookie" in response["Vary"]
     grant = _body(response)
-    claims = verify_ticket(grant["ticket"], request.session)
+    claims = verify_ticket(grant["ticket"], request.session.session_key)
     assert grant["protocol"] == 2
     assert grant["url"] == "/_next/ws/"
     assert claims.topics == ("poll:42",)
@@ -142,13 +167,11 @@ def test_websocket_negotiation_without_get_or_ws_transport_is_refused(
         assert response.status_code == 406
         assert _body(response) == {"error": "transport_unavailable"}
 
-    monkeypatch.setattr(transports.apps, "is_installed", lambda _name: False)
-    transports.forget_transports()
+    transports.withdraw_websocket()
     request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
     assert TopicStream(request, "room", authorize=_allow_topic).status_code == 406
 
-    monkeypatch.setattr(transports.apps, "is_installed", lambda _name: True)
-    transports.forget_transports()
+    transports.announce_websocket()
     request = RequestFactory().post("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
     response = TopicStream(request, "room", authorize=_allow_topic)
     assert response.status_code == 405
@@ -224,7 +247,7 @@ def test_websocket_negotiation_accepts_stable_transform_and_explicit_references(
             authorize_ref="tests.realtime.test_topics._allow_topic",
         )
     assert response.status_code == 200
-    claims = verify_ticket(_body(response)["ticket"], request.session)
+    claims = verify_ticket(_body(response)["ticket"], request.session.session_key)
     assert claims.transform_ref == "tests.realtime.test_topics._event_transform"
     assert claims.authorizer_ref == "tests.realtime.test_topics._allow_topic"
 
@@ -240,7 +263,7 @@ def test_websocket_negotiation_discovers_stable_callbacks_and_rejects_bad_paths(
             request, "room", transform=_event_transform, authorize=_allow_topic
         )
         assert response.status_code == 200
-        claims = verify_ticket(_body(response)["ticket"], request.session)
+        claims = verify_ticket(_body(response)["ticket"], request.session.session_key)
         assert claims.transform_ref == "tests.realtime.test_topics._event_transform"
         assert claims.authorizer_ref == "tests.realtime.test_topics._allow_topic"
 
@@ -829,4 +852,4 @@ def test_websocket_negotiation_replaces_a_stale_anonymous_cookie(
     assert request.session.session_key != stale
     assert request.session.modified is True
     fresh = SessionStore(session_key=request.session.session_key)
-    assert verify_ticket(grant["ticket"], fresh).topics == ("room",)
+    assert verify_ticket(grant["ticket"], fresh.session_key).topics == ("room",)

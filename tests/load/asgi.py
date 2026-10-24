@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, cast
 
 from django.core.asgi import get_asgi_application
 
-from next.contrib.channels import application as realtime_application
+from next.realtime import application as realtime_application
 
 
 if TYPE_CHECKING:

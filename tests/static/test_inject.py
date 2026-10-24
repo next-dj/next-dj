@@ -45,18 +45,12 @@ NEXT_JS_URL = "/static/next/next.min.js"
 LAZY_CHUNKS = (
     '"scripts":"/static/next/next.scripts.min.js",'
     '"stream":"/static/next/next.stream.min.js",'
-    '"ws":"/static/next/next.ws.min.js",'
     '"csrf":"/static/next/next.csrf.min.js",'
     '"poll":"/static/next/next.poll.min.js"'
 )
-REALTIME = (
-    '"$realtime":{"protocol":2,"transports":["sse"],'
-    '"content_type":"application/vnd.next.patches+json"}'
-)
-CHUNKS = f'"$chunks":{{{LAZY_CHUNKS}}},{REALTIME}'
-DEV_CHUNKS = (
-    f'"$chunks":{{{LAZY_CHUNKS},"dev":"/static/next/next.dev.min.js"}},{REALTIME}'
-)
+CHUNKS = f'"$chunks":{{{LAZY_CHUNKS}}}'
+DEV_CHUNKS = f'"$chunks":{{{LAZY_CHUNKS},"dev":"/static/next/next.dev.min.js"}}'
+
 HASHED = {
     "next/next.min.js": "/static/next/next.min.1a2b.js",
     "next/next.scripts.min.js": "/static/next/next.scripts.min.3c4d.js",
@@ -69,7 +63,6 @@ HASHED = {
 HASHED_CHUNKS = (
     '"$chunks":{"scripts":"/static/next/next.scripts.min.3c4d.js",'
     '"stream":"/static/next/next.stream.min.7a8b.js",'
-    '"ws":"/static/next/next.ws.min.8c9d.js",'
     '"csrf":"/static/next/next.csrf.min.9c0d.js",'
     '"poll":"/static/next/next.poll.min.1e2f.js"}'
 )
@@ -256,8 +249,8 @@ class TestScriptsChunkUrl:
             first = fresh_manager.inject(html, StaticCollector())
             second = fresh_manager.inject(html, StaticCollector())
         assert first == second
-        assert f"Next._init({{{HASHED_CHUNKS},{REALTIME}}})" in first
-        assert url.call_count == 6
+        assert f"Next._init({{{HASHED_CHUNKS}}})" in first
+        assert url.call_count == 5
 
     def test_debug_names_the_hashed_dev_chunk_too(
         self, fresh_manager: StaticManager
@@ -272,8 +265,7 @@ class TestScriptsChunkUrl:
         ):
             out = fresh_manager.inject(html, StaticCollector())
         assert (
-            f'{HASHED_CHUNKS[:-1]},"dev":"/static/next/next.dev.min.5e6f.js"}},'
-            f"{REALTIME}"
+            f'{HASHED_CHUNKS[:-1]},"dev":"/static/next/next.dev.min.5e6f.js"}}}})'
         ) in out
 
 
@@ -282,6 +274,35 @@ class _SpacedSerializer(JsonJsContextSerializer):
 
     def dumps(self, value: object) -> str:
         return json.dumps(value)
+
+
+class TestWebSocketChunk:
+    """The WebSocket adapter is listed only while the `ws` transport is active."""
+
+    HTML = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
+
+    def test_an_active_websocket_lists_the_adapter_and_its_offer(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        with (
+            override_next_settings(REALTIME={"TRANSPORTS": ["ws", "sse"]}),
+            mock.patch(
+                "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+            ),
+        ):
+            out = fresh_manager.inject(self.HTML, StaticCollector())
+        assert '"ws":"/static/next/next.ws.min.js"' in out
+        assert '"$realtime":{"protocol":2,"transports":["ws","sse"]' in out
+
+    def test_the_stock_transports_leave_the_adapter_out(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+        ):
+            out = fresh_manager.inject(self.HTML, StaticCollector())
+        assert "next.ws.min.js" not in out
+        assert "$realtime" not in out
 
 
 class TestChunksEncoding:
@@ -329,7 +350,7 @@ class TestChunksEncoding:
             side_effect=HASHED.__getitem__,
         ):
             out = fresh_manager.inject(self.HTML, StaticCollector())
-        assert f"{HASHED_CHUNKS},{REALTIME}" in out
+        assert f"{HASHED_CHUNKS}}})" in out
 
     def test_another_serializer_encodes_it_again(
         self, fresh_manager: StaticManager
@@ -749,7 +770,6 @@ class TestBackendRewritesEveryAssetUrl:
             mock.call(NEXT_JS_URL, request=mock.ANY),
             mock.call("/static/next/next.scripts.min.js", request=mock.ANY),
             mock.call("/static/next/next.stream.min.js", request=mock.ANY),
-            mock.call("/static/next/next.ws.min.js", request=mock.ANY),
             mock.call("/static/next/next.csrf.min.js", request=mock.ANY),
             mock.call("/static/next/next.poll.min.js", request=mock.ANY),
         ]

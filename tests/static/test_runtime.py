@@ -17,11 +17,15 @@ from next.static.runtime import (
     NEXT_JS_STATIC_PATH,
     REALTIME_PAYLOAD_KEY,
     RESERVED_PAYLOAD_KEYS,
+    RealtimeOffer,
     _failures as runtime_failures,
     csrf_payload_for,
+    forget_realtime_offer,
     nonce_attr,
+    realtime_offer,
 )
 from next.static.serializers import resolve_serializer
+from next.testing import override_next_settings
 
 
 if TYPE_CHECKING:
@@ -400,37 +404,63 @@ class TestNextJsStaticPath:
         assert NEXT_JS_STATIC_PATH.endswith(".js")
 
 
+TRANSPORTS = "next.static.runtime._active_transports"
+PARTIAL_BACKEND = "next.partial.manager.partial_backend_manager.get"
+TURBO = "text/vnd.turbo-stream.html"
+WEBSOCKET = {"TRANSPORTS": ["ws", "sse"]}
+BOTH_TRANSPORTS = f'"{REALTIME_PAYLOAD_KEY}":{{"protocol":2,"transports":["ws","sse"],'
+
+
 class TestRealtimePayload:
-    def test_chunk_payload_advertises_sse_protocol(self) -> None:
+    """The `$realtime` entry is sent only where it moves off the runtime defaults."""
+
+    def test_the_stock_configuration_sends_no_entry(self) -> None:
+        out = NextScriptBuilder(URL).init_script({"$chunks": {"stream": "/s.js"}})
+        assert out == '<script>Next._init({"$chunks":{"stream":"/s.js"}});</script>'
+        assert realtime_offer() == RealtimeOffer("", websocket=False)
+
+    def test_an_active_websocket_advertises_both_transports(self) -> None:
+        with override_next_settings(REALTIME=WEBSOCKET):
+            out = NextScriptBuilder(URL).init_script({"$chunks": {}})
+            assert realtime_offer().websocket is True
+        assert (
+            f'{BOTH_TRANSPORTS}"content_type":"application/vnd.next.patches+json"}}'
+        ) in out
+
+    def test_changing_the_transports_drops_the_memoised_entry(self) -> None:
         builder = NextScriptBuilder(URL)
-        out = builder.init_script({"$chunks": {"stream": "/stream.js"}})
+        before = builder.init_script({"$chunks": {}})
+        with override_next_settings(REALTIME=WEBSOCKET):
+            during = builder.init_script({"$chunks": {}})
+        after = builder.init_script({"$chunks": {}})
+        assert REALTIME_PAYLOAD_KEY not in before
+        assert BOTH_TRANSPORTS in during
+        assert after == before
+
+    @pytest.mark.usefixtures("forgotten_realtime_offer")
+    def test_another_partial_backend_names_its_content_type(self) -> None:
+        with mock.patch(PARTIAL_BACKEND) as get_backend:
+            get_backend.return_value.content_type = TURBO
+            out = NextScriptBuilder(URL).init_script({"$chunks": {}})
+            assert realtime_offer().websocket is False
         assert (
             f'"{REALTIME_PAYLOAD_KEY}":{{"protocol":2,"transports":["sse"],'
-            '"content_type":"application/vnd.next.patches+json"}'
+            f'"content_type":"{TURBO}"}}'
         ) in out
 
-    def test_caller_cannot_override_realtime_protocol(self) -> None:
-        builder = NextScriptBuilder(URL)
-        out = builder.init_script(
-            {
-                "$chunks": {},
-                REALTIME_PAYLOAD_KEY: {"protocol": 1, "transports": ["poll"]},
-            }
-        )
-        assert out.count(f'"{REALTIME_PAYLOAD_KEY}"') == 1
-        assert (
-            '"protocol":2,"transports":["sse"],'
-            '"content_type":"application/vnd.next.patches+json"'
-        ) in out
+    def test_a_payload_without_chunks_carries_no_entry(self) -> None:
+        with override_next_settings(REALTIME=WEBSOCKET):
+            out = NextScriptBuilder(URL).init_script({"user": "alice"})
+        assert REALTIME_PAYLOAD_KEY not in out
 
-    def test_payload_uses_the_selected_partial_backend_content_type(self) -> None:
-        builder = NextScriptBuilder(URL)
-        with mock.patch(
-            "next.partial.manager.partial_backend_manager.get"
-        ) as get_backend:
-            get_backend.return_value.content_type = "text/vnd.turbo-stream.html"
-            out = builder.init_script({"$chunks": {}})
-        assert '"content_type":"text/vnd.turbo-stream.html"' in out
+    @pytest.mark.usefixtures("forgotten_realtime_offer")
+    def test_the_offer_is_resolved_once_until_it_is_forgotten(self) -> None:
+        with mock.patch(TRANSPORTS, return_value=("sse",)) as transports:
+            first = realtime_offer()
+            assert realtime_offer() is first
+            forget_realtime_offer()
+            realtime_offer()
+        assert transports.call_count == 2
 
 
 class TestReservedPayloadKeys:

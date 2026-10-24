@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import copy
 import subprocess
 import sys
+from types import MappingProxyType
 from typing import Any
 
 import pytest
@@ -15,6 +17,7 @@ from next.conf.frozen import FrozenDict, FrozenList
 from next.conf.merge import (
     BOOL_KEYS,
     DICT_KEYS,
+    FROZEN_DEFAULTS,
     LIST_KEYS,
     OPTIONAL_STR_KEYS,
     STR_KEYS,
@@ -169,6 +172,36 @@ class TestReplacementIsWhole:
             DEFAULTS, {"FORM_WIZARD_BACKEND": {"OPTIONS": {"TIMEOUT": 60}}}
         )
         assert "BACKEND" not in merged["FORM_WIZARD_BACKEND"]
+
+
+class TestDefaultsFrozenOnce:
+    """The framework defaults are frozen on import and every merge copies the result."""
+
+    def test_the_defaults_still_match_their_import_time_freeze(self) -> None:
+        """Nothing that ran since the import, the whole suite included, edits them."""
+        assert dict(FROZEN_DEFAULTS) == DEFAULTS
+        assert FROZEN_DEFAULTS.keys() == DEFAULTS.keys()
+
+    def test_the_frozen_defaults_are_a_read_only_view(self) -> None:
+        assert isinstance(FROZEN_DEFAULTS, MappingProxyType)
+
+    def test_the_framework_defaults_reuse_the_frozen_values(self) -> None:
+        merged = merge_user_settings(DEFAULTS, None)
+        assert merged["PAGE_BACKENDS"] is FROZEN_DEFAULTS["PAGE_BACKENDS"]
+
+    def test_the_merged_mapping_is_a_copy(self) -> None:
+        merged = merge_user_settings(DEFAULTS, {"URL_NAME_TEMPLATE": "route_{name}"})
+        merged["MADE_UP"] = 1
+        assert "MADE_UP" not in FROZEN_DEFAULTS
+        assert FROZEN_DEFAULTS["URL_NAME_TEMPLATE"] == DEFAULTS["URL_NAME_TEMPLATE"]
+
+    def test_another_defaults_mapping_freezes_per_merge(self) -> None:
+        own = copy.deepcopy(DEFAULTS)
+        own["PAGE_BACKENDS"] = [{"BACKEND": "own.Backend"}]
+        merged = merge_user_settings(own, None)
+        assert isinstance(merged["PAGE_BACKENDS"], FrozenList)
+        assert merged["PAGE_BACKENDS"] == [{"BACKEND": "own.Backend"}]
+        assert merged["PAGE_BACKENDS"] is not own["PAGE_BACKENDS"]
 
 
 class TestSentinelHome:

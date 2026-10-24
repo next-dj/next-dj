@@ -20,7 +20,7 @@ class TestBenchTicket:
             )
 
         grant = benchmark(run)
-        claims = verify_ticket(grant.token, request.session)
+        claims = verify_ticket(grant.token, request.session.session_key)
         assert claims.topics == topics
 
     @pytest.mark.parametrize("count", [1, 64])
@@ -33,6 +33,6 @@ class TestBenchTicket:
             transform_ref=None,
             authorizer_ref=ROOM_AUTHORIZER_REF,
         )
-        claims = benchmark(verify_ticket, grant.token, request.session)
+        claims = benchmark(verify_ticket, grant.token, request.session.session_key)
         assert claims.topics == tuple(topic_names(count))
         assert claims.authorizer_ref == ROOM_AUTHORIZER_REF
