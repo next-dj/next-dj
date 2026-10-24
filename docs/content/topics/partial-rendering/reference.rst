@@ -45,6 +45,38 @@ A protocol backend that authors its own wire format carries the same fields unde
 
 The JSON examples on this page omit ``assets`` and ``form`` when they are empty.
 
+Stream frames add transport metadata beside the envelope.
+``server_time`` is an epoch timestamp in milliseconds on every ``next-patches`` frame.
+A realtime topic frame also has ``topic``, ``epoch``, and ``seq``.
+These keys are absent from ordinary HTTP response bodies and are not fields of ``Envelope``.
+
+.. list-table:: Realtime stream control frames
+   :header-rows: 1
+   :widths: 24 76
+
+   * - Event
+     - Data
+   * - ``next-hello``
+     - ``protocol: 2``, ``server_time``, ``topics`` mapping each topic name to ``{"epoch": ..., "seq": ...}``, and the supported ``transports``.
+       It is sent once the broker subscription is live.
+   * - ``next-skip``
+     - ``topic``, ``epoch``, and ``seq`` acknowledge a message suppressed by a subscriber transform.
+   * - ``next-end``
+     - ``code``, ``"auth"`` when the topic authorizer denied a grant.
+       The client closes the stream and does not reconnect it.
+       A revoked session sends no ``next-end``, so the reconnect goes through the page guard again.
+   * - ``next-patches``
+     - The ordinary envelope plus ``server_time``, and on topic streams ``topic``, ``epoch``, and ``seq``.
+
+The control frames are compact JSON in this fixed schema whatever protocol backend is installed.
+A WebSocket carries the same frames as JSON objects with a ``type`` of ``hello``, ``skip``, or ``patches``, see :doc:`/content/ref/realtime`.
+
+The client keeps an ``(epoch, seq)`` cursor per topic and ignores duplicates.
+It requests the page's bound zones after a gap in the same epoch, an epoch different from the cursor, a nonzero sequence on the first hello, or a changed position on reconnect.
+An epoch change means the broker counter started again, so the client resets that topic's cursor to the new position.
+The broker does not replay events.
+A zone GET restores current state through the page's guards and the subscriber's cookies.
+
 Patch verbs
 -----------
 
@@ -250,7 +282,7 @@ A target off that origin is refused before any request leaves, with a ``partial:
      - The asset version the client holds.
        The first request of a page asserts none.
    * - ``X-Next-Request-Id``
-     - Every mutation
+     - Every non-abortable mutation
      - The ring id used to suppress an SSE echo.
    * - ``X-Next-Origin``
      - Every layer request, the open GET, the accept re-GET, and a mutation submitted from a form inside the layer.
@@ -407,6 +439,9 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - The match key for the morph and for ``append`` dedup, falling back to ``id``.
        On a repeated form it names the instance, written by the ``key=`` tag parameter, so a partial morph lands on the submitted form rather than the first.
    * - ``data-next-sse``
+     - A container
+     - Compatibility alias for ``data-next-stream``.
+   * - ``data-next-stream``
      - A container
      - Subscribe to a patch stream at the URL.
    * - ``data-next-busy``

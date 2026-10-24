@@ -44,25 +44,36 @@ JS_URL = "https://cdn.example.com/a.js"
 NEXT_JS_URL = "/static/next/next.min.js"
 LAZY_CHUNKS = (
     '"scripts":"/static/next/next.scripts.min.js",'
-    '"sse":"/static/next/next.sse.min.js",'
+    '"stream":"/static/next/next.stream.min.js",'
+    '"sse":"/static/next/next.stream.min.js",'
+    '"ws":"/static/next/next.ws.min.js",'
     '"csrf":"/static/next/next.csrf.min.js",'
     '"poll":"/static/next/next.poll.min.js"'
 )
-CHUNKS = f'"$chunks":{{{LAZY_CHUNKS}}}'
-DEV_CHUNKS = f'"$chunks":{{{LAZY_CHUNKS},"dev":"/static/next/next.dev.min.js"}}'
+REALTIME = (
+    '"$realtime":{"protocol":2,"transports":["sse"],'
+    '"content_type":"application/vnd.next.patches+json"}'
+)
+CHUNKS = f'"$chunks":{{{LAZY_CHUNKS}}},{REALTIME}'
+DEV_CHUNKS = (
+    f'"$chunks":{{{LAZY_CHUNKS},"dev":"/static/next/next.dev.min.js"}},{REALTIME}'
+)
 HASHED = {
     "next/next.min.js": "/static/next/next.min.1a2b.js",
     "next/next.scripts.min.js": "/static/next/next.scripts.min.3c4d.js",
-    "next/next.sse.min.js": "/static/next/next.sse.min.7a8b.js",
+    "next/next.stream.min.js": "/static/next/next.sse.min.7a8b.js",
+    "next/next.ws.min.js": "/static/next/next.ws.min.8c9d.js",
     "next/next.csrf.min.js": "/static/next/next.csrf.min.9c0d.js",
     "next/next.poll.min.js": "/static/next/next.poll.min.1e2f.js",
     "next/next.dev.min.js": "/static/next/next.dev.min.5e6f.js",
 }
 HASHED_CHUNKS = (
     '"$chunks":{"scripts":"/static/next/next.scripts.min.3c4d.js",'
+    '"stream":"/static/next/next.sse.min.7a8b.js",'
     '"sse":"/static/next/next.sse.min.7a8b.js",'
+    '"ws":"/static/next/next.ws.min.8c9d.js",'
     '"csrf":"/static/next/next.csrf.min.9c0d.js",'
-    '"poll":"/static/next/next.poll.min.1e2f.js"'
+    '"poll":"/static/next/next.poll.min.1e2f.js"}'
 )
 REQUEST_ONLY_BACKENDS = {
     "STATIC_BACKENDS": [
@@ -247,8 +258,8 @@ class TestScriptsChunkUrl:
             first = fresh_manager.inject(html, StaticCollector())
             second = fresh_manager.inject(html, StaticCollector())
         assert first == second
-        assert f"Next._init({{{HASHED_CHUNKS}}}}})" in first
-        assert url.call_count == 5
+        assert f"Next._init({{{HASHED_CHUNKS},{REALTIME}}})" in first
+        assert url.call_count == 7
 
     def test_debug_names_the_hashed_dev_chunk_too(
         self, fresh_manager: StaticManager
@@ -262,7 +273,10 @@ class TestScriptsChunkUrl:
             ),
         ):
             out = fresh_manager.inject(html, StaticCollector())
-        assert f'{HASHED_CHUNKS},"dev":"/static/next/next.dev.min.5e6f.js"}}' in out
+        assert (
+            f'{HASHED_CHUNKS[:-1]},"dev":"/static/next/next.dev.min.5e6f.js"}},'
+            f"{REALTIME}"
+        ) in out
 
 
 class _SpacedSerializer(JsonJsContextSerializer):
@@ -317,7 +331,7 @@ class TestChunksEncoding:
             side_effect=HASHED.__getitem__,
         ):
             out = fresh_manager.inject(self.HTML, StaticCollector())
-        assert f"{HASHED_CHUNKS}}}" in out
+        assert f"{HASHED_CHUNKS},{REALTIME}" in out
 
     def test_another_serializer_encodes_it_again(
         self, fresh_manager: StaticManager
@@ -736,7 +750,9 @@ class TestBackendRewritesEveryAssetUrl:
         assert asset_url.call_args_list == [
             mock.call(NEXT_JS_URL, request=mock.ANY),
             mock.call("/static/next/next.scripts.min.js", request=mock.ANY),
-            mock.call("/static/next/next.sse.min.js", request=mock.ANY),
+            mock.call("/static/next/next.stream.min.js", request=mock.ANY),
+            mock.call("/static/next/next.stream.min.js", request=mock.ANY),
+            mock.call("/static/next/next.ws.min.js", request=mock.ANY),
             mock.call("/static/next/next.csrf.min.js", request=mock.ANY),
             mock.call("/static/next/next.poll.min.js", request=mock.ANY),
         ]
@@ -801,13 +817,14 @@ class TestBrokenRuntimeConfiguration:
     def test_an_uncollected_chunk_is_left_to_the_runtime(self, caplog) -> None:
         with mock.patch(
             "next.static.manager.staticfiles_storage.url",
-            side_effect=_hashed_without("next/next.sse.min.js"),
+            side_effect=_hashed_without("next/next.stream.min.js"),
         ):
             page = StaticManager().inject(self.PAGE, StaticCollector())
-        assert '"sse"' not in page
+        assert '"sse":"/static/next/next.stream.min.js"' not in page
+        assert '"stream":"/static/next/next.stream.min.js"' not in page
         assert '"poll":"/static/next/next.poll.min.js"' in page
         [message] = _records(caplog)
-        assert "next/next.sse.min.js" in message
+        assert "next/next.stream.min.js" in message
 
     def test_an_unknown_policy_injects_as_auto_logged_once(self, caplog) -> None:
         with override_next_settings(NEXT_JS_OPTIONS={"policy": "sometimes"}):
@@ -955,12 +972,12 @@ class TestMemoisedFallbacksDegradeEveryRender:
         """The HTML is complete without a lazy chunk, so the render stays shareable."""
         with mock.patch(
             "next.static.manager.staticfiles_storage.url",
-            side_effect=_hashed_without("next/next.sse.min.js"),
+            side_effect=_hashed_without("next/next.stream.min.js"),
         ):
             assert self._degraded_renders() == [False, False, False]
         records = [r for r in caplog.records if r.name.startswith("next.static")]
         assert [r.levelname for r in records] == ["WARNING", "WARNING"]
-        assert "has no next/next.sse.min.js" in records[0].getMessage()
+        assert "has no next/next.stream.min.js" in records[0].getMessage()
         assert records[1].suppressed > 0
 
     def test_a_broken_serializer(self, caplog) -> None:

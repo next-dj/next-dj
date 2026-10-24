@@ -1,21 +1,24 @@
 import inspect
 import json
-import threading
-import time
+from datetime import timedelta
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
-from django.core.cache import cache
+from django.contrib.admin.sites import AdminSite
 from django.core.management import call_command
 from django.http import Http404
-from polls import broker as broker_module
+from django.test import RequestFactory
+from django.utils import timezone
+from polls.admin import PollAdmin
 from polls.backends import ViteManifestBackend
-from polls.broker import SNAPSHOT_KEY, PollBroker, build_snapshot, store_snapshot
 from polls.demo import DEMO_POLLS, seed_demo
 from polls.deps import DPoll, PollProvider
 from polls.forms import VoteForm
 from polls.models import Choice, Poll
+from polls.realtime import can_subscribe_topic
 from polls.signals import VOTE_ACTION_NAME, broadcast_vote
+from polls.snapshots import Snapshot, build_snapshot
 
 from next.static import default_kinds
 from next.testing import make_resolution_context, resolve_call
@@ -399,56 +402,90 @@ class TestBroadcastReceiverGuards:
         """Each unactionable payload exits before reaching `broker.publish`."""
         broadcast_vote(action_name=action_name, form=form_factory())
 
-
-class TestBrokerChangeLoop:
-    """The change loop spins through timeouts and evictions without crashing."""
-
-    @pytest.fixture(autouse=True)
-    def _fast_wake(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Shorten the wake timeout so the loop spins fast in tests."""
-        monkeypatch.setattr(broker_module, "WAKE_TIMEOUT_SECONDS", 0.01)
-
-    def test_timeout_spins_until_a_real_change_arrives(self, poll: Poll) -> None:
-        """A timeout with no new revision loops until a publish lands.
-
-        A consumer thread spins until the test publishes, then yields a single `Change`.
-        """
-        local = PollBroker()
-        captured: list[object] = []
-        stream = local.changes(poll.pk)
-        worker = threading.Thread(target=lambda: captured.append(next(stream)))
-        worker.start()
-        time.sleep(0.05)
-        local.publish(build_snapshot(poll), request_id="r1")
-        worker.join(timeout=2)
-        stream.close()
-        assert captured
-        assert captured[0].request_id == "r1"
-
-    def test_evicted_payload_is_skipped_until_a_fresh_snapshot(
-        self, poll: Poll
+    def test_valid_vote_without_request_does_not_publish(
+        self, poll: Poll, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A revision bump whose cache entry is missing loops without yielding.
+        form = VoteForm(
+            data={"poll": poll.pk, "choice": poll.choices.get(text="Tabs").pk}
+        )
+        assert form.is_valid()
+        published: list[object] = []
+        monkeypatch.setattr(
+            "polls.signals.publish", lambda *args, **kwargs: published.append(args)
+        )
+        broadcast_vote(action_name=VOTE_ACTION_NAME, form=form)
+        assert not published
 
-        The branch guards a cache eviction landing between `notify_all` and the read.
-        """
-        local = PollBroker()
-        captured: list[object] = []
-        stream = local.changes(poll.pk)
-        worker = threading.Thread(target=lambda: captured.append(next(stream)))
-        worker.start()
-        time.sleep(0.05)
-        cache.delete(SNAPSHOT_KEY.format(poll_id=poll.pk))
-        with local._conditions[poll.pk]:
-            local._revisions[poll.pk] += 1
-            local._conditions[poll.pk].notify_all()
-        time.sleep(0.05)
-        store_snapshot(build_snapshot(poll))
-        local.publish(build_snapshot(poll))
-        worker.join(timeout=2)
-        stream.close()
-        assert captured
-        assert captured[0].snapshot["poll_id"] == poll.pk
+
+class TestPollSnapshots:
+    """The example builds request-independent poll snapshots for its page context."""
+
+    def test_snapshot_payload_shape(self) -> None:
+        snapshot = Snapshot(
+            poll_id=1,
+            total_votes=5,
+            is_open=True,
+            accepting_votes=True,
+            deadline=None,
+            choices=(),
+        )
+        assert snapshot.to_payload() == {
+            "poll_id": 1,
+            "total_votes": 5,
+            "is_open": True,
+            "accepting_votes": True,
+            "deadline": None,
+            "choices": [],
+        }
+
+    def test_build_snapshot_reads_ordered_choices_and_total(self, poll: Poll) -> None:
+        poll.choices.filter(text="Tabs").update(votes=4)
+        poll.choices.filter(text="Spaces").update(votes=3)
+        snapshot = build_snapshot(poll)
+        payload = snapshot.to_payload()
+        assert payload["poll_id"] == poll.pk
+        assert payload["total_votes"] == 7
+        assert [choice["text"] for choice in payload["choices"]] == ["Tabs", "Spaces"]
+
+
+class TestPollAdmin:
+    """Host changes publish the updated phase after the database commit."""
+
+    @pytest.mark.parametrize("deadline_kind", ["none", "future"])
+    def test_save_publishes_phase_and_zone_refresh(
+        self, poll: Poll, monkeypatch: pytest.MonkeyPatch, deadline_kind: str
+    ) -> None:
+        if deadline_kind == "future":
+            poll.closes_at = timezone.now() + timedelta(minutes=1)
+        publish = Mock()
+        monkeypatch.setattr("polls.admin.publish", publish)
+        poll_admin = PollAdmin(Poll, AdminSite())
+
+        poll_admin.save_model(RequestFactory().post("/admin/"), poll, None, True)
+
+        assert publish.call_count == 2
+        assert [call.kwargs["on_commit"] for call in publish.call_args_list] == [
+            True,
+            True,
+        ]
+        assert [call.args[0] for call in publish.call_args_list] == [
+            f"poll:{poll.pk}",
+            f"poll:{poll.pk}",
+        ]
+
+
+class TestRealtimeAuthorization:
+    """The topic authorizer rejects malformed and removed poll topics."""
+
+    @pytest.mark.parametrize("topic", ["room:1", "poll:", "poll:not-a-number"])
+    def test_rejects_topics_outside_poll_namespace(self, topic: str) -> None:
+        assert can_subscribe_topic(None, topic) is False
+
+    def test_allows_existing_poll_topic(self, poll: Poll) -> None:
+        assert can_subscribe_topic(None, f"poll:{poll.pk}") is True
+
+    def test_rejects_removed_poll_topic(self, poll: Poll) -> None:
+        assert can_subscribe_topic(None, f"poll:{poll.pk + 1000}") is False
 
 
 class TestDemoSeed:

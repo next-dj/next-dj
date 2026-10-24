@@ -1,6 +1,6 @@
-from polls.broker import build_snapshot
 from polls.deps import DPoll
 from polls.models import Poll
+from polls.snapshots import build_snapshot
 
 from next import context, page
 from next.pages import MetadataDict

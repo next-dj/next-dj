@@ -579,7 +579,9 @@ def check_tag_templates_format(*args, **kwargs) -> list[CheckMessage]:
 
 _DEPLOYED_BUNDLES: Final = (
     NEXT_JS_STATIC_PATH,
-    *(path for key, path in CHUNK_STATIC_PATHS.items() if key != DEV_CHUNK_KEY),
+    *dict.fromkeys(
+        path for key, path in CHUNK_STATIC_PATHS.items() if key != DEV_CHUNK_KEY
+    ),
 )
 """The runtime bundles a production page may load, the dev chunk left out."""
 

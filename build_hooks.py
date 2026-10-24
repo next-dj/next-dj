@@ -14,7 +14,8 @@ _SOURCEMAP_REFERENCE = "//# sourceMappingURL="
 _BUNDLES = (
     "next.min.js",
     "next.scripts.min.js",
-    "next.sse.min.js",
+    "next.stream.min.js",
+    "next.ws.min.js",
     "next.csrf.min.js",
     "next.poll.min.js",
     "next.dev.min.js",

@@ -382,7 +382,9 @@ class TestBackendsLoadedOnce:
 class TestChunkUrlMemo:
     """Each chunk URL is resolved once per storage and again after a rebuild."""
 
-    @pytest.mark.parametrize("name", ["scripts", "sse", "csrf", "poll", "dev"])
+    @pytest.mark.parametrize(
+        "name", ["scripts", "stream", "sse", "csrf", "poll", "dev"]
+    )
     def test_a_rebuilt_storage_resolves_it_again(
         self, fresh_manager: StaticManager, name: str
     ) -> None:
@@ -394,7 +396,8 @@ class TestChunkUrlMemo:
             fresh_manager.forget_backend_urls()
             fresh_manager.chunk_url(name)
         assert url.call_count == 2
-        assert first == f"/static/next/next.{name}.min.js"
+        expected = "stream" if name in {"stream", "sse"} else name
+        assert first == f"/static/next/next.{expected}.min.js"
 
 
 class TestAssetUrlHook:

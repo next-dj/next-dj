@@ -11,6 +11,7 @@ import { readCsrf } from "./csrf";
 import type { CsrfMint } from "./csrf";
 import type { SseFactory } from "./sse";
 import type { PollFactory } from "./poll";
+import type { WsTransportFactory } from "./ws";
 import type { NavigatedDetail, NavigationState } from "./navigation";
 import { scriptNonce } from "./protocol";
 import type { Diagnostics, PartialError } from "./protocol";
@@ -25,11 +26,13 @@ export type { Asset, AssetLoad, Envelope, FormMeta, Patch } from "./apply";
 export type { ConsentChange } from "./consent";
 export type { ScriptsChunk } from "./chunks";
 export type { ScriptStatus } from "./scripts";
+export type { StreamMeta } from "./sse";
 
 /** The module each single-module chunk registers through Next._land, by chunk name. */
 interface NextModules {
   scripts: ScriptsFactory;
-  sse: SseFactory;
+  stream: SseFactory;
+  ws: WsTransportFactory;
   csrf: CsrfMint;
   poll: PollFactory;
   dev: Diagnostics;
@@ -61,6 +64,13 @@ export interface NextEventMap {
   "partial:layer-opened": { opener: HTMLElement | null };
   "partial:layer-accepted": { result: unknown };
   "partial:layer-dismissed": { reason: string };
+  "next:stream-gap": { topic: string; from: number; to: number };
+  "next:stream-state": {
+    url: string;
+    transport: "sse" | "websocket";
+    state: "connecting" | "open" | "closed";
+    code?: string;
+  };
   "next:toast": { text: string; variant: string };
   "next:navigated": NavigatedDetail;
   "next:consent": ConsentChange;
@@ -126,7 +136,7 @@ class Next {
 
   // One loader per chunk. The dev chunk is fetched only when the payload has $dev.
   static #modules = Object.fromEntries(
-    ["scripts", "sse", "csrf", "poll", "dev"].map((key) => [
+    ["scripts", "stream", "ws", "csrf", "poll", "dev"].map((key) => [
       key,
       lazyChunk(Next.#chunk, key),
     ]),
@@ -135,7 +145,9 @@ class Next {
   static partial: PartialSurface = createPartial({
     dispatch: Next.#chunk.dispatch,
     mergeContext: (data) => Next.#mergeContext(data),
-    sse: Next.#modules.sse,
+    context: Next.#chunk.context,
+    sse: Next.#modules.stream,
+    ws: Next.#modules.ws,
     csrf: Next.#modules.csrf,
     poll: Next.#modules.poll,
   });
@@ -213,9 +225,17 @@ class Next {
   }
 
   /** Register the module a lazy chunk exports, called by the chunk as it evaluates. */
-  static _land<K extends keyof NextModules>(key: K, value: NextModules[K]): void {
+  static _land<K extends keyof NextModules>(key: K, value: NextModules[K]): void;
+  static _land(key: "sse", value: SseFactory): void;
+  static _land(
+    key: keyof NextModules | "sse",
+    value: NextModules[keyof NextModules] | SseFactory,
+  ): void {
     // A chunk from another release may name a module this runtime does not know.
-    (Next.#modules[key] as Lazy<NextModules[K]> | undefined)?.land(value);
+    const moduleKey = key === "sse" ? "stream" : key;
+    (Next.#modules[moduleKey] as Lazy<SseFactory> | undefined)?.land(
+      value as SseFactory,
+    );
   }
 
   /** Subscribe to a runtime event, returning an unsubscribe function. */

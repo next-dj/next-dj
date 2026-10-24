@@ -157,6 +157,12 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`stream-live-updates-with-sse`
    Push live updates to the browser with server-sent events.
 
+:doc:`count-down-to-a-server-deadline`
+   Display a countdown using the server's estimated clock.
+
+:doc:`fan-out-across-processes-with-redis`
+   Share realtime publications across workers through Redis.
+
 :doc:`split-settings-per-environment`
    Split settings into base, dev, and prod modules.
 
@@ -209,6 +215,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    observe-framework-signals
    write-a-vendor-adapter
    stream-live-updates-with-sse
+   stream-over-websockets-with-channels
+   count-down-to-a-server-deadline
+   fan-out-across-processes-with-redis
    split-settings-per-environment
 
 .. seealso::

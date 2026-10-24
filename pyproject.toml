@@ -34,6 +34,12 @@ dependencies = [
 testing = [
     "defusedxml>=0.7",
 ]
+broker = [
+    "redis>=5",
+]
+channels = [
+    "channels>=4.2,<5",
+]
 
 [project.urls]
 Homepage = "https://github.com/next-dj/next-dj"
@@ -43,6 +49,7 @@ Repository = "https://github.com/next-dj/next-dj"
 
 [dependency-groups]
 dev = [
+    "channels[daphne]>=4.2,<5",
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
     "pytest-django==4.14.0",
@@ -58,6 +65,8 @@ dev = [
     "pydantic>=2.0",
     "markdown>=3.7",
     "time-machine>=2.16",
+    "fakeredis[lua]>=2",
+    "channels-redis>=4.3.0",
     "pytest-randomly==5.0.0",
     "defusedxml==0.7.1",
     "types-defusedxml==0.7.0.20260504",
@@ -76,6 +85,7 @@ codspeed = [
 ]
 e2e = [
     "pytest-playwright==0.9.0",
+    "channels[daphne]>=4.2,<5",
     "playwright==1.63.0",
 ]
 docs = [
@@ -107,7 +117,8 @@ packages = ["next"]
 artifacts = [
     "next/static/next/next.min.js",
     "next/static/next/next.scripts.min.js",
-    "next/static/next/next.sse.min.js",
+    "next/static/next/next.stream.min.js",
+    "next/static/next/next.ws.min.js",
     "next/static/next/next.csrf.min.js",
     "next/static/next/next.poll.min.js",
     "next/static/next/next.dev.min.js",
@@ -131,7 +142,8 @@ include = [
 artifacts = [
     "next/static/next/next.min.js",
     "next/static/next/next.scripts.min.js",
-    "next/static/next/next.sse.min.js",
+    "next/static/next/next.stream.min.js",
+    "next/static/next/next.ws.min.js",
     "next/static/next/next.csrf.min.js",
     "next/static/next/next.poll.min.js",
     "next/static/next/next.dev.min.js",
@@ -187,6 +199,7 @@ omit = [
     "*/next/components/checks.py",
     "*/next/forms/checks/*",
     "*/next/partial/checks/*",
+    "*/next/realtime/checks.py",
     "*/next/apps/checks.py",
     "*/next/seo/checks/*",
     "*/next/site/checks.py",
@@ -216,6 +229,9 @@ exclude_lines = [
     "@(typing\\.)?overload",
     "if TYPE_CHECKING:",
 ]
+
+[tool.typos.default.extend-words]
+asend = "asend"
 
 [tool.ruff]
 target-version = "py312"

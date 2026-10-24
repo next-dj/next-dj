@@ -190,12 +190,12 @@ Pick distinct keys when both registrations live in the same module.
 Reserved payload keys
 ~~~~~~~~~~~~~~~~~~~~~
 
-The framework owns five ``$``-prefixed keys of the init payload, ``$csrf``, ``$dev``, ``$chunks``, ``$scripts``, and ``$consent``, and claims them after the conflict policy has run.
+The framework owns six ``$``-prefixed keys of the init payload, ``$csrf``, ``$dev``, ``$chunks``, ``$realtime``, ``$scripts``, and ``$consent``, and claims them after the conflict policy has run.
 A project key of any of these names is dropped from the collected context on every automatically injected payload, whichever way the project registered it, together with the pre-encoded fragment and the per-key serializer that key recorded.
 The framework then writes its own value where it has one, ``$csrf`` on a payload whose request can mint a CSRF token and ``$dev`` on a payload built while ``DEBUG`` is on.
 The runtime reads ``$csrf`` at bootstrap and seeds the header it stamps on every unsafe request, so a programmatic ``Next.partial.fetch`` carries a token without a form field.
 On a page whose CSRF token is deferred, ``$csrf`` names the token endpoint instead of a token, see :doc:`/content/security/csrf-and-forms`.
-``$chunks`` is part of every payload and names the scripts chunk ``next.scripts.min.js`` under ``scripts``, the stream bridge ``next.sse.min.js`` under ``sse``, the CSRF mint ``next.csrf.min.js`` under ``csrf``, the zone poller ``next.poll.min.js`` under ``poll``, and, while ``DEBUG`` is on, the diagnostics chunk ``next.dev.min.js`` under ``dev``, which the runtime fetches only when ``$dev`` is true, and ``$scripts`` and ``$consent`` carry the script manifest and the consent state, see :doc:`/content/ref/client-extras`.
+``$chunks`` is part of every payload and names the scripts chunk ``next.scripts.min.js`` under ``scripts``, the stream bridge ``next.stream.min.js`` under ``stream`` and its ``sse`` compatibility alias, the CSRF mint ``next.csrf.min.js`` under ``csrf``, the zone poller ``next.poll.min.js`` under ``poll``, and, while ``DEBUG`` is on, the diagnostics chunk ``next.dev.min.js`` under ``dev``, which the runtime fetches only when ``$dev`` is true, and ``$scripts`` and ``$consent`` carry the script manifest and the consent state, see :doc:`/content/ref/client-extras`.
 A chunk the static files storage cannot serve is left out of ``$chunks`` with a warning, and the render stays shareable since its HTML is complete, while ``next.W090`` reports the chunk at deploy.
 A render with no value to write leaves the key out of the payload altogether, so a production page carries no ``$dev`` key at all and an automatically injected payload carries the registered value in no environment.
 A payload the project assembles itself under the ``MANUAL`` policy answers for its own filtering, see `Manual injection`_.

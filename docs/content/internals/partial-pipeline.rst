@@ -69,7 +69,9 @@ Modules
 
 ``next.partial.patches``.
    The ``Patches`` builder and the ``PatchResponse`` it serialises into.
-   Every verb is a method, from ``morph``, ``replace``, ``inner``, ``append``, ``prepend``, and ``remove`` to ``toast``, ``event``, ``layer_open``, ``layer_close``, ``push_url``, ``redirect``, ``context``, and ``meta``, plus ``morph_zone`` and ``morph_foreign_zone`` which render before they record, ``add_asset`` for an asset the render did not collect, and ``op`` for a verb the project registered.
+   Every verb is a method: ``morph``, ``replace``, ``inner``, ``append``, ``prepend``, ``remove``, ``refresh``, ``toast``, ``event``, ``layer_open``, ``layer_close``, ``push_url``, ``replace_url``, ``redirect``, ``context``, and ``meta``.
+   The builder also has ``morph_zone`` and ``morph_foreign_zone``, which render before recording.
+   It has ``add_asset`` for an asset the render did not collect and ``op`` for a registered project verb.
 
 ``next.partial.envelope``.
    ``Patch``, ``Asset``, ``FormMeta``, and ``Envelope``, the value objects of the wire form.

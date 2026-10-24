@@ -145,6 +145,10 @@ next/static/next/next.scripts.min.js
 next/static/next/next.scripts.min.js.map
 next/static/next/next.sse.min.js
 next/static/next/next.sse.min.js.map
+next/static/next/next.stream.min.js
+next/static/next/next.stream.min.js.map
+next/static/next/next.ws.min.js
+next/static/next/next.ws.min.js.map
 next/static/next/next.csrf.min.js
 next/static/next/next.csrf.min.js.map
 next/static/next/next.poll.min.js

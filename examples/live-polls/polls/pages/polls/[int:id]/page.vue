@@ -44,6 +44,7 @@ function mountChart(root) {
   const existing = instances.get(root);
   if (existing) {
     existing.vm.applySnapshot(snapshot);
+    renderPollPhase(root, existing);
     return;
   }
   const target = root.querySelector("[data-poll-chart-app]");
@@ -51,7 +52,53 @@ function mountChart(root) {
   target.innerHTML = "";
   const app = createApp(PollChart, { snapshot });
   const vm = app.mount(target);
-  instances.set(root, { app, vm });
+  const stream = window.Next?.partial?.stream;
+  let entry;
+  const unsubscribe = stream?.on(
+    `poll:${root.dataset.pollChart}`,
+    "poll:phase",
+    ({ is_open, deadline }) => {
+      root.dataset.pollOpen = String(is_open === true);
+      root.dataset.pollDeadline = deadline == null ? "" : String(deadline);
+      renderPollPhase(root, entry);
+    },
+  );
+  entry = { app, vm, timer: null, unsubscribe };
+  instances.set(root, entry);
+  renderPollPhase(root, entry);
+}
+
+function renderPollPhase(root, entry) {
+  const stream = window.Next?.partial?.stream;
+  const now = stream?.now?.() ?? Date.now();
+  const deadlineValue = root.dataset.pollDeadline;
+  const deadline = deadlineValue ? Number(deadlineValue) : null;
+  const open = root.dataset.pollOpen === "true";
+  const remaining = deadline === null ? null : deadline - now;
+  const accepting = open && (remaining === null || remaining > 0);
+  const status = root.querySelector("[data-poll-status]");
+  const countdown = root.querySelector("[data-poll-countdown]");
+
+  if (status) {
+    const message = accepting ? "Voting is open" : "Voting is closed";
+    if (status.textContent !== message) status.textContent = message;
+  }
+  if (countdown) {
+    countdown.textContent = accepting && remaining !== null
+      ? `Voting closes in ${Math.ceil(remaining / 1000)} seconds`
+      : "";
+  }
+  for (const button of root.querySelectorAll('button[type="submit"]')) {
+    button.disabled = !accepting;
+  }
+  if (open && deadline !== null) {
+    if (entry?.timer === null) {
+      entry.timer = window.setInterval(() => renderPollPhase(root, entry), 1000);
+    }
+  } else if (entry && entry.timer !== null) {
+    window.clearInterval(entry.timer);
+    entry.timer = null;
+  }
 }
 
 function applyContextSnapshot({ context, changed }) {
@@ -62,6 +109,12 @@ function applyContextSnapshot({ context, changed }) {
     const entry = instances.get(root);
     if (entry) entry.vm.applySnapshot(snapshot);
   }
+}
+
+function announceVoteCount({ total_votes }) {
+  if (!Number.isInteger(total_votes)) return;
+  const status = document.querySelector("[data-poll-vote-announcement]");
+  if (status) status.textContent = `${total_votes} total votes`;
 }
 
 // Zone morphs never detach the keep container, so this fires only when
@@ -77,6 +130,8 @@ function unmountRemoved(event) {
     const entry = instances.get(root);
     if (entry !== undefined) {
       entry.app.unmount();
+      if (entry.timer !== null) window.clearInterval(entry.timer);
+      entry.unsubscribe?.();
       instances.delete(root);
     }
   }
@@ -84,6 +139,7 @@ function unmountRemoved(event) {
 
 window.Next?.partial?.onMount("[data-poll-chart]", mountChart);
 window.Next?.on?.("context-updated", applyContextSnapshot);
+window.Next?.on?.("poll:votes", announceVoteCount);
 document.addEventListener("next:removed", unmountRemoved);
 
 export default {};

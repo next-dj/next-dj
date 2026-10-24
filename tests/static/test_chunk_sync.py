@@ -49,7 +49,8 @@ class TestChunkLists:
     def test_module_keys_match_the_payload_chunk_map(self) -> None:
         source = (CLIENT / "next.ts").read_text(encoding="utf-8")
         modules = _ts_strings(source, r"static #modules = Object\.fromEntries\(")
-        assert modules == set(CHUNK_STATIC_PATHS)
+        assert modules == set(CHUNK_STATIC_PATHS) - {"sse"}
+        assert CHUNK_STATIC_PATHS["stream"] == CHUNK_STATIC_PATHS["sse"]
 
     def test_scripts_chunk_keys_match_the_payload_keys(self) -> None:
         source = (CLIENT / "chunks.ts").read_text(encoding="utf-8")
@@ -62,13 +63,19 @@ class TestChunkLists:
     def test_each_chunk_entry_lands_under_its_own_key(self) -> None:
         entries = _build_entries()
         for key, path in CHUNK_STATIC_PATHS.items():
+            if key == "sse":
+                continue
             entry = entries[path.removeprefix("next/").removesuffix(".js")]
             source = (ROOT / entry).read_text(encoding="utf-8")
-            assert f'Next._land("{key}"' in source, entry
+            expected = "sse" if key == "stream" else key
+            assert f'Next._land("{expected}"' in source, entry
 
     def test_each_chunk_entry_is_named_by_its_key(self) -> None:
         entries = _build_entries()
         for key, path in CHUNK_STATIC_PATHS.items():
+            if key == "sse":
+                assert path == CHUNK_STATIC_PATHS["stream"]
+                continue
             assert path == f"next/next.{key}.min.js"
             entry = entries[f"next.{key}.min"]
             assert entry == f"next/client/entries/{key}.ts"

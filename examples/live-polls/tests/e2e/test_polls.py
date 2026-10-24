@@ -1,6 +1,8 @@
 from collections.abc import Iterator
+from datetime import timedelta
 
 import pytest
+from django.utils import timezone
 from e2e_support.browser import (
     CDN_URL_PATTERN,
     PageProbe,
@@ -13,8 +15,10 @@ from e2e_support.browser import (
 )
 from e2e_support.settings import CONTEXT_ARGS
 from playwright.sync_api import Browser, Locator, Page, Response, Route, expect
-from polls.broker import broker, build_snapshot
 from polls.models import Choice, Poll
+
+from next.partial import Patches
+from next.realtime import publish
 
 
 pytestmark = pytest.mark.e2e
@@ -49,7 +53,11 @@ def watcher(page: Page, tabs_or_spaces: Poll) -> Iterator[Page]:
     yield second
     probe.detach(second)
     second.close()
-    broker.publish(build_snapshot(tabs_or_spaces))
+    publish(
+        f"poll:{tabs_or_spaces.pk}",
+        Patches(None).refresh(zone="poll-results"),
+        on_commit=False,
+    )
     assert probe.problems() == []
 
 
@@ -123,6 +131,21 @@ def test_the_vue_island_mounts_and_draws_the_bars_the_server_never_sizes(
     assert bar_of(page, tabs).evaluate("element => element.style.width") == "75%"
     assert bar_of(page, spaces).evaluate("element => element.style.width") == "25%"
     expect_no_partial_request(page, next_probe)
+
+
+def test_poll_deadline_uses_the_stream_clock_and_disables_votes(
+    page: Page, base_url: str, tabs_or_spaces: Poll
+) -> None:
+    tabs_or_spaces.closes_at = timezone.now() + timedelta(seconds=4)
+    tabs_or_spaces.save(update_fields=("closes_at",))
+
+    open_poll(page, base_url, tabs_or_spaces)
+
+    status = page.locator("[data-poll-status]")
+    expect(status).to_contain_text("Voting closes in")
+    expect(page.get_by_role("button", name="Tabs", exact=True)).to_be_enabled()
+    expect(status).to_have_text("Voting is closed", timeout=6000)
+    expect(page.get_by_role("button", name="Tabs", exact=True)).to_be_disabled()
 
 
 def test_voting_repaints_the_zone_through_the_very_same_vue_instance(

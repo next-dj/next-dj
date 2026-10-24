@@ -25,22 +25,32 @@ import type { LinkLoader, SessionStore } from "./assets";
 import { createTriggers } from "./triggers";
 import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
 import type { EventSourceAdapter, Sse, SseFactory, VisibilityAdapter } from "./sse";
+import type { WebSocketAdapter, WsTransportFactory } from "./ws";
 import { createCsrf } from "./csrf";
 import type { Csrf, CsrfMint } from "./csrf";
 import type { LazyModule } from "./chunks";
 import type { PollFactory } from "./poll";
 import { createNavigation } from "./navigation";
 import type { NavigationState } from "./navigation";
-import { defaultHistory, defaultNavigate } from "./adapters";
-import { ATTR_SSE, ECHO_LIMIT, currentUrl, fire, matching } from "./protocol";
+import { defaultFetch, defaultHistory, defaultNavigate } from "./adapters";
+import {
+  ATTR_SSE,
+  ATTR_STREAM,
+  ECHO_LIMIT,
+  currentUrl,
+  fire,
+  matching,
+} from "./protocol";
 import type { Diagnostics } from "./protocol";
 
 /** The core seams the applier and the fetch layer read from. */
 export interface PartialDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   mergeContext: (data: Record<string, unknown>) => void;
+  context: () => Record<string, unknown>;
   // The SSE bridge, the CSRF token fetch and the poller, each in its own lazy chunk.
   sse: LazyModule<SseFactory>;
+  ws?: LazyModule<WsTransportFactory>;
   csrf: LazyModule<CsrfMint>;
   poll: LazyModule<PollFactory>;
 }
@@ -63,6 +73,7 @@ export interface PartialAdapters {
   confirm?: ConfirmAdapter;
   cssTimeoutMs?: number;
   source?: EventSourceAdapter;
+  websocket?: WebSocketAdapter;
   visibility?: VisibilityAdapter;
 }
 
@@ -81,6 +92,8 @@ export interface PartialSurface {
   onMount(selector: string, callback: (el: Element) => void): () => void;
   layers: LayerStack;
   sse: Sse;
+  /** Transport-neutral stream API; `sse` remains an alias during the migration. */
+  stream: Sse;
   /** Run the on-`ready` work, called by the core from the inline `_init`. */
   ready(): void;
   /** Configure the adapters and rebuild the wire and applier. */
@@ -143,12 +156,19 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     }
     return bridge;
   };
+  const withBridge = (callback: (factory: SseFactory) => void): void => {
+    const realtime = deps.context().$realtime as { transports?: unknown[] } | undefined;
+    const loadStream = (): void => deps.sse.whenLoaded(callback);
+    if (realtime?.transports?.includes("ws") === true && deps.ws !== undefined) {
+      void deps.ws.load().then(loadStream);
+    } else loadStream();
+  };
   // A page with no stream never fetches the bridge.
   const sse: Sse = {
     scan(root) {
-      if (matching(root, `[${ATTR_SSE}]`).length === 0) return;
+      if (matching(root, `[${ATTR_SSE}], [${ATTR_STREAM}]`).length === 0) return;
       const started = epoch;
-      deps.sse.whenLoaded((factory) => {
+      withBridge((factory) => {
         if (started === epoch) live(factory).scan(root);
       });
     },
@@ -157,6 +177,23 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       else unbridged = [...unbridged, id].slice(-ECHO_LIMIT);
     },
     size: () => bridge?.size() ?? 0,
+    now: () => bridge?.now() ?? Date.now(),
+    offset: () => bridge?.offset() ?? 0,
+    on(topic, name, callback) {
+      const started = epoch;
+      let active = true;
+      let unsubscribe: (() => void) | undefined;
+      withBridge((factory) => {
+        if (active && started === epoch) {
+          unsubscribe = live(factory).on(topic, name, callback);
+        }
+      });
+      return () => {
+        active = false;
+        unsubscribe?.();
+      };
+    },
+    meta: () => bridge?.meta(),
     _reset() {
       bridge?._reset();
       unbridged = [];
@@ -241,11 +278,24 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   }
 
   function sseDeps(adapters?: PartialAdapters) {
+    const { websocket: socket, ...streamAdapters } = adapters ?? {};
+    const realtime = deps.context().$realtime as
+      | { content_type?: string; transports?: unknown[] }
+      | undefined;
+    const contentType = realtime?.content_type ?? "application/json";
+    const wsFactory = deps.ws?.get();
     return {
-      ...adapters,
+      ...streamAdapters,
+      ...(wsFactory === undefined ? {} : { websocket: wsFactory }),
+      useWebSocket: realtime?.transports?.includes("ws") === true,
+      ...(socket === undefined ? {} : { socket }),
+      websocketFetch: adapters?.fetch ?? defaultFetch(),
       // A stream event carries no dirty snapshot, so the server value wins.
       apply: (raw: unknown, page: string) => void applier.apply(raw, { owner: page }),
-      fetch: (request: WireRequest) => void wire.fetch(request),
+      parse: (body: string) => wire.parseStream(contentType, body),
+      fetch: (request: WireRequest) => wire.fetch(request),
+      cancel: (request: { url: string; zone: string }) =>
+        wire.abort(`${request.url.split("?")[0]} ${request.zone}`),
       dispatch: announce(adapters),
       pageUrl: (el: Element) => layers.urlFor(el),
     };
@@ -316,6 +366,9 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       return layers;
     },
     get sse() {
+      return sse;
+    },
+    get stream() {
       return sse;
     },
     _current: () => navigation.current(),

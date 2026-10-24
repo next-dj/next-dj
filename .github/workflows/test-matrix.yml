@@ -28,6 +28,17 @@ jobs:
           - python-version: "3.14"
             django-version: "5.2"
 
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
     steps:
     - uses: actions/checkout@v6
       with:
@@ -60,6 +71,8 @@ jobs:
       run: |
         uv run --no-project python -c 'import django; print(f"Django version: {django.get_version()}")'
     - name: Run tests
+      env:
+        REDIS_URL: redis://localhost:6379/0
       run: ${{ inputs.test-command }}
     - name: Upload coverage to Codecov
       if: inputs.upload-codecov

@@ -14,6 +14,7 @@ The stream helper
 -----------------
 
 ``PatchEventStream`` is a :class:`~django.http.StreamingHttpResponse` returned from a page's ``render`` escape hatch.
+For broker-backed topic delivery with automatic WSGI/ASGI selection, use :doc:`/content/topics/realtime`.
 There is no dedicated SSE endpoint and no new public URL.
 The page view authorizes the subscriber, the same as any other page.
 
@@ -39,7 +40,10 @@ The page view authorizes the subscriber, the same as any other page.
        """Open the patch event stream for one poll."""
        return PatchEventStream(request, patch_source(request, poll.pk))
 
-Each ``Patches`` the source yields becomes one ``next-patches`` event, serialized by the active protocol backend, the same shape an HTTP response carries.
+Each ``Patches`` the source yields becomes one ``next-patches`` event.
+The HTTP envelope shape is preserved and ``server_time`` is added only to the SSE data frame.
+Topic streams also add ``topic``, ``epoch``, and ``seq``.
+The active protocol backend owns the stream codec.
 A ``data-next-sse="/url/"`` element on the page opens the ``EventSource`` and routes each event into the same apply pipeline an HTTP response uses.
 
 The refresh fan-out
@@ -53,7 +57,14 @@ The stream carries no HTML.
    :caption: a fan-out event
 
    event: next-patches
-   data: {"version":"9f3c2e1b","request_id":"1c9f…-r1","ops":[{"op":"refresh","zone":"poll-results"}]}
+   data: {"version":"9f3c2e1b","ops":[{"op":"refresh","zone":"poll-results"}],"assets":[],"form":null,"request_id":"1c9f…-r1","server_time":1792843200000,"topic":"poll:42","epoch":"9f2c41d07a3be851","seq":18}
+
+Topic streams append ``server_time``, ``topic``, ``epoch``, and ``seq`` to the SSE data object.
+Manual ``PatchEventStream`` sources receive ``server_time`` as well.
+Neither path changes the ordinary ``PatchResponse`` body or ``Envelope.as_dict()``.
+
+The envelope keeps the key order ``version``, ``ops``, ``assets``, ``form``, and ``csrf`` when present, then ``request_id`` when present.
+Empty ``assets`` and an absent form are serialized as ``[]`` and ``null``.
 
 Authorization stays in the subscriber's view, because the zone GET travels the page's own URL, the same view, the same guards, the same middleware as a full load.
 The stream never broadcasts one user's HTML to another, and the event channel does not have to know who may see what.
@@ -141,8 +152,11 @@ Stream telemetry
 ----------------
 
 ``PatchEventStream`` announces its own life through two signals, both sent with the stream class as the sender.
-``sse_stream_opened`` carries the ``request`` and fires when the response is built.
-``sse_stream_closed`` carries the ``request``, the ``duration_ms`` the connection lived, and the ``envelopes_sent`` count flushed over it, and fires when the source is exhausted or the client is gone.
+``sse_stream_opened`` carries the ``request`` and fires when iteration starts and the first frame is about to be sent.
+``sse_stream_closed`` carries the ``request``, the ``duration_ms`` the connection lived, and the ``envelopes_sent`` count yielded to Django's response iterator.
+It fires when the source is exhausted or the response closes its iterator.
+The count does not confirm network delivery after a disconnect.
+A blocked sync source cannot observe a disconnect until another item is yielded or the source returns.
 
 .. code-block:: python
    :caption: notes/signals.py

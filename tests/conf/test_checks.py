@@ -29,6 +29,7 @@ VALID_TYPED_VALUES: dict[str, object] = {
     "CSRF_DELIVERY": "auto",
     "NEXT_JS_OPTIONS": {},
     "METADATA": {},
+    "REALTIME": {},
     "SITE": {},
     "SEO": {},
     "CONSENT": {},

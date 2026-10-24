@@ -57,6 +57,7 @@ _KEY_TYPES: dict[str, type] = (
         "CONSENT": dict,
         "METADATA": dict,
         "NEXT_JS_OPTIONS": dict,
+        "REALTIME": dict,
         "SEO": dict,
         "SITE": dict,
     }

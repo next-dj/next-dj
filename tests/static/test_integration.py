@@ -149,9 +149,13 @@ class TestJsContextFlowsThroughInit:
         assert (
             'Next._init({"user":"alice","score":42,'
             '"$chunks":{"scripts":"/static/next/next.scripts.min.js",'
-            '"sse":"/static/next/next.sse.min.js",'
+            '"stream":"/static/next/next.stream.min.js",'
+            '"sse":"/static/next/next.stream.min.js",'
+            '"ws":"/static/next/next.ws.min.js",'
             '"csrf":"/static/next/next.csrf.min.js",'
-            '"poll":"/static/next/next.poll.min.js"}})'
+            '"poll":"/static/next/next.poll.min.js"},'
+            '"$realtime":{"protocol":2,"transports":["sse"],'
+            '"content_type":"application/vnd.next.patches+json"}})'
         ) in out
 
 

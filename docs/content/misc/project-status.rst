@@ -20,7 +20,7 @@ Run ``uv run python manage.py check`` after an upgrade, because the framework re
 What that classifier does not describe is how the code is held, which is the part a reader evaluating the project can verify.
 Every merge carries 100 percent line and branch coverage over ``next/``, the same threshold on every project under ``examples/``, and the same on the TypeScript client runtime.
 Mypy runs strict over the whole package, Ruff runs with every rule selected, and a benchmark job fails a pull request whose median regresses past the gate it sets.
-The client runtime has a hard gzip budget of 14 KB, checked on every run because it ships on every page, and each lazy chunk carries a budget of its own.
+The client runtime has a hard gzip budget of 15 KiB, checked on every run because it ships on every page, and each lazy chunk carries a budget of its own.
 :doc:`/content/contributing/quality-gates` states what each gate measures and which command reproduces it.
 
 Road to 1.0
@@ -31,10 +31,12 @@ The public API has to freeze, which means the curated top-level ``next.*`` expor
 The ``NEXT_FRAMEWORK`` key set has to freeze with it, so an upgrade adds keys and renames none.
 The extension contracts have to freeze last, the backend base classes of every family and the ports in :doc:`/content/ref/ports`, because an extension written against them outlives the release it was written on.
 
-Three subsystems are still moving.
+Four subsystems are still moving.
 Partial rendering carries the largest surface and the most open questions, and its own :doc:`/content/topics/partial-rendering/limitations` page states what the current model does not cover.
 The client runtime moves with it, since the two halves of the protocol change together.
-The static pipeline is the third, where asset name resolution and the rules a custom backend inherits are the parts a project extending it reads from the reference page rather than from a recipe.
+Realtime transport and broker integrations are also moving while the project exercises them in production shaped deployments.
+See :doc:`/content/topics/realtime` for the current contract.
+The static pipeline is the fourth, where asset name resolution and the rules a custom backend inherits are the parts a project extending it reads from the reference page rather than from a recipe.
 Routing, pages, layouts, context, and form dispatch are the settled half of the tree.
 
 The criterion for leaving Alpha is therefore not a feature count.

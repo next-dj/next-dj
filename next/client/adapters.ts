@@ -7,9 +7,10 @@ import type { SessionStore } from "./assets";
 import type { PopStateAdapter } from "./layers";
 import type { Move } from "./morph";
 import type { EventSourceAdapter, VisibilityAdapter } from "./sse";
+import type { WebSocketAdapter } from "./ws";
 import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
 import type { Clock, FetchAdapter, Navigate } from "./wire";
-import { sameOrigin } from "./protocol";
+import { SSE_END, SSE_HELLO, SSE_SKIP, sameOrigin } from "./protocol";
 
 /** The fetch seam, a real fetch would hit the network in tests. */
 export function defaultFetch(): FetchAdapter {
@@ -113,8 +114,9 @@ export function defaultObserver(): IntersectionAdapter {
 }
 
 // moveBefore moves a node atomically, so an iframe, video, focus, and CSS
-// animation survive the move without a disconnect/connect cycle.
-const HAS_MOVE_BEFORE = "moveBefore" in Element.prototype;
+// animation survive the move without a disconnect/connect cycle. The probe is
+// marked pure so the lazy chunks that import other adapters drop it.
+const HAS_MOVE_BEFORE = /* @__PURE__ */ (() => "moveBefore" in Element.prototype)();
 
 /** The atomic-move seam over moveBefore, falling back to insertBefore. */
 export const defaultMove: Move = (parent, node, before) => {
@@ -135,16 +137,36 @@ export const defaultMove: Move = (parent, node, before) => {
 /** The EventSource seam for the SSE bridge, jsdom does not implement EventSource. */
 export function defaultEventSource(): EventSourceAdapter {
   return {
-    open(url, onMessage, onError) {
+    open(url, onMessage, onError, onControl, onOpen) {
       const es = new EventSource(url, { withCredentials: true });
+      es.onopen = () => onOpen?.();
       es.addEventListener("next-patches", (event) =>
         onMessage((event as MessageEvent<string>).data),
       );
+      for (const name of [SSE_HELLO, SSE_SKIP, SSE_END]) {
+        es.addEventListener(name, (event) =>
+          onControl?.(name, (event as MessageEvent<string>).data),
+        );
+      }
       // A CLOSED readyState is a 4xx or a permanent failure with no native
       // reconnect, CONNECTING means the browser is already retrying.
       es.onerror = () => onError(es.readyState === EventSource.CLOSED);
       // close ends the connection and discards every listener with the object.
       return { close: () => es.close() };
+    },
+  };
+}
+
+/** The native WebSocket seam, kept injectable for deterministic transport tests. */
+export function defaultWebSocket(): WebSocketAdapter {
+  return {
+    open(url, onOpen, onMessage, onClose) {
+      const socket = new WebSocket(url);
+      socket.onopen = () => onOpen((data) => socket.send(data));
+      socket.onmessage = (event) => onMessage(event.data);
+      socket.onclose = (event) => onClose(event.code);
+      socket.onerror = () => undefined;
+      return { close: () => socket.close() };
     },
   };
 }

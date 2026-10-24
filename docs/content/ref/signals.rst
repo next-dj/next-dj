@@ -30,8 +30,9 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
 ``uid`` is the registry identity of the action, the value the dispatch URL and the ``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores no uid in its meta.
 ``request`` is the live ``HttpRequest`` being dispatched and must not be retained past the receiver call.
 
-Eight signals announce a backend the shared loader built, one per settings-driven family.
-``component_backend_loaded``, ``consent_backend_loaded``, ``form_backend_loaded``, ``partial_backend_loaded``, ``router_backend_loaded``, ``sitemap_backend_loaded``, ``static_backend_loaded``, and ``wizard_backend_loaded`` all send the resolved backend class as the sender and carry ``config``, a copy of the settings entry, and ``instance``, the object the loader built from it.
+Signals announce backends the framework builds from settings.
+The shared-loader signals send the resolved class as the sender and carry ``config``, a copy of the settings entry, and ``instance``, the object the loader built from it.
+``broker_backend_loaded`` uses the same payload shape for the selected realtime broker.
 Each family owns its own signal rather than sharing one, so a receiver connected with ``sender=`` does not have to sort one family's classes out of another's.
 ``router_backend_loaded`` and ``component_backend_loaded`` are skipped on a reload that asks not to notify, which is what a caller reloading from inside a receiver passes.
 
@@ -82,6 +83,15 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``info``, ``template_path``
      - After a component is rendered to HTML.
        ``template_path`` may be ``None`` for components without a template file.
+   * - ``broker_backend_loaded``
+     - The realtime broker class
+     - ``config``, ``instance``
+     - After the configured broker is created on first use.
+       The manager lock is already released, so a receiver may read the broker again from any thread.
+   * - ``message_published``
+     - The realtime broker class
+     - ``topic``, ``message``
+     - After the broker accepts a publication.
    * - ``components_registered``
      - ``ComponentRegistry``
      - ``infos``
@@ -188,14 +198,15 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``config``, ``instance``
      - After one ``SEO["SITEMAP_BACKENDS"]`` entry is instantiated, once per entry on every manager reload.
    * - ``sse_stream_closed``
-     - ``PatchEventStream``
+     - The concrete stream class
      - ``request``, ``duration_ms``, ``envelopes_sent``
      - When a patch event stream ends, its source exhausted or the client gone.
-       ``envelopes_sent`` counts the envelopes flushed over the connection.
+       ``envelopes_sent`` counts envelope frames yielded to Django's response iterator.
+       It does not confirm network delivery after a disconnect.
    * - ``sse_stream_opened``
-     - ``PatchEventStream``
+     - The concrete stream class
      - ``request``
-     - When a patch event stream starts.
+     - When iteration starts and the first stream frame is about to be sent.
    * - ``static_backend_loaded``
      - The static backend class
      - ``config``, ``instance``

@@ -76,6 +76,9 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 :doc:`partial`
    ``next.partial`` for the patch builder, zones, SSE streams, and the protocol backend.
 
+:doc:`realtime`
+   ``next.realtime`` for topic names, broker backends, and published messages.
+
 :doc:`metadata`
    ``next.pages.metadata`` for the metadata dicts, value objects, renderer, and ``ld`` nodes.
 
@@ -161,6 +164,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    forms
    static
    partial
+   realtime
    metadata
    seo
    site

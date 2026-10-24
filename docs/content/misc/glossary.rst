@@ -188,6 +188,25 @@ Terms used throughout the next.dj documentation.
       The wire object of a partial response.
       Carries the asset version, the ordered patch ops, the co-located assets of the rendered targets, and the machine-readable form meta.
 
+   stream frame
+      The transport wrapper around a patch envelope.
+      Realtime frames add ``topic``, ``epoch``, ``seq``, and ``server_time`` beside the envelope, while SSE and WebSocket use different framing.
+      See :doc:`/content/topics/realtime`.
+
+   realtime topic
+      A named broker channel to which an application publishes safe patch operations or events.
+      A topic notification is ephemeral and not a durable event log.
+      See :doc:`/content/topics/realtime`.
+
+   sequence number
+      The per-topic ``seq`` value used to detect duplicate or missed realtime messages.
+      It is unique within an ``epoch``, the random token a broker draws whenever a topic counter starts again.
+      A gap or an epoch change causes the client to re-fetch its bound zones over guarded HTTP.
+
+   resync
+      The guarded HTTP zone request that restores current state after a realtime gap or reconnect.
+      The server renders the response for each subscriber and its own cookies.
+
    provider
       A class that produces a value for a parameter.
       Implements ``can_handle`` and ``resolve``.

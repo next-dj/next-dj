@@ -4,6 +4,7 @@ import json
 from decimal import Decimal
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
+from unittest import mock
 
 import pytest
 from django.test import RequestFactory
@@ -14,6 +15,7 @@ from next.static.runtime import (
     CSRF_PAYLOAD_KEY,
     DEV_PAYLOAD_KEY,
     NEXT_JS_STATIC_PATH,
+    REALTIME_PAYLOAD_KEY,
     RESERVED_PAYLOAD_KEYS,
     _failures as runtime_failures,
     csrf_payload_for,
@@ -398,12 +400,45 @@ class TestNextJsStaticPath:
         assert NEXT_JS_STATIC_PATH.endswith(".js")
 
 
+class TestRealtimePayload:
+    def test_chunk_payload_advertises_sse_protocol(self) -> None:
+        builder = NextScriptBuilder(URL)
+        out = builder.init_script({"$chunks": {"stream": "/stream.js"}})
+        assert (
+            f'"{REALTIME_PAYLOAD_KEY}":{{"protocol":2,"transports":["sse"],'
+            '"content_type":"application/vnd.next.patches+json"}'
+        ) in out
+
+    def test_caller_cannot_override_realtime_protocol(self) -> None:
+        builder = NextScriptBuilder(URL)
+        out = builder.init_script(
+            {
+                "$chunks": {},
+                REALTIME_PAYLOAD_KEY: {"protocol": 1, "transports": ["poll"]},
+            }
+        )
+        assert out.count(f'"{REALTIME_PAYLOAD_KEY}"') == 1
+        assert (
+            '"protocol":2,"transports":["sse"],'
+            '"content_type":"application/vnd.next.patches+json"'
+        ) in out
+
+    def test_payload_uses_the_selected_partial_backend_content_type(self) -> None:
+        builder = NextScriptBuilder(URL)
+        with mock.patch(
+            "next.partial.manager.partial_backend_manager.get"
+        ) as get_backend:
+            get_backend.return_value.content_type = "text/vnd.turbo-stream.html"
+            out = builder.init_script({"$chunks": {}})
+        assert '"content_type":"text/vnd.turbo-stream.html"' in out
+
+
 class TestReservedPayloadKeys:
     """The reserved set is the single source of truth for framework-owned keys."""
 
     def test_holds_every_framework_wire_name(self) -> None:
         assert (
-            frozenset({"$csrf", "$dev", "$chunks", "$scripts", "$consent"})
+            frozenset({"$csrf", "$dev", "$chunks", "$realtime", "$scripts", "$consent"})
             == RESERVED_PAYLOAD_KEYS
         )
 

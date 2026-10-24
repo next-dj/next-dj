@@ -27,7 +27,15 @@ LIST_KEYS: Final[frozenset[str]] = frozenset(
     }
 )
 DICT_KEYS: Final[frozenset[str]] = frozenset(
-    {"NEXT_JS_OPTIONS", "FORM_WIZARD_BACKEND", "METADATA", "SITE", "SEO", "CONSENT"}
+    {
+        "NEXT_JS_OPTIONS",
+        "FORM_WIZARD_BACKEND",
+        "METADATA",
+        "REALTIME",
+        "SITE",
+        "SEO",
+        "CONSENT",
+    }
 )
 STR_KEYS: Final[frozenset[str]] = frozenset(
     {

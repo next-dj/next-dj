@@ -150,7 +150,22 @@ It travels the page's own URL through the same routed view, so the page's access
 A zone inside a ``{% has_perm %}`` block of the page, or in the body of a component that decides what it shows, is refused to every partial request as an unknown zone, so the decision about a permission lives inside the zone, see :ref:`topics-permissions-zones`.
 
 An SSE stream is a response the project returns from one of its own pages, not an endpoint the framework adds.
-The authorization of that page is therefore the only gate on the stream, and a stream that fans out rows a visitor may not read needs the filter in the generator that produces them, see :doc:`/content/topics/partial-rendering/sse`.
+The authorization of that page is therefore the first gate on the stream.
+Row-level access that a topic callback does not express belongs in that guarded page.
+
+An importable ``authorize(user, topic)`` callback on ``TopicStream`` keeps protecting the stream after the page guard ran, over SSE and WebSocket alike.
+Each connection rechecks its session and calls the callback at most once per ``REALTIME['HEARTBEAT']`` interval, so a revocation is noticed within about two heartbeat intervals plus the callback's latency.
+A topic denial ends an SSE stream with a terminal ``next-end`` frame, while a revoked session ends it without one so the reconnect meets the page guard again.
+A denied socket closes with ``4401`` for a session problem or ``4403`` for a topic denial.
+
+WebSocket negotiation issues a short-lived session-bound ticket through that guarded page.
+The ticket is sent in the first socket frame, never in the URL, and carries the stream's topics, transform, and authorizer reference.
+If the stream cannot be represented by stable importable callbacks, negotiation falls back to SSE.
+The socket needs a server-side session engine, because a signed-cookie session leaves nothing on the server to recheck, and ``next.W145`` reports it.
+The WebSocket Origin check reads ``ALLOWED_HOSTS`` and refuses a ``*`` entry, see :doc:`/content/deployment/wsgi-asgi`.
+
+Published topic operations must not carry rendered HTML.
+Publish a ``refresh`` and let each subscriber's guarded HTTP request render the response for that user.
 
 Every zone morph enforces page-level access on its own.
 A ``morph(zone=..., page=...)`` onto a foreign page checks that page's access rule and re-runs its authorization chain, and raises ``ForeignPageNotAuthorizedError`` on a denial or ``DynamicForeignPageError`` for a dynamic body, see :doc:`/content/topics/partial-rendering/reference`.
