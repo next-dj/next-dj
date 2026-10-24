@@ -1,8 +1,9 @@
 import multiprocessing
 import queue
 import time
+import traceback
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from multiprocessing.context import SpawnContext, SpawnProcess
 from multiprocessing.queues import Queue
@@ -19,8 +20,7 @@ from tests.load.server import serve
 from tests.load.stats import ProcessReport, TransportTotals, combine
 
 
-SETUP_TIMEOUT = 60.0
-READY_TIMEOUT = 120.0
+SETUP_TIMEOUT = 30.0
 DRAIN_TIMEOUT = 10.0
 JOIN_TIMEOUT = 10.0
 EXIT_GRACE = 2.0
@@ -72,10 +72,40 @@ class Channels:
     received: Queue[ProcessReport]
     start: Event
     abort: Event
+    failures: Queue[tuple[str, str]]
+
+
+def supervise(
+    target: Callable[..., None], failures: Queue[tuple[str, str]], *args: object
+) -> None:
+    """Run a worker target and hand its traceback to the parent before it dies."""
+    try:
+        target(*args)
+    except Exception:
+        failures.put((multiprocessing.current_process().name, traceback.format_exc()))
+        raise
+
+
+def _failure(process: SpawnProcess, failures: Queue[tuple[str, str]]) -> str:
+    """Describe a failed worker, with the traceback it sent when it sent one."""
+    msg = f"{process.name} exited with code {process.exitcode}."
+    deadline = time.monotonic() + SLICE
+    while (remaining := deadline - time.monotonic()) > 0:
+        try:
+            name, trace = failures.get(timeout=remaining)
+        except queue.Empty:
+            break
+        if name == process.name:
+            return f"{msg}\n{trace}"
+    return msg
 
 
 def _get[T](
-    source: Queue[T], timeout: float, missing: str, watched: Sequence[SpawnProcess]
+    source: Queue[T],
+    timeout: float,
+    missing: str,
+    watched: Sequence[SpawnProcess],
+    failures: Queue[tuple[str, str]],
 ) -> T:
     """Take one item off a queue in short slices, failing as soon as a worker dies.
 
@@ -91,8 +121,7 @@ def _get[T](
         except queue.Empty:
             for process in watched:
                 if process.exitcode is not None and process.exitcode != 0:
-                    msg = f"{process.name} exited with code {process.exitcode}."
-                    raise HarnessError(msg) from None
+                    raise HarnessError(_failure(process, failures)) from None
 
 
 def client_jobs(profile: Profile, port: int) -> tuple[ClientJob, ...]:
@@ -111,8 +140,9 @@ def client_jobs(profile: Profile, port: int) -> tuple[ClientJob, ...]:
             index=index,
             port=port,
             clients=tuple(specs[index::count]),
-            ready_timeout=READY_TIMEOUT,
-            totals_timeout=READY_TIMEOUT + profile.duration + SETUP_TIMEOUT,
+            connect_concurrency=max(profile.connect_concurrency // count, 1),
+            ready_timeout=profile.ready_timeout,
+            totals_timeout=profile.ready_timeout + profile.duration + SETUP_TIMEOUT,
             drain_timeout=DRAIN_TIMEOUT,
         )
         for index in range(count)
@@ -127,7 +157,7 @@ def publisher_jobs(profile: Profile) -> tuple[PublisherJob, ...]:
             topics=profile.topic_names,
             rate=profile.rate,
             messages=profile.messages,
-            start_timeout=READY_TIMEOUT + 2 * SETUP_TIMEOUT,
+            start_timeout=profile.ready_timeout + 2 * SETUP_TIMEOUT,
         )
         for index in range(profile.publishers)
     )
@@ -150,17 +180,27 @@ def _stop(processes: Sequence[SpawnProcess]) -> None:
 
 
 def _await_ready(
-    profile: Profile, channels: Channels, workers: Sequence[SpawnProcess]
+    profile: Profile,
+    channels: Channels,
+    workers: Sequence[SpawnProcess],
+    watched: Sequence[SpawnProcess],
 ) -> None:
-    """Wait for every worker, then refuse to publish unless every client got hello."""
+    """Wait for every worker, then refuse to publish unless every client got hello.
+
+    The server reports no readiness, so it is watched for failure but never awaited.
+    """
     hello = 0
-    for _ in workers:
+    silent = [worker.name for worker in workers]
+    deadline = time.monotonic() + profile.ready_timeout + SETUP_TIMEOUT
+    while silent:
         ready = _get(
             channels.ready,
-            READY_TIMEOUT + SETUP_TIMEOUT,
-            "A worker never became ready.",
-            workers,
+            deadline - time.monotonic(),
+            f"No readiness within the deadline from {', '.join(silent)}.",
+            watched,
+            channels.failures,
         )
+        silent.remove(ready.worker)
         if ready.kind == "clients":
             hello += ready.hello
     clients = profile.sse_clients + profile.ws_clients
@@ -184,6 +224,7 @@ def _measure(
             profile.duration + SETUP_TIMEOUT,
             "A publisher never reported its counts.",
             workers,
+            channels.failures,
         )
         for _ in range(profile.publishers)
     )
@@ -199,6 +240,7 @@ def _measure(
             DRAIN_TIMEOUT + SETUP_TIMEOUT,
             "A client process never reported its totals.",
             workers,
+            channels.failures,
         )
         for _ in controls
     ]
@@ -215,8 +257,15 @@ def _workers(
     """Build the client and publisher processes without starting them."""
     workers = [
         context.Process(
-            target=run_clients,
-            args=(job, channels.ready, control, channels.received),
+            target=supervise,
+            args=(
+                run_clients,
+                channels.failures,
+                job,
+                channels.ready,
+                control,
+                channels.received,
+            ),
             name=f"load-clients-{job.index}",
             daemon=True,
         )
@@ -224,8 +273,10 @@ def _workers(
     ]
     workers.extend(
         context.Process(
-            target=run_publisher,
+            target=supervise,
             args=(
+                run_publisher,
+                channels.failures,
                 job,
                 channels.ready,
                 channels.start,
@@ -253,9 +304,13 @@ def run(profile: Profile) -> Outcome:
         received=context.Queue(),
         start=context.Event(),
         abort=context.Event(),
+        failures=context.Queue(),
     )
     server = context.Process(
-        target=serve, args=(ports,), name="load-server", daemon=True
+        target=supervise,
+        args=(serve, channels.failures, ports),
+        name="load-server",
+        daemon=True,
     )
     workers: list[SpawnProcess] = []
     server.start()
@@ -264,7 +319,11 @@ def run(profile: Profile) -> Outcome:
             msg = "The server process has no pid."
             raise HarnessError(msg)
         port = _get(
-            ports, SETUP_TIMEOUT, "The server never reported its port.", [server]
+            ports,
+            SETUP_TIMEOUT,
+            "The server never reported its port.",
+            [server],
+            channels.failures,
         )
         try:
             with ResourceSampler(server.pid) as sampler:
@@ -274,7 +333,7 @@ def run(profile: Profile) -> Outcome:
                 opened = time.monotonic()
                 for worker in workers:
                     worker.start()
-                _await_ready(profile, channels, [server, *workers])
+                _await_ready(profile, channels, workers, [server, *workers])
                 open_seconds = time.monotonic() - opened
                 measured = _measure(profile, channels, controls, [server, *workers])
         finally:

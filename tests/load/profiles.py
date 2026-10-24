@@ -18,6 +18,8 @@ class Profile:
     rate: float
     duration: float
     client_processes: int
+    ready_timeout: float
+    connect_concurrency: int
     max_lost_ratio: float
     max_client_lost_ratio: float
     max_error_ratio: float
@@ -25,7 +27,7 @@ class Profile:
 
     @property
     def messages(self) -> int:
-        """Return how many messages one publisher schedules, one per tick of the rate."""
+        """Return how many messages one publisher schedules, one per rate tick."""
         return math.ceil(self.rate * self.duration)
 
     @property
@@ -54,6 +56,8 @@ PROFILES: Mapping[str, Profile] = {
         rate=20.0,
         duration=20.0,
         client_processes=1,
+        ready_timeout=30.0,
+        connect_concurrency=64,
         max_lost_ratio=0.0,
         max_client_lost_ratio=0.0,
         max_error_ratio=0.0,
@@ -68,6 +72,8 @@ PROFILES: Mapping[str, Profile] = {
         rate=50.0,
         duration=30.0,
         client_processes=4,
+        ready_timeout=120.0,
+        connect_concurrency=64,
         max_lost_ratio=0.001,
         max_client_lost_ratio=0.01,
         max_error_ratio=0.01,

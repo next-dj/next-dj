@@ -190,6 +190,12 @@ An unknown name fails the run.
    * - Client processes
      - 1
      - 4
+   * - Ready timeout
+     - 30 seconds
+     - 120 seconds
+   * - Concurrent connects
+     - 64
+     - 64
    * - Allowed lost ratio
      - 0
      - 0.001
@@ -202,6 +208,10 @@ An unknown name fails the run.
    * - Allowed resync ratio
      - 0
      - 0.01
+
+The ready timeout bounds how long the clients may take to receive ``hello`` before the run fails without publishing.
+A worker process that raises fails the run at once with the worker traceback in the pytest report instead of waiting out a deadline.
+The concurrent connects cap how many connections all client processes open at once, which keeps the server's accept queue below the macOS default ``kern.ipc.somaxconn`` of 128.
 
 ``LOAD_DURATION`` overrides the duration of the chosen profile with a positive number of seconds, which suits a quick smoke run.
 
@@ -221,6 +231,7 @@ It waits until ``docker exec`` runs ``redis-cli ping`` inside the container and 
 When the run ends, it stops that container by its id, and it never stops a container it did not start.
 That path needs Docker.
 The harness raises the Redis client pool through ``max_connections`` in the URL, because each subscription holds one connection and the library default of 100 is too small.
+The local-memory cache that holds the sessions is sized well above the sessions of any profile, because an evicted session fails the WebSocket ticket check.
 Every run keys its data under a unique prefix and purges it afterwards.
 
 Metrics and pass criteria

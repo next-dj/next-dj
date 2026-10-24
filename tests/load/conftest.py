@@ -38,7 +38,7 @@ def stack(redis_url: str) -> dict[str, object]:
 
 @pytest.fixture()
 def redis_prefix(redis_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
-    """Key the run under a unique prefix that spawned processes inherit, then purge it."""
+    """Key the run under a unique prefix for the spawned processes, then purge it."""
     prefix = f"nextdj-load-{uuid.uuid4().hex[:12]}"
     monkeypatch.setenv("LOAD_REDIS_PREFIX", prefix)
     yield prefix

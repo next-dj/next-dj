@@ -47,7 +47,7 @@ class ClientSpec:
 
 @dataclass(frozen=True, slots=True)
 class ClientJob:
-    """The subscribers one client process runs and the timeouts it obeys."""
+    """The subscribers one client process runs, its connect gate and its timeouts."""
 
     index: int
     port: int
@@ -55,9 +55,9 @@ class ClientJob:
     ready_timeout: float
     totals_timeout: float
     drain_timeout: float
+    connect_concurrency: int
     connect_timeout: float = 30.0
     read_timeout: float = 60.0
-    connect_concurrency: int = 64
     max_reconnects: int = 3
     reconnect_delay: float = 0.5
 

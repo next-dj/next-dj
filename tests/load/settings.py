@@ -3,6 +3,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 BROKER_POOL = 4096
+CACHE_ENTRIES = 100_000
 
 
 def broker_url(url: str) -> str:
@@ -45,6 +46,7 @@ CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "LOCATION": "next-dj-load",
+        "OPTIONS": {"MAX_ENTRIES": CACHE_ENTRIES},
     }
 }
 
