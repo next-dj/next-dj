@@ -116,9 +116,12 @@ describe("WebSocket stream transport", () => {
     made.sockets[0]!.message(JSON.stringify({ type: "unknown", data: {} }));
     made.sockets[0]!.message(JSON.stringify({ type: "patches" }));
     made.sockets[0]!.message(JSON.stringify({ type: "patches", data: { seq: 12 } }));
+    made.sockets[0]!.message(JSON.stringify({ type: "patches", data: [1] }));
     made.sockets[0]!.message({ type: "patches" });
     expect(made.sink.hello).toHaveBeenCalledExactlyOnceWith(JSON.stringify(hello));
-    expect(made.sink.patches).toHaveBeenCalledExactlyOnceWith('seq=10 {"not": json');
+    expect(made.sink.patches).toHaveBeenNthCalledWith(1, 'seq=10 {"not": json');
+    expect(made.sink.patches).toHaveBeenNthCalledWith(2, { seq: 12 });
+    expect(made.sink.patches).toHaveBeenCalledTimes(2);
     expect(made.sink.skip).toHaveBeenCalledWith(
       '{"type":"skip","topic":"poll:4","epoch":"a","seq":11}',
     );

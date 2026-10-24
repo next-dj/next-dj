@@ -1604,6 +1604,40 @@ describe("createSse", () => {
     sse._reset();
   });
 
+  it("applies a parsed websocket envelope as is and parses text through the hook", () => {
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
+    let sink: TransportSink | undefined;
+    const parsed: string[] = [];
+    const sse = createSse({
+      apply: (raw) => applied.push(raw),
+      parse: (body) => {
+        parsed.push(body);
+        return { version: "v1", ops: [], topic: "room", epoch: "e", seq: 2 };
+      },
+      fetch: () => Promise.resolve(),
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      document,
+      visibility: manualVisibility(),
+      useWebSocket: true,
+      websocket: () => ({
+        name: "websocket",
+        open: (_url, opened) => {
+          sink = opened;
+          return { close: () => undefined };
+        },
+      }),
+    });
+    sse.scan(document);
+    const object = { version: "v1", ops: [], topic: "room", epoch: "e", seq: 1 };
+    sink!.patches(object);
+    expect(parsed).toEqual([]);
+    expect(applied).toEqual([object]);
+    sink!.patches("seq=2 custom");
+    expect(parsed).toEqual(["seq=2 custom"]);
+    expect(applied).toHaveLength(2);
+    sse._reset();
+  });
+
   it("closes for good on a terminal end event and reports its code", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();

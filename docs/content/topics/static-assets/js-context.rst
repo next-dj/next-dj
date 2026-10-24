@@ -195,7 +195,7 @@ A project key of any of these names is dropped from the collected context on eve
 The framework then writes its own value where it has one, ``$csrf`` on a payload whose request can mint a CSRF token and ``$dev`` on a payload built while ``DEBUG`` is on.
 The runtime reads ``$csrf`` at bootstrap and seeds the header it stamps on every unsafe request, so a programmatic ``Next.partial.fetch`` carries a token without a form field.
 On a page whose CSRF token is deferred, ``$csrf`` names the token endpoint instead of a token, see :doc:`/content/security/csrf-and-forms`.
-``$chunks`` is part of every payload and names the scripts chunk ``next.scripts.min.js`` under ``scripts``, the stream bridge ``next.stream.min.js`` under ``stream`` and its ``sse`` compatibility alias, the CSRF mint ``next.csrf.min.js`` under ``csrf``, the zone poller ``next.poll.min.js`` under ``poll``, and, while ``DEBUG`` is on, the diagnostics chunk ``next.dev.min.js`` under ``dev``, which the runtime fetches only when ``$dev`` is true, and ``$scripts`` and ``$consent`` carry the script manifest and the consent state, see :doc:`/content/ref/client-extras`.
+``$chunks`` is part of every payload and names the scripts chunk ``next.scripts.min.js`` under ``scripts``, the stream bridge ``next.stream.min.js`` under ``stream``, the WebSocket transport ``next.ws.min.js`` under ``ws``, the CSRF mint ``next.csrf.min.js`` under ``csrf``, the zone poller ``next.poll.min.js`` under ``poll``, and, while ``DEBUG`` is on, the diagnostics chunk ``next.dev.min.js`` under ``dev``, which the runtime fetches only when ``$dev`` is true, and ``$scripts`` and ``$consent`` carry the script manifest and the consent state, see :doc:`/content/ref/client-extras`.
 A chunk the static files storage cannot serve is left out of ``$chunks`` with a warning, and the render stays shareable since its HTML is complete, while ``next.W090`` reports the chunk at deploy.
 A render with no value to write leaves the key out of the payload altogether, so a production page carries no ``$dev`` key at all and an automatically injected payload carries the registered value in no environment.
 A payload the project assembles itself under the ``MANUAL`` policy answers for its own filtering, see `Manual injection`_.
@@ -408,7 +408,7 @@ Pass its ``js_context()``, ``js_context_serializers()``, and ``js_context_encode
        )
 
 A payload built this way carries none of the framework's reserved entries, because the static manager both claims and writes those keys only under ``AUTO``, so a page injected by hand runs no consent-gated script and no deferred CSRF.
-Without ``$chunks`` the runtime has no URL for any lazy chunk, so ``Next.ready("scripts")`` rejects and the stream, CSRF, poll, and diagnostics chunks never load.
+Without ``$chunks`` the runtime has no URL for any lazy chunk, so ``Next.ready("scripts")`` rejects and the stream, WebSocket, CSRF, poll, and diagnostics chunks never load.
 Add ``"$chunks": {name: staticfiles_storage.url(path) for name, path in CHUNK_STATIC_PATHS.items()}`` to the payload, with ``CHUNK_STATIC_PATHS`` from ``next.static.runtime``, so every chunk resolves through the storage.
 ``Next.ready`` waits for ``Next._init``, so a layout that never emits the init script leaves every ``Next.ready`` call pending.
 It does carry a project key of a reserved name, because ``js_context()`` is the unfiltered store and the reserved-key drop lives in the automatic path alone.

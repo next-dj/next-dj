@@ -15,7 +15,7 @@ from django.utils.crypto import constant_time_compare, salted_hmac
 from next.conf import next_framework_settings
 
 from .errors import InvalidTicketError
-from .topics import validate_topic
+from .messages import validate_topic
 
 
 if TYPE_CHECKING:

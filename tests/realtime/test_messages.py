@@ -3,7 +3,8 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from next.partial import Patches
-from next.realtime import Message, Position
+from next.realtime import InvalidTopicError, Message, Position
+from next.realtime.messages import validate_topic
 from tests.support.realtime import message_payload
 
 
@@ -64,3 +65,15 @@ def test_message_from_dict_wrong_wire_type_raises(overrides: dict[str, object]) 
 def test_message_from_dict_non_positive_seq_raises(seq: int) -> None:
     with pytest.raises(ValueError, match="positive"):
         Message.from_dict(message_payload(seq=seq))
+
+
+@pytest.mark.parametrize("topic", ["room:17", "poll.results", "a_b-c", "x" * 200])
+def test_validate_topic_valid_name_is_returned(topic: str) -> None:
+    assert validate_topic(topic) == topic
+
+
+@pytest.mark.parametrize("topic", ["", "next:internal", "bad topic", "x" * 201, 1])
+def test_validate_topic_invalid_name_raises_with_the_value(topic: object) -> None:
+    with pytest.raises(InvalidTopicError) as error:
+        validate_topic(topic)
+    assert error.value.topic == topic

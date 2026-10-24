@@ -259,17 +259,17 @@ class RealtimeConsumer(websocket.AsyncJsonWebsocketConsumer):
         await self._send_message(replace(message, envelope=_prepare(result)))
 
     async def _send_message(self, message: Message) -> None:
-        """Send the exact SSE data text of the backend's frame, never re-parsed."""
-        frame = partial_backend_manager.get().sse_stream_event(
-            message.envelope,
-            StreamMeta(
-                server_time=_now_ms(),
-                topic=message.topic,
-                seq=message.seq,
-                epoch=message.epoch,
-            ),
+        """Send the backend's JSON frame object, or the exact text of its SSE data."""
+        backend = partial_backend_manager.get()
+        meta = StreamMeta(
+            server_time=_now_ms(),
+            topic=message.topic,
+            seq=message.seq,
+            epoch=message.epoch,
         )
-        data = _sse_data(frame)
+        data: object = backend.stream_data(message.envelope, meta)
+        if data is None:
+            data = _sse_data(backend.sse_stream_event(message.envelope, meta))
         if data is None:
             msg = "A partial backend must emit an SSE data field for WebSocket streams."
             raise ImproperlyConfigured(msg)

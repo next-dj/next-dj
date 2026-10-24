@@ -29,6 +29,9 @@ const MAX_BOUND = 64;
 const NOOP: TransportControl = { close: () => undefined };
 const STREAM_SELECTOR = `[${ATTR_STREAM}], [${ATTR_SSE}]`;
 
+/** A patches frame body, raw text for the parse hook or an already decoded object. */
+export type PatchesData = string | Record<string, unknown>;
+
 /** The handle returned by a transport and closed on teardown. */
 export interface TransportControl {
   close(): void;
@@ -36,7 +39,7 @@ export interface TransportControl {
 
 /** Messages a transport delivers to the shared stream protocol. */
 export interface TransportSink {
-  patches(this: void, data: string): void;
+  patches(this: void, data: PatchesData): void;
   hello(this: void, data: string): void;
   skip(this: void, data: string): void;
   // A terminal frame, the server denied or revoked access and the stream stays closed.
@@ -387,20 +390,21 @@ export function createStream(deps: StreamDeps): Stream {
     return id !== undefined && echo.has(id);
   }
 
-  // Parse one event body and apply it, unless it is the client's own echo. A
-  // parse error fires partial:error and the stream lives on.
-  function onMessage(connection: Connection, data: string): void {
-    let raw: unknown;
-    try {
-      raw = deps.parse === undefined ? JSON.parse(data) : deps.parse(data);
-    } catch (error) {
-      deps.dispatch("partial:error", {
-        kind: "parse",
-        body: data,
-        error,
-      } satisfies PartialError);
-      return;
-    }
+  // Parse a text body or take an object frame as is, then apply it unless it is the
+  // client's own echo. A parse error fires partial:error and the stream lives on.
+  function onMessage(connection: Connection, data: PatchesData): void {
+    let raw: unknown = data;
+    if (typeof data === "string")
+      try {
+        raw = (deps.parse ?? JSON.parse)(data);
+      } catch (error) {
+        deps.dispatch("partial:error", {
+          kind: "parse",
+          body: data,
+          error,
+        } satisfies PartialError);
+        return;
+      }
     if (isRecord(raw)) {
       sampleTime(raw[SERVER_TIME]);
       const topic = asString(raw[TOPIC]);
@@ -509,7 +513,7 @@ export function createStream(deps: StreamDeps): Stream {
     connection.control = transport.open(
       url,
       {
-        patches: live((data: string) => onMessage(connection, data)),
+        patches: live((data: PatchesData) => onMessage(connection, data)),
         hello: live((data: string) => onHello(connection, data)),
         skip: live((data: string) => onSkip(connection, data)),
         end: live((data: string) => onError(connection, asString(control(data)?.code))),

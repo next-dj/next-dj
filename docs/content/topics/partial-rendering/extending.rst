@@ -110,7 +110,7 @@ A value is pushed by the name of a registered ``serialize=True`` provider on the
        return Patches(request).context(cart_count=cart.count).response()
 
 A name that is not a ``serialize=True`` provider of the origin page raises ``UnknownContextNameError``, so the verb cannot smuggle an arbitrary value past the provider contract.
-The reserved keys of the init payload, ``$csrf``, ``$dev``, ``$chunks``, ``$scripts``, and ``$consent``, raise ``ReservedContextKeyError`` whether or not the origin page registered them, symmetric to ``event()`` refusing a framework-owned event name.
+The reserved keys of the init payload, ``$csrf``, ``$dev``, ``$chunks``, ``$realtime``, ``$scripts``, and ``$consent``, raise ``ReservedContextKeyError`` whether or not the origin page registered them, symmetric to ``event()`` refusing a framework-owned event name.
 The ``$`` namespace therefore stays the framework's on a patch as it is on a full render.
 A page that registers such a name loses that value on the full render too, so no patch has anything to update, see :doc:`/content/topics/static-assets/js-context`.
 
@@ -250,8 +250,10 @@ The example therefore also overrides ``sse_stream_event`` to put the metadata wh
            data = json.dumps(payload, separators=(",", ":"))
            return f"event: next-patches\ndata: {data}\n\n"
 
-Every stream data frame reaches ``Next.partial.parseHook`` registered for the backend's ``content_type``, over SSE and WebSocket alike.
-A WebSocket ``patches`` frame carries the ``data:`` text of ``sse_stream_event`` unchanged, so a non-JSON format works on both transports.
+Every SSE frame reaches ``Next.partial.parseHook`` registered for the backend's ``content_type``.
+A WebSocket ``patches`` frame reaches it too when its ``data`` is text.
+The stock ``JsonPartialProtocolBackend`` sends an object instead and skips the hook, but only with the stock ``content_type`` and neither ``sse_event`` nor ``sse_stream_event`` overridden.
+A backend with its own ``content_type`` or SSE framing sends the ``data:`` text of ``sse_stream_event`` unchanged, so a non-JSON format works on both transports.
 The hook must return the regular patch envelope with ``topic``, ``epoch``, ``seq``, and ``server_time`` beside it, so the runtime can apply the patches, detect gaps and epoch changes, and keep topic listeners informed.
 
 The ``next-hello``, ``next-skip``, and ``next-end`` control frames are a fixed JSON schema that the client parses without the hook.

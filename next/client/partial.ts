@@ -48,8 +48,8 @@ export interface PartialDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   mergeContext: (data: Record<string, unknown>) => void;
   context: () => Record<string, unknown>;
-  // The SSE bridge, the CSRF token fetch and the poller, each in its own lazy chunk.
-  sse: LazyModule<SseFactory>;
+  // The stream bridge, the CSRF token fetch and the poller, each in its own lazy chunk.
+  stream: LazyModule<SseFactory>;
   ws?: LazyModule<WsTransportFactory>;
   csrf: LazyModule<CsrfMint>;
   poll: LazyModule<PollFactory>;
@@ -158,7 +158,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   };
   const withBridge = (callback: (factory: SseFactory) => void): void => {
     const realtime = deps.context().$realtime as { transports?: unknown[] } | undefined;
-    const loadStream = (): void => deps.sse.whenLoaded(callback);
+    const loadStream = (): void => deps.stream.whenLoaded(callback);
     if (realtime?.transports?.includes("ws") === true && deps.ws !== undefined) {
       void deps.ws.load().then(loadStream);
     } else loadStream();

@@ -45,7 +45,6 @@ NEXT_JS_URL = "/static/next/next.min.js"
 LAZY_CHUNKS = (
     '"scripts":"/static/next/next.scripts.min.js",'
     '"stream":"/static/next/next.stream.min.js",'
-    '"sse":"/static/next/next.stream.min.js",'
     '"ws":"/static/next/next.ws.min.js",'
     '"csrf":"/static/next/next.csrf.min.js",'
     '"poll":"/static/next/next.poll.min.js"'
@@ -61,7 +60,7 @@ DEV_CHUNKS = (
 HASHED = {
     "next/next.min.js": "/static/next/next.min.1a2b.js",
     "next/next.scripts.min.js": "/static/next/next.scripts.min.3c4d.js",
-    "next/next.stream.min.js": "/static/next/next.sse.min.7a8b.js",
+    "next/next.stream.min.js": "/static/next/next.stream.min.7a8b.js",
     "next/next.ws.min.js": "/static/next/next.ws.min.8c9d.js",
     "next/next.csrf.min.js": "/static/next/next.csrf.min.9c0d.js",
     "next/next.poll.min.js": "/static/next/next.poll.min.1e2f.js",
@@ -69,8 +68,7 @@ HASHED = {
 }
 HASHED_CHUNKS = (
     '"$chunks":{"scripts":"/static/next/next.scripts.min.3c4d.js",'
-    '"stream":"/static/next/next.sse.min.7a8b.js",'
-    '"sse":"/static/next/next.sse.min.7a8b.js",'
+    '"stream":"/static/next/next.stream.min.7a8b.js",'
     '"ws":"/static/next/next.ws.min.8c9d.js",'
     '"csrf":"/static/next/next.csrf.min.9c0d.js",'
     '"poll":"/static/next/next.poll.min.1e2f.js"}'
@@ -259,7 +257,7 @@ class TestScriptsChunkUrl:
             second = fresh_manager.inject(html, StaticCollector())
         assert first == second
         assert f"Next._init({{{HASHED_CHUNKS},{REALTIME}}})" in first
-        assert url.call_count == 7
+        assert url.call_count == 6
 
     def test_debug_names_the_hashed_dev_chunk_too(
         self, fresh_manager: StaticManager
@@ -751,7 +749,6 @@ class TestBackendRewritesEveryAssetUrl:
             mock.call(NEXT_JS_URL, request=mock.ANY),
             mock.call("/static/next/next.scripts.min.js", request=mock.ANY),
             mock.call("/static/next/next.stream.min.js", request=mock.ANY),
-            mock.call("/static/next/next.stream.min.js", request=mock.ANY),
             mock.call("/static/next/next.ws.min.js", request=mock.ANY),
             mock.call("/static/next/next.csrf.min.js", request=mock.ANY),
             mock.call("/static/next/next.poll.min.js", request=mock.ANY),
@@ -820,7 +817,6 @@ class TestBrokenRuntimeConfiguration:
             side_effect=_hashed_without("next/next.stream.min.js"),
         ):
             page = StaticManager().inject(self.PAGE, StaticCollector())
-        assert '"sse":"/static/next/next.stream.min.js"' not in page
         assert '"stream":"/static/next/next.stream.min.js"' not in page
         assert '"poll":"/static/next/next.poll.min.js"' in page
         [message] = _records(caplog)

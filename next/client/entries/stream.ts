@@ -2,4 +2,4 @@
 
 import { createSse } from "../sse";
 
-window.Next._land("sse", createSse);
+window.Next._land("stream", createSse);

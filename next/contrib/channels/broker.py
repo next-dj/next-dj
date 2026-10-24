@@ -36,8 +36,7 @@ from django.core.exceptions import ImproperlyConfigured
 from next.realtime.access import run_detached
 from next.realtime.backends import BrokerBackend
 from next.realtime.errors import BrokerConnectionError
-from next.realtime.messages import Message, Position
-from next.realtime.topics import validate_topic
+from next.realtime.messages import Message, Position, validate_topic
 
 
 if TYPE_CHECKING:

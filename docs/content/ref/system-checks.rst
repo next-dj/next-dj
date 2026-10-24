@@ -1017,7 +1017,7 @@ Warnings
        Assets of that kind reach the browser only on a full page render, never through a patch envelope.
      - ``next.static.checks``
    * - ``next.W075``
-     - A page or a component registers a keyed ``serialize=True`` context under a name the ``next.min.js`` init payload reserves, ``$csrf``, ``$dev``, ``$chunks``, ``$scripts``, or ``$consent``.
+     - A page or a component registers a keyed ``serialize=True`` context under a name the ``next.min.js`` init payload reserves, ``$csrf``, ``$dev``, ``$chunks``, ``$realtime``, ``$scripts``, or ``$consent``.
        The framework owns those names on every render, so the registered value never reaches ``window.Next.context`` and no ``context`` patch updates it.
        The message names the declaring ``page.py`` or ``component.py`` and asks for a rename.
        A keyless ``serialize=True`` provider spreads the keys of the dict it returns at render time, so the check never sees them.

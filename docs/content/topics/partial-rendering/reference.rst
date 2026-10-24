@@ -197,7 +197,7 @@ See :doc:`extending` for the end-to-end recipe, the ``context`` and ``event`` se
 An event name that starts with ``partial:`` or ``next:``, or equals ``ready`` or ``context-updated``, is reserved for the runtime lifecycle.
 ``Patches.event()`` rejects such a name with ``ReservedEventNameError``, symmetric to ``op()`` rejecting a built-in verb on the generic channel, so an application cannot forge a lifecycle event.
 
-The ``$csrf``, ``$dev``, ``$chunks``, ``$scripts``, and ``$consent`` keys of the init payload are reserved the same way.
+The ``$csrf``, ``$dev``, ``$chunks``, ``$realtime``, ``$scripts``, and ``$consent`` keys of the init payload are reserved the same way.
 ``Patches.context()`` rejects any of them with ``ReservedContextKeyError``, and the js-context delta of a zone render drops them before it becomes a ``context`` op.
 The ``$`` namespace therefore belongs to the framework on a patch exactly as it does on a full render.
 A full render drops a page or component key of such a name from the payload whether or not it has a framework value to write there, so no patch has a registered value to update.

@@ -6,7 +6,7 @@ from .delivery import apublish, publish
 from .errors import BrokerConnectionError, InvalidTopicError, TopicPayloadError
 from .messages import Message, Position
 from .redis import RedisBroker
-from .streams import TopicStream
+from .topics import TopicStream
 
 
 __all__ = [

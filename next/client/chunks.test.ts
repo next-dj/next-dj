@@ -354,7 +354,7 @@ describe("a scripts chunk past its moment", () => {
 });
 
 describe("a single-module chunk", () => {
-  it("loads the stream chunk from the legacy sse payload key", async () => {
+  it("ignores an sse payload key for the stream chunk", async () => {
     const doc = document.implementation.createHTMLDocument("");
     const chunk = lazyChunk<string>(
       {
@@ -366,12 +366,8 @@ describe("a single-module chunk", () => {
       "stream",
     );
 
-    const loading = chunk.load();
-    expect(doc.head.querySelector("script")?.getAttribute("src")).toBe(
-      "/legacy-stream.js",
-    );
-    chunk.land("stream module");
-    await expect(loading).resolves.toBe("stream module");
+    await expect(chunk.load()).resolves.toBeUndefined();
+    expect(doc.head.querySelector("script")).toBeNull();
   });
 
   function makeDev() {

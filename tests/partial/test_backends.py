@@ -13,6 +13,8 @@ from next.partial.manager import partial_backend_manager
 from next.partial.signals import partial_backend_loaded
 from next.partial.stream import StreamEnd, StreamHello, StreamMeta, StreamSkip
 from next.testing import capture_signals
+from tests.support.cases.realtime import TEXT_FRAME_CASES, TextFrameCase
+from tests.support.codecs import MimeJsonCodec, SseEventJsonCodec, sse_data_text
 
 
 def _sample_envelope() -> Envelope:
@@ -131,12 +133,6 @@ class TestSseEvent:
         }
 
 
-class _WrappedJsonBackend(JsonPartialProtocolBackend):
-    def sse_event(self, envelope: Envelope) -> str:
-        wrapped = json.dumps({"wrapped": envelope.as_dict()})
-        return f"event: next-patches\ndata: {wrapped}\n\n"
-
-
 class _HttpOnlyJsonBackend(JsonPartialProtocolBackend):
     def serialize_envelope(self, envelope: Envelope) -> bytes:
         return json.dumps({"http": envelope.version}).encode()
@@ -146,7 +142,7 @@ class TestJsonSubclassStreamEvents:
     """A JSON subclass keeps its own SSE shape, and HTTP overrides leave SSE alone."""
 
     def test_overridden_sse_event_wins_over_the_metadata_path(self) -> None:
-        backend = _WrappedJsonBackend()
+        backend = SseEventJsonCodec()
         envelope = _sample_envelope()
         frame = backend.sse_stream_event(envelope, StreamMeta(server_time=1, seq=2))
         assert frame == backend.sse_event(envelope)
@@ -281,6 +277,40 @@ class TestProtocolContract:
 
         with pytest.raises(TypeError, match="deserialize_envelope"):
             _WriteOnly()
+
+
+_STREAM_META = StreamMeta(server_time=1700, topic="room:7", seq=3, epoch="e1")
+
+
+class TestStreamData:
+    """Only a JSON backend with stock SSE hooks hands the WebSocket an object."""
+
+    def test_json_backend_returns_the_object_its_sse_frame_encodes(self) -> None:
+        backend = JsonPartialProtocolBackend()
+        envelope = _sample_envelope()
+        frame = backend.sse_stream_event(envelope, _STREAM_META)
+        data = backend.stream_data(envelope, _STREAM_META)
+        assert data == json.loads(frame.splitlines()[1][len("data: ") :])
+        assert data["seq"] == 3
+        assert data["epoch"] == "e1"
+
+    def test_http_only_override_still_returns_the_object(self) -> None:
+        data = _HttpOnlyJsonBackend().stream_data(_sample_envelope(), _STREAM_META)
+        assert data is not None
+        assert data["topic"] == "room:7"
+
+    @pytest.mark.parametrize("case", TEXT_FRAME_CASES, ids=lambda case: case.id)
+    def test_text_frame_codec_returns_none(self, case: TextFrameCase) -> None:
+        assert case.backend.stream_data(_sample_envelope(), _STREAM_META) is None
+
+    def test_custom_mime_type_keeps_the_merged_sse_frame(self) -> None:
+        envelope = _sample_envelope()
+        frame = MimeJsonCodec().sse_stream_event(envelope, _STREAM_META)
+        stock = JsonPartialProtocolBackend()
+        assert frame == stock.sse_stream_event(envelope, _STREAM_META)
+        assert json.loads(sse_data_text(frame)) == stock.stream_data(
+            envelope, _STREAM_META
+        )
 
 
 @pytest.fixture()

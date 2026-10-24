@@ -1,10 +1,26 @@
-"""Immutable broker messages, topic positions and their JSON-safe representation."""
+"""Immutable broker messages, topic positions and the topic names that address them."""
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from next.partial.envelope import Envelope
+
+from .errors import InvalidTopicError
+
+
+_TOPIC = re.compile(r"[A-Za-z0-9_.:-]{1,200}")
+_RESERVED_PREFIX = "next:"
+
+
+def validate_topic(topic: str) -> str:
+    """Return a valid topic name or raise with the rejected value."""
+    if not isinstance(topic, str) or _TOPIC.fullmatch(topic) is None:
+        raise InvalidTopicError(topic)
+    if topic.startswith(_RESERVED_PREFIX):
+        raise InvalidTopicError(topic)
+    return topic
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,4 +85,4 @@ class Message:
         return cls(topic, seq, decoded, float(published_at), epoch)
 
 
-__all__ = ["Message", "Position"]
+__all__ = ["Message", "Position", "validate_topic"]

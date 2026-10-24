@@ -23,6 +23,13 @@ def _sse_json_event(name: str, data: object) -> str:
     return f"event: {name}\ndata: {payload}\n\n"
 
 
+def _stream_frame(envelope: "Envelope", meta: StreamMeta) -> dict[str, Any]:
+    """Merge the stream metadata into the envelope's JSON object."""
+    data = envelope.as_dict()
+    data.update(meta.as_dict())
+    return data
+
+
 class PartialProtocolBackend(ABC):
     """Pluggable strategy for the wire format of patch envelopes.
 
@@ -56,8 +63,18 @@ class PartialProtocolBackend(ABC):
 
         A non-JSON codec overrides it to carry `meta`, or clients lose gap detection.
         """
-        _ = meta
+        del meta
         return self.sse_event(envelope)
+
+    def stream_data(
+        self, envelope: "Envelope", meta: StreamMeta
+    ) -> dict[str, Any] | None:
+        """Return a topic frame as a JSON object, or None for a text-only codec.
+
+        The WebSocket transport sends the object as is, and the SSE data text on None.
+        """
+        del envelope, meta
+        return None
 
     def sse_hello(self, frame: "Mapping[str, object]") -> str:
         """Serialize a stream handshake control frame in the fixed JSON schema."""
@@ -77,6 +94,11 @@ class PartialProtocolBackend(ABC):
 
         A reader parses a body through the backend that wrote it.
         """
+
+
+def _custom_sse_event(cls: type["JsonPartialProtocolBackend"]) -> bool:
+    """Tell whether a JSON backend subclass overrides `sse_event` with its own shape."""
+    return cls.sse_event is not JsonPartialProtocolBackend.sse_event
 
 
 class JsonPartialProtocolBackend(PartialProtocolBackend):
@@ -107,11 +129,26 @@ class JsonPartialProtocolBackend(PartialProtocolBackend):
 
         An overridden `sse_event` defines its own SSE shape, so that shape wins.
         """
-        if type(self).sse_event is not JsonPartialProtocolBackend.sse_event:
+        if _custom_sse_event(type(self)):
             return super().sse_stream_event(envelope, meta)
-        data = envelope.as_dict()
-        data.update(meta.as_dict())
-        return _sse_json_event(_SSE_EVENT_NAME, data)
+        return _sse_json_event(_SSE_EVENT_NAME, _stream_frame(envelope, meta))
+
+    @override
+    def stream_data(
+        self, envelope: "Envelope", meta: StreamMeta
+    ) -> dict[str, Any] | None:
+        """Return the SSE frame object, or None under a custom MIME type or SSE shape.
+
+        A custom MIME type keys its own client parse hook, which only reads text frames.
+        """
+        cls = type(self)
+        if (
+            self.content_type != CONTENT_TYPE
+            or _custom_sse_event(cls)
+            or cls.sse_stream_event is not JsonPartialProtocolBackend.sse_stream_event
+        ):
+            return None
+        return _stream_frame(envelope, meta)
 
     @override
     def deserialize_envelope(self, body: bytes) -> "Envelope":

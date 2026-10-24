@@ -459,6 +459,7 @@ class TestPollAdmin:
             poll.closes_at = timezone.now() + timedelta(minutes=1)
         publish = Mock()
         monkeypatch.setattr("polls.admin.publish", publish)
+        monkeypatch.setattr("polls.realtime.publish", publish)
         poll_admin = PollAdmin(Poll, AdminSite())
 
         poll_admin.save_model(RequestFactory().post("/admin/"), poll, None, True)

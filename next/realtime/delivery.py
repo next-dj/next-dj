@@ -11,9 +11,8 @@ from next.partial.patches import Patches
 
 from .errors import TopicPayloadError
 from .manager import broker_manager
-from .messages import Message
+from .messages import Message, validate_topic
 from .signals import message_published
-from .topics import validate_topic
 
 
 _ALLOWED_OPS = frozenset({"refresh", "event", "toast", "remove"})

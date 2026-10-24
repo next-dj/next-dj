@@ -2,6 +2,14 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from next.partial import PartialProtocolBackend
+from tests.support.codecs import (
+    InstanceMimeJsonCodec,
+    MimeJsonCodec,
+    SseEventJsonCodec,
+    SseStreamEventJsonCodec,
+    TextStreamCodec,
+)
 from tests.support.realtime import ROOM_AUTHORIZER_REF
 
 
@@ -59,4 +67,21 @@ UNUSABLE_REFERENCE_CASES: tuple[TicketReferenceCase, ...] = (
     TicketReferenceCase("non_callable_transform", "django.conf.settings"),
     TicketReferenceCase("missing_authorizer", None, "missing.module.callback"),
     TicketReferenceCase("non_callable_authorizer", None, "django.conf.settings"),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TextFrameCase:
+    """One codec whose topic frame reaches the socket as its SSE data text."""
+
+    id: str
+    backend: PartialProtocolBackend
+
+
+TEXT_FRAME_CASES: tuple[TextFrameCase, ...] = (
+    TextFrameCase("text_codec", TextStreamCodec()),
+    TextFrameCase("sse_event_override", SseEventJsonCodec()),
+    TextFrameCase("sse_stream_event_override", SseStreamEventJsonCodec()),
+    TextFrameCase("custom_mime_type", MimeJsonCodec()),
+    TextFrameCase("instance_mime_type", InstanceMimeJsonCodec()),
 )

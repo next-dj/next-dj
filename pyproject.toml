@@ -49,7 +49,9 @@ Repository = "https://github.com/next-dj/next-dj"
 
 [dependency-groups]
 dev = [
-    "channels[daphne]>=4.2,<5",
+    "channels>=4.2,<5",
+    "uvicorn>=0.38",
+    "wsproto>=1.2",
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
     "pytest-django==4.14.0",
@@ -85,10 +87,13 @@ codspeed = [
 ]
 e2e = [
     "pytest-playwright==0.9.0",
-    "channels[daphne]>=4.2,<5",
+    "channels>=4.2,<5",
+    "uvicorn>=0.38",
+    "wsproto>=1.2",
     "playwright==1.63.0",
 ]
 docs = [
+    "channels>=4.2,<5",
     "defusedxml==0.7.1",
     "doc8==2.0.0",
     "sphinx==9.1.0",
@@ -100,6 +105,11 @@ docs = [
     "sphinxcontrib-apidoc==0.6.0",
     "sphinxcontrib-mermaid==2.1.1",
     "sphinx-reredirects==1.1.0",
+]
+load = [
+    "httpx>=0.28",
+    "websockets>=16",
+    "psutil>=7.2",
 ]
 
 [tool.hatch.version]
@@ -166,6 +176,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "perf: performance benchmarks (opt-in, run with -m perf)",
+    "load: local load runs against a live server (opt-in, run via make load)",
 ]
 addopts = [
     "--strict-markers",
@@ -174,6 +185,7 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-fail-under=100",
     "--ignore=tests/benchmarks",
+    "--ignore=tests/load",
     "-p", "no:benchmark",
     "-p", "no:codspeed",
 ]

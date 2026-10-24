@@ -1,3 +1,4 @@
+import re
 from collections.abc import Iterator
 from datetime import timedelta
 
@@ -16,6 +17,7 @@ from e2e_support.browser import (
 from e2e_support.settings import CONTEXT_ARGS
 from playwright.sync_api import Browser, Locator, Page, Response, Route, expect
 from polls.models import Choice, Poll
+from polls.realtime import publish_phase
 
 from next.partial import Patches
 from next.realtime import publish
@@ -134,18 +136,29 @@ def test_the_vue_island_mounts_and_draws_the_bars_the_server_never_sizes(
 
 
 def test_poll_deadline_uses_the_stream_clock_and_disables_votes(
-    page: Page, base_url: str, tabs_or_spaces: Poll
+    page: Page, base_url: str, tabs_or_spaces: Poll, next_probe: PageProbe
 ) -> None:
-    tabs_or_spaces.closes_at = timezone.now() + timedelta(seconds=4)
+    tabs_or_spaces.closes_at = timezone.now() + timedelta(hours=1)
     tabs_or_spaces.save(update_fields=("closes_at",))
 
     open_poll(page, base_url, tabs_or_spaces)
 
     status = page.locator("[data-poll-status]")
-    expect(status).to_contain_text("Voting closes in")
+    countdown = page.locator("[data-poll-countdown]")
+    expect(countdown).to_have_text(re.compile(r"^Voting closes in \d+ seconds$"))
+    remaining = int(re.findall(r"\d+", countdown.inner_text())[0])
+    assert 60 < remaining <= 3600
+    expect(status).to_have_text("Voting is open")
     expect(page.get_by_role("button", name="Tabs", exact=True)).to_be_enabled()
-    expect(status).to_have_text("Voting is closed", timeout=6000)
+
+    tabs_or_spaces.closes_at = timezone.now() + timedelta(seconds=2)
+    tabs_or_spaces.save(update_fields=("closes_at",))
+    publish_phase(tabs_or_spaces, on_commit=False)
+
+    expect(status).to_have_text("Voting is closed")
+    expect(countdown).to_have_text("")
     expect(page.get_by_role("button", name="Tabs", exact=True)).to_be_disabled()
+    expect_no_partial_request(page, next_probe)
 
 
 def test_voting_repaints_the_zone_through_the_very_same_vue_instance(

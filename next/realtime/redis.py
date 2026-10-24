@@ -34,8 +34,7 @@ from next.partial.envelope import Envelope
 
 from .backends import BrokerBackend
 from .errors import BrokerConnectionError
-from .messages import Message, Position
-from .topics import validate_topic
+from .messages import Message, Position, validate_topic
 
 
 logger = logging.getLogger(__name__)

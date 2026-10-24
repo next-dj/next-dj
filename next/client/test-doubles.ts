@@ -111,10 +111,10 @@ export function unloaded<T>(key: string): Lazy<T> & { tags(): number } {
   return { ...chunk, tags };
 }
 
-// The modules of the sse, csrf, and poll chunks, as createPartial takes them.
+// The modules of the stream, ws, csrf, and poll chunks, as createPartial takes them.
 export const chunkModules = {
   context: () => ({}),
-  sse: landed(createSse),
+  stream: landed(createSse),
   ws: landed(createWebSocketTransport),
   csrf: landed(mintCsrf),
   poll: landed(createPoller),

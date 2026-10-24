@@ -239,8 +239,9 @@ The WebSocket frames are JSON objects.
 ``hello`` carries the SSE ``next-hello`` keys plus ``"type": "hello"`` and ``heartbeat``, the server interval in seconds the client sizes its missed-ping watchdog from.
 ``ping`` is ``{"type": "ping", "server_time": ...}`` and ``skip`` carries ``topic``, ``epoch``, and ``seq``.
 
-A ``patches`` frame is ``{"type": "patches", "data": "<text>"}``, where ``data`` is the exact ``data:`` text of the protocol backend's ``sse_stream_event`` output, never re-parsed on the server.
-The client hands that text to the same parse hook the SSE transport uses, so a custom wire format works on both transports.
+A ``patches`` frame is ``{"type": "patches", "data": ...}``, where ``data`` is the object the protocol backend's ``stream_data`` returns, the envelope with its ``StreamMeta`` keys for the stock JSON backend.
+The stock JSON backend returns ``None`` too once a subclass sets its own ``content_type`` or overrides ``sse_event`` or ``sse_stream_event``.
+A backend whose ``stream_data`` returns ``None`` sends the exact ``data:`` text of its ``sse_stream_event`` output instead, never re-parsed on the server, and the client hands that text to the same parse hook the SSE transport uses, so a custom wire format works on both transports.
 
 ``application`` reads its Origin allowlist from ``ALLOWED_HOSTS`` unless ``origins=`` is passed.
 Each entry becomes a scheme-less pattern that ignores the port, and a leading-dot entry such as ``.example.com`` allows ``example.com`` and every subdomain, as it does in Django.

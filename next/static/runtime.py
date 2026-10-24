@@ -45,9 +45,6 @@ STREAM_CHUNK_STATIC_PATH: Final = "next/next.stream.min.js"
 WS_CHUNK_STATIC_PATH: Final = "next/next.ws.min.js"
 """The optional WebSocket adapter, fetched only when WS is enabled."""
 
-SSE_CHUNK_STATIC_PATH: Final = STREAM_CHUNK_STATIC_PATH
-"""Compatibility alias for the stream bridge under the earlier `sse` key."""
-
 CSRF_CHUNK_STATIC_PATH: Final = "next/next.csrf.min.js"
 """The deferred CSRF token loader, fetched on the first post from a page without one."""
 
@@ -61,7 +58,6 @@ CHUNK_STATIC_PATHS: Final[Mapping[str, str]] = MappingProxyType(
     {
         "scripts": SCRIPTS_CHUNK_STATIC_PATH,
         "stream": STREAM_CHUNK_STATIC_PATH,
-        "sse": SSE_CHUNK_STATIC_PATH,
         "ws": WS_CHUNK_STATIC_PATH,
         "csrf": CSRF_CHUNK_STATIC_PATH,
         "poll": POLL_CHUNK_STATIC_PATH,

@@ -167,9 +167,9 @@ export function createWebSocketTransport(
                 clearTimeout(watchdog);
                 watchdog = setTimeout(failed, heartbeat * 2500);
               }
-              // Patches text reaches the parse hook untouched for custom codecs.
               if (frame.type === "patches") {
-                if (typeof frame.data === "string") sink.patches(frame.data);
+                if (typeof frame.data === "string" || isRecord(frame.data))
+                  sink.patches(frame.data);
               } else if (frame.type === "hello") sink.hello(body);
               else if (frame.type === "skip") sink.skip(body);
               else if (frame.type === "ping") {

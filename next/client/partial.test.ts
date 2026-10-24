@@ -667,11 +667,11 @@ describe("createPartial surface", () => {
     expect(calls.length).toBeGreaterThan(0);
   });
 
-  it("fetches the sse chunk only once a scan finds a stream, then opens it", () => {
-    const sse = unloaded<SseFactory>("sse");
+  it("fetches the stream chunk only once a scan finds a stream, then opens it", () => {
+    const stream = unloaded<SseFactory>("stream");
     const lazy = createPartial({
       ...chunkModules,
-      sse,
+      stream,
       dispatch: () => undefined,
       mergeContext: () => undefined,
     });
@@ -685,12 +685,12 @@ describe("createPartial surface", () => {
     document.head.innerHTML = "";
     document.body.innerHTML = '<div data-next-zone="z"></div>';
     lazy.sse.scan(document);
-    expect(sse.tags()).toBe(0);
+    expect(stream.tags()).toBe(0);
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     lazy.sse.scan(document);
     expect(lazy.sse.size()).toBe(0);
-    expect(sse.tags()).toBe(1);
-    sse.land(createSse);
+    expect(stream.tags()).toBe(1);
+    stream.land(createSse);
     expect(source.opened).toHaveLength(1);
     expect(lazy.sse.size()).toBe(1);
     lazy._reset();
@@ -731,14 +731,15 @@ describe("createPartial surface", () => {
     const stream = unloaded<SseFactory>("stream");
     const lazy = createPartial({
       ...chunkModules,
-      sse: stream,
+      stream,
       dispatch: () => undefined,
       mergeContext: () => undefined,
     });
     const source = mockSource();
     lazy._configure({ document, source: source.adapter });
+    document.head.innerHTML = "";
     document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
-    lazy.sse.scan(document);
+    lazy.stream.scan(document);
     expect(stream.tags()).toBe(1);
     stream.land(createSse);
     expect(source.opened).toHaveLength(1);
@@ -777,11 +778,11 @@ describe("createPartial surface", () => {
   });
 
   it("hands the request ids sent before the bridge to it, so their echoes drop", () => {
-    const sse = unloaded<SseFactory>("sse");
+    const stream = unloaded<SseFactory>("stream");
     const applied: Record<string, unknown>[] = [];
     const lazy = createPartial({
       ...chunkModules,
-      sse,
+      stream,
       dispatch: (event, detail) => {
         if (event === "partial:applied") applied.push(detail);
       },
@@ -798,7 +799,7 @@ describe("createPartial surface", () => {
     lazy.sse.scan(document);
     // Only the last ECHO_LIMIT ids are kept, as the bridge's own ring keeps them.
     for (let i = 0; i < 26; i += 1) lazy.sse.remember(`r${i}`);
-    sse.land(createSse);
+    stream.land(createSse);
     const event = (id: string): string =>
       JSON.stringify({
         version: "v1",
@@ -842,10 +843,10 @@ describe("createPartial surface", () => {
   });
 
   it("a stream chunk landing after a reset scans nothing for the dead pass", () => {
-    const sse = unloaded<SseFactory>("sse");
+    const stream = unloaded<SseFactory>("stream");
     const lazy = createPartial({
       ...chunkModules,
-      sse,
+      stream,
       dispatch: () => undefined,
       mergeContext: () => undefined,
     });
@@ -860,7 +861,7 @@ describe("createPartial surface", () => {
     lazy.sse.scan(document);
     lazy.sse.remember("stale");
     lazy._reset();
-    sse.land(createSse);
+    stream.land(createSse);
     expect(source.opened).toEqual([]);
     lazy.sse.scan(document);
     expect(source.opened).toHaveLength(1);
@@ -1239,10 +1240,10 @@ describe("createPartial surface", () => {
   });
 
   it("ignores a stream chunk that lands after its scan was reset", () => {
-    const sseChunk = unloaded<SseFactory>("sse");
+    const streamChunk = unloaded<SseFactory>("stream");
     const late = createPartial({
       ...chunkModules,
-      sse: sseChunk,
+      stream: streamChunk,
       dispatch: () => undefined,
       mergeContext: () => undefined,
     });
@@ -1255,22 +1256,22 @@ describe("createPartial surface", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     late.stream.scan(document);
     late._reset();
-    sseChunk.land(createSse);
+    streamChunk.land(createSse);
     expect(source.opened).toEqual([]);
   });
 
   it("ignores a stream listener whose lazy chunk lands after reset", () => {
-    const sse = unloaded<SseFactory>("sse");
+    const stream = unloaded<SseFactory>("stream");
     const lazy = createPartial({
       ...chunkModules,
-      sse,
+      stream,
       dispatch: () => undefined,
       mergeContext: () => undefined,
     });
     const seen: unknown[] = [];
     lazy.stream.on("room:1", "room:update", (...args) => seen.push(args));
     lazy._reset();
-    sse.land(createSse);
+    stream.land(createSse);
     expect(seen).toEqual([]);
   });
 

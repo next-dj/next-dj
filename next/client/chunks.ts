@@ -106,9 +106,7 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
     if (value !== undefined) return Promise.resolve(value);
     if (pending !== undefined) return pending;
     const chunks = deps.context().$chunks;
-    const url = isRecord(chunks)
-      ? (asString(chunks[key]) ?? (key === "stream" ? asString(chunks.sse) : undefined))
-      : undefined;
+    const url = isRecord(chunks) ? asString(chunks[key]) : undefined;
     if (url === undefined) return Promise.resolve(undefined);
     const el = doc.createElement("script");
     if (deps.nonce !== undefined) el.nonce = deps.nonce;

@@ -17,8 +17,7 @@ from typing import override
 
 from next.partial.envelope import Envelope
 
-from .messages import Message, Position
-from .topics import validate_topic
+from .messages import Message, Position, validate_topic
 
 
 _NEVER_PUBLISHED = Position(epoch="", seq=0)

@@ -342,7 +342,8 @@ A ``401``, ``403``, or ``406`` reply, any other content type, no reply within fi
 The failure count resets only after a socket stayed open for one heartbeat past its ``hello``, so a server that drops every socket right after ``hello`` still ends on SSE.
 A socket that sends no ``hello`` within five seconds of opening is closed as a transient failure.
 The ``hello`` frame names the server's ``heartbeat`` in seconds, and a socket that receives no frame for two and a half heartbeats counts as dropped, is closed, and reconnects.
-A ``patches`` frame hands its ``data`` text to the registered parse hook unchanged, the same text an ``EventSource`` would deliver.
+A ``patches`` frame whose ``data`` is a string hands that text to the registered parse hook unchanged, the same text an ``EventSource`` would deliver.
+A ``patches`` frame whose ``data`` is an object is applied as is and skips the hook.
 
 The attribute contract
 ~~~~~~~~~~~~~~~~~~~~~~

@@ -2,7 +2,7 @@ import asyncio
 import json
 import threading
 from typing import ClassVar
-from unittest.mock import AsyncMock, create_autospec
+from unittest.mock import AsyncMock, Mock, create_autospec
 from urllib.parse import urlparse
 
 import pytest
@@ -13,7 +13,6 @@ pytest.importorskip("channels")
 from asgiref.sync import sync_to_async
 from asgiref.typing import ASGIApplication, ASGIReceiveCallable, ASGISendCallable, Scope
 from channels.security.websocket import OriginValidator
-from channels.testing import WebsocketCommunicator
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.models import Permission
 from django.contrib.sessions.backends.db import SessionStore
@@ -39,15 +38,19 @@ from next.realtime.tickets import TicketClaims, TicketGrant, issue_ticket
 from tests.support.cases.realtime import (
     MALFORMED_SUBSCRIPTION_CASES,
     RAW_FRAME_CASES,
+    TEXT_FRAME_CASES,
     UNUSABLE_REFERENCE_CASES,
     RefusedFrameCase,
+    TextFrameCase,
     TicketReferenceCase,
 )
+from tests.support.codecs import sse_data_text
 from tests.support.realtime import (
     ROOM_AUTHORIZER_REF,
     SessionTicket,
     issue_session_ticket,
 )
+from tests.support.websocket import WebsocketCommunicator
 
 
 _TOPIC_ALLOWED = True
@@ -257,50 +260,59 @@ def test_consumer_session_bound_ticket_receives_hello_and_cleans_up() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_consumer_published_message_frame_carries_exact_sse_data_text(
+def test_consumer_json_backend_frame_carries_the_stream_object(
     session_ticket: SessionTicket,
 ) -> None:
+    envelope = Patches(None).refresh(zone="score").envelope()
+
     async def scenario() -> None:
         communicator = await _connect(session_ticket.session)
         await _subscribe(communicator, session_ticket.grant)
-        published = await broker_manager.get().apublish(
-            "room:42", Patches(None).refresh(zone="score").envelope()
-        )
+        published = await broker_manager.get().apublish("room:42", envelope)
         frame = await _next_non_ping(communicator)
         assert frame["type"] == "patches"
-        assert isinstance(frame["data"], str)
-        data = json.loads(frame["data"])
-        assert data["topic"] == "room:42"
-        assert data["seq"] == published.seq
-        assert data["epoch"] == published.epoch
+        data = frame["data"]
+        assert isinstance(data, dict)
+        meta = StreamMeta(
+            server_time=data["server_time"],
+            topic="room:42",
+            seq=published.seq,
+            epoch=published.epoch,
+        )
+        sse = JsonPartialProtocolBackend().sse_stream_event(envelope, meta)
+        assert data == json.loads(sse_data_text(sse))
         await communicator.disconnect()
         await _assert_clean()
 
     asyncio.run(scenario())
 
 
-class _TextCodecBackend(JsonPartialProtocolBackend):
-    def sse_stream_event(self, envelope: Envelope, meta: StreamMeta) -> str:
-        return f"event: next-patches\ndata: seq={meta.seq}\ndata: {meta.epoch}\n\n"
-
-
 @pytest.mark.django_db(transaction=True)
-def test_consumer_non_json_codec_frame_is_carried_unchanged(
-    monkeypatch: pytest.MonkeyPatch, session_ticket: SessionTicket
+@pytest.mark.parametrize("case", TEXT_FRAME_CASES, ids=lambda case: case.id)
+def test_consumer_custom_sse_codec_frame_carries_its_sse_data_text(
+    monkeypatch: pytest.MonkeyPatch, session_ticket: SessionTicket, case: TextFrameCase
 ) -> None:
-    backend = _TextCodecBackend()
-    monkeypatch.setattr(partial_backend_manager, "get", lambda: backend)
+    frame_of = case.backend.sse_stream_event
+    spy = Mock(wraps=frame_of)
+    monkeypatch.setattr(case.backend, "sse_stream_event", spy)
+    monkeypatch.setattr(partial_backend_manager, "get", lambda: case.backend)
+    envelope = Patches.versioned("v7").refresh(zone="score").envelope()
 
     async def scenario() -> None:
         communicator = await _connect(session_ticket.session)
         await _subscribe(communicator, session_ticket.grant)
-        published = await broker_manager.get().apublish(
-            "room:42", Patches(None).refresh(zone="score").envelope()
-        )
+        published = await broker_manager.get().apublish("room:42", envelope)
         frame = await _next_non_ping(communicator)
+        sent, meta = spy.call_args.args
+        assert sent == envelope
+        assert (meta.topic, meta.seq, meta.epoch) == (
+            "room:42",
+            published.seq,
+            published.epoch,
+        )
         assert frame == {
             "type": "patches",
-            "data": f"seq={published.seq}\n{published.epoch}",
+            "data": sse_data_text(frame_of(envelope, meta)),
         }
         await communicator.disconnect()
         await _assert_clean()
@@ -366,7 +378,7 @@ def test_consumer_channels_layer_broker_publish_reaches_the_socket() -> None:
             )
             patches = await _next_non_ping(communicator)
             assert patches["type"] == "patches"
-            assert json.loads(patches["data"])["seq"] == 1
+            assert patches["data"]["seq"] == 1
             await communicator.disconnect()
             assert not broker._layer.groups.get(broker._group("room:43"), {})
 
@@ -521,8 +533,9 @@ def test_consumer_concurrent_transforms_run_on_separate_threads() -> None:
         await broker_manager.get().apublish(
             "room:42", Patches(None).refresh(zone="score").envelope()
         )
-        assert (await left.receive_json_from(timeout=5))["type"] == "patches"
-        assert (await right.receive_json_from(timeout=5))["type"] == "patches"
+        for communicator in (left, right):
+            frame = await communicator.receive_output(timeout=5)
+            assert json.loads(frame["text"])["type"] == "patches"
         await left.disconnect()
         await right.disconnect()
         await _assert_clean()
@@ -706,7 +719,7 @@ def test_consumer_importable_transform_rewrites_the_patches() -> None:
         )
         frame = await _next_non_ping(communicator)
         assert frame["type"] == "patches"
-        assert json.loads(frame["data"])["ops"][0]["name"] == "room:update"
+        assert frame["data"]["ops"][0]["name"] == "room:update"
         await communicator.disconnect()
         await _assert_clean()
 

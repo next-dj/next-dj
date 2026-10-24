@@ -146,7 +146,7 @@ class Next {
     dispatch: Next.#chunk.dispatch,
     mergeContext: (data) => Next.#mergeContext(data),
     context: Next.#chunk.context,
-    sse: Next.#modules.stream,
+    stream: Next.#modules.stream,
     ws: Next.#modules.ws,
     csrf: Next.#modules.csrf,
     poll: Next.#modules.poll,
@@ -225,17 +225,9 @@ class Next {
   }
 
   /** Register the module a lazy chunk exports, called by the chunk as it evaluates. */
-  static _land<K extends keyof NextModules>(key: K, value: NextModules[K]): void;
-  static _land(key: "sse", value: SseFactory): void;
-  static _land(
-    key: keyof NextModules | "sse",
-    value: NextModules[keyof NextModules] | SseFactory,
-  ): void {
+  static _land<K extends keyof NextModules>(key: K, value: NextModules[K]): void {
     // A chunk from another release may name a module this runtime does not know.
-    const moduleKey = key === "sse" ? "stream" : key;
-    (Next.#modules[moduleKey] as Lazy<SseFactory> | undefined)?.land(
-      value as SseFactory,
-    );
+    (Next.#modules[key] as Lazy<NextModules[K]> | undefined)?.land(value);
   }
 
   /** Subscribe to a runtime event, returning an unsubscribe function. */

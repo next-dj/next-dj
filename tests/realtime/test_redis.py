@@ -422,6 +422,22 @@ def test_redis_async_client_per_event_loop_is_not_reused(clients) -> None:
     assert backend.positions(["poll:1"])["poll:1"].seq == 4
 
 
+def test_redis_async_client_drops_the_entry_of_a_closed_loop(clients) -> None:
+    backend = RedisBroker()
+    closed = asyncio.new_event_loop()
+    closed.run_until_complete(backend.apublish("poll:1", refresh_envelope()))
+    closed.close()
+    assert closed in backend._async_clients
+    running = asyncio.new_event_loop()
+    try:
+        running.run_until_complete(backend.apublish("poll:1", refresh_envelope()))
+    finally:
+        running.close()
+    assert closed not in backend._async_clients
+    assert running in backend._async_clients
+    assert len(clients.created) == 2
+
+
 def test_redis_aclose_releases_sync_and_async_clients(clients, monkeypatch) -> None:
     backend = RedisBroker()
     closed = create_autospec(clients.sync.close)
