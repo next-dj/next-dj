@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Coroutine, Iterator
     from pathlib import Path
 
-    from next.realtime import BrokerBackend
+    from next.realtime import BrokerBackend, MemoryBroker, RedisBroker
 
 
 _DEFAULT_LEAF_BODY = "def render(request):\n    return 'x'\n"
@@ -172,6 +172,22 @@ def published_topics(broker: BrokerBackend, count: int) -> list[str]:
     for topic in topics:
         broker.publish(topic, envelope)
     return topics
+
+
+def quiet_presence[B: MemoryBroker | RedisBroker](broker: B) -> B:
+    """Close the snapshot schedule so no background publish lands in a measurement."""
+    broker.presence_schedule.close()
+    return broker
+
+
+def joined_connections(
+    broker: MemoryBroker | RedisBroker, count: int, topic: str = "room:1"
+) -> list[str]:
+    """Join ``count`` identified connections for an hour and return their ids."""
+    connections = [f"c{index}" for index in range(count)]
+    for connection in connections:
+        broker.join(topic, connection, {"id": connection}, 3600)
+    return connections
 
 
 def run_without_loop[T](coro: Coroutine[object, object, T]) -> T:

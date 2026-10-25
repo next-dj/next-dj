@@ -172,12 +172,19 @@ def hello(
 def patches(
     message: Message, backend: PartialProtocolBackend, *, server_time: int
 ) -> str:
-    """Encode a topic message as the backend's JSON object, or its exact SSE data."""
-    meta = StreamMeta(
-        server_time=server_time,
-        topic=message.topic,
-        seq=message.seq,
-        epoch=message.epoch,
+    """Encode a topic message as the backend's JSON object, or its exact SSE data.
+
+    An unnumbered message carries no `seq` or `epoch`, so the client cursor stays.
+    """
+    meta = (
+        StreamMeta(
+            server_time=server_time,
+            topic=message.topic,
+            seq=message.seq,
+            epoch=message.epoch,
+        )
+        if message.seq
+        else StreamMeta(server_time=server_time, topic=message.topic)
     )
     data: object = backend.stream_data(message.envelope, meta)
     if data is None:

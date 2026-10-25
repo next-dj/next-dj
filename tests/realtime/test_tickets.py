@@ -31,6 +31,7 @@ from next.realtime.tickets import (
     TicketClaims,
     issue_ticket,
     resolve_claims,
+    resolve_identify,
     ticket_max_age,
     verify_ticket,
     websocket_path,
@@ -40,6 +41,7 @@ from next.testing import override_next_settings
 
 _AUTHORIZER = "tests.realtime.test_tickets.allow_room"
 _TRANSFORM = "tests.realtime.test_tickets.drop_message"
+_IDENTIFY = "tests.realtime.test_tickets.name_guest"
 
 NOT_CALLABLE = "a constant"
 
@@ -50,6 +52,10 @@ def allow_room(_user: object, _topic: str) -> bool:
 
 def drop_message(_message: object) -> None:
     return None
+
+
+def name_guest(_user: object, _topic: str) -> dict[str, object]:
+    return {"name": "guest"}
 
 
 @pytest.mark.django_db()
@@ -421,3 +427,85 @@ def test_ticket_for_a_signed_in_session_never_loads_its_user() -> None:
     tables = " ".join(query["sql"] for query in queries.captured_queries)
     assert "django_session" in tables
     assert "auth_user" not in tables
+
+
+def _signed_presence(session_key: str, **presence: object) -> str:
+    digest = salted_hmac(
+        _SALT, session_key, secret=settings.SECRET_KEY, algorithm="sha256"
+    ).hexdigest()
+    payload = {
+        "session": digest,
+        "topics": ["room"],
+        "transform": None,
+        "authorizer": _AUTHORIZER,
+        **presence,
+    }
+    return signing.TimestampSigner(salt=_SALT).sign_object(payload, compress=True)
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize("presence", [False, True, _IDENTIFY])
+def test_ticket_carries_the_presence_mode_of_its_grant(presence: object) -> None:
+    request = RequestFactory().get("/updates/")
+    request.session = SessionStore()
+    grant = issue_ticket(
+        request,
+        ("room",),
+        transform_ref=None,
+        authorizer_ref=_AUTHORIZER,
+        presence=presence,
+    )
+    claims = verify_ticket(grant.token, request.session.session_key)
+    assert claims.presence == presence
+    payload = signing.TimestampSigner(salt=_SALT).unsign_object(grant.token)
+    assert ("presence" in payload) is (presence is not False)
+
+
+@pytest.mark.django_db()
+def test_ticket_without_a_presence_key_verifies_outside_presence() -> None:
+    session = SessionStore()
+    session.create()
+    token = _signed_presence(session.session_key)
+    assert verify_ticket(token, session.session_key).presence is False
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize("presence", [42, None, "", "x" * (MAX_REFERENCE_LENGTH + 1)])
+def test_ticket_with_a_malformed_presence_is_rejected(presence: object) -> None:
+    session = SessionStore()
+    session.create()
+    token = _signed_presence(session.session_key, presence=presence)
+    with pytest.raises(InvalidTicketError, match="invalid presence"):
+        verify_ticket(token, session.session_key)
+
+
+def test_issue_ticket_refuses_an_oversized_presence_reference() -> None:
+    request = RequestFactory().get("/updates/")
+    with pytest.raises(ValueError, match="WebSocket ticket reference"):
+        issue_ticket(
+            request,
+            ("room",),
+            transform_ref=None,
+            authorizer_ref=_AUTHORIZER,
+            presence="x" * (MAX_REFERENCE_LENGTH + 1),
+        )
+
+
+@pytest.mark.parametrize(
+    ("presence", "expected"), [(False, None), (True, None), (_IDENTIFY, name_guest)]
+)
+def test_resolve_identify_imports_only_a_named_callable(
+    presence: object, expected: object
+) -> None:
+    claims = TicketClaims(("room",), None, _AUTHORIZER, presence)
+    assert resolve_identify(claims) is expected
+
+
+@pytest.mark.parametrize(
+    "presence",
+    ["tests.realtime.missing_module.name", "tests.realtime.test_tickets.NOT_CALLABLE"],
+)
+def test_resolve_identify_unusable_reference_is_a_bad_ticket(presence: str) -> None:
+    claims = TicketClaims(("room",), None, _AUTHORIZER, presence)
+    with pytest.raises(InvalidTicketError, match="does not import"):
+        resolve_identify(claims)

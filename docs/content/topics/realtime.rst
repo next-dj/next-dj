@@ -61,6 +61,8 @@ Under WSGI, disconnect cleanup is best-effort at the next yield, write, or close
 Closing the stream releases the broker subscription.
 
 An optional ``transform(message)`` runs for each subscriber and can return a safe ``Patches`` builder or ``Envelope``.
+``transform``, ``authorize``, and ``presence`` each take a callable or its dotted path, such as ``"rooms.access.can_watch"``.
+A dotted path is imported when the stream is built and reaches a WebSocket ticket as written.
 Returning ``None`` suppresses the message for that subscriber.
 Async streams run synchronous transforms in a worker thread.
 
@@ -202,6 +204,114 @@ The signed-cookie session engine works with WebSocket only in part, and ``next.W
 
 The ``db``, ``cache``, ``cached_db``, and ``file`` engines avoid all three.
 
+Presence
+--------
+
+Presence tells a page who is watching a topic.
+A stream that opts in is recorded on its topics while it is open, and the broker publishes the live attendance as an ordinary topic message.
+Pass ``presence=True`` for a counter or an ``identify`` callable for a list of members.
+
+.. code-block:: python
+   :caption: rooms/pages/rooms/[slug:code]/stream/page.py
+
+   from django.http import HttpRequest
+
+   from next.realtime import TopicStream
+
+   def render(request: HttpRequest, room: DRoom[Room]) -> TopicStream:
+       return TopicStream(request, f"room:{room.code}", presence=True)
+
+Every attendance snapshot of the topic reaches the page as the ``next:presence`` event, and the page subscribes to it like to any topic event.
+
+.. code-block:: javascript
+   :caption: rooms/static/rooms/online.js
+
+   Next.partial.stream.on("room:42", "next:presence", (detail) => {
+     document.querySelector("#online").textContent = detail.count;
+   });
+
+The detail always holds ``count``.
+It holds ``members`` only in the member mode, and only while at least one identified member attends and ``SIZE`` is above ``0``, so a page reads it as ``detail.members ?? []``.
+The client needs no new code, because the event is a plain ``event`` operation.
+
+A snapshot is not an ordinary publication.
+It travels unnumbered, so it takes no ``seq``, never enters the replay log, and skips the subscriber ``transform``, which therefore cannot hide or edit it for one user.
+A reconnecting page receives the current snapshot right after ``hello`` instead of a replayed one.
+The access check still gates the stream, so a subscriber that loses its grant stops receiving snapshots with everything else.
+
+Members and privacy
+~~~~~~~~~~~~~~~~~~~
+
+``identify(user, topic)`` returns a mapping of JSON values that describes the user to the other subscribers, or ``None`` to attend without a description.
+It runs once per topic when the connection opens, with the session user of the request, and under ASGI it runs on the shared worker pool, so it may query the database.
+
+.. code-block:: python
+   :caption: rooms/presence.py
+
+   from collections.abc import Mapping
+
+   def identify(user, topic: str) -> Mapping[str, object] | None:
+       if not user.is_authenticated:
+           return None
+       return {"handle": user.username, "name": user.get_full_name()}
+
+.. code-block:: python
+   :caption: rooms/pages/rooms/[slug:code]/stream/page.py
+
+   def render(request: HttpRequest, room: DRoom[Room]) -> TopicStream:
+       return TopicStream(
+           request, f"room:{room.code}", presence="rooms.presence.identify"
+       )
+
+Privacy rests on two rules, because no transform touches a snapshot.
+The ``members`` list reaches only subscribers that identify their own members, and the stream cuts it from every ``next:presence`` event it sends to any other subscriber, a counter stream or one without presence alike.
+Whatever ``identify`` returns is exactly what those identifying subscribers see, so it is the privacy boundary of presence.
+Return only what each watcher may see of the others, and leave out e-mail addresses, primary keys, and anything private.
+A stream with ``presence=True`` sends no data about people, only a number.
+
+The mapping needs string keys and JSON values, and its compact JSON may not exceed ``REALTIME['PRESENCE']['MEMBER_BYTES']`` bytes.
+A larger or non-JSON member raises ``InvalidMemberError`` when the connection joins.
+
+How the count is made
+~~~~~~~~~~~~~~~~~~~~~
+
+The member mode counts unique participants.
+The canonical JSON of the mapping, with sorted keys, is the identity of a member, so two tabs of one user that return an equal mapping are one member and show once.
+Two different people who return the same mapping merge too, so add a distinguishing public key such as a handle when names can repeat.
+A connection whose ``identify`` returned ``None`` counts alone.
+The counter mode counts connections, so two tabs of one user count twice.
+A topic that mixes both kinds of stream adds the counters of the two.
+
+``REALTIME['PRESENCE']['SIZE']`` caps how many members one event lists, ``100`` by default, and the ``count`` stays exact beyond it.
+A ``SIZE`` of ``0`` sends the count alone.
+Members are listed in the order of their first join, and a member that leaves entirely and comes back joins the end of the list.
+
+The coalescing window
+~~~~~~~~~~~~~~~~~~~~~
+
+A change in the attendance does not publish at once.
+The first change claims a window of ``REALTIME['PRESENCE']['WINDOW']`` seconds, one second by default, and the broker publishes one snapshot of the attendance when the window closes.
+Every change inside the window joins that snapshot, so a crowd that opens a page together produces one event instead of one per person.
+A new connection always claims a window, because it needs the snapshot to learn the starting state, even when its member is already present through another tab.
+A connection that leaves, or expires, claims one only when its member goes away entirely.
+When the last connection of a topic leaves while another process holds the window, the leaving process schedules the snapshot for the moment that window closes, so the final count arrives even if the holder died.
+
+A page that must show the count on first paint reads it on the server with ``presence(topic)``, or ``await apresence(topic)`` in async code.
+Both return a ``Presence`` snapshot and raise ``ImproperlyConfigured`` on a broker without presence.
+
+Crashed connections
+~~~~~~~~~~~~~~~~~~~
+
+An open connection refreshes its record once per heartbeat, and the record lives three heartbeat intervals unless an ``Attendance`` subclass sets another ``ttl_heartbeats``.
+A process that dies without a goodbye therefore drops out of the attendance after at most three intervals, 75 seconds at the default ``HEARTBEAT``.
+Any later join, refresh, or leave on the topic prunes the expired records and publishes the new snapshot.
+A read through ``presence(topic)`` never counts an expired record.
+
+Presence needs a broker that implements ``PresenceBroker``.
+``MemoryBroker`` and ``RedisBroker`` do, and a stream that asks for presence on another broker fails to start.
+Over WebSocket the ``identify`` callable travels in the signed ticket as a dotted path, so a callable without an importable path, such as a lambda, answers the negotiation with ``406`` and ``reason`` set to ``presence``, and the stream stays on SSE.
+:doc:`/content/ref/realtime` carries the contract and :doc:`/content/ref/settings` the limits.
+
 Listen to topic events
 ----------------------
 
@@ -214,6 +324,7 @@ Applications can listen to a topic event without adding transport metadata to it
      console.log(detail.deadline, meta.epoch, meta.seq);
    });
 
+A ``next:presence`` event carries no position, so its ``meta.seq`` is ``undefined`` and its ``meta.epoch`` is an empty string.
 ``Next.partial.stream.meta()`` is available during synchronous event delivery.
 ``stream.now()`` estimates server epoch time in milliseconds.
 ``stream.offset()`` returns the median of the last five server clock samples.
@@ -236,5 +347,5 @@ See also
    :doc:`/content/howto/fan-out-across-processes-with-redis` for shared broker setup.
    :doc:`/content/howto/stream-over-websockets` for the WebSocket transport.
    :doc:`/content/ref/realtime` for the broker contract and the replay order.
-   :doc:`/content/howto/write-a-broker-backend` for a custom backend with replay.
+   :doc:`/content/howto/write-a-broker-backend` for a custom backend with replay and presence.
    :doc:`/content/topics/partial-rendering/sse` for the underlying SSE transport.

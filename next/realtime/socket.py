@@ -14,6 +14,7 @@ from next.partial.manager import partial_backend_manager
 
 from . import frames
 from .access import Access, AccessCheck, heartbeat_seconds, live_session, run_detached
+from .attendance import Attendance, aattend, aattending
 from .backends import BrokerBackend
 from .delivery import transformed
 from .errors import BrokerConnectionError, InvalidTicketError
@@ -21,10 +22,12 @@ from .frames import Close, FrameError, Pong, Subscribe
 from .manager import broker_manager
 from .messages import Message, Position
 from .replay import acatch_up
-from .tickets import TicketClaims, resolve_claims, verify_ticket
+from .roster import Presence, counted, snapshot_message
+from .tickets import TicketClaims, resolve_claims, resolve_identify, verify_ticket
 
 
 if TYPE_CHECKING:
+    from .attendance import Identify
     from .tickets import TopicTransform
 
 
@@ -146,9 +149,13 @@ class TopicSocket:
         self._heartbeat = heartbeat if heartbeat is not None else heartbeat_seconds()
         self._clock = clock
         self._transform: TopicTransform | None = None
+        self._identify: Identify | None = None
 
     async def serve(self, inbound: AsyncIterable[str | bytes]) -> None:
-        """Run the connection until the client leaves or the protocol closes it."""
+        """Run the connection until the client leaves or the protocol closes it.
+
+        The presence a ticket asks for is left on every way out, a cancellation too.
+        """
         codes: list[int | None] = []
         try:
             async with asyncio.TaskGroup() as group:
@@ -233,7 +240,10 @@ class TopicSocket:
                 await self._writer.send(frames.error("unsupported"))
 
     async def _deliver(self, frame: Subscribe) -> None:
-        """Stream the granted topics in the fixed subscribe, catch up, hello order."""
+        """Stream the granted topics in the subscribe, join, catch up, hello order.
+
+        The join follows the positions, so its snapshot lands past the hello cursor.
+        """
         claims = await self._subscribe(frame)
         await self._grant()
         broker = self._broker
@@ -243,27 +253,59 @@ class TopicSocket:
             claims.topics, timeout=self._heartbeat
         ) as subscription:
             positions = await broker.apositions(claims.topics)
-            await self.catch_up(subscription, positions)
-            await self._writer.send(
-                frames.hello(
-                    claims.topics,
-                    positions,
-                    heartbeat=self._heartbeat,
-                    server_time=self._now(),
+            attendance = await self.attend(broker, claims)
+            async with aattending(attendance, subscription) as stream:
+                await self.catch_up(subscription, positions)
+                await self._writer.send(
+                    frames.hello(
+                        claims.topics,
+                        positions,
+                        heartbeat=self._heartbeat,
+                        server_time=self._now(),
+                    )
                 )
-            )
-            async for item in subscription:
-                await self._grant()
-                if item is None:
-                    await self.tick()
-                else:
-                    await self._writer.send(await self._frame_for(item))
+                if attendance is not None:
+                    await self._snapshots(attendance, claims.topics)
+                async for item in stream:
+                    await self._grant()
+                    if item is None:
+                        await self.tick()
+                    else:
+                        await self._writer.send(await self._frame_for(item))
+
+    async def attend(
+        self, broker: BrokerBackend, claims: TicketClaims
+    ) -> Attendance | None:
+        """Return the attendance the ticket asks for on its topics, None without.
+
+        An override returns another `Attendance`, a subclass with its own TTL too.
+        """
+        if claims.presence is False:
+            return None
+        return await aattend(
+            broker,
+            claims.topics,
+            self._identify,
+            self.handshake.user,
+            heartbeat=self._heartbeat,
+            connection=self.connection_id,
+        )
+
+    async def _snapshots(self, attendance: Attendance, topics: tuple[str, ...]) -> None:
+        """Send each topic's current presence right after hello, unnumbered."""
+        for topic in topics:
+            snapshot = await attendance.broker.apresence(topic)
+            if self._identify is None:
+                snapshot = Presence(snapshot.count)
+            message = snapshot_message(topic, snapshot, self._clock())
+            await self._writer.send(await self._frame_for(message))
 
     async def _subscribe(self, frame: Subscribe) -> TicketClaims:
         """Verify the ticket for the handshake session and build its access check."""
         try:
             claims = verify_ticket(frame.ticket, self.handshake.session_key)
             transform, authorizer = resolve_claims(claims)
+            self._identify = resolve_identify(claims)
         except InvalidTicketError:
             await self._fail(Close.SESSION)
         self.cursor = frame.cursor
@@ -285,12 +327,17 @@ class TopicSocket:
             await self._fail(_CLOSE_CODES[verdict])
 
     async def _frame_for(self, message: Message) -> str:
-        """Encode one message for this subscriber, transformed off the event loop."""
-        if self._transform is not None:
+        """Encode one message for this subscriber, transformed off the event loop.
+
+        A subscriber outside identify mode gets presence events without their members.
+        """
+        if message.seq and self._transform is not None:
             result = transformed(message, await run_detached(self._transform, message))
             if result is None:
                 return frames.skip(message)
             message = result
+        if self._identify is None:
+            message = counted(message)
         return frames.patches(
             message, partial_backend_manager.get(), server_time=self._now()
         )

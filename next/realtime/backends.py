@@ -1,6 +1,8 @@
 """Broker contracts and the process-local in-memory implementation."""
 
 import asyncio
+import itertools
+import json
 import math
 import secrets
 import threading
@@ -27,6 +29,15 @@ from next.partial.envelope import Envelope
 
 from .messages import Message, Position, validate_topic
 from .replay import INCOMPLETE, Replay, replay_after, replay_window
+from .roster import (
+    Member,
+    Presence,
+    PresenceWindow,
+    Scheduler,
+    encode_member,
+    presence_envelope,
+)
+from .signals import published
 
 
 _NEVER_PUBLISHED = Position(epoch="", seq=0)
@@ -55,6 +66,14 @@ class BrokerBackend(ABC):
     @abstractmethod
     async def apublish(self, topic: str, envelope: Envelope) -> Message:
         """Publish an envelope through the asynchronous backend API."""
+
+    def broadcast(self, topic: str, envelope: Envelope) -> Message:
+        """Deliver an envelope to live subscribers only, unnumbered and never logged.
+
+        Presence snapshots need it, so a broker that keeps presence overrides it.
+        """
+        msg = f"{type(self).__qualname__} has no unnumbered fan-out for broadcast()."
+        raise NotImplementedError(msg)
 
     @abstractmethod
     def subscribe(
@@ -150,7 +169,138 @@ def _since_idle(
     return logged
 
 
-class MemoryBroker(BrokerBackend):
+class _Roster:
+    """The live attendance of one topic and the earliest moment a record can expire.
+
+    Connections sharing an encoded member are one attendee, one without a member alone.
+    Attendees keep the order of their first join, and `version` counts the changes.
+    """
+
+    __slots__ = (
+        "anonymous",
+        "attendees",
+        "holders",
+        "identified",
+        "prune_at",
+        "published",
+        "version",
+    )
+
+    def __init__(self) -> None:
+        self.anonymous: dict[str, float] = {}
+        self.identified: dict[str, tuple[float, str]] = {}
+        self.attendees: dict[str, float] = {}
+        self.holders: dict[str, set[str]] = {}
+        self.prune_at = math.inf
+        self.version = 0
+        self.published = 0
+
+    def __bool__(self) -> bool:
+        return bool(self.anonymous or self.identified)
+
+    def put(self, connection: str, deadline: float, identity: str | None) -> bool:
+        """Store a connection under its encoded member, True when it is new or moved."""
+        if identity is None:
+            fresh = connection not in self.anonymous
+            if fresh:
+                self.remove(connection)
+            self.anonymous[connection] = deadline
+        else:
+            previous = self.identified.get(connection)
+            fresh = previous is None or previous[1] != identity
+            if fresh:
+                self.remove(connection)
+                self.holders.setdefault(identity, set()).add(connection)
+            self.identified[connection] = (deadline, identity)
+            before = None if previous is None or fresh else previous[0]
+            self._rescore(identity, deadline, before)
+        self.prune_at = min(self.prune_at, deadline)
+        return fresh
+
+    def refresh(self, connection: str, deadline: float) -> bool:
+        """Move a connection's deadline, False when it holds no record."""
+        if connection in self.anonymous:
+            self.anonymous[connection] = deadline
+        else:
+            entry = self.identified.get(connection)
+            if entry is None:
+                return False
+            before, identity = entry
+            self.identified[connection] = (deadline, identity)
+            if deadline >= self.attendees[identity]:
+                self.attendees[identity] = deadline
+            else:
+                self._rescore(identity, deadline, before)
+        self.prune_at = min(self.prune_at, deadline)
+        return True
+
+    def _rescore(self, identity: str, deadline: float, before: float | None) -> None:
+        """Keep an attendee's deadline the latest of its connections after one moved."""
+        held = self.attendees.get(identity)
+        if held is None or deadline >= held:
+            self.attendees[identity] = deadline
+        elif before is not None and before >= held:
+            holders = self.holders[identity]
+            self.attendees[identity] = max(self.identified[h][0] for h in holders)
+
+    def snapshot(self, now: float, size: int) -> tuple[int, list[str]]:
+        """Count the unexpired attendees and list the first identified ones.
+
+        Before the earliest deadline nothing has lapsed, so no record is scanned.
+        """
+        if now < self.prune_at:
+            listed = list(itertools.islice(self.attendees, size))
+            return len(self.attendees) + len(self.anonymous), listed
+        live = [
+            identity for identity, deadline in self.attendees.items() if deadline > now
+        ]
+        unnamed = sum(1 for deadline in self.anonymous.values() if deadline > now)
+        return len(live) + unnamed, live[:size]
+
+    def remove(self, connection: str) -> bool:
+        """Forget a connection, True when its attendee left with it."""
+        if self.anonymous.pop(connection, None) is not None:
+            return True
+        entry = self.identified.pop(connection, None)
+        if entry is None:
+            return False
+        identity = entry[1]
+        holders = self.holders[identity]
+        holders.discard(connection)
+        if not holders:
+            del self.holders[identity], self.attendees[identity]
+            return True
+        self.attendees[identity] = max(self.identified[h][0] for h in holders)
+        return False
+
+    def prune(self, now: float) -> bool:
+        """Drop the expired connections once the earliest deadline passed."""
+        if now < self.prune_at:
+            return False
+        expired = [
+            connection
+            for connection, deadline in self.anonymous.items()
+            if deadline <= now
+        ]
+        expired.extend(
+            connection
+            for connection, (deadline, _) in self.identified.items()
+            if deadline <= now
+        )
+        changed = False
+        for connection in expired:
+            changed = self.remove(connection) or changed
+        self.prune_at = min(
+            itertools.chain(
+                self.anonymous.values(),
+                (deadline for deadline, _ in self.identified.values()),
+            ),
+            default=math.inf,
+        )
+        return changed
+
+
+class MemoryBroker(BrokerBackend, PresenceWindow):
     """Deliver messages within one process using bounded subscriber queues.
 
     A replay log expires `REPLAY['TTL']` seconds after its last `published_at` stamp.
@@ -162,8 +312,13 @@ class MemoryBroker(BrokerBackend):
         *,
         clock: Callable[[], float] = time.time,
         replay: Mapping[str, object] | None = None,
+        presence: Mapping[str, object] | None = None,
+        schedule: Scheduler | None = None,
     ) -> None:
-        """Create the broker and validate its queue size and replay window."""
+        """Create the broker and validate its queue size, replay and presence limits.
+
+        `schedule` builds the presence schedule from the announce hook it is handed.
+        """
         super().__init__(config)
         size = self.options.get("QUEUE_SIZE", 256)
         if not isinstance(size, int) or isinstance(size, bool) or size < 1:
@@ -179,6 +334,9 @@ class MemoryBroker(BrokerBackend):
         self._subscribers: dict[str, set[_SyncSubscriber | _AsyncSubscriber]] = (
             defaultdict(set)
         )
+        self._rosters: dict[str, _Roster] = {}
+        self._windows: dict[str, float] = {}
+        self.keep_presence(presence, schedule, clock)
 
     @override
     def publish(self, topic: str, envelope: Envelope) -> Message:
@@ -198,14 +356,27 @@ class MemoryBroker(BrokerBackend):
                 if now >= self._sweep_at:
                     self._sweep(now)
                 self._logs[topic].append(message)
-            for subscriber in tuple(self._subscribers.get(topic, ())):
-                if isinstance(subscriber, _SyncSubscriber):
-                    with subscriber.condition:
-                        subscriber.queue.append(message)
-                        subscriber.condition.notify()
-                elif not subscriber.enqueue(message):
-                    self._remove_subscriber(subscriber)
+            self._fan_out(topic, message)
         return message
+
+    @override
+    def broadcast(self, topic: str, envelope: Envelope) -> Message:
+        """Notify the local subscribers without numbering or logging the envelope."""
+        envelope = self.validate_publication(topic, envelope)
+        with self._lock:
+            message = Message(topic, 0, envelope, self.clock())
+            self._fan_out(topic, message)
+        return message
+
+    def _fan_out(self, topic: str, message: Message) -> None:
+        """Queue a message for every subscriber of its topic, under the broker lock."""
+        for subscriber in tuple(self._subscribers.get(topic, ())):
+            if isinstance(subscriber, _SyncSubscriber):
+                with subscriber.condition:
+                    subscriber.queue.append(message)
+                    subscriber.condition.notify()
+            elif not subscriber.enqueue(message):
+                self._remove_subscriber(subscriber)
 
     def _sweep(self, now: float) -> None:
         """Drop the expired logs on the first publish a TTL after the last sweep."""
@@ -244,6 +415,117 @@ class MemoryBroker(BrokerBackend):
     async def areplay(self, topic: str, after: Position) -> Replay:
         """Replay without leaving the event loop, the log lives in this process."""
         return self.replay(topic, after)
+
+    def join(
+        self, topic: str, connection: str, member: Member | None, ttl: float
+    ) -> None:
+        """Record a connection and claim the window while a change is unannounced."""
+        validate_topic(topic)
+        encoded = encode_member(member, self.presence_limits.member_bytes)
+        with self._lock:
+            now = self.clock()
+            roster = self._rosters.setdefault(topic, _Roster())
+            pruned = roster.prune(now)
+            if roster.put(connection, now + ttl, encoded) or pruned:
+                roster.version += 1
+            claimed = roster.version != roster.published and self._claim(topic, now)
+        if claimed:
+            self.schedule_presence(topic)
+
+    def touch(self, topic: str, connection: str, ttl: float) -> bool:
+        """Move a connection's deadline, pruning the topic's expired ones first."""
+        validate_topic(topic)
+        with self._lock:
+            now = self.clock()
+            roster = self._rosters.get(topic)
+            if roster is None:
+                return False
+            if roster.prune(now):
+                roster.version += 1
+            present = roster.refresh(connection, now + ttl)
+            claimed = roster.version != roster.published and self._claim(topic, now)
+        if claimed:
+            self.schedule_presence(topic)
+        return present
+
+    def leave(self, topic: str, connection: str) -> None:
+        """Forget a connection and claim the window while a change is unannounced."""
+        validate_topic(topic)
+        with self._lock:
+            now = self.clock()
+            roster = self._rosters.get(topic)
+            if roster is None:
+                return
+            pruned = roster.prune(now)
+            if roster.remove(connection) or pruned:
+                roster.version += 1
+            claimed = roster.version != roster.published and self._claim(topic, now)
+        if claimed:
+            self.schedule_presence(topic)
+
+    def presence(self, topic: str) -> Presence:
+        """Return the unexpired attendees of a topic without pruning them.
+
+        The members decode from their stored JSON in one call, fresh for each caller.
+        """
+        validate_topic(topic)
+        with self._lock:
+            roster = self._rosters.get(topic)
+            if roster is None:
+                return Presence(0)
+            count, listed = roster.snapshot(self.clock(), self.presence_limits.size)
+        if not listed:
+            return Presence(count)
+        return Presence(count, tuple(json.loads(f"[{','.join(listed)}]")))
+
+    async def ajoin(
+        self, topic: str, connection: str, member: Member | None, ttl: float
+    ) -> None:
+        """Join without leaving the event loop, the roster lives in this process."""
+        self.join(topic, connection, member, ttl)
+
+    async def atouch(self, topic: str, connection: str, ttl: float) -> bool:
+        """Touch without leaving the event loop."""
+        return self.touch(topic, connection, ttl)
+
+    async def aleave(self, topic: str, connection: str) -> None:
+        """Leave without leaving the event loop."""
+        self.leave(topic, connection)
+
+    async def apresence(self, topic: str) -> Presence:
+        """Read the presence without leaving the event loop."""
+        return self.presence(topic)
+
+    def _claim(self, topic: str, now: float) -> bool:
+        """Take the free window of a topic whose last change is still unannounced."""
+        if now < self._windows.get(topic, -math.inf):
+            return False
+        self._windows[topic] = now + self.presence_limits.window
+        return True
+
+    @override
+    def announce_presence(self, topic: str) -> None:
+        """Release a closed window and broadcast the snapshot it coalesced.
+
+        The read and the fan-out share the lock, so snapshots leave in change order.
+        """
+        with self._lock:
+            if self._windows.get(topic, math.inf) <= self.clock():
+                del self._windows[topic]
+            roster = self._rosters.get(topic)
+            if roster is None or roster.version == roster.published:
+                return
+            snapshot = self.presence(topic)
+            roster.published = roster.version
+            if not roster:
+                del self._rosters[topic]
+            message = self.broadcast(topic, presence_envelope(snapshot))
+        published(self, message)
+
+    @override
+    def close(self) -> None:
+        """Broadcast the pending snapshots and stop the presence schedule."""
+        self.presence_schedule.close()
 
     @override
     def subscribe(

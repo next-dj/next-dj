@@ -837,10 +837,12 @@ def test_publish_and_positions_wrap_redis_transport_errors(
         backend.positions(["poll:1"])
 
     async def scenario() -> None:
-        client, script = backend._async_client()
+        client, scripts = backend._async_client()
+        script_source = redis_backend._PUBLISH_SCRIPT
+        script = scripts[script_source]
         backend._async_clients[asyncio.get_running_loop()] = (
             client,
-            AsyncMock(spec=script, side_effect=failure),
+            {**scripts, script_source: AsyncMock(spec=script, side_effect=failure)},
         )
         monkeypatch.setattr(
             client, "pipeline", create_autospec(client.pipeline, side_effect=failure)

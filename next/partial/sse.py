@@ -249,7 +249,13 @@ class PatchStreamWriter(StreamingHttpResponse):
         message: "_TopicMessage",
         server_time: int,
     ) -> bytes:
-        """Serialize one topic message with the `id` line the stream gives it."""
+        """Serialize one topic message with the `id` line the stream gives it.
+
+        A message with seq 0 is unnumbered, so it carries no position and no id.
+        """
+        if message.seq == 0:
+            meta = StreamMeta(server_time=server_time, topic=message.topic)
+            return backend.sse_stream_event(envelope, meta).encode("utf-8")
         meta = StreamMeta(
             server_time=server_time,
             topic=message.topic,

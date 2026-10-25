@@ -227,6 +227,119 @@ describe.each([
   });
 });
 
+function presence(count: number): Record<string, unknown> {
+  return {
+    version: "v1",
+    ops: [
+      { op: "event", name: "next:presence", detail: { count } },
+      { op: "refresh", zone: "results" },
+    ],
+    assets: [],
+    form: null,
+    topic: "room",
+  };
+}
+
+describe.each([
+  ["sse", sseHarness],
+  ["websocket", wsHarness],
+])("ephemeral frames over %s", (_name, make) => {
+  async function watched(harness: Harness) {
+    const sse = start(harness);
+    const seen: unknown[] = [];
+    sse.on("room", "next:presence", (detail, meta) =>
+      seen.push({ detail, meta, current: sse.meta() }),
+    );
+    sse.scan(document);
+    await harness.connect();
+    return { sse, seen };
+  }
+
+  it("applies a snapshot right after hello and leaves the cursor alone", async () => {
+    const harness = make();
+    const { sse, seen } = await watched(harness);
+    harness.hello(position(2, "e"));
+    fetched.length = 0;
+    gaps.length = 0;
+    harness.send(presence(1));
+    harness.send(frame(3));
+    expect(applied).toEqual([undefined, 3]);
+    expect(seen).toEqual([
+      {
+        detail: { count: 1 },
+        meta: {
+          topic: "room",
+          epoch: "",
+          seq: undefined,
+          serverTime: expect.any(Number),
+        },
+        current: {
+          topic: "room",
+          epoch: "",
+          seq: undefined,
+          serverTime: expect.any(Number),
+        },
+      },
+    ]);
+    expect(fetched).toEqual([]);
+    expect(gaps).toEqual([]);
+    sse._reset();
+  });
+
+  it("neither gaps nor dedupes between sequenced frames", async () => {
+    const harness = make();
+    const { sse, seen } = await watched(harness);
+    harness.hello(position(0));
+    harness.send(frame(1));
+    harness.send(presence(2));
+    harness.send(presence(2));
+    harness.send(frame(2));
+    harness.send(presence(3));
+    harness.send(frame(2));
+    harness.send(frame(3));
+    expect(applied).toEqual([1, undefined, undefined, 2, undefined, 3]);
+    expect(seen.map((item) => (item as { detail: unknown }).detail)).toEqual([
+      { count: 2 },
+      { count: 2 },
+      { count: 3 },
+    ]);
+    expect(fetched).toEqual([]);
+    expect(gaps).toEqual([]);
+    sse._reset();
+  });
+
+  it("still detects a real gap after an ephemeral frame", async () => {
+    const harness = make();
+    const { sse } = await watched(harness);
+    harness.hello(position(0));
+    harness.send(frame(1));
+    harness.send(presence(1));
+    harness.send(frame(3));
+    expect(applied).toEqual([1, undefined, 3]);
+    expect(gaps).toEqual([{ topic: "room", from: 1, to: 3 }]);
+    sse._reset();
+  });
+});
+
+describe("websocket cursor across ephemeral frames", () => {
+  it("subscribes again with the last sequenced position", async () => {
+    const harness = wsHarness();
+    const sse = start(harness);
+    sse.scan(document);
+    await harness.connect();
+    harness.hello(position(0));
+    harness.send(presence(1));
+    harness.send(frame(1));
+    harness.send(presence(2));
+    await harness.drop();
+    await harness.connect();
+    expect(
+      harness.subs().map((sub) => (sub as { last_seq: unknown }).last_seq),
+    ).toEqual([{}, position(1)]);
+    sse._reset();
+  });
+});
+
 describe("websocket replay cursor", () => {
   it("subscribes again with the cursor that replayed frames advanced", async () => {
     const harness = wsHarness();
@@ -310,5 +423,25 @@ describe("sse event ids", () => {
     expect(plain.applied).toEqual([1, 2, 3, 4, 6]);
     expect(plain.gaps).toEqual([{ topic: "room", from: 4, to: 6 }]);
     expect(tagged).toEqual(plain);
+  });
+
+  it("applies an ephemeral event without an id off the cursor", () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const sse = start({ ...sseHarness(), deps: {} });
+    const counts: unknown[] = [];
+    sse.on("room", "next:presence", (detail) => counts.push(detail.count));
+    sse.scan(document);
+    const source = FakeEventSource.last!;
+    source.onopen?.();
+    source.emit("next-hello", { topics: position(0) });
+    source.emit("next-patches", presence(1));
+    source.emit("next-patches", frame(1), "e:1");
+    source.emit("next-patches", presence(2));
+    source.emit("next-patches", frame(2), "e:2");
+    expect(counts).toEqual([1, 2]);
+    expect(applied).toEqual([undefined, 1, undefined, 2]);
+    expect(fetched).toEqual([]);
+    expect(gaps).toEqual([]);
+    sse._reset();
   });
 });

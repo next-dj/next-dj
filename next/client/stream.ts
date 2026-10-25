@@ -132,7 +132,7 @@ interface Resync {
 export interface StreamMeta {
   topic: string;
   epoch: string;
-  seq: number;
+  seq: number | undefined;
   serverTime: number;
 }
 
@@ -409,16 +409,19 @@ export function createStream(deps: StreamDeps): Stream {
       sampleTime(raw[SERVER_TIME]);
       const topic = asString(raw[TOPIC]);
       const seq = raw[SEQ];
-      if (topic !== undefined && isSeq(seq)) {
+      if (topic !== undefined) {
         const epoch = asString(raw[EPOCH]) ?? "";
         recordBound(connection, raw);
         // The gap check runs first, so an own echo cannot hide a lost frame.
-        if (!advance(connection, topic, epoch, seq) || isEcho(asString(raw.request_id)))
+        if (
+          (isSeq(seq) && !advance(connection, topic, epoch, seq)) ||
+          isEcho(asString(raw.request_id))
+        )
           return;
         currentMeta = {
           topic,
           epoch,
-          seq,
+          seq: isSeq(seq) ? seq : undefined,
           serverTime:
             typeof raw[SERVER_TIME] === "number" ? raw[SERVER_TIME] : now() + offset(),
         };

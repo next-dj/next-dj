@@ -1,6 +1,7 @@
 import asyncio
 import multiprocessing
 import os
+import signal
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -17,12 +18,21 @@ from next.realtime import (
     BrokerConnectionError,
     Message,
     Position,
+    Presence,
     RedisBroker,
     TopicStream,
 )
 from next.realtime.manager import broker_manager
+from next.realtime.roster import EVENT
+from tests.realtime.attendee import CONNECTION, TOPIC as ROOM, attend_until_killed
 from tests.realtime.publisher import TOPIC, WORKER_BATCH, publish_batch
-from tests.support.realtime import ResumingClient, anext_frame, next_frame
+from tests.support.realtime import (
+    ResumingClient,
+    anext_frame,
+    manual_schedule,
+    next_frame,
+    silent_schedule,
+)
 
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
@@ -304,3 +314,173 @@ def test_redis_reconnect_with_a_cursor_replays_exactly_the_missed_messages(
     ]
     assert client.dropped == []
     assert client.gaps == []
+
+
+def _presence_counts(broker: RedisBroker, messages: Iterator[Message | None]) -> list:
+    """Touch the survivor on every idle tick and collect counts until one is left."""
+    counts: list[object] = []
+    deadline = time.monotonic() + 60
+    while counts[-1:] != [1] and time.monotonic() < deadline:
+        message = next(messages)
+        if message is None:
+            broker.touch(ROOM, "survivor", 30)
+            continue
+        (op,) = message.envelope.ops
+        if op.extras.get("name") == EVENT:
+            counts.append(op.extras["detail"]["count"])
+    return counts
+
+
+def test_redis_presence_of_a_killed_process_expires_and_is_announced(prefix) -> None:
+    context = multiprocessing.get_context("spawn")
+    joined = context.Event()
+    attendee = context.Process(
+        target=attend_until_killed, args=(REDIS_URL, prefix, 2.0, joined)
+    )
+    survivor = RedisBroker(
+        {"OPTIONS": {"URL": REDIS_URL, "PREFIX": prefix}}, presence={"WINDOW": 0.1}
+    )
+    attendee.start()
+    try:
+        assert joined.wait(60)
+        assert survivor.presence(ROOM) == Presence(1)
+        with survivor.subscribe([ROOM], timeout=0.1) as messages:
+            survivor.join(ROOM, "survivor", None, 30)
+            attendee.kill()
+            attendee.join(30)
+            counts = _presence_counts(survivor, messages)
+    finally:
+        attendee.kill()
+        attendee.join(30)
+        survivor.close()
+
+    assert attendee.exitcode == -signal.SIGKILL
+    assert counts[-1:] == [1]
+    assert survivor.presence(ROOM) == Presence(1)
+    assert not survivor.touch(ROOM, CONNECTION, 30)
+
+
+def _next_snapshot(messages: Iterator[Message | None]) -> Message:
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        message = next(messages)
+        if message is not None and message.envelope.ops[0].extras.get("name") == EVENT:
+            return message
+    pytest.fail("No presence snapshot arrived.")
+
+
+def test_redis_snapshot_after_the_window_owner_died_arrives_on_a_touch(prefix) -> None:
+    options = {"OPTIONS": {"URL": REDIS_URL, "PREFIX": prefix}}
+    owner = RedisBroker(options, presence={"WINDOW": 0.2})
+    other = RedisBroker(options, presence={"WINDOW": 0.2})
+    try:
+        with other.subscribe([ROOM], timeout=0.05) as messages:
+            owner.presence_schedule.close()
+            owner.join(ROOM, "owner", {"id": 2}, 30)
+            other.join(ROOM, "other", {"id": 1}, 30)
+            time.sleep(0.3)
+            assert other.touch(ROOM, "other", 30)
+            snapshot = _next_snapshot(messages)
+        position = other.positions([ROOM])[ROOM]
+    finally:
+        owner.close()
+        other.close()
+
+    assert not snapshot.numbered
+    assert snapshot.envelope.ops[0].extras["detail"] == {
+        "count": 2,
+        "members": [{"id": 2}, {"id": 1}],
+    }
+    assert position.seq == 0
+
+
+def _presence_broker(prefix: str, window: float = 0.05) -> RedisBroker:
+    return RedisBroker(
+        {"OPTIONS": {"URL": REDIS_URL, "PREFIX": prefix}},
+        presence={"WINDOW": window},
+        schedule=manual_schedule(time.monotonic),
+    )
+
+
+def _lasting(admin: redis.Redis, prefix: str) -> dict[str, int]:
+    return {key: admin.pttl(key) for key in admin.scan_iter(match=f"{prefix}:*")}
+
+
+def _assert_expiring(admin: redis.Redis, prefix: str) -> None:
+    lasting = _lasting(admin, prefix)
+    assert lasting
+    assert all(0 < left <= 600 for left in lasting.values()), lasting
+
+
+@pytest.mark.parametrize("member", [None, {"id": 1}], ids=["unnamed", "named"])
+def test_redis_presence_keys_of_a_short_visit_expire(admin, prefix, member) -> None:
+    broker = _presence_broker(prefix)
+    try:
+        broker.join(ROOM, "visitor", member, 0.3)
+        _assert_expiring(admin, prefix)
+        broker.leave(ROOM, "visitor")
+        time.sleep(0.06)
+        assert broker.presence_schedule.run_due() >= 1
+        _assert_expiring(admin, prefix)
+        deadline = time.monotonic() + 5
+        while _lasting(admin, prefix) and time.monotonic() < deadline:
+            time.sleep(0.05)
+    finally:
+        broker.close()
+
+    assert _lasting(admin, prefix) == {}
+
+
+@pytest.mark.parametrize("step", range(1, 5))
+def test_redis_snapshots_of_two_brokers_end_on_the_latest_change(
+    prefix, monkeypatch, step: int
+) -> None:
+    first, second, watcher = (_presence_broker(prefix, 1.0) for _ in range(3))
+    first.join(ROOM, "a", {"id": 1}, 30)
+    calls = [0]
+    execute = first._redis.execute_command
+
+    def interleaved(*args: object, **options: object) -> object:
+        result = execute(*args, **options)
+        calls[0] += 1
+        if calls[0] == step:
+            second.join(ROOM, "b", {"id": 2}, 30)
+            second.announce_presence(ROOM)
+        return result
+
+    monkeypatch.setattr(first._redis, "execute_command", interleaved)
+    try:
+        with watcher.subscribe([ROOM], timeout=0.2) as messages:
+            first.announce_presence(ROOM)
+            details = []
+            for message in messages:
+                if message is None:
+                    break
+                details.append(message.envelope.ops[0].extras["detail"])
+        latest = watcher.presence(ROOM).as_detail()
+    finally:
+        for broker in (first, second, watcher):
+            broker.close()
+
+    assert details
+    assert details[-1] == latest
+
+
+def test_redis_last_leave_under_a_dead_window_is_announced(prefix) -> None:
+    owner, other = _presence_broker(prefix, 0.2), _presence_broker(prefix, 0.2)
+    owner.presence_schedule = silent_schedule(owner.announce_presence)
+    try:
+        with other.subscribe([ROOM], timeout=0.05) as messages:
+            owner.join(ROOM, "owner", None, 30)
+            owner.leave(ROOM, "owner")
+            other.join(ROOM, "other", None, 30)
+            other.leave(ROOM, "other")
+            assert other.presence_schedule.pending() == (ROOM,)
+            time.sleep(0.25)
+            assert other.presence_schedule.run_due() == 1
+            snapshot = _next_snapshot(messages)
+    finally:
+        owner.close()
+        other.close()
+
+    assert snapshot.envelope.ops[0].extras["detail"] == {"count": 0}

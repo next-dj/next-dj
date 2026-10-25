@@ -36,6 +36,17 @@ from .backends import BrokerBackend
 from .errors import BrokerConnectionError
 from .messages import Message, Position, validate_topic
 from .replay import INCOMPLETE, Replay, replay_after, replay_window
+from .roster import (
+    Member,
+    Presence,
+    PresenceWindow,
+    Scheduler,
+    decode_member,
+    encode_member,
+    presence_event,
+    snapshot_message,
+)
+from .signals import published
 
 
 logger = logging.getLogger(__name__)
@@ -74,6 +85,264 @@ redis.call('PUBLISH', ARGV[1], payload)
 return {state[1], epoch}
 """
 
+_CLOCK = """
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+"""
+_PRUNE = (
+    _CLOCK
+    + """
+local SEP = string.char(0)
+local BATCH = 1000
+local changed = redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now) > 0
+local lapsed = redis.call('ZRANGEBYSCORE', KEYS[4], '-inf', now)
+if #lapsed > 0 then
+  redis.call('ZREMRANGEBYSCORE', KEYS[4], '-inf', now)
+  for first = 1, #lapsed, BATCH do
+    local last = math.min(first + BATCH - 1, #lapsed)
+    local payloads = redis.call('HMGET', KEYS[2], unpack(lapsed, first, last))
+    local held = {}
+    for index = 1, #payloads do
+      if payloads[index] then
+        held[#held + 1] = payloads[index] .. SEP .. lapsed[first + index - 1]
+      end
+    end
+    redis.call('HDEL', KEYS[2], unpack(lapsed, first, last))
+    if #held > 0 then
+      redis.call('ZREM', KEYS[6], unpack(held))
+    end
+  end
+  local gone = redis.call('ZRANGEBYSCORE', KEYS[5], '-inf', now)
+  if #gone > 0 then
+    redis.call('ZREMRANGEBYSCORE', KEYS[5], '-inf', now)
+    for first = 1, #gone, BATCH do
+      local last = math.min(first + BATCH - 1, #gone)
+      redis.call('ZREM', KEYS[8], unpack(gone, first, last))
+    end
+    changed = true
+  end
+end
+"""
+)
+_SETTLE = """
+local function settle(window)
+  if changed then
+    redis.call('HINCRBY', KEYS[7], 'version', 1)
+  end
+  local state = redis.call('HMGET', KEYS[7], 'version', 'published')
+  if state[1] and state[1] ~= state[2]
+      and redis.call('SET', KEYS[3], '1', 'NX', 'PX', window) then
+    return 1
+  end
+  return 0
+end
+"""
+_KEEP = """
+local function keep(ttl)
+  for _, group in ipairs({{1}, {4, 2, 5, 6, 8}, {7}}) do
+    local left = redis.call('PTTL', KEYS[group[1]])
+    if left ~= -2 and left < ttl then
+      for _, index in ipairs(group) do
+        redis.call('PEXPIRE', KEYS[index], ttl * 2)
+      end
+    end
+  end
+end
+"""
+_LATEST = """
+local function latest(payload)
+  local holders = redis.call(
+    'ZRANGEBYLEX', KEYS[6], '[' .. payload .. SEP, '(' .. payload .. string.char(1))
+  local best = 0
+  for _, holder in ipairs(holders) do
+    local deadline = tonumber(
+      redis.call('ZSCORE', KEYS[4], string.sub(holder, #payload + 2)))
+    if deadline > best then
+      best = deadline
+    end
+  end
+  return #holders, best
+end
+"""
+_RESCORE = """
+local function rescore(connection, payload, deadline)
+  local held = redis.call('ZSCORE', KEYS[5], payload)
+  if not held or tonumber(held) <= deadline then
+    redis.call('ZADD', KEYS[4], deadline, connection)
+    redis.call('ZADD', KEYS[5], deadline, payload)
+    return
+  end
+  local before = redis.call('ZSCORE', KEYS[4], connection)
+  redis.call('ZADD', KEYS[4], deadline, connection)
+  if before and tonumber(before) >= tonumber(held) then
+    local _, best = latest(payload)
+    redis.call('ZADD', KEYS[5], best, payload)
+  end
+end
+"""
+_DETACH = """
+local function detach(connection, payload)
+  redis.call('ZREM', KEYS[4], connection)
+  redis.call('HDEL', KEYS[2], connection)
+  redis.call('ZREM', KEYS[6], payload .. SEP .. connection)
+  local count, best = latest(payload)
+  if count == 0 then
+    redis.call('ZREM', KEYS[5], payload)
+    redis.call('ZREM', KEYS[8], payload)
+    return true
+  end
+  redis.call('ZADD', KEYS[5], best, payload)
+  return false
+end
+"""
+_JOIN_SCRIPT = (
+    _PRUNE
+    + _SETTLE
+    + _KEEP
+    + _LATEST
+    + _RESCORE
+    + _DETACH
+    + """
+local ttl = tonumber(ARGV[2])
+local deadline = now + ttl
+local previous = redis.call('HGET', KEYS[2], ARGV[1])
+if ARGV[3] == '' then
+  if previous then
+    detach(ARGV[1], previous)
+  end
+  if redis.call('ZADD', KEYS[1], deadline, ARGV[1]) == 1 then
+    changed = true
+  end
+else
+  redis.call('ZREM', KEYS[1], ARGV[1])
+  if previous ~= ARGV[3] then
+    if previous then
+      detach(ARGV[1], previous)
+    end
+    redis.call('HSET', KEYS[2], ARGV[1], ARGV[3])
+    redis.call('ZADD', KEYS[6], 0, ARGV[3] .. SEP .. ARGV[1])
+    redis.call('ZADD', KEYS[8], 'NX', now, ARGV[3])
+    changed = true
+  end
+  rescore(ARGV[1], ARGV[3], deadline)
+end
+local claimed = settle(ARGV[4])
+keep(ttl)
+return claimed
+"""
+)
+_TOUCH_SCRIPT = (
+    _PRUNE
+    + _SETTLE
+    + _KEEP
+    + _LATEST
+    + _RESCORE
+    + """
+local ttl = tonumber(ARGV[2])
+local deadline = now + ttl
+local payload = redis.call('HGET', KEYS[2], ARGV[1])
+local present = 1
+if payload then
+  rescore(ARGV[1], payload, deadline)
+elseif redis.call('ZSCORE', KEYS[1], ARGV[1]) then
+  redis.call('ZADD', KEYS[1], 'XX', deadline, ARGV[1])
+else
+  present = 0
+end
+local claimed = settle(ARGV[3])
+keep(ttl)
+return {present, claimed}
+"""
+)
+_LEAVE_SCRIPT = (
+    _PRUNE
+    + _SETTLE
+    + _LATEST
+    + _DETACH
+    + """
+local payload = redis.call('HGET', KEYS[2], ARGV[1])
+if payload then
+  if detach(ARGV[1], payload) then
+    changed = true
+  end
+elseif redis.call('ZREM', KEYS[1], ARGV[1]) == 1 then
+  changed = true
+end
+local claimed = settle(ARGV[2])
+if changed and redis.call('PTTL', KEYS[7]) == -1 then
+  redis.call('PEXPIRE', KEYS[7], ARGV[2] * 2)
+end
+if claimed == 0 and redis.call('EXISTS', KEYS[1], KEYS[5]) == 0 then
+  local state = redis.call('HMGET', KEYS[7], 'version', 'published')
+  if state[1] and state[1] ~= state[2] then
+    return {0, redis.call('PTTL', KEYS[3])}
+  end
+end
+return {claimed, 0}
+"""
+)
+_LIST = (
+    _CLOCK
+    + """
+local live = '(' .. now
+local attendees = redis.call('ZCOUNT', KEYS[2], live, '+inf')
+local result = {redis.call('ZCOUNT', KEYS[1], live, '+inf') + attendees}
+local size = tonumber(ARGV[1])
+local lapsed = redis.call('ZCARD', KEYS[2]) > attendees
+if size > 0 and not lapsed then
+  for _, payload in ipairs(redis.call('ZRANGE', KEYS[3], 0, size - 1)) do
+    result[#result + 1] = payload
+  end
+end
+local start = 0
+while lapsed and #result <= size do
+  local chunk = redis.call('ZRANGE', KEYS[3], start, start + 255)
+  if #chunk == 0 then
+    break
+  end
+  for _, payload in ipairs(chunk) do
+    local deadline = redis.call('ZSCORE', KEYS[2], payload)
+    if deadline and tonumber(deadline) > now then
+      result[#result + 1] = payload
+      if #result > size then
+        break
+      end
+    end
+  end
+  start = start + 256
+end
+"""
+)
+_SNAPSHOT_SCRIPT = _LIST + "return result\n"
+_ANNOUNCE_SCRIPT = (
+    """
+local state = redis.call('HMGET', KEYS[4], 'version', 'published')
+if state[1] and state[1] == state[2] then
+  return false
+end
+"""
+    + _LIST
+    + """
+if state[1] then
+  redis.call('HSET', KEYS[4], 'published', state[1])
+end
+local detail = '{"count":' .. result[1]
+if #result > 1 then
+  detail = detail .. ',"members":[' .. table.concat(result, ',', 2) .. ']'
+end
+redis.call('PUBLISH', ARGV[2], ARGV[3] .. detail .. '}' .. ARGV[4])
+return result
+"""
+)
+_SCRIPTS = (
+    _PUBLISH_SCRIPT,
+    _JOIN_SCRIPT,
+    _TOUCH_SCRIPT,
+    _LEAVE_SCRIPT,
+    _SNAPSHOT_SCRIPT,
+)
+_HOLE = "\x00detail\x00"
+
 
 def valid_prefix(value: object) -> TypeGuard[str]:
     """Whether a `PREFIX` has a non-colon character and no brace that moves the tag."""
@@ -92,6 +361,10 @@ class _AsyncPubSub(Protocol):
     def get_message(self, *, timeout: float) -> Awaitable[Mapping[str, Any] | None]: ...
 
     def ping(self, message: str) -> Awaitable[object]: ...
+
+
+class _AsyncScript(Protocol):
+    def __call__(self, *, keys: list[str], args: list[str]) -> Awaitable[Any]: ...
 
 
 class _TransportFailures:
@@ -147,7 +420,7 @@ class _Watch:
             self.deadline = time.monotonic() + self.timeout
 
 
-class RedisBroker(BrokerBackend):
+class RedisBroker(BrokerBackend, PresenceWindow):
     """Deliver messages across processes through Redis Pub/Sub."""
 
     def __init__(
@@ -155,8 +428,14 @@ class RedisBroker(BrokerBackend):
         config: Mapping[str, object] | None = None,
         *,
         replay: Mapping[str, object] | None = None,
+        presence: Mapping[str, object] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        schedule: Scheduler | None = None,
     ) -> None:
-        """Create the sync Redis client and prepare per-loop async clients."""
+        """Create the sync Redis client and prepare per-loop async clients.
+
+        `clock` and `schedule` time and build the presence schedule, not the deadlines.
+        """
         super().__init__(config)
         try:
             redis = importlib.import_module("redis")
@@ -200,17 +479,26 @@ class RedisBroker(BrokerBackend):
         )
         self._client_options = self._merged_client_options(interval)
         self._modules: tuple[ModuleType, ModuleType] = (redis, redis_asyncio)
-        self._failures = _TransportFailures(
-            (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError),
-            redis.exceptions.MaxConnectionsError,
+        transport = (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError)
+        exhausted = redis.exceptions.MaxConnectionsError
+        self._failures = _TransportFailures(transport, exhausted)
+        self._leave_failures = _TransportFailures(
+            (*transport, redis.exceptions.ResponseError), exhausted
         )
         client: Any = self.create_client(
             url, dict(self._client_options), asynchronous=False
         )
         self._redis: Any = client
         self._publish_script: Any = client.register_script(_PUBLISH_SCRIPT)
+        self.keep_presence(presence, schedule, clock)
+        self._window_ms = _milliseconds(self.presence_limits.window)
+        self._join_script: Any = client.register_script(_JOIN_SCRIPT)
+        self._touch_script: Any = client.register_script(_TOUCH_SCRIPT)
+        self._leave_script: Any = client.register_script(_LEAVE_SCRIPT)
+        self._snapshot_script: Any = client.register_script(_SNAPSHOT_SCRIPT)
+        self._announce_script: Any = client.register_script(_ANNOUNCE_SCRIPT)
         self._async_clients: WeakKeyDictionary[
-            asyncio.AbstractEventLoop, tuple[Any, Any]
+            asyncio.AbstractEventLoop, tuple[Any, Mapping[str, Any]]
         ] = WeakKeyDictionary()
         self._async_lock = threading.Lock()
         _BROKERS.add(self)
@@ -260,13 +548,23 @@ class RedisBroker(BrokerBackend):
         """Atomically number and publish one envelope through this loop's client."""
         envelope = self.validate_publication(topic, envelope)
         published_at = time.time()
-        _, script = self._async_client()
+        script = self._async_script(_PUBLISH_SCRIPT)
         with self._failures:
             seq, epoch = await script(
                 keys=[self._sequence_key(topic), self._log_key(topic)],
                 args=self._script_args(topic, envelope, published_at),
             )
         return Message(topic, int(seq), envelope, published_at, epoch)
+
+    @override
+    def broadcast(self, topic: str, envelope: Envelope) -> Message:
+        """Publish an envelope on the topic channel alone, unnumbered and unlogged."""
+        envelope = self.validate_publication(topic, envelope)
+        message = Message(topic, 0, envelope, time.time())
+        payload = json.dumps(message.as_dict(), separators=(",", ":"))
+        with self._failures:
+            self._redis.publish(self._channel(topic), payload)
+        return message
 
     @override
     def subscribe(
@@ -445,9 +743,163 @@ class RedisBroker(BrokerBackend):
         messages.reverse()
         return replay_after(after, current, messages)
 
+    def join(
+        self, topic: str, connection: str, member: Member | None, ttl: float
+    ) -> None:
+        """Record a connection in one script that also prunes and claims the window."""
+        keys, args = self._join_call(topic, connection, member, ttl)
+        with self._failures:
+            claimed = self._join_script(keys=keys, args=args)
+        if claimed:
+            self.schedule_presence(topic)
+
+    async def ajoin(
+        self, topic: str, connection: str, member: Member | None, ttl: float
+    ) -> None:
+        """Record a connection through this loop's client."""
+        keys, args = self._join_call(topic, connection, member, ttl)
+        script = self._async_script(_JOIN_SCRIPT)
+        with self._failures:
+            claimed = await script(keys=keys, args=args)
+        if claimed:
+            self.schedule_presence(topic)
+
+    def touch(self, topic: str, connection: str, ttl: float) -> bool:
+        """Push a deadline out in one script, False once the record was pruned."""
+        keys, args = self._touch_call(topic, connection, ttl)
+        with self._failures:
+            present, claimed = self._touch_script(keys=keys, args=args)
+        if claimed:
+            self.schedule_presence(topic)
+        return bool(present)
+
+    async def atouch(self, topic: str, connection: str, ttl: float) -> bool:
+        """Push a deadline out through this loop's client."""
+        keys, args = self._touch_call(topic, connection, ttl)
+        script = self._async_script(_TOUCH_SCRIPT)
+        with self._failures:
+            present, claimed = await script(keys=keys, args=args)
+        if claimed:
+            self.schedule_presence(topic)
+        return bool(present)
+
+    def leave(self, topic: str, connection: str) -> None:
+        """Forget a connection in one script that also prunes and claims the window."""
+        keys, args = self._leave_call(topic, connection)
+        with self._leave_failures:
+            claimed, wait = self._leave_script(keys=keys, args=args)
+        self._after_leave(topic, claimed, wait)
+
+    async def aleave(self, topic: str, connection: str) -> None:
+        """Forget a connection through this loop's client."""
+        keys, args = self._leave_call(topic, connection)
+        script = self._async_script(_LEAVE_SCRIPT)
+        with self._leave_failures:
+            claimed, wait = await script(keys=keys, args=args)
+        self._after_leave(topic, claimed, wait)
+
+    def _after_leave(self, topic: str, claimed: int, wait: int) -> None:
+        """Schedule the claimed window, or a snapshot once another process's closes.
+
+        A topic left empty gets no touch, so it cannot wait for one to heal its count.
+        """
+        if claimed:
+            self.schedule_presence(topic)
+        elif wait > 0:
+            self.presence_schedule.schedule(topic, wait / 1000)
+
+    def presence(self, topic: str) -> Presence:
+        """Count the unexpired attendees and read the first identified members."""
+        keys = self._snapshot_keys(topic)
+        with self._failures:
+            row = self._snapshot_script(
+                keys=keys, args=[str(self.presence_limits.size)]
+            )
+        return _snapshot(row)
+
+    async def apresence(self, topic: str) -> Presence:
+        """Read the presence of a topic through this loop's client."""
+        keys = self._snapshot_keys(topic)
+        script = self._async_script(_SNAPSHOT_SCRIPT)
+        with self._failures:
+            row = await script(keys=keys, args=[str(self.presence_limits.size)])
+        return _snapshot(row)
+
+    @override
+    def announce_presence(self, topic: str) -> None:
+        """Read the snapshot and publish it in one script, so windows keep change order.
+
+        The script skips a topic whose last change some process already announced.
+        """
+        published_at = time.time()
+        frame = snapshot_message(topic, Presence(0), published_at).as_dict()
+        frame["envelope"] = presence_event(_HOLE).as_dict()
+        head, _, tail = json.dumps(frame, separators=(",", ":")).partition(
+            json.dumps(_HOLE)
+        )
+        args = [str(self.presence_limits.size), self._channel(topic), head, tail]
+        keys = [*self._snapshot_keys(topic), self.topic_key("state", topic)]
+        with self._failures:
+            row = self._announce_script(keys=keys, args=args)
+        if row is None:
+            return
+        published(self, snapshot_message(topic, _snapshot(row), published_at))
+
+    def _join_call(
+        self, topic: str, connection: str, member: Member | None, ttl: float
+    ) -> tuple[list[str], list[str]]:
+        encoded = encode_member(member, self.presence_limits.member_bytes)
+        args = [connection, _milliseconds(ttl), encoded or "", self._window_ms]
+        return self._presence_keys(topic), args
+
+    def _touch_call(
+        self, topic: str, connection: str, ttl: float
+    ) -> tuple[list[str], list[str]]:
+        args = [connection, _milliseconds(ttl), self._window_ms]
+        return self._presence_keys(topic), args
+
+    def _leave_call(self, topic: str, connection: str) -> tuple[list[str], list[str]]:
+        return self._presence_keys(topic), [connection, self._window_ms]
+
+    def _presence_keys(self, topic: str) -> list[str]:
+        """Return the presence keys of a topic, all under the topic's hash tag.
+
+        The state hash counts the changes and the order set ranks attendees by arrival.
+        """
+        validate_topic(topic)
+        return [
+            self.topic_key(kind, topic)
+            for kind in (
+                "presence",
+                "members",
+                "window",
+                "identified",
+                "attendees",
+                "holders",
+                "state",
+                "order",
+            )
+        ]
+
+    def _snapshot_keys(self, topic: str) -> list[str]:
+        """Return the unnamed connections, the attendees and their arrival order."""
+        validate_topic(topic)
+        return [
+            self.topic_key("presence", topic),
+            self.topic_key("attendees", topic),
+            self.topic_key("order", topic),
+        ]
+
+    def _async_script(self, source: str) -> _AsyncScript:
+        """Return a script bound once to this loop's client."""
+        _, scripts = self._async_client()
+        script: _AsyncScript = scripts[source]
+        return script
+
     @override
     def close(self) -> None:
         """Close the sync pool and schedule the close of clients on live loops."""
+        self.presence_schedule.close()
         with self._async_lock:
             clients = list(self._async_clients.items())
             self._async_clients.clear()
@@ -470,8 +922,8 @@ class RedisBroker(BrokerBackend):
         self._async_lock = threading.Lock()
         self._async_clients = WeakKeyDictionary()
 
-    def _async_client(self) -> tuple[Any, Any]:
-        """Return the async client and script bound to the running event loop."""
+    def _async_client(self) -> tuple[Any, Mapping[str, Any]]:
+        """Return the async client and the scripts bound to the running event loop."""
         loop = asyncio.get_running_loop()
         with self._async_lock:
             for stale in [known for known in self._async_clients if known.is_closed()]:
@@ -481,7 +933,10 @@ class RedisBroker(BrokerBackend):
                 client: Any = self.create_client(
                     self._url, dict(self._client_options), asynchronous=True
                 )
-                entry = (client, client.register_script(_PUBLISH_SCRIPT))
+                scripts = {
+                    source: client.register_script(source) for source in _SCRIPTS
+                }
+                entry = (client, scripts)
                 self._async_clients[loop] = entry
         return entry
 
@@ -512,9 +967,9 @@ class RedisBroker(BrokerBackend):
         return self._decode_message(event.get("data"))
 
     def topic_key(self, kind: str, topic: str) -> str:
-        """Return the `seq` or `log` key of a topic, hash-tagged into one Cluster slot.
+        """Return a key of a topic, hash-tagged into one Cluster slot.
 
-        The publish script and the replay transaction touch both, so they must share it.
+        Every script on a topic touches several of its keys, so they must share it.
         """
         return f"{self._prefix}:{kind}:{{{topic}}}"
 
@@ -573,6 +1028,35 @@ class RedisBroker(BrokerBackend):
         if message is None:
             logger.warning("Skipped a malformed realtime message from Redis.")
         return message
+
+
+def _milliseconds(seconds: float) -> str:
+    """Return a TTL as the whole milliseconds a script adds to the Redis clock."""
+    return str(max(1, math.ceil(seconds * 1000)))
+
+
+def _snapshot(row: Sequence[Any]) -> Presence:
+    """Decode the count and the stored members a snapshot script returned."""
+    return Presence(int(row[0]), _members(row[1:]))
+
+
+def _members(payloads: Sequence[Any]) -> tuple[Member, ...]:
+    """Decode the stored members in one call, one by one when any row is malformed."""
+    try:
+        decoded = json.loads(f"[{','.join(payloads)}]")
+    except (TypeError, ValueError):
+        decoded = None
+    if (
+        isinstance(decoded, list)
+        and len(decoded) == len(payloads)
+        and all(isinstance(member, dict) for member in decoded)
+    ):
+        return tuple(decoded)
+    return tuple(
+        member
+        for member in (decode_member(payload) for payload in payloads)
+        if member is not None
+    )
 
 
 _BROKERS: weakref.WeakSet[RedisBroker] = weakref.WeakSet()

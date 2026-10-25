@@ -37,6 +37,16 @@ from .replay import (
     valid_size,
     valid_ttl,
 )
+from .roster import (
+    MAX_MEMBER_BYTES,
+    MAX_MEMBERS,
+    MAX_WINDOW,
+    PRESENCE_KEYS,
+    PresenceBroker,
+    valid_member_bytes,
+    valid_snapshot_size,
+    valid_window,
+)
 from .views import TicketIntrospectionView
 
 
@@ -52,6 +62,7 @@ _REALTIME_KEYS = frozenset(
         "HEARTBEAT",
         "GATEWAY_TOKEN",
         "REPLAY",
+        "PRESENCE",
     }
 )
 _BROKER_OPTIONS = {
@@ -123,7 +134,9 @@ def check_realtime_settings(*args, **kwargs) -> list[CheckMessage]:
         )
     errors.extend(_heartbeat_errors(realtime))
     errors.extend(_replay_errors(realtime))
+    errors.extend(_presence_errors(realtime))
     errors.extend(_broker_errors(broker))
+    errors.extend(_presence_warnings(realtime, broker))
     errors.extend(_deployment_warnings(realtime))
     return errors
 
@@ -183,6 +196,76 @@ def _replay_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
             )
         )
     return errors
+
+
+def _presence_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
+    """Require a presence mapping with a bounded window, member count and member size.
+
+    Only a missing key falls back to the default, an explicit None is not a mapping.
+    """
+    if "PRESENCE" not in realtime:
+        return []
+    presence = realtime["PRESENCE"]
+    prefix = f"{_PREFIX}['PRESENCE']"
+    if not isinstance(presence, Mapping):
+        return [Error(f"{prefix} must be a mapping.", obj=settings, id="next.E193")]
+    errors = errors_for_unknown_keys(
+        dict(presence), allowed=PRESENCE_KEYS, prefix=prefix
+    )
+    if "WINDOW" in presence and not valid_window(presence["WINDOW"]):
+        errors.append(
+            Error(
+                f"{prefix}['WINDOW'] must be a positive number of seconds up to "
+                f"{MAX_WINDOW}.",
+                obj=settings,
+                id="next.E194",
+            )
+        )
+    if "SIZE" in presence and not valid_snapshot_size(presence["SIZE"]):
+        errors.append(
+            Error(
+                f"{prefix}['SIZE'] must be an integer from 0 to {MAX_MEMBERS}.",
+                hint="Use 0 to send the count without members.",
+                obj=settings,
+                id="next.E195",
+            )
+        )
+    if "MEMBER_BYTES" in presence and not valid_member_bytes(presence["MEMBER_BYTES"]):
+        errors.append(
+            Error(
+                f"{prefix}['MEMBER_BYTES'] must be an integer from 1 to "
+                f"{MAX_MEMBER_BYTES}.",
+                obj=settings,
+                id="next.E196",
+            )
+        )
+    return errors
+
+
+def _presence_warnings(
+    realtime: Mapping[str, object], broker: Mapping[str, object]
+) -> list[CheckMessage]:
+    """Flag presence settings the configured broker cannot serve.
+
+    Presence is opt-in per stream, so only an explicit `PRESENCE` key signals intent.
+    """
+    if "PRESENCE" not in realtime:
+        return []
+    backend_class = _broker_class(broker.get("BACKEND"))
+    if backend_class is None or issubclass(backend_class, PresenceBroker):
+        return []
+    return [
+        DjangoWarning(
+            f"{_PREFIX}['PRESENCE'] is set, but {backend_class.__qualname__} keeps "
+            "no presence, so every stream that asks for it fails to start.",
+            hint=(
+                "Implement next.realtime.PresenceBroker on the broker, or drop "
+                "PRESENCE and presence= from the streams."
+            ),
+            obj=settings,
+            id="next.W144",
+        )
+    ]
 
 
 def _transport_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:

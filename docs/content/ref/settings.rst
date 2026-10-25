@@ -246,6 +246,7 @@ Default value.
        "HEARTBEAT": 25.0,
        "GATEWAY_TOKEN": None,
        "REPLAY": {"SIZE": 100, "TTL": 300},
+       "PRESENCE": {"WINDOW": 1.0, "SIZE": 100, "MEMBER_BYTES": 512},
    }
 
 ``BROKER.BACKEND`` names a ``BrokerBackend`` subclass, and ``BROKER.OPTIONS`` belongs to that backend.
@@ -306,6 +307,17 @@ A missing key takes its default, any key besides the two is reported as ``next.E
 A broker reads the window once when it is created, so a settings reload rebuilds the broker with it.
 With a nonzero ``SIZE`` and a ``BACKEND`` that keeps no log, ``next.W143`` warns that every reconnect resynchronises.
 See :doc:`realtime` for the replay order and the guarantees it gives.
+
+``PRESENCE`` limits the attendance a stream reports when it passes ``presence`` to ``TopicStream``.
+``WINDOW`` is the coalescing window in seconds, a positive number up to ``60`` that ``next.E194`` enforces.
+Every change inside an open window joins the one ``next:presence`` event that the broker publishes when the window closes.
+``SIZE`` is the number of members one event lists, an integer from ``0`` to ``1000`` that ``next.E195`` enforces, and ``0`` sends the count alone.
+The ``count`` stays exact beyond ``SIZE``.
+``MEMBER_BYTES`` is the largest compact JSON of one member in bytes, an integer from ``1`` to ``4096`` that ``next.E196`` enforces, and a larger member raises ``InvalidMemberError`` on its join.
+A missing key takes its default, any key besides the three is reported as ``next.E035``, and a ``PRESENCE`` value that is not a mapping is reported as ``next.E193``.
+A broker reads the limits once when it is created.
+With an explicit ``PRESENCE`` and a ``BACKEND`` that keeps no presence, ``next.W144`` warns that every stream asking for presence fails to start.
+See :doc:`realtime` for the snapshot semantics.
 
 See :doc:`realtime` for the broker API and :doc:`/content/howto/stream-over-websockets` for setup.
 

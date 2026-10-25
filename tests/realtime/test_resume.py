@@ -252,10 +252,10 @@ def test_single_topic_sse_frames_carry_the_epoch_and_seq_as_id(
     stream = TopicStream(request, "poll:1", heartbeat_seconds=0.01)
     iterator = stream.streaming_content
     assert next(iterator).startswith(b"retry: ")
-    replayed = next(iterator)
-    hello = next(iterator)
+    replayed = next_frame(iterator)
+    hello = next_frame(iterator)
     broker.publish("poll:1", refresh_envelope())
-    live = next(iterator)
+    live = next_frame(iterator)
     stream._iterator.close()
 
     assert _event_id(replayed) == f"{epoch}:2"
@@ -272,7 +272,7 @@ def test_multi_topic_sse_frames_carry_no_id(broker: BrokerBackend) -> None:
     next(iterator)
     next(iterator)
     broker.publish("poll:2", refresh_envelope())
-    frame = next(iterator)
+    frame = next_frame(iterator)
     stream._iterator.close()
     assert b"event: next-patches" in frame
     assert _event_id(frame) is None
@@ -287,7 +287,8 @@ def test_async_sse_stream_resumes_from_last_event_id(broker: BrokerBackend) -> N
         )
         stream = TopicStream(request, "poll:1", heartbeat_seconds=0.01)
         iterator = stream.streaming_content.__aiter__()
-        frames = [await anext(iterator) for _ in range(3)]
+        frames = [await anext(iterator)]
+        frames.extend([await anext_frame(iterator) for _ in range(2)])
         await stream._iterator.aclose()
         return frames
 

@@ -3,9 +3,10 @@
 from . import checks, frames, signals
 from .asgi import WebSocketApp, application
 from .backends import BrokerBackend, MemoryBroker
-from .delivery import apublish, publish
+from .delivery import apresence, apublish, presence, publish
 from .errors import (
     BrokerConnectionError,
+    InvalidMemberError,
     InvalidTicketError,
     InvalidTopicError,
     TopicPayloadError,
@@ -14,6 +15,7 @@ from .frames import Close
 from .messages import Message, Position
 from .redis import RedisBroker
 from .replay import Replay, ReplayingBroker
+from .roster import Presence, PresenceBroker
 from .socket import Handshake, SocketPort, TopicSocket
 from .tickets import TicketClaims, verify_ticket
 from .topics import TopicStream
@@ -25,11 +27,14 @@ __all__ = [
     "BrokerConnectionError",
     "Close",
     "Handshake",
+    "InvalidMemberError",
     "InvalidTicketError",
     "InvalidTopicError",
     "MemoryBroker",
     "Message",
     "Position",
+    "Presence",
+    "PresenceBroker",
     "RedisBroker",
     "Replay",
     "ReplayingBroker",
@@ -41,9 +46,11 @@ __all__ = [
     "TopicStream",
     "WebSocketApp",
     "application",
+    "apresence",
     "apublish",
     "checks",
     "frames",
+    "presence",
     "publish",
     "signals",
     "verify_ticket",

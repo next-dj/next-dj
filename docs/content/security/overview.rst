@@ -158,6 +158,15 @@ Each connection rechecks its session and calls the callback at most once per ``R
 A topic denial ends an SSE stream with a terminal ``next-end`` frame, while a revoked session ends it without one so the reconnect meets the page guard again.
 A denied socket closes with ``4401`` for a session problem or ``4403`` for a topic denial.
 
+Presence puts what a visitor shows into the stream of everyone else.
+With ``presence=True`` the stream stores and sends a number only, and no data about people leaves the server.
+With an ``identify`` callable every subscriber of the topic that identifies its own members receives the whole mapping it returns for every attendee, in the ``members`` list of the ``next:presence`` event, so ``identify`` is the privacy boundary.
+The server cuts ``members`` from the event for a stream with ``presence=True`` or without presence, over SSE and WebSocket alike.
+Return only public fields such as a display name or a handle, and never an e-mail address, a primary key, or a permission.
+Only those who may open the stream see the attendance, because the event passes the page guard and the ``authorize`` callback like any message.
+The mapping is capped at ``REALTIME['PRESENCE']['MEMBER_BYTES']`` bytes and the list at ``REALTIME['PRESENCE']['SIZE']`` members.
+Over WebSocket the ticket carries the dotted path of ``identify`` and the socket calls it with the session user of the handshake, never with a value from the client.
+
 WebSocket negotiation issues a short-lived session-bound ticket through that guarded page.
 The ticket is sent in the first socket frame, never in the URL, and carries the stream's topics, transform, and authorizer reference.
 If the stream cannot be represented by stable importable callbacks, negotiation falls back to SSE.

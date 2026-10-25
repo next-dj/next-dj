@@ -33,7 +33,10 @@ class Position:
 
 @dataclass(frozen=True, slots=True)
 class Message:
-    """One envelope published on a topic, numbered by the broker within an epoch."""
+    """One envelope published on a topic, numbered by the broker within an epoch.
+
+    A `seq` of 0 marks an unnumbered message that skips the log and moves no cursor.
+    """
 
     topic: str
     seq: int
@@ -41,21 +44,29 @@ class Message:
     published_at: float
     epoch: str = ""
 
+    @property
+    def numbered(self) -> bool:
+        """Whether the broker numbered the message, False for an unnumbered one."""
+        return self.seq > 0
+
     def as_dict(self) -> dict[str, Any]:
-        """Return the message as a JSON-safe mapping."""
-        return {
-            "topic": self.topic,
-            "seq": self.seq,
-            "epoch": self.epoch,
-            "envelope": self.envelope.as_dict(),
-            "published_at": self.published_at,
-        }
+        """Return the JSON-safe mapping, without a position when unnumbered."""
+        data: dict[str, Any] = {"topic": self.topic}
+        if self.numbered:
+            data["seq"] = self.seq
+            data["epoch"] = self.epoch
+        data["envelope"] = self.envelope.as_dict()
+        data["published_at"] = self.published_at
+        return data
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "Message":
-        """Rebuild a message from its JSON-safe mapping, rejecting wrong wire types."""
+        """Rebuild a message from its JSON-safe mapping, rejecting wrong wire types.
+
+        A mapping without `seq` is an unnumbered message.
+        """
         topic = data.get("topic")
-        seq = data.get("seq")
+        seq = data.get("seq", 0)
         epoch = data.get("epoch", "")
         envelope = data.get("envelope")
         published_at = data.get("published_at")
@@ -65,7 +76,7 @@ class Message:
         if not isinstance(seq, int) or isinstance(seq, bool):
             msg = "A broker message needs an integer seq."
             raise TypeError(msg)
-        if seq < 1:
+        if "seq" in data and seq < 1:
             msg = "A broker message seq must be positive."
             raise ValueError(msg)
         if not isinstance(epoch, str):

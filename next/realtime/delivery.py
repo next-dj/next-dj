@@ -1,4 +1,4 @@
-"""Publish validated, subscriber-safe patch envelopes to realtime topics."""
+"""Publish subscriber-safe patch envelopes to realtime topics and read who is there."""
 
 import json
 from collections.abc import Callable
@@ -13,7 +13,8 @@ from next.partial.patches import Patches
 from .errors import TopicPayloadError
 from .manager import broker_manager
 from .messages import Message, validate_topic
-from .signals import message_published
+from .roster import Presence, presence_broker
+from .signals import message_published, published
 
 
 _ALLOWED_OPS = frozenset({"refresh", "event", "toast", "remove"})
@@ -72,8 +73,7 @@ def transformed(message: Message, result: object) -> Message | None:
 def _publish_now(topic: str, envelope: Envelope) -> None:
     """Publish once and emit the lifecycle signal after broker acceptance."""
     backend = broker_manager.get()
-    message = backend.publish(topic, envelope)
-    message_published.send(sender=type(backend), topic=topic, message=message)
+    published(backend, backend.publish(topic, envelope))
 
 
 def _deferred(topic: str, envelope: Envelope) -> Callable[[], None]:
@@ -122,4 +122,16 @@ async def apublish(topic: str, patches: Patches | Envelope) -> Message:
     return message
 
 
-__all__ = ["apublish", "publish", "transformed"]
+def presence(topic: str) -> Presence:
+    """Return the attendance snapshot of a topic, refusing a broker without presence."""
+    broker = presence_broker(broker_manager.get())
+    return broker.presence(validate_topic(topic))
+
+
+async def apresence(topic: str) -> Presence:
+    """Return the attendance snapshot of a topic through the broker's async API."""
+    broker = presence_broker(await broker_manager.aget())
+    return await broker.apresence(validate_topic(topic))
+
+
+__all__ = ["apresence", "apublish", "presence", "publish", "transformed"]

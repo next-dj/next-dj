@@ -16,6 +16,7 @@ from django.contrib.auth import (
 )
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sessions.backends.db import SessionStore
+from django.core.exceptions import ImproperlyConfigured
 from django.test import AsyncRequestFactory, RequestFactory, override_settings
 
 from next.partial import Patches
@@ -47,6 +48,10 @@ def _event_transform(message):
 
 def _allow_topic(_user: object, _topic: str) -> bool:
     return True
+
+
+def _name_guest(_user: object, _topic: str) -> dict[str, object]:
+    return {"name": "guest"}
 
 
 @pytest.fixture()
@@ -243,10 +248,8 @@ def test_websocket_negotiation_accepts_stable_transform_and_explicit_references(
         response = TopicStream(
             request,
             "room",
-            transform=_event_transform,
-            transform_ref="tests.realtime.test_topics._event_transform",
-            authorize=_allow_topic,
-            authorize_ref="tests.realtime.test_topics._allow_topic",
+            transform="tests.realtime.test_topics._event_transform",
+            authorize="tests.realtime.test_topics._allow_topic",
         )
     assert response.status_code == 200
     claims = verify_ticket(_body(response)["ticket"], request.session.session_key)
@@ -269,24 +272,29 @@ def test_websocket_negotiation_discovers_stable_callbacks_and_rejects_bad_paths(
         assert claims.transform_ref == "tests.realtime.test_topics._event_transform"
         assert claims.authorizer_ref == "tests.realtime.test_topics._allow_topic"
 
+        with pytest.raises(ImproperlyConfigured, match=r"transform=.* does not import"):
+            TopicStream(
+                request,
+                "room",
+                transform="missing.module.transform",
+                authorize=_allow_topic,
+            )
+        with pytest.raises(ImproperlyConfigured, match=r"authorize=.* does not import"):
+            TopicStream(request, "room", authorize="missing.module.authorizer")
+
+        def renamed(message):
+            return message
+
+        renamed.__qualname__ = "renamed_away"
         response = TopicStream(
-            request,
-            "room",
-            transform=_event_transform,
-            transform_ref="missing.module.transform",
-            authorize=_allow_topic,
+            request, "room", transform=renamed, authorize=_allow_topic
         )
         assert response.status_code == 406
         assert _body(response)["reason"] == "transform"
-
-        response = TopicStream(
-            request,
-            "room",
-            authorize=_allow_topic,
-            authorize_ref="missing.module.authorizer",
-        )
-        assert response.status_code == 406
-        assert _body(response)["reason"] == "authorization"
+        with pytest.raises(ImproperlyConfigured, match="does not name a callable"):
+            TopicStream(
+                request, "room", presence="tests.realtime.test_topics._SKIP_ONE"
+            )
 
 
 _SKIP_ONE = re.compile(rb"id: [0-9a-f]{16}:1\nevent: next-skip\n")
@@ -859,3 +867,45 @@ def test_websocket_negotiation_replaces_a_stale_anonymous_cookie(
     assert request.session.modified is True
     fresh = SessionStore(session_key=request.session.session_key)
     assert verify_ticket(grant["ticket"], fresh.session_key).topics == ("room",)
+
+
+_NAME_GUEST = "tests.realtime.test_topics._name_guest"
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize(
+    ("presence", "expected"),
+    [
+        (False, False),
+        (True, True),
+        (_name_guest, _NAME_GUEST),
+        (_NAME_GUEST, _NAME_GUEST),
+    ],
+    ids=["off", "count", "callable", "dotted"],
+)
+def test_websocket_ticket_carries_the_stream_presence(
+    ws_available: None, presence: object, expected: object
+) -> None:
+    request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
+    request.session = SessionStore()
+    with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
+        response = TopicStream(
+            request, "room", authorize=_allow_topic, presence=presence
+        )
+    assert response.status_code == 200
+    claims = verify_ticket(_body(response)["ticket"], request.session.session_key)
+    assert claims.presence == expected
+
+
+@pytest.mark.django_db()
+def test_websocket_negotiation_falls_back_for_an_unstable_identify(
+    ws_available: None,
+) -> None:
+    request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
+    request.session = SessionStore()
+    with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
+        response = TopicStream(
+            request, "room", authorize=_allow_topic, presence=lambda _u, _t: None
+        )
+    assert response.status_code == 406
+    assert _body(response) == {"transport": "sse", "reason": "presence"}

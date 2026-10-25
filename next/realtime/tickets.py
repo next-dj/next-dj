@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from next.partial.patches import Patches
 
     from .access import TopicAuthorizer
+    from .attendance import Identify
     from .messages import Message
 
     type TopicTransform = Callable[[Message], Patches | Envelope | None]
@@ -52,6 +53,7 @@ def _max_ticket_length() -> int:
         "topics": ["t" * _MAX_TOPIC_LENGTH] * _MAX_TOPICS,
         "transform": "\U0010ffff" * MAX_REFERENCE_LENGTH,
         "authorizer": "\U0010ffff" * MAX_REFERENCE_LENGTH,
+        "presence": "\U0010ffff" * MAX_REFERENCE_LENGTH,
     }
     encoded = json.dumps(payload, separators=(",", ":"))
     return 4 * math.ceil((len(encoded) + 1) / 3) + _SIGNATURE_OVERHEAD
@@ -83,11 +85,15 @@ class TicketGrant:
 
 @dataclass(frozen=True, slots=True)
 class TicketClaims:
-    """Validated ticket grants a WebSocket gateway may act on after its handshake."""
+    """Validated ticket grants a WebSocket gateway may act on after its handshake.
+
+    `presence` is False outside presence, True for a count, or the identify reference.
+    """
 
     topics: tuple[str, ...]
     transform_ref: str | None
     authorizer_ref: str
+    presence: bool | str = False
 
 
 def issue_ticket(
@@ -96,13 +102,15 @@ def issue_ticket(
     *,
     transform_ref: str | None,
     authorizer_ref: str,
+    presence: bool | str = False,
 ) -> TicketGrant:
     """Sign the exact topic grant after the guarded stream view has run.
 
     The grant is held to the verifier's caps, so a ticket it signs always verifies.
     A cookie the handshake would find dead gets a fresh session, as a first visit does.
     """
-    _require_grant(topics, transform_ref, authorizer_ref)
+    presence_ref = presence if isinstance(presence, str) else None
+    _require_grant(topics, (transform_ref, authorizer_ref, presence_ref))
     session = getattr(request, "session", None)
     if session is None:
         msg = "WebSocket ticket negotiation requires Django SessionMiddleware."
@@ -118,27 +126,27 @@ def issue_ticket(
         raise InvalidTicketError(msg)
     age = ticket_max_age()
     signer = signing.TimestampSigner(salt=_SALT)
-    payload = {
+    payload: dict[str, object] = {
         "session": _session_digest(session_key),
         "topics": list(topics),
         "transform": transform_ref,
         "authorizer": authorizer_ref,
     }
+    if presence is not False:
+        payload["presence"] = presence
     token = signer.sign_object(payload, compress=True)
     url = f"{get_script_prefix().rstrip('/')}{websocket_path()}"
     return TicketGrant(token, topics, url, age)
 
 
-def _require_grant(
-    topics: tuple[str, ...], transform_ref: str | None, authorizer_ref: str
-) -> None:
+def _require_grant(topics: tuple[str, ...], references: tuple[str | None, ...]) -> None:
     """Refuse a grant the verifier would reject."""
     if not topics or len(topics) > _MAX_TOPICS or len(set(topics)) != len(topics):
         msg = f"A WebSocket ticket grants 1 to {_MAX_TOPICS} unique topics."
         raise ValueError(msg)
     for topic in topics:
         validate_topic(topic)
-    for reference in (transform_ref, authorizer_ref):
+    for reference in references:
         if reference is not None and not 0 < len(reference) <= MAX_REFERENCE_LENGTH:
             msg = (
                 f"A WebSocket ticket reference holds 1 to {MAX_REFERENCE_LENGTH} "
@@ -184,32 +192,45 @@ def resolve_claims(
 
     A reference that no longer imports a callable fails like a bad ticket.
     """
-    try:
-        transform = (
-            None
-            if claims.transform_ref is None
-            else _callable(import_string(claims.transform_ref))
-        )
-        authorizer = _callable(import_string(claims.authorizer_ref))
-    except (ImportError, AttributeError, TypeError) as exc:
-        msg = "The WebSocket ticket names a callable that does not import."
-        raise InvalidTicketError(msg) from exc
+    ref = claims.transform_ref
+    transform = None if ref is None else _resolve(ref)
+    authorizer = _resolve(claims.authorizer_ref)
     return (
         cast("TopicTransform | None", transform),
         cast("TopicAuthorizer", authorizer),
     )
 
 
-def _callable(value: object) -> Callable[..., object]:
-    """Return an imported reference, or raise when it cannot be called."""
-    if not callable(value):
-        msg = "A WebSocket ticket reference must name a callable."
+def resolve_identify(claims: TicketClaims) -> Identify | None:
+    """Import the identify callable a verified ticket names, None for a bare count.
+
+    A reference that no longer imports a callable fails like a bad ticket.
+    """
+    if not isinstance(claims.presence, str):
+        return None
+    return cast("Identify", _resolve(claims.presence))
+
+
+def import_callable(path: str) -> Callable[..., Any]:
+    """Import the callable a dotted path names, `TypeError` for another value."""
+    target = import_string(path)
+    if not callable(target):
+        msg = f"{path!r} does not name a callable."
         raise TypeError(msg)
-    return value
+    return cast("Callable[..., Any]", target)
+
+
+def _resolve(ref: str) -> Callable[..., Any]:
+    """Import a callable a verified ticket names, failing like a bad ticket."""
+    try:
+        return import_callable(ref)
+    except (ImportError, AttributeError, TypeError) as exc:
+        msg = "The WebSocket ticket names a callable that does not import."
+        raise InvalidTicketError(msg) from exc
 
 
 def _ticket_claims(payload: Mapping[str, Any]) -> TicketClaims:
-    """Validate the signed topic, transform, and authorization references."""
+    """Validate the signed topics and the references the grant names."""
     raw_topics = payload.get("topics")
     if (
         not isinstance(raw_topics, list)
@@ -242,7 +263,15 @@ def _ticket_claims(payload: Mapping[str, Any]) -> TicketClaims:
     ):
         msg = "The WebSocket ticket has no valid topic authorizer."
         raise InvalidTicketError(msg)
-    return TicketClaims(topics, transform_ref, authorizer_ref)
+    presence = payload.get("presence", False)
+    if not isinstance(presence, bool) and (
+        not isinstance(presence, str)
+        or not presence
+        or len(presence) > MAX_REFERENCE_LENGTH
+    ):
+        msg = "The WebSocket ticket has an invalid presence."
+        raise InvalidTicketError(msg)
+    return TicketClaims(topics, transform_ref, authorizer_ref, presence)
 
 
 def ticket_max_age() -> int:
@@ -291,8 +320,10 @@ __all__ = [
     "MAX_REFERENCE_LENGTH",
     "TicketClaims",
     "TicketGrant",
+    "import_callable",
     "issue_ticket",
     "resolve_claims",
+    "resolve_identify",
     "ticket_max_age",
     "verify_ticket",
     "websocket_path",

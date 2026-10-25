@@ -1,8 +1,18 @@
 import json
-from collections.abc import AsyncIterator, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+from functools import partial
+
+import fakeredis
+import fakeredis._basefakesocket
+import fakeredis._commands
+import fakeredis.aioredis
+import pytest
+from fakeredis.commands_mixins import server_mixin
 
 from next.partial import Envelope, Patches
 from next.realtime.backends import BrokerBackend, MemoryBroker
+from next.realtime.redis import RedisBroker
+from next.realtime.roster import PresenceSchedule, Scheduler
 from next.testing.realtime import SocketTicket, issue_socket_ticket
 
 
@@ -14,15 +24,34 @@ def allow_room_topic(_user: object, topic: str) -> bool:
     return topic.startswith("room:")
 
 
+def manual_schedule(clock: Callable[[], float]) -> Scheduler:
+    """Build presence schedules a test runs by hand on its own clock."""
+    return partial(PresenceSchedule, clock=clock, threaded=False)
+
+
+def silent_schedule(announce: Callable[[str], object]) -> PresenceSchedule:
+    """Build a presence schedule that queues windows and never announces them."""
+    del announce
+    return PresenceSchedule(_unannounced, threaded=False)
+
+
+def _unannounced(_topic: str) -> None:
+    """Drop a closed window without a snapshot."""
+
+
 def issue_session_ticket(
     topics: tuple[str, ...] = ("room:42",),
     *,
     transform_ref: str | None = None,
     authorizer_ref: str = ROOM_AUTHORIZER_REF,
+    presence: bool | str = False,
 ) -> SocketTicket:
     """Issue a ticket for the ``room:`` topics the realtime tests subscribe to."""
     return issue_socket_ticket(
-        topics, transform_ref=transform_ref, authorizer_ref=authorizer_ref
+        topics,
+        transform_ref=transform_ref,
+        authorizer_ref=authorizer_ref,
+        presence=presence,
     )
 
 
@@ -96,6 +125,44 @@ class PlainBroker(BrokerBackend):
 
     async def apositions(self, topics):
         return self.inner.positions(topics)
+
+
+class FakeServerBroker(RedisBroker):
+    """Reach one fakeredis server from the sync client and every per-loop client."""
+
+    def __init__(self, server: fakeredis.FakeServer, **kwargs: object) -> None:
+        """Keep the server before the base class builds the sync client."""
+        self.server = server
+        super().__init__(**kwargs)
+
+    def create_client(self, url, options, *, asynchronous):
+        factory = fakeredis.aioredis.FakeRedis if asynchronous else fakeredis.FakeRedis
+        return factory(server=self.server, decode_responses=True)
+
+
+class ServerClock:
+    """A wall clock a test moves by hand, for brokers and the fakeredis server alike."""
+
+    def __init__(self, now: float = 1_700_000_000.0) -> None:
+        """Start at a fixed Unix time."""
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+    def time(self) -> float:
+        """Answer as `time.time` does for the fakeredis modules that read it."""
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        """Move the clock forward."""
+        self.now += seconds
+
+
+def freeze_fakeredis(monkeypatch: pytest.MonkeyPatch, clock: ServerClock) -> None:
+    """Make fakeredis read `clock` for `TIME`, key expiry and timestamp arguments."""
+    for module in (server_mixin, fakeredis._basefakesocket, fakeredis._commands):
+        monkeypatch.setattr(module, "time", clock)
 
 
 class ResumingClient:

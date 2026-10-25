@@ -11,7 +11,7 @@ Topic messages have to travel through a message system the shipped brokers do no
 Solution
 --------
 
-Subclass ``BrokerBackend`` for a new transport and give it ``replay`` and ``areplay`` so reconnecting streams catch up from its log.
+Subclass ``BrokerBackend`` for a new transport and give it ``replay`` and ``areplay`` so reconnecting streams catch up from its log, and with the methods of ``PresenceBroker`` so streams can report who is attending.
 For another way into Redis, subclass ``RedisBroker`` and override ``create_client`` and ``topic_key``.
 Select the class in ``NEXT_FRAMEWORK['REALTIME']['BROKER']['BACKEND']``.
 
@@ -87,6 +87,129 @@ A replay that fails on the transport raises ``BrokerConnectionError``, and the s
 
 Without these methods and with a nonzero ``REPLAY['SIZE']``, ``manage.py check`` warns with ``next.W143`` that every reconnect resynchronises.
 
+Add presence
+~~~~~~~~~~~~
+
+``PresenceBroker`` is a runtime-checkable ``Protocol`` too, so a broker reports attendance by defining ``join``, ``leave``, ``touch``, ``presence``, and their ``ajoin``, ``aleave``, ``atouch``, and ``apresence`` twins.
+``join(topic, connection, member, ttl)`` records a connection until ``ttl`` seconds pass without a touch.
+``touch`` pushes the deadline out and returns ``False`` when the record is gone, and the stream then joins again.
+``leave`` forgets the connection, and ``presence`` returns a ``Presence`` of the live connections without any expired one.
+
+The helpers live in ``next.realtime.roster``.
+``encode_member(member, limit)`` returns the canonical JSON to store, ``None`` for no member, and raises ``InvalidMemberError`` for a member that is too large or not JSON.
+Store that string as the identity of the member, because connections with an equal string are one member.
+``decode_member`` reads it back and skips a malformed row.
+
+``PresenceWindow`` is the mixin both shipped brokers share.
+``keep_presence(limits, schedule, clock)`` reads ``REALTIME['PRESENCE']`` into ``self.presence_limits`` when ``limits`` is ``None`` and builds ``self.presence_schedule``, the ``PresenceSchedule`` that calls ``announce_presence(topic)`` on a daemon thread once a window closes.
+``schedule`` is ``None`` for that default, or a callable that receives the hook and returns a schedule, which is how a test runs windows by hand.
+``announce_presence`` is the overridable hook, and ``announce(broker, topic)`` is its usual body, reading the current snapshot and sending it through ``broker.broadcast``.
+Override ``broadcast`` to deliver the snapshot to live subscribers without a sequence, since the default raises ``NotImplementedError`` and a snapshot never enters the replay log.
+
+A change claims the coalescing window of its topic, and the claim has to be atomic across processes, as a ``SET NX PX`` is on Redis.
+Only the process that wins the claim calls ``schedule_presence(topic)``, so one window produces one event.
+A join of a new connection and a leave or expiry that removes a whole member are the changes that claim.
+``touch`` prunes expired records as well, so it claims a window when its prune removed a member, and the store returns both answers from one atomic step.
+
+A claim alone loses the snapshot when the process that won it dies before the window closes.
+Keep a version per topic in the store, raise it on every change, and record the version a snapshot announced.
+A join, a touch, or a leave that finds the version unannounced claims a free window without a change of its own, so the next refresh of any connection heals a lost window.
+A leave that empties its topic sees no later refresh, so when another process holds the window the store answers how long it stays held and the broker schedules the snapshot for then.
+
+``announce(broker, topic)`` reads the snapshot and broadcasts it in two steps, which orders the snapshots of one process only.
+Two processes that announce one topic can interleave, and an older snapshot read first may leave last and stay on every page.
+When more than one process announces, read the snapshot, record its version, and fan it out in one atomic step of the store, as the announce script of ``RedisBroker`` does.
+
+.. code-block:: python
+   :caption: realtime/brokers.py
+
+   import time
+   from collections.abc import Mapping
+
+   from next.partial import Envelope
+   from next.realtime import Message, Presence
+   from next.realtime.roster import (
+       PresenceWindow,
+       Scheduler,
+       announce,
+       decode_member,
+       encode_member,
+   )
+
+   class PresenceQueueBroker(ReplayingQueueBroker, PresenceWindow):
+       """Keep the attendance of each topic in the project store."""
+
+       def __init__(
+           self,
+           config: Mapping[str, object] | None = None,
+           *,
+           schedule: Scheduler | None = None,
+       ) -> None:
+           super().__init__(config)
+           self.keep_presence(None, schedule, time.monotonic)
+
+       def join(self, topic, connection, member, ttl) -> None:
+           limits = self.presence_limits
+           encoded = encode_member(member, limits.member_bytes)
+           if self.store.put_attendee(topic, connection, encoded, ttl, limits.window):
+               self.schedule_presence(topic)
+
+       def touch(self, topic, connection, ttl) -> bool:
+           window = self.presence_limits.window
+           present, claimed = self.store.refresh_attendee(topic, connection, ttl, window)
+           if claimed:
+               self.schedule_presence(topic)
+           return present
+
+       def leave(self, topic, connection) -> None:
+           window = self.presence_limits.window
+           claimed, held = self.store.drop_attendee(topic, connection, window)
+           if claimed:
+               self.schedule_presence(topic)
+           elif held:
+               self.presence_schedule.schedule(topic, held)
+
+       def presence(self, topic) -> Presence:
+           count, rows = self.store.read_attendees(topic, self.presence_limits.size)
+           members = (decode_member(row) for row in rows)
+           return Presence(count, tuple(m for m in members if m is not None))
+
+       async def ajoin(self, topic, connection, member, ttl) -> None:
+           self.join(topic, connection, member, ttl)
+
+       async def atouch(self, topic, connection, ttl) -> bool:
+           return self.touch(topic, connection, ttl)
+
+       async def aleave(self, topic, connection) -> None:
+           self.leave(topic, connection)
+
+       async def apresence(self, topic) -> Presence:
+           return self.presence(topic)
+
+       def broadcast(self, topic: str, envelope: Envelope) -> Message:
+           envelope = self.validate_publication(topic, envelope)
+           message = Message(topic, 0, envelope, time.time())
+           self.store.fan_out(topic, message.as_dict())
+           return message
+
+       def announce_presence(self, topic: str) -> None:
+           announce(self, topic)
+
+       def close(self) -> None:
+           self.presence_schedule.close()
+           super().close()
+
+The async twins call the synchronous methods, which suits a store that only touches memory, and a networked store awaits its own asynchronous client there instead.
+``isinstance(broker, PresenceBroker)`` holds only once all eight methods exist, and a stream refuses presence on a broker without them.
+The store methods above are the part a project writes, and each has to prune expired records and count each member once.
+``Presence.count`` is the number of distinct members plus every connection without a member, and the list holds at most ``presence_limits.size`` of them.
+
+A subclass of ``RedisBroker`` inherits presence whole, and overrides ``announce_presence`` to observe or reroute each snapshot.
+An override of ``topic_key`` has to return a distinct key for the kinds ``presence``, ``members``, ``window``, ``identified``, ``attendees``, ``holders``, ``state``, and ``order`` too, all under one hash tag, since the scripts touch them together.
+
+Without these methods a stream that passes ``presence`` fails to start with ``ImproperlyConfigured``, and ``presence()`` and ``apresence()`` raise it too.
+With an explicit ``REALTIME['PRESENCE']`` setting, ``manage.py check`` warns with ``next.W144`` that the broker keeps no presence.
+
 Reach Redis another way
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -161,7 +284,7 @@ A publisher outside Django passes ``replay={"SIZE": 100, "TTL": 300}`` to the co
 Verification
 ------------
 
-Run ``uv run python manage.py check`` and confirm it reports neither ``next.E184`` for the class nor ``next.W143`` for the replay window.
+Run ``uv run python manage.py check`` and confirm it reports neither ``next.E184`` for the class, nor ``next.W143`` for the replay window, nor ``next.W144`` for the presence limits.
 
 Open a single-topic stream page with an old cursor in ``Last-Event-ID``, for example with ``curl -N -H "Last-Event-ID: <epoch>:<seq>"`` and the session cookie of a signed-in user.
 The messages after that cursor arrive with their ``id:`` lines before ``next-hello``, and a cursor the log cannot cover yields ``next-hello`` alone.
@@ -173,4 +296,4 @@ See also
 
    :doc:`/content/ref/realtime` for the broker contract, the replay order, and the SSE event ids.
    :doc:`/content/howto/fan-out-across-processes-with-redis` for the stock Redis setup.
-   :doc:`/content/topics/realtime` for the delivery guarantees replay works within.
+   :doc:`/content/topics/realtime` for the delivery guarantees replay works within and the page side of presence.

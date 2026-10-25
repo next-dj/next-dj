@@ -16,7 +16,7 @@ from next.conf.scopes import scope_value
 
 from .access import cookie_session_key, live_session
 from .errors import InvalidTicketError
-from .tickets import TicketClaims, resolve_claims, verify_ticket
+from .tickets import TicketClaims, resolve_claims, resolve_identify, verify_ticket
 
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ class TicketIntrospectionView(View):
     ) -> dict[str, Any]:
         """Return the body of an accepted ticket, never the session key or its data.
 
-        `expires_in` is left out when the session store keeps no deadline it can read.
+        `expires_in` is left out when the store keeps no deadline, `presence` off it.
         """
         signed_in = getattr(user, "is_authenticated", False) is True
         pk = getattr(user, "pk", None) if signed_in else None
@@ -80,6 +80,10 @@ class TicketIntrospectionView(View):
         }
         if expires_in is not None:
             body["expires_in"] = expires_in
+        if isinstance(claims.presence, str):
+            body["presence"] = "members"
+        elif claims.presence:
+            body["presence"] = "count"
         return body
 
     def grant_transformed(
@@ -117,6 +121,7 @@ def _vouch(ticket: str, session_key: str) -> tuple[TicketClaims, object, int | N
     """Verify a ticket against its live session and the authorizer it names."""
     claims = verify_ticket(ticket, session_key)
     _transform, authorizer = resolve_claims(claims)
+    resolve_identify(claims)
     live = live_session(session_key)
     if live is None:
         msg = "The ticket's session is gone."

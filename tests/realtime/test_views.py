@@ -55,6 +55,10 @@ def keep_everything(message: Message) -> Message:
     return message
 
 
+def name_guest(_user: object, _topic: str) -> dict[str, object]:
+    return {"name": "guest"}
+
+
 urlpatterns = [
     path("gateway/", include("next.realtime.urls")),
     path("custom/", HeaderTokenView.as_view(), name="custom"),
@@ -336,3 +340,27 @@ def test_a_subclass_changing_the_body_still_refuses_a_transform() -> None:
     response = _introspect(_body(plain), url=reverse("body"))
     assert response.json() == {"rooms": ["room:1"]}
     _assert_denied(_introspect(_body(_transform_ticket()), url=reverse("body")))
+
+
+@pytest.mark.parametrize(
+    ("presence", "mode"),
+    [(True, "count"), (f"{__name__}.name_guest", "members")],
+    ids=["count", "members"],
+)
+def test_grant_names_the_presence_mode_but_not_its_reference(
+    presence: object, mode: str
+) -> None:
+    ticket = issue_socket_ticket(
+        ("room:1",), authorizer_ref=ROOM_AUTHORIZER_REF, presence=presence
+    )
+    response = _introspect(_body(ticket))
+    assert response.status_code == 200
+    assert response.json()["presence"] == mode
+    assert "name_guest" not in response.content.decode()
+
+
+def test_ticket_with_an_unimportable_identify_is_denied() -> None:
+    ticket = issue_socket_ticket(
+        ("room:1",), authorizer_ref=ROOM_AUTHORIZER_REF, presence=f"{__name__}.gone"
+    )
+    _assert_denied(_introspect(_body(ticket)))

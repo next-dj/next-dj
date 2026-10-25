@@ -110,8 +110,9 @@ The comparison runs on a single Python and Django combination so matrix noise st
 On ``main`` the workflow pushes the head numbers to the ``gh-pages`` branch with an informational alert threshold of 200 percent that never blocks.
 
 The realtime benchmarks live in ``tests/benchmarks/realtime/`` and need no running Redis.
-Only the ``realtime.publish``, ``realtime.fanout``, and ``realtime.hello`` groups touch a broker.
+Only the ``realtime.publish``, ``realtime.fanout``, ``realtime.hello``, and ``realtime.presence`` groups touch a broker.
 ``realtime.publish`` runs on both the in-process ``MemoryBroker`` and a ``RedisBroker`` backed by ``fakeredis``, and ``realtime.fanout`` runs on the memory broker alone.
+``realtime.presence`` runs on both of them as well.
 In ``realtime.hello`` only the position read goes to a broker, on both of them, while the handshake frame benchmark uses the memory broker in its setup and never calls a broker in the measured body.
 The other groups run without a broker.
 Each benchmark checks its own result outside the measured body, so a call that degrades into an early exit fails the test instead of looking fast.
@@ -131,6 +132,9 @@ Each group measures one step of the publish and delivery path.
      - Serialising one small or medium envelope into an SSE event frame, and delivering one message as a WebSocket patches frame.
    * - ``realtime.hello``
      - Reading the latest position of 1 or 64 topics in one batch, and building and serialising the handshake frame from positions read beforehand, without touching a broker while it measures.
+   * - ``realtime.presence``
+     - Joining a fresh connection, refreshing the deadline of one connection on a roster of 1 and of 1000, and reading the attendance snapshot of 1 and of 1000 members, on the memory broker and on a Redis broker backed by ``fakeredis``.
+       The windows are not scheduled while it measures, so no background snapshot enters a timing.
    * - ``realtime.access``
      - Rechecking topic grants for one live connection with the synchronous ``check()``, inside the throttle window where the cached verdict answers and outside it where the authorizer runs again.
        Live connections under ASGI go through ``acheck()``, which this group does not measure.

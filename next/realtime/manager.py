@@ -50,8 +50,21 @@ class BrokerManager:
             return backend
         return await sync_to_async(self.get, thread_sensitive=True)()
 
+    def backend_class(self) -> type[BrokerBackend]:
+        """Return the class of the configured backend without building one."""
+        backend = self._backend
+        if backend is not None:
+            return type(backend)
+        return self._resolve()[0]
+
     def _build(self) -> tuple[BrokerBackend, dict[str, object]]:
         """Resolve the nested broker entry and construct the selected backend."""
+        klass, config = self._resolve()
+        instance = instantiate_backend(klass, config)
+        return instance, dict(config)
+
+    def _resolve(self) -> tuple[type[BrokerBackend], Mapping[str, object]]:
+        """Resolve the class the nested broker entry selects."""
         realtime = getattr(next_framework_settings, _SETTING, {})
         config = realtime.get("BROKER", {}) if isinstance(realtime, Mapping) else {}
         if not isinstance(config, Mapping):
@@ -64,8 +77,7 @@ class BrokerManager:
         except ImportError as exc:
             msg = f"Could not import the configured realtime broker: {exc}"
             raise ImproperlyConfigured(msg) from exc
-        instance = instantiate_backend(klass, config)
-        return instance, dict(config)
+        return klass, config
 
     def reset(self) -> None:
         """Drop the cached backend after settings change and close its resources."""

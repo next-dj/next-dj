@@ -934,6 +934,22 @@ Errors
      - The ``PREFIX`` option of ``RedisBroker`` is not a string with a non-colon character, or it holds ``{`` or ``}``.
        A brace moves the Redis Cluster hash tag off the topic name, so the two keys of a topic no longer share a slot.
      - ``next.realtime.checks``
+   * - ``next.E193``
+     - ``NEXT_FRAMEWORK['REALTIME']['PRESENCE']`` is set to something other than a mapping.
+       Leaving the key out keeps the default limits.
+     - ``next.realtime.checks``
+   * - ``next.E194``
+     - ``NEXT_FRAMEWORK['REALTIME']['PRESENCE']['WINDOW']`` is not a positive number of seconds up to ``60``.
+       The window coalesces every join and leave on a topic into one ``next:presence`` event.
+     - ``next.realtime.checks``
+   * - ``next.E195``
+     - ``NEXT_FRAMEWORK['REALTIME']['PRESENCE']['SIZE']`` is not an integer from ``0`` to ``1000``.
+       It caps the members one ``next:presence`` event lists, the count stays exact, and ``0`` sends the count alone.
+     - ``next.realtime.checks``
+   * - ``next.E196``
+     - ``NEXT_FRAMEWORK['REALTIME']['PRESENCE']['MEMBER_BYTES']`` is not an integer from ``1`` to ``4096``.
+       It caps the compact JSON of one member, and a larger member fails its join with ``InvalidMemberError``.
+     - ``next.realtime.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -1323,6 +1339,10 @@ Warnings
    * - ``next.W143``
      - ``NEXT_FRAMEWORK['REALTIME']['REPLAY']['SIZE']`` is above zero while the configured broker class is no ``ReplayingBroker``, so every reconnect resynchronises from ``hello``.
        Implementing ``replay`` and ``areplay`` on the broker, or setting ``SIZE`` to ``0``, clears it.
+     - ``next.realtime.checks``
+   * - ``next.W144``
+     - ``NEXT_FRAMEWORK['REALTIME']['PRESENCE']`` is set while the configured broker class is no ``PresenceBroker``, so every stream that asks for presence fails to start.
+       Implementing ``PresenceBroker`` on the broker, or dropping ``PRESENCE``, clears it.
      - ``next.realtime.checks``
 
 Codes are assigned per check and are not contiguous.

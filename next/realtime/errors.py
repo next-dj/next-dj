@@ -30,12 +30,25 @@ class InvalidTicketError(ValueError):
     """Raised when a WebSocket ticket cannot safely grant a topic subscription."""
 
 
+class InvalidMemberError(ValueError):
+    """Raised when a presence member is not a small mapping of JSON values."""
+
+    def __init__(self, reason: str) -> None:
+        """Store why the member was refused and name the setting that bounds it."""
+        self.reason = reason
+        super().__init__(
+            "A presence member must be a JSON object of at most "
+            f"REALTIME.PRESENCE.MEMBER_BYTES bytes. Rejected because {reason}."
+        )
+
+
 class BrokerConnectionError(ConnectionError):
     """Raised when a broker subscription can no longer guarantee delivery."""
 
 
 __all__ = [
     "BrokerConnectionError",
+    "InvalidMemberError",
     "InvalidTicketError",
     "InvalidTopicError",
     "TopicPayloadError",

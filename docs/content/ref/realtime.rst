@@ -25,10 +25,10 @@ API tier
 --------
 
 Advanced.
-   ``BrokerBackend``, ``MemoryBroker``, ``RedisBroker``, ``ReplayingBroker``, ``Replay``, ``Message``, ``Position``, ``TopicStream``, ``publish``, ``apublish``, ``BrokerConnectionError``, ``InvalidTopicError``, and ``TopicPayloadError`` are imported from ``next.realtime``.
+   ``BrokerBackend``, ``MemoryBroker``, ``RedisBroker``, ``ReplayingBroker``, ``Replay``, ``Message``, ``Position``, ``TopicStream``, ``publish``, ``apublish``, ``Presence``, ``PresenceBroker``, ``presence``, ``apresence``, ``BrokerConnectionError``, ``InvalidTopicError``, ``InvalidMemberError``, and ``TopicPayloadError`` are imported from ``next.realtime``.
    The WebSocket side adds ``WebSocketApp``, ``application``, ``TopicSocket``, ``SocketPort``, ``Handshake``, ``TicketClaims``, ``verify_ticket``, ``InvalidTicketError``, ``Close``, and ``TicketIntrospectionView``.
    ``signals``, ``checks``, and ``frames`` are also available as submodules.
-   ``resolve_claims`` lives in ``next.realtime.tickets`` for gateway authors.
+   ``resolve_claims`` and ``resolve_identify`` live in ``next.realtime.tickets`` for gateway authors.
    ``replay_window``, ``replay_after``, and ``INCOMPLETE`` live in ``next.realtime.replay`` for broker authors.
 
 Topic names contain 1 to 200 ASCII letters, digits, underscores, dots, colons, or hyphens.
@@ -45,6 +45,7 @@ See :doc:`settings` for the complete default, the ``HEARTBEAT`` interval, and th
 ``RedisBroker`` accepts ``OPTIONS.URL``, ``OPTIONS.PREFIX``, ``OPTIONS.HEALTH_CHECK_INTERVAL``, and ``OPTIONS.CLIENT`` and requires the Redis optional dependency from the ``broker`` extra, ``redis`` 8 or newer.
 Without it, selecting the backend is reported by ``manage.py check`` as ``next.E179``.
 ``REALTIME.REPLAY`` sizes the replay log of both brokers, see `Replay`_.
+``REALTIME.PRESENCE`` limits the attendance snapshots of both brokers, see `Presence`_.
 
 The in-memory backend is process-local.
 A multi-process production deployment must use a shared backend such as Redis, because the framework does not infer process count from the server configuration.
@@ -55,8 +56,9 @@ A subclass that overrides ``RedisBroker.create_client(url, options, *, asynchron
 A pool that raises ``redis.exceptions.MaxConnectionsError`` logs a warning on the ``next.realtime.redis`` logger.
 A ``BlockingConnectionPool`` raises a plain ``ConnectionError`` on timeout instead, so its exhaustion ends the stream with ``BrokerConnectionError`` and logs no warning.
 
-``RedisBroker.topic_key(kind, topic)`` names the two keys of a topic, ``<PREFIX>:seq:{<topic>}`` for the counter and its epoch and ``<PREFIX>:log:{<topic>}`` for the replay log.
-The braces are a Redis Cluster hash tag that puts both keys in one slot, since the publish script and the replay transaction touch them together.
+``RedisBroker.topic_key(kind, topic)`` names the keys of a topic, ``<PREFIX>:seq:{<topic>}`` for the counter and its epoch and ``<PREFIX>:log:{<topic>}`` for the replay log.
+The presence keys use the kinds ``presence``, ``members``, ``window``, ``identified``, ``attendees``, ``holders``, ``state``, and ``order`` in the same form.
+The braces are a Redis Cluster hash tag that puts the keys of a topic in one slot, since the publish script, the replay transaction, and the presence scripts touch them together.
 An override keeps that property and returns a distinct key for each ``kind``.
 ``PREFIX`` therefore needs a non-colon character and no ``{`` or ``}``, because a brace in it would move the hash tag off the topic name, and the broker raises ``ImproperlyConfigured`` for any other value, which ``manage.py check`` reports earlier as ``next.E192``.
 The Pub/Sub channel stays ``<PREFIX>:topic:<topic>``.
@@ -293,6 +295,129 @@ An entry in ``{"epoch": "...", "seq": 7}`` form replays, while a bare integer ``
 The browser client sends its cursor in the object form on every reconnect.
 A subclass changes the replay step through the ``TopicSocket.catch_up`` hook that `Serving the socket`_ describes.
 
+Presence
+--------
+
+A stream that passes ``presence`` to ``TopicStream`` records its connection on each of its topics while it is open, and the broker publishes the attendance of a topic as a message on the topic itself.
+:doc:`/content/topics/realtime` explains the feature from the page author's side.
+
+The ``presence`` parameter
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``TopicStream(request, *topics, transform=None, authorize=None, presence=False, heartbeat_seconds=None)`` takes ``presence`` as one of three values.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Value
+     - Meaning
+   * - ``False``
+     - The stream takes no part in presence.
+   * - ``True``
+     - Count mode.
+       Every connection counts, and no data about people is stored or sent.
+   * - ``identify`` or its dotted path
+     - Member mode.
+       ``identify(user, topic)`` returns a mapping of JSON values or ``None``, and the mapping is shown to every subscriber of the topic that identifies its own members too.
+
+``transform``, ``authorize``, and ``presence`` accept a callable or its dotted path, and a path is imported when the stream is built.
+A path that does not import or does not name a callable raises ``ImproperlyConfigured``, and so does a ``presence`` that is no bool, callable, or string, such as ``None`` or ``0``.
+A stream that asks for presence on a broker without it raises ``ImproperlyConfigured`` when it is built, under WSGI and ASGI alike.
+A callable passed directly reaches a WebSocket ticket through its import path, and one without a stable path such as a lambda keeps the stream on SSE with the reason ``transform``, ``authorization``, or ``presence``.
+
+The stream joins after it read the topic positions and before it sends the replayed messages and ``hello``, and right after ``hello`` it sends the current snapshot of every topic.
+It refreshes its record once per heartbeat and leaves in the ``finally`` of the generator, on a disconnect, a cancellation, and a revoked grant alike.
+A broker failure on leave is logged on ``next.realtime.attendance``, the other topics are still left, and the time to live removes the record.
+An asynchronous leave waits at most one heartbeat, so a broker that hangs never holds the close, and the time to live removes what it did not confirm.
+
+``TopicStream.attend(backend)``, ``TopicStream.aattend(backend)``, and ``TopicSocket.attend(broker, claims)`` are the hooks that build the ``Attendance`` of a connection from ``next.realtime.attendance``.
+An override returns another ``Attendance``, such as a subclass with its own ``ttl_heartbeats``, or ``None`` to keep the connection out of the roster.
+
+The attendance snapshot
+~~~~~~~~~~~~~~~~~~~~~~~
+
+``Presence(count, members=())`` is the frozen snapshot a broker returns.
+``count`` is the number of distinct members in member mode plus every connection without a member, and the number of connections in count mode.
+Connections whose members have the same canonical JSON, with keys sorted and compact separators, are one member.
+``members`` holds at most ``REALTIME['PRESENCE']['SIZE']`` members in the order of their first join, and ``count`` stays exact beyond that cap.
+A member that leaves entirely and comes back joins the end of the order.
+``Presence.as_detail()`` returns the detail of the event, ``{"count": n}`` without members and ``{"count": n, "members": [...]}`` with them, so the key is absent when no identified member attends or ``SIZE`` is ``0``.
+
+The event is an ``event`` operation named ``next:presence`` that the broker broadcasts unnumbered through ``BrokerBackend.broadcast``.
+It takes no ``seq``, never enters the replay log, and fires ``message_published`` with a message whose ``seq`` is ``0``.
+It passes the access check but skips the subscriber ``transform``.
+The stream cuts ``members`` from every ``next:presence`` event, numbered or not and wherever it sits among the operations, for every subscriber that does not identify its own.
+An SSE frame of it has no ``id`` line and a WebSocket ``patches`` frame of it has no ``seq`` or ``epoch``, so a client applies it without moving its cursor or counting a gap.
+A client listens with ``Next.partial.stream.on(topic, "next:presence", callback)``.
+
+``presence(topic)`` and ``await apresence(topic)`` read the current ``Presence`` of a topic from the configured broker, never an expired record.
+Both validate the topic name and raise ``ImproperlyConfigured`` when the broker has no presence.
+
+The coalescing window
+~~~~~~~~~~~~~~~~~~~~~
+
+A change that matters claims a window of ``REALTIME['PRESENCE']['WINDOW']`` seconds on its topic, and the broker publishes one snapshot when the window closes.
+A change inside an open window claims nothing, and its effect is in the snapshot because the snapshot is read at the close.
+A join of a connection that is new, or that moved to another member, claims a window.
+A leave or an expiry claims one only when the member left entirely.
+One daemon thread per broker times the windows for WSGI and ASGI alike, starts on the first window, and exits when none is pending.
+Every change raises a version that the published snapshot records, and a join, a refresh, or a leave that finds the version unannounced claims a free window, so a snapshot outlives the death of the process that held the window.
+``RedisBroker`` reads and publishes a snapshot in one script, so snapshots of one topic leave in the order of their changes.
+A leave that empties its topic while another process holds the window schedules the snapshot for the close of that window, since no later refresh would claim it.
+A failure to publish a snapshot is logged on ``next.realtime.roster`` and the topic is tried again a window later.
+``close()`` publishes the pending snapshots at once and stops the thread, and a forked child starts with a fresh schedule.
+
+The record of a connection lives ``Attendance.ttl_heartbeats`` heartbeat intervals, three by default, and every refresh pushes the deadline out.
+The scripts and the memory roster prune the expired records on a join, a refresh, and a leave, and a prune that removes a member claims a window.
+A refresh that finds its record pruned joins again.
+
+The ``PresenceBroker`` contract
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``PresenceBroker`` is a runtime-checkable ``Protocol`` like ``ReplayingBroker``, so a broker supports presence by defining its methods.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Member
+     - Contract
+   * - ``join(topic, connection, member, ttl)`` and ``ajoin``
+     - Record a connection until ``ttl`` seconds pass without a touch.
+       ``member`` is a mapping or ``None``, and a broker encodes it with ``encode_member`` from ``next.realtime.roster``, which raises ``InvalidMemberError`` for a member that is no mapping with string keys, holds a value JSON cannot carry, or exceeds ``MEMBER_BYTES``.
+       Joining a known connection replaces its member.
+   * - ``touch(topic, connection, ttl)`` and ``atouch``
+     - Push the deadline out and return ``False`` when the connection holds no record, so the caller joins again.
+   * - ``leave(topic, connection)`` and ``aleave``
+     - Forget the connection.
+   * - ``presence(topic)`` and ``apresence``
+     - Return the attendance snapshot as a ``Presence`` and never an expired attendee.
+
+A transport failure raises ``BrokerConnectionError``.
+A broker keeps the coalescing itself with the helpers of ``next.realtime.roster``, namely the ``PresenceWindow`` mixin, ``presence_limits()``, ``PresenceSchedule``, ``announce()``, ``encode_member()``, and ``decode_member()``.
+``PresenceWindow`` holds ``presence_limits`` and ``presence_schedule``, and its schedule calls the ``announce_presence(topic)`` hook once a window closes.
+``announce(broker, topic)`` sends the snapshot through ``broker.broadcast``, whose default raises ``NotImplementedError``, because a snapshot must reach live subscribers unnumbered.
+:doc:`/content/howto/write-a-broker-backend` builds one on top of ``RedisBroker``.
+
+``MemoryBroker`` keeps a roster per topic and prunes by the earliest deadline, so a refresh costs the same on a large roster.
+``RedisBroker`` keeps eight keys per topic under the hash tag, the ``presence`` set for connections without a member, the ``members`` hash, the ``window`` lock, the ``state`` hash of the change version, and the ``identified``, ``attendees``, ``holders``, and ``order`` indexes for members.
+A script extends a key to twice the time to live only once less than one time to live is left.
+Every script path leaves each of the eight keys with a time to live, so the keys of an emptied topic expire.
+Its Lua scripts read the Redis ``TIME``, so hosts with different clocks agree on every deadline.
+Both constructors take a ``presence`` keyword with the same mapping as the setting, and a broker reads it once when it is created.
+Both take a ``schedule`` keyword too, a callable that receives the ``announce_presence`` hook and returns the ``PresenceSchedule``, and an override of ``announce_presence`` observes or reroutes every snapshot.
+
+The limits
+~~~~~~~~~~
+
+``REALTIME['PRESENCE']`` holds ``WINDOW``, ``SIZE``, and ``MEMBER_BYTES``.
+The defaults are ``1.0``, ``100``, and ``512``.
+``WINDOW`` is a positive number of seconds up to ``60``, ``SIZE`` an integer from ``0`` to ``1000``, and ``MEMBER_BYTES`` an integer from ``1`` to ``4096``.
+A mapping with another key or an invalid value raises ``ImproperlyConfigured`` when the broker is created.
+``manage.py check`` reports a value that is not a mapping as ``next.E193``, another key as ``next.E035``, and an invalid ``WINDOW``, ``SIZE``, or ``MEMBER_BYTES`` as ``next.E194``, ``next.E195``, or ``next.E196``.
+An explicit ``PRESENCE`` with a broker that is no ``PresenceBroker`` is ``next.W144``.
+
 Public API
 ----------
 
@@ -317,6 +442,12 @@ Public API
 .. autoclass:: next.realtime.Position
    :members:
 
+.. autoclass:: next.realtime.PresenceBroker
+   :members:
+
+.. autoclass:: next.realtime.Presence
+   :members:
+
 .. autoclass:: next.realtime.TopicStream
    :members:
 
@@ -324,10 +455,17 @@ Public API
 
 .. autofunction:: next.realtime.apublish
 
+.. autofunction:: next.realtime.presence
+
+.. autofunction:: next.realtime.apresence
+
 .. autoexception:: next.realtime.BrokerConnectionError
    :members:
 
 .. autoexception:: next.realtime.InvalidTopicError
+   :members:
+
+.. autoexception:: next.realtime.InvalidMemberError
    :members:
 
 .. autoexception:: next.realtime.TopicPayloadError
@@ -566,6 +704,10 @@ The ``Handshake.session_key`` has to be the key the ticket was issued under.
 
 ``verify_ticket(token, session_key)`` returns the ``TicketClaims`` of a valid ticket and raises ``InvalidTicketError`` otherwise.
 ``resolve_claims(claims)`` imports the transform and the authorizer the claims name.
+``TicketClaims.presence`` is ``False`` for a stream outside presence, ``True`` for a count, or the dotted path of the ``identify`` callable, and ``resolve_identify(claims)`` imports that callable or returns ``None``.
+A ``TopicSocket`` joins the presence of its ticket after the position read and before ``hello``, under its ``connection_id``, and leaves it on every way out, a cancellation and a watchdog drop included.
+A ticket without a ``presence`` key verifies as ``False``.
+The ``count`` of a snapshot follows the rules of `Presence`_, one member for every group of equal mappings in member mode and one per connection in count mode.
 
 .. autoclass:: next.realtime.WebSocketApp
    :members:
@@ -587,6 +729,8 @@ The ``Handshake.session_key`` has to be the key the ticket was issued under.
 .. autofunction:: next.realtime.verify_ticket
 
 .. autofunction:: next.realtime.tickets.resolve_claims
+
+.. autofunction:: next.realtime.tickets.resolve_identify
 
 .. autoexception:: next.realtime.InvalidTicketError
    :members:
@@ -627,6 +771,8 @@ The gateway sends a ``POST`` with ``Authorization: Bearer`` set to ``REALTIME['G
      - ``{"topics": [...], "user": "<pk>" or null, "expires_in": <seconds>}``.
        The ticket is valid for the session in the cookie, and every authorizer accepts it.
        ``expires_in`` is the time the store still keeps the session, and it is absent when the store keeps no deadline the endpoint can read, as with the ``cache`` engine.
+       ``presence`` is ``"count"`` or ``"members"`` for a stream that takes part in presence and is absent otherwise.
+       The ``identify`` path stays out of the body, and a ticket whose ``identify`` no longer imports gets the ``403``.
    * - ``400``
      - ``{"error": "invalid"}``.
        The caller is authorized and the body is not JSON or lacks a string ``ticket`` or ``cookie``.
@@ -657,13 +803,13 @@ See :doc:`signals` for their payloads and :doc:`/content/topics/signals` for rec
 System checks
 -------------
 
-Realtime checks validate the ``REALTIME`` keys, the transport list, the ticket age, the WebSocket path, the heartbeat, the replay window, and the broker backend and its options, and report a missing ``redis`` dependency.
-A warning flags a nonzero ``REPLAY['SIZE']`` with a broker that keeps no replay log.
+Realtime checks validate the ``REALTIME`` keys, the transport list, the ticket age, the WebSocket path, the heartbeat, the replay window, the presence limits, and the broker backend and its options, and report a missing ``redis`` dependency.
+A warning flags a nonzero ``REPLAY['SIZE']`` with a broker that keeps no replay log, and another flags an explicit ``PRESENCE`` with a broker that keeps no presence.
 Deployment warnings flag an explicit ``"ws"`` transport without ``SessionMiddleware`` or with signed-cookie sessions.
 A ``WebSocketApp`` logs the session warnings itself when it is created, since ``manage.py check`` never sees a mounted socket.
 An error flags a routed ticket introspection endpoint that has no ``GATEWAY_TOKEN``.
 The checks run against the defaults when ``NEXT_FRAMEWORK`` has no ``REALTIME`` key.
-See :doc:`system-checks` for the ids ``next.E177`` to ``next.E192`` and ``next.W141`` to ``next.W143``.
+See :doc:`system-checks` for the ids ``next.E177`` to ``next.E196`` and ``next.W141`` to ``next.W144``.
 
 See also
 --------

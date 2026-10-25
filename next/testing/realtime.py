@@ -201,6 +201,7 @@ def issue_socket_ticket(
     *,
     authorizer_ref: str,
     transform_ref: str | None = None,
+    presence: bool | str = False,
     session: SessionBase | None = None,
 ) -> SocketTicket:
     """Issue a WebSocket ticket through the negotiation path, under a saved session.
@@ -212,7 +213,11 @@ def issue_socket_ticket(
     request = RequestFactory().get("/")
     request.session = session
     grant = issue_ticket(
-        request, topics, transform_ref=transform_ref, authorizer_ref=authorizer_ref
+        request,
+        topics,
+        transform_ref=transform_ref,
+        authorizer_ref=authorizer_ref,
+        presence=presence,
     )
     return SocketTicket(session, grant)
 

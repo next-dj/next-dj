@@ -70,6 +70,7 @@ DEFAULTS: Final[Mapping[str, Any]] = MappingProxyType(
             "HEARTBEAT": 25.0,
             "GATEWAY_TOKEN": None,
             "REPLAY": {"SIZE": 100, "TTL": 300},
+            "PRESENCE": {"WINDOW": 1.0, "SIZE": 100, "MEMBER_BYTES": 512},
         },
         "TEMPLATE_LOADERS": ["next.pages.loaders.DjxTemplateLoader"],
         "NEXT_JS_OPTIONS": {},
