@@ -1,5 +1,5 @@
 import asyncio
-import json
+import secrets
 from collections.abc import Callable
 
 import pytest
@@ -12,13 +12,8 @@ from next.realtime import Message, TopicStream
 from next.realtime.access import Access
 from next.realtime.backends import BrokerBackend
 from next.realtime.manager import broker_manager
-from tests.support.realtime import (
-    PlainBroker,
-    ResumingClient,
-    anext_frame,
-    next_frame,
-    refresh_envelope,
-)
+from next.testing import SseEvent, SseReader
+from tests.support.realtime import PlainBroker, ResumingClient, refresh_envelope
 
 
 _MAX_PULLS = 50
@@ -148,9 +143,11 @@ def test_last_event_id_replays_the_missed_messages_before_hello(
     ],
 )
 def test_malformed_last_event_id_means_no_cursor(
-    mode: str, broker: BrokerBackend, header: str
+    mode: str, broker: BrokerBackend, header: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(secrets, "token_hex", lambda nbytes: "a1" * nbytes)
     epoch = _published(broker, 3)
+    assert epoch.upper() != epoch
     value = header.format(epoch=epoch, EPOCH=epoch.upper())
     stream = _stream("poll:1", asynchronous=mode == "async", cursor=value)
     assert stream._cursors == {}
@@ -236,12 +233,6 @@ def test_revoked_access_during_replay_ends_before_hello(
     assert _trace(_items(stream, broker, 3)) == [2, StreamEnd("auth")]
 
 
-def _event_id(frame: bytes) -> str | None:
-    lines = frame.decode().split("\n")
-    ids = [line.removeprefix("id: ") for line in lines if line.startswith("id: ")]
-    return ids[0] if ids else None
-
-
 def test_single_topic_sse_frames_carry_the_epoch_and_seq_as_id(
     broker: BrokerBackend,
 ) -> None:
@@ -250,79 +241,68 @@ def test_single_topic_sse_frames_carry_the_epoch_and_seq_as_id(
         "/polls/1/stream/", headers={"Last-Event-ID": f"{epoch}:1"}
     )
     stream = TopicStream(request, "poll:1", heartbeat_seconds=0.01)
-    iterator = stream.streaming_content
-    assert next(iterator).startswith(b"retry: ")
-    replayed = next_frame(iterator)
-    hello = next_frame(iterator)
-    broker.publish("poll:1", refresh_envelope())
-    live = next_frame(iterator)
-    stream._iterator.close()
+    with SseReader(stream) as events:
+        replayed = next(events)
+        hello = next(events)
+        broker.publish("poll:1", refresh_envelope())
+        live = next(events)
 
-    assert _event_id(replayed) == f"{epoch}:2"
-    assert replayed.startswith(f"id: {epoch}:2\nevent: next-patches\n".encode())
-    assert json.loads(replayed.decode().split("data: ", 1)[1])["seq"] == 2
-    assert hello.startswith(f"id: {epoch}:2\nevent: next-hello\n".encode())
-    assert _event_id(live) == f"{epoch}:3"
+    assert (replayed.id, replayed.event) == (f"{epoch}:2", "next-patches")
+    assert replayed.json()["seq"] == 2
+    assert (hello.id, hello.event) == (f"{epoch}:2", "next-hello")
+    assert live.id == f"{epoch}:3"
 
 
 def test_multi_topic_sse_frames_carry_no_id(broker: BrokerBackend) -> None:
     request = RequestFactory().get("/polls/stream/")
     stream = TopicStream(request, "poll:1", "poll:2", heartbeat_seconds=0.01)
-    iterator = stream.streaming_content
-    next(iterator)
-    next(iterator)
-    broker.publish("poll:2", refresh_envelope())
-    frame = next_frame(iterator)
-    stream._iterator.close()
-    assert b"event: next-patches" in frame
-    assert _event_id(frame) is None
+    with SseReader(stream) as events:
+        assert next(events).event == "next-hello"
+        broker.publish("poll:2", refresh_envelope())
+        frame = next(events)
+    assert frame.event == "next-patches"
+    assert frame.id is None
 
 
 def test_async_sse_stream_resumes_from_last_event_id(broker: BrokerBackend) -> None:
     epoch = _published(broker, 3)
 
-    async def scenario() -> list[bytes]:
+    async def scenario() -> tuple[int | None, list[SseEvent]]:
         request = AsyncRequestFactory().get(
             "/polls/1/stream/", headers={"Last-Event-ID": f"{epoch}:2"}
         )
         stream = TopicStream(request, "poll:1", heartbeat_seconds=0.01)
-        iterator = stream.streaming_content.__aiter__()
-        frames = [await anext(iterator)]
-        frames.extend([await anext_frame(iterator) for _ in range(2)])
-        await stream._iterator.aclose()
-        return frames
+        async with SseReader(stream) as events:
+            frames = [await anext(events), await anext(events)]
+            return events.retry, frames
 
-    retry, replayed, hello = asyncio.run(scenario())
-    assert retry.startswith(b"retry: ")
-    assert _event_id(replayed) == f"{epoch}:3"
-    assert hello.startswith(f"id: {epoch}:3\nevent: next-hello\n".encode())
+    retry, (replayed, hello) = asyncio.run(scenario())
+    assert retry is not None
+    assert replayed.id == f"{epoch}:3"
+    assert (hello.id, hello.event) == (f"{epoch}:3", "next-hello")
 
 
 def _sse_frames(
     stream: TopicStream, count: int, *, live: int = 0, topic: str = "poll:1"
-) -> list[bytes]:
-    """Read SSE frames after the retry hint, then publish `live` more and read them."""
+) -> list[SseEvent]:
+    """Read SSE events, then publish `live` more and read them."""
     broker = broker_manager.get()
     if isinstance(stream._request, ASGIRequest):
 
-        async def collect() -> list[bytes]:
-            iterator = stream.streaming_content.__aiter__()
-            await anext(iterator)
-            frames = [await anext_frame(iterator) for _ in range(count)]
-            for _ in range(live):
-                await broker.apublish(topic, refresh_envelope())
-            frames.extend([await anext_frame(iterator) for _ in range(live)])
-            await stream._iterator.aclose()
+        async def collect() -> list[SseEvent]:
+            async with SseReader(stream) as events:
+                frames = [await anext(events) for _ in range(count)]
+                for _ in range(live):
+                    await broker.apublish(topic, refresh_envelope())
+                frames.extend([await anext(events) for _ in range(live)])
             return frames
 
         return asyncio.run(collect())
-    iterator = stream.streaming_content
-    next(iterator)
-    frames = [next_frame(iterator) for _ in range(count)]
-    for _ in range(live):
-        broker.publish(topic, refresh_envelope())
-    frames.extend(next_frame(iterator) for _ in range(live))
-    stream._iterator.close()
+    with SseReader(stream) as events:
+        frames = [next(events) for _ in range(count)]
+        for _ in range(live):
+            broker.publish(topic, refresh_envelope())
+        frames.extend(next(events) for _ in range(live))
     return frames
 
 
@@ -346,9 +326,7 @@ def test_filtered_stream_resumes_past_the_log_from_its_last_skip(
     monkeypatch.setattr(broker_manager, "_backend", broker)
     epoch = _published(broker, 1)
     first = _sse_frames(_filtered("poll:1", mode=mode), 1, live=3)
-    assert [_event_id(frame) for frame in first] == [
-        f"{epoch}:{seq}" for seq in (1, 2, 3, 4)
-    ]
+    assert [frame.id for frame in first] == [f"{epoch}:{seq}" for seq in (1, 2, 3, 4)]
     client = ResumingClient({"poll:1": (epoch, 4)})
     resumed = _sse_frames(
         _filtered("poll:1", mode=mode, cursor=f"{epoch}:4"), 1, live=1
@@ -363,9 +341,9 @@ def test_multi_topic_hello_and_skip_frames_carry_no_id(
 ) -> None:
     _published(broker, 1)
     frames = _sse_frames(_filtered("poll:1", "poll:2", mode=mode), 1, live=1)
-    assert [frame.split(b"\n", 1)[0] for frame in frames] == [
-        b"event: next-hello",
-        b"event: next-skip",
+    assert [(frame.event, frame.id) for frame in frames] == [
+        ("next-hello", None),
+        ("next-skip", None),
     ]
 
 
@@ -373,7 +351,7 @@ def test_hello_of_a_topic_never_published_carries_no_id(
     mode: str, broker: BrokerBackend
 ) -> None:
     (hello,) = _sse_frames(_filtered("poll:1", mode=mode), 1)
-    assert hello.startswith(b"event: next-hello\n")
+    assert (hello.event, hello.id) == ("next-hello", None)
 
 
 @pytest.mark.parametrize(

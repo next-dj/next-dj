@@ -73,7 +73,7 @@ async def _served_frames(
     live: int = 0,
 ) -> tuple[list[dict[str, object]], MemoryPort]:
     port = MemoryPort()
-    handshake = Handshake(ticket.session_key, None, None)
+    handshake = Handshake(ticket.credential, None, None)
     socket = TopicSocket(port, handshake, broker=broker, heartbeat=60)
     task = asyncio.create_task(socket.serve(port.inbound()))
     port.push_json(ticket.subscribe_frame(last_seq=last_seq))
@@ -190,7 +190,7 @@ def test_replayed_messages_pass_through_the_ticket_transform(
     async def scenario() -> list[dict[str, object]]:
         port = MemoryPort()
         socket = TopicSocket(
-            port, Handshake(ticket.session_key, None, None), broker=broker
+            port, Handshake(ticket.credential, None, None), broker=broker
         )
         task = asyncio.create_task(socket.serve(port.inbound()))
         port.push_json(ticket.subscribe_frame(last_seq=_cursor(epoch, 1)))

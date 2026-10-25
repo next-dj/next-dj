@@ -6,6 +6,7 @@ import math
 from collections.abc import Callable, Iterator, Mapping, Sequence
 
 from django.conf import settings
+from django.contrib.sessions.backends.base import SessionBase
 from django.contrib.sessions.backends.signed_cookies import (
     SessionStore as SignedCookieSessionStore,
 )
@@ -27,6 +28,7 @@ from next.conf.defaults import USER_SETTING
 from next.conf.scopes import scope_value
 
 from .backends import BrokerBackend, MemoryBroker
+from .binding import SessionBinding, SignedCookieBinding, TicketBinding, binding_class
 from .frames import MAX_INBOUND_BYTES
 from .handlers import (
     MAX_NAME_LENGTH,
@@ -82,6 +84,7 @@ _REALTIME_KEYS = frozenset(
         "BROKER",
         "TRANSPORTS",
         "TICKET_MAX_AGE",
+        "TICKET_BINDING",
         "WS_PATH",
         "HEARTBEAT",
         "GATEWAY_TOKEN",
@@ -159,6 +162,7 @@ def check_realtime_settings(*args, **kwargs) -> list[CheckMessage]:
                 id="next.E183",
             )
         )
+    errors.extend(_binding_errors(realtime))
     errors.extend(_heartbeat_errors(realtime))
     errors.extend(_replay_errors(realtime))
     errors.extend(_presence_errors(realtime))
@@ -169,6 +173,24 @@ def check_realtime_settings(*args, **kwargs) -> list[CheckMessage]:
     errors.extend(_presence_warnings(realtime, broker))
     errors.extend(_deployment_warnings(realtime))
     return errors
+
+
+def _binding_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
+    """Require the ticket binding to name an importable concrete TicketBinding."""
+    if "TICKET_BINDING" not in realtime:
+        return []
+    if binding_class(realtime["TICKET_BINDING"]) is not None:
+        return []
+    return [
+        Error(
+            f"{_PREFIX}['TICKET_BINDING'] must be the dotted path of an importable "
+            "concrete TicketBinding subclass.",
+            hint="Use 'next.realtime.SessionBinding' or "
+            "'next.realtime.SignedCookieBinding'.",
+            obj=settings,
+            id="next.E211",
+        )
+    ]
 
 
 def _heartbeat_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
@@ -461,7 +483,8 @@ def websocket_deployment_messages() -> list[CheckMessage]:
     """
     messages: list[CheckMessage] = []
     middleware = getattr(settings, "MIDDLEWARE", ())
-    if not any(item.endswith("SessionMiddleware") for item in middleware):
+    sessions = any(item.endswith("SessionMiddleware") for item in middleware)
+    if not sessions and _bound_to(SessionBinding):
         messages.append(
             DjangoWarning(
                 "WebSocket tickets require SessionMiddleware on the guarded HTTP "
@@ -470,20 +493,35 @@ def websocket_deployment_messages() -> list[CheckMessage]:
                 id="next.W141",
             )
         )
-    if _signed_cookie_sessions():
+    if _signed_cookie_sessions() and _bound_to(SessionBinding):
         messages.append(
             DjangoWarning(
                 "WebSocket tickets are bound to the session key, which the "
-                "signed-cookie SESSION_ENGINE re-signs on every session save, so the "
-                "handshake cookie stops matching the ticket and the socket closes "
-                "with 4401.",
+                "signed-cookie SESSION_ENGINE has no value for on a first visit and "
+                "re-signs on every session save, so negotiation answers 503 or the "
+                "socket closes with 4401.",
                 hint=(
-                    "Use the db, cache, cached_db, or file session engine. A signed "
-                    "cookie also outlives logout until SESSION_COOKIE_AGE, only a "
-                    "password change or an inactive user revokes it."
+                    "Set REALTIME['TICKET_BINDING'] to "
+                    "'next.realtime.SignedCookieBinding', or use a server-side session "
+                    "engine. A signed cookie still outlives logout until "
+                    "SESSION_COOKIE_AGE."
                 ),
                 obj=settings,
                 id="next.W142",
+            )
+        )
+    if _server_sessions() and _bound_to(SignedCookieBinding):
+        messages.append(
+            DjangoWarning(
+                "WebSocket tickets are bound by SignedCookieBinding, which reloads a "
+                "signed-in user by pk and auth hash, so a socket outlives logout and "
+                "the expiry of the server-side SESSION_ENGINE.",
+                hint=(
+                    "Set REALTIME['TICKET_BINDING'] to 'next.realtime.SessionBinding', "
+                    "which rechecks the stored session."
+                ),
+                obj=settings,
+                id="next.W147",
             )
         )
     return messages
@@ -508,14 +546,32 @@ def tunnel_origin_messages(origins: Sequence[str]) -> list[CheckMessage]:
     ]
 
 
-def _signed_cookie_sessions() -> bool:
-    """Whether the session engine keeps no server-side record a socket can recheck."""
+def _bound_to(base: type[TicketBinding]) -> bool:
+    """Whether the configured ticket binding is `base` or a subclass of it."""
+    klass = binding_class(scope_value("REALTIME", "TICKET_BINDING"))
+    return klass is not None and issubclass(klass, base)
+
+
+def _session_store() -> type[SessionBase] | None:
+    """Return the session engine's store class, None when it does not import."""
     engine = getattr(settings, "SESSION_ENGINE", "")
     try:
         store = import_string(f"{engine}.SessionStore")
     except ImportError:
-        return False
-    return isinstance(store, type) and issubclass(store, SignedCookieSessionStore)
+        return None
+    return store if isinstance(store, type) and issubclass(store, SessionBase) else None
+
+
+def _signed_cookie_sessions() -> bool:
+    """Whether the session engine keeps no server-side record a socket can recheck."""
+    store = _session_store()
+    return store is not None and issubclass(store, SignedCookieSessionStore)
+
+
+def _server_sessions() -> bool:
+    """Whether the session engine keeps a server-side record a socket can recheck."""
+    store = _session_store()
+    return store is not None and not issubclass(store, SignedCookieSessionStore)
 
 
 def _broker_errors(broker: Mapping[str, object]) -> list[CheckMessage]:

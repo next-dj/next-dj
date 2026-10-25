@@ -1,5 +1,4 @@
-import json
-from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from functools import partial
 
 import fakeredis
@@ -13,7 +12,9 @@ from next.partial import Envelope, Patches
 from next.realtime.backends import BrokerBackend, MemoryBroker
 from next.realtime.redis import RedisBroker
 from next.realtime.roster import PresenceSchedule, Scheduler
-from next.testing.realtime import SocketTicket, issue_socket_ticket
+from next.realtime.signals import stream_subscribed, stream_unsubscribed
+from next.testing import SignalRecorder
+from next.testing.realtime import SocketTicket, SseEvent, issue_socket_ticket
 
 
 ROOM_AUTHORIZER_REF = "tests.support.realtime.allow_room_topic"
@@ -55,6 +56,22 @@ def issue_session_ticket(
     )
 
 
+class LiveStreams(SignalRecorder):
+    """Count the streams that announced a subscription and have not left it yet."""
+
+    def __init__(self) -> None:
+        """Record both stream signals."""
+        super().__init__(stream_subscribed, stream_unsubscribed)
+
+    def live(self, topic: str | None = None) -> int:
+        """Return how many streams, on `topic` when given, are still subscribed."""
+        count = 0
+        for event in self.events:
+            if topic is None or topic in event.kwargs["topics"]:
+                count += 1 if event.signal is stream_subscribed else -1
+        return count
+
+
 def refresh_envelope() -> Envelope:
     """Build the topic-safe refresh envelope most broker tests publish."""
     return Patches(None).refresh(zone="results").envelope()
@@ -71,25 +88,6 @@ def message_payload(**overrides: object) -> dict[str, object]:
     }
     payload.update(overrides)
     return payload
-
-
-HEARTBEAT_FRAME = b": heartbeat\n\n"
-
-
-def next_frame(iterator: Iterator[bytes]) -> bytes:
-    """Return the next SSE chunk that is not a heartbeat, whatever the timing."""
-    frame = next(iterator)
-    while frame == HEARTBEAT_FRAME:
-        frame = next(iterator)
-    return frame
-
-
-async def anext_frame(iterator: AsyncIterator[bytes]) -> bytes:
-    """Return the next async SSE chunk that is not a heartbeat."""
-    frame = await anext(iterator)
-    while frame == HEARTBEAT_FRAME:
-        frame = await anext(iterator)
-    return frame
 
 
 async def anext_item[T](source: AsyncIterator[T | None]) -> T:
@@ -202,19 +200,18 @@ class ResumingClient:
             if previous is not None or seq > 0:
                 self.gaps.append((topic, 0 if previous is None else previous[1], seq))
 
-    def sse(self, frame: bytes) -> str:
-        """Feed one SSE frame, checking its id matches the payload cursor."""
-        lines = frame.decode().strip().split("\n")
-        fields = dict(line.split(": ", 1) for line in lines)
-        data = json.loads(fields["data"])
-        if fields["event"] == "next-hello":
+    def sse(self, event: SseEvent) -> str:
+        """Feed one SSE event, checking its id matches the payload cursor."""
+        data = event.json()
+        if event.event == "next-hello":
+            topics = data["topics"]
+            assert isinstance(topics, Mapping)
             ((epoch, seq),) = (
-                (position["epoch"], position["seq"])
-                for position in data["topics"].values()
+                (position["epoch"], position["seq"]) for position in topics.values()
             )
-            assert fields["id"] == f"{epoch}:{seq}"
+            assert event.id == f"{epoch}:{seq}"
             self.hello(data)
         else:
-            assert fields["id"] == f"{data['epoch']}:{data['seq']}"
+            assert event.id == f"{data['epoch']}:{data['seq']}"
             self.patches(data)
-        return fields["event"]
+        return event.event

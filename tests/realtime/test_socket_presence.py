@@ -26,6 +26,7 @@ from next.testing.realtime import (
 )
 from tests.support.realtime import (
     ROOM_AUTHORIZER_REF,
+    LiveStreams,
     PlainBroker,
     issue_session_ticket,
     manual_schedule,
@@ -63,7 +64,7 @@ def _socket(
     *,
     heartbeat: float = 60,
 ) -> TopicSocket:
-    handshake = Handshake(ticket.session_key, AnonymousUser(), None)
+    handshake = Handshake(ticket.credential, AnonymousUser(), None)
     return TopicSocket(port, handshake, broker=broker, heartbeat=heartbeat)
 
 
@@ -236,7 +237,7 @@ def test_watchdog_drop_leaves_the_roster(
     async def scenario() -> None:
         broker = _broker()
         port = StalledPort()
-        handshake = Handshake(ticket.session_key, AnonymousUser(), None)
+        handshake = Handshake(ticket.credential, AnonymousUser(), None)
         socket = _PatientSocket(port, handshake, broker=broker, heartbeat=0.001)
         task = asyncio.create_task(socket.serve(port.inbound()))
         port.push_json(ticket.subscribe_frame())
@@ -273,7 +274,7 @@ def test_idle_heartbeat_touches_the_record_before_its_ping() -> None:
 
 
 def test_presence_on_a_broker_without_it_closes_internal(
-    caplog: pytest.LogCaptureFixture,
+    caplog: pytest.LogCaptureFixture, streams: LiveStreams
 ) -> None:
     ticket = issue_session_ticket(presence=True)
 
@@ -285,7 +286,7 @@ def test_presence_on_a_broker_without_it_closes_internal(
         await _finish(asyncio.create_task(socket.serve(port.inbound())))
         assert port.sent == []
         assert port.close_code == Close.INTERNAL
-        assert broker.inner._subscribers == {}
+        assert streams.live() == 0
 
     asyncio.run(scenario())
     assert "keeps no presence" in caplog.text
@@ -360,7 +361,7 @@ def test_socket_attend_hook_can_keep_a_ticket_out_of_the_roster() -> None:
     async def scenario() -> None:
         broker = _broker()
         port = MemoryPort()
-        handshake = Handshake(ticket.session_key, AnonymousUser(), None)
+        handshake = Handshake(ticket.credential, AnonymousUser(), None)
         socket = _SilentSocket(port, handshake, broker=broker, heartbeat=60)
         task = asyncio.create_task(socket.serve(port.inbound()))
         port.push_json(ticket.subscribe_frame())

@@ -220,13 +220,12 @@ async def _tunnel(
         (b"host", b"testserver"),
         (b"cookie", _cookie(ticket, secret).encode()),
     ]
-    communicator = WebsocketCommunicator(app, "/_next/ws/", headers=headers)
+    communicator = WebsocketCommunicator(app, "/_next/ws/", headers=headers, timeout=10)
     connected, _ = await communicator.connect()
     assert connected
-    await communicator.send_json_to(ticket.subscribe_frame())
-    assert json.loads((await communicator.receive_output(5))["text"])["type"] == "hello"
+    assert (await communicator.subscribe(ticket))["type"] == "hello"
     await communicator.send_json_to({"type": "http", "id": "1", **frame})
-    answer = json.loads((await communicator.receive_output(10))["text"])
+    answer = await communicator.receive_json_from()
     await communicator.disconnect()
     return answer
 
@@ -837,7 +836,7 @@ class TestSessionEngines:
         ticket, user_id = member
         written, _ = _both(app, ticket, csrf, "tunnel_write")
         _, seen = _both(app, ticket, csrf, "tunnel_whoami")
-        stored = import_module(engine).SessionStore(ticket.session_key).load()
+        stored = import_module(engine).SessionStore(ticket.session.session_key).load()
         assert stored[SESSION_KEY] == user_id
         if engine == _SIGNED:
             assert written["error"] == "http_only"
@@ -889,7 +888,7 @@ class TestSessionEngines:
             secret=secret,
         )
         _, seen = _both(app, ticket, csrf, "tunnel_whoami")
-        stored = import_module(engine).SessionStore(ticket.session_key).load()
+        stored = import_module(engine).SessionStore(ticket.session.session_key).load()
         assert answer == _ROTATED
         assert stored[SESSION_KEY] == user_id
         assert seen.content == b"True None"

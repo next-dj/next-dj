@@ -30,6 +30,7 @@ Advanced.
    Upstream events add ``on`` and ``Upstream``.
    ``DjangoTunnel``, ``Tunnel``, and ``TunnelHints`` live in ``next.realtime.tunnel`` for gateway and tunnel authors.
    ``signals``, ``checks``, and ``frames`` are also available as submodules.
+   ``TicketBinding``, ``SessionBinding``, and ``SignedCookieBinding`` choose what a ticket is bound to, and ``LiveIdentity``, ``stored_session``, ``session_user``, ``session_alive``, and ``ticket_binding`` are the helpers a binding author uses.
    ``resolve_claims`` and ``resolve_identify`` live in ``next.realtime.tickets`` for gateway authors.
    ``replay_window``, ``replay_after``, and ``INCOMPLETE`` live in ``next.realtime.replay`` for broker authors.
 
@@ -497,7 +498,7 @@ The connection then runs in this order.
    Without a live session it sends ``{"type": "error", "code": "auth"}`` and closes with ``4401``.
 #. The client sends a ``sub`` frame within five seconds.
    A first frame that is not a valid ``sub``, or a silence past the deadline, ends in ``{"type": "error", "code": "protocol"}`` and ``4400``.
-#. The server verifies the ticket against the session of the handshake and imports the transform and authorizer it names.
+#. The server verifies the ticket against the credential of the handshake and imports the transform and authorizer it names.
    A ticket that is forged, expired, bound to another session, or names a callable that no longer imports ends in an ``auth`` error and ``4401``.
 #. The server checks the session and the authorizer for every topic.
    A revoked session ends in an ``auth`` error and ``4401``, and a denied topic ends in an ``auth`` error and ``4403``.
@@ -661,7 +662,7 @@ Close codes
      - Three frames in a row found the token bucket empty, see `Upstream events`_.
        An ``error`` frame with the ``limit`` code precedes it.
 
-The browser client falls back to SSE for good on ``4401`` and ``4403``, and on an ``auth`` error frame.
+The browser client decides by the close code rather than the ``error`` frame before it, falling back to SSE for good on ``4403`` and negotiating a fresh ticket once on ``4401`` before it does.
 Every other close is transient.
 The client retries after ``150 * 2^(n-1)`` milliseconds plus up to 150 milliseconds of jitter, and it falls back to SSE after three failures in a row.
 A watchdog wakes once per heartbeat and drops a peer whose send has been blocked for longer than a heartbeat.
@@ -857,18 +858,95 @@ A connection with no ``Origin`` header is refused, because only a browser carrie
 ``WebSocketApp(origins=[...])`` replaces the rule with an explicit list in the ``CSRF_TRUSTED_ORIGINS`` format and raises ``ValueError`` for an empty or malformed list.
 A ``*`` entry in ``ALLOWED_HOSTS`` is not an error, because the check compares the Origin with the validated ``Host``.
 
-The session comes from the cookie named by ``SESSION_COOKIE_NAME`` and is read through the configured ``SESSION_ENGINE`` on the shared thread pool.
+The credential comes from the cookies of the handshake through the ticket binding, and the default binding reads the session named by the ``SESSION_COOKIE_NAME`` cookie through the configured ``SESSION_ENGINE`` on the shared thread pool.
 The load is read-only.
 A session whose hash only matches a ``SECRET_KEY_FALLBACKS`` entry keeps working, since rotating the key belongs to the next HTTP request and the socket has no response to carry a new cookie.
 The ``db``, ``cache``, ``cached_db``, and ``file`` engines work.
 The signed-cookie engine re-signs its cookie on every session save, so a ticket issued before the save no longer matches the handshake cookie, and the socket closes with ``4401``, which ``next.W142`` reports.
+``SignedCookieBinding`` removes that limit and needs no server-side session engine, see `Ticket binding`_.
 The ``file`` engine replaces an expired session with a new file when it loads one, and the socket turns that write into a no-op.
-The socket loads the session at the handshake and on each recheck, so a cache-backed store that evicts live sessions closes sockets with ``4401``.
+Under the default binding the socket loads the session at the handshake and on each recheck, so a cache-backed store that evicts live sessions closes sockets with ``4401``.
 
 A recheck runs on every heartbeat and at the session's deadline, and it closes the socket only when the session is gone.
 A session renewed over HTTP, by ``SESSION_SAVE_EVERY_REQUEST`` or ``set_expiry``, moves the deadline and keeps its socket open.
 The deadline is the ``expire_date`` row of the ``db`` and ``cached_db`` engines, or an expiry date passed to ``set_expiry``.
 The ``cache`` and ``file`` engines keep no deadline the socket can read otherwise, so for them the heartbeat recheck alone notices an expired session.
+
+Ticket binding
+~~~~~~~~~~~~~~
+
+A ticket proves that the browser which negotiated it is the one that opens the socket.
+``NEXT_FRAMEWORK['REALTIME']['TICKET_BINDING']`` names the ``TicketBinding`` subclass that decides what the ticket is bound to, as a dotted path.
+The default ``next.realtime.SessionBinding`` binds the Django session key.
+``next.realtime.SignedCookieBinding`` binds a signed-in user and a visitor cookie, and serves the signed-cookie ``SESSION_ENGINE``.
+A project class serves any other identity, see :doc:`/content/howto/bind-tickets-to-your-own-identity`.
+
+A binding answers five questions, and the framework calls them in this order.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Method
+     - Contract
+   * - ``issue(request)``
+     - Runs while the ticket is negotiated and returns the subject string the ticket binds.
+       It raises ``InvalidTicketError`` when the request has nothing to bind, which answers the negotiation with ``503`` and ``session_unavailable``.
+   * - ``respond(request, response)``
+     - Sets the cookie a binding needs on a negotiation reply and does nothing by default.
+       It reads what ``issue`` left on the request and is idempotent, so a view that issues tickets without ``TopicStream`` calls ``ticket_binding().respond(request, response)`` on its own response.
+   * - ``credential(cookies)``
+     - Reads the credential from the cookies of the handshake or of an introspection call and returns ``None`` when they carry none.
+       It runs off the event loop, so it may read the session store.
+   * - ``subject(credential)``
+     - Returns the subject the credential proves, which ``verify_ticket`` compares with the one the ticket binds, or ``None`` when it proves none.
+       It runs on the event loop of the socket, so it is pure and never blocks, with no database, cache, or network access.
+   * - ``live(credential)``
+     - Returns a ``LiveIdentity`` of the user and the seconds left, or ``None`` once the credential is gone.
+       The seconds are ``None`` when the store keeps no deadline.
+       The handshake calls it, and so does every recheck, which is where a logout or a password change closes the socket.
+       It serves WebSockets only.
+   * - ``live_session(session_key)``
+     - Returns a ``LiveIdentity`` for the session key of an SSE request, or ``None`` once the session is gone.
+       It calls ``stored_session`` by default and serves SSE only.
+
+The ticket carries a digest of the subject under ``SECRET_KEY``, and ``verify_ticket`` accepts a digest made under any of ``SECRET_KEY_FALLBACKS`` as well.
+``Handshake.credential`` holds the credential of the binding, which is the session key only under ``SessionBinding``, and it stays out of ``repr``.
+A handler never sees it.
+``Handshake.subject`` and ``Upstream.subject`` hold a keyed digest of the subject the credential proves, which is stable across reconnects of one user or visitor, never yields the credential back, and is empty when the credential proves no subject.
+The digest changes when ``SECRET_KEY`` rotates, and under ``SessionBinding`` it follows the session rather than the user, so a new login yields a new one.
+``stored_session(session_key)`` returns the ``LiveIdentity`` of a stored session, ``session_user(store)`` loads the user of a session without writing to it, and ``session_alive(session_key)`` tells whether the stored session is live.
+A binding class is built once per dotted path and shared by every connection, so it keeps no per-connection state.
+
+``SignedCookieBinding`` binds a signed-in user as ``user:<auth hash>:<pk>`` and an anonymous visitor as ``visitor:<id>``.
+The visitor id lives in the signed ``next_visitor`` cookie, which the negotiation reply sets and renews with the path, domain, ``Secure``, ``SameSite``, and lifetime of the session cookie and always ``HttpOnly``.
+``issue`` leaves the visitor id on ``request.META``, and ``respond`` writes the cookie from there, so a custom view calls ``ticket_binding().respond(request, response)`` on its reply.
+A view that forgets the call sets no cookie, and the handshake closes with ``4401``.
+A signed-in negotiation makes ``respond`` delete the ``next_visitor`` cookie, so a visitor that never negotiated while signed in survives a login and a logout, and the first anonymous negotiation after one that did issues a fresh visitor.
+A negotiation whose session holds a user that no longer loads, after a password change elsewhere, binds a visitor the same way.
+``live`` loads the user by pk and compares the auth hash, so a password change or an inactive user closes the socket, while a logout in another tab does not, because the binding keeps no stored session to delete.
+``live`` for a credential it does not recognise returns ``None``.
+A subclass changes ``cookie_name`` or ``salt``.
+The binding works under any ``SESSION_ENGINE``, and ``next.W147`` warns when a server-side engine runs next to it, because ``SessionBinding`` would recheck the stored session there.
+
+.. autoclass:: next.realtime.TicketBinding
+   :members:
+
+.. autoclass:: next.realtime.SessionBinding
+   :members:
+
+.. autoclass:: next.realtime.SignedCookieBinding
+   :members:
+
+.. autoclass:: next.realtime.LiveIdentity
+
+.. autofunction:: next.realtime.stored_session
+
+.. autofunction:: next.realtime.session_user
+
+.. autofunction:: next.realtime.session_alive
+
+.. autofunction:: next.realtime.ticket_binding
 
 Serving the socket
 ~~~~~~~~~~~~~~~~~~
@@ -895,15 +973,16 @@ An ``authenticate`` that raises is logged and closes the socket with ``1011``.
 ``TopicSocket`` knows nothing of ASGI.
 It reads frames from an async iterable and writes through a ``SocketPort``, which is two coroutines, ``send(text)`` and ``close(code)``.
 ``send`` raises ``OSError`` once the peer is gone, and ``close`` tolerates a peer that already left.
-A gateway on another server loads the ``Handshake`` of a session key with ``await Handshake.from_session(session_key)``, which ``WebSocketApp.authenticate`` uses too, and runs ``TopicSocket(port, handshake).serve(frames)``.
+A gateway on another server loads the ``Handshake`` of the connection cookies with ``await Handshake.from_cookies(cookies)``, which ``WebSocketApp.authenticate`` uses too, and runs ``TopicSocket(port, handshake).serve(frames)``.
+The mapping comes from ``django.http.parse_cookie`` on the ``cookie`` header, and the method returns ``None`` for an empty mapping or a binding that finds no live credential.
 A gateway that tunnels form actions passes ``tunnel=`` as well, a ``DjangoTunnel`` or its own ``Tunnel``.
-A gateway that takes the identity from elsewhere builds ``Handshake(session_key, user, expires_at)`` itself, with ``expires_at`` on the ``time.monotonic()`` clock or ``None``.
+A gateway that takes the identity from elsewhere builds ``Handshake(credential, user, expires_at)`` itself, with ``expires_at`` on the ``time.monotonic()`` clock or ``None``.
 ``expires_at`` is the moment of a forced session recheck, not of a close.
-The ``Handshake.session_key`` has to be the key the ticket was issued under.
+The ``Handshake.credential`` has to be the credential the ticket was issued under, and ``Handshake.subject`` is derived from it.
 ``TopicSocket.catch_up(subscription, positions)`` and ``TopicSocket.tick`` are the hooks a subclass overrides, the first between the position read and ``hello`` and the second on each idle heartbeat.
 ``TopicSocket.handle(upstream)`` and ``TopicSocket.access_check(claims, authorizer)`` are the hooks of `Upstream events`_.
 
-``verify_ticket(token, session_key)`` returns the ``TicketClaims`` of a valid ticket and raises ``InvalidTicketError`` otherwise.
+``verify_ticket(token, credential)`` returns the ``TicketClaims`` of a valid ticket and raises ``InvalidTicketError`` otherwise.
 ``resolve_claims(claims)`` imports the transform and the authorizer the claims name.
 ``TicketClaims.presence`` is ``False`` for a stream outside presence, ``True`` for a count, or the dotted path of the ``identify`` callable, and ``resolve_identify(claims)`` imports that callable or returns ``None``.
 A ``TopicSocket`` joins the presence of its ticket after the position read and before ``hello``, under its ``connection_id``, and leaves it on every way out, a cancellation and a watchdog drop included.
@@ -1009,19 +1088,26 @@ Signals
 ``broker_backend_loaded`` fires when the lazy manager creates the configured backend, after the manager lock is released.
 ``message_published`` fires after the broker accepts a publication.
 ``upstream_received`` fires before an upstream handler runs, with the ``Upstream`` it gets.
+``stream_subscribed`` and ``stream_unsubscribed`` bracket the life of every ``TopicStream`` and ``TopicSocket``, the second with the ``duration`` and an ``UnsubscribeReason``.
 See :doc:`signals` for their payloads and :doc:`/content/topics/signals` for receiver usage.
+
+Management command
+------------------
+
+``manage.py realtime`` publishes to a topic and reads its positions, presence, and replay log from the shell, and ``manage.py runserver`` serves the project on uvicorn with the WebSocket mounted.
+See :doc:`management` for both.
 
 System checks
 -------------
 
-Realtime checks validate the ``REALTIME`` keys, the transport list, the ticket age, the WebSocket path, the heartbeat, the replay window, the presence limits, and the broker backend and its options, and report a missing ``redis`` dependency.
+Realtime checks validate the ``REALTIME`` keys, the transport list, the ticket age, the ticket binding, the WebSocket path, the heartbeat, the replay window, the presence limits, and the broker backend and its options, and report a missing ``redis`` dependency.
 A warning flags a nonzero ``REPLAY['SIZE']`` with a broker that keeps no replay log, and another flags an explicit ``PRESENCE`` with a broker that keeps no presence.
-Deployment warnings flag an explicit ``"ws"`` transport without ``SessionMiddleware`` or with signed-cookie sessions.
+Deployment warnings flag an explicit ``"ws"`` transport without ``SessionMiddleware`` or with signed-cookie sessions under the default ticket binding.
 A ``WebSocketApp`` logs the session warnings itself when it is created, since ``manage.py check`` never sees a mounted socket.
 An error flags a routed ticket introspection endpoint that has no ``GATEWAY_TOKEN``.
 The checks run against the defaults when ``NEXT_FRAMEWORK`` has no ``REALTIME`` key.
 Errors flag invalid ``UPSTREAM`` and ``TUNNEL`` limits and upstream handlers that can never match.
-See :doc:`system-checks` for the ids ``next.E177`` to ``next.E199``, ``next.E201`` to ``next.E210``, and ``next.W141`` to ``next.W144`` and ``next.W146``.
+See :doc:`system-checks` for the ids ``next.E177`` to ``next.E199``, ``next.E201`` to ``next.E211``, and ``next.W141`` to ``next.W144``, ``next.W146``, and ``next.W147``.
 
 See also
 --------
@@ -1032,4 +1118,8 @@ See also
    :doc:`backends` for the shared backend loading conventions.
    :doc:`/content/topics/realtime` for publication, access, and recovery.
    :doc:`/content/howto/write-a-broker-backend` for a custom broker.
+   :doc:`/content/howto/bind-tickets-to-your-own-identity` for a ticket binding of your own.
+   :doc:`/content/howto/deliver-events-durably` for events that must not be lost.
+   :doc:`management` for the ``realtime`` and ``runserver`` commands.
+   :doc:`testing` for the realtime test helpers.
    :doc:`/content/topics/partial-rendering/sse` for the existing stream transport.

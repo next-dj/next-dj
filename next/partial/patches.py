@@ -471,7 +471,9 @@ class Patches:
         if _is_reserved_event(name):
             raise ReservedEventNameError(name)
         self._ops.append(
-            Patch(op="event", extras={"name": name, "detail": dict(detail or {})})
+            Patch(
+                op="event", extras={keys.EVENT_NAME: name, "detail": dict(detail or {})}
+            )
         )
         return self
 

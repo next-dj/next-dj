@@ -7,7 +7,14 @@ from django.http import HttpRequest
 from django.test import override_settings
 from django.urls import URLPattern, include, path
 
-from next.realtime import MemoryBroker, TicketIntrospectionView, checks
+from next.realtime import (
+    MemoryBroker,
+    SessionBinding,
+    SignedCookieBinding,
+    TicketBinding,
+    TicketIntrospectionView,
+    checks,
+)
 from next.realtime.checks import check_realtime_settings, check_ticket_introspection
 from next.realtime.replay import MAX_SIZE, MAX_TTL
 
@@ -146,6 +153,7 @@ def _ids(**overrides: object) -> set[str]:
 
 _WS = {"REALTIME": {"TRANSPORTS": ["ws"]}}
 _SIGNED = "django.contrib.sessions.backends.signed_cookies"
+_SIGNED_BINDING = "next.realtime.SignedCookieBinding"
 
 
 def _redis(**options: object) -> dict[str, object]:
@@ -218,6 +226,20 @@ def test_check_warns_ws_without_session_middleware() -> None:
     assert _ids(NEXT_FRAMEWORK=_WS, MIDDLEWARE=[]) == {"next.W141"}
 
 
+@pytest.mark.parametrize(
+    ("binding", "expected"),
+    [
+        ("next.realtime.SessionBinding", {"next.W141"}),
+        ("tests.realtime.test_checks.SessionKeyBinding", {"next.W141"}),
+        ("next.realtime.SignedCookieBinding", {"next.W147"}),
+        ("tests.realtime.test_binding.DeviceBinding", set()),
+    ],
+)
+def test_check_w141_follows_the_ticket_binding(binding: str, expected: set) -> None:
+    config = {"REALTIME": {**_WS["REALTIME"], "TICKET_BINDING": binding}}
+    assert _ids(NEXT_FRAMEWORK=config, MIDDLEWARE=[]) == expected
+
+
 def test_check_warns_ws_with_signed_cookie_sessions() -> None:
     with override_settings(NEXT_FRAMEWORK=_WS, SESSION_ENGINE=_SIGNED):
         (warning,) = check_realtime_settings()
@@ -225,6 +247,91 @@ def test_check_warns_ws_with_signed_cookie_sessions() -> None:
     assert "re-signs on every session save" in warning.msg
     assert "4401" in warning.msg
     assert "outlives logout" in warning.hint
+
+
+class SessionKeyBinding(SessionBinding):
+    pass
+
+
+class AbstractBinding(TicketBinding):
+    pass
+
+
+def test_check_w142_points_at_the_signed_cookie_binding() -> None:
+    with override_settings(NEXT_FRAMEWORK=_WS, SESSION_ENGINE=_SIGNED):
+        (warning,) = check_realtime_settings()
+    assert "next.realtime.SignedCookieBinding" in warning.hint
+
+
+@pytest.mark.parametrize(
+    ("binding", "expected"),
+    [
+        ("next.realtime.SignedCookieBinding", set()),
+        ("tests.realtime.test_binding.DeviceBinding", set()),
+        ("tests.realtime.test_checks.SessionKeyBinding", {"next.W142"}),
+        ("next.realtime.SessionBinding", {"next.W142"}),
+    ],
+)
+def test_check_w142_follows_the_ticket_binding(binding: str, expected: set) -> None:
+    config = {"REALTIME": {**_WS["REALTIME"], "TICKET_BINDING": binding}}
+    assert _ids(NEXT_FRAMEWORK=config, SESSION_ENGINE=_SIGNED) == expected
+
+
+class VisitorBinding(SignedCookieBinding):
+    pass
+
+
+@pytest.mark.parametrize(
+    ("binding", "engine", "expected"),
+    [
+        ("next.realtime.SignedCookieBinding", "db", {"next.W147"}),
+        ("tests.realtime.test_checks.VisitorBinding", "cache", {"next.W147"}),
+        ("next.realtime.SignedCookieBinding", "signed_cookies", set()),
+        ("next.realtime.SessionBinding", "db", set()),
+    ],
+)
+def test_check_w147_flags_a_signed_cookie_binding_on_server_sessions(
+    binding: str, engine: str, expected: set[str]
+) -> None:
+    config = {"REALTIME": {**_WS["REALTIME"], "TICKET_BINDING": binding}}
+    session_engine = f"django.contrib.sessions.backends.{engine}"
+    assert _ids(NEXT_FRAMEWORK=config, SESSION_ENGINE=session_engine) == expected
+
+
+def test_check_w147_names_logout_and_the_session_binding() -> None:
+    config = {"REALTIME": {**_WS["REALTIME"], "TICKET_BINDING": _SIGNED_BINDING}}
+    with override_settings(NEXT_FRAMEWORK=config):
+        (warning,) = check_realtime_settings()
+    assert warning.id == "next.W147"
+    assert "outlives logout" in warning.msg
+    assert "next.realtime.SessionBinding" in warning.hint
+
+
+def test_check_w147_ignores_an_unimportable_session_engine() -> None:
+    config = {"REALTIME": {**_WS["REALTIME"], "TICKET_BINDING": _SIGNED_BINDING}}
+    assert _ids(NEXT_FRAMEWORK=config, SESSION_ENGINE="missing") == set()
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        None,
+        42,
+        "tests.realtime.missing.Binding",
+        "tests.realtime.test_checks.CustomBroker",
+        "tests.realtime.test_checks.AbstractBinding",
+    ],
+)
+def test_check_rejects_an_unusable_ticket_binding(binding: object) -> None:
+    config = {"REALTIME": {**_WS["REALTIME"], "TICKET_BINDING": binding}}
+    assert _ids(NEXT_FRAMEWORK=config, SESSION_ENGINE=_SIGNED) == {"next.E211"}
+
+
+def test_check_accepts_a_custom_ticket_binding() -> None:
+    config = {
+        "REALTIME": {"TICKET_BINDING": "tests.realtime.test_checks.SessionKeyBinding"}
+    }
+    assert _ids(NEXT_FRAMEWORK=config) == set()
 
 
 _PLAIN = "tests.support.realtime.PlainBroker"

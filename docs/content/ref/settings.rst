@@ -242,6 +242,7 @@ Default value.
        },
        "TRANSPORTS": None,
        "TICKET_MAX_AGE": 60,
+       "TICKET_BINDING": "next.realtime.SessionBinding",
        "WS_PATH": "/_next/ws/",
        "HEARTBEAT": 25.0,
        "GATEWAY_TOKEN": None,
@@ -297,6 +298,12 @@ A custom backend reads its own ``OPTIONS`` keys, which ``manage.py check`` leave
 A process that serves pages without mounting the socket, such as a WSGI worker next to a separate ASGI deployment, needs an explicit ``["ws", "sse"]`` to offer it.
 Set it to ``["sse"]`` to disable WebSocket negotiation.
 ``TICKET_MAX_AGE`` is the lifetime of a session-bound WebSocket grant in seconds and accepts values from 1 to 600.
+``TICKET_BINDING`` is the dotted path of the ``TicketBinding`` subclass that decides what a WebSocket ticket is bound to, and ``next.E211`` reports any other value.
+The default ``next.realtime.SessionBinding`` binds the session key.
+``next.realtime.SignedCookieBinding`` binds a signed-in user by its pk and session auth hash and an anonymous visitor by a ``next_visitor`` cookie, so it serves the signed-cookie ``SESSION_ENGINE``, a first visit without a session included.
+The negotiation reply sets that cookie with ``HttpOnly`` and the path, domain, ``Secure``, ``SameSite`` and lifetime of the session cookie, and renews it on every negotiation.
+Its socket rechecks the user by pk and auth hash without writing a cookie, so a password change or an inactive user closes it while a logout elsewhere does not, and ``next.W147`` warns when a server-side ``SESSION_ENGINE`` runs next to it.
+A subclass changes ``cookie_name`` or ``salt``, and a project binding implements ``issue``, ``credential``, ``subject`` and ``live``, with ``live_session`` for SSE and ``respond`` for what the negotiation reply carries, see :doc:`realtime` and :doc:`/content/howto/bind-tickets-to-your-own-identity`.
 ``WS_PATH`` sets the same-origin WebSocket route and defaults to ``/_next/ws/``, and it is the only place the route is configured.
 ``GATEWAY_TOKEN`` is the bearer secret of the ticket introspection endpoint, which stays off until a URLconf includes it.
 It defaults to ``None``, and a routed endpoint with no token refuses every caller and is reported as ``next.E188``.

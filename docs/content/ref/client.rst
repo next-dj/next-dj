@@ -351,7 +351,11 @@ A change between two non-empty epochs resets the cursor and resyncs, while a cha
 
 With WebSockets enabled, the client first sends the stream URL a GET with ``X-Next-Transport: ws`` and ``Accept: application/json``.
 It opens the socket only for a ``200`` reply whose content type is ``application/json``.
-A ``401``, ``403``, or ``406`` reply, any other content type, no reply within five seconds, an ``auth`` error frame, a ``4401`` or ``4403`` close, or three failed attempts in a row sends that connection to SSE for good.
+A ``401``, ``403``, or ``406`` reply, any other content type, no reply within five seconds, a ``4403`` close, or three failed attempts in a row sends that connection to SSE for good.
+The server sends an ``error`` frame before a ``4400``, ``4401``, or ``4403`` close, and the client decides by the close code, while an ``auth`` frame that no close follows within five seconds counts as a ``4401``.
+A ``4401`` close drops the connection once and negotiates again for a fresh ticket, since two negotiations on a first visit can issue different anonymous identities and the browser keeps the cookie of the last.
+A second ``4401`` with no ``hello`` between the two sends the connection to SSE for good, and each ``hello`` earns one such retry.
+The retry does not count as a failed attempt.
 
 The failure count resets only after a socket stayed open for one heartbeat past its ``hello``, so a server that drops every socket right after ``hello`` still ends on SSE.
 A socket that sends no ``hello`` within five seconds of opening is closed as a transient failure.

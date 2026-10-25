@@ -188,6 +188,7 @@ export function createWebSocketTransport(
       let watchdog: ReturnType<typeof setTimeout> | undefined;
       let healthy: ReturnType<typeof setTimeout> | undefined;
       let renewing = false;
+      let reauthed = false;
       const stopped = (): boolean => closed || fallbackMode;
       const quiet = (): void => {
         clearTimeout(watchdog);
@@ -267,6 +268,16 @@ export function createWebSocketTransport(
             return;
           }
           const born = generation;
+          const ended = (code: number): void => {
+            if (active !== opened) return;
+            if (code === 4401 && !reauthed) {
+              reauthed = true;
+              drop();
+              void connect();
+              return;
+            }
+            failed(code === 4401 || code === 4403);
+          };
           const opened: TransportControl = socket.open(
             target.url,
             (readySend) => {
@@ -309,6 +320,7 @@ export function createWebSocketTransport(
               }
               if (!isRecord(frame)) return;
               if (frame.type === "hello") {
+                reauthed = false;
                 const beat = frame.heartbeat;
                 heartbeat = typeof beat === "number" && beat > 0 ? beat : 0;
                 clearTimeout(watchdog);
@@ -349,12 +361,13 @@ export function createWebSocketTransport(
                 link?.send('{"type":"pong"}');
               } else if (frame.type === "ack" || frame.type === "http")
                 link?.replies.get(String(frame.id))?.(frame);
-              else if (frame.type === "error" && frame.code === "auth") useFallback();
+              else if (frame.type === "error" && frame.code === "auth") {
+                clearTimeout(watchdog);
+                watchdog = setTimeout(ended, NEGOTIATION_MS, 4401);
+              }
               if (link !== undefined) drain(link);
             },
-            (code) => {
-              if (active === opened) failed(code === 4401 || code === 4403);
-            },
+            ended,
           );
           active = opened;
           // An accepted socket that never says hello would otherwise hang the stream.

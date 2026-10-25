@@ -37,7 +37,7 @@ from next.realtime.roster import (
 )
 from next.realtime.signals import message_published
 from next.realtime.socket import Handshake, TopicSocket
-from next.testing import capture_signals
+from next.testing import SseEvent, SseReader, capture_signals
 from next.testing.realtime import MemoryPort, SocketTicket
 from tests.support.realtime import (
     FakeServerBroker,
@@ -46,7 +46,6 @@ from tests.support.realtime import (
     freeze_fakeredis,
     issue_session_ticket,
     manual_schedule,
-    next_frame,
     refresh_envelope,
     silent_schedule,
 )
@@ -483,13 +482,6 @@ def test_asgi_stream_refuses_presence_on_a_configured_broker_without_it(
         TopicStream(request, TOPIC, presence=True)
 
 
-def _sse(frame: bytes) -> dict[str, object]:
-    lines = frame.decode().strip().split("\n")
-    fields = dict(line.split(": ", 1) for line in lines)
-    fields["data"] = json.loads(fields["data"])
-    return fields
-
-
 @pytest.fixture()
 def memory(monkeypatch) -> Iterator[MemoryBroker]:
     broker = _memory()
@@ -498,61 +490,54 @@ def memory(monkeypatch) -> Iterator[MemoryBroker]:
     broker.close()
 
 
-def _sync_stream(presence: object, **options: object) -> Iterator[bytes]:
+def _sync_stream(presence: object, **options: object) -> SseReader:
     request = RequestFactory().get("/rooms/1/stream/")
     request.user = AnonymousUser()
     stream = TopicStream(
         request, TOPIC, presence=presence, heartbeat_seconds=0.05, **options
     )
-    iterator = iter(stream.streaming_content)
-    next(iterator)
-    assert b"next-hello" in next_frame(iterator)
-    return iterator
+    events = SseReader(stream)
+    assert next(events).event == "next-hello"
+    return events
 
 
-def _detail(fields: dict[str, object]) -> object:
-    data = fields["data"]
-    assert isinstance(data, dict)
-    (op,) = data["ops"]
+def _detail(event: SseEvent) -> object:
+    (op,) = event.json()["ops"]
     assert op["name"] == EVENT
     return op["detail"]
 
 
 @pytest.mark.django_db()
 def test_sse_snapshot_after_hello_is_an_event_without_id_or_seq(memory) -> None:
-    iterator = _sync_stream(True)
-    fields = _sse(next_frame(iterator))
+    event = next(_sync_stream(True))
 
-    assert fields["event"] == "next-patches"
-    assert "id" not in fields
-    assert {"seq", "epoch"}.isdisjoint(fields["data"])
-    assert fields["data"]["topic"] == TOPIC
-    assert _detail(fields) == {"count": 1}
+    assert event.event == "next-patches"
+    assert event.id is None
+    assert {"seq", "epoch"}.isdisjoint(event.json())
+    assert event.json()["topic"] == TOPIC
+    assert _detail(event) == {"count": 1}
 
 
 @pytest.mark.django_db()
 def test_sse_shows_members_only_to_an_identifying_stream(memory) -> None:
     counting = _sync_stream(True)
-    assert _detail(_sse(next_frame(counting))) == {"count": 1}
+    assert _detail(next(counting)) == {"count": 1}
     naming = _sync_stream(f"{_HERE}.identify")
-    assert _detail(_sse(next_frame(naming))) == {
-        "count": 2,
-        "members": [identify(None, TOPIC)],
-    }
+    assert _detail(next(naming)) == {"count": 2, "members": [identify(None, TOPIC)]}
     plain = _sync_stream(False)
     memory.presence_schedule.run_due(10)
 
     member = [identify(None, TOPIC)]
-    assert _detail(_sse(next_frame(counting))) == {"count": 2}
-    assert _detail(_sse(next_frame(naming))) == {"count": 2, "members": member}
-    assert _detail(_sse(next_frame(plain))) == {"count": 2}
+    assert _detail(next(counting)) == {"count": 2}
+    assert _detail(next(naming)) == {"count": 2, "members": member}
+    assert _detail(next(plain)) == {"count": 2}
 
 
 @pytest.mark.django_db()
 def test_sse_snapshot_skips_the_subscriber_transform(memory) -> None:
     iterator = _sync_stream(True, transform=skip_everything)
 
-    assert _detail(_sse(next_frame(iterator))) == {"count": 1}
+    assert _detail(next(iterator)) == {"count": 1}
 
 
 def test_asgi_snapshot_after_hello_hides_the_members_of_a_count_stream(memory) -> None:
@@ -583,7 +568,7 @@ def test_asgi_snapshot_after_hello_hides_the_members_of_a_count_stream(memory) -
 
 
 async def _ws_open(port: MemoryPort, issued: SocketTicket, broker) -> asyncio.Task:
-    handshake = Handshake(issued.session_key, AnonymousUser(), None)
+    handshake = Handshake(issued.credential, AnonymousUser(), None)
     socket = TopicSocket(port, handshake, broker=broker, heartbeat=60)
     task = asyncio.create_task(socket.serve(port.inbound()))
     port.push_json(issued.subscribe_frame())
@@ -787,9 +772,9 @@ def test_last_leave_under_a_live_window_announces_the_change_once(
 def test_sse_cuts_the_members_of_a_numbered_presence_event(memory) -> None:
     counting = _sync_stream(False)
     naming = _sync_stream(f"{_HERE}.identify")
-    next_frame(naming)
+    next(naming)
     envelope = presence_envelope(Presence(1, ({"id": 7},)))
     memory.publish(TOPIC, envelope)
 
-    assert _detail(_sse(next_frame(counting))) == {"count": 1}
-    assert _detail(_sse(next_frame(naming))) == {"count": 1, "members": [{"id": 7}]}
+    assert _detail(next(counting)) == {"count": 1}
+    assert _detail(next(naming)) == {"count": 1, "members": [{"id": 7}]}

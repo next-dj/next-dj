@@ -3,6 +3,7 @@
 import json
 from collections.abc import Callable
 from dataclasses import replace
+from typing import Literal, overload
 
 from django.db import transaction
 
@@ -70,10 +71,10 @@ def transformed(message: Message, result: object) -> Message | None:
     return replace(message, envelope=_prepare(result))
 
 
-def _publish_now(topic: str, envelope: Envelope) -> None:
-    """Publish once and emit the lifecycle signal after broker acceptance."""
+def _publish_now(topic: str, envelope: Envelope) -> Message:
+    """Publish once, send `message_published` after the broker accepts it, return it."""
     backend = broker_manager.get()
-    published(backend, backend.publish(topic, envelope))
+    return published(backend, backend.publish(topic, envelope))
 
 
 def _deferred(topic: str, envelope: Envelope) -> Callable[[], None]:
@@ -89,25 +90,45 @@ def _deferred(topic: str, envelope: Envelope) -> Callable[[], None]:
     return deliver
 
 
+@overload
+def publish(
+    topic: str,
+    patches: Patches | Envelope,
+    *,
+    on_commit: Literal[False],
+    using: str | None = None,
+) -> Message: ...
+
+
+@overload
 def publish(
     topic: str,
     patches: Patches | Envelope,
     *,
     on_commit: bool = True,
     using: str | None = None,
-) -> None:
-    """Publish safe patch instructions, optionally after the current transaction.
+) -> Message | None: ...
+
+
+def publish(
+    topic: str,
+    patches: Patches | Envelope,
+    *,
+    on_commit: bool = True,
+    using: str | None = None,
+) -> Message | None:
+    """Publish safe patch instructions and return the message, None once deferred.
 
     A deferred broker failure is logged by Django instead of failing a committed write.
     """
     validated_topic = validate_topic(topic)
     envelope = _prepare(patches)
-    if on_commit:
-        transaction.on_commit(
-            _deferred(validated_topic, envelope), using=using, robust=True
-        )
-    else:
-        _publish_now(validated_topic, envelope)
+    if not on_commit:
+        return _publish_now(validated_topic, envelope)
+    transaction.on_commit(
+        _deferred(validated_topic, envelope), using=using, robust=True
+    )
+    return None
 
 
 async def apublish(topic: str, patches: Patches | Envelope) -> Message:

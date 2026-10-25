@@ -41,6 +41,8 @@ from next.partial.signals import (
 from next.realtime.signals import (
     broker_backend_loaded,
     message_published,
+    stream_subscribed,
+    stream_unsubscribed,
     upstream_received,
 )
 from next.scripts.signals import scripts_registered
@@ -94,6 +96,8 @@ __all__ = [
     "sse_stream_closed",
     "sse_stream_opened",
     "static_backend_loaded",
+    "stream_subscribed",
+    "stream_unsubscribed",
     "template_loaded",
     "upstream_received",
     "watch_specs_ready",

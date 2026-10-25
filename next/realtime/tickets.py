@@ -16,7 +16,7 @@ from django.utils.module_loading import import_string
 
 from next.conf import next_framework_settings
 
-from .access import session_alive
+from .binding import ticket_binding
 from .errors import InvalidTicketError
 from .messages import validate_topic
 
@@ -106,28 +106,15 @@ def issue_ticket(
 ) -> TicketGrant:
     """Sign the exact topic grant after the guarded stream view has run.
 
-    The grant is held to the verifier's caps, so a ticket it signs always verifies.
-    A cookie the handshake would find dead gets a fresh session, as a first visit does.
+    The grant is held to the verifier's caps, and `TICKET_BINDING` names its subject.
     """
     presence_ref = presence if isinstance(presence, str) else None
     _require_grant(topics, (transform_ref, authorizer_ref, presence_ref))
-    session = getattr(request, "session", None)
-    if session is None:
-        msg = "WebSocket ticket negotiation requires Django SessionMiddleware."
-        raise InvalidTicketError(msg)
-    session_key = session.session_key
-    if session_key is None or not session_alive(session_key):
-        session.create()
-        session.modified = True
-        fresh = session.session_key
-        session_key = None if fresh == session_key else fresh
-    if not isinstance(session_key, str) or not session_key:
-        msg = "A persistent Django session is required for WebSocket tickets."
-        raise InvalidTicketError(msg)
+    subject = ticket_binding().issue(request)
     age = ticket_max_age()
     signer = signing.TimestampSigner(salt=_SALT)
     payload: dict[str, object] = {
-        "session": _session_digest(session_key),
+        "session": _session_digest(subject, settings.SECRET_KEY),
         "topics": list(topics),
         "transform": transform_ref,
         "authorizer": authorizer_ref,
@@ -155,16 +142,16 @@ def _require_grant(topics: tuple[str, ...], references: tuple[str | None, ...]) 
             raise ValueError(msg)
 
 
-def verify_ticket(token: object, session_key: str) -> TicketClaims:
-    """Verify signature, age, session binding, and the signed topic grant.
+def verify_ticket(token: object, credential: str) -> TicketClaims:
+    """Verify signature, age, binding, and the signed topic grant.
 
-    The key is the one the connection's session cookie carries, never a client field.
+    The credential is what the ticket binding read from the handshake cookies.
     """
     if not isinstance(token, str) or not token or len(token) > _MAX_TICKET_LENGTH:
         msg = "A non-empty WebSocket ticket is required."
         raise InvalidTicketError(msg)
-    if not isinstance(session_key, str) or not session_key:
-        msg = "The WebSocket connection has no Django session."
+    if not isinstance(credential, str) or not credential:
+        msg = "The WebSocket connection carries no ticket credential."
         raise InvalidTicketError(msg)
     try:
         payload = signing.TimestampSigner(salt=_SALT).unsign_object(
@@ -176,10 +163,8 @@ def verify_ticket(token: object, session_key: str) -> TicketClaims:
     if not isinstance(payload, Mapping):
         msg = "The WebSocket ticket has an invalid payload."
         raise InvalidTicketError(msg)
-    digest = payload.get("session")
-    if not isinstance(digest, str) or not constant_time_compare(
-        digest, _session_digest(session_key)
-    ):
+    subject = ticket_binding().subject(credential)
+    if subject is None or not _bound(payload.get("session"), subject):
         msg = "The WebSocket ticket belongs to another session."
         raise InvalidTicketError(msg)
     return _ticket_claims(payload)
@@ -309,11 +294,19 @@ def websocket_path() -> str:
     return path
 
 
-def _session_digest(session_key: str) -> str:
-    """Bind a ticket without exposing the raw session identifier in its payload."""
-    return salted_hmac(
-        _SALT, session_key, secret=settings.SECRET_KEY, algorithm="sha256"
-    ).hexdigest()
+def _session_digest(subject: str, secret: str | bytes) -> str:
+    """Bind a ticket without exposing the raw binding subject in its payload."""
+    return salted_hmac(_SALT, subject, secret=secret, algorithm="sha256").hexdigest()
+
+
+def _bound(digest: object, subject: str) -> bool:
+    """Whether a signed digest names the subject under the key or a fallback key."""
+    if not isinstance(digest, str):
+        return False
+    keys = (settings.SECRET_KEY, *settings.SECRET_KEY_FALLBACKS)
+    return any(
+        constant_time_compare(digest, _session_digest(subject, key)) for key in keys
+    )
 
 
 __all__ = [

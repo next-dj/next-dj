@@ -8,12 +8,8 @@ from django.test import AsyncRequestFactory, RequestFactory
 
 from next.realtime import MemoryBroker, Presence, TopicStream
 from next.realtime.manager import broker_manager
-from tests.support.realtime import (
-    FakeServerBroker,
-    anext_frame,
-    next_frame,
-    silent_schedule,
-)
+from next.testing import SseReader
+from tests.support.realtime import FakeServerBroker, silent_schedule
 
 
 TOPIC = "room:1"
@@ -60,9 +56,7 @@ def test_closing_a_sync_stream_after_hello_leaves(broker, presence) -> None:
     request = RequestFactory().get("/rooms/1/stream/")
     request.user = AnonymousUser()
     stream = TopicStream(request, TOPIC, presence=option, heartbeat_seconds=5)
-    iterator = iter(stream.streaming_content)
-    next(iterator)
-    assert b"next-hello" in next_frame(iterator)
+    assert next(SseReader(stream)).event == "next-hello"
 
     assert broker.presence(TOPIC) == expected
     stream.close()
@@ -83,11 +77,10 @@ def test_cancelling_an_asgi_stream_leaves(broker, presence) -> None:
     stream = TopicStream(_async_request(), TOPIC, presence=option, heartbeat_seconds=5)
 
     async def scenario() -> tuple[Presence, Presence]:
-        iterator = stream.streaming_content.__aiter__()
-        await anext(iterator)
-        assert b"next-hello" in await anext_frame(iterator)
+        events = SseReader(stream)
+        assert (await anext(events)).event == "next-hello"
         joined = await broker.apresence(TOPIC)
-        pull = asyncio.ensure_future(anext(iterator))
+        pull = asyncio.ensure_future(anext(events))
         await asyncio.sleep(0)
         pull.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -104,9 +97,8 @@ def test_closing_an_asgi_stream_after_hello_leaves(broker, presence) -> None:
     stream = TopicStream(_async_request(), TOPIC, presence=option, heartbeat_seconds=5)
 
     async def scenario() -> tuple[Presence, Presence]:
-        iterator = stream.streaming_content.__aiter__()
-        await anext(iterator)
-        assert b"next-hello" in await anext_frame(iterator)
+        events = SseReader(stream)
+        assert (await anext(events)).event == "next-hello"
         joined = await broker.apresence(TOPIC)
         await stream._iterator.aclose()
         return joined, await broker.apresence(TOPIC)

@@ -104,7 +104,7 @@ def _introspect(
 
 
 def _body(ticket: SocketTicket) -> dict[str, str]:
-    return {"ticket": ticket.grant.token, "cookie": _cookie(ticket.session_key)}
+    return {"ticket": ticket.grant.token, "cookie": _cookie(ticket.session.session_key)}
 
 
 def _assert_denied(response) -> None:
@@ -122,11 +122,11 @@ def test_returns_the_grant_of_an_anonymous_session(ticket: SocketTicket) -> None
     assert 0 < payload["expires_in"] <= SessionStore().get_session_cookie_age()
     assert set(payload) == {"topics", "user", "expires_in"}
     assert "no-store" in response["Cache-Control"]
-    assert ticket.session_key not in response.content.decode()
+    assert ticket.credential not in response.content.decode()
 
 
 def test_expires_in_is_what_the_stored_row_has_left(ticket: SocketTicket) -> None:
-    Session.objects.filter(session_key=ticket.session_key).update(
+    Session.objects.filter(session_key=ticket.session.session_key).update(
         expire_date=timezone.now() + timedelta(seconds=10)
     )
     assert 0 < _introspect(_body(ticket)).json()["expires_in"] <= 10
@@ -195,7 +195,9 @@ def test_refusals_share_one_answer(ticket: SocketTicket) -> None:
     other.create()
     responses = [
         _introspect(_body(ticket), authorization="Bearer wrong"),
-        _introspect({"ticket": "forged", "cookie": _cookie(ticket.session_key)}),
+        _introspect(
+            {"ticket": "forged", "cookie": _cookie(ticket.session.session_key)}
+        ),
         _introspect(
             {"ticket": ticket.grant.token, "cookie": _cookie(other.session_key)}
         ),
@@ -236,7 +238,7 @@ def test_logs_the_reason_it_hides_from_the_caller(
     ticket: SocketTicket, caplog: pytest.LogCaptureFixture
 ) -> None:
     with caplog.at_level(logging.INFO, logger="next.realtime.views"):
-        _introspect({"ticket": "forged", "cookie": _cookie(ticket.session_key)})
+        _introspect({"ticket": "forged", "cookie": _cookie(ticket.session.session_key)})
     assert "invalid or expired" in caplog.text
 
 

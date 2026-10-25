@@ -18,6 +18,7 @@ The default ``on_commit=True`` delays sync publication until the selected databa
 Pass ``using="analytics"`` when the mutation belongs to a non-default database, otherwise the default connection is used.
 The callback is process-local and is not a durable outbox.
 An ``apublish`` call publishes immediately through the backend's asynchronous API.
+Both return the numbered ``Message`` once they have published, and a deferred ``publish`` returns ``None``.
 
 .. code-block:: python
    :caption: rooms/signals.py
@@ -37,7 +38,7 @@ Use ``refresh(zone=...)`` when a subscriber must load private or request-specifi
 
 A deferred publication runs as a robust ``on_commit`` callback.
 When the broker fails after the commit, Django logs the exception with the topic in the callback's repr and the committed write still answers normally.
-``publish(..., on_commit=False)`` and ``apublish`` call the broker at once and raise its error to the caller.
+``publish(..., on_commit=False)`` and ``apublish`` call the broker at once, return the ``Message``, and raise the broker error to the caller.
 
 Subscribe from an authorized page
 ---------------------------------
@@ -89,13 +90,13 @@ A revocation is therefore noticed within about two heartbeat intervals, plus the
 Over SSE a topic denial by ``authorize`` ends the stream with a terminal ``next-end`` frame whose data is ``{"code":"auth"}``, and the browser stops reconnecting that stream.
 A revoked session ends the SSE stream without that frame, so the ``EventSource`` reconnects with the current cookie and the page guard decides, a ``403`` stopping it for good.
 Over WebSocket a denial sends ``{"type":"error","code":"auth"}`` and closes the socket with ``4401`` for a session problem or ``4403`` for a topic denial.
-The client then falls back to SSE, where the same rules apply.
+The client then falls back to SSE, where the same rules apply, after one fresh negotiation when the close was ``4401``.
 
 When the process mounts a ``WebSocketApp``, the client can negotiate a WebSocket through this same guarded stream URL.
 The signed ticket binds the current session to the topics, transform, and importable ``authorize`` callback chosen by the page.
 The client sends the ticket in its first WebSocket frame and never in the URL.
 The socket checks the request Origin before it accepts, and it rechecks the session and topic access before joining the broker and during the connection.
-WebSocket works best with a session engine that stores sessions on the server, and ``next.W142`` flags the signed-cookie engine, see `Known limitations`_.
+WebSocket works best with a session engine that stores sessions on the server, and ``next.W142`` flags the signed-cookie engine under the default ticket binding, see `Known limitations`_.
 The socket loads its session from the cookie at the handshake and on every recheck, so a session cache that evicts live entries closes sockets with ``4401``.
 Size the session cache for the open connections, or use the ``db`` or ``cached_db`` engine.
 
@@ -134,6 +135,7 @@ Delivery is at most once and best-effort.
 Bounded subscriber queues drop their oldest message when full, and a reconnect recovers only what the replay log still holds, see `Replay after a reconnect`_.
 The in-memory broker is process-local.
 Use ``RedisBroker`` for multiple workers or hosts, so they share publication and sequence state.
+An event that must not be lost goes through an outbox table, see :doc:`/content/howto/deliver-events-durably`.
 
 The client keeps an ``(epoch, seq)`` cursor per topic.
 On the first ``hello`` with a nonzero sequence, the client revalidates the page's zones because the HTML render may predate the subscription.
@@ -194,7 +196,7 @@ Known limitations
 The browser client closes its streams while the tab is hidden and opens them again on return.
 Over SSE that is a new ``EventSource``, which sends no ``Last-Event-ID``, so a stream resumed after a visibility change resynchronises instead of replaying.
 
-The signed-cookie session engine works with WebSocket only in part, and ``next.W142`` reports it.
+The signed-cookie session engine works with the default ticket binding only in part, and ``next.W142`` reports it.
 
 - A first visit without a session cookie cannot negotiate a ticket, since the engine has no session key before it saves one, and neither can a forged or expired signed cookie.
   The negotiation answers ``503`` with ``session_unavailable`` and the client falls back to SSE after its retries.
@@ -202,7 +204,13 @@ The signed-cookie session engine works with WebSocket only in part, and ``next.W
   The socket closes with ``4401`` and the client continues over SSE.
 - A signed cookie stays valid after logout until ``SESSION_COOKIE_AGE`` passes, so logging out leaves an open socket running, and only a password change or an inactive user revokes its session.
 
-The ``db``, ``cache``, ``cached_db``, and ``file`` engines avoid all three.
+Setting ``NEXT_FRAMEWORK['REALTIME']['TICKET_BINDING']`` to ``"next.realtime.SignedCookieBinding"`` removes the first two limits.
+It binds a signed-in user by primary key and auth hash and an anonymous visitor by a signed cookie, so neither changes when the engine re-signs the session.
+The third stays, because the signed cookie holds nothing on the server to delete.
+The binding needs no server-side session engine, yet next to one it never rechecks the stored session, so ``next.W147`` suggests ``SessionBinding`` there.
+A project with another source of identity writes a binding of its own, see :doc:`/content/howto/bind-tickets-to-your-own-identity`.
+
+The ``db``, ``cache``, ``cached_db``, and ``file`` engines avoid all three with the default binding.
 
 Presence
 --------
@@ -382,8 +390,10 @@ A pattern may not start with ``next:`` and a name is 1 to 100 topic characters.
      - The decoded JSON the page sent, untrusted like any request input.
    * - ``user``
      - The user of the session behind the connection, possibly anonymous.
-   * - ``session_key``
-     - The session key the socket loaded at the handshake.
+   * - ``subject``
+     - An opaque id of the identity behind the connection, stable across its reconnects and empty when the credential proves none.
+       It is a keyed digest and never the session key, because a handler never sees the credential of the socket.
+       It changes when ``SECRET_KEY`` rotates, and under ``SessionBinding`` it follows the session rather than the user, so a new login yields a new one.
    * - ``connection``
      - An identifier of the sending connection.
    * - ``params``

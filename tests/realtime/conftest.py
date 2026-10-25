@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 import fakeredis
 import fakeredis.aioredis
@@ -11,7 +11,7 @@ from next.realtime.backends import MemoryBroker
 from next.realtime.manager import broker_manager
 from next.realtime.redis import RedisBroker
 from next.testing.realtime import SocketTicket
-from tests.support.realtime import issue_session_ticket
+from tests.support.realtime import LiveStreams, issue_session_ticket
 
 
 @pytest.fixture(autouse=True)
@@ -19,6 +19,12 @@ def _reset_broker_manager():
     broker_manager.reset()
     yield
     broker_manager.reset()
+
+
+@pytest.fixture()
+def streams() -> Iterator[LiveStreams]:
+    with LiveStreams() as recording:
+        yield recording
 
 
 @pytest.fixture()

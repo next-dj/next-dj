@@ -81,30 +81,53 @@ Each subscriber then loads current HTML through its own guarded HTTP request and
 Run the server
 --------------
 
-``runserver`` is a WSGI server, so it never mounts the socket and clients stay on SSE.
-Run an ASGI server that speaks WebSocket instead.
-``uvicorn`` needs a WebSocket implementation, which the ``standard`` extra installs.
+``manage.py runserver`` of next.dj serves the project over ASGI on uvicorn and mounts the socket, so development needs no separate server command.
+It needs uvicorn with a WebSocket implementation, which the ``standard`` extra installs.
 
 .. code-block:: bash
    :caption: shell
 
    uv add "uvicorn[standard]"
-   uv run uvicorn config.asgi:application --reload
+   uv run python manage.py runserver
 
-``--reload`` restarts the server on code changes, which suits development.
+Django runs the command of the application listed first in ``INSTALLED_APPS``, so ``next`` has to come before ``django.contrib.staticfiles``.
+The command serves the application that ``ASGI_APPLICATION`` names, and falls back to ``next.realtime.application`` over Django's ASGI handler when the setting is absent.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   INSTALLED_APPS = [
+       "django.contrib.auth",
+       "django.contrib.contenttypes",
+       "django.contrib.sessions",
+       "next",
+       "django.contrib.staticfiles",
+   ]
+
+   ASGI_APPLICATION = "config.asgi.application"
+
+The command restarts on code changes through Django's own autoreloader and serves static files under ``DEBUG``.
+With ``staticfiles`` listed first, or without uvicorn, it is the WSGI ``runserver`` and clients stay on SSE.
+The command caps inbound frames at 64 KiB and turns off the protocol ping of uvicorn, because the socket pings an idle subscription itself.
+See :doc:`/content/ref/management` for the options.
+
 Production runs several uvicorn workers, either through uvicorn itself or under gunicorn with the uvicorn worker class.
 
 .. code-block:: bash
    :caption: shell
 
-   uv run uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 4
+   uv run uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 4 --ws-max-size 65536
    uv run gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --workers 4
 
+The socket closes a larger inbound frame with ``1009`` anyway, and ``--ws-max-size 65536`` keeps uvicorn from buffering up to 16 MiB first.
+Uvicorn pings every 20 seconds by default, which duplicates the heartbeat of the socket, so ``--ws-ping-interval`` is a deployment decision.
 Every worker imports ``config/asgi.py`` itself, so each one mounts the socket and offers ``ws``.
 The default ``MemoryBroker`` reaches subscribers in one process only, so use ``RedisBroker`` once there is more than one worker, see :doc:`fan-out-across-processes-with-redis`.
 
 The socket sends a ``ping`` frame every ``NEXT_FRAMEWORK["REALTIME"]["HEARTBEAT"]`` seconds, 25 by default, so keep that value below the idle timeout of every proxy in front of it.
 The browser renews a ticket when it reconnects.
+Tests drive the socket and the SSE stream with the helpers of :doc:`/content/ref/testing`.
+A project on the signed-cookie session engine or another identity source binds tickets through :doc:`bind-tickets-to-your-own-identity`.
 See :doc:`/content/deployment/wsgi-asgi` for proxy settings.
 
 Change the Origin or authentication
@@ -126,7 +149,7 @@ The entries follow the ``CSRF_TRUSTED_ORIGINS`` format, and an empty or malforme
 
 A subclass overrides ``allow_origin`` for a rule of its own and ``authenticate`` to take the identity from somewhere other than the session cookie, such as a header set by a trusted proxy.
 ``authenticate`` returns a ``Handshake`` or ``None`` for a refusal, which closes the socket with ``4401``.
-The ``session_key`` of the handshake has to be the key the ticket was issued under, because the ticket is bound to it and the session recheck reads that key from ``SESSION_ENGINE``.
+The ``credential`` of the handshake has to be the one the ticket was issued under, because the ticket is bound to it and every recheck hands it back to the ticket binding.
 
 .. code-block:: python
    :caption: realtime/socket.py
@@ -186,7 +209,7 @@ Serve the protocol from a Python gateway
 ----------------------------------------
 
 A gateway built on another WebSocket library reuses the connection logic through ``TopicSocket``.
-It supplies a ``SocketPort``, two coroutines that write one text frame and close with a code, and a ``Handshake`` for the session it accepted.
+It supplies a ``SocketPort``, two coroutines that write one text frame and close with a code, and a ``Handshake`` for the identity it accepted.
 The sketch below uses the ``websockets`` library.
 
 .. code-block:: python
@@ -195,7 +218,6 @@ The sketch below uses the ``websockets`` library.
    import asyncio
 
    import django
-   from django.conf import settings
    from django.http import parse_cookie
    from websockets.asyncio.server import ServerConnection, serve
    from websockets.exceptions import ConnectionClosed
@@ -226,8 +248,7 @@ The sketch below uses the ``websockets`` library.
 
    async def handler(connection: ServerConnection) -> None:
        cookies = parse_cookie(connection.request.headers.get("Cookie", ""))
-       key = cookies.get(settings.SESSION_COOKIE_NAME, "")
-       handshake = await Handshake.from_session(key) if key else None
+       handshake = await Handshake.from_cookies(cookies)
        if handshake is None:
            await connection.send(frames.error("auth"))
            await connection.close(frames.Close.SESSION)
@@ -241,10 +262,12 @@ The sketch below uses the ``websockets`` library.
 The gateway checks the Origin itself, here through the ``origins`` argument of ``serve``.
 It runs in a process of its own, so list ``"ws"`` in ``REALTIME['TRANSPORTS']`` in the project that renders the pages, and share ``SECRET_KEY``, the session store, and the broker with the gateway.
 ``send`` has to raise ``OSError`` once the peer is gone, and ``close`` has to tolerate a peer that already left.
-``Handshake.from_session`` loads the session and its user on the shared thread pool without writing to the store, and returns ``None`` once the session is gone.
-``TopicSocket`` verifies the ticket from the ``sub`` frame against the handshake's ``session_key`` itself, so the gateway never handles tickets.
-A gateway that takes the identity from elsewhere builds ``Handshake(session_key, user, expires_at)`` directly, with the key the ticket was issued under and ``expires_at`` on the ``time.monotonic()`` clock or ``None``.
-At ``expires_at`` the socket rechecks the session and stays open when HTTP requests have renewed it.
+``Handshake.from_cookies`` asks the configured ticket binding for the credential of the cookies and loads its user on the shared thread pool without writing to the store.
+It returns ``None`` for no cookies or once the credential is gone.
+``TopicSocket`` verifies the ticket from the ``sub`` frame against the handshake's ``credential`` itself, so the gateway never handles tickets.
+A gateway that takes the identity from elsewhere builds ``Handshake(credential, user, expires_at)`` directly, with the credential the ticket was issued under and ``expires_at`` on the ``time.monotonic()`` clock or ``None``.
+The handshake derives its opaque ``subject`` from the credential, and that digest is all a handler sees.
+At ``expires_at`` the socket rechecks the credential and stays open when HTTP requests have renewed it.
 
 Bring your own WebSocket server
 -------------------------------
@@ -320,7 +343,7 @@ A deployment with several workers or hosts selects ``RedisBroker``, which shares
 See :doc:`fan-out-across-processes-with-redis` for the setup.
 
 Delivery is best-effort, and clients recover gaps by requesting their guarded zones over HTTP.
-Use a durable outbox if the application needs guaranteed delivery after a database commit.
+Use a durable outbox if the application needs guaranteed delivery after a database commit, see :doc:`deliver-events-durably`.
 
 The same socket carries events from the page to the server and form submissions, see :ref:`topics-realtime-upstream` and :ref:`topics-realtime-tunnel`.
 

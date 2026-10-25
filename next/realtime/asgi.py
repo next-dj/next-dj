@@ -24,12 +24,11 @@ from asgiref.typing import (
 from django.conf import settings
 from django.core.exceptions import DisallowedHost
 from django.core.handlers.asgi import ASGIHandler, get_script_prefix
-from django.http import HttpRequest
+from django.http import HttpRequest, parse_cookie
 from django.http.request import split_domain_port
 from django.utils.http import is_same_domain
 
 from . import frames
-from .access import cookie_session_key
 from .checks import tunnel_origin_messages, websocket_deployment_messages
 from .frames import Close
 from .limits import SocketLimits
@@ -257,11 +256,8 @@ class WebSocketApp:
         return origin in _trusted_origins()
 
     async def authenticate(self, scope: WebSocketScope) -> Handshake | None:
-        """Load the Django session named by the cookie, or None without one."""
-        session_key = cookie_session_key(cookie_header(scope))
-        if session_key is None:
-            return None
-        return await Handshake.from_session(session_key)
+        """Load what the ticket binding reads from the cookies, or None without it."""
+        return await Handshake.from_cookies(parse_cookie(cookie_header(scope)))
 
     def bind(self, http_app: ASGI3Application) -> None:
         """Adopt the app `application()` serves, unless one was given explicitly."""

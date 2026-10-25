@@ -104,7 +104,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    ``next.conf`` for settings loading and the ``extend_default_backend`` helper.
 
 :doc:`server`
-   ``next.server`` for the autoreload watcher.
+   ``next.server`` for the autoreload watcher and the ASGI development server.
 
 :doc:`signals`
    ``next.signals`` aggregator that re-exports every framework signal.

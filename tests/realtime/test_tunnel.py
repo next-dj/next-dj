@@ -705,7 +705,7 @@ async def _open(
     ticket: SocketTicket, tunnel: object
 ) -> tuple[MemoryPort, asyncio.Task[None]]:
     port = MemoryPort()
-    handshake = Handshake(ticket.session_key, AnonymousUser(), None)
+    handshake = Handshake(ticket.credential, AnonymousUser(), None)
     socket = TopicSocket(
         port, handshake, broker=MemoryBroker(), heartbeat=60, tunnel=tunnel
     )
@@ -837,7 +837,7 @@ def test_a_slot_is_held_until_its_reply_is_sent() -> None:
         tunnel = _Instant()
         socket = TopicSocket(
             port,
-            Handshake(ticket.session_key, AnonymousUser(), None),
+            Handshake(ticket.credential, AnonymousUser(), None),
             broker=MemoryBroker(),
             heartbeat=60,
             tunnel=tunnel,
@@ -867,7 +867,7 @@ def test_the_hello_carries_the_limits_of_a_custom_tunnel() -> None:
         port = MemoryPort()
         socket = TopicSocket(
             port,
-            Handshake(ticket.session_key, AnonymousUser(), None),
+            Handshake(ticket.credential, AnonymousUser(), None),
             broker=MemoryBroker(),
             heartbeat=60,
             tunnel=_Instant(),

@@ -35,6 +35,7 @@ VALID: Final = "valid"
 ERRORS: Final = "errors"
 
 ZONE: Final = "zone"
+EVENT_NAME: Final = "name"
 FORM_SELECTOR: Final = "form"
 
 FORM_ZONE_ATTR: Final = "data-next-target"
@@ -48,6 +49,7 @@ __all__ = [
     "CSRF",
     "EPOCH",
     "ERRORS",
+    "EVENT_NAME",
     "FORM",
     "FORM_KEY_ATTR",
     "FORM_SELECTOR",

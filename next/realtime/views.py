@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 from django.contrib.auth.decorators import login_not_required
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, JsonResponse, parse_cookie
 from django.utils.cache import add_never_cache_headers
 from django.utils.crypto import constant_time_compare
 from django.utils.decorators import method_decorator
@@ -14,7 +14,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from next.conf.scopes import scope_value
 
-from .access import cookie_session_key, live_session
+from .binding import ticket_binding
 from .errors import InvalidTicketError
 from .tickets import TicketClaims, resolve_claims, resolve_identify, verify_ticket
 
@@ -104,9 +104,9 @@ class TicketIntrospectionView(View):
         if fields is None:
             return _answer(_INVALID, 400)
         ticket, cookie = fields
-        session_key = cookie_session_key(cookie) or ""
+        credential = ticket_binding().credential(parse_cookie(cookie)) or ""
         try:
-            claims, user, expires_in = _vouch(ticket, session_key)
+            claims, user, expires_in = _vouch(ticket, credential)
         except InvalidTicketError as exc:
             return _refuse(str(exc))
         if claims.transform_ref is None:
@@ -117,12 +117,12 @@ class TicketIntrospectionView(View):
         return _answer(body, 200)
 
 
-def _vouch(ticket: str, session_key: str) -> tuple[TicketClaims, object, int | None]:
-    """Verify a ticket against its live session and the authorizer it names."""
-    claims = verify_ticket(ticket, session_key)
+def _vouch(ticket: str, credential: str) -> tuple[TicketClaims, object, int | None]:
+    """Verify a ticket against its live binding and the authorizer it names."""
+    claims = verify_ticket(ticket, credential)
     _transform, authorizer = resolve_claims(claims)
     resolve_identify(claims)
-    live = live_session(session_key)
+    live = ticket_binding().live(credential)
     if live is None:
         msg = "The ticket's session is gone."
         raise InvalidTicketError(msg)

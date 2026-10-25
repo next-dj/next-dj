@@ -174,8 +174,10 @@ Over WebSocket the ticket carries the dotted path of ``identify`` and the socket
 WebSocket negotiation issues a short-lived session-bound ticket through that guarded page.
 The ticket is sent in the first socket frame, never in the URL, and carries the stream's topics, transform, and authorizer reference.
 If the stream cannot be represented by stable importable callbacks, negotiation falls back to SSE.
-The socket needs a server-side session engine, because a signed-cookie session outlives logout and re-signs on every save, and ``next.W142`` reports it.
-The socket loads its session from the cookie and reads it without writing, so rotating ``SECRET_KEY`` with ``SECRET_KEY_FALLBACKS`` does not log an open socket out.
+The default binding needs a server-side session engine, because a signed-cookie session outlives logout and re-signs on every save, and ``next.W142`` reports it.
+``SignedCookieBinding`` serves the signed-cookie engine, keeps an open socket running after logout, and ``next.W147`` reports it next to a server-side engine.
+A handler sees an opaque ``subject`` digest of the identity and never the session key or another credential.
+Under the default binding the socket loads its session from the cookie and reads it without writing, so rotating ``SECRET_KEY`` with ``SECRET_KEY_FALLBACKS`` does not log an open socket out.
 The WebSocket Origin check follows Django's CSRF rule, so the Origin has to name the validated ``Host`` or match ``CSRF_TRUSTED_ORIGINS``, and a connection with no Origin is refused, see :doc:`/content/deployment/wsgi-asgi`.
 
 The ticket introspection endpoint for gateways outside Python is off until a URLconf includes it.

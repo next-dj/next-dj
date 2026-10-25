@@ -24,15 +24,10 @@ from next.realtime import (
 )
 from next.realtime.manager import broker_manager
 from next.realtime.roster import EVENT
+from next.testing import SseEvent, SseReader
 from tests.realtime.attendee import CONNECTION, TOPIC as ROOM, attend_until_killed
 from tests.realtime.publisher import TOPIC, WORKER_BATCH, publish_batch
-from tests.support.realtime import (
-    ResumingClient,
-    anext_frame,
-    manual_schedule,
-    next_frame,
-    silent_schedule,
-)
+from tests.support.realtime import ResumingClient, manual_schedule, silent_schedule
 
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
@@ -265,24 +260,20 @@ def test_redis_topic_keys_share_one_hash_slot(broker, admin, prefix) -> None:
 
 def _resumed_frames(
     stream: TopicStream, broker: RedisBroker, count: int, *, mode: str
-) -> list[bytes]:
-    """Read replay and hello frames, publish one live message, then read it."""
+) -> list[SseEvent]:
+    """Read replay and hello events, publish one live message, then read it."""
     if mode == "sync":
-        iterator = stream.streaming_content
-        next(iterator)
-        frames = [next_frame(iterator) for _ in range(count)]
-        broker.publish(TOPIC, _envelope())
-        frames.append(next_frame(iterator))
-        stream._iterator.close()
+        with SseReader(stream) as events:
+            frames = [next(events) for _ in range(count)]
+            broker.publish(TOPIC, _envelope())
+            frames.append(next(events))
         return frames
 
-    async def collect() -> list[bytes]:
-        iterator = stream.streaming_content.__aiter__()
-        await anext(iterator)
-        frames = [await anext_frame(iterator) for _ in range(count)]
-        await broker.apublish(TOPIC, _envelope())
-        frames.append(await anext_frame(iterator))
-        await stream._iterator.aclose()
+    async def collect() -> list[SseEvent]:
+        async with SseReader(stream) as events:
+            frames = [await anext(events) for _ in range(count)]
+            await broker.apublish(TOPIC, _envelope())
+            frames.append(await anext(events))
         return frames
 
     return asyncio.run(collect())

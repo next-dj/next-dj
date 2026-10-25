@@ -1002,6 +1002,9 @@ Errors
      - ``NEXT_FRAMEWORK['REALTIME']['UPSTREAM']['TIMEOUT']`` is not a positive number of seconds up to ``600``.
        It bounds how long one ``up`` event waits for its handler.
      - ``next.realtime.checks``
+   * - ``next.E211``
+     - ``NEXT_FRAMEWORK['REALTIME']['TICKET_BINDING']`` is not the dotted path of an importable concrete ``TicketBinding`` subclass.
+     - ``next.realtime.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -1378,14 +1381,15 @@ Warnings
        Declaring ``page.public()`` in the intercept ``page.py`` clears it, or ``page.login_required()`` keeps the login on purpose.
      - ``next.pages.checks.intercepts``
    * - ``next.W141``
-     - WebSocket ticket issuance is configured without ``SessionMiddleware``.
+     - The WebSocket transport is enabled while ``TICKET_BINDING`` is ``SessionBinding`` or a subclass of it and ``MIDDLEWARE`` lists no ``SessionMiddleware``, so every negotiation answers ``503``.
+       ``SignedCookieBinding`` binds a visitor without the middleware, and a custom binding answers for its own requirements, so neither raises it.
        A ``WebSocketApp`` logs the same warning when it is created.
      - ``next.realtime.checks``
    * - ``next.W142``
-     - The WebSocket transport is enabled while ``SESSION_ENGINE`` is the signed-cookie engine.
-       A ticket is bound to the session key, which that engine re-signs on every session save, so the handshake cookie stops matching the ticket and the socket closes with ``4401``.
-       A signed cookie also outlives logout until ``SESSION_COOKIE_AGE``, and only a password change or an inactive user revokes it.
-       Switching to the ``db``, ``cache``, ``cached_db`` or ``file`` engine clears it.
+     - The WebSocket transport is enabled while ``SESSION_ENGINE`` is the signed-cookie engine and ``TICKET_BINDING`` is ``SessionBinding`` or a subclass of it.
+       That engine has no session key on a first visit and re-signs the key on every session save, so negotiation answers ``503`` or the handshake cookie stops matching the ticket and the socket closes with ``4401``.
+       Setting ``TICKET_BINDING`` to ``next.realtime.SignedCookieBinding``, or switching to the ``db``, ``cache``, ``cached_db`` or ``file`` engine, clears it.
+       A signed cookie still outlives logout until ``SESSION_COOKIE_AGE``, and only a password change or an inactive user revokes it.
        A ``WebSocketApp`` logs the same warning when it is created.
      - ``next.realtime.checks``
    * - ``next.W143``
@@ -1408,6 +1412,12 @@ Warnings
        ``WebSocketApp`` logs it when it is created, since ``manage.py check`` never sees the list.
        Adding the origin to ``CSRF_TRUSTED_ORIGINS``, or setting ``REALTIME['TUNNEL']`` to ``False``, clears it.
      - ``next.realtime.asgi``
+   * - ``next.W147``
+     - ``TICKET_BINDING`` is ``SignedCookieBinding`` or a subclass of it while ``SESSION_ENGINE`` is a server-side engine.
+       The binding reloads a signed-in user by pk and auth hash, so an open socket outlives logout and the expiry of the stored session.
+       Setting ``TICKET_BINDING`` to ``next.realtime.SessionBinding``, which rechecks the stored session, clears it.
+       A ``WebSocketApp`` logs the same warning when it is created.
+     - ``next.realtime.checks``
 
 Codes are assigned per check and are not contiguous.
 

@@ -17,8 +17,9 @@ Every signal below is a Django ``Signal``.
 The ``sender`` column lists the value passed to ``Signal.send``.
 Receivers connected with a matching ``sender`` only fire for that sender.
 
-Every signal but ``settings_reloaded`` is sent with ``Signal.send``, or ``Signal.asend`` for ``upstream_received``, so an exception from a receiver leaves the send and reaches the render, the dispatch, or the startup step that was under way, and the receivers connected behind it never run.
-``settings_reloaded`` alone is sent with ``Signal.send_robust``, which runs the whole chain and re-raises the first error afterwards.
+Most signals are sent with ``Signal.send``, or ``Signal.asend`` for ``upstream_received`` and for ``message_published`` from ``apublish``, so an exception from a receiver leaves the send and reaches the render, the dispatch, or the startup step that was under way, and the receivers connected behind it never run.
+``stream_subscribed`` and ``stream_unsubscribed`` are sent with ``Signal.send_robust``, or ``Signal.asend_robust`` on an async stream and a WebSocket, which log a raising receiver and keep the stream open, as `Stream lifecycle`_ describes.
+``settings_reloaded`` is sent with ``Signal.send_robust`` too, and runs the whole chain before it re-raises the first error.
 A receiver body therefore guards itself, see :ref:`topics-signals` for the pattern.
 
 Most of the catalog is built with ``use_caching=True``, which makes Django key the receiver lookup on a weak reference to the sender.
@@ -97,6 +98,20 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``upstream``
      - Before the handler of an ``up`` frame runs, once the topic grant and the access recheck passed.
        ``upstream`` is the ``Upstream`` the handler gets, and the signal goes out with ``asend``, so a raising receiver turns the ``ack`` into ``internal``.
+   * - ``stream_subscribed``
+     - ``type(connection)``, so ``TopicStream`` or ``TopicSocket``
+     - ``transport``, ``topics``, ``connection``, ``request``, ``subject``, ``user``
+     - Right after a stream enters its broker subscription.
+       ``transport`` is ``"sse"`` or ``"ws"``, ``topics`` the tuple of topics the subscription joined, and ``connection`` the ``TopicStream`` or ``TopicSocket`` itself.
+       An SSE stream carries its ``HttpRequest``, the ``user`` of that request, which is ``None`` without ``AuthenticationMiddleware``, and a ``subject`` of ``None``.
+       A WebSocket carries the opaque ``subject`` and the ``user`` of its handshake and a ``request`` of ``None``.
+       No argument carries the credential, though ``connection`` is the ``TopicSocket``, so server code reaches ``connection.handshake.credential`` only on purpose.
+       The request must not be retained past the receiver call.
+   * - ``stream_unsubscribed``
+     - ``type(connection)``, so ``TopicStream`` or ``TopicSocket``
+     - ``transport``, ``topics``, ``connection``, ``duration``, ``reason``
+     - When a stream that opened while a receiver listened to either lifecycle signal leaves its topics, once per stream.
+       ``duration`` is the seconds the subscription stayed open on the monotonic clock and ``reason`` an ``UnsubscribeReason``.
    * - ``components_registered``
      - ``ComponentRegistry``
      - ``infos``
@@ -251,6 +266,79 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - After a zone body renders for a partial request.
        ``duration_ms`` times the zone render.
 
+Stream lifecycle
+----------------
+
+A stream announces itself once it holds a broker subscription and again when it lets go, over SSE and over a WebSocket alike.
+The pair brackets the life of one ``TopicStream`` response or one ``TopicSocket``, so a receiver counts live streams, times their length, or tells how they ended.
+A stream sends ``stream_unsubscribed`` at most once, and only if it opened while a receiver listened to ``stream_subscribed`` or ``stream_unsubscribed``.
+A receiver of ``stream_unsubscribed`` alone therefore hears every stream that opened after it connected.
+A receiver connected while a stream is open never sees that stream close, and a counter it keeps never drops below zero when it listens to both signals from the start.
+A stream refused before it subscribes, by a failed ticket or a denied topic, sends neither signal.
+Nothing is sent or timed while no receiver listens.
+
+``reason`` is a member of ``UnsubscribeReason``, a ``StrEnum`` that compares equal to its string.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 16 42 42
+
+   * - Reason
+     - SSE
+     - WebSocket
+   * - ``client``
+     - The browser disconnected.
+       Django cancels the response on ``http.disconnect``, and a cancellation reads as the client leaving.
+     - The peer closed, stopped reading, or a send failed.
+   * - ``cancelled``
+     - Never used.
+     - The serving task was cancelled.
+   * - ``revoked``
+     - The session or the topic grant failed a recheck.
+     - The socket closed with ``4401`` or ``4403``.
+   * - ``error``
+     - The broker connection failed or a stage raised.
+     - The broker connection or the transport failed, or a stage raised.
+   * - ``server``
+     - The broker subscription ended on its own.
+     - The broker subscription ended, or the socket closed for a protocol violation, a rate limit, or an oversized frame.
+
+The receiver below keeps the number of live streams per transport in each process.
+Connect it from ``AppConfig.ready`` by importing the module there.
+
+.. code-block:: python
+   :caption: observability/streams.py
+
+   import logging
+   import threading
+   from collections import Counter
+
+   from django.dispatch import receiver
+
+   from next.realtime.signals import UnsubscribeReason
+   from next.signals import stream_subscribed, stream_unsubscribed
+
+   logger = logging.getLogger(__name__)
+   live: Counter[str] = Counter()
+   lock = threading.Lock()
+
+   @receiver(stream_subscribed)
+   def stream_opened(sender, transport, topics, **kwargs) -> None:
+       with lock:
+           live[transport] += 1
+
+   @receiver(stream_unsubscribed)
+   def stream_closed(sender, transport, topics, duration, reason, **kwargs) -> None:
+       with lock:
+           live[transport] -= 1
+       if reason is UnsubscribeReason.ERROR:
+           logger.warning("stream on %s failed after %.1fs", topics, duration)
+
+A receiver of a WebSocket or of an async stream runs on the event loop when it is async, and a synchronous one runs on a worker thread, so a receiver shared by both guards its state with a lock as above.
+A receiver that raises an ``Exception`` does not end the stream, because both signals go out with ``send_robust``.
+The error is logged at ``ERROR`` on the ``next.realtime.signals`` logger with the transport and the topics, and Django logs it on ``django.dispatch`` as well.
+A ``CancelledError`` from a receiver is not swallowed.
+
 Subpackage signals
 ------------------
 
@@ -284,6 +372,12 @@ Static
 ~~~~~~
 
 .. automodule:: next.static.signals
+   :members:
+
+Realtime
+~~~~~~~~
+
+.. automodule:: next.realtime.signals
    :members:
 
 Partial rendering

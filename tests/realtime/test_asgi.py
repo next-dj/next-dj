@@ -94,7 +94,7 @@ def test_creating_the_app_logs_deployment_warnings(
     messages = [record.getMessage() for record in caplog.records]
     assert messages[0].startswith("(next.W141) WebSocket tickets require")
     assert messages[1].startswith("(next.W142) WebSocket tickets are bound to the")
-    assert "Use the db, cache, cached_db, or file session engine." in messages[1]
+    assert "next.realtime.SignedCookieBinding" in messages[1]
 
 
 @pytest.mark.parametrize(
@@ -267,7 +267,7 @@ def test_authenticate_loads_the_session_named_by_the_cookie(
     scope = _scope([(b"cookie", b"other=1"), ticket.cookie])
     handshake = asyncio.run(app.authenticate(scope))
     assert handshake is not None
-    assert handshake.session_key == ticket.session_key
+    assert handshake.credential == ticket.credential
     assert handshake.user.is_authenticated is False
     assert handshake.expires_at is not None
 

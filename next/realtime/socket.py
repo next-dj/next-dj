@@ -6,16 +6,23 @@ import secrets
 import time
 from collections.abc import AsyncIterable, AsyncIterator, Callable, Mapping
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar, NoReturn, Protocol, Self
 
 from next.partial.manager import partial_backend_manager
 
 from . import frames
-from .access import Access, AccessCheck, heartbeat_seconds, live_session, run_detached
+from .access import (
+    Access,
+    AccessCheck,
+    SocketAccessCheck,
+    heartbeat_seconds,
+    run_detached,
+)
 from .attendance import Attendance, aattend, aattending
 from .backends import BrokerBackend
+from .binding import opaque_subject, ticket_binding
 from .delivery import transformed
 from .errors import BrokerConnectionError, InvalidTicketError
 from .frames import (
@@ -35,6 +42,7 @@ from .manager import broker_manager
 from .messages import Message, Position
 from .replay import acatch_up
 from .roster import Presence, counted, snapshot_message
+from .signals import StreamLifecycle, UnsubscribeReason
 from .tickets import TicketClaims, resolve_claims, resolve_identify, verify_ticket
 from .tunnel import Tunnel
 
@@ -57,6 +65,11 @@ _REASONS = {
     Close.TOPIC_DENIED: "auth",
     Close.RATE_LIMITED: "limit",
 }
+_LEFT: dict[int | None, UnsubscribeReason] = {
+    None: UnsubscribeReason.CLIENT,
+    Close.SESSION: UnsubscribeReason.REVOKED,
+    Close.TOPIC_DENIED: UnsubscribeReason.REVOKED,
+}
 
 
 class SocketPort(Protocol):
@@ -74,27 +87,42 @@ class SocketPort(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class Handshake:
-    """The session a WebSocket was accepted for, the one its ticket was issued under.
+    """The credential a WebSocket was accepted for, the one its ticket was issued under.
 
-    `expires_at` is a forced session recheck on the `time.monotonic()` clock, or None.
+    `subject` is the opaque id handlers see, `credential` stays with the rechecks.
     """
 
-    session_key: str
+    credential: str = field(repr=False)
     user: object
     expires_at: float | None
+    subject: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Derive the opaque subject once, so no handler needs the credential."""
+        object.__setattr__(self, "subject", opaque_subject(self.credential))
 
     @classmethod
-    async def from_session(cls, session_key: str) -> Self | None:
-        """Load a stored session and its user on the shared pool, or None once gone.
+    async def from_cookies(cls, cookies: Mapping[str, str]) -> Self | None:
+        """Load the ticket binding's credential and live user, or None without one.
 
-        Nothing is written, so the load neither rotates the key nor extends the expiry.
+        Both reads take one trip to the shared pool, none without a cookie at all.
         """
-        live = await run_detached(live_session, session_key)
+        if not cookies:
+            return None
+        return await run_detached(cls._from_cookies, cookies)
+
+    @classmethod
+    def _from_cookies(cls, cookies: Mapping[str, str]) -> Self | None:
+        binding = ticket_binding()
+        credential = binding.credential(cookies)
+        if credential is None:
+            return None
+        live = binding.live(credential)
         if live is None:
             return None
         user, left = live
         expires_at = None if left is None else time.monotonic() + left
-        return cls(session_key, user, expires_at)
+        return cls(credential, user, expires_at)
 
 
 class _ClosedError(Exception):
@@ -180,13 +208,23 @@ class TopicSocket:
         self._requests = 0
         self._topics: frozenset[str] = frozenset()
         self._ready = asyncio.Event()
+        self._lifecycle = StreamLifecycle(self, "ws")
 
     async def serve(self, inbound: AsyncIterable[str | bytes]) -> None:
         """Run the connection until the client leaves or the protocol closes it.
 
         The presence a ticket asks for is left on every way out, a cancellation too.
         """
+        reason = UnsubscribeReason.CANCELLED
+        try:
+            reason = await self._run(inbound)
+        finally:
+            await self._lifecycle.aclose(reason)
+
+    async def _run(self, inbound: AsyncIterable[str | bytes]) -> UnsubscribeReason:
+        """Serve the connection and return why its subscription, if any, ended."""
         codes: list[int | None] = []
+        reasons: list[UnsubscribeReason] = []
         try:
             async with asyncio.TaskGroup() as group:
                 group.create_task(self._read(inbound, group))
@@ -197,18 +235,23 @@ class TopicSocket:
                 for error in closed.exceptions
                 if isinstance(error, _ClosedError)
             )
+            reasons.extend(_LEFT.get(code, UnsubscribeReason.SERVER) for code in codes)
         except* BrokerConnectionError:
             logger.info("Realtime WebSocket stream lost its broker subscription")
             codes.append(Close.INTERNAL)
+            reasons.append(UnsubscribeReason.ERROR)
         except* OSError:
             logger.warning("Realtime WebSocket broker connection failed", exc_info=True)
             codes.append(Close.INTERNAL)
+            reasons.append(UnsubscribeReason.ERROR)
         except* Exception:
             logger.exception("Realtime WebSocket stream failed")
             codes.append(Close.INTERNAL)
+            reasons.append(UnsubscribeReason.ERROR)
         code = codes[0] if codes else None
         if code is not None and None not in codes:
             await self._writer.close(code)
+        return reasons[0] if reasons else UnsubscribeReason.SERVER
 
     async def catch_up(
         self,
@@ -332,7 +375,7 @@ class TopicSocket:
             frame.name,
             frame.data,
             self.handshake.user,
-            self.handshake.session_key,
+            self.handshake.subject,
             self.connection_id,
         )
         try:
@@ -401,6 +444,9 @@ class TopicSocket:
         async with broker.asubscribe(
             claims.topics, timeout=self._heartbeat
         ) as subscription:
+            await self._lifecycle.aopen(
+                claims.topics, subject=self.handshake.subject, user=self.handshake.user
+            )
             positions = await broker.apositions(claims.topics)
             attendance = await self.attend(broker, claims)
             async with aattending(attendance, subscription) as stream:
@@ -422,6 +468,7 @@ class TopicSocket:
                         await self.tick()
                     else:
                         await self._writer.send(await self._frame_for(item))
+        await self._lifecycle.aclose(UnsubscribeReason.SERVER)
 
     def _hello_limits(self) -> dict[str, object]:
         """Return the frame limits hello tells the client, the tunnel only when on."""
@@ -470,7 +517,7 @@ class TopicSocket:
     async def _subscribe(self, frame: Subscribe) -> TicketClaims:
         """Verify the ticket for the handshake session and build its access check."""
         try:
-            claims = verify_ticket(frame.ticket, self.handshake.session_key)
+            claims = verify_ticket(frame.ticket, self.handshake.credential)
             transform, authorizer = resolve_claims(claims)
             self._identify = resolve_identify(claims)
         except InvalidTicketError:
@@ -489,10 +536,10 @@ class TopicSocket:
 
         An override may recheck more often, before every `up` event too.
         """
-        return AccessCheck(
+        return SocketAccessCheck(
             claims.topics,
             authorizer=authorizer,
-            session_key=self.handshake.session_key,
+            session_key=self.handshake.credential,
             user=self.handshake.user,
             interval=self._heartbeat,
             expires_at=self.handshake.expires_at,

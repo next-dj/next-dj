@@ -46,8 +46,13 @@ class BrokerConnectionError(ConnectionError):
     """Raised when a broker subscription can no longer guarantee delivery."""
 
 
+class ConsoleError(Exception):
+    """Raised when a terminal request to the broker is refused, with the reason."""
+
+
 __all__ = [
     "BrokerConnectionError",
+    "ConsoleError",
     "InvalidMemberError",
     "InvalidTicketError",
     "InvalidTopicError",

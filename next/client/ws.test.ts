@@ -20,6 +20,7 @@ function harness() {
     open(): void;
     message(body: unknown): void;
     close(code: number): void;
+    refuse(code: number, reason?: string): void;
     sent: string[];
     control: { close: ReturnType<typeof vi.fn> };
   }[] = [];
@@ -30,6 +31,10 @@ function harness() {
         open: () => onOpen((body) => item.sent.push(body)),
         message: onMessage,
         close: onClose,
+        refuse: (code: number, reason = "auth") => {
+          onMessage(JSON.stringify({ type: "error", code: reason }));
+          onClose(code);
+        },
         sent: [] as string[],
         control: { close: vi.fn() },
       };
@@ -216,12 +221,62 @@ describe("WebSocket stream transport", () => {
     await vi.advanceTimersByTimeAsync(151);
     await settle();
     expect(made.sockets).toHaveLength(2);
-    made.sockets[1]!.close(4401);
+    made.sockets[1]!.refuse(4403);
     expect(made.calls).toHaveLength(1);
+    expect(made.fetch).toHaveBeenCalledTimes(2);
     control.close();
   });
 
-  it("falls back when the grant points off origin or the socket reports auth", async () => {
+  it("renegotiates once on 4401 and then falls back on a repeated 4401", async () => {
+    const made = harness();
+    made.fetch.mockImplementation(async () => grant());
+    const control = createWebSocketTransport({
+      fallback: made.fallback,
+      fetch: made.fetch,
+      socket: made.socket,
+      origin: "https://example.test",
+    }).open("/stream/", made.sink);
+    await settle();
+    made.sockets[0]!.refuse(4401);
+    await settle();
+    expect(made.fetch).toHaveBeenCalledTimes(2);
+    expect(made.sockets).toHaveLength(2);
+    expect(made.sockets[0]!.control.close).toHaveBeenCalledOnce();
+    expect(made.calls).toHaveLength(0);
+    made.sockets[1]!.refuse(4401);
+    expect(made.calls).toHaveLength(1);
+    expect(made.fetch).toHaveBeenCalledTimes(2);
+    control.close();
+  });
+
+  it("allows one more renegotiation on 4401 after a hello", async () => {
+    const made = harness();
+    made.fetch.mockImplementation(async () => grant());
+    const control = createWebSocketTransport({
+      fallback: made.fallback,
+      fetch: made.fetch,
+      socket: made.socket,
+      origin: "https://example.test",
+    }).open("/stream/", made.sink);
+    await settle();
+    made.sockets[0]!.open();
+    made.sockets[0]!.message(JSON.stringify({ type: "hello", topics: {} }));
+    made.sockets[0]!.refuse(4401);
+    await settle();
+    expect(made.sockets).toHaveLength(2);
+    made.sockets[1]!.open();
+    made.sockets[1]!.message(JSON.stringify({ type: "hello", topics: {} }));
+    made.sockets[1]!.refuse(4401);
+    await settle();
+    expect(made.sockets).toHaveLength(3);
+    expect(made.calls).toHaveLength(0);
+    made.sockets[2]!.refuse(4401);
+    expect(made.calls).toHaveLength(1);
+    expect(made.fetch).toHaveBeenCalledTimes(3);
+    control.close();
+  });
+
+  it("falls back when the grant points off origin or the socket closes with 4403", async () => {
     const offOrigin = harness();
     offOrigin.fetch.mockResolvedValue(grant("https://attacker.test/ws/"));
     createWebSocketTransport({
@@ -243,10 +298,13 @@ describe("WebSocket stream transport", () => {
     }).open("/stream/", auth.sink);
     await settle();
     auth.sockets[0]!.message(JSON.stringify({ type: "error", code: "auth" }));
+    expect(auth.sockets[0]!.control.close).not.toHaveBeenCalled();
+    expect(auth.calls).toHaveLength(0);
+    auth.sockets[0]!.close(4403);
     expect(auth.sockets[0]!.control.close).toHaveBeenCalledOnce();
     expect(auth.calls).toHaveLength(1);
-    auth.sockets[0]!.message(JSON.stringify({ type: "error", code: "auth" }));
-    auth.sockets[0]!.close(1006);
+    expect(auth.fetch).toHaveBeenCalledOnce();
+    auth.sockets[0]!.refuse(1006);
     expect(auth.calls).toHaveLength(1);
   });
 
@@ -758,25 +816,65 @@ describe("WebSocket stream transport", () => {
     const second = flapping(denied);
     await settle();
     second.hello(0, 1);
-    denied.sockets[0]!.message(JSON.stringify({ type: "error", code: "auth" }));
+    denied.sockets[0]!.refuse(4403);
     await vi.advanceTimersByTimeAsync(60000);
     expect(denied.calls).toHaveLength(1);
-    expect(denied.sink.closed).not.toHaveBeenCalled();
+    expect(denied.sink.closed).toHaveBeenCalledOnce();
+    expect(denied.fetch).toHaveBeenCalledOnce();
     second.control.close();
   });
 
-  it("falls back on a top-level auth error frame", async () => {
+  it("reads an auth frame that no close follows as a 4401", async () => {
+    vi.useFakeTimers();
     const made = harness();
-    made.fetch.mockResolvedValue(grant());
-    createWebSocketTransport({
+    made.fetch.mockImplementation(async () => grant());
+    const control = createWebSocketTransport({
       fallback: made.fallback,
       fetch: made.fetch,
       socket: made.socket,
       origin: "https://example.test",
     }).open("/stream/", made.sink);
     await settle();
+    made.sockets[0]!.open();
+    made.sockets[0]!.message(
+      JSON.stringify({ type: "hello", topics: {}, heartbeat: 1 }),
+    );
     made.sockets[0]!.message(JSON.stringify({ type: "error", code: "auth" }));
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(made.sockets).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await settle();
+    expect(made.sockets[0]!.control.close).toHaveBeenCalledOnce();
+    expect(made.fetch).toHaveBeenCalledTimes(2);
+    expect(made.sockets).toHaveLength(2);
+    made.sockets[0]!.close(4401);
+    expect(made.calls).toHaveLength(0);
+    made.sockets[1]!.message(JSON.stringify({ type: "error", code: "auth" }));
+    await vi.advanceTimersByTimeAsync(5000);
     expect(made.calls).toHaveLength(1);
+    expect(made.fetch).toHaveBeenCalledTimes(2);
+    control.close();
+  });
+
+  it("retries over WebSocket after a protocol error and a 4400 close", async () => {
+    vi.useFakeTimers();
+    const made = harness();
+    made.fetch.mockImplementation(async () => grant());
+    const control = createWebSocketTransport({
+      fallback: made.fallback,
+      fetch: made.fetch,
+      socket: made.socket,
+      origin: "https://example.test",
+      random: () => 0,
+    }).open("/stream/", made.sink);
+    await settle();
+    made.sockets[0]!.refuse(4400, "protocol");
+    expect(made.sink.closed).toHaveBeenCalledWith("transient");
+    await vi.advanceTimersByTimeAsync(151);
+    await settle();
+    expect(made.fetch).toHaveBeenCalledTimes(2);
+    expect(made.calls).toHaveLength(0);
+    control.close();
   });
 });
 
@@ -901,7 +999,7 @@ describe("WebSocket upstream events", () => {
 
   it("drops the socket of a fallback, so events report false", async () => {
     const s = await subscribed();
-    s.socket.message(JSON.stringify({ type: "error", code: "auth" }));
+    s.socket.refuse(4403);
     await expect(s.transport.up("room", "typing", {})).resolves.toBe(false);
     s.control.close();
   });

@@ -28,11 +28,11 @@ from next.realtime.roster import (
     encode_member,
     presence_limits,
 )
+from next.testing import SseReader
 from tests.support.realtime import (
     FakeServerBroker,
     PlainBroker,
     manual_schedule,
-    next_frame,
     silent_schedule,
 )
 
@@ -216,9 +216,7 @@ def test_sync_stream_joins_before_hello_and_leaves_on_close(
     request = RequestFactory().get("/rooms/1/stream/")
     request.user = AnonymousUser()
     stream = TopicStream(request, "room:1", presence=_identify, heartbeat_seconds=5)
-    iterator = iter(stream.streaming_content)
-    next(iterator)
-    assert b"hello" in next_frame(iterator)
+    assert next(SseReader(stream)).event == "next-hello"
 
     assert memory.presence("room:1") == Presence(
         1, ({"name": "guest", "topic": "room:1"},)
@@ -393,9 +391,7 @@ def test_stream_attend_hook_keeps_its_own_attendance(
     request = RequestFactory().get("/rooms/1/stream/")
     request.user = AnonymousUser()
     stream = _LongStream(request, "room:1", presence=True, heartbeat_seconds=5)
-    iterator = iter(stream.streaming_content)
-    next(iterator)
-    assert b"hello" in next_frame(iterator)
+    assert next(SseReader(stream)).event == "next-hello"
 
     assert list(memory._rosters["room:1"].anonymous.values()) == [clock.now + 50]
     stream.close()

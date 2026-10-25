@@ -38,14 +38,14 @@ _NO_PARAMS: Final[Mapping[str, str]] = MappingProxyType({})
 class Upstream:
     """One client event on a granted topic, with the connection that sent it.
 
-    `params` holds what the placeholders of the handler's topic pattern matched.
+    `subject` is the opaque `Handshake.subject`, never the credential behind it.
     """
 
     topic: str
     name: str
     data: object
     user: object
-    session_key: str
+    subject: str
     connection: str
     params: Mapping[str, str] = _NO_PARAMS
 

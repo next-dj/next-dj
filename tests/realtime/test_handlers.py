@@ -37,7 +37,7 @@ def registry() -> Iterator[HandlerRegistry]:
 
 
 def _send(topic: str, name: str, data: object = None) -> bool:
-    return asyncio.run(dispatch(Upstream(topic, name, data, "alice", "s1", "c1")))
+    return asyncio.run(dispatch(Upstream(topic, name, data, "alice", "subject", "c1")))
 
 
 def _first(upstream: Upstream) -> None:
@@ -234,7 +234,7 @@ class TestDispatch:
                 name="typing",
                 data={"on": True},
                 user="alice",
-                session_key="s1",
+                subject="subject",
                 connection="c1",
                 params={"code": "abc"},
             )

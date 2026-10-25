@@ -21,15 +21,9 @@ from django.test import RequestFactory, override_settings
 from django.utils import timezone
 from django.utils.module_loading import import_string
 
-from next.realtime import access as access_module
-from next.realtime.access import (
-    Access,
-    AccessCheck,
-    heartbeat_seconds,
-    live_session,
-    run_detached,
-    session_user,
-)
+from next.realtime import access as access_module, binding as binding_module
+from next.realtime.access import Access, AccessCheck, heartbeat_seconds, run_detached
+from next.realtime.binding import session_user, stored_session
 
 
 _CACHE = "django.contrib.sessions.backends.cache"
@@ -444,7 +438,7 @@ def _files(directory: Path) -> dict[str, bytes]:
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("store_class", [SessionStore, CachedDbStore])
-def test_live_session_reads_the_deadline_of_the_stored_row(
+def test_stored_session_reads_the_deadline_of_the_stored_row(
     store_class: type[SessionStore],
 ) -> None:
     session = store_class()
@@ -458,7 +452,7 @@ def test_live_session_reads_the_deadline_of_the_stored_row(
         if store_class is CachedDbStore
         else "django.contrib.sessions.backends.db"
     ):
-        live = live_session(session.session_key)
+        live = stored_session(session.session_key)
     assert live is not None
     user, left = live
     assert isinstance(user, AnonymousUser)
@@ -467,7 +461,7 @@ def test_live_session_reads_the_deadline_of_the_stored_row(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_live_session_of_a_row_deleted_after_the_load_is_gone() -> None:
+def test_stored_session_of_a_row_deleted_after_the_load_is_gone() -> None:
     session = SessionStore()
     session.create()
     key = session.session_key
@@ -479,58 +473,58 @@ def test_live_session_of_a_row_deleted_after_the_load_is_gone() -> None:
         return data
 
     with patch.object(SessionStore, "load", load_then_delete):
-        assert live_session(key) is None
+        assert stored_session(key) is None
 
 
 @pytest.mark.django_db(transaction=True)
-def test_live_session_of_an_expired_row_is_gone_and_left_in_place() -> None:
+def test_stored_session_of_an_expired_row_is_gone_and_left_in_place() -> None:
     session = SessionStore()
     session.create()
     rows = Session.objects.filter(session_key=session.session_key)
     rows.update(expire_date=timezone.now() - timedelta(seconds=1))
     stored = _stored_rows()
-    assert live_session(session.session_key) is None
+    assert stored_session(session.session_key) is None
     assert _stored_rows() == stored
 
 
 @override_settings(SESSION_ENGINE=_CACHE)
-def test_live_session_of_a_cache_session_has_no_deadline() -> None:
+def test_stored_session_of_a_cache_session_has_no_deadline() -> None:
     session = CacheStore()
     session.create()
-    assert live_session(session.session_key) == (AnonymousUser(), None)
+    assert stored_session(session.session_key) == (AnonymousUser(), None)
 
 
 @override_settings(SESSION_ENGINE=_CACHE)
-def test_live_session_of_a_cache_session_reads_an_explicit_expiry_date() -> None:
+def test_stored_session_of_a_cache_session_reads_an_explicit_expiry_date() -> None:
     session = CacheStore()
     session.set_expiry(timezone.now() + timedelta(seconds=60))
     session.create()
-    live = live_session(session.session_key)
+    live = stored_session(session.session_key)
     assert live is not None
     assert live[1] is not None
     assert 0 < live[1] <= 60
 
 
 @override_settings(SESSION_ENGINE=_CACHE)
-def test_live_session_of_a_cache_session_past_its_expiry_date_is_gone() -> None:
+def test_stored_session_of_a_cache_session_past_its_expiry_date_is_gone() -> None:
     session = CacheStore()
     session.create()
     past = (timezone.now() - timedelta(seconds=1)).isoformat()
     cache.set(session.cache_key, {"_session_expiry": past}, 60)
-    assert live_session(session.session_key) is None
+    assert stored_session(session.session_key) is None
 
 
 @pytest.mark.django_db(transaction=True)
-def test_live_session_of_a_file_session_has_no_deadline(file_sessions: Path) -> None:
+def test_stored_session_of_a_file_session_has_no_deadline(file_sessions: Path) -> None:
     session = FileStore()
     session.create()
     files = _files(file_sessions)
-    assert live_session(session.session_key) == (AnonymousUser(), None)
+    assert stored_session(session.session_key) == (AnonymousUser(), None)
     assert _files(file_sessions) == files
 
 
 @pytest.mark.django_db(transaction=True)
-def test_live_session_of_an_expired_file_session_writes_no_new_file(
+def test_stored_session_of_an_expired_file_session_writes_no_new_file(
     file_sessions: Path,
 ) -> None:
     session = FileStore()
@@ -539,12 +533,12 @@ def test_live_session_of_an_expired_file_session_writes_no_new_file(
     old = path.stat().st_mtime - session.get_session_cookie_age() - 10
     os.utime(path, (old, old))
     files = _files(file_sessions)
-    assert live_session(session.session_key) is None
+    assert stored_session(session.session_key) is None
     assert _files(file_sessions) == files
 
 
 @pytest.mark.django_db(transaction=True)
-def test_live_session_of_a_corrupt_file_session_is_anonymous_and_untouched(
+def test_stored_session_of_a_corrupt_file_session_is_anonymous_and_untouched(
     file_sessions: Path,
 ) -> None:
     session = FileStore()
@@ -552,13 +546,13 @@ def test_live_session_of_a_corrupt_file_session_is_anonymous_and_untouched(
     (path,) = file_sessions.iterdir()
     path.write_text("not a signed session", encoding="ascii")
     files = _files(file_sessions)
-    assert live_session(session.session_key) == (AnonymousUser(), None)
+    assert stored_session(session.session_key) == (AnonymousUser(), None)
     assert _files(file_sessions) == files
 
 
 @pytest.mark.usefixtures("file_sessions")
-def test_live_session_of_a_key_outside_the_file_alphabet_is_gone() -> None:
-    assert live_session("../../outside-the-store") is None
+def test_stored_session_of_a_key_outside_the_file_alphabet_is_gone() -> None:
+    assert stored_session("../../outside-the-store") is None
 
 
 @pytest.mark.django_db(transaction=True)
@@ -568,7 +562,7 @@ def test_read_only_store_drops_every_write() -> None:
     session.create()
     key = session.session_key
     stored = _stored_rows()
-    store = access_module._read_only(SessionStore)(key)
+    store = binding_module._read_only(SessionStore)(key)
     store["note"] = "changed"
     store.save()
     store.delete()
@@ -584,7 +578,7 @@ class _Engines:
 
 def test_read_only_store_keeps_the_signing_salt_of_a_nested_engine() -> None:
     engine = _Engines.SessionStore
-    assert access_module._read_only(engine)().key_salt == engine().key_salt
+    assert binding_module._read_only(engine)().key_salt == engine().key_salt
 
 
 @pytest.fixture(params=_ENGINES)
@@ -608,11 +602,11 @@ def _engine_login(engine: str):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_live_session_loads_the_logged_in_user_of_every_engine(
+def test_stored_session_loads_the_logged_in_user_of_every_engine(
     session_engine: str,
 ) -> None:
     user, key = _engine_login(session_engine)
-    live = live_session(key)
+    live = stored_session(key)
     assert live is not None
     assert getattr(live[0], "pk", None) == user.pk
 
@@ -664,13 +658,13 @@ def test_access_check_revokes_a_changed_password_under_every_engine(
 
 @pytest.mark.django_db(transaction=True)
 @override_settings(SESSION_ENGINE=_SIGNED)
-def test_live_session_of_a_tampered_signed_cookie_is_gone() -> None:
+def test_stored_session_of_a_tampered_signed_cookie_is_gone() -> None:
     _user, key = _engine_login(_SIGNED)
-    assert live_session(f"{key}x") is None
+    assert stored_session(f"{key}x") is None
 
 
 @pytest.mark.django_db(transaction=True)
 @override_settings(SESSION_ENGINE=_SIGNED, SESSION_COOKIE_AGE=-1)
-def test_live_session_of_an_expired_signed_cookie_is_gone() -> None:
+def test_stored_session_of_an_expired_signed_cookie_is_gone() -> None:
     _user, key = _engine_login(_SIGNED)
-    assert live_session(key) is None
+    assert stored_session(key) is None

@@ -18,7 +18,7 @@ from django.test import RequestFactory, override_settings
 from next.partial import JsonPartialProtocolBackend, Patches, StreamMeta
 from next.partial.manager import partial_backend_manager
 from next.realtime import frames, socket as socket_module
-from next.realtime.access import AccessCheck
+from next.realtime.access import SocketAccessCheck
 from next.realtime.backends import MemoryBroker
 from next.realtime.errors import BrokerConnectionError
 from next.realtime.frames import Close
@@ -36,7 +36,7 @@ from tests.support.cases.realtime import (
     TicketReferenceCase,
 )
 from tests.support.codecs import sse_data_text
-from tests.support.realtime import issue_session_ticket
+from tests.support.realtime import LiveStreams, issue_session_ticket
 
 
 _HERE = "tests.realtime.test_socket"
@@ -109,7 +109,9 @@ class ManualClock:
 def access_clock(monkeypatch: pytest.MonkeyPatch) -> ManualClock:
     """Drive the access recheck interval by hand instead of waiting for it."""
     clock = ManualClock()
-    monkeypatch.setattr(socket_module, "AccessCheck", partial(AccessCheck, clock=clock))
+    monkeypatch.setattr(
+        socket_module, "SocketAccessCheck", partial(SocketAccessCheck, clock=clock)
+    )
     return clock
 
 
@@ -233,7 +235,7 @@ def _handshake(
     ticket: SocketTicket, user: object = None, expires_at: float | None = None
 ) -> Handshake:
     return Handshake(
-        ticket.session_key, AnonymousUser() if user is None else user, expires_at
+        ticket.credential, AnonymousUser() if user is None else user, expires_at
     )
 
 
@@ -314,7 +316,7 @@ def test_serve_catches_up_between_positions_and_hello(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_hello_carries_positions_heartbeat_and_the_clock() -> None:
+def test_hello_carries_positions_heartbeat_and_the_clock(streams: LiveStreams) -> None:
     ticket = issue_session_ticket(("room:42", "room:43"))
 
     async def scenario() -> None:
@@ -339,7 +341,7 @@ def test_hello_carries_positions_heartbeat_and_the_clock() -> None:
         port.disconnect()
         await _finish(task)
         assert port.close_code is None
-        assert broker._subscribers == {}
+        assert streams.live() == 0
 
     asyncio.run(scenario())
 
@@ -375,7 +377,7 @@ def test_connection_id_is_unique_per_socket() -> None:
 
 @pytest.mark.django_db(transaction=True)
 def test_default_broker_and_heartbeat_come_from_settings(
-    session_ticket: SocketTicket,
+    session_ticket: SocketTicket, streams: LiveStreams
 ) -> None:
     async def scenario() -> None:
         port = MemoryPort()
@@ -387,7 +389,7 @@ def test_default_broker_and_heartbeat_come_from_settings(
         assert (await _frame(port))["type"] == "patches"
         port.disconnect()
         await _finish(task)
-        assert broker._subscribers == {}
+        assert streams.live() == 0
 
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"HEARTBEAT": 7.5}}):
         asyncio.run(scenario())
@@ -510,7 +512,7 @@ def test_transform_skipping_a_message_sends_skip_with_epoch() -> None:
 
 @pytest.mark.django_db(transaction=True)
 def test_failing_transform_logs_and_closes_internal(
-    caplog: pytest.LogCaptureFixture,
+    caplog: pytest.LogCaptureFixture, streams: LiveStreams
 ) -> None:
     ticket = issue_session_ticket(transform_ref=f"{_HERE}._failing_transform")
 
@@ -521,14 +523,14 @@ def test_failing_transform_logs_and_closes_internal(
         await broker.apublish("room:42", _envelope())
         await _finish(task)
         assert port.close_code == Close.INTERNAL
-        assert broker._subscribers == {}
+        assert streams.live() == 0
 
     asyncio.run(scenario())
     assert "Realtime WebSocket stream failed" in caplog.text
 
 
 @pytest.mark.django_db(transaction=True)
-def test_concurrent_transforms_run_on_separate_threads() -> None:
+def test_concurrent_transforms_run_on_separate_threads(streams: LiveStreams) -> None:
     tickets = [
         issue_session_ticket(transform_ref=f"{_HERE}._rendezvous_transform")
         for _ in range(2)
@@ -547,7 +549,7 @@ def test_concurrent_transforms_run_on_separate_threads() -> None:
             port.disconnect()
         for task in tasks:
             await _finish(task)
-        assert broker._subscribers == {}
+        assert streams.live() == 0
 
     asyncio.run(scenario())
 
@@ -590,7 +592,7 @@ def test_denied_topic_closes_before_subscribing_to_the_broker() -> None:
 
 @pytest.mark.django_db(transaction=True)
 def test_topic_revoked_while_subscribed_closes_topic_denied(
-    access_clock: ManualClock,
+    access_clock: ManualClock, streams: LiveStreams
 ) -> None:
     ticket = issue_session_ticket(authorizer_ref=f"{_HERE}._toggled_authorizer")
 
@@ -604,14 +606,14 @@ def test_topic_revoked_while_subscribed_closes_topic_denied(
         assert await _frame(port) == {"type": "error", "code": "auth"}
         await _finish(task)
         assert port.close_code == Close.TOPIC_DENIED
-        assert broker._subscribers == {}
+        assert streams.live() == 0
 
     asyncio.run(scenario())
 
 
 @pytest.mark.django_db(transaction=True)
 def test_heartbeat_rechecks_access_before_its_ping(
-    access_clock: ManualClock, session_ticket: SocketTicket
+    access_clock: ManualClock, session_ticket: SocketTicket, streams: LiveStreams
 ) -> None:
     async def scenario() -> None:
         broker = ScriptedBroker()
@@ -627,7 +629,7 @@ def test_heartbeat_rechecks_access_before_its_ping(
         await _finish(task)
         assert socket.ticks == 0
         assert port.close_code == Close.SESSION
-        assert broker._subscribers == {}
+        assert streams.live() == 0
 
     asyncio.run(scenario())
 
@@ -668,7 +670,7 @@ def _revoke(user: object, revocation: str) -> None:
     ],
 )
 def test_user_revoked_while_subscribed_closes_before_delivery(
-    access_clock: ManualClock, revocation: str, code: Close
+    access_clock: ManualClock, revocation: str, code: Close, streams: LiveStreams
 ) -> None:
     user, ticket = _logged_in_ticket()
 
@@ -683,7 +685,7 @@ def test_user_revoked_while_subscribed_closes_before_delivery(
         assert await _frame(port) == {"type": "error", "code": "auth"}
         await _finish(task)
         assert port.close_code == code
-        assert broker._subscribers == {}
+        assert streams.live() == 0
 
     asyncio.run(scenario())
 
@@ -854,7 +856,7 @@ def test_client_leaving_before_subscribing_closes_nothing() -> None:
 
 @pytest.mark.django_db(transaction=True)
 def test_malformed_frame_after_subscribing_stops_the_stream(
-    session_ticket: SocketTicket,
+    session_ticket: SocketTicket, streams: LiveStreams
 ) -> None:
     async def scenario() -> None:
         broker = MemoryBroker()
@@ -864,7 +866,7 @@ def test_malformed_frame_after_subscribing_stops_the_stream(
         assert await _frame(port) == {"type": "error", "code": "protocol"}
         await _finish(task)
         assert port.close_code == Close.PROTOCOL
-        assert broker._subscribers == {}
+        assert streams.live() == 0
 
     asyncio.run(scenario())
 
@@ -907,6 +909,7 @@ def test_broker_failure_closes_internal_without_a_leak(
     session_ticket: SocketTicket,
     failure: BaseException,
     log: str,
+    streams: LiveStreams,
 ) -> None:
     caplog.set_level(logging.INFO, logger=socket_module.__name__)
 
@@ -919,7 +922,7 @@ def test_broker_failure_closes_internal_without_a_leak(
         )
         assert frames_sent == []
         assert port.close_code == Close.INTERNAL
-        assert broker._subscribers == {}
+        assert streams.live() == 0
 
     asyncio.run(scenario())
     assert log in caplog.text
@@ -927,17 +930,17 @@ def test_broker_failure_closes_internal_without_a_leak(
 
 @pytest.mark.django_db(transaction=True)
 def test_cancelling_serve_propagates_and_releases_the_subscription(
-    session_ticket: SocketTicket,
+    session_ticket: SocketTicket, streams: LiveStreams
 ) -> None:
     async def scenario() -> None:
         broker = MemoryBroker()
         port = MemoryPort()
         task, _ = await _subscribed(port, session_ticket, broker)
-        assert broker._subscribers != {}
+        assert streams.live() == 1
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-        assert broker._subscribers == {}
+        assert streams.live() == 0
         assert port.close_code is None
 
     asyncio.run(scenario())
@@ -945,23 +948,25 @@ def test_cancelling_serve_propagates_and_releases_the_subscription(
 
 @pytest.mark.django_db(transaction=True)
 def test_disconnect_while_waiting_releases_the_subscription(
-    session_ticket: SocketTicket,
+    session_ticket: SocketTicket, streams: LiveStreams
 ) -> None:
     async def scenario() -> None:
         broker = MemoryBroker()
         port = MemoryPort()
         task, _ = await _subscribed(port, session_ticket, broker)
-        assert set(broker._subscribers) == {"room:42"}
+        assert streams.live("room:42") == 1
         port.disconnect()
         await _finish(task)
-        assert broker._subscribers == {}
+        assert streams.live() == 0
         assert port.close_code is None
 
     asyncio.run(scenario())
 
 
 @pytest.mark.django_db(transaction=True)
-def test_disconnect_during_a_sync_transform_releases_the_subscription() -> None:
+def test_disconnect_during_a_sync_transform_releases_the_subscription(
+    streams: LiveStreams,
+) -> None:
     ticket = issue_session_ticket(transform_ref=f"{_HERE}._blocking_transform")
 
     async def scenario() -> None:
@@ -973,7 +978,7 @@ def test_disconnect_during_a_sync_transform_releases_the_subscription() -> None:
         port.disconnect()
         _TRANSFORM_RELEASE.set()
         await _finish(task)
-        assert broker._subscribers == {}
+        assert streams.live() == 0
         assert port.close_code is None
         assert len(port.sent) == 1
 
@@ -981,7 +986,9 @@ def test_disconnect_during_a_sync_transform_releases_the_subscription() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_peer_gone_mid_send_drops_without_close(session_ticket: SocketTicket) -> None:
+def test_peer_gone_mid_send_drops_without_close(
+    session_ticket: SocketTicket, streams: LiveStreams
+) -> None:
     async def scenario() -> None:
         broker = MemoryBroker()
         port = LeavingPort()
@@ -990,7 +997,7 @@ def test_peer_gone_mid_send_drops_without_close(session_ticket: SocketTicket) ->
         await broker.apublish("room:42", _envelope())
         await _finish(task)
         assert port.close_code is None
-        assert broker._subscribers == {}
+        assert streams.live() == 0
 
     asyncio.run(scenario())
 
@@ -1011,6 +1018,7 @@ def test_watchdog_drops_a_client_that_stopped_reading(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
     session_ticket: SocketTicket,
+    streams: LiveStreams,
 ) -> None:
     caplog.set_level(logging.INFO, logger=socket_module.__name__)
     _monotonic(monkeypatch, 0.0, 0.0, 10.0)
@@ -1025,7 +1033,7 @@ def test_watchdog_drops_a_client_that_stopped_reading(
         assert port.entered.is_set()
         assert port.sent == []
         assert port.close_code is None
-        assert broker._subscribers == {}
+        assert streams.live() == 0
 
     asyncio.run(scenario())
     assert "dropped a client that stopped reading" in caplog.text

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections.abc import Iterator
 
 import pytest
 from django.db import transaction
@@ -8,16 +9,14 @@ from django.test import RequestFactory, TestCase
 from next.partial import Envelope, Patch, Patches
 from next.partial.headers import REQUEST_ID
 from next.realtime import MemoryBroker, TopicPayloadError, apublish, delivery, publish
-from next.realtime.manager import broker_manager
 from next.realtime.signals import message_published
-from next.testing import SignalRecorder
+from next.testing import SignalRecorder, memory_broker as install_memory_broker
 
 
 @pytest.fixture()
-def memory_broker(monkeypatch: pytest.MonkeyPatch) -> MemoryBroker:
-    backend = MemoryBroker()
-    monkeypatch.setattr(broker_manager, "_backend", backend)
-    return backend
+def memory_broker() -> Iterator[MemoryBroker]:
+    with install_memory_broker() as backend:
+        yield backend
 
 
 def _envelope(*patches: Patch, **metadata) -> Envelope:
@@ -29,7 +28,7 @@ def test_publish_safe_event_delivers_and_signals_message(
 ) -> None:
     with memory_broker.subscribe(["room:1"], timeout=0.01) as messages:
         with SignalRecorder(message_published) as recorder:
-            publish(
+            returned = publish(
                 "room:1",
                 Patches(None).event("room:update", {"count": 2}),
                 on_commit=False,
@@ -40,6 +39,7 @@ def test_publish_safe_event_delivers_and_signals_message(
     assert event.kwargs["message"] == message
     assert message is not None
     assert message.seq == 1
+    assert returned == message
 
 
 def test_publish_partial_request_copies_request_id(memory_broker: MemoryBroker) -> None:
@@ -83,7 +83,7 @@ def test_publish_in_transaction_delivers_after_commit(
         TestCase.captureOnCommitCallbacks(execute=True),
         transaction.atomic(),
     ):
-        publish("poll:commit", Patches(None).refresh(zone="results"))
+        assert publish("poll:commit", Patches(None).refresh(zone="results")) is None
         assert recorder.events_for(message_published) == []
     assert len(recorder.events_for(message_published)) == 1
     assert memory_broker.positions(["poll:commit"])["poll:commit"].seq == 1

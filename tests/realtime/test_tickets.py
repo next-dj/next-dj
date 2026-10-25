@@ -94,7 +94,7 @@ def test_ticket_other_session_or_tampered_token_is_rejected() -> None:
         verify_ticket(grant.token + "x", request.session.session_key)
     with pytest.raises(InvalidTicketError, match="non-empty"):
         verify_ticket(None, request.session.session_key)
-    with pytest.raises(InvalidTicketError, match="no Django session"):
+    with pytest.raises(InvalidTicketError, match="no ticket credential"):
         verify_ticket(grant.token, "")
 
 
@@ -264,12 +264,12 @@ def test_ticket_for_a_persisted_session_keeps_its_key() -> None:
     assert verify_ticket(grant.token, key).topics == ("room",)
 
 
-@pytest.mark.parametrize("session_key", [None, 42, ""])
-def test_verify_ticket_without_a_string_session_key_is_rejected(
-    session_key: object,
+@pytest.mark.parametrize("credential", [None, 42, ""])
+def test_verify_ticket_without_a_string_credential_is_rejected(
+    credential: object,
 ) -> None:
-    with pytest.raises(InvalidTicketError, match="no Django session"):
-        verify_ticket("token", session_key)
+    with pytest.raises(InvalidTicketError, match="no ticket credential"):
+        verify_ticket("token", credential)
 
 
 @pytest.mark.parametrize(

@@ -66,6 +66,7 @@ DEFAULTS: Final[Mapping[str, Any]] = MappingProxyType(
             },
             "TRANSPORTS": None,
             "TICKET_MAX_AGE": 60,
+            "TICKET_BINDING": "next.realtime.SessionBinding",
             "WS_PATH": "/_next/ws/",
             "HEARTBEAT": 25.0,
             "GATEWAY_TOKEN": None,

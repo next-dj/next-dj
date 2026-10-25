@@ -6,7 +6,7 @@ Server reference
 Module summary
 --------------
 
-``next.server`` exposes the autoreload watcher, the watch-spec helpers, and the filesystem roots used by the development server.
+``next.server`` exposes the autoreload watcher, the watch-spec helpers, the filesystem roots, and the ASGI development server used by ``manage.py runserver``.
 The Django wiring that activates them lives in ``next.apps`` (see :doc:`apps`).
 
 Public API
@@ -48,6 +48,17 @@ Each root is resolved to an absolute path.
 Tooling that needs to symlink or scan those directories reads them from here instead of recomputing paths.
 
 .. automodule:: next.server.roots
+   :members:
+
+ASGI server
+~~~~~~~~~~~
+
+``serve_development(server, *, host, port, static, announce=None, options=None)`` builds the app that ``ASGI_APPLICATION`` names, or ``next.realtime.application`` over Django's handler, calls ``announce`` once the app is mounted, and runs it on ``server``.
+``server`` is any object with the ``run(app, **options)`` method of ``ASGIServer``, which uvicorn satisfies and ``asgi_server()`` returns, or ``None`` without uvicorn.
+``server_options()`` returns the uvicorn options the realtime socket needs, and the ``options`` argument overrides them.
+A CLI of a project uses these to serve the same app as ``manage.py runserver`` without a Django command.
+
+.. automodule:: next.server.asgi
    :members:
 
 Signals

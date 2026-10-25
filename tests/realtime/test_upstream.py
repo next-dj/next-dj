@@ -3,6 +3,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import fields
 from unittest.mock import patch
 
 import pytest
@@ -10,7 +11,7 @@ from django.contrib.auth.models import AnonymousUser
 from django.test import override_settings
 
 from next.realtime import Upstream, checks, handlers
-from next.realtime.access import AccessCheck, TopicAuthorizer
+from next.realtime.access import AccessCheck, SocketAccessCheck, TopicAuthorizer
 from next.realtime.backends import MemoryBroker
 from next.realtime.frames import Close
 from next.realtime.handlers import HandlerRegistry, on
@@ -67,10 +68,10 @@ class _Rechecking(TopicSocket):
     def access_check(
         self, claims: TicketClaims, authorizer: TopicAuthorizer | None
     ) -> AccessCheck:
-        return AccessCheck(
+        return SocketAccessCheck(
             claims.topics,
             authorizer=authorizer,
-            session_key=self.handshake.session_key,
+            session_key=self.handshake.credential,
             user=self.handshake.user,
             interval=0,
         )
@@ -84,7 +85,7 @@ def _socket(
     clock: Callable[[], float] = time.time,
     socket_class: type[TopicSocket] = TopicSocket,
 ) -> TopicSocket:
-    handshake = Handshake(ticket.session_key, AnonymousUser(), None)
+    handshake = Handshake(ticket.credential, AnonymousUser(), None)
     chosen = _Rechecking if recheck else socket_class
     return chosen(port, handshake, broker=MemoryBroker(), heartbeat=60, clock=clock)
 
@@ -458,3 +459,33 @@ def test_events_past_the_concurrency_are_refused_without_a_strike() -> None:
     limits = {"REALTIME": {"UPSTREAM": {"CONCURRENCY": 2}}}
     with override_settings(NEXT_FRAMEWORK=limits):
         asyncio.run(scenario())
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_handler_never_sees_the_session_key_behind_the_subject() -> None:
+    received: list[Upstream] = []
+
+    @on("room:{room}", "typing")
+    def typing(upstream: Upstream) -> None:
+        received.append(upstream)
+
+    ticket = _ticket()
+    key = ticket.session.session_key
+    assert key is not None
+
+    async def scenario() -> TopicSocket:
+        port = MemoryPort()
+        socket, task = await _open(port, ticket)
+        port.push_json(_up("typing", id="1"))
+        assert (await _frame(port))["ok"] is True
+        await _close(port, task)
+        return socket
+
+    socket = asyncio.run(scenario())
+    (upstream,) = received
+    values = [getattr(upstream, field.name) for field in fields(upstream)]
+    assert all(key not in repr(value) for value in values)
+    assert key not in repr(upstream)
+    assert key not in repr(socket.handshake)
+    assert upstream.subject == socket.handshake.subject
+    assert len(upstream.subject) == 64

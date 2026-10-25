@@ -3,6 +3,16 @@
 from . import checks, frames, signals
 from .asgi import WebSocketApp, application
 from .backends import BrokerBackend, MemoryBroker
+from .binding import (
+    LiveIdentity,
+    SessionBinding,
+    SignedCookieBinding,
+    TicketBinding,
+    session_alive,
+    session_user,
+    stored_session,
+    ticket_binding,
+)
 from .delivery import apresence, apublish, presence, publish
 from .errors import (
     BrokerConnectionError,
@@ -31,6 +41,7 @@ __all__ = [
     "InvalidMemberError",
     "InvalidTicketError",
     "InvalidTopicError",
+    "LiveIdentity",
     "MemoryBroker",
     "Message",
     "Position",
@@ -39,7 +50,10 @@ __all__ = [
     "RedisBroker",
     "Replay",
     "ReplayingBroker",
+    "SessionBinding",
+    "SignedCookieBinding",
     "SocketPort",
+    "TicketBinding",
     "TicketClaims",
     "TicketIntrospectionView",
     "TopicPayloadError",
@@ -55,6 +69,10 @@ __all__ = [
     "on",
     "presence",
     "publish",
+    "session_alive",
+    "session_user",
     "signals",
+    "stored_session",
+    "ticket_binding",
     "verify_ticket",
 ]

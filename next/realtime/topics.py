@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import time
-from contextlib import aclosing, suppress
+from contextlib import aclosing
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, TypeGuard, override
 
@@ -26,6 +27,7 @@ from .access import (
     run_detached,
 )
 from .attendance import aattend, aattending, attend, attending
+from .binding import ticket_binding
 from .delivery import transformed
 from .errors import BrokerConnectionError, InvalidTicketError, InvalidTopicError
 from .manager import broker_manager
@@ -38,6 +40,7 @@ from .roster import (
     require_presence,
     snapshot_message,
 )
+from .signals import StreamLifecycle, UnsubscribeReason
 from .tickets import MAX_REFERENCE_LENGTH, import_callable, issue_ticket
 from .transports import active_transports
 
@@ -175,6 +178,7 @@ class TopicStream(PatchStreamWriter):
             self[header] = value
         if status == HTTPStatus.OK:
             patch_vary_headers(self, ["Cookie", "X-Next-Transport"])
+            ticket_binding().respond(request, self)
 
     def _sync_messages(self, backend: BrokerBackend) -> Iterator[TopicItem]:
         """Yield broker messages and heartbeats while access is still granted."""
@@ -182,21 +186,36 @@ class TopicStream(PatchStreamWriter):
         if verdict is not Access.GRANTED:
             yield from _closing_frames(verdict)
             return
-        with suppress(BrokerConnectionError):
-            yield from self._sync_subscription(backend)
+        lifecycle = StreamLifecycle(self, "sse")
+        reason = UnsubscribeReason.SERVER
+        try:
+            yield from self._sync_subscription(backend, lifecycle)
+        except BrokerConnectionError:
+            reason = UnsubscribeReason.ERROR
+        except GeneratorExit:
+            reason = UnsubscribeReason.CLIENT
+            raise
+        except Exception:
+            reason = UnsubscribeReason.ERROR
+            raise
+        finally:
+            lifecycle.close(reason)
 
-    def _sync_subscription(self, backend: BrokerBackend) -> Iterator[TopicItem]:
+    def _sync_subscription(
+        self, backend: BrokerBackend, lifecycle: StreamLifecycle
+    ) -> Iterator[TopicItem]:
         """Yield replayed misses, hello and live messages until access is revoked."""
         with backend.subscribe(
             self.topics, timeout=self._subscription_timeout
         ) as subscription:
+            lifecycle.open(self.topics, request=self._request, user=self._user)
             positions = backend.positions(self.topics)
             attendance = self.attend(backend)
             with attending(attendance, subscription) as stream:
                 for missed in catch_up(backend, self._cursors, positions):
                     verdict = self._access.check()
                     if verdict is not Access.GRANTED:
-                        yield from _closing_frames(verdict)
+                        yield from _revoked(verdict, lifecycle)
                         return
                     yield self._sync_item(missed)
                 yield self._hello(positions)
@@ -205,7 +224,7 @@ class TopicStream(PatchStreamWriter):
                 for message in stream:
                     verdict = self._access.check()
                     if verdict is not Access.GRANTED:
-                        yield from _closing_frames(verdict)
+                        yield from _revoked(verdict, lifecycle)
                         return
                     yield self._sync_item(message)
 
@@ -261,27 +280,38 @@ class TopicStream(PatchStreamWriter):
             return
         if backend is None:
             backend = await broker_manager.aget()
+        lifecycle = StreamLifecycle(self, "sse")
+        reason = UnsubscribeReason.SERVER
         try:
-            async with aclosing(self._async_subscription(backend)) as items:
+            async with aclosing(self._async_subscription(backend, lifecycle)) as items:
                 async for item in items:
                     yield item
         except BrokerConnectionError:
-            return
+            reason = UnsubscribeReason.ERROR
+        except (GeneratorExit, asyncio.CancelledError):
+            reason = UnsubscribeReason.CLIENT
+            raise
+        except Exception:
+            reason = UnsubscribeReason.ERROR
+            raise
+        finally:
+            await lifecycle.aclose(reason)
 
     async def _async_subscription(
-        self, backend: BrokerBackend
+        self, backend: BrokerBackend, lifecycle: StreamLifecycle
     ) -> AsyncGenerator[TopicItem]:
         """Yield replayed misses, hello and live messages until access is revoked."""
         async with backend.asubscribe(
             self.topics, timeout=self._subscription_timeout
         ) as subscription:
+            await lifecycle.aopen(self.topics, request=self._request, user=self._user)
             positions = await backend.apositions(self.topics)
             attendance = await self.aattend(backend)
             async with aattending(attendance, subscription) as stream:
                 for missed in await acatch_up(backend, self._cursors, positions):
                     verdict = await self._access.acheck()
                     if verdict is not Access.GRANTED:
-                        for frame in _closing_frames(verdict):
+                        for frame in _revoked(verdict, lifecycle):
                             yield frame
                         return
                     yield await self._async_item(missed)
@@ -291,7 +321,7 @@ class TopicStream(PatchStreamWriter):
                 async for message in stream:
                     verdict = await self._access.acheck()
                     if verdict is not Access.GRANTED:
-                        for frame in _closing_frames(verdict):
+                        for frame in _revoked(verdict, lifecycle):
                             yield frame
                         return
                     yield await self._async_item(message)
@@ -376,6 +406,12 @@ def _closing_frames(verdict: Access) -> tuple[StreamEnd, ...]:
     A reconnect carries the current cookie and lets the page guard decide.
     """
     return (_TOPIC_DENIED,) if verdict is Access.TOPIC_DENIED else ()
+
+
+def _revoked(verdict: Access, lifecycle: StreamLifecycle) -> tuple[StreamEnd, ...]:
+    """Note a revocation as the stream's unsubscribe reason and return its frames."""
+    lifecycle.reason = UnsubscribeReason.REVOKED
+    return _closing_frames(verdict)
 
 
 def _require_presence_option(presence: object) -> None:

@@ -3,6 +3,7 @@ import json
 import math
 import re
 import threading
+from collections.abc import Iterator
 from contextlib import asynccontextmanager, contextmanager, nullcontext
 from unittest.mock import create_autospec
 
@@ -31,11 +32,11 @@ from next.realtime import (
 )
 from next.realtime.backends import BrokerBackend
 from next.realtime.errors import BrokerConnectionError, InvalidTicketError
-from next.realtime.manager import broker_manager
 from next.realtime.messages import Position
 from next.realtime.tickets import verify_ticket
+from next.testing import SseEvent, SseReader, memory_broker as install_memory_broker
 from next.testing.realtime import override_websocket_mount
-from tests.support.realtime import anext_frame, anext_item, next_frame
+from tests.support.realtime import LiveStreams, anext_item
 
 
 def _suppress_message(message):
@@ -67,39 +68,48 @@ def _body(response: TopicStream) -> dict[str, object]:
 
 
 @pytest.fixture()
-def memory_broker(monkeypatch: pytest.MonkeyPatch) -> MemoryBroker:
-    backend = MemoryBroker()
-    monkeypatch.setattr(broker_manager, "_backend", backend)
-    return backend
+def memory_broker() -> Iterator[MemoryBroker]:
+    with install_memory_broker() as backend:
+        yield backend
 
 
 def test_sync_topic_stream_published_message_follows_retry_and_hello(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     request = RequestFactory().get("/polls/1/stream/")
     stream = TopicStream(
         request, "poll:1", heartbeat_seconds=0.01, server_clock=lambda: 12.345
     )
-    iterator = stream.streaming_content
+    with SseReader(stream) as events:
+        hello = next(events)
+        assert events.retry is not None
+        publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
+        frame = next(events)
 
-    assert next(iterator).startswith(b"retry: ")
-    hello = next_frame(iterator)
-    assert hello.startswith(b"event: next-hello")
-    assert b'"protocol":2' in hello
-    assert b'"topics":{"poll:1":{"epoch":"","seq":0}}' in hello
-    assert next(iterator) == b": heartbeat\n\n"
-    publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
-    frame = next_frame(iterator)
-    stream._iterator.close()
-
+    assert hello.event == "next-hello"
+    assert hello.json()["protocol"] == 2
+    assert hello.json()["topics"] == {"poll:1": {"epoch": "", "seq": 0}}
     epoch = memory_broker.positions(["poll:1"])["poll:1"].epoch
-    assert frame.startswith(f"id: {epoch}:1\nevent: next-patches\n".encode())
-    assert b'"zone":"results"' in frame
-    assert b'"topic":"poll:1"' in frame
-    assert b'"seq":1' in frame
-    assert b'"epoch":"' in frame
-    assert b'"server_time":12345' in frame
-    assert memory_broker._subscribers == {}
+    assert (frame.id, frame.event) == (f"{epoch}:1", "next-patches")
+    assert '"zone":"results"' in frame.data
+    assert frame.json()["topic"] == "poll:1"
+    assert frame.json()["seq"] == 1
+    assert frame.json()["epoch"] == epoch
+    assert frame.json()["server_time"] == 12345
+    assert streams.live() == 0
+
+
+def test_sync_topic_stream_idle_emits_heartbeats_after_hello(
+    memory_broker: MemoryBroker, streams: LiveStreams
+) -> None:
+    stream = TopicStream(RequestFactory().get("/"), "poll:1", heartbeat_seconds=0.01)
+    with SseReader(stream):
+        iterator = stream.streaming_content
+        assert next(iterator).startswith(b"retry: ")
+        assert next(iterator).startswith(b"event: next-hello")
+        assert next(iterator) == _HEARTBEAT
+        assert next(iterator) == _HEARTBEAT
+    assert streams.live() == 0
 
 
 @pytest.mark.usefixtures("ws_available")
@@ -111,12 +121,8 @@ def test_sse_hello_announces_only_sse_even_with_a_websocket_mounted(
     stream = TopicStream(
         request, "poll:2", "poll:1", heartbeat_seconds=0.01, server_clock=lambda: 2.5
     )
-    iterator = stream.streaming_content
-    next(iterator)
-    hello = next_frame(iterator)
-    stream._iterator.close()
-
-    body = json.loads(hello.decode().split("data: ", 1)[1])
+    with SseReader(stream) as events:
+        body = next(events).json()
     epoch = memory_broker.positions(["poll:2"])["poll:2"].epoch
     assert body == {
         "protocol": 2,
@@ -292,31 +298,29 @@ def test_websocket_negotiation_discovers_stable_callbacks_and_rejects_bad_paths(
         assert response.status_code == 406
         assert _body(response)["reason"] == "transform"
         with pytest.raises(ImproperlyConfigured, match="does not name a callable"):
-            TopicStream(
-                request, "room", presence="tests.realtime.test_topics._SKIP_ONE"
-            )
+            TopicStream(request, "room", presence="tests.realtime.test_topics._SKIP_ID")
 
 
-_SKIP_ONE = re.compile(rb"id: [0-9a-f]{16}:1\nevent: next-skip\n")
+_SKIP_ID = re.compile(r"[0-9a-f]{16}:1")
+_HEARTBEAT = b": heartbeat\n\n"
 
 
 def test_sync_topic_stream_transform_can_suppress_message(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     request = RequestFactory().get("/polls/1/stream/")
     stream = TopicStream(
         request, "poll:1", transform=_suppress_message, heartbeat_seconds=0.001
     )
-    iterator = stream.streaming_content
-    assert next(iterator).startswith(b"retry: ")
-    assert next_frame(iterator).startswith(b"event: next-hello")
-    publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
-    skipped = next_frame(iterator)
-    stream._iterator.close()
-    assert _SKIP_ONE.match(skipped)
-    assert b'"topic":"poll:1","epoch":"' in skipped
-    assert b'"seq":1}' in skipped
-    assert memory_broker._subscribers == {}
+    with SseReader(stream) as events:
+        assert next(events).event == "next-hello"
+        publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
+        skipped = next(events)
+    assert skipped.event == "next-skip"
+    assert _SKIP_ID.match(str(skipped.id))
+    assert skipped.json()["topic"] == "poll:1"
+    assert skipped.json()["seq"] == 1
+    assert streams.live() == 0
 
 
 def test_sync_topic_stream_transform_emits_envelope(
@@ -326,19 +330,17 @@ def test_sync_topic_stream_transform_emits_envelope(
     stream = TopicStream(
         request, "poll:1", transform=_event_transform, heartbeat_seconds=0.01
     )
-    iterator = stream.streaming_content
-    assert next(iterator).startswith(b"retry: ")
-    assert next_frame(iterator).startswith(b"event: next-hello")
-    publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
-    frame = next_frame(iterator)
-    stream._iterator.close()
-    assert b'"name":"poll:update"' in frame
-    assert b'"topic":"poll:1"' in frame
-    assert b'"seq":1' in frame
+    with SseReader(stream) as events:
+        assert next(events).event == "next-hello"
+        publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
+        frame = next(events)
+    assert '"name":"poll:update"' in frame.data
+    assert frame.json()["topic"] == "poll:1"
+    assert frame.json()["seq"] == 1
 
 
 def test_async_topic_stream_uses_async_subscription_and_transform(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     def transform(message):
         return Patches(None).event("poll:update", {"seq": message.seq})
@@ -348,46 +350,46 @@ def test_async_topic_stream_uses_async_subscription_and_transform(
         stream = TopicStream(
             request, "poll:1", transform=transform, heartbeat_seconds=0.01
         )
-        iterator = stream.streaming_content.__aiter__()
-        assert (await anext(iterator)).startswith(b"retry: ")
-        assert (await anext_frame(iterator)).startswith(b"event: next-hello")
-        pending = asyncio.create_task(anext_frame(iterator))
-        for _ in range(10):
-            if memory_broker._subscribers.get("poll:1"):
-                break
-            await asyncio.sleep(0)
-        assert memory_broker._subscribers.get("poll:1")
-        await apublish("poll:1", Patches(None).refresh(zone="results"))
-        frame = await pending
-        await stream._iterator.aclose()
-        assert frame.startswith(b"id: ")
-        assert b"\nevent: next-patches\n" in frame
-        assert b'"name":"poll:update"' in frame
-        assert b'"topic":"poll:1"' in frame
-        assert b'"seq":1' in frame
+        async with SseReader(stream) as events:
+            assert (await anext(events)).event == "next-hello"
+            pending = asyncio.ensure_future(anext(events))
+            for _ in range(10):
+                if streams.live("poll:1"):
+                    break
+                await asyncio.sleep(0)
+            assert streams.live("poll:1")
+            await apublish("poll:1", Patches(None).refresh(zone="results"))
+            frame = await pending
+        assert frame.id is not None
+        assert frame.event == "next-patches"
+        assert '"name":"poll:update"' in frame.data
+        assert frame.json()["topic"] == "poll:1"
+        assert frame.json()["seq"] == 1
 
     asyncio.run(scenario())
-    assert memory_broker._subscribers == {}
+    assert streams.live() == 0
 
 
 def test_async_topic_stream_idle_without_transform_emits_heartbeat(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     async def scenario() -> None:
         request = AsyncRequestFactory().get("/polls/1/stream/")
         stream = TopicStream(request, "poll:1", heartbeat_seconds=0.001)
         iterator = stream.streaming_content.__aiter__()
         assert (await anext(iterator)).startswith(b"retry: ")
-        assert (await anext_frame(iterator)).startswith(b"event: next-hello")
-        assert await anext(iterator) == b": heartbeat\n\n"
+        while (chunk := await anext(iterator)) == _HEARTBEAT:
+            pass
+        assert chunk.startswith(b"event: next-hello")
+        assert await anext(iterator) == _HEARTBEAT
         await stream._iterator.aclose()
 
     asyncio.run(scenario())
-    assert memory_broker._subscribers == {}
+    assert streams.live() == 0
 
 
 def test_async_message_source_passes_timeout_and_untransformed_messages(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     async def scenario() -> None:
         request = AsyncRequestFactory().get("/polls/1/stream/")
@@ -405,7 +407,7 @@ def test_async_message_source_passes_timeout_and_untransformed_messages(
         await source.aclose()
 
     asyncio.run(scenario())
-    assert memory_broker._subscribers == {}
+    assert streams.live() == 0
 
 
 def test_sync_message_source_exits_when_broker_iterator_finishes(
@@ -428,7 +430,7 @@ def test_sync_message_source_exits_when_broker_iterator_finishes(
 
 
 def test_topic_stream_subscription_precedes_the_position_snapshot(
-    memory_broker: MemoryBroker, monkeypatch: pytest.MonkeyPatch
+    memory_broker: MemoryBroker, streams: LiveStreams, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     request = RequestFactory().get("/polls/1/stream/")
     stream = TopicStream(request, "poll:1", heartbeat_seconds=0.01)
@@ -437,7 +439,7 @@ def test_topic_stream_subscription_precedes_the_position_snapshot(
 
     def publish_during_snapshot(topics):
         calls.append(tuple(topics))
-        assert memory_broker._subscribers["poll:1"]
+        assert streams.live("poll:1")
         memory_broker.publish(
             "poll:1", Patches(None).refresh(zone="results").envelope()
         )
@@ -452,7 +454,7 @@ def test_topic_stream_subscription_precedes_the_position_snapshot(
     assert hello.topics["poll:1"][1] == 1
     assert hello.topics["poll:1"][0] == message.epoch
     assert message.seq == 1
-    assert memory_broker._subscribers == {}
+    assert streams.live() == 0
 
 
 @pytest.mark.django_db()
@@ -514,7 +516,7 @@ def test_topic_stream_without_heartbeat_uses_the_realtime_setting(
 
 
 def test_async_topic_stream_transform_can_suppress_message(
-    memory_broker: MemoryBroker, monkeypatch: pytest.MonkeyPatch
+    memory_broker: MemoryBroker, streams: LiveStreams, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def scenario() -> None:
         subscribed = asyncio.Event()
@@ -531,18 +533,17 @@ def test_async_topic_stream_transform_can_suppress_message(
         stream = TopicStream(
             request, "poll:1", transform=_suppress_message, heartbeat_seconds=0.1
         )
-        iterator = stream.streaming_content.__aiter__()
-        assert (await anext(iterator)).startswith(b"retry: ")
-        assert (await anext_frame(iterator)).startswith(b"event: next-hello")
-        pending = asyncio.create_task(anext_frame(iterator))
-        await asyncio.wait_for(subscribed.wait(), timeout=1)
-        await apublish("poll:1", Patches(None).refresh(zone="results"))
-        assert _SKIP_ONE.match(await pending)
-        assert await anext(iterator) == b": heartbeat\n\n"
-        await stream._iterator.aclose()
+        async with SseReader(stream) as events:
+            assert (await anext(events)).event == "next-hello"
+            pending = asyncio.ensure_future(anext(events))
+            await asyncio.wait_for(subscribed.wait(), timeout=1)
+            await apublish("poll:1", Patches(None).refresh(zone="results"))
+            skipped = await pending
+        assert skipped.event == "next-skip"
+        assert _SKIP_ID.match(str(skipped.id))
 
     asyncio.run(scenario())
-    assert memory_broker._subscribers == {}
+    assert streams.live() == 0
 
 
 @pytest.mark.parametrize("seconds", [0, -1, math.inf, math.nan, True, "fast"])
@@ -564,7 +565,7 @@ _END_FRAME = b'event: next-end\ndata: {"code":"auth"}\n\n'
 
 
 def test_sync_topic_stream_closes_before_subscribing_when_access_is_denied(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     request = RequestFactory().get("/polls/1/stream/")
     stream = TopicStream(
@@ -574,11 +575,11 @@ def test_sync_topic_stream_closes_before_subscribing_when_access_is_denied(
     assert len(chunks) == 2
     assert chunks[0].startswith(b"retry: ")
     assert chunks[1] == _END_FRAME
-    assert memory_broker._subscribers == {}
+    assert streams.live() == 0
 
 
 def test_sync_topic_stream_closes_once_the_authorizer_revokes_access(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     allowed = [True]
     calls: list[str] = []
@@ -591,20 +592,18 @@ def test_sync_topic_stream_closes_once_the_authorizer_revokes_access(
     stream = TopicStream(
         request, "poll:1", authorize=authorize, heartbeat_seconds=0.001
     )
-    iterator = stream.streaming_content
-    assert next(iterator).startswith(b"retry: ")
-    assert next_frame(iterator).startswith(b"event: next-hello")
-    allowed[0] = False
-    rest = list(iterator)
-    assert rest[-1] == _END_FRAME
-    assert set(rest[:-1]) <= {b": heartbeat\n\n"}
+    with SseReader(stream) as events:
+        assert next(events).event == "next-hello"
+        allowed[0] = False
+        rest = list(events)
+    assert rest == [SseEvent("next-end", '{"code":"auth"}')]
     assert calls[-1] == "poll:1"
     assert len(calls) >= 2
-    assert memory_broker._subscribers == {}
+    assert streams.live() == 0
 
 
 def test_topic_stream_rechecks_access_at_most_once_per_heartbeat(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     calls: list[str] = []
 
@@ -614,19 +613,19 @@ def test_topic_stream_rechecks_access_at_most_once_per_heartbeat(
 
     request = RequestFactory().get("/polls/1/stream/")
     stream = TopicStream(request, "poll:1", authorize=authorize, heartbeat_seconds=60)
-    iterator = stream.streaming_content
-    next(iterator)
-    next_frame(iterator)
-    for _ in range(3):
-        publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
-        assert b"\nevent: next-patches\n" in next_frame(iterator)
-    stream._iterator.close()
+    with SseReader(stream) as events:
+        next(events)
+        for _ in range(3):
+            publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
+            assert next(events).event == "next-patches"
     assert calls == ["poll:1"]
-    assert memory_broker._subscribers == {}
+    assert streams.live() == 0
 
 
 @pytest.mark.django_db(transaction=True)
-def test_async_topic_stream_closes_after_logout(memory_broker: MemoryBroker) -> None:
+def test_async_topic_stream_closes_after_logout(
+    memory_broker: MemoryBroker, streams: LiveStreams
+) -> None:
     user = get_user_model().objects.create_user(username="reader", password="x")
     request = AsyncRequestFactory().get("/polls/1/stream/")
     request.session = SessionStore()
@@ -641,13 +640,11 @@ def test_async_topic_stream_closes_after_logout(memory_broker: MemoryBroker) -> 
         stream = TopicStream(
             request, "poll:1", authorize=_allow_topic, heartbeat_seconds=0.01
         )
-        iterator = stream.streaming_content.__aiter__()
-        assert (await anext(iterator)).startswith(b"retry: ")
-        assert (await anext_frame(iterator)).startswith(b"event: next-hello")
+        events = SseReader(stream)
+        assert (await anext(events)).event == "next-hello"
         await sync_to_async(store.flush, thread_sensitive=False)()
-        rest = [chunk async for chunk in iterator]
-        assert set(rest) <= {b": heartbeat\n\n"}
-        assert memory_broker._subscribers == {}
+        assert [event async for event in events] == []
+        assert streams.live() == 0
         assert {
             task for task in asyncio.all_tasks() if task is not asyncio.current_task()
         } == set()
@@ -656,7 +653,7 @@ def test_async_topic_stream_closes_after_logout(memory_broker: MemoryBroker) -> 
 
 
 def test_async_topic_stream_denial_closes_before_subscribing(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     async def scenario() -> None:
         request = AsyncRequestFactory().get("/polls/1/stream/")
@@ -666,13 +663,13 @@ def test_async_topic_stream_denial_closes_before_subscribing(
         chunks = [chunk async for chunk in stream.streaming_content]
         assert len(chunks) == 2
         assert chunks[1] == _END_FRAME
-        assert memory_broker._subscribers == {}
+        assert streams.live() == 0
 
     asyncio.run(scenario())
 
 
 def test_async_topic_stream_revokes_on_a_message_and_runs_transform_off_loop(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     allowed = [True]
     threads: list[bool] = []
@@ -703,7 +700,7 @@ def test_async_topic_stream_revokes_on_a_message_and_runs_transform_off_loop(
         rest = [item async for item in source]
         assert rest[-1] == StreamEnd("auth")
         assert set(rest[:-1]) <= {None}
-        assert memory_broker._subscribers == {}
+        assert streams.live() == 0
 
     asyncio.run(scenario())
     assert threads == [False]
@@ -759,37 +756,31 @@ def _anonymous_session_request(factory):
 
 @pytest.mark.django_db(transaction=True)
 def test_sync_anonymous_session_rotation_ends_without_an_end_frame(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     request = _anonymous_session_request(RequestFactory())
     stream = TopicStream(request, "poll:1", heartbeat_seconds=0.001)
-    iterator = stream.streaming_content
-    assert next(iterator).startswith(b"retry: ")
-    assert next_frame(iterator).startswith(b"event: next-hello")
+    events = SseReader(stream)
+    assert next(events).event == "next-hello"
     SessionStore(session_key=request.session.session_key).cycle_key()
-    rest = list(iterator)
-    assert _END_FRAME not in rest
-    assert set(rest) <= {b": heartbeat\n\n"}
-    assert memory_broker._subscribers == {}
+    assert list(events) == []
+    assert streams.live() == 0
 
 
 @pytest.mark.django_db(transaction=True)
 def test_async_anonymous_session_rotation_ends_without_an_end_frame(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     request = _anonymous_session_request(AsyncRequestFactory())
 
     async def scenario() -> None:
         stream = TopicStream(request, "poll:1", heartbeat_seconds=0.001)
-        iterator = stream.streaming_content.__aiter__()
-        assert (await anext(iterator)).startswith(b"retry: ")
-        assert (await anext_frame(iterator)).startswith(b"event: next-hello")
+        events = SseReader(stream)
+        assert (await anext(events)).event == "next-hello"
         store = SessionStore(session_key=request.session.session_key)
         await sync_to_async(store.cycle_key, thread_sensitive=False)()
-        rest = [chunk async for chunk in iterator]
-        assert _END_FRAME not in rest
-        assert set(rest) <= {b": heartbeat\n\n"}
-        assert memory_broker._subscribers == {}
+        assert [event async for event in events] == []
+        assert streams.live() == 0
 
     asyncio.run(scenario())
 
@@ -802,24 +793,22 @@ def _stale_anonymous_request(factory):
 
 @pytest.mark.django_db(transaction=True)
 def test_sync_stale_anonymous_cookie_at_open_still_streams(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     request = _stale_anonymous_request(RequestFactory())
     stream = TopicStream(
         request, "poll:1", authorize=_allow_topic, heartbeat_seconds=60
     )
-    iterator = stream.streaming_content
-    assert next(iterator).startswith(b"retry: ")
-    assert next_frame(iterator).startswith(b"event: next-hello")
-    publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
-    assert b"\nevent: next-patches\n" in next_frame(iterator)
-    stream._iterator.close()
-    assert memory_broker._subscribers == {}
+    with SseReader(stream) as events:
+        assert next(events).event == "next-hello"
+        publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
+        assert next(events).event == "next-patches"
+    assert streams.live() == 0
 
 
 @pytest.mark.django_db(transaction=True)
 def test_async_stale_anonymous_cookie_at_open_still_streams(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     request = _stale_anonymous_request(AsyncRequestFactory())
 
@@ -827,20 +816,18 @@ def test_async_stale_anonymous_cookie_at_open_still_streams(
         stream = TopicStream(
             request, "poll:1", authorize=_allow_topic, heartbeat_seconds=60
         )
-        iterator = stream.streaming_content.__aiter__()
-        assert (await anext(iterator)).startswith(b"retry: ")
-        assert (await anext_frame(iterator)).startswith(b"event: next-hello")
-        await apublish("poll:1", Patches(None).refresh(zone="results"))
-        assert b"\nevent: next-patches\n" in await anext_frame(iterator)
-        await stream._iterator.aclose()
-        assert memory_broker._subscribers == {}
+        async with SseReader(stream) as events:
+            assert (await anext(events)).event == "next-hello"
+            await apublish("poll:1", Patches(None).refresh(zone="results"))
+            assert (await anext(events)).event == "next-patches"
+        assert streams.live() == 0
 
     asyncio.run(scenario())
 
 
 @pytest.mark.django_db(transaction=True)
 def test_stale_cookie_of_an_authenticated_user_is_a_revocation(
-    memory_broker: MemoryBroker,
+    memory_broker: MemoryBroker, streams: LiveStreams
 ) -> None:
     user = get_user_model().objects.create_user(username="gone", password="x")
     request = _stale_anonymous_request(RequestFactory())
@@ -849,7 +836,7 @@ def test_stale_cookie_of_an_authenticated_user_is_a_revocation(
     chunks = list(stream.streaming_content)
     assert len(chunks) == 1
     assert chunks[0].startswith(b"retry: ")
-    assert memory_broker._subscribers == {}
+    assert streams.live() == 0
 
 
 @pytest.mark.django_db(transaction=True)
