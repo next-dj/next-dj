@@ -13,6 +13,7 @@ from .errors import (
 from .frames import Close
 from .messages import Message, Position
 from .redis import RedisBroker
+from .replay import Replay, ReplayingBroker
 from .socket import Handshake, SocketPort, TopicSocket
 from .tickets import TicketClaims, verify_ticket
 from .topics import TopicStream
@@ -30,6 +31,8 @@ __all__ = [
     "Message",
     "Position",
     "RedisBroker",
+    "Replay",
+    "ReplayingBroker",
     "SocketPort",
     "TicketClaims",
     "TicketIntrospectionView",

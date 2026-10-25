@@ -35,7 +35,7 @@ testing = [
     "defusedxml>=0.7",
 ]
 broker = [
-    "redis>=5",
+    "redis>=8",
 ]
 
 [project.urls]
@@ -65,6 +65,7 @@ dev = [
     "markdown>=3.7",
     "time-machine>=2.16",
     "fakeredis[lua]>=2",
+    "redis>=8",
     "pytest-randomly==5.0.0",
     "defusedxml==0.7.1",
     "types-defusedxml==0.7.0.20260504",

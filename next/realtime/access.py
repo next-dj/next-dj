@@ -15,7 +15,6 @@ from django.conf import settings
 from django.contrib import auth
 from django.contrib.sessions.backends.base import SessionBase
 from django.contrib.sessions.backends.db import SessionStore as DatabaseStore
-from django.core.exceptions import SuspiciousOperation
 from django.db import close_old_connections
 from django.http import HttpRequest, parse_cookie
 from django.utils.module_loading import import_string
@@ -251,25 +250,33 @@ def cookie_session_key(cookie: str) -> str | None:
     return parse_cookie(cookie).get(settings.SESSION_COOKIE_NAME) or None
 
 
-def live_session(session_key: str) -> tuple[object, int | None] | None:
-    """Return a stored session's user and seconds left, or None once it is gone.
+def _live_store(session_key: str) -> tuple[SessionBase, int | None] | None:
+    """Return a stored session and its seconds left, or None once it is gone.
 
-    Nothing is written, so the load neither rotates the key nor extends the expiry.
+    A failed load drops the key, the one signal signed cookies share with every engine.
     """
     engine = import_string(f"{settings.SESSION_ENGINE}.SessionStore")
     store = _read_only(engine)(session_key)
-    try:
-        stored = store.exists(session_key)
-    except SuspiciousOperation:
-        return None
-    if not stored:
-        return None
     expiry = store.get("_session_expiry")
     if store.session_key != session_key:
         return None
     left = _seconds_left(store, expiry)
     if left is not None and left <= 0:
         return None
+    return store, left
+
+
+def session_alive(session_key: str) -> bool:
+    """Whether a handshake would find the stored session live, without its user."""
+    return _live_store(session_key) is not None
+
+
+def live_session(session_key: str) -> tuple[object, int | None] | None:
+    """Return a stored session's user and seconds left, or None once it is gone."""
+    live = _live_store(session_key)
+    if live is None:
+        return None
+    store, left = live
     return session_user(store), left
 
 
@@ -281,5 +288,6 @@ __all__ = [
     "heartbeat_seconds",
     "live_session",
     "run_detached",
+    "session_alive",
     "session_user",
 ]

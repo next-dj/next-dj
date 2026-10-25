@@ -74,7 +74,7 @@ A WebSocket carries the same frames as JSON objects with a ``type`` of ``hello``
 The client keeps an ``(epoch, seq)`` cursor per topic and ignores duplicates.
 It requests the page's bound zones after a gap in the same epoch, an epoch different from the cursor, a nonzero sequence on the first hello, or a changed position on reconnect.
 An epoch change means the broker counter started again, so the client resets that topic's cursor to the new position.
-The broker does not replay events.
+A reconnect replays only what the broker's bounded log still holds, see :doc:`/content/topics/realtime`.
 A zone GET restores current state through the page's guards and the subscriber's cookies.
 
 Patch verbs

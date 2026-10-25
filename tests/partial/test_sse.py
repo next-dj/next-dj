@@ -7,7 +7,7 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.test import AsyncRequestFactory, RequestFactory, override_settings
 
-from next.partial import Envelope, Patches, PatchEventStream
+from next.partial import Envelope, JsonPartialProtocolBackend, Patches, PatchEventStream
 from next.partial.manager import partial_backend_manager
 from next.partial.signals import sse_stream_closed, sse_stream_opened
 from next.partial.sse import _heartbeat_seconds, _retry_ms
@@ -538,6 +538,49 @@ class TestTopicFrameMetadata:
         )
         frames = _consume(PatchEventStream(request_obj, [message]))
         assert b'"topic":"room:1","epoch":"e9","seq":3' in frames[1]
+
+
+class _NumberedStream(PatchEventStream):
+    def event_id(self, message) -> str | None:
+        return f"{message.epoch}:{message.seq}"
+
+
+class _TextBackend(JsonPartialProtocolBackend):
+    def sse_event(self, envelope: Envelope) -> str:
+        return f"event: custom\ndata: {len(envelope.ops)}\n\n"
+
+
+def _topic_message(epoch: str = "e9") -> SimpleNamespace:
+    return SimpleNamespace(
+        envelope=_patches().envelope(), topic="room:1", seq=3, epoch=epoch
+    )
+
+
+class TestTopicFrameEventId:
+    """The writer prefixes the id its `event_id` hook names to a topic frame."""
+
+    def test_the_default_hook_names_no_id(self, request_obj: object) -> None:
+        frames = _consume(PatchEventStream(request_obj, [_topic_message()]))
+        assert frames[1].startswith(b"event: next-patches\n")
+        assert b"id:" not in frames[1]
+
+    def test_a_named_id_leads_the_frame(self, request_obj: object) -> None:
+        frames = _consume(_NumberedStream(request_obj, [_topic_message(), _patches()]))
+        assert frames[1].startswith(b"id: e9:3\nevent: next-patches\n")
+        assert b"id:" not in frames[2]
+
+    @pytest.mark.parametrize("epoch", ["e9\nevent: x", "e9\r", "e9\0"])
+    def test_an_id_that_would_break_the_framing_is_dropped(
+        self, request_obj: object, epoch: str
+    ) -> None:
+        frames = _consume(_NumberedStream(request_obj, [_topic_message(epoch)]))
+        assert frames[1].startswith(b"event: next-patches\n")
+
+    def test_a_custom_protocol_backend_keeps_the_id(self, request_obj: object) -> None:
+        backend = {"BACKEND": "tests.partial.test_sse._TextBackend", "OPTIONS": {}}
+        with _partial_backend_config([backend]):
+            frames = _consume(_NumberedStream(request_obj, [_topic_message()]))
+        assert frames[1] == b"id: e9:3\nevent: custom\ndata: 1\n\n"
 
 
 class TestEndFrame:

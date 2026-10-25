@@ -14,8 +14,9 @@ The socket is part of the framework and runs on plain ASGI, so no extra package 
 Mount the socket
 ----------------
 
-The socket rechecks its session on the server while it stays open, so ``SESSION_ENGINE`` must store sessions on the server.
-The ``db``, ``cache``, ``cached_db``, and ``file`` engines work, while the signed-cookie engine is unsupported and ``manage.py check`` reports it as ``next.W142``.
+The socket rechecks its session on the server while it stays open, so ``SESSION_ENGINE`` should store sessions on the server.
+The ``db``, ``cache``, ``cached_db``, and ``file`` engines work.
+The signed-cookie engine re-signs its cookie on every session save, which breaks the ticket of a socket that opens after the save, and ``manage.py check`` reports it as ``next.W142``, see :ref:`topics-realtime`.
 
 Wrap Django's HTTP ASGI application with ``next.realtime.application``.
 The helper serves the socket at ``REALTIME['WS_PATH']``, loads the Django session from the cookie, and validates the WebSocket Origin the way Django's CSRF check does.
@@ -42,7 +43,8 @@ The browser first performs its normal GET with ``X-Next-Transport: ws``.
 The response is ``application/json`` and contains a short-lived, session-bound ticket scoped to that stream's topics, transform, and authorizer.
 The client sends the ticket in its first WebSocket frame and never places it in the URL.
 A reply of any other content type, or no reply within five seconds, sends the client to SSE.
-When the cookie names a session that no longer exists, negotiation issues the ticket against a fresh session and the response rewrites the session cookie.
+When the handshake would treat the cookie as dead, because it names a session that no longer exists or an expired one, negotiation issues the ticket against a fresh session and the response rewrites the session cookie.
+The signed-cookie engine has no session to create there, so a forged or expired signed cookie gets the ``503`` a first visit gets, see :ref:`topics-realtime`.
 
 Once the socket opens, its ``hello`` must arrive within five seconds, or the client closes the socket as a transient failure and retries.
 The server sends ``hello`` only after the broker confirms the subscription, and ``RedisBroker`` waits up to five seconds for that confirmation.
@@ -303,10 +305,11 @@ The reply names the user as a string primary key, or ``null`` for an anonymous v
 It leaves ``expires_in`` out when the session store keeps no deadline the endpoint can read, as the ``cache`` engine does, and then the gateway picks its own interval for the ``1001`` close.
 A wrong bearer, a bad ticket, a lost session or a refused topic answers ``403`` with ``{"error": "denied"}`` whatever the reason.
 An authorized call whose body is not JSON or lacks a string ``ticket`` or ``cookie`` answers ``400`` with ``{"error": "invalid"}``.
-The endpoint refuses a ticket whose stream uses a transform, because a gateway cannot run Python, so a stream that serves such a gateway publishes already-filtered topics.
+The endpoint refuses a ticket whose stream uses a transform by default, because a gateway cannot run Python, so a stream that serves such a gateway publishes already-filtered topics.
 
 The default caller check is the bearer token.
 A subclass of ``TicketIntrospectionView`` overrides ``authorize(request)`` to check a client certificate header or a source address, and ``grant(claims, user, expires_in)`` to change the reply.
+A gateway that applies the transform itself gets a reply from an override of ``grant_transformed(claims, user, expires_in)``, which returns ``None`` by default and so keeps the ``403``.
 Mount the subclass on a path of its own with ``as_view()``.
 
 Pick a broker for several processes

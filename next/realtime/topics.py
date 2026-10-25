@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import math
 import time
-from contextlib import suppress
+from contextlib import aclosing, suppress
 from http import HTTPStatus
-from typing import TYPE_CHECKING, TypeGuard
+from typing import TYPE_CHECKING, TypeGuard, override
 
 from django.core.handlers.asgi import ASGIRequest
 from django.http import StreamingHttpResponse
@@ -28,6 +28,7 @@ from .delivery import transformed
 from .errors import BrokerConnectionError, InvalidTicketError, InvalidTopicError
 from .manager import broker_manager
 from .messages import validate_topic
+from .replay import acatch_up, catch_up, format_event_id, parse_event_id
 from .tickets import MAX_REFERENCE_LENGTH, issue_ticket
 from .transports import active_transports
 
@@ -37,11 +38,18 @@ _TOPIC_DENIED = StreamEnd("auth")
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+    from collections.abc import (
+        AsyncGenerator,
+        AsyncIterator,
+        Callable,
+        Iterator,
+        Mapping,
+    )
 
     from django.http import HttpRequest
 
     from next.partial.envelope import Envelope
+    from next.partial.stream import StreamPosition
 
     from .backends import BrokerBackend
     from .messages import Message, Position
@@ -95,6 +103,7 @@ class TopicStream(PatchStreamWriter):
             msg = "TopicStream heartbeat_seconds must be a positive finite number."
             raise ValueError(msg)
         self.topics = selected
+        self._single = len(selected) == 1
         self._subscription_timeout = interval
         self._access = AccessCheck(
             selected,
@@ -111,6 +120,7 @@ class TopicStream(PatchStreamWriter):
         super().__init__(
             request, source, heartbeat_seconds=interval, server_clock=self._server_clock
         )
+        self._cursors = self.replay_cursors(request)
 
     def _negotiate(self, request: HttpRequest) -> None:
         """Become the JSON ticket reply, or the reply that sends the client to SSE."""
@@ -146,24 +156,33 @@ class TopicStream(PatchStreamWriter):
             yield from self._sync_subscription(backend)
 
     def _sync_subscription(self, backend: BrokerBackend) -> Iterator[TopicItem]:
-        """Yield one subscription's hello and messages until access is revoked."""
+        """Yield replayed misses, hello and live messages until access is revoked."""
         with backend.subscribe(
             self.topics, timeout=self._subscription_timeout
         ) as stream:
-            yield self._hello(backend.positions(self.topics))
+            positions = backend.positions(self.topics)
+            for missed in catch_up(backend, self._cursors, positions):
+                verdict = self._access.check()
+                if verdict is not Access.GRANTED:
+                    yield from _closing_frames(verdict)
+                    return
+                yield self._sync_item(missed)
+            yield self._hello(positions)
             for message in stream:
                 verdict = self._access.check()
                 if verdict is not Access.GRANTED:
                     yield from _closing_frames(verdict)
                     return
-                if message is None:
-                    yield None
-                    continue
-                result = self._transform_message(message)
-                if result is not None:
-                    yield result
-                else:
-                    yield StreamSkip(message.topic, message.seq, message.epoch)
+                yield self._sync_item(message)
+
+    def _sync_item(self, message: Message | None) -> Message | StreamSkip | None:
+        """Transform one message in this thread, or acknowledge its skip."""
+        if message is None:
+            return None
+        result = self._transform_message(message)
+        if result is None:
+            return StreamSkip(message.topic, message.seq, message.epoch)
+        return result
 
     async def _async_messages(
         self, backend: BrokerBackend | None = None
@@ -177,19 +196,35 @@ class TopicStream(PatchStreamWriter):
         if backend is None:
             backend = await broker_manager.aget()
         try:
-            async with backend.asubscribe(
-                self.topics, timeout=self._subscription_timeout
-            ) as stream:
-                yield self._hello(await backend.apositions(self.topics))
-                async for message in stream:
-                    verdict = await self._access.acheck()
-                    if verdict is not Access.GRANTED:
-                        for frame in _closing_frames(verdict):
-                            yield frame
-                        return
-                    yield await self._async_item(message)
+            async with aclosing(self._async_subscription(backend)) as items:
+                async for item in items:
+                    yield item
         except BrokerConnectionError:
             return
+
+    async def _async_subscription(
+        self, backend: BrokerBackend
+    ) -> AsyncGenerator[TopicItem]:
+        """Yield replayed misses, hello and live messages until access is revoked."""
+        async with backend.asubscribe(
+            self.topics, timeout=self._subscription_timeout
+        ) as stream:
+            positions = await backend.apositions(self.topics)
+            for missed in await acatch_up(backend, self._cursors, positions):
+                verdict = await self._access.acheck()
+                if verdict is not Access.GRANTED:
+                    for frame in _closing_frames(verdict):
+                        yield frame
+                    return
+                yield await self._async_item(missed)
+            yield self._hello(positions)
+            async for message in stream:
+                verdict = await self._access.acheck()
+                if verdict is not Access.GRANTED:
+                    for frame in _closing_frames(verdict):
+                        yield frame
+                    return
+                yield await self._async_item(message)
 
     async def _async_item(self, message: Message | None) -> Message | StreamSkip | None:
         """Transform one message off the event loop, or acknowledge its skip."""
@@ -199,6 +234,29 @@ class TopicStream(PatchStreamWriter):
         if result is None:
             return StreamSkip(message.topic, message.seq, message.epoch)
         return result
+
+    def replay_cursors(self, request: HttpRequest) -> Mapping[str, Position]:
+        """Return the cursor a single-topic stream resumes from, its `Last-Event-ID`.
+
+        A malformed id or a multi-topic stream resumes from nothing and resyncs.
+        """
+        if len(self.topics) != 1:
+            return {}
+        cursor = parse_event_id(request.headers.get("Last-Event-ID"))
+        return {} if cursor is None else {self.topics[0]: cursor}
+
+    @override
+    def event_id(self, frame: StreamPosition | StreamHello) -> str | None:
+        """Return the `<epoch>:<seq>` id `EventSource` resends as `Last-Event-ID`.
+
+        Hello carries the topic position, so a reconnect before any message resumes.
+        """
+        if not self._single:
+            return None
+        if isinstance(frame, StreamHello):
+            epoch, seq = frame.topics[self.topics[0]]
+            return format_event_id(epoch, seq)
+        return format_event_id(frame.epoch, frame.seq)
 
     def _hello(self, positions: Mapping[str, Position]) -> StreamHello:
         """Announce the subscription's starting position on every topic."""

@@ -5,6 +5,8 @@ import fakeredis.aioredis
 import pytest
 import redis
 import redis.asyncio
+from django.contrib.sessions.backends.cache import SessionStore
+from django.http import HttpRequest
 from django.test import override_settings
 
 from next.realtime import MemoryBroker, RedisBroker
@@ -13,6 +15,7 @@ from next.realtime.manager import broker_manager
 
 _REDIS_BACKEND = "next.realtime.RedisBroker"
 _MEMORY_BACKEND = "next.realtime.MemoryBroker"
+_CACHE_SESSIONS = "django.contrib.sessions.backends.cache"
 
 
 @pytest.fixture()
@@ -63,3 +66,13 @@ def configured_broker(
         config = {"BACKEND": _MEMORY_BACKEND}
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"BROKER": config}}):
         yield broker_manager.get()
+
+
+@pytest.fixture()
+def session_request() -> Iterator[HttpRequest]:
+    """Carry a saved session from the cache engine, the live path without a database."""
+    with override_settings(SESSION_ENGINE=_CACHE_SESSIONS):
+        request = HttpRequest()
+        request.session = SessionStore()
+        request.session.save()
+        yield request

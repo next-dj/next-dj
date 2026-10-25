@@ -20,6 +20,7 @@ from .errors import BrokerConnectionError, InvalidTicketError
 from .frames import Close, FrameError, Pong, Subscribe
 from .manager import broker_manager
 from .messages import Message, Position
+from .replay import acatch_up
 from .tickets import TicketClaims, resolve_claims, verify_ticket
 
 
@@ -125,6 +126,8 @@ class TopicSocket:
     It knows no ASGI, so any server or gateway drives it through a `SocketPort`.
     """
 
+    _access: AccessCheck
+
     def __init__(
         self,
         port: SocketPort,
@@ -175,8 +178,19 @@ class TopicSocket:
         subscription: AsyncIterator[Message | None],
         positions: Mapping[str, Position],
     ) -> None:
-        """Send what the client missed before hello, a no-op without replay."""
-        del subscription, positions
+        """Replay what the client cursor missed before hello, nothing on a gap.
+
+        Later messages wait in the subscription, passed so an override can read it.
+        """
+        del subscription
+        cursors = {
+            topic: cursor
+            for topic, cursor in self.cursor.items()
+            if isinstance(cursor, Position)
+        }
+        for message in await acatch_up(self._broker, cursors, positions):
+            await self._grant()
+            await self._writer.send(await self._frame_for(message))
 
     async def tick(self) -> None:
         """Answer an idle heartbeat of the subscription with a ping."""
@@ -220,11 +234,11 @@ class TopicSocket:
 
     async def _deliver(self, frame: Subscribe) -> None:
         """Stream the granted topics in the fixed subscribe, catch up, hello order."""
-        claims, access = await self._subscribe(frame)
-        await self._grant(access)
+        claims = await self._subscribe(frame)
+        await self._grant()
         broker = self._broker
         if broker is None:
-            broker = await broker_manager.aget()
+            broker = self._broker = await broker_manager.aget()
         async with broker.asubscribe(
             claims.topics, timeout=self._heartbeat
         ) as subscription:
@@ -239,13 +253,13 @@ class TopicSocket:
                 )
             )
             async for item in subscription:
-                await self._grant(access)
+                await self._grant()
                 if item is None:
                     await self.tick()
                 else:
                     await self._writer.send(await self._frame_for(item))
 
-    async def _subscribe(self, frame: Subscribe) -> tuple[TicketClaims, AccessCheck]:
+    async def _subscribe(self, frame: Subscribe) -> TicketClaims:
         """Verify the ticket for the handshake session and build its access check."""
         try:
             claims = verify_ticket(frame.ticket, self.handshake.session_key)
@@ -254,7 +268,7 @@ class TopicSocket:
             await self._fail(Close.SESSION)
         self.cursor = frame.cursor
         self._transform = transform
-        access = AccessCheck(
+        self._access = AccessCheck(
             claims.topics,
             authorizer=authorizer,
             session_key=self.handshake.session_key,
@@ -262,11 +276,11 @@ class TopicSocket:
             interval=self._heartbeat,
             expires_at=self.handshake.expires_at,
         )
-        access.bind()
-        return claims, access
+        self._access.bind()
+        return claims
 
-    async def _grant(self, access: AccessCheck) -> None:
-        verdict = await access.acheck()
+    async def _grant(self) -> None:
+        verdict = await self._access.acheck()
         if verdict is not Access.GRANTED:
             await self._fail(_CLOSE_CODES[verdict])
 

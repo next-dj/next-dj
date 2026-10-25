@@ -179,7 +179,7 @@ A multi worker deployment must trigger the reload from every worker or restart t
 Realtime publication has the same process boundary.
 The default ``MemoryBroker`` reaches subscribers in one process only, so multi-worker deployments need a shared broker.
 Use ``RedisBroker`` from the ``broker`` extra.
-A detected sequence gap is repaired by a guarded HTTP zone resync rather than broker replay.
+A reconnect catches up from the broker's bounded replay log, and any gap the log cannot cover is repaired by a guarded HTTP zone resync.
 
 A WebSocket loads its session from the cookie at the handshake and on every recheck.
 A recheck also runs at the session's deadline, so a session that ``SESSION_SAVE_EVERY_REQUEST`` renews keeps its socket open.

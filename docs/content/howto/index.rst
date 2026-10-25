@@ -163,6 +163,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`fan-out-across-processes-with-redis`
    Share realtime publications across workers through Redis.
 
+:doc:`write-a-broker-backend`
+   Carry topics through a custom broker with replay, or reach Redis through Sentinel.
+
 :doc:`split-settings-per-environment`
    Split settings into base, dev, and prod modules.
 
@@ -218,6 +221,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    stream-over-websockets
    count-down-to-a-server-deadline
    fan-out-across-processes-with-redis
+   write-a-broker-backend
    split-settings-per-environment
 
 .. seealso::

@@ -1140,6 +1140,7 @@ dev = [
     { name = "pytest-lazy-fixtures" },
     { name = "pytest-randomly" },
     { name = "pytest-xdist" },
+    { name = "redis" },
     { name = "ruff" },
     { name = "time-machine" },
     { name = "twine" },
@@ -1178,7 +1179,7 @@ load = [
 requires-dist = [
     { name = "defusedxml", marker = "extra == 'testing'", specifier = ">=0.7" },
     { name = "django", specifier = ">=5.2,<6.2" },
-    { name = "redis", marker = "extra == 'broker'", specifier = ">=5" },
+    { name = "redis", marker = "extra == 'broker'", specifier = ">=8" },
 ]
 provides-extras = ["broker", "testing"]
 
@@ -1211,6 +1212,7 @@ dev = [
     { name = "pytest-lazy-fixtures", specifier = "==1.4.1" },
     { name = "pytest-randomly", specifier = "==5.0.0" },
     { name = "pytest-xdist", specifier = "==3.8.0" },
+    { name = "redis", specifier = ">=8" },
     { name = "ruff", specifier = "==0.16.9" },
     { name = "time-machine", specifier = ">=2.16" },
     { name = "twine", specifier = "==7.0.0" },

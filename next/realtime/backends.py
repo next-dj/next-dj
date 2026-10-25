@@ -1,12 +1,20 @@
 """Broker contracts and the process-local in-memory implementation."""
 
 import asyncio
+import math
 import secrets
 import threading
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
-from collections.abc import AsyncIterator, Iterable, Iterator, Mapping, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Callable,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from contextlib import (
     AbstractAsyncContextManager,
     AbstractContextManager,
@@ -18,6 +26,7 @@ from typing import override
 from next.partial.envelope import Envelope
 
 from .messages import Message, Position, validate_topic
+from .replay import INCOMPLETE, Replay, replay_after, replay_window
 
 
 _NEVER_PUBLISHED = Position(epoch="", seq=0)
@@ -126,19 +135,47 @@ class _AsyncSubscriber:
             return message
 
 
-class MemoryBroker(BrokerBackend):
-    """Deliver messages within one process using bounded subscriber queues."""
+def _since_idle(
+    logged: tuple[Message, ...], now: float, ttl: float
+) -> tuple[Message, ...]:
+    """Keep the messages written since the log last sat a whole TTL without a write.
 
-    def __init__(self, config: Mapping[str, object] | None = None) -> None:
-        """Create the broker and validate its per-subscriber queue size."""
+    A write after such a pause restarts the log, as the expiry of a Redis key does.
+    """
+    if not logged or now - logged[-1].published_at >= ttl:
+        return ()
+    for index in range(len(logged) - 1, 0, -1):
+        if logged[index].published_at - logged[index - 1].published_at >= ttl:
+            return logged[index:]
+    return logged
+
+
+class MemoryBroker(BrokerBackend):
+    """Deliver messages within one process using bounded subscriber queues.
+
+    A replay log expires `REPLAY['TTL']` seconds after its last `published_at` stamp.
+    """
+
+    def __init__(
+        self,
+        config: Mapping[str, object] | None = None,
+        *,
+        clock: Callable[[], float] = time.time,
+        replay: Mapping[str, object] | None = None,
+    ) -> None:
+        """Create the broker and validate its queue size and replay window."""
         super().__init__(config)
         size = self.options.get("QUEUE_SIZE", 256)
         if not isinstance(size, int) or isinstance(size, bool) or size < 1:
             msg = "REALTIME.BROKER.OPTIONS.QUEUE_SIZE must be a positive integer."
             raise ValueError(msg)
         self._queue_size = size
+        self.clock = clock
+        self.replay_size, self.replay_ttl = replay_window(replay)
         self._lock = threading.RLock()
         self._positions: dict[str, Position] = {}
+        self._logs: defaultdict[str, deque[Message]] = defaultdict(self._new_log)
+        self._sweep_at = -math.inf
         self._subscribers: dict[str, set[_SyncSubscriber | _AsyncSubscriber]] = (
             defaultdict(set)
         )
@@ -155,9 +192,12 @@ class MemoryBroker(BrokerBackend):
                 else Position(current.epoch, current.seq + 1)
             )
             self._positions[topic] = position
-            message = Message(
-                topic, position.seq, envelope, time.time(), position.epoch
-            )
+            now = self.clock()
+            message = Message(topic, position.seq, envelope, now, position.epoch)
+            if self.replay_size:
+                if now >= self._sweep_at:
+                    self._sweep(now)
+                self._logs[topic].append(message)
             for subscriber in tuple(self._subscribers.get(topic, ())):
                 if isinstance(subscriber, _SyncSubscriber):
                     with subscriber.condition:
@@ -167,10 +207,43 @@ class MemoryBroker(BrokerBackend):
                     self._remove_subscriber(subscriber)
         return message
 
+    def _sweep(self, now: float) -> None:
+        """Drop the expired logs on the first publish a TTL after the last sweep."""
+        ttl = self.replay_ttl
+        self._logs = defaultdict(
+            self._new_log,
+            {
+                topic: log
+                for topic, log in self._logs.items()
+                if now - log[-1].published_at < ttl
+            },
+        )
+        self._sweep_at = now + ttl
+
+    def _new_log(self) -> deque[Message]:
+        """Start an empty topic log bounded by `REPLAY['SIZE']`."""
+        return deque(maxlen=self.replay_size)
+
     @override
     async def apublish(self, topic: str, envelope: Envelope) -> Message:
         """Publish with the same ordering and fan-out contract as `publish`."""
         return self.publish(topic, envelope)
+
+    def replay(self, topic: str, after: Position) -> Replay:
+        """Return the logged messages after a cursor, incomplete on any gap."""
+        validate_topic(topic)
+        if not self.replay_size:
+            return INCOMPLETE
+        with self._lock:
+            current = self._positions.get(topic, _NEVER_PUBLISHED)
+            log = self._logs.get(topic)
+            logged = () if log is None else tuple(log)
+            now = self.clock()
+        return replay_after(after, current, _since_idle(logged, now, self.replay_ttl))
+
+    async def areplay(self, topic: str, after: Position) -> Replay:
+        """Replay without leaving the event loop, the log lives in this process."""
+        return self.replay(topic, after)
 
     @override
     def subscribe(

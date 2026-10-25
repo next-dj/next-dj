@@ -197,24 +197,3 @@ class SteppingClock:
         """Return the advanced time."""
         self._now += self._step
         return self._now
-
-
-class StubSession:
-    """A persisted session stand-in that needs no database."""
-
-    def __init__(self, session_key: str = "bench-session-key") -> None:
-        """Remember the key the session claims to be saved under."""
-        self.session_key = session_key
-        self.modified = False
-
-    def exists(self, session_key: str) -> bool:
-        """Report every non-empty key as saved."""
-        return bool(session_key)
-
-
-class StubRequest:
-    """A request stand-in that carries only a stub session."""
-
-    def __init__(self) -> None:
-        """Attach a fresh stub session."""
-        self.session = StubSession()

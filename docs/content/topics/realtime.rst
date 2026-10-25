@@ -93,7 +93,7 @@ When the process mounts a ``WebSocketApp``, the client can negotiate a WebSocket
 The signed ticket binds the current session to the topics, transform, and importable ``authorize`` callback chosen by the page.
 The client sends the ticket in its first WebSocket frame and never in the URL.
 The socket checks the request Origin before it accepts, and it rechecks the session and topic access before joining the broker and during the connection.
-WebSocket needs a session engine that stores sessions on the server, so the signed-cookie engine is unsupported and ``next.W142`` reports it.
+WebSocket works best with a session engine that stores sessions on the server, and ``next.W142`` flags the signed-cookie engine, see `Known limitations`_.
 The socket loads its session from the cookie at the handshake and on every recheck, so a session cache that evicts live entries closes sockets with ``4401``.
 Size the session cache for the open connections, or use the ``db`` or ``cached_db`` engine.
 
@@ -129,7 +129,7 @@ Delivery guarantees
 -------------------
 
 Delivery is at most once and best-effort.
-The broker does not replay events, and bounded subscriber queues drop their oldest message when full.
+Bounded subscriber queues drop their oldest message when full, and a reconnect recovers only what the replay log still holds, see `Replay after a reconnect`_.
 The in-memory broker is process-local.
 Use ``RedisBroker`` for multiple workers or hosts, so they share publication and sequence state.
 
@@ -150,6 +150,57 @@ If a broker loses a topic's whole record, epoch and counter together as an evict
 ``on_commit`` prevents subscribers from refreshing before a database commit.
 It does not make broker delivery durable if the broker is unavailable after commit.
 Client disconnect also does not roll back a completed mutation or stop a synchronous ORM operation that is already running.
+
+Replay after a reconnect
+------------------------
+
+Both shipped brokers keep the newest messages of each topic in a bounded log, sized by ``NEXT_FRAMEWORK['REALTIME']['REPLAY']``.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "REALTIME": {
+           "REPLAY": {"SIZE": 100, "TTL": 300},
+       },
+   }
+
+``SIZE`` caps the messages kept per topic and ``TTL`` is how many seconds the log lives after the last publication on the topic.
+``SIZE`` set to ``0`` turns the log off, so every reconnect resynchronises.
+
+A reconnecting stream subscribes, reads the topic positions, and sends the messages its cursor missed up to those positions before ``hello``.
+Replayed messages pass through the subscriber transform and the access check like live ones.
+A topic replays only when the log holds every message from the cursor to the current position in the same epoch.
+A trimmed or expired log, a broker restart, and a new epoch replay nothing for that topic, and ``hello`` then shows the gap so the client resynchronises its zones.
+
+A WebSocket client sends its cursor in the ``sub`` frame on every reconnect.
+An SSE stream over one topic tags ``hello`` and each message and ``skip`` frame with an ``id`` that ``EventSource`` sends back as ``Last-Event-ID`` when it reconnects.
+An SSE stream over several topics carries no ``id`` and resumes through the resync alone.
+:doc:`/content/ref/realtime` describes the order, the id format, and the override points.
+
+An event is not state
+~~~~~~~~~~~~~~~~~~~~~
+
+Replay is a bounded best-effort catch-up, not a record of what happened.
+The log forgets messages past ``SIZE`` and ``TTL``, a broker restart drops it, and the at-most-once rule still holds for a live subscriber whose queue overflows.
+Build pages so that a topic event only says that state may have changed, and let ``hello`` and the zone GET it triggers stay the source of truth.
+A page that renders correctly after a resync renders correctly after any replay too.
+
+Known limitations
+~~~~~~~~~~~~~~~~~
+
+The browser client closes its streams while the tab is hidden and opens them again on return.
+Over SSE that is a new ``EventSource``, which sends no ``Last-Event-ID``, so a stream resumed after a visibility change resynchronises instead of replaying.
+
+The signed-cookie session engine works with WebSocket only in part, and ``next.W142`` reports it.
+
+- A first visit without a session cookie cannot negotiate a ticket, since the engine has no session key before it saves one, and neither can a forged or expired signed cookie.
+  The negotiation answers ``503`` with ``session_unavailable`` and the client falls back to SSE after its retries.
+- Any HTTP response that saves the session re-signs the cookie, so a ticket issued before that save no longer matches the handshake cookie.
+  The socket closes with ``4401`` and the client continues over SSE.
+- A signed cookie stays valid after logout until ``SESSION_COOKIE_AGE`` passes, so logging out leaves an open socket running, and only a password change or an inactive user revokes its session.
+
+The ``db``, ``cache``, ``cached_db``, and ``file`` engines avoid all three.
 
 Listen to topic events
 ----------------------
@@ -184,5 +235,6 @@ See also
    :doc:`/content/howto/stream-live-updates-with-sse` for a short recipe.
    :doc:`/content/howto/fan-out-across-processes-with-redis` for shared broker setup.
    :doc:`/content/howto/stream-over-websockets` for the WebSocket transport.
-   :doc:`/content/ref/realtime` for the broker contract and a custom backend.
+   :doc:`/content/ref/realtime` for the broker contract and the replay order.
+   :doc:`/content/howto/write-a-broker-backend` for a custom backend with replay.
    :doc:`/content/topics/partial-rendering/sse` for the underlying SSE transport.

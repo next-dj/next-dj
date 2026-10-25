@@ -1,7 +1,8 @@
 import pytest
+from django.http import HttpRequest
 
 from next.realtime.tickets import issue_ticket, verify_ticket
-from tests.benchmarks.factories import StubRequest, topic_names
+from tests.benchmarks.factories import topic_names
 from tests.support.realtime import ROOM_AUTHORIZER_REF
 
 
@@ -10,8 +11,8 @@ class TestBenchTicket:
 
     @pytest.mark.parametrize("count", [1, 64])
     @pytest.mark.benchmark(group="realtime.ticket")
-    def test_issue(self, count: int, benchmark) -> None:
-        request = StubRequest()
+    def test_issue(self, count: int, session_request: HttpRequest, benchmark) -> None:
+        request = session_request
         topics = tuple(topic_names(count))
 
         def run() -> object:
@@ -25,8 +26,8 @@ class TestBenchTicket:
 
     @pytest.mark.parametrize("count", [1, 64])
     @pytest.mark.benchmark(group="realtime.ticket")
-    def test_verify(self, count: int, benchmark) -> None:
-        request = StubRequest()
+    def test_verify(self, count: int, session_request: HttpRequest, benchmark) -> None:
+        request = session_request
         grant = issue_ticket(
             request,
             tuple(topic_names(count)),

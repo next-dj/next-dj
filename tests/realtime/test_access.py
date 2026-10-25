@@ -19,6 +19,7 @@ from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.test import RequestFactory, override_settings
 from django.utils import timezone
+from django.utils.module_loading import import_string
 
 from next.realtime import access as access_module
 from next.realtime.access import (
@@ -34,6 +35,8 @@ from next.realtime.access import (
 _CACHE = "django.contrib.sessions.backends.cache"
 _CACHED_DB = "django.contrib.sessions.backends.cached_db"
 _FILE = "django.contrib.sessions.backends.file"
+_SIGNED = "django.contrib.sessions.backends.signed_cookies"
+_ENGINES = ("django.contrib.sessions.backends.db", _CACHE, _CACHED_DB, _FILE, _SIGNED)
 
 
 @dataclass
@@ -582,3 +585,92 @@ class _Engines:
 def test_read_only_store_keeps_the_signing_salt_of_a_nested_engine() -> None:
     engine = _Engines.SessionStore
     assert access_module._read_only(engine)().key_salt == engine().key_salt
+
+
+@pytest.fixture(params=_ENGINES)
+def session_engine(
+    request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[str]:
+    monkeypatch.setattr(FileStore, "_storage_path", str(tmp_path), raising=False)
+    with override_settings(
+        SESSION_ENGINE=request.param, SESSION_FILE_PATH=str(tmp_path)
+    ):
+        yield request.param
+
+
+def _engine_login(engine: str):
+    user = get_user_model().objects.create_user(username="reader", password="secret")
+    request = RequestFactory().get("/")
+    request.session = import_string(f"{engine}.SessionStore")()
+    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+    request.session.save()
+    return user, request.session.session_key
+
+
+@pytest.mark.django_db(transaction=True)
+def test_live_session_loads_the_logged_in_user_of_every_engine(
+    session_engine: str,
+) -> None:
+    user, key = _engine_login(session_engine)
+    live = live_session(key)
+    assert live is not None
+    assert getattr(live[0], "pk", None) == user.pk
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("mode", ["sync", "async"])
+def test_access_check_keeps_a_logged_in_session_of_every_engine_granted(
+    session_engine: str, mode: str
+) -> None:
+    user, key = _engine_login(session_engine)
+    seen: list[object] = []
+
+    def authorizer(current: object, _topic: str) -> bool:
+        seen.append(getattr(current, "pk", None))
+        return True
+
+    clock = FakeClock()
+    check = AccessCheck(
+        ("a",),
+        authorizer=authorizer,
+        session_key=key,
+        user=user,
+        interval=1,
+        clock=clock,
+    )
+    check.bind()
+    for now in (0, 2, 4):
+        clock.now = now
+        verdict = check.check() if mode == "sync" else asyncio.run(check.acheck())
+        assert verdict is Access.GRANTED
+    assert seen == [user.pk] * 3
+
+
+@pytest.mark.django_db(transaction=True)
+def test_access_check_revokes_a_changed_password_under_every_engine(
+    session_engine: str,
+) -> None:
+    user, key = _engine_login(session_engine)
+    clock = FakeClock()
+    check = AccessCheck(
+        ("a",), authorizer=None, session_key=key, user=user, interval=1, clock=clock
+    )
+    assert check.check() is Access.GRANTED
+    user.set_password("changed")
+    user.save(update_fields=["password"])
+    clock.now = 2
+    assert check.check() is Access.SESSION_REVOKED
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(SESSION_ENGINE=_SIGNED)
+def test_live_session_of_a_tampered_signed_cookie_is_gone() -> None:
+    _user, key = _engine_login(_SIGNED)
+    assert live_session(f"{key}x") is None
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(SESSION_ENGINE=_SIGNED, SESSION_COOKIE_AGE=-1)
+def test_live_session_of_an_expired_signed_cookie_is_gone() -> None:
+    _user, key = _engine_login(_SIGNED)
+    assert live_session(key) is None

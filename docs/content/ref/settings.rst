@@ -245,6 +245,7 @@ Default value.
        "WS_PATH": "/_next/ws/",
        "HEARTBEAT": 25.0,
        "GATEWAY_TOKEN": None,
+       "REPLAY": {"SIZE": 100, "TTL": 300},
    }
 
 ``BROKER.BACKEND`` names a ``BrokerBackend`` subclass, and ``BROKER.OPTIONS`` belongs to that backend.
@@ -265,7 +266,8 @@ Default value.
      - The Redis connection URL.
    * - ``next.realtime.RedisBroker``
      - ``PREFIX``, ``"next"``
-     - The prefix of every counter key and Pub/Sub channel.
+     - The prefix of every counter key, replay log key, and Pub/Sub channel.
+       It needs a non-colon character and no ``{`` or ``}``, since a brace moves the Redis Cluster hash tag off the topic name, and ``next.E192`` reports any other value.
    * - ``next.realtime.RedisBroker``
      - ``HEALTH_CHECK_INTERVAL``, ``10.0``
      - Seconds a Redis connection may stay idle before the client pings it before its next command.
@@ -278,7 +280,7 @@ Default value.
        ``max_connections`` is the usual entry, see :doc:`/content/howto/fan-out-across-processes-with-redis`.
 
 ``MemoryBroker`` serves one process and does not coordinate sequence numbers across processes.
-``RedisBroker`` needs the ``broker`` extra.
+``RedisBroker`` needs the ``broker`` extra, which installs ``redis`` 8 or newer.
 A custom backend reads its own ``OPTIONS`` keys, which ``manage.py check`` leaves alone.
 
 ``TRANSPORTS`` defaults to ``None`` and selects ``["ws", "sse"]`` in a process that mounts a ``WebSocketApp``, or ``["sse"]`` otherwise.
@@ -296,6 +298,14 @@ At that interval a quiet stream writes a heartbeat comment or a WebSocket ``ping
 ``TopicStream(heartbeat_seconds=...)`` overrides it for one SSE stream.
 The ``SSE.HEARTBEAT_SECONDS`` option of ``PARTIAL_BACKENDS`` is a separate setting that times only a manual ``PatchEventStream`` with an async source, while ``SSE.RETRY_MS`` stays the reconnect hint of both stream kinds.
 Keep ``HEARTBEAT`` below the shortest idle timeout of every proxy and load balancer in front of the streams.
+
+``REPLAY`` sizes the per-topic log a reconnecting stream catches up from.
+``SIZE`` is the number of newest messages kept per topic, an integer from ``0`` to ``10000`` that ``next.E189`` enforces, and ``0`` turns the log off.
+``TTL`` is the number of seconds the log of a topic lives after its last publication, a positive number up to ``31536000``, one year, that ``next.E190`` enforces.
+A missing key takes its default, any key besides the two is reported as ``next.E035``, and a ``REPLAY`` value that is not a mapping is reported as ``next.E191``.
+A broker reads the window once when it is created, so a settings reload rebuilds the broker with it.
+With a nonzero ``SIZE`` and a ``BACKEND`` that keeps no log, ``next.W143`` warns that every reconnect resynchronises.
+See :doc:`realtime` for the replay order and the guarantees it gives.
 
 See :doc:`realtime` for the broker API and :doc:`/content/howto/stream-over-websockets` for setup.
 

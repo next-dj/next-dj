@@ -82,6 +82,16 @@ class TicketIntrospectionView(View):
             body["expires_in"] = expires_in
         return body
 
+    def grant_transformed(
+        self, claims: TicketClaims, user: object, expires_in: int | None
+    ) -> dict[str, Any] | None:
+        """Return the body of an accepted ticket naming a transform, or None to refuse.
+
+        A gateway outside Python cannot run the transform, so the default refuses.
+        """
+        del claims, user, expires_in
+        return None
+
     def post(self, request: HttpRequest) -> JsonResponse:
         """Answer the grant of a live ticket, or the one refusal for anything else."""
         if not self.authorize(request):
@@ -95,19 +105,18 @@ class TicketIntrospectionView(View):
             claims, user, expires_in = _vouch(ticket, session_key)
         except InvalidTicketError as exc:
             return _refuse(str(exc))
-        return _answer(self.grant(claims, user, expires_in), 200)
+        if claims.transform_ref is None:
+            return _answer(self.grant(claims, user, expires_in), 200)
+        body = self.grant_transformed(claims, user, expires_in)
+        if body is None:
+            return _refuse("The ticket names a transform the view does not serve.")
+        return _answer(body, 200)
 
 
 def _vouch(ticket: str, session_key: str) -> tuple[TicketClaims, object, int | None]:
-    """Verify a ticket against its live session and the authorizer it names.
-
-    A gateway outside Python cannot run a transform, so a ticket naming one fails.
-    """
+    """Verify a ticket against its live session and the authorizer it names."""
     claims = verify_ticket(ticket, session_key)
-    transform, authorizer = resolve_claims(claims)
-    if transform is not None:
-        msg = "The ticket names a transform a gateway cannot apply."
-        raise InvalidTicketError(msg)
+    _transform, authorizer = resolve_claims(claims)
     live = live_session(session_key)
     if live is None:
         msg = "The ticket's session is gone."

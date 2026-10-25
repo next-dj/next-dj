@@ -125,7 +125,7 @@ Review these when the project publishes ``TopicStream`` updates.
   The authorizer and the session are rechecked at most once per heartbeat, so a revocation takes effect within about two heartbeat intervals.
 - Keep ``ALLOWED_HOSTS``, ``CSRF_TRUSTED_ORIGINS`` and ``SECURE_PROXY_SSL_HEADER`` accurate, or pass an explicit ``origins`` list, because the WebSocket Origin check follows Django's CSRF rule and refuses a connection with no Origin.
   Behind a proxy, enable ``USE_X_FORWARDED_HOST`` when the proxy rewrites ``Host``.
-- Store sessions on the server when WebSockets are enabled, because ``next.W142`` reports the signed-cookie engine.
+- Store sessions on the server when WebSockets are enabled, because ``next.W142`` reports the signed-cookie engine, whose re-signed cookie breaks tickets and outlives logout.
   Size a cache-backed session store for the open sockets, since an evicted session closes its socket with ``4401``.
 - Set ``REALTIME['GATEWAY_TOKEN']`` from the environment when a gateway outside Python calls the ticket introspection endpoint.
 - Treat topic delivery as best-effort notification.

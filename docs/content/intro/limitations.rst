@@ -36,7 +36,8 @@ A ``lazy=`` zone fills through a later client round trip, and a ``poll=`` zone r
 A slow zone holds its response instead of streaming a placeholder, because there is no server-side suspense flush.
 Realtime uses Server-Sent Events by default and supports optional WebSocket delivery under ASGI through the built-in ``WebSocketApp``.
 Both transports carry server-authored notifications from server to client, and form actions remain the path for client mutations.
-Replay and presence are outside the current model.
+Replay is a bounded catch-up from a per-topic log, and a reconnect the log cannot cover resynchronises its zones over HTTP, see :doc:`/content/topics/realtime`.
+Presence is outside the current model.
 
 Single partial backend
 ----------------------

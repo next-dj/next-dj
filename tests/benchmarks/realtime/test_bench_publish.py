@@ -19,6 +19,22 @@ class TestBenchBrokerPublish:
         envelope = small_envelope()
         benchmark(redis_broker.publish, "room:1", envelope)
 
+    @pytest.mark.benchmark(group="realtime.publish")
+    def test_memory_broker_without_replay(self, benchmark) -> None:
+        broker = MemoryBroker(replay={"SIZE": 0})
+        envelope = small_envelope()
+        benchmark(broker.publish, "room:1", envelope)
+
+    @pytest.mark.benchmark(group="realtime.publish")
+    def test_redis_broker_without_replay(self, fake_redis, benchmark) -> None:
+        """Runs the sequence script with the log off, the cost before replay."""
+        broker = RedisBroker({"OPTIONS": {"URL": "redis://fake/1"}}, replay={"SIZE": 0})
+        envelope = small_envelope()
+        try:
+            benchmark(broker.publish, "room:1", envelope)
+        finally:
+            broker.close()
+
 
 class TestBenchPublicPublish:
     """Publish through the configured broker, paying validation, snapshot and signal."""

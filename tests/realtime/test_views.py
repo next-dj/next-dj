@@ -1,6 +1,7 @@
 import json
 import logging
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from django.contrib.auth import get_user_model, login
@@ -13,6 +14,7 @@ from django.utils import timezone
 
 from next.realtime import TicketIntrospectionView
 from next.realtime.messages import Message
+from next.realtime.tickets import TicketClaims
 from next.testing.realtime import SocketTicket, issue_socket_ticket
 from tests.support.realtime import ROOM_AUTHORIZER_REF
 
@@ -27,13 +29,37 @@ class HeaderTokenView(TicketIntrospectionView):
         return request.headers.get("X-Gateway") == "trusted"
 
 
+class TransformServingView(TicketIntrospectionView):
+    def grant_transformed(
+        self, claims: TicketClaims, user: object, expires_in: int | None
+    ) -> dict[str, Any] | None:
+        if claims.transform_ref != f"{__name__}.skip_everything":
+            return None
+        body = self.grant(claims, user, expires_in)
+        return {**body, "transform": claims.transform_ref}
+
+
+class BodyOnlyView(TicketIntrospectionView):
+    def grant(
+        self, claims: TicketClaims, user: object, expires_in: int | None
+    ) -> dict[str, Any]:
+        del user, expires_in
+        return {"rooms": list(claims.topics)}
+
+
 def skip_everything(message: Message) -> None:
     del message
+
+
+def keep_everything(message: Message) -> Message:
+    return message
 
 
 urlpatterns = [
     path("gateway/", include("next.realtime.urls")),
     path("custom/", HeaderTokenView.as_view(), name="custom"),
+    path("transforms/", TransformServingView.as_view(), name="transforms"),
+    path("body/", BodyOnlyView.as_view(), name="body"),
 ]
 
 pytestmark = [pytest.mark.django_db(transaction=True), pytest.mark.urls(__name__)]
@@ -262,3 +288,51 @@ def test_a_subclass_swaps_the_caller_check(ticket: SocketTicket) -> None:
         _body(ticket), authorization=None, url=url, **{"X-Gateway": "trusted"}
     )
     assert response.status_code == 200
+
+
+def _transform_ticket(transform: str = "skip_everything") -> SocketTicket:
+    return issue_socket_ticket(
+        ("room:1",),
+        authorizer_ref=ROOM_AUTHORIZER_REF,
+        transform_ref=f"{__name__}.{transform}",
+    )
+
+
+def test_a_subclass_serves_a_transform_ticket_in_its_own_shape() -> None:
+    ticket = _transform_ticket()
+    response = _introspect(_body(ticket), url=reverse("transforms"))
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["transform"] == f"{__name__}.skip_everything"
+    assert payload["topics"] == ["room:1"]
+    assert "no-store" in response["Cache-Control"]
+
+
+def test_a_subclass_refuses_a_transform_it_does_not_serve(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ticket = _transform_ticket("keep_everything")
+    with caplog.at_level(logging.INFO, logger="next.realtime.views"):
+        _assert_denied(_introspect(_body(ticket), url=reverse("transforms")))
+    assert "transform" in caplog.text
+
+
+def test_a_served_transform_still_needs_a_live_session() -> None:
+    ticket = _transform_ticket()
+    ticket.session.delete()
+    _assert_denied(_introspect(_body(ticket), url=reverse("transforms")))
+
+
+def test_a_ticket_without_a_transform_skips_the_transform_hook(
+    ticket: SocketTicket,
+) -> None:
+    response = _introspect(_body(ticket), url=reverse("transforms"))
+    assert response.status_code == 200
+    assert "transform" not in response.json()
+
+
+def test_a_subclass_changing_the_body_still_refuses_a_transform() -> None:
+    plain = issue_socket_ticket(("room:1",), authorizer_ref=ROOM_AUTHORIZER_REF)
+    response = _introspect(_body(plain), url=reverse("body"))
+    assert response.json() == {"rooms": ["room:1"]}
+    _assert_denied(_introspect(_body(_transform_ticket()), url=reverse("body")))

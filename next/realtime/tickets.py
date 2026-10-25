@@ -16,6 +16,7 @@ from django.utils.module_loading import import_string
 
 from next.conf import next_framework_settings
 
+from .access import session_alive
 from .errors import InvalidTicketError
 from .messages import validate_topic
 
@@ -99,7 +100,7 @@ def issue_ticket(
     """Sign the exact topic grant after the guarded stream view has run.
 
     The grant is held to the verifier's caps, so a ticket it signs always verifies.
-    A stale session cookie gets a fresh session, as a first visit does.
+    A cookie the handshake would find dead gets a fresh session, as a first visit does.
     """
     _require_grant(topics, transform_ref, authorizer_ref)
     session = getattr(request, "session", None)
@@ -107,10 +108,11 @@ def issue_ticket(
         msg = "WebSocket ticket negotiation requires Django SessionMiddleware."
         raise InvalidTicketError(msg)
     session_key = session.session_key
-    if session_key is None or not session.exists(session_key):
+    if session_key is None or not session_alive(session_key):
         session.create()
         session.modified = True
-        session_key = session.session_key
+        fresh = session.session_key
+        session_key = None if fresh == session_key else fresh
     if not isinstance(session_key, str) or not session_key:
         msg = "A persistent Django session is required for WebSocket tickets."
         raise InvalidTicketError(msg)

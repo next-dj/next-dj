@@ -23,7 +23,9 @@ if TYPE_CHECKING:
 
     from django.http import HttpRequest
 
+    from .backends import PartialProtocolBackend
     from .patches import Patches
+    from .stream import StreamPosition
 
     class _TopicMessage(Protocol):
         @property
@@ -55,6 +57,7 @@ _SSE_OPTION = "SSE"
 _DEFAULT_RETRY_MS = 3000
 _DEFAULT_HEARTBEAT_SECONDS = 25.0
 _CONTROL_FRAMES = (StreamHello, StreamSkip, StreamEnd)
+_UNSAFE_ID = frozenset("\r\n\0")
 
 
 class PatchStreamWriter(StreamingHttpResponse):
@@ -218,30 +221,57 @@ class PatchStreamWriter(StreamingHttpResponse):
         """Serialize a patch envelope or stream control object as an SSE frame."""
         backend = partial_backend_manager.get()
         if isinstance(item, StreamHello):
-            return backend.sse_hello(item.as_dict()).encode("utf-8")
+            return self._identified(item, backend.sse_hello(item.as_dict()))
         if isinstance(item, StreamSkip):
-            return backend.sse_skip(item.as_dict()).encode("utf-8")
+            return self._identified(item, backend.sse_skip(item.as_dict()))
         if isinstance(item, StreamEnd):
             return backend.sse_end(item.as_dict()).encode("utf-8")
         message_envelope = getattr(item, "envelope", None)
-        meta = StreamMeta(server_time=int(self._server_clock() * 1000))
+        server_time = int(self._server_clock() * 1000)
         if isinstance(item, Envelope):
             envelope = item
         elif isinstance(message_envelope, Envelope):
-            envelope = message_envelope
-            message = cast("_TopicMessage", item)
-            meta = StreamMeta(
-                server_time=int(self._server_clock() * 1000),
-                topic=message.topic,
-                seq=message.seq,
-                epoch=message.epoch,
+            return self._message_frame(
+                backend, message_envelope, cast("_TopicMessage", item), server_time
             )
         elif callable(message_envelope):
             envelope = cast("Callable[[], Envelope]", message_envelope)()
         else:
             msg = "SSE patch sources must yield a patch, envelope, or message."
             raise TypeError(msg)
+        meta = StreamMeta(server_time=server_time)
         return backend.sse_stream_event(envelope, meta).encode("utf-8")
+
+    def _message_frame(
+        self,
+        backend: "PartialProtocolBackend",
+        envelope: Envelope,
+        message: "_TopicMessage",
+        server_time: int,
+    ) -> bytes:
+        """Serialize one topic message with the `id` line the stream gives it."""
+        meta = StreamMeta(
+            server_time=server_time,
+            topic=message.topic,
+            seq=message.seq,
+            epoch=message.epoch,
+        )
+        return self._identified(message, backend.sse_stream_event(envelope, meta))
+
+    def _identified(self, item: "StreamPosition | StreamHello", frame: str) -> bytes:
+        """Prefix a codec frame with the `id` line `event_id` gives it, if any."""
+        event_id = self.event_id(item)
+        if event_id is not None and _UNSAFE_ID.isdisjoint(event_id):
+            frame = f"id: {event_id}\n{frame}"
+        return frame.encode("utf-8")
+
+    def event_id(self, frame: "StreamPosition | StreamHello") -> str | None:
+        """Return the SSE `id` of a message, skip or hello frame, or None to send none.
+
+        The writer adds it to the codec's frame, so every protocol backend carries it.
+        """
+        del frame
+        return None
 
     def _announce_opened(self) -> None:
         """Report that streaming starts when iteration produces its first frame."""

@@ -104,13 +104,6 @@ jobs:
         node-version: 24
         cache: 'npm'
         cache-dependency-path: examples/*/package-lock.json
-    - name: Build the Vite bundles
-      run: |
-        shopt -s nullglob
-        for config in examples/*/vite.config.*; do
-          dir=$(dirname "$config")
-          (cd "$dir" && npm ci && npm run build)
-        done
     - name: Install uv
       uses: astral-sh/setup-uv@v6
       with:
@@ -158,7 +151,7 @@ jobs:
     - name: Run the browser end-to-end suites
       env:
         PYTEST_E2E: uv run --no-project pytest -o faulthandler_timeout=120
-      run: make test-examples-e2e
+      run: make test-examples-e2e E2E_BUILD=build-examples
     - name: Upload playwright artifacts from failures
       if: failure()
       uses: actions/upload-artifact@v4

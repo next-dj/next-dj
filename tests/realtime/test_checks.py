@@ -9,6 +9,7 @@ from django.urls import URLPattern, include, path
 
 from next.realtime import MemoryBroker, TicketIntrospectionView, checks
 from next.realtime.checks import check_realtime_settings, check_ticket_introspection
+from next.realtime.replay import MAX_SIZE, MAX_TTL
 
 
 class CustomBroker(MemoryBroker):
@@ -182,6 +183,33 @@ def test_check_accepts_a_positive_heartbeat(heartbeat: object) -> None:
     assert _ids(NEXT_FRAMEWORK={"REALTIME": {"HEARTBEAT": heartbeat}}) == set()
 
 
+@pytest.mark.parametrize(
+    ("replay", "expected"),
+    [
+        ({"SIZE": 0, "TTL": 1}, set()),
+        ({"SIZE": 500}, set()),
+        ({"TTL": 0.5}, set()),
+        (None, {"next.E191"}),
+        ({"SIZE": -1}, {"next.E189"}),
+        ({"SIZE": 1.5}, {"next.E189"}),
+        ({"SIZE": True}, {"next.E189"}),
+        ({"SIZE": MAX_SIZE + 1}, {"next.E189"}),
+        ({"SIZE": MAX_SIZE}, set()),
+        ({"TTL": 0}, {"next.E190"}),
+        ({"TTL": math.inf}, {"next.E190"}),
+        ({"TTL": "300"}, {"next.E190"}),
+        ({"TTL": 1e300}, {"next.E190"}),
+        ({"TTL": MAX_TTL + 0.5}, {"next.E190"}),
+        ({"TTL": MAX_TTL}, set()),
+        ({"SIZE": -1, "TTL": 0}, {"next.E189", "next.E190"}),
+        ({"LIMIT": 1}, {"next.E035"}),
+        ([100, 300], {"next.E191"}),
+    ],
+)
+def test_check_validates_the_replay_log(replay: object, expected: set[str]) -> None:
+    assert _ids(NEXT_FRAMEWORK={"REALTIME": {"REPLAY": replay}}) == expected
+
+
 def test_check_explicit_ws_accepts_a_configured_deployment() -> None:
     assert _ids(NEXT_FRAMEWORK=_WS) == set()
 
@@ -191,7 +219,42 @@ def test_check_warns_ws_without_session_middleware() -> None:
 
 
 def test_check_warns_ws_with_signed_cookie_sessions() -> None:
-    assert _ids(NEXT_FRAMEWORK=_WS, SESSION_ENGINE=_SIGNED) == {"next.W142"}
+    with override_settings(NEXT_FRAMEWORK=_WS, SESSION_ENGINE=_SIGNED):
+        (warning,) = check_realtime_settings()
+    assert warning.id == "next.W142"
+    assert "re-signs on every session save" in warning.msg
+    assert "4401" in warning.msg
+    assert "outlives logout" in warning.hint
+
+
+_PLAIN = "tests.support.realtime.PlainBroker"
+
+
+@pytest.mark.parametrize("replay", [{}, {"REPLAY": {"SIZE": 5}}])
+def test_check_warns_a_replay_log_on_a_broker_without_replay(replay: dict) -> None:
+    config = {"REALTIME": {"BROKER": {"BACKEND": _PLAIN}, **replay}}
+    with override_settings(NEXT_FRAMEWORK=config):
+        (warning,) = check_realtime_settings()
+    assert warning.id == "next.W143"
+    assert "PlainBroker keeps no replay log" in warning.msg
+    assert "replay() and areplay()" in warning.hint
+
+
+@pytest.mark.parametrize(
+    ("backend", "replay"),
+    [
+        (_PLAIN, {"SIZE": 0}),
+        (_PLAIN, {"SIZE": -1}),
+        ("next.realtime.MemoryBroker", {"SIZE": 5}),
+        ("next.realtime.RedisBroker", {"SIZE": 5}),
+        ("tests.realtime.test_checks.CustomBroker", None),
+    ],
+)
+def test_check_replay_warning_stays_quiet_when_replay_is_served_or_off(
+    backend: str, replay: object
+) -> None:
+    config = {"REALTIME": {"BROKER": {"BACKEND": backend}, "REPLAY": replay}}
+    assert "next.W143" not in _ids(NEXT_FRAMEWORK=config)
 
 
 @pytest.mark.parametrize("engine", ["django.contrib.sessions.backends.db", "missing"])
@@ -230,6 +293,16 @@ def test_check_rejects_an_invalid_redis_health_check_interval(interval: object) 
 @pytest.mark.parametrize("interval", [0, 2.5])
 def test_check_accepts_a_redis_health_check_interval(interval: object) -> None:
     assert _ids(NEXT_FRAMEWORK=_redis(HEALTH_CHECK_INTERVAL=interval)) == set()
+
+
+@pytest.mark.parametrize("prefix", ["", ":::", "{tenant}", "app{x", "a}b", 7])
+def test_check_rejects_a_redis_prefix_that_breaks_the_hash_tag(prefix: object) -> None:
+    assert _ids(NEXT_FRAMEWORK=_redis(PREFIX=prefix)) == {"next.E192"}
+
+
+@pytest.mark.parametrize("prefix", ["next", "app:realtime:"])
+def test_check_accepts_a_redis_prefix(prefix: object) -> None:
+    assert _ids(NEXT_FRAMEWORK=_redis(PREFIX=prefix)) == set()
 
 
 @pytest.mark.parametrize(

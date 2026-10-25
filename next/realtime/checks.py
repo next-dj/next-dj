@@ -27,7 +27,16 @@ from next.conf.defaults import USER_SETTING
 from next.conf.scopes import scope_value
 
 from .backends import BrokerBackend, MemoryBroker
-from .redis import RedisBroker
+from .redis import RedisBroker, valid_prefix
+from .replay import (
+    MAX_SIZE,
+    MAX_TTL,
+    REPLAY_KEYS,
+    ReplayingBroker,
+    replay_window,
+    valid_size,
+    valid_ttl,
+)
 from .views import TicketIntrospectionView
 
 
@@ -35,7 +44,15 @@ _PREFIX = "NEXT_FRAMEWORK['REALTIME']"
 _OPTIONS = f"{_PREFIX}['BROKER']['OPTIONS']"
 _BROKER_KEYS = frozenset({"BACKEND", "OPTIONS"})
 _REALTIME_KEYS = frozenset(
-    {"BROKER", "TRANSPORTS", "TICKET_MAX_AGE", "WS_PATH", "HEARTBEAT", "GATEWAY_TOKEN"}
+    {
+        "BROKER",
+        "TRANSPORTS",
+        "TICKET_MAX_AGE",
+        "WS_PATH",
+        "HEARTBEAT",
+        "GATEWAY_TOKEN",
+        "REPLAY",
+    }
 )
 _BROKER_OPTIONS = {
     "next.realtime.backends.MemoryBroker": frozenset({"QUEUE_SIZE"}),
@@ -105,6 +122,7 @@ def check_realtime_settings(*args, **kwargs) -> list[CheckMessage]:
             )
         )
     errors.extend(_heartbeat_errors(realtime))
+    errors.extend(_replay_errors(realtime))
     errors.extend(_broker_errors(broker))
     errors.extend(_deployment_warnings(realtime))
     return errors
@@ -127,6 +145,44 @@ def _heartbeat_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
             id="next.E185",
         )
     ]
+
+
+def _replay_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
+    """Require a replay mapping with a SIZE up to MAX_SIZE and a TTL up to a year.
+
+    Only a missing key falls back to the default, an explicit None is not a mapping.
+    """
+    if "REPLAY" not in realtime:
+        return []
+    replay = realtime["REPLAY"]
+    if not isinstance(replay, Mapping):
+        return [
+            Error(
+                f"{_PREFIX}['REPLAY'] must be a mapping.", obj=settings, id="next.E191"
+            )
+        ]
+    errors = errors_for_unknown_keys(
+        dict(replay), allowed=REPLAY_KEYS, prefix=f"{_PREFIX}['REPLAY']"
+    )
+    if "SIZE" in replay and not valid_size(replay["SIZE"]):
+        errors.append(
+            Error(
+                f"{_PREFIX}['REPLAY']['SIZE'] must be an integer from 0 to {MAX_SIZE}.",
+                hint="Use 0 to turn the replay log off.",
+                obj=settings,
+                id="next.E189",
+            )
+        )
+    if "TTL" in replay and not valid_ttl(replay["TTL"]):
+        errors.append(
+            Error(
+                f"{_PREFIX}['REPLAY']['TTL'] must be a positive number of seconds "
+                f"up to {MAX_TTL}, one year.",
+                obj=settings,
+                id="next.E190",
+            )
+        )
+    return errors
 
 
 def _transport_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
@@ -181,9 +237,15 @@ def websocket_deployment_messages() -> list[CheckMessage]:
     if _signed_cookie_sessions():
         messages.append(
             DjangoWarning(
-                "WebSocket subscriptions need server-side sessions, but "
-                "SESSION_ENGINE stores them in signed cookies.",
-                hint="Use the db, cache, cached_db, or file session engine.",
+                "WebSocket tickets are bound to the session key, which the "
+                "signed-cookie SESSION_ENGINE re-signs on every session save, so the "
+                "handshake cookie stops matching the ticket and the socket closes "
+                "with 4401.",
+                hint=(
+                    "Use the db, cache, cached_db, or file session engine. A signed "
+                    "cookie also outlives logout until SESSION_COOKIE_AGE, only a "
+                    "password change or an inactive user revokes it."
+                ),
                 obj=settings,
                 id="next.W142",
             )
@@ -223,6 +285,7 @@ def _broker_errors(broker: Mapping[str, object]) -> list[CheckMessage]:
     if isinstance(options, Mapping):
         errors.extend(_option_errors(options, backend_class))
     errors.extend(_dependency_errors(backend, backend_class))
+    errors.extend(_replay_warnings(backend_class))
     if backend_class is None:
         errors.append(
             Error(
@@ -233,6 +296,32 @@ def _broker_errors(broker: Mapping[str, object]) -> list[CheckMessage]:
             )
         )
     return errors
+
+
+def _replay_warnings(backend_class: type[BrokerBackend] | None) -> list[CheckMessage]:
+    """Flag a replay log the configured broker cannot serve, so resumes resync."""
+    if backend_class is None or issubclass(backend_class, ReplayingBroker):
+        return []
+    try:
+        size, _ = replay_window()
+    except ImproperlyConfigured:
+        return []
+    if size == 0:
+        return []
+    return [
+        DjangoWarning(
+            f"{_PREFIX}['REPLAY']['SIZE'] is {size}, but "
+            f"{backend_class.__qualname__} keeps no replay log, so every reconnect "
+            "resyncs from hello.",
+            hint=(
+                "Implement replay() and areplay() from "
+                "next.realtime.replay.ReplayingBroker on the broker, or set SIZE "
+                "to 0."
+            ),
+            obj=settings,
+            id="next.W143",
+        )
+    ]
 
 
 def _broker_class(backend: object) -> type[BrokerBackend] | None:
@@ -279,8 +368,18 @@ def _option_errors(
 
 
 def _redis_option_errors(options: Mapping[str, object]) -> list[CheckMessage]:
-    """Check the Redis interval and client keywords the broker validates at startup."""
+    """Check the Redis prefix, interval and client keywords the broker validates."""
     errors: list[CheckMessage] = []
+    if "PREFIX" in options and not valid_prefix(options["PREFIX"]):
+        errors.append(
+            Error(
+                f"{_OPTIONS}['PREFIX'] must be a string with a non-colon character "
+                "and no { or }.",
+                hint="A brace moves the Redis Cluster hash tag off the topic name.",
+                obj=settings,
+                id="next.E192",
+            )
+        )
     interval = options.get("HEALTH_CHECK_INTERVAL", 0)
     if (
         not isinstance(interval, int | float)

@@ -1,14 +1,27 @@
 import base64
 import hashlib
+from collections.abc import Iterator
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import create_autospec
 
 import pytest
 import time_machine
 from django.conf import settings
+from django.contrib.auth import (
+    BACKEND_SESSION_KEY,
+    HASH_SESSION_KEY,
+    SESSION_KEY,
+    get_user_model,
+)
 from django.contrib.sessions.backends.db import SessionStore
+from django.contrib.sessions.backends.file import SessionStore as FileStore
+from django.contrib.sessions.middleware import SessionMiddleware
 from django.core import signing
-from django.test import RequestFactory
+from django.db import connection
+from django.http import HttpRequest, HttpResponse
+from django.test import RequestFactory, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils.crypto import salted_hmac
 
 from next.realtime.errors import InvalidTicketError
@@ -282,3 +295,129 @@ def test_resolve_claims_unimportable_or_non_callable_reference_is_a_bad_ticket(
     claims = TicketClaims(("room",), transform_ref, authorizer_ref)
     with pytest.raises(InvalidTicketError, match="does not import"):
         resolve_claims(claims)
+
+
+_STORED = tuple(
+    f"django.contrib.sessions.backends.{name}"
+    for name in ("db", "cache", "cached_db", "file")
+)
+_SIGNED = "django.contrib.sessions.backends.signed_cookies"
+
+
+def _engine_settings(
+    engine: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> override_settings:
+    monkeypatch.setattr(FileStore, "_storage_path", str(tmp_path), raising=False)
+    return override_settings(SESSION_ENGINE=engine, SESSION_FILE_PATH=str(tmp_path))
+
+
+@pytest.fixture(params=(*_STORED, _SIGNED))
+def any_engine(
+    request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[str]:
+    with _engine_settings(request.param, tmp_path, monkeypatch):
+        yield request.param
+
+
+@pytest.fixture(params=_STORED)
+def stored_engine(
+    request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[str]:
+    with _engine_settings(request.param, tmp_path, monkeypatch):
+        yield request.param
+
+
+def _write_session(request: HttpRequest) -> HttpResponse:
+    request.session["visit"] = 1
+    return HttpResponse()
+
+
+def _issue(request: HttpRequest) -> HttpResponse:
+    grant = issue_ticket(
+        request, ("room",), transform_ref=None, authorizer_ref=_AUTHORIZER
+    )
+    return HttpResponse(grant.token)
+
+
+def _respond(view, cookie: str | None) -> tuple[HttpResponse, str | None]:
+    request = RequestFactory().get("/updates/")
+    if cookie is not None:
+        request.COOKIES[settings.SESSION_COOKIE_NAME] = cookie
+    response = SessionMiddleware(view)(request)
+    morsel = response.cookies.get(settings.SESSION_COOKIE_NAME)
+    return response, cookie if morsel is None else morsel.value
+
+
+@pytest.mark.django_db(transaction=True)
+def test_ticket_for_an_established_session_keeps_the_cookie_it_binds(
+    any_engine: str,
+) -> None:
+    del any_engine
+    _response, cookie = _respond(_write_session, None)
+    assert cookie is not None
+    response, held = _respond(_issue, cookie)
+    assert settings.SESSION_COOKIE_NAME not in response.cookies
+    assert held == cookie
+    assert verify_ticket(response.content.decode(), held).topics == ("room",)
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("cookie", [None, "stale-session-key-0001"])
+def test_ticket_without_a_live_session_binds_the_cookie_it_sets(
+    stored_engine: str, cookie: str | None
+) -> None:
+    del stored_engine
+    response, held = _respond(_issue, cookie)
+    assert held is not None
+    assert held != cookie
+    assert verify_ticket(response.content.decode(), held).topics == ("room",)
+
+
+@override_settings(SESSION_ENGINE=_SIGNED)
+def test_ticket_without_a_signed_cookie_session_raises() -> None:
+    with pytest.raises(InvalidTicketError, match="persistent Django session"):
+        _respond(_issue, None)
+
+
+@override_settings(SESSION_ENGINE=_SIGNED)
+@pytest.mark.parametrize(
+    "cookie",
+    ["forged:value:unsigned", signing.dumps({"a": 1})],
+    ids=["forged", "foreign-salt"],
+)
+def test_ticket_for_a_signed_cookie_the_handshake_rejects_raises(cookie: str) -> None:
+    with pytest.raises(InvalidTicketError, match="persistent Django session"):
+        _respond(_issue, cookie)
+
+
+@pytest.mark.django_db()
+@override_settings(SESSION_ENGINE="django.contrib.sessions.backends.db")
+def test_ticket_for_an_expired_stored_session_binds_a_fresh_one() -> None:
+    expired = SessionStore()
+    expired["visit"] = 1
+    expired.set_expiry(datetime(2000, 1, 1, tzinfo=UTC))
+    expired.save()
+    response, held = _respond(_issue, expired.session_key)
+    assert held not in {None, expired.session_key}
+    assert verify_ticket(response.content.decode(), held).topics == ("room",)
+
+
+@pytest.mark.django_db()
+@override_settings(SESSION_ENGINE="django.contrib.sessions.backends.db")
+def test_ticket_for_a_signed_in_session_never_loads_its_user() -> None:
+    user = get_user_model().objects.create_user(username="reader", password="x")
+    stored = SessionStore()
+    stored[SESSION_KEY] = str(user.pk)
+    stored[HASH_SESSION_KEY] = user.get_session_auth_hash()
+    stored[BACKEND_SESSION_KEY] = settings.AUTHENTICATION_BACKENDS[0]
+    stored.save()
+    request = RequestFactory().get("/updates/")
+    request.session = SessionStore(stored.session_key)
+    with CaptureQueriesContext(connection) as queries:
+        grant = issue_ticket(
+            request, ("room",), transform_ref=None, authorizer_ref=_AUTHORIZER
+        )
+    assert verify_ticket(grant.token, stored.session_key).topics == ("room",)
+    tables = " ".join(query["sql"] for query in queries.captured_queries)
+    assert "django_session" in tables
+    assert "auth_user" not in tables

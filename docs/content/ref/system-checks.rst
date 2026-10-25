@@ -917,6 +917,23 @@ Errors
        The endpoint refuses every gateway until a token is set.
        Setting a long random token, or overriding ``authorize`` in a subclass, clears it.
      - ``next.realtime.checks``
+   * - ``next.E189``
+     - ``NEXT_FRAMEWORK['REALTIME']['REPLAY']['SIZE']`` is not an integer from ``0`` to ``10000``.
+       A boolean, a float, a negative number, and anything above ``10000`` all fail it, and ``0`` is accepted and turns the replay log off.
+       The cap bounds the read of a whole topic log that every replay makes.
+     - ``next.realtime.checks``
+   * - ``next.E190``
+     - ``NEXT_FRAMEWORK['REALTIME']['REPLAY']['TTL']`` is not a positive number of seconds up to ``31536000``, one year.
+       A boolean, a string, zero, a negative value, ``inf``, ``nan``, and anything above a year all fail it, and the cap keeps the Redis ``PEXPIRE`` milliseconds far inside what Redis accepts.
+     - ``next.realtime.checks``
+   * - ``next.E191``
+     - ``NEXT_FRAMEWORK['REALTIME']['REPLAY']`` is set to something other than a mapping.
+       Leaving the key out keeps the default window.
+     - ``next.realtime.checks``
+   * - ``next.E192``
+     - The ``PREFIX`` option of ``RedisBroker`` is not a string with a non-colon character, or it holds ``{`` or ``}``.
+       A brace moves the Redis Cluster hash tag off the topic name, so the two keys of a topic no longer share a slot.
+     - ``next.realtime.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -1298,9 +1315,14 @@ Warnings
      - ``next.realtime.checks``
    * - ``next.W142``
      - The WebSocket transport is enabled while ``SESSION_ENGINE`` is the signed-cookie engine.
-       A socket rechecks its session on the server, and a signed-cookie session has no server-side record to recheck.
+       A ticket is bound to the session key, which that engine re-signs on every session save, so the handshake cookie stops matching the ticket and the socket closes with ``4401``.
+       A signed cookie also outlives logout until ``SESSION_COOKIE_AGE``, and only a password change or an inactive user revokes it.
        Switching to the ``db``, ``cache``, ``cached_db`` or ``file`` engine clears it.
        A ``WebSocketApp`` logs the same warning when it is created.
+     - ``next.realtime.checks``
+   * - ``next.W143``
+     - ``NEXT_FRAMEWORK['REALTIME']['REPLAY']['SIZE']`` is above zero while the configured broker class is no ``ReplayingBroker``, so every reconnect resynchronises from ``hello``.
+       Implementing ``replay`` and ``areplay`` on the broker, or setting ``SIZE`` to ``0``, clears it.
      - ``next.realtime.checks``
 
 Codes are assigned per check and are not contiguous.

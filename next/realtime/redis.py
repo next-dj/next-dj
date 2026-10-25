@@ -25,7 +25,7 @@ from contextlib import (
     contextmanager,
 )
 from types import ModuleType, TracebackType
-from typing import Any, Protocol, override
+from typing import Any, Protocol, TypeGuard, override
 from weakref import WeakKeyDictionary
 
 from django.core.exceptions import ImproperlyConfigured
@@ -35,6 +35,7 @@ from next.partial.envelope import Envelope
 from .backends import BrokerBackend
 from .errors import BrokerConnectionError
 from .messages import Message, Position, validate_topic
+from .replay import INCOMPLETE, Replay, replay_after, replay_window
 
 
 logger = logging.getLogger(__name__)
@@ -44,8 +45,8 @@ _DEFAULT_PREFIX = "next"
 _DEFAULT_HEALTH_CHECK_INTERVAL = 10.0
 _SUBSCRIBE_TIMEOUT = 5.0
 _LIVENESS = "next-realtime-liveness"
+_BRACES = frozenset("{}")
 _UNCONFIRMED = "Redis did not confirm the subscription in time."
-_EXHAUSTED = frozenset({"Too many connections", "No connection available."})
 _POOL_EXHAUSTED = (
     "The Redis connection pool is exhausted, raise max_connections in "
     "REALTIME.BROKER.OPTIONS.CLIENT."
@@ -54,14 +55,31 @@ _PUBLISH_SCRIPT = """
 redis.call('HINCRBY', KEYS[1], 'seq', 1)
 local state = redis.call('HMGET', KEYS[1], 'seq', 'epoch')
 local epoch = state[2]
+local size = tonumber(ARGV[4])
 if state[1] == '1' or not epoch then
   epoch = ARGV[3]
   redis.call('HSET', KEYS[1], 'epoch', epoch)
+  if size > 0 then
+    redis.call('DEL', KEYS[2])
+  end
 end
-local head = '{"seq":' .. state[1] .. ',"epoch":"' .. epoch .. '",'
-redis.call('PUBLISH', ARGV[1], head .. string.sub(ARGV[2], 2))
+local payload = '{"seq":' .. state[1] .. ',"epoch":"' .. epoch .. '",'
+  .. string.sub(ARGV[2], 2)
+if size > 0 then
+  redis.call('LPUSH', KEYS[2], payload)
+  redis.call('LTRIM', KEYS[2], 0, size - 1)
+  redis.call('PEXPIRE', KEYS[2], ARGV[5])
+end
+redis.call('PUBLISH', ARGV[1], payload)
 return {state[1], epoch}
 """
+
+
+def valid_prefix(value: object) -> TypeGuard[str]:
+    """Whether a `PREFIX` has a non-colon character and no brace that moves the tag."""
+    return (
+        isinstance(value, str) and bool(value.rstrip(":")) and _BRACES.isdisjoint(value)
+    )
 
 
 class _PubSub(Protocol):
@@ -96,7 +114,7 @@ class _TransportFailures:
     ) -> None:
         """Translate a transport failure so callers catch one broker error type."""
         if isinstance(error, self.errors):
-            if isinstance(error, self.exhausted) or str(error) in _EXHAUSTED:
+            if isinstance(error, self.exhausted):
                 logger.warning(_POOL_EXHAUSTED)
             msg = f"The Redis broker connection failed: {error}"
             raise BrokerConnectionError(msg) from error
@@ -132,7 +150,12 @@ class _Watch:
 class RedisBroker(BrokerBackend):
     """Deliver messages across processes through Redis Pub/Sub."""
 
-    def __init__(self, config: Mapping[str, object] | None = None) -> None:
+    def __init__(
+        self,
+        config: Mapping[str, object] | None = None,
+        *,
+        replay: Mapping[str, object] | None = None,
+    ) -> None:
         """Create the sync Redis client and prepare per-loop async clients."""
         super().__init__(config)
         try:
@@ -151,8 +174,11 @@ class RedisBroker(BrokerBackend):
         if not isinstance(url, str) or not url:
             msg = "REALTIME.BROKER.OPTIONS.URL must be a non-empty Redis URL."
             raise ImproperlyConfigured(msg)
-        if not isinstance(prefix, str) or not prefix:
-            msg = "REALTIME.BROKER.OPTIONS.PREFIX must be a non-empty string."
+        if not valid_prefix(prefix):
+            msg = (
+                "REALTIME.BROKER.OPTIONS.PREFIX must be a string with a non-colon "
+                "character and no { or }."
+            )
             raise ImproperlyConfigured(msg)
         if (
             isinstance(interval, bool)
@@ -166,10 +192,12 @@ class RedisBroker(BrokerBackend):
             )
             raise ImproperlyConfigured(msg)
         self._prefix = prefix.rstrip(":")
-        if not self._prefix:
-            msg = "REALTIME.BROKER.OPTIONS.PREFIX must contain a non-colon character."
-            raise ImproperlyConfigured(msg)
         self._url = url
+        self.replay_size, self.replay_ttl = replay_window(replay)
+        self._window_args = (
+            str(self.replay_size),
+            str(math.ceil(self.replay_ttl * 1000)),
+        )
         self._client_options = self._merged_client_options(interval)
         self._modules: tuple[ModuleType, ModuleType] = (redis, redis_asyncio)
         self._failures = _TransportFailures(
@@ -222,7 +250,7 @@ class RedisBroker(BrokerBackend):
         published_at = time.time()
         with self._failures:
             seq, epoch = self._publish_script(
-                keys=[self._sequence_key(topic)],
+                keys=[self._sequence_key(topic), self._log_key(topic)],
                 args=self._script_args(topic, envelope, published_at),
             )
         return Message(topic, int(seq), envelope, published_at, epoch)
@@ -235,7 +263,7 @@ class RedisBroker(BrokerBackend):
         _, script = self._async_client()
         with self._failures:
             seq, epoch = await script(
-                keys=[self._sequence_key(topic)],
+                keys=[self._sequence_key(topic), self._log_key(topic)],
                 args=self._script_args(topic, envelope, published_at),
             )
         return Message(topic, int(seq), envelope, published_at, epoch)
@@ -370,6 +398,53 @@ class RedisBroker(BrokerBackend):
                 rows = await pipe.execute()
         return self._positions(selected, rows)
 
+    def replay(self, topic: str, after: Position) -> Replay:
+        """Read the topic position and its log in one transaction, then cut the gap."""
+        validate_topic(topic)
+        if not self.replay_size:
+            return INCOMPLETE
+        pipe = self._redis.pipeline(transaction=True)
+        pipe.hmget(self._sequence_key(topic), "seq", "epoch")
+        pipe.lrange(self._log_key(topic), 0, -1)
+        with self._failures:
+            row, logged = pipe.execute()
+        return self._replay(topic, after, row, logged)
+
+    async def areplay(self, topic: str, after: Position) -> Replay:
+        """Read the topic position and its log in one asynchronous transaction."""
+        validate_topic(topic)
+        if not self.replay_size:
+            return INCOMPLETE
+        client, _ = self._async_client()
+        with self._failures:
+            async with client.pipeline(transaction=True) as pipe:
+                pipe.hmget(self._sequence_key(topic), "seq", "epoch")
+                pipe.lrange(self._log_key(topic), 0, -1)
+                row, logged = await pipe.execute()
+        return self._replay(topic, after, row, logged)
+
+    def _replay(
+        self,
+        topic: str,
+        after: Position,
+        row: Sequence[str | None],
+        logged: Sequence[str],
+    ) -> Replay:
+        """Decode the newest-first log down to the cursor and compare the two."""
+        current = self._positions((topic,), (row,))[topic]
+        if after.epoch != current.epoch:
+            return INCOMPLETE
+        messages: list[Message] = []
+        for payload in logged:
+            message = self._decode_message(payload)
+            if message is None:
+                continue
+            if message.seq <= after.seq:
+                break
+            messages.append(message)
+        messages.reverse()
+        return replay_after(after, current, messages)
+
     @override
     def close(self) -> None:
         """Close the sync pool and schedule the close of clients on live loops."""
@@ -436,8 +511,18 @@ class RedisBroker(BrokerBackend):
             return None
         return self._decode_message(event.get("data"))
 
+    def topic_key(self, kind: str, topic: str) -> str:
+        """Return the `seq` or `log` key of a topic, hash-tagged into one Cluster slot.
+
+        The publish script and the replay transaction touch both, so they must share it.
+        """
+        return f"{self._prefix}:{kind}:{{{topic}}}"
+
     def _sequence_key(self, topic: str) -> str:
-        return f"{self._prefix}:seq:{topic}"
+        return self.topic_key("seq", topic)
+
+    def _log_key(self, topic: str) -> str:
+        return self.topic_key("log", topic)
 
     def _channel(self, topic: str) -> str:
         return f"{self._prefix}:topic:{topic}"
@@ -461,6 +546,7 @@ class RedisBroker(BrokerBackend):
             self._channel(topic),
             json.dumps(body, separators=(",", ":")),
             secrets.token_hex(8),
+            *self._window_args,
         ]
 
     @staticmethod

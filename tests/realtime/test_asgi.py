@@ -93,8 +93,8 @@ def test_creating_the_app_logs_deployment_warnings(
         WebSocketApp()
     messages = [record.getMessage() for record in caplog.records]
     assert messages[0].startswith("(next.W141) WebSocket tickets require")
-    assert messages[1].startswith("(next.W142) WebSocket subscriptions need")
-    assert messages[1].endswith("Use the db, cache, cached_db, or file session engine.")
+    assert messages[1].startswith("(next.W142) WebSocket tickets are bound to the")
+    assert "Use the db, cache, cached_db, or file session engine." in messages[1]
 
 
 @pytest.mark.parametrize(

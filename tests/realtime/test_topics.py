@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+import re
 import threading
 from contextlib import asynccontextmanager, contextmanager, nullcontext
 from unittest.mock import create_autospec
@@ -86,7 +87,8 @@ def test_sync_topic_stream_published_message_follows_retry_and_hello(
     frame = next_frame(iterator)
     stream._iterator.close()
 
-    assert frame.startswith(b"event: next-patches")
+    epoch = memory_broker.positions(["poll:1"])["poll:1"].epoch
+    assert frame.startswith(f"id: {epoch}:1\nevent: next-patches\n".encode())
     assert b'"zone":"results"' in frame
     assert b'"topic":"poll:1"' in frame
     assert b'"seq":1' in frame
@@ -287,6 +289,9 @@ def test_websocket_negotiation_discovers_stable_callbacks_and_rejects_bad_paths(
         assert _body(response)["reason"] == "authorization"
 
 
+_SKIP_ONE = re.compile(rb"id: [0-9a-f]{16}:1\nevent: next-skip\n")
+
+
 def test_sync_topic_stream_transform_can_suppress_message(
     memory_broker: MemoryBroker,
 ) -> None:
@@ -300,7 +305,7 @@ def test_sync_topic_stream_transform_can_suppress_message(
     publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
     skipped = next_frame(iterator)
     stream._iterator.close()
-    assert skipped.startswith(b"event: next-skip")
+    assert _SKIP_ONE.match(skipped)
     assert b'"topic":"poll:1","epoch":"' in skipped
     assert b'"seq":1}' in skipped
     assert memory_broker._subscribers == {}
@@ -347,7 +352,8 @@ def test_async_topic_stream_uses_async_subscription_and_transform(
         await apublish("poll:1", Patches(None).refresh(zone="results"))
         frame = await pending
         await stream._iterator.aclose()
-        assert frame.startswith(b"event: next-patches")
+        assert frame.startswith(b"id: ")
+        assert b"\nevent: next-patches\n" in frame
         assert b'"name":"poll:update"' in frame
         assert b'"topic":"poll:1"' in frame
         assert b'"seq":1' in frame
@@ -523,7 +529,7 @@ def test_async_topic_stream_transform_can_suppress_message(
         pending = asyncio.create_task(anext_frame(iterator))
         await asyncio.wait_for(subscribed.wait(), timeout=1)
         await apublish("poll:1", Patches(None).refresh(zone="results"))
-        assert (await pending).startswith(b"event: next-skip")
+        assert _SKIP_ONE.match(await pending)
         assert await anext(iterator) == b": heartbeat\n\n"
         await stream._iterator.aclose()
 
@@ -605,7 +611,7 @@ def test_topic_stream_rechecks_access_at_most_once_per_heartbeat(
     next_frame(iterator)
     for _ in range(3):
         publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
-        assert next_frame(iterator).startswith(b"event: next-patches")
+        assert b"\nevent: next-patches\n" in next_frame(iterator)
     stream._iterator.close()
     assert calls == ["poll:1"]
     assert memory_broker._subscribers == {}
@@ -798,7 +804,7 @@ def test_sync_stale_anonymous_cookie_at_open_still_streams(
     assert next(iterator).startswith(b"retry: ")
     assert next_frame(iterator).startswith(b"event: next-hello")
     publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
-    assert next_frame(iterator).startswith(b"event: next-patches")
+    assert b"\nevent: next-patches\n" in next_frame(iterator)
     stream._iterator.close()
     assert memory_broker._subscribers == {}
 
@@ -817,7 +823,7 @@ def test_async_stale_anonymous_cookie_at_open_still_streams(
         assert (await anext(iterator)).startswith(b"retry: ")
         assert (await anext_frame(iterator)).startswith(b"event: next-hello")
         await apublish("poll:1", Patches(None).refresh(zone="results"))
-        assert (await anext_frame(iterator)).startswith(b"event: next-patches")
+        assert b"\nevent: next-patches\n" in await anext_frame(iterator)
         await stream._iterator.aclose()
         assert memory_broker._subscribers == {}
 

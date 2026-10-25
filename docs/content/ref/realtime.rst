@@ -15,8 +15,8 @@ It carries partial-rendering envelopes but does not render HTML.
 
 The broker numbers each topic with a ``seq`` inside an ``epoch`` and delivers messages at most once, on a best-effort basis.
 A bounded subscriber queue drops its oldest message when it fills.
-Consumers detect a gap or an epoch change from the stream metadata and recover current state through their own guarded HTTP request.
-Messages published while a subscriber is disconnected are not replayed.
+Both shipped brokers keep a bounded log of the newest messages per topic, so a reconnecting subscriber receives what it missed when the log covers the whole gap.
+Consumers detect any other gap or an epoch change from the stream metadata and recover current state through their own guarded HTTP request.
 
 ``MemoryBroker`` is the default and shares messages among subscribers in one process.
 For deployments with multiple workers or hosts, select ``RedisBroker`` so they share publication and sequence state.
@@ -25,10 +25,11 @@ API tier
 --------
 
 Advanced.
-   ``BrokerBackend``, ``MemoryBroker``, ``RedisBroker``, ``Message``, ``Position``, ``TopicStream``, ``publish``, ``apublish``, ``BrokerConnectionError``, ``InvalidTopicError``, and ``TopicPayloadError`` are imported from ``next.realtime``.
+   ``BrokerBackend``, ``MemoryBroker``, ``RedisBroker``, ``ReplayingBroker``, ``Replay``, ``Message``, ``Position``, ``TopicStream``, ``publish``, ``apublish``, ``BrokerConnectionError``, ``InvalidTopicError``, and ``TopicPayloadError`` are imported from ``next.realtime``.
    The WebSocket side adds ``WebSocketApp``, ``application``, ``TopicSocket``, ``SocketPort``, ``Handshake``, ``TicketClaims``, ``verify_ticket``, ``InvalidTicketError``, ``Close``, and ``TicketIntrospectionView``.
    ``signals``, ``checks``, and ``frames`` are also available as submodules.
    ``resolve_claims`` lives in ``next.realtime.tickets`` for gateway authors.
+   ``replay_window``, ``replay_after``, and ``INCOMPLETE`` live in ``next.realtime.replay`` for broker authors.
 
 Topic names contain 1 to 200 ASCII letters, digits, underscores, dots, colons, or hyphens.
 The ``next:`` prefix belongs to the framework and is rejected.
@@ -41,8 +42,9 @@ See :doc:`settings` for the complete default, the ``HEARTBEAT`` interval, and th
 
 ``REALTIME.BROKER.BACKEND`` names the backend class.
 ``MemoryBroker`` accepts ``OPTIONS.QUEUE_SIZE``, a positive integer that bounds each subscriber queue.
-``RedisBroker`` accepts ``OPTIONS.URL``, ``OPTIONS.PREFIX``, ``OPTIONS.HEALTH_CHECK_INTERVAL``, and ``OPTIONS.CLIENT`` and requires the Redis optional dependency from the ``broker`` extra.
+``RedisBroker`` accepts ``OPTIONS.URL``, ``OPTIONS.PREFIX``, ``OPTIONS.HEALTH_CHECK_INTERVAL``, and ``OPTIONS.CLIENT`` and requires the Redis optional dependency from the ``broker`` extra, ``redis`` 8 or newer.
 Without it, selecting the backend is reported by ``manage.py check`` as ``next.E179``.
+``REALTIME.REPLAY`` sizes the replay log of both brokers, see `Replay`_.
 
 The in-memory backend is process-local.
 A multi-process production deployment must use a shared backend such as Redis, because the framework does not infer process count from the server configuration.
@@ -50,7 +52,14 @@ A multi-process production deployment must use a shared backend such as Redis, b
 ``OPTIONS.CLIENT`` is a mapping of keyword arguments passed whole to the Redis ``from_url`` call, for the synchronous and the asynchronous client.
 It overrides the defaults ``health_check_interval`` and ``socket_keepalive``, while ``decode_responses`` is always ``True``.
 A subclass that overrides ``RedisBroker.create_client(url, options, *, asynchronous)`` reaches Redis through Sentinel or Cluster.
-An exhausted connection pool logs a warning on the ``next.realtime.redis`` logger.
+A pool that raises ``redis.exceptions.MaxConnectionsError`` logs a warning on the ``next.realtime.redis`` logger.
+A ``BlockingConnectionPool`` raises a plain ``ConnectionError`` on timeout instead, so its exhaustion ends the stream with ``BrokerConnectionError`` and logs no warning.
+
+``RedisBroker.topic_key(kind, topic)`` names the two keys of a topic, ``<PREFIX>:seq:{<topic>}`` for the counter and its epoch and ``<PREFIX>:log:{<topic>}`` for the replay log.
+The braces are a Redis Cluster hash tag that puts both keys in one slot, since the publish script and the replay transaction touch them together.
+An override keeps that property and returns a distinct key for each ``kind``.
+``PREFIX`` therefore needs a non-colon character and no ``{`` or ``}``, because a brace in it would move the hash tag off the topic name, and the broker raises ``ImproperlyConfigured`` for any other value, which ``manage.py check`` reports earlier as ``next.E192``.
+The Pub/Sub channel stays ``<PREFIX>:topic:<topic>``.
 
 Broker contract
 ---------------
@@ -85,8 +94,8 @@ One instance serves the whole process, so every method is called from many reque
        Both default to doing nothing, and ``aclose`` calls ``close``.
        The broker manager calls ``close`` when the framework settings reload.
 
-A stream enters the subscription first and reads the positions second, then sends ``hello``.
-A message published in between appears in the iterator and is also counted in the positions, which the client treats as a duplicate rather than as a gap.
+A stream enters the subscription first, reads the positions second, replays what its cursor missed third, and then sends ``hello``.
+A message published after the subscription appears in the iterator and may also be counted in the positions or replayed, which the client treats as a duplicate rather than as a gap.
 A subscription that cannot guarantee delivery any more, after a reconnect or an unanswered liveness ping, raises ``BrokerConnectionError`` from its iterator.
 A backend also translates its own transport failures into ``BrokerConnectionError``, so a stream catches one error type.
 The SSE stream then ends without a terminal frame so the browser reconnects and receives a fresh ``hello``, and the WebSocket closes with ``1011``.
@@ -186,6 +195,103 @@ The storage calls are left to the project, and ``self.store`` stands for whateve
 ``listen`` returns only after the queue confirms the subscription, which is what makes the subscription live on entry.
 ``Message.from_dict`` rejects wrong wire types with ``TypeError`` or ``ValueError``, so a backend that reads from an untrusted channel logs and skips such a payload.
 ``manage.py check`` reports a class that is not an importable concrete ``BrokerBackend`` subclass as ``next.E184`` and leaves the options of a custom backend to that backend.
+The skeleton keeps no replay log, so with a nonzero ``REPLAY['SIZE']`` the check warns with ``next.W143``.
+:doc:`/content/howto/write-a-broker-backend` adds the log and walks through a ``RedisBroker`` subclass.
+
+Replay
+------
+
+A reconnecting subscriber states the cursor it stopped at, and the stream sends the messages after it before ``hello``.
+Replay is a bounded best-effort catch-up rather than a delivery guarantee, so ``hello`` and the zone resync it triggers stay the source of truth.
+
+The replay log
+~~~~~~~~~~~~~~
+
+``REALTIME['REPLAY']`` holds ``SIZE``, the number of newest messages kept per topic, and ``TTL``, the seconds the log of a topic lives after its last publication.
+The defaults are ``100`` and ``300``, ``SIZE`` set to ``0`` turns the log off, ``SIZE`` is capped at ``10000`` messages, and ``TTL`` is capped at ``31536000`` seconds, one year.
+A replay reads and copies the whole log of a topic, ``LRANGE`` over every entry on Redis and a copy under the broker lock in memory, so the size cap bounds that read and the memory a topic holds, about 10 MB at 1 KB a message.
+A broker reads the window once when it is created, so a settings reload rebuilds the broker with the new values.
+A ``replay`` keyword on either broker constructor takes the same mapping and wins over the setting, so a process without Django settings can build a broker.
+A window that is not a mapping, carries another key, or holds an invalid value raises ``ImproperlyConfigured`` when the broker is created.
+``manage.py check`` reports it earlier, a value that is not a mapping as ``next.E191``, another key as ``next.E035``, and an invalid ``SIZE`` or ``TTL`` as ``next.E189`` or ``next.E190``.
+
+``MemoryBroker`` keeps the newest ``SIZE`` messages of each topic in the process and drops the whole log once ``TTL`` seconds pass without a publication on the topic.
+A publication on a topic whose log has already expired starts a new log, as ``PEXPIRE`` does on Redis, and the first publication a ``TTL`` after the last sweep drops the expired logs of every topic.
+An idle log therefore holds its memory for two ``TTL`` periods at most while the broker keeps publishing.
+Its ``clock`` keyword, ``time.time`` by default, stamps ``published_at`` and times the expiry from the same reading, so a test passes a fake one.
+``RedisBroker`` writes the log in the same Lua script that numbers and publishes a message, so the three steps are atomic, and the script publishes only after the log write.
+The log is a list trimmed to ``SIZE`` entries whose expiry each publication pushes out by ``TTL``, and the script deletes it when the topic starts a new epoch.
+With ``SIZE`` set to ``0`` the script never touches the log key.
+``replay`` reads the counter and the log in one ``MULTI`` transaction.
+
+The resume order
+~~~~~~~~~~~~~~~~
+
+SSE and WebSocket run the same order for every connection.
+
+#. The stream subscribes to the broker.
+#. It reads the positions of its topics, the snapshot that ``hello`` announces.
+#. For each topic whose cursor trails the snapshot in the same epoch, it replays the messages after the cursor up to the snapshot position.
+   Every replayed message passes through the same transform and the same access check as a live one, so a filtered message becomes a ``skip`` and a revoked grant ends the stream.
+#. It sends ``hello``.
+#. It sends live messages.
+   A message published after the subscription waits in the subscription queue, and one already replayed arrives again for the client to drop by ``seq``.
+
+A topic replays nothing when its cursor names another epoch or runs ahead of the snapshot.
+It replays nothing either when the log lacks any message between the cursor and the snapshot, because it was trimmed, expired, or lost with a broker restart.
+The same holds for a broker that is no ``ReplayingBroker``, for ``SIZE`` set to ``0``, and for a replay that raises ``BrokerConnectionError``.
+Replay is all or nothing per topic, so the client never receives a partial run that looks contiguous.
+In each case the client compares ``hello`` with its cursor and resynchronises its zones as it does for any gap.
+
+The replaying broker contract
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``ReplayingBroker`` is a runtime-checkable ``Protocol`` with two methods, so a broker supports replay by defining them rather than by subclassing.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Member
+     - Contract
+   * - ``replay(topic, after)`` and ``areplay(topic, after)``
+     - Take a ``Position`` cursor and return a ``Replay`` of the logged messages numbered after it, in ascending order.
+       ``areplay`` runs on the event loop, so a broker that only reads memory calls ``replay`` from it.
+       A transport failure raises ``BrokerConnectionError``, and the stream then skips replay for that topic.
+   * - ``Replay.messages``
+     - The tuple of messages after the cursor.
+   * - ``Replay.complete``
+     - Whether the messages close the whole gap from the cursor to the current position of the topic.
+       A stream discards an incomplete answer and leaves the gap to the resync.
+
+The stream cuts a complete answer at its position snapshot, since later messages already wait in the subscription.
+
+Resuming over SSE
+~~~~~~~~~~~~~~~~~
+
+A ``TopicStream`` with exactly one topic writes ``id: <epoch>:<seq>`` before every message frame and every ``skip`` frame, replayed ones included, and before ``hello`` with the position of the topic.
+A reconnect before the first message therefore resumes from the position ``hello`` announced.
+A topic that was never published has no position to name, so its ``hello`` carries no ``id``, and ``end`` frames never carry one.
+When ``EventSource`` reconnects on its own, it sends the last id back as ``Last-Event-ID`` and the stream replays from that cursor.
+The header is parsed strictly as sixteen lower-case hex digits, a colon, and a decimal ``seq`` without leading zeros, at most 40 characters in all.
+Any other value counts as no cursor, and the stream resynchronises from ``hello``.
+Both shipped brokers draw epochs in that form, and a broker whose epochs take another form gets no ids.
+
+A stream over several topics writes no ``id``, because one id cannot hold a cursor per topic, so it resumes through the resync alone.
+
+Three methods are the override points.
+``PatchStreamWriter.event_id(frame)`` in ``next.partial.sse`` receives a message or ``skip`` frame as a ``StreamPosition``, or the ``StreamHello``, and returns its id, ``None`` by default, and the writer drops an id holding CR, LF, or NUL.
+``TopicStream.event_id(frame)`` returns the ``<epoch>:<seq>`` form for a single-topic stream.
+``TopicStream.replay_cursors(request)`` returns the mapping of topic to ``Position`` the stream replays from, so a subclass that writes its own ids reads them back there.
+The stream calls it once the instance is built, so an override can read ``self.topics``.
+
+Resuming over WebSocket
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``last_seq`` mapping of the ``sub`` frame is the cursor.
+An entry in ``{"epoch": "...", "seq": 7}`` form replays, while a bare integer ``seq`` names no epoch and replays nothing.
+The browser client sends its cursor in the object form on every reconnect.
+A subclass changes the replay step through the ``TopicSocket.catch_up`` hook that `Serving the socket`_ describes.
 
 Public API
 ----------
@@ -197,6 +303,12 @@ Public API
    :members:
 
 .. autoclass:: next.realtime.RedisBroker
+   :members:
+
+.. autoclass:: next.realtime.ReplayingBroker
+   :members:
+
+.. autoclass:: next.realtime.Replay
    :members:
 
 .. autoclass:: next.realtime.Message
@@ -249,8 +361,8 @@ The connection then runs in this order.
    A ticket that is forged, expired, bound to another session, or names a callable that no longer imports ends in an ``auth`` error and ``4401``.
 #. The server checks the session and the authorizer for every topic.
    A revoked session ends in an ``auth`` error and ``4401``, and a denied topic ends in an ``auth`` error and ``4403``.
-#. The server subscribes to the broker, reads the positions of the topics, and sends ``hello``.
-   A message published between the subscription and the position read arrives after ``hello`` as well, and the client treats it as a duplicate rather than a gap.
+#. The server subscribes to the broker, reads the positions of the topics, sends the messages the ``last_seq`` cursor missed, and sends ``hello``, see `Replay`_.
+   A message published after the subscription arrives after ``hello`` as well, and the client treats it as a duplicate rather than a gap.
 
 From then on the server sends ``patches`` and ``skip`` frames as messages arrive, and a ``ping`` whenever a whole heartbeat passes without one.
 The same access check repeats when a message or a heartbeat arrives after the heartbeat interval has elapsed, and a failure closes the socket as in the fifth step.
@@ -284,8 +396,8 @@ Frames that are not JSON objects close with ``4400``.
 That covers an empty text frame, invalid JSON, a JSON value that is not an object, and every binary frame.
 A frame over 64 KiB closes with ``1009``.
 
-The server records the ``last_seq`` cursor and sends the current positions in ``hello``, and it does not replay what the client missed.
-The client compares the positions with its own cursor and resynchronises through the guarded zone GET, see :doc:`/content/topics/realtime`.
+The server replays what the ``last_seq`` cursor missed when the replay log covers the gap, and then sends the current positions in ``hello``.
+The client compares the positions with its own cursor and resynchronises through the guarded zone GET whenever replay left a gap, see :doc:`/content/topics/realtime`.
 
 Server frames
 ~~~~~~~~~~~~~
@@ -413,7 +525,8 @@ A ``*`` entry in ``ALLOWED_HOSTS`` is not an error, because the check compares t
 The session comes from the cookie named by ``SESSION_COOKIE_NAME`` and is read through the configured ``SESSION_ENGINE`` on the shared thread pool.
 The load is read-only.
 A session whose hash only matches a ``SECRET_KEY_FALLBACKS`` entry keeps working, since rotating the key belongs to the next HTTP request and the socket has no response to carry a new cookie.
-The ``db``, ``cache``, ``cached_db``, and ``file`` engines work, and the signed-cookie engine does not, which ``next.W142`` reports.
+The ``db``, ``cache``, ``cached_db``, and ``file`` engines work.
+The signed-cookie engine re-signs its cookie on every session save, so a ticket issued before the save no longer matches the handshake cookie, and the socket closes with ``4401``, which ``next.W142`` reports.
 The ``file`` engine replaces an expired session with a new file when it loads one, and the socket turns that write into a no-op.
 The socket loads the session at the handshake and on each recheck, so a cache-backed store that evicts live sessions closes sockets with ``4401``.
 
@@ -449,7 +562,7 @@ A gateway on another server loads the ``Handshake`` of a session key with ``awai
 A gateway that takes the identity from elsewhere builds ``Handshake(session_key, user, expires_at)`` itself, with ``expires_at`` on the ``time.monotonic()`` clock or ``None``.
 ``expires_at`` is the moment of a forced session recheck, not of a close.
 The ``Handshake.session_key`` has to be the key the ticket was issued under.
-``TopicSocket.catch_up`` and ``TopicSocket.tick`` are the hooks a subclass overrides, the first between the position read and ``hello`` and the second on each idle heartbeat.
+``TopicSocket.catch_up(subscription, positions)`` and ``TopicSocket.tick`` are the hooks a subclass overrides, the first between the position read and ``hello`` and the second on each idle heartbeat.
 
 ``verify_ticket(token, session_key)`` returns the ``TicketClaims`` of a valid ticket and raises ``InvalidTicketError`` otherwise.
 ``resolve_claims(claims)`` imports the transform and the authorizer the claims name.
@@ -519,14 +632,16 @@ The gateway sends a ``POST`` with ``Authorization: Bearer`` set to ``REALTIME['G
        The caller is authorized and the body is not JSON or lacks a string ``ticket`` or ``cookie``.
    * - ``403``
      - ``{"error": "denied"}``.
-       The bearer is wrong, the ticket is forged or expired, the session is gone or foreign, an authorizer refuses a topic, or the ticket names a transform.
+       The bearer is wrong, the ticket is forged or expired, the session is gone or foreign, an authorizer refuses a topic, or the ticket names a transform and ``grant_transformed`` returns ``None``.
        One body covers every case so a caller learns nothing of the reason, and the reason is logged at ``INFO`` on ``next.realtime.views``.
    * - ``405``
      - Any method but ``POST``, with an ``Allow: POST`` header.
 
-A ticket that names a transform is refused, because a gateway cannot run Python.
+A ticket that names a transform is refused by default, because a gateway cannot run Python.
 Responses carry never-cache headers, and the view is exempt from CSRF and from the default login requirement.
 A subclass overrides ``authorize(request)`` for a caller check of its own, such as a client certificate header, and ``grant(claims, user, expires_in)`` to change the body.
+``grant_transformed(claims, user, expires_in)`` answers a ticket with a transform, and a subclass returns a body for a gateway that applies the transform itself.
+It returns ``None`` by default, which keeps the ``403``.
 A routed endpoint with the stock ``authorize`` and no ``GATEWAY_TOKEN`` is reported as ``next.E188``.
 
 .. autoclass:: next.realtime.TicketIntrospectionView
@@ -542,12 +657,13 @@ See :doc:`signals` for their payloads and :doc:`/content/topics/signals` for rec
 System checks
 -------------
 
-Realtime checks validate the ``REALTIME`` keys, the transport list, the ticket age, the WebSocket path, the heartbeat, and the broker backend and its options, and report a missing ``redis`` dependency.
+Realtime checks validate the ``REALTIME`` keys, the transport list, the ticket age, the WebSocket path, the heartbeat, the replay window, and the broker backend and its options, and report a missing ``redis`` dependency.
+A warning flags a nonzero ``REPLAY['SIZE']`` with a broker that keeps no replay log.
 Deployment warnings flag an explicit ``"ws"`` transport without ``SessionMiddleware`` or with signed-cookie sessions.
 A ``WebSocketApp`` logs the session warnings itself when it is created, since ``manage.py check`` never sees a mounted socket.
 An error flags a routed ticket introspection endpoint that has no ``GATEWAY_TOKEN``.
 The checks run against the defaults when ``NEXT_FRAMEWORK`` has no ``REALTIME`` key.
-See :doc:`system-checks` for the ids ``next.E177`` to ``next.E188`` and ``next.W141`` and ``next.W142``.
+See :doc:`system-checks` for the ids ``next.E177`` to ``next.E192`` and ``next.W141`` to ``next.W143``.
 
 See also
 --------
@@ -557,4 +673,5 @@ See also
    :doc:`settings` for the ``REALTIME`` settings mapping.
    :doc:`backends` for the shared backend loading conventions.
    :doc:`/content/topics/realtime` for publication, access, and recovery.
+   :doc:`/content/howto/write-a-broker-backend` for a custom broker.
    :doc:`/content/topics/partial-rendering/sse` for the existing stream transport.

@@ -12,6 +12,7 @@ import pytest
 import redis
 import redis.asyncio
 from django.core.exceptions import ImproperlyConfigured
+from redis.crc import key_slot
 
 from next.partial import Patches
 from next.realtime import (
@@ -81,7 +82,7 @@ def test_redis_publish_twice_shares_epoch_under_prefixed_keys(clients) -> None:
         "poll:1": Position(first.epoch, 2),
         "poll:empty": Position("", 0),
     }
-    assert clients.sync.hgetall("app:realtime:seq:poll:1") == {
+    assert clients.sync.hgetall("app:realtime:seq:{poll:1}") == {
         "seq": "2",
         "epoch": first.epoch,
     }
@@ -91,9 +92,9 @@ def test_redis_publish_twice_shares_epoch_under_prefixed_keys(clients) -> None:
 def test_redis_lost_counter_or_epoch_starts_new_epoch(clients) -> None:
     backend = RedisBroker()
     first = backend.publish("poll:1", refresh_envelope())
-    clients.sync.delete("next:seq:poll:1")
+    clients.sync.delete("next:seq:{poll:1}")
     restarted = backend.publish("poll:1", refresh_envelope())
-    clients.sync.hdel("next:seq:poll:1", "epoch")
+    clients.sync.hdel("next:seq:{poll:1}", "epoch")
     regenerated = backend.publish("poll:1", refresh_envelope())
     following = backend.publish("poll:1", refresh_envelope())
 
@@ -104,7 +105,7 @@ def test_redis_lost_counter_or_epoch_starts_new_epoch(clients) -> None:
     assert following.epoch == regenerated.epoch
 
 
-def test_redis_publish_uses_registered_script_with_one_key(
+def test_redis_publish_uses_registered_script_with_counter_and_log_keys(
     clients, monkeypatch
 ) -> None:
     backend = RedisBroker()
@@ -124,9 +125,13 @@ def test_redis_publish_uses_registered_script_with_one_key(
     backend.publish("poll:1", refresh_envelope())
 
     (numkeys, keys_and_args), *_ = calls
-    assert numkeys == 1
-    assert keys_and_args[0] == "next:seq:poll:1"
-    assert keys_and_args[1] == "next:topic:poll:1"
+    assert numkeys == 2
+    assert keys_and_args[:3] == (
+        "next:seq:{poll:1}",
+        "next:log:{poll:1}",
+        "next:topic:poll:1",
+    )
+    assert keys_and_args[-2:] == ("100", "300000")
 
 
 def test_redis_client_options_enable_health_checks_and_keepalive(clients) -> None:
@@ -279,8 +284,9 @@ def test_redis_async_pool_exhaustion_logs_a_warning(clients, caplog) -> None:
 @pytest.mark.parametrize(
     ("failure", "warned"),
     [
-        (redis.ConnectionError("Too many connections"), True),
-        (redis.ConnectionError("No connection available."), True),
+        (redis.exceptions.MaxConnectionsError("Too many connections"), True),
+        (redis.ConnectionError("Too many connections"), False),
+        (redis.ConnectionError("No connection available."), False),
         (redis.ConnectionError("Connection closed by server."), False),
         (redis.TimeoutError("Timeout reading from socket"), False),
     ],
@@ -658,7 +664,13 @@ def test_redis_subscribe_empty_topics_raises(clients) -> None:
 
 
 def test_redis_invalid_url_or_prefix_raises(clients) -> None:
-    for options in ({"URL": ""}, {"PREFIX": ""}, {"PREFIX": ":::"}):
+    for options in (
+        {"URL": ""},
+        {"PREFIX": ""},
+        {"PREFIX": ":::"},
+        {"PREFIX": "{tenant}"},
+        {"PREFIX": "app}"},
+    ):
         with pytest.raises(ImproperlyConfigured):
             RedisBroker({"OPTIONS": options})
 
@@ -879,5 +891,29 @@ def test_redis_fork_hook_stand_in_accepts_hooks() -> None:
 def test_redis_positions_keep_an_epoch_whose_counter_is_gone(clients) -> None:
     backend = RedisBroker()
     published = backend.publish("poll:1", refresh_envelope())
-    clients.sync.hdel("next:seq:poll:1", "seq")
+    clients.sync.hdel("next:seq:{poll:1}", "seq")
     assert backend.positions(["poll:1"]) == {"poll:1": Position(published.epoch, 0)}
+
+
+def test_redis_topic_keys_share_one_cluster_slot(clients) -> None:
+    backend = RedisBroker({"OPTIONS": {"PREFIX": "app"}})
+    seq, log = backend.topic_key("seq", "a:b"), backend.topic_key("log", "a:b")
+    assert (seq, log) == ("app:seq:{a:b}", "app:log:{a:b}")
+    assert key_slot(seq.encode()) == key_slot(log.encode())
+    assert backend._channel("a:b") == "app:topic:a:b"
+
+
+class _FlatKeys(RedisBroker):
+    def topic_key(self, kind: str, topic: str) -> str:
+        return f"flat-{kind}-{topic}"
+
+
+def test_redis_subclass_topic_key_lays_out_every_stored_key(clients) -> None:
+    backend = _FlatKeys()
+    first = backend.publish("poll:1", refresh_envelope())
+    assert clients.sync.hget("flat-seq-poll:1", "epoch") == first.epoch
+    assert clients.sync.llen("flat-log-poll:1") == 1
+    assert backend.positions(["poll:1"]) == {"poll:1": Position(first.epoch, 1)}
+    assert [
+        m.seq for m in backend.replay("poll:1", Position(first.epoch, 0)).messages
+    ] == [1]

@@ -4,7 +4,7 @@ import copy
 import subprocess
 import sys
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from django.test import override_settings
@@ -12,7 +12,7 @@ from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy
 from pytest_lazy_fixtures import lf
 
-from next.conf import next_framework_settings
+from next.conf import DEFAULTS as PUBLIC_DEFAULTS, next_framework_settings
 from next.conf.frozen import FrozenDict, FrozenList
 from next.conf.merge import (
     BOOL_KEYS,
@@ -29,7 +29,11 @@ from next.conf.settings import NextFrameworkSettings
 from tests.django_setup import PROJECT_ROOT
 
 
-DEFAULTS: dict[str, Any] = NextFrameworkSettings.DEFAULTS
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+
+DEFAULTS: Mapping[str, Any] = NextFrameworkSettings.DEFAULTS
 
 KEY_CLASSES = (LIST_KEYS, DICT_KEYS, STR_KEYS, OPTIONAL_STR_KEYS, BOOL_KEYS)
 
@@ -92,7 +96,7 @@ class TestAcceptedValue:
         assert isinstance(merged["DEFAULTS"]["site_name"], Promise)
 
     def test_key_outside_every_shape_is_unset(self) -> None:
-        """A third-party key added to `DEFAULTS` keeps the default it declared."""
+        """A key no shape class names merges to nothing."""
         assert accepted_value("THIRD_PARTY_KEY", "value") is UNSET
 
 
@@ -196,12 +200,40 @@ class TestDefaultsFrozenOnce:
         assert FROZEN_DEFAULTS["URL_NAME_TEMPLATE"] == DEFAULTS["URL_NAME_TEMPLATE"]
 
     def test_another_defaults_mapping_freezes_per_merge(self) -> None:
-        own = copy.deepcopy(DEFAULTS)
+        own = copy.deepcopy(dict(DEFAULTS))
         own["PAGE_BACKENDS"] = [{"BACKEND": "own.Backend"}]
         merged = merge_user_settings(own, None)
         assert isinstance(merged["PAGE_BACKENDS"], FrozenList)
         assert merged["PAGE_BACKENDS"] == [{"BACKEND": "own.Backend"}]
         assert merged["PAGE_BACKENDS"] is not own["PAGE_BACKENDS"]
+
+
+class TestDefaultsReadOnly:
+    """`DEFAULTS` refuses every change after import, a new key included."""
+
+    def test_the_settings_view_and_the_package_share_one_read_only_mapping(
+        self,
+    ) -> None:
+        assert DEFAULTS is PUBLIC_DEFAULTS
+        assert isinstance(DEFAULTS, MappingProxyType)
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            lambda defaults: defaults.__setitem__("THIRD_PARTY", {}),
+            lambda defaults: defaults.__setitem__("STRICT_LOADING", True),
+            lambda defaults: defaults.__delitem__("STRICT_LOADING"),
+            lambda defaults: defaults.update({"THIRD_PARTY": {}}),
+            lambda defaults: defaults.setdefault("THIRD_PARTY", {}),
+        ],
+        ids=["add", "replace", "delete", "update", "setdefault"],
+    )
+    def test_a_mutation_raises_and_leaves_the_keys_alone(self, mutate) -> None:
+        keys = set(DEFAULTS)
+        with pytest.raises((TypeError, AttributeError)):
+            mutate(DEFAULTS)
+        assert set(DEFAULTS) == keys
+        assert "THIRD_PARTY" not in DEFAULTS
 
 
 class TestSentinelHome:
