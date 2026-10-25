@@ -247,6 +247,15 @@ Default value.
        "GATEWAY_TOKEN": None,
        "REPLAY": {"SIZE": 100, "TTL": 300},
        "PRESENCE": {"WINDOW": 1.0, "SIZE": 100, "MEMBER_BYTES": 512},
+       "HANDLERS": None,
+       "UPSTREAM": {
+           "RATE": 10.0,
+           "BURST": 20,
+           "MAX_BYTES": 16384,
+           "CONCURRENCY": 16,
+           "TIMEOUT": 10.0,
+       },
+       "TUNNEL": {"CONCURRENCY": 4, "TIMEOUT": 30.0, "MAX_REPLY_BYTES": 1048576},
    }
 
 ``BROKER.BACKEND`` names a ``BrokerBackend`` subclass, and ``BROKER.OPTIONS`` belongs to that backend.
@@ -318,6 +327,23 @@ A missing key takes its default, any key besides the three is reported as ``next
 A broker reads the limits once when it is created.
 With an explicit ``PRESENCE`` and a ``BACKEND`` that keeps no presence, ``next.W144`` warns that every stream asking for presence fails to start.
 See :doc:`realtime` for the snapshot semantics.
+
+``UPSTREAM`` limits the frames a WebSocket client sends after ``sub``, the ``up`` events and the tunneled ``http`` requests alike.
+They draw on one token bucket per connection that holds ``BURST`` tokens and refills at ``RATE`` tokens a second.
+``RATE`` is a positive number up to ``1000`` that ``next.E202`` enforces, and ``BURST`` is an integer from ``1`` to ``1000`` that ``next.E203`` enforces.
+The default lets a page send a typing indicator or a cursor ten times a second and absorbs a burst of twenty, such as several form posts in a row.
+``MAX_BYTES`` caps one ``up`` frame in UTF-8 bytes as it arrives, an integer from ``1`` to ``65536`` that ``next.E204`` enforces, while a tunneled request is bounded by the 64 KiB frame limit alone.
+``CONCURRENCY`` is the number of ``up`` events one connection runs at once, an integer from ``1`` to ``64`` that ``next.E209`` enforces, and an event past it is refused with ``limit`` without counting towards ``4429``.
+``TIMEOUT`` is the seconds one ``up`` event waits for its handler before the ``ack`` answers ``timeout``, a positive number up to ``600`` that ``next.E210`` enforces.
+A missing key takes its default, any key besides the five is reported as ``next.E035``, and an ``UPSTREAM`` value that is not a mapping is reported as ``next.E201``.
+
+``TUNNEL`` configures the request tunnel that runs form actions over an open WebSocket, and ``False`` turns it off.
+``CONCURRENCY`` is the number of requests one connection runs at once, an integer from ``1`` to ``64`` that ``next.E206`` enforces.
+``TIMEOUT`` is the seconds one request may take, a positive number up to ``600`` that ``next.E207`` enforces.
+``MAX_REPLY_BYTES`` caps the body of one reply, an integer from ``1`` to ``67108864`` that ``next.E208`` enforces.
+A missing key takes its default, any key besides the three is reported as ``next.E035``, and a value that is neither ``False`` nor a mapping is reported as ``next.E205``.
+``WebSocketApp`` reads both mappings once when it is created, and the ``hello`` frame tells the client ``MAX_BYTES`` and ``TIMEOUT``.
+See :doc:`realtime` for the frames and the refusals.
 
 See :doc:`realtime` for the broker API and :doc:`/content/howto/stream-over-websockets` for setup.
 

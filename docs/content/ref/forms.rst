@@ -59,7 +59,7 @@ Framework machinery.
    The forms system checks live in ``next.forms.checks``, a package of one-word submodules, ``actions``, ``config``, ``widgets``, and ``wizards`` for the checks themselves and ``sources`` for the registration readers they share.
    The framework application config imports the package at startup, and the forms package re-exports it, so ``next.forms.checks`` names the same package either way.
    ``next.forms.ports`` holds ``ActionOwnersImpl``, which binds the ``action_owners`` reader of ``sources`` to the ``ActionOwners`` port of :doc:`ports`.
-   ``FormActionNotFoundError``, ``UnstorableWizardValueError``, and ``UnregisteredComponentError`` live in ``next.forms.errors`` and are re-exported at the package level.
+   ``FormActionNotFoundError``, ``SessionRotationError``, ``UnstorableWizardValueError``, and ``UnregisteredComponentError`` live in ``next.forms.errors`` and are re-exported at the package level.
    The UID helpers ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``ORIGIN_FIELD_NAME``, ``FORM_ORIGIN_OVERRIDE_KEY``, ``MAX_ORIGIN_LENGTH``, ``reverse_form_action``, ``current_origin_path``, ``is_path_only``, ``validated_origin_path``, and ``posted_origin_path`` live in ``next.forms.uid``.
    The test isolation helper ``reset_form_registration_state`` belongs to ``next.testing``, documented under :doc:`/content/ref/testing`.
 
@@ -99,8 +99,11 @@ When ``registry_empty`` is true the message also explains that no actions are re
 .. autoexception:: next.forms.FormActionNotFoundError
    :members:
 
+``SessionRotationError`` is raised by ``cycle_key()`` and ``flush()`` of the session in an action that runs over the WebSocket tunnel, before the store writes, see :ref:`topics-realtime-tunnel`.
 ``UnstorableWizardValueError`` is raised by the session wizard backend for a cleaned value its JSON codec cannot store, and names the backend keys that serve such a value instead.
 ``UnregisteredComponentError`` is a ``LookupError`` raised while a ``ComponentWidget`` renders a component name nothing registered, with the closest visible component names rendered into the message on first read.
+
+.. autoexception:: next.forms.SessionRotationError
 
 .. autoexception:: next.forms.UnstorableWizardValueError
    :members:

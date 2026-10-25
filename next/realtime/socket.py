@@ -8,7 +8,7 @@ from collections.abc import AsyncIterable, AsyncIterator, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, NoReturn, Protocol, Self
+from typing import TYPE_CHECKING, ClassVar, NoReturn, Protocol, Self
 
 from next.partial.manager import partial_backend_manager
 
@@ -18,15 +18,29 @@ from .attendance import Attendance, aattend, aattending
 from .backends import BrokerBackend
 from .delivery import transformed
 from .errors import BrokerConnectionError, InvalidTicketError
-from .frames import Close, FrameError, Pong, Subscribe
+from .frames import (
+    Close,
+    FrameError,
+    Pong,
+    Refusal,
+    Reply,
+    Request,
+    Subscribe,
+    Up,
+    UpstreamError,
+)
+from .handlers import Upstream, dispatch as dispatch_upstream
+from .limits import SocketLimits, TokenBucket, TunnelLimits
 from .manager import broker_manager
 from .messages import Message, Position
 from .replay import acatch_up
 from .roster import Presence, counted, snapshot_message
 from .tickets import TicketClaims, resolve_claims, resolve_identify, verify_ticket
+from .tunnel import Tunnel
 
 
 if TYPE_CHECKING:
+    from .access import TopicAuthorizer
     from .attendance import Identify
     from .tickets import TopicTransform
 
@@ -41,6 +55,7 @@ _REASONS = {
     Close.PROTOCOL: "protocol",
     Close.SESSION: "auth",
     Close.TOPIC_DENIED: "auth",
+    Close.RATE_LIMITED: "limit",
 }
 
 
@@ -129,6 +144,7 @@ class TopicSocket:
     It knows no ASGI, so any server or gateway drives it through a `SocketPort`.
     """
 
+    strikes: ClassVar[int] = 3
     _access: AccessCheck
 
     def __init__(
@@ -139,8 +155,13 @@ class TopicSocket:
         broker: BrokerBackend | None = None,
         heartbeat: float | None = None,
         clock: Callable[[], float] = time.time,
+        tunnel: Tunnel | None = None,
+        limits: SocketLimits | None = None,
     ) -> None:
-        """Bind the connection to its port and session without touching the network."""
+        """Bind the connection to its port and session without touching the network.
+
+        Without `limits` the settings are read here, `WebSocketApp` reads them once.
+        """
         self.handshake = handshake
         self.connection_id = secrets.token_urlsafe(16)
         self.cursor: Mapping[str, Position | int] = MappingProxyType({})
@@ -150,6 +171,15 @@ class TopicSocket:
         self._clock = clock
         self._transform: TopicTransform | None = None
         self._identify: Identify | None = None
+        self._limits = limits if limits is not None else SocketLimits.configured()
+        self._tunnel = tunnel if self._limits.tunnel is not None else None
+        upstream = self._limits.upstream
+        self._bucket = TokenBucket(upstream.rate, upstream.burst, clock=clock)
+        self._strikes = 0
+        self._events = 0
+        self._requests = 0
+        self._topics: frozenset[str] = frozenset()
+        self._ready = asyncio.Event()
 
     async def serve(self, inbound: AsyncIterable[str | bytes]) -> None:
         """Run the connection until the client leaves or the protocol closes it.
@@ -220,7 +250,7 @@ class TopicSocket:
             await self._fail(Close.PROTOCOL)
         group.create_task(self._deliver(frame))
         async for item in stream:
-            await self._dispatch(await self._parse(item))
+            await self._dispatch(await self._parse(item), group)
         raise _ClosedError(None)
 
     async def _parse(self, item: str | bytes) -> frames.Inbound:
@@ -231,13 +261,131 @@ class TopicSocket:
         except FrameError as exc:
             await self._fail(exc.code)
 
-    async def _dispatch(self, frame: frames.Inbound) -> None:
-        """Route one frame after the subscription, answering unknown ones in place."""
+    async def _dispatch(self, frame: frames.Inbound, group: asyncio.TaskGroup) -> None:
+        """Route one frame after the subscription, each one drawing a token first.
+
+        An event or a request runs as its own task, so a slow one never stalls a pong.
+        """
+        admitted = await self._admit()
         match frame:
             case Pong():
                 return
+            case Up():
+                if admitted:
+                    group.create_task(self._up(frame))
+                else:
+                    await self._refuse_up(frame.id)
+            case Request():
+                if admitted:
+                    group.create_task(self._request(frame))
+                else:
+                    await self._writer.send(frames.reply(frame.id, Refusal.LIMIT))
             case _:
-                await self._writer.send(frames.error("unsupported"))
+                if admitted:
+                    await self._writer.send(frames.error("unsupported"))
+
+    async def _admit(self) -> bool:
+        """Draw a token for a frame, closing with 4429 after `strikes` refusals."""
+        if self._bucket.take():
+            self._strikes = 0
+            return True
+        self._strikes += 1
+        if self._strikes >= self.strikes:
+            await self._fail(Close.RATE_LIMITED)
+        return False
+
+    async def _refuse_up(self, frame_id: str | None) -> None:
+        if frame_id is not None:
+            await self._writer.send(frames.ack(frame_id, UpstreamError.LIMIT))
+        else:
+            await self._writer.send(frames.error("limit"))
+
+    async def _up(self, frame: Up) -> None:
+        """Hand an event to its handler within the connection's concurrency, then ack.
+
+        An event past `UPSTREAM['CONCURRENCY']` is refused but never counts to 4429.
+        """
+        if self._events >= self._limits.upstream.concurrency:
+            await self._refuse_up(frame.id)
+            return
+        self._events += 1
+        try:
+            error = await self._deliver_up(frame)
+            if frame.id is not None:
+                await self._writer.send(frames.ack(frame.id, error))
+        finally:
+            self._events -= 1
+
+    async def _deliver_up(self, frame: Up) -> UpstreamError | None:
+        if frame.size > self._limits.upstream.max_bytes:
+            return UpstreamError.TOO_BIG
+        await self._ready.wait()
+        if frame.topic not in self._topics:
+            return UpstreamError.TOPIC
+        verdict = await self._access.acheck()
+        if verdict is not Access.GRANTED:
+            if frame.id is not None:
+                await self._writer.send(frames.ack(frame.id, UpstreamError.DENIED))
+            await self._fail(_CLOSE_CODES[verdict])
+        upstream = Upstream(
+            frame.topic,
+            frame.name,
+            frame.data,
+            self.handshake.user,
+            self.handshake.session_key,
+            self.connection_id,
+        )
+        try:
+            async with asyncio.timeout(self._limits.upstream.timeout):
+                delivered = await self.handle(upstream)
+        except TimeoutError:
+            logger.warning("Realtime upstream handler for %r timed out", frame.name)
+            return UpstreamError.TIMEOUT
+        except Exception:
+            logger.exception("Realtime upstream handler for %r failed", frame.name)
+            return UpstreamError.INTERNAL
+        return None if delivered else UpstreamError.UNKNOWN
+
+    async def handle(self, upstream: Upstream) -> bool:
+        """Route one granted event, to its `@realtime.on` handler by default.
+
+        False means nothing serves the event, and the client gets `unknown`.
+        """
+        return await dispatch_upstream(upstream)
+
+    async def _request(self, frame: Request) -> None:
+        """Run a tunneled request within the connection's concurrency and timeout.
+
+        The access recheck runs first, as for an event, so a revoked grant closes.
+        """
+        limits, tunnel = self._limits.tunnel, self._tunnel
+        if limits is None or tunnel is None:
+            await self._writer.send(frames.reply(frame.id, Refusal.DISABLED))
+            return
+        if self._requests >= limits.concurrency:
+            await self._writer.send(frames.reply(frame.id, Refusal.LIMIT))
+            return
+        self._requests += 1
+        try:
+            await self._ready.wait()
+            await self._grant()
+            answer = await self._tunneled(tunnel, frame, limits)
+            await self._writer.send(frames.reply(frame.id, answer))
+        finally:
+            self._requests -= 1
+
+    async def _tunneled(
+        self, tunnel: Tunnel, frame: Request, limits: TunnelLimits
+    ) -> Reply | Refusal:
+        try:
+            async with asyncio.timeout(limits.timeout):
+                return await tunnel(frame, connection=self.connection_id)
+        except TimeoutError:
+            logger.warning("Realtime tunnel request to %s timed out", frame.path)
+            return Refusal.TIMEOUT
+        except Exception:
+            logger.exception("Realtime tunnel request to %s failed", frame.path)
+            return Refusal.INTERNAL
 
     async def _deliver(self, frame: Subscribe) -> None:
         """Stream the granted topics in the subscribe, join, catch up, hello order.
@@ -246,6 +394,7 @@ class TopicSocket:
         """
         claims = await self._subscribe(frame)
         await self._grant()
+        self._ready.set()
         broker = self._broker
         if broker is None:
             broker = self._broker = await broker_manager.aget()
@@ -262,6 +411,7 @@ class TopicSocket:
                         positions,
                         heartbeat=self._heartbeat,
                         server_time=self._now(),
+                        limits=self._hello_limits(),
                     )
                 )
                 if attendance is not None:
@@ -272,6 +422,23 @@ class TopicSocket:
                         await self.tick()
                     else:
                         await self._writer.send(await self._frame_for(item))
+
+    def _hello_limits(self) -> dict[str, object]:
+        """Return the frame limits hello tells the client, the tunnel only when on."""
+        limits: dict[str, object] = {
+            "upstream": {"frame": self._limits.upstream.max_bytes}
+        }
+        tunnel, settings = self._tunnel, self._limits.tunnel
+        if tunnel is not None and settings is not None:
+            hints = tunnel.hints()
+            limits["tunnel"] = {
+                "timeout": settings.timeout,
+                "frame": frames.MAX_INBOUND_BYTES,
+                "headers": sorted(hints.headers),
+                "prefixes": list(hints.prefixes),
+                "csrf": hints.csrf,
+            }
+        return limits
 
     async def attend(
         self, broker: BrokerBackend, claims: TicketClaims
@@ -310,7 +477,19 @@ class TopicSocket:
             await self._fail(Close.SESSION)
         self.cursor = frame.cursor
         self._transform = transform
-        self._access = AccessCheck(
+        self._access = self.access_check(claims, authorizer)
+        self._access.bind()
+        self._topics = frozenset(claims.topics)
+        return claims
+
+    def access_check(
+        self, claims: TicketClaims, authorizer: "TopicAuthorizer | None"
+    ) -> AccessCheck:
+        """Build the throttled recheck of the ticket, once per heartbeat by default.
+
+        An override may recheck more often, before every `up` event too.
+        """
+        return AccessCheck(
             claims.topics,
             authorizer=authorizer,
             session_key=self.handshake.session_key,
@@ -318,8 +497,6 @@ class TopicSocket:
             interval=self._heartbeat,
             expires_at=self.handshake.expires_at,
         )
-        self._access.bind()
-        return claims
 
     async def _grant(self) -> None:
         verdict = await self._access.acheck()

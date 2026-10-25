@@ -404,3 +404,37 @@ def test_check_accepts_the_gateway_token_key() -> None:
     config = {"REALTIME": {"GATEWAY_TOKEN": "secret"}}
     with override_settings(NEXT_FRAMEWORK=config):
         assert check_realtime_settings() == []
+
+
+@pytest.mark.parametrize(
+    ("realtime", "ids"),
+    [
+        (
+            {"UPSTREAM": {"RATE": 5, "BURST": 10, "MAX_BYTES": 100, "CONCURRENCY": 64}},
+            [],
+        ),
+        ({"TUNNEL": False}, []),
+        ({"TUNNEL": {"CONCURRENCY": 8, "TIMEOUT": 1, "MAX_REPLY_BYTES": 10}}, []),
+        ({"UPSTREAM": None}, ["next.E201"]),
+        ({"UPSTREAM": {"RATE": True}}, ["next.E202"]),
+        ({"UPSTREAM": {"RATE": 1001}}, ["next.E202"]),
+        ({"UPSTREAM": {"BURST": 0}}, ["next.E203"]),
+        ({"UPSTREAM": {"MAX_BYTES": 65537}}, ["next.E204"]),
+        ({"UPSTREAM": {"CONCURRENCY": 0}}, ["next.E209"]),
+        ({"UPSTREAM": {"CONCURRENCY": True}}, ["next.E209"]),
+        ({"UPSTREAM": {"SIZE": 1}}, ["next.E035"]),
+        ({"UPSTREAM": {"TIMEOUT": 0}}, ["next.E210"]),
+        ({"UPSTREAM": {"TIMEOUT": 601}}, ["next.E210"]),
+        ({"TUNNEL": True}, ["next.E205"]),
+        ({"TUNNEL": {"CONCURRENCY": 65}}, ["next.E206"]),
+        ({"TUNNEL": {"TIMEOUT": math.nan}}, ["next.E207"]),
+        ({"TUNNEL": {"MAX_REPLY_BYTES": "1"}}, ["next.E208"]),
+        ({"TUNNEL": {"RATE": 1}}, ["next.E035"]),
+    ],
+)
+def test_check_reports_upstream_and_tunnel_limits(
+    realtime: dict[str, object], ids: list[str]
+) -> None:
+    with override_settings(NEXT_FRAMEWORK={"REALTIME": realtime}):
+        messages = check_realtime_settings()
+    assert [message.id for message in messages] == ids

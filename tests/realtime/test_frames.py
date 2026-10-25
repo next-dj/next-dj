@@ -181,7 +181,7 @@ def test_parse_pong_with_extra_keys_is_a_protocol_error() -> None:
 
 @pytest.mark.parametrize(
     "text",
-    ['{"type":"up","name":"vote"}', '{"type":1}', '{"type":null}', '{"ticket":"t"}'],
+    ['{"type":"later","name":"vote"}', '{"type":1}', '{"type":null}', '{"ticket":"t"}'],
 )
 def test_parse_object_of_unknown_type_is_unsupported(text: str) -> None:
     assert isinstance(frames.parse(text), Unsupported)
@@ -368,3 +368,87 @@ def test_outbound_frames_are_server_only_types_a_server_would_not_accept(
     text: str,
 ) -> None:
     assert isinstance(frames.parse(text), Unsupported)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            '{"type":"up","topic":"room:1","name":"typing","data":{"on":true},"id":"7"}',
+            frames.Up("room:1", "typing", {"on": True}, "7", 74),
+        ),
+        ('{"type":"up","topic":"t","name":"n"}', frames.Up("t", "n", None, None, 36)),
+        (
+            '{"type":"up","topic":"t","name":"n","id":null}',
+            frames.Up("t", "n", None, None, 46),
+        ),
+        (
+            '{"type":"up","topic":"t","name":"n","data":"é"}',
+            frames.Up("t", "n", "é", None, 48),
+        ),
+    ],
+)
+def test_parse_reads_an_upstream_event(text: str, expected: frames.Up) -> None:
+    assert frames.parse(text) == expected
+
+
+@pytest.mark.parametrize(
+    "frame",
+    [
+        {"type": "up", "topic": "t", "name": "n", "extra": 1},
+        {"type": "up", "topic": 1, "name": "n"},
+        {"type": "up", "topic": "t"},
+        {"type": "up", "topic": "t", "name": "n", "id": 7},
+        {"type": "up", "topic": "t", "name": "n", "id": ""},
+        {"type": "up", "topic": "t", "name": "n", "id": "x" * 65},
+        {"type": "http", "method": "POST", "path": "/"},
+        {"type": "http", "id": "1", "method": "POST", "path": "/", "cookie": "x"},
+        {"type": "http", "id": "1", "method": 1, "path": "/"},
+        {"type": "http", "id": "1", "method": "POST", "path": None},
+        {"type": "http", "id": "1", "method": "POST", "path": "/", "body": 1},
+        {"type": "http", "id": "1", "method": "POST", "path": "/", "headers": []},
+        {"type": "http", "id": "1", "method": "POST", "path": "/", "headers": {"a": 1}},
+    ],
+)
+def test_parse_refuses_a_malformed_upstream_or_request(frame: dict) -> None:
+    with pytest.raises(FrameError) as caught:
+        frames.parse(json.dumps(frame))
+    assert caught.value.code is Close.PROTOCOL
+
+
+def test_parse_reads_a_request_with_defaults() -> None:
+    request = frames.parse('{"type":"http","id":"1","method":"POST","path":"/a/"}')
+    assert request == frames.Request("1", "POST", "/a/", MappingProxyType({}), "")
+    full = frames.parse(
+        '{"type":"http","id":"2","method":"POST","path":"/a/",'
+        '"headers":{"accept":"x"},"body":"n=1"}'
+    )
+    assert isinstance(full, frames.Request)
+    assert dict(full.headers) == {"accept": "x"}
+    assert full.body == "n=1"
+
+
+def test_ack_and_reply_encode_compact_frames() -> None:
+    assert frames.ack("1") == '{"type":"ack","id":"1","ok":true}'
+    assert frames.ack("1", frames.UpstreamError.TOPIC) == (
+        '{"type":"ack","id":"1","ok":false,"error":"topic"}'
+    )
+    assert frames.reply("2", frames.Refusal.STALE) == (
+        '{"type":"http","id":"2","status":0,"error":"stale","retry":true}'
+    )
+    assert frames.reply("3", frames.Reply(204, {"x-next-a": "b"}, "")) == (
+        '{"type":"http","id":"3","status":204,"headers":{"x-next-a":"b"},"body":""}'
+    )
+
+
+@pytest.mark.parametrize(
+    ("refusal", "retry"),
+    [
+        *((refusal, True) for refusal in ("disabled", "limit", "method", "path")),
+        *((refusal, True) for refusal in ("headers", "body", "stale", "transport")),
+        *((refusal, False) for refusal in ("http_only", "too_big", "timeout")),
+        *((refusal, False) for refusal in ("encoding", "internal")),
+    ],
+)
+def test_a_refusal_retries_only_what_never_ran(refusal: str, *, retry: bool) -> None:
+    assert frames.Refusal(refusal).retry is retry

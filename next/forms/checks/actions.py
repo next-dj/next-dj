@@ -2,8 +2,12 @@
 
 from pathlib import Path
 
+from django.apps import apps
 from django.conf import settings
+from django.contrib.messages.storage.cookie import CookieStorage
+from django.contrib.messages.storage.fallback import FallbackStorage
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.utils.module_loading import import_string
 
 from next.checks import NEXT
 from next.forms.dispatch.permissions import COMPONENT_MODULE, owner_rule
@@ -86,6 +90,20 @@ def check_invalid_form_meta_scope(*args, **kwargs) -> list[CheckMessage]:
         for qualname, bad_value in diagnostics().invalid_action_scope
     ]
     return class_errors + action_errors
+
+
+@register(NEXT)
+def check_invalid_action_transport(*args, **kwargs) -> list[CheckMessage]:
+    """Error when an @action transport or a form class Meta.transport is unknown."""
+    return [
+        Error(
+            f"{owner} declares transport={bad_value!r}. Valid values are 'http' "
+            "and 'any'.",
+            hint="The action answers over HTTP alone until the value is fixed.",
+            id="next.E200",
+        )
+        for owner, bad_value in diagnostics().invalid_transport
+    ]
 
 
 @register(NEXT)
@@ -332,6 +350,48 @@ def check_success_message_framework(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
+def _cookie_messages() -> bool:
+    """Whether installed messages keep their `MESSAGE_STORAGE` in a cookie."""
+    if not apps.is_installed("django.contrib.messages"):
+        return False
+    try:
+        storage = import_string(settings.MESSAGE_STORAGE)
+    except ImportError:
+        return False
+    return isinstance(storage, type) and issubclass(
+        storage, CookieStorage | FallbackStorage
+    )
+
+
+@register(NEXT)
+def check_tunneled_cookie_messages(*args, **kwargs) -> list[CheckMessage]:
+    """Warn when a socket-capable action flashes messages into a cookie.
+
+    A tunneled reply cannot set a new cookie, so a flashed message refuses it.
+    """
+    tunneled = [
+        meta.get("name")
+        for meta in iter_registered_actions()
+        if meta.get("transport") == "any"
+    ]
+    if not tunneled or not _cookie_messages():
+        return []
+    return [
+        DjangoWarning(
+            f"Form actions {', '.join(map(repr, tunneled))} admit transport='any' "
+            f"while MESSAGE_STORAGE {settings.MESSAGE_STORAGE!r} keeps messages in a "
+            "cookie, so a message flashed over the WebSocket tunnel refuses the "
+            "reply with http_only after the action ran.",
+            hint=(
+                "Set MESSAGE_STORAGE to "
+                "'django.contrib.messages.storage.session.SessionStorage'."
+            ),
+            obj=settings,
+            id="next.W145",
+        )
+    ]
+
+
 __all__ = [
     "check_action_applied_to_class",
     "check_action_guard_permissions",
@@ -346,4 +406,5 @@ __all__ = [
     "check_public_actions",
     "check_shared_action_name_collisions",
     "check_success_message_framework",
+    "check_tunneled_cookie_messages",
 ]

@@ -38,7 +38,11 @@ from next.partial.signals import (
     zone_registered,
     zone_rendered,
 )
-from next.realtime.signals import broker_backend_loaded, message_published
+from next.realtime.signals import (
+    broker_backend_loaded,
+    message_published,
+    upstream_received,
+)
 from next.scripts.signals import scripts_registered
 from next.seo.signals import sitemap_backend_loaded
 from next.server.signals import watch_specs_ready
@@ -91,6 +95,7 @@ __all__ = [
     "sse_stream_opened",
     "static_backend_loaded",
     "template_loaded",
+    "upstream_received",
     "watch_specs_ready",
     "wizard_backend_loaded",
     "wizard_completed",

@@ -8,6 +8,7 @@ import functools
 import math
 import time
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, cast, override
 
 from asgiref.sync import sync_to_async
@@ -60,6 +61,25 @@ async def run_detached[**P, R](
 
     A long-lived socket opens no thread-sensitive context, so such calls serialize.
     """
+    call = _fresh_links(func, *args, **kwargs)
+    return await sync_to_async(call, thread_sensitive=False)()
+
+
+async def run_pooled[**P, R](
+    executor: ThreadPoolExecutor,
+    func: Callable[P, R],
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> R:
+    """Run blocking code on its own pool, so it never queues the shared one."""
+    call = _fresh_links(func, *args, **kwargs)
+    return await sync_to_async(call, thread_sensitive=False, executor=executor)()
+
+
+def _fresh_links[**P, R](
+    func: Callable[P, R], *args: P.args, **kwargs: P.kwargs
+) -> Callable[[], R]:
+    """Wrap a call in `close_old_connections`, as a request cycle would."""
 
     def call() -> R:
         close_old_connections()
@@ -68,7 +88,7 @@ async def run_detached[**P, R](
         finally:
             close_old_connections()
 
-    return await sync_to_async(call, thread_sensitive=False)()
+    return call
 
 
 class AccessCheck:
@@ -288,6 +308,7 @@ __all__ = [
     "heartbeat_seconds",
     "live_session",
     "run_detached",
+    "run_pooled",
     "session_alive",
     "session_user",
 ]

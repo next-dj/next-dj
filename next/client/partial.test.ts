@@ -5,7 +5,7 @@ import type { PartialAdapters, PartialDeps, PartialSurface } from "./partial";
 import type { DialogAdapter } from "./layers";
 import { createSse } from "./sse";
 import type { EventSourceAdapter, SourceControl, SseFactory, StreamMeta } from "./sse";
-import type { WsTransportFactory } from "./ws";
+import type { WebSocketAdapter, WsTransportFactory } from "./ws";
 import {
   manualPollClock,
   manualVisibility,
@@ -795,6 +795,9 @@ describe("createPartial surface", () => {
     const source = mockSource();
     let usedWebSocket = false;
     const websocket: WsTransportFactory = (deps) => ({
+      up: vi.fn(),
+      http: vi.fn(),
+      renew: vi.fn(),
       name: "websocket",
       open(url, sink, lastSeq) {
         usedWebSocket = true;
@@ -1377,5 +1380,191 @@ describe("Next.partial integration", () => {
     expect(typeof win.Next.partial.fetch).toBe("function");
     expect(typeof win.Next.partial.defineOp).toBe("function");
     expect(typeof win.Next.partial._reset).toBe("function");
+  });
+});
+
+describe("createPartial over an open WebSocket", () => {
+  const MASKED = [
+    "fw062o3AibVzOUYtJtC0uP0MIDbY3wEs5fxT6MItQLn5l3tNjTQBXB3Rs6p5X4VE",
+    "QcrsoFV0mQwlcQhSwkUZBjSeSzOdaxTwGVYfs3ATUqYRJZMc6K8A45VjC22k45aI",
+  ] as const;
+  const OTHER = "eoRDP3uSdzGc7HxAfeekm21kauG5wYsEsI9i2xEzzqDRvSXf3rLt6xvz6W853mSy";
+  const FORM =
+    '<div data-next-stream="/stream/"></div><div data-next-zone="z">old</div>' +
+    '<form action="/_next/form/u/" data-next-action="u" data-next-transport="any">' +
+    '<input name="t" value="x"></form>';
+  const REPLY = JSON.stringify({
+    version: "v1",
+    ops: [{ op: "inner", target: { zone: "z" }, html: "new" }],
+  });
+
+  async function flush(): Promise<void> {
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  }
+
+  function submit(): void {
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  }
+
+  function connected(transports: string[]) {
+    const sent: string[] = [];
+    const deliver: ((body: unknown) => void)[] = [];
+    const opens: (() => void)[] = [];
+    const websocket: WebSocketAdapter = {
+      open(_url, onOpen, onMessage) {
+        opens.push(() => onOpen((body) => sent.push(body)));
+        deliver.push(onMessage);
+        return { close: () => undefined };
+      },
+    };
+    const fetch = vi.fn(async (url: string) =>
+      url.endsWith("/stream/")
+        ? Response.json({
+            protocol: 2,
+            transport: "ws",
+            ticket: "t",
+            url: "/_next/ws/",
+          })
+        : patchesResponse(REPLY),
+    );
+    const partial = createPartial({
+      ...chunkModules,
+      context: () => ({ $realtime: { transports } }),
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    partial._configure({
+      document,
+      fetch,
+      websocket,
+      source: mockSource().adapter,
+      visibility: manualVisibility(),
+    });
+    document.body.innerHTML = FORM;
+    partial.stream.scan(document);
+    const message = (frame: Record<string, unknown>, socket = 0): void =>
+      deliver[socket]!(JSON.stringify(frame));
+    const last = (): Record<string, unknown> =>
+      JSON.parse(sent[sent.length - 1]!) as Record<string, unknown>;
+    return { partial, fetch, opens, message, last, sent };
+  }
+
+  it("sends upstream events once the socket has said hello", async () => {
+    const c = connected(["ws", "sse"]);
+    await expect(c.partial.stream.send("room", "typing", {})).resolves.toBe(false);
+    await flush();
+    c.opens[0]!();
+    c.message({ type: "hello", topics: { room: { epoch: "e", seq: 0 } } });
+    const sent = c.partial.stream.send("room", "typing", { user: 1 });
+    expect(c.last()).toMatchObject({ type: "up", topic: "room", name: "typing" });
+    c.message({ type: "ack", id: c.last().id, ok: true });
+    await expect(sent).resolves.toBe(true);
+    c.partial._reset();
+  });
+
+  it("sends an event without waiting for an ack when asked to", async () => {
+    const c = connected(["ws", "sse"]);
+    await flush();
+    c.opens[0]!();
+    c.message({ type: "hello", topics: { room: { epoch: "e", seq: 0 } } });
+    await expect(
+      c.partial.stream.send("room", "typing", { user: 1 }, { ack: false }),
+    ).resolves.toBe(true);
+    expect(c.last()).toEqual({
+      type: "up",
+      topic: "room",
+      name: "typing",
+      data: { user: 1 },
+    });
+    const acked = c.partial.stream.send("room", "typing", null, { ack: true });
+    expect(c.last().id).toEqual(expect.any(String));
+    c.message({ type: "ack", id: c.last().id, ok: true });
+    await expect(acked).resolves.toBe(true);
+    c.partial._reset();
+  });
+
+  it("reconnects the socket when a reply or the page rotates the CSRF token", async () => {
+    const c = connected(["ws", "sse"]);
+    const negotiations = (): number =>
+      c.fetch.mock.calls.filter(([url]) => url.endsWith("/stream/")).length;
+    await flush();
+    c.opens[0]!();
+    c.message({ type: "hello", topics: { room: { epoch: "e", seq: 0 } }, tunnel: {} });
+    submit();
+    await flush();
+    c.message({
+      type: "http",
+      id: c.last().id,
+      status: 200,
+      headers: { "content-type": "application/vnd.next.patches+json" },
+      body: JSON.stringify({
+        version: "v1",
+        ops: [],
+        csrf: { header: "X-CSRFToken", token: MASKED[0] },
+      }),
+    });
+    await flush();
+    expect(negotiations()).toBe(2);
+    c.opens[1]!();
+    c.message({ type: "hello", topics: {} }, 1);
+    c.partial.setCsrf({ header: "X-CSRFToken", token: MASKED[1] });
+    await flush();
+    expect(negotiations()).toBe(2);
+    c.partial.setCsrf({ header: "X-CSRFToken", token: OTHER });
+    await flush();
+    expect(negotiations()).toBe(3);
+    c.opens[2]!();
+    c.message({ type: "hello", topics: {} }, 2);
+    c.partial.setCsrf({ header: "X-CSRFToken", url: "/csrf/" });
+    c.partial.setCsrf(undefined);
+    await flush();
+    expect(negotiations()).toBe(3);
+    c.partial._reset();
+  });
+
+  it("keeps the socket when a reply re-masks the token the page started with", async () => {
+    const c = connected(["ws", "sse"]);
+    c.partial.setCsrf({ header: "X-CSRFToken", token: MASKED[0] });
+    await flush();
+    c.opens[0]!();
+    c.message({ type: "hello", topics: {}, tunnel: {} });
+    c.partial.setCsrf({ header: "X-CSRFToken", token: MASKED[1] });
+    await flush();
+    expect(c.fetch.mock.calls.filter(([url]) => url.endsWith("/stream/"))).toHaveLength(
+      1,
+    );
+    c.partial._reset();
+  });
+
+  it("applies a form reply from the socket as the fetched reply", async () => {
+    const c = connected(["ws", "sse"]);
+    await flush();
+    c.opens[0]!();
+    c.message({ type: "hello", topics: { room: { epoch: "e", seq: 0 } }, tunnel: {} });
+    submit();
+    await flush();
+    expect(c.last()).toMatchObject({ type: "http", method: "POST", body: "t=x" });
+    c.message({
+      type: "http",
+      id: c.last().id,
+      status: 200,
+      headers: { "content-type": "application/vnd.next.patches+json" },
+      body: REPLY,
+    });
+    await flush();
+    const tunneled = document.querySelector('[data-next-zone="z"]')!.textContent;
+    expect(c.fetch).toHaveBeenCalledOnce();
+    c.partial._reset();
+
+    const plain = connected(["sse"]);
+    submit();
+    await flush();
+    expect(plain.fetch).toHaveBeenCalledOnce();
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe(tunneled);
+    expect(tunneled).toBe("new");
+    await expect(plain.partial.stream.send("room", "typing", {})).resolves.toBe(false);
+    plain.partial._reset();
   });
 });

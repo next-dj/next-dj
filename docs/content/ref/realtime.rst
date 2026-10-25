@@ -27,6 +27,8 @@ API tier
 Advanced.
    ``BrokerBackend``, ``MemoryBroker``, ``RedisBroker``, ``ReplayingBroker``, ``Replay``, ``Message``, ``Position``, ``TopicStream``, ``publish``, ``apublish``, ``Presence``, ``PresenceBroker``, ``presence``, ``apresence``, ``BrokerConnectionError``, ``InvalidTopicError``, ``InvalidMemberError``, and ``TopicPayloadError`` are imported from ``next.realtime``.
    The WebSocket side adds ``WebSocketApp``, ``application``, ``TopicSocket``, ``SocketPort``, ``Handshake``, ``TicketClaims``, ``verify_ticket``, ``InvalidTicketError``, ``Close``, and ``TicketIntrospectionView``.
+   Upstream events add ``on`` and ``Upstream``.
+   ``DjangoTunnel``, ``Tunnel``, and ``TunnelHints`` live in ``next.realtime.tunnel`` for gateway and tunnel authors.
    ``signals``, ``checks``, and ``frames`` are also available as submodules.
    ``resolve_claims`` and ``resolve_identify`` live in ``next.realtime.tickets`` for gateway authors.
    ``replay_window``, ``replay_after``, and ``INCOMPLETE`` live in ``next.realtime.replay`` for broker authors.
@@ -525,6 +527,17 @@ Client frames
      - ``{"type": "pong"}``
      - The answer to ``ping``.
        Extra keys close with ``4400``, and the server takes no other action.
+   * - ``up``
+     - ``{"type": "up", "topic": "room:42", "name": "typing", "data": {...}, "id": "7"}``
+     - A client event for the handler of ``topic`` and ``name``, see `Upstream events`_.
+       ``topic`` and ``name`` are strings, ``data`` is any JSON value, and ``id`` is an optional string of 1 to 64 characters.
+       Only a frame with an ``id`` gets an ``ack``.
+       Any other key or type closes with ``4400``.
+   * - ``http``
+     - ``{"type": "http", "id": "8", "method": "POST", "path": "/_next/form/<uid>/", "headers": {...}, "body": "..."}``
+     - A form action request the server runs as an HTTP request, see `Request tunnel`_.
+       ``id`` is a required string of 1 to 64 characters, ``method`` and ``path`` are strings, ``headers`` is an optional object of string values, and ``body`` is an optional string.
+       Any other key or type closes with ``4400``, since the server cannot answer a frame without its ``id``.
    * - any other ``type``
      - a JSON object with an unknown or missing ``type``
      - The server answers ``{"type": "error", "code": "unsupported"}`` and keeps the socket open.
@@ -550,7 +563,7 @@ Server frames
    * - ``hello``
      - ``{"type": "hello", "protocol": 2, "server_time": 1761300000000, "topics": {"room:42": {"epoch": "9f2c41d07a3be851", "seq": 17}}, "transports": ["ws", "sse"], "heartbeat": 25.0}``
      - The subscription is live.
-       It carries the keys of the SSE ``next-hello`` frame plus ``type`` and ``heartbeat``, the server interval in seconds.
+       It carries the keys of the SSE ``next-hello`` frame plus ``type`` and ``heartbeat``, the server interval in seconds, and the ``upstream`` and ``tunnel`` limits below.
        A client sizes its missed-ping watchdog from ``heartbeat``.
    * - ``patches``
      - ``{"type": "patches", "data": ...}``
@@ -564,10 +577,44 @@ Server frames
      - ``{"type": "ping", "server_time": 1761300000000}``
      - A heartbeat on an idle subscription.
        The client answers with ``pong``.
+   * - ``ack``
+     - ``{"type": "ack", "id": "7", "ok": true}`` or ``{"type": "ack", "id": "7", "ok": false, "error": "topic"}``
+     - The outcome of an ``up`` frame with an ``id``, see `Upstream events`_.
+   * - ``http``
+     - ``{"type": "http", "id": "8", "status": 200, "headers": {...}, "body": "..."}`` or ``{"type": "http", "id": "8", "status": 0, "error": "limit", "retry": true}``
+     - The answer to an ``http`` frame, an HTTP reply or a refusal with ``status`` ``0``, see `Request tunnel`_.
    * - ``error``
      - ``{"type": "error", "code": "protocol"}``
-     - ``code`` is ``protocol``, ``auth``, or ``unsupported``.
+     - ``code`` is ``protocol``, ``auth``, ``unsupported``, or ``limit``.
        ``protocol`` and ``auth`` precede a close with ``4400``, ``4401``, or ``4403``, while ``unsupported`` leaves the socket open.
+       ``limit`` refuses an ``up`` frame without an ``id`` and precedes the close with ``4429``.
+       Every frame after ``sub`` draws a token, so a ``pong`` or an unsupported frame that finds the bucket empty gets no answer and counts towards ``4429`` as well.
+
+The WebSocket ``hello`` tells the client the limits it builds its frames by.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Key
+     - Value
+   * - ``upstream.frame``
+     - ``UPSTREAM['MAX_BYTES']``, the largest ``up`` frame in UTF-8 bytes.
+       Always present.
+   * - ``tunnel.timeout``
+     - ``TUNNEL['TIMEOUT']`` in seconds, after which the server answers ``timeout``.
+   * - ``tunnel.frame``
+     - ``frames.MAX_INBOUND_BYTES``, the largest ``http`` frame in UTF-8 bytes.
+   * - ``tunnel.headers``
+     - The sorted request header names the tunnel keeps, lowercase, ``DjangoTunnel.request_headers`` by default.
+   * - ``tunnel.prefixes``
+     - The header name prefixes the tunnel keeps, ``DjangoTunnel.request_prefixes`` by default.
+   * - ``tunnel.csrf``
+     - The lowercase header ``CSRF_HEADER_NAME`` stands for, such as ``x-csrftoken``, or ``null`` when the setting names a plain ``META`` key.
+
+``tunnel`` is present only when the socket has a tunnel and ``REALTIME['TUNNEL']`` is not ``False``, so its absence means every ``http`` frame answers ``disabled``.
+With the defaults the frame ends in ``"upstream":{"frame":16384},"tunnel":{"timeout":30.0,"frame":65536,"headers":["accept","content-type"],"prefixes":["x-next-"],"csrf":"x-csrftoken"}``.
+A client sends a header outside ``headers``, ``prefixes``, and ``csrf`` over HTTP, since the tunnel drops it.
 
 A stock JSON backend returns ``None`` from ``stream_data`` once a subclass sets its own ``content_type`` or overrides ``sse_event`` or ``sse_stream_event``.
 The client hands a string ``data`` to the same parse hook the SSE transport uses, so a custom wire format works on both transports.
@@ -611,8 +658,8 @@ Close codes
      - The authorizer refuses a topic of the grant.
    * - ``4429``
      - ``RATE_LIMITED``
-     - Defined for gateways that rate limit.
-       The built-in socket never sends it.
+     - Three frames in a row found the token bucket empty, see `Upstream events`_.
+       An ``error`` frame with the ``limit`` code precedes it.
 
 The browser client falls back to SSE for good on ``4401`` and ``4403``, and on an ``auth`` error frame.
 Every other close is transient.
@@ -648,6 +695,156 @@ Limits
    * - Heartbeat
      - 25 seconds by default
      - ``REALTIME['HEARTBEAT']``
+   * - Frames after ``sub``
+     - 10 a second with a burst of 20 by default
+     - ``REALTIME['UPSTREAM']['RATE']`` and ``['BURST']``
+   * - One ``up`` frame
+     - 16 KiB of UTF-8 by default
+     - ``REALTIME['UPSTREAM']['MAX_BYTES']``
+   * - Concurrent ``up`` events
+     - 16 by default
+     - ``REALTIME['UPSTREAM']['CONCURRENCY']``
+   * - Wait for a handler
+     - 10 seconds by default
+     - ``REALTIME['UPSTREAM']['TIMEOUT']``
+   * - ``id`` of an ``up`` or ``http`` frame
+     - 64 characters
+     - ``frames.MAX_ID_LENGTH``
+   * - Tunneled requests at once
+     - 4 by default
+     - ``REALTIME['TUNNEL']['CONCURRENCY']``
+   * - Tunneled request time
+     - 30 seconds by default
+     - ``REALTIME['TUNNEL']['TIMEOUT']``
+   * - Tunneled reply body
+     - 1 MiB by default
+     - ``REALTIME['TUNNEL']['MAX_REPLY_BYTES']``
+
+Upstream events
+~~~~~~~~~~~~~~~
+
+Every frame after ``sub`` draws one token from a bucket per connection, which holds ``UPSTREAM['BURST']`` tokens and refills at ``UPSTREAM['RATE']`` a second.
+A frame that finds the bucket empty is refused at once, an ``up`` with ``{"type": "ack", "ok": false, "error": "limit"}`` or, without an ``id``, with an ``error`` frame of the ``limit`` code, and an ``http`` with a ``limit`` refusal.
+Three refusals in a row with no admitted frame between them close the socket with ``4429``, ``TopicSocket.strikes`` in a subclass.
+A reconnect starts a fresh bucket, so a client that backs off before reconnecting gets its burst again.
+A frame sent before ``hello`` waits until the ticket is verified and its topics granted.
+
+An admitted ``up`` frame is checked in this order, and the first failure is the ``error`` of its ``ack``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 16 84
+
+   * - ``error``
+     - When
+   * - ``too_big``
+     - The frame exceeds ``UPSTREAM['MAX_BYTES']`` bytes of UTF-8.
+   * - ``topic``
+     - ``topic`` is not a topic of the ticket.
+   * - ``denied``
+     - The session or the authorizer refuses the ticket on the throttled access recheck.
+       The socket then closes as on any failed recheck, with ``4401`` or ``4403``.
+   * - ``unknown``
+     - No ``@realtime.on`` handler serves the topic and the name.
+   * - ``timeout``
+     - The handler ran past ``UPSTREAM['TIMEOUT']``.
+       The event may still take effect, since a sync handler keeps running in its thread, so a client does not resend it blindly.
+   * - ``internal``
+     - The handler raised, which is logged on ``next.realtime.socket``.
+   * - ``limit``
+     - The bucket was empty, or ``UPSTREAM['CONCURRENCY']`` events of the connection are still running.
+       Only the bucket counts towards ``4429``.
+
+``{"type": "ack", "id": ..., "ok": true}`` means the handler ran to completion.
+Each admitted frame runs as its own task, so acks may arrive in another order than the frames.
+The recheck runs at most once per heartbeat, so an ``up`` frame may still reach its handler up to one heartbeat after the session or the grant is revoked.
+``TopicSocket.access_check(claims, authorizer)`` builds that recheck, and an override with a shorter interval tightens it.
+A sync handler runs on a thread pool of its own, sized like the default executor, so a slow handler never queues the session loads and transforms of other sockets.
+``TopicSocket.handle(upstream)`` routes a granted event and returns whether anything served it, and an override replaces the ``@realtime.on`` registry with routing of its own.
+
+Request tunnel
+~~~~~~~~~~~~~~
+
+An ``http`` frame runs a form action through the same ASGI application ``application()`` serves, as a ``POST`` with the cookies, host, origin, and proxy headers of the WebSocket handshake.
+Middleware, CSRF, sessions, guards, and ``FormActionDispatch`` see an ordinary request, and ``request.scope["next.transport"]`` is ``"ws"``.
+The session keeps its engine and class, and during the action only ``cycle_key()``, ``flush()``, and their async forms are replaced on the instance with a refusal.
+Only an action declared with ``transport="any"`` runs, and the other actions answer ``421`` with ``X-Next-Transport: http`` before their guards.
+
+The frame contributes only ``content-type``, ``accept``, the header ``CSRF_HEADER_NAME`` names, and ``x-next-*`` headers, and every other header of the frame is dropped.
+A request may carry at most 32 headers, each name an RFC 7230 token and each value at most 4096 Latin-1 characters without CR, LF, or NUL.
+``DjangoTunnel.max_headers``, ``max_header_value``, ``max_path``, and ``grace`` are class attributes a subclass changes.
+The body is sent as UTF-8 with a computed ``content-length``.
+The server takes from the handshake every header except the hop-by-hop and ``sec-websocket-*`` headers, the ones the frame supplies, ``content-length``, ``accept-encoding``, ``if-*``, ``range``, ``expect``, and ``referer``.
+The scheme is ``https`` for a ``wss`` socket, so ``SECURE_PROXY_SSL_HEADER`` and ``USE_X_FORWARDED_HOST`` behave as over HTTP.
+
+A reply carries its status, the ``content-type``, ``location``, and ``x-next-*`` headers with repeated values joined by ``", "``, and the body decoded as UTF-8 with replacement.
+Only a reply to a request that reached ``FormActionDispatch`` passes, so a middleware that swaps ``request.urlconf`` or answers on its own never leaks another view through the socket.
+Such a reply is the answer of the action, so a ``PermissionDenied`` or ``Http404`` raised by a guard or a handler arrives with its ``403`` or ``404`` as over HTTP.
+A redirect is not followed and arrives as its ``3xx`` with ``location``.
+A ``Set-Cookie`` that repeats a cookie of the handshake with the same value and no deletion is dropped, and any other ``Set-Cookie`` turns the reply into the ``http_only`` refusal, logged as a warning that names the cookies and never their values.
+A ``set_expiry()`` call in a tunneled action moves the expiry the store keeps, while the browser cookie keeps its lifetime, so an action that changes how long the browser holds the session keeps ``transport="http"``.
+``DjangoTunnel.cookie_allowed(name, morsel)`` decides each cookie, and an override admits a cookie the client does not need, such as an analytics marker.
+
+A refusal has ``status`` ``0``, an ``error`` code, and ``retry``.
+``retry`` is ``true`` only when the request never reached the action dispatch, or reached it only to get the ``421`` of an HTTP-only action, so a client may send it again over HTTP.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 16 10 74
+
+   * - ``error``
+     - ``retry``
+     - When
+   * - ``disabled``
+     - ``true``
+     - The socket has no application to run requests through, or ``REALTIME['TUNNEL']`` is ``False``.
+   * - ``limit``
+     - ``true``
+     - The bucket was empty, or ``TUNNEL['CONCURRENCY']`` requests of the connection are still running.
+       Only the bucket counts towards ``4429``.
+   * - ``method``
+     - ``true``
+     - The method is not ``POST``.
+   * - ``path``
+     - ``true``
+     - The path is not ASCII up to 2048 characters starting with a single ``/`` and free of spaces, quotes, ``#``, and ``\``, or it falls outside the ``root_path`` of the socket.
+   * - ``headers``
+     - ``true``
+     - A header breaks the rules above.
+   * - ``body``
+     - ``true``
+     - The body is not valid UTF-8, or ``content-type`` is neither ``application/x-www-form-urlencoded`` nor ``application/json``, multipart included.
+   * - ``stale``
+     - ``true``
+     - The handshake carried no ``CSRF_COOKIE_NAME`` cookie while ``CSRF_USE_SESSIONS`` is off, or a ``403`` came before the request reached the dispatch, which is how the CSRF check refuses a token rotated after the handshake.
+       The client then reconnects the socket for fresh cookies and sends the request over HTTP.
+   * - ``transport``
+     - ``true``
+     - The path does not resolve to the form action dispatch, the action answered ``421`` with ``X-Next-Transport: http``, or another reply below ``500`` came before the request reached the dispatch.
+   * - ``http_only``
+     - ``false``
+     - The reply sets a cookie the socket cannot deliver, such as a flashed message in a cookie or a new cookie.
+       Or the action rotated or flushed the session, a login or a logout, which the dispatch refuses before the store writes and answers with ``X-Next-Transport: session``.
+   * - ``too_big``
+     - ``false``
+     - The reply body exceeds ``TUNNEL['MAX_REPLY_BYTES']``.
+   * - ``timeout``
+     - ``false``
+     - The request ran past ``TUNNEL['TIMEOUT']``.
+   * - ``encoding``
+     - ``false``
+     - The reply carries ``content-encoding``.
+   * - ``internal``
+     - ``false``
+     - The application raised or broke the ASGI protocol, which is logged on ``next.realtime.tunnel``, or answered ``500`` or above before the request reached the dispatch.
+
+A timeout or a closing socket ends the request with ``http.disconnect`` and waits ``DjangoTunnel.grace``, one second, for the application.
+The application is never cancelled, because a cancel inside Django's thread-sensitive context blocks the event loop until the view thread returns.
+A synchronous view keeps running in its thread after the disconnect, so a ``timeout`` or ``http_only`` request may have committed, and Django still sends ``request_finished`` once it ends.
+Such a request keeps its ``TUNNEL['CONCURRENCY']`` slot until the view returns, so a socket never runs more views at once than the limit.
+``WebSocketApp(http_app=...)`` runs the requests through another application, and a subclass that overrides ``WebSocketApp.tunnel(scope)`` returns its own ``Tunnel``, an object whose ``async __call__(request, *, connection)`` returns a ``Reply`` or a ``Refusal`` and whose ``hints()`` returns the ``TunnelHints`` of the ``hello`` frame.
+``DjangoTunnel`` keeps its header lists in class attributes, so a subclass extends them without copying the class, and ``hello`` reports the extended lists.
+With messages kept in a cookie, ``next.W145`` warns that a flashed message turns a tunneled reply into ``http_only``.
 
 Origin and session
 ~~~~~~~~~~~~~~~~~~
@@ -687,20 +884,24 @@ Another HTTP application gets the lifespan events, and the broker closes before 
 An application that fails or returns before sending a lifespan event, such as a middleware around Django's handler, leaves the answer to ``application``.
 A broker that fails to close is logged and reported as ``lifespan.shutdown.failed``.
 Creating a ``WebSocketApp`` marks the process as serving ``ws``, which switches the default ``TRANSPORTS`` to ``["ws", "sse"]``.
-It also logs the session warnings of ``manage.py check`` as ``WARNING`` records on the ``next.realtime.asgi`` logger.
+It also logs the session warnings of ``manage.py check`` as ``WARNING`` records on the ``next.realtime.asgi`` logger, and ``next.W146`` for an explicit origin CSRF refuses.
+It reads ``UPSTREAM`` and ``TUNNEL`` once, so a bad value raises ``ImproperlyConfigured`` when the application is built rather than on every connection, and ``WebSocketApp.limits`` holds the result.
 
 Three methods of ``WebSocketApp`` are the extension points of a subclass.
 ``allow_origin(origin, scope)`` decides the Origin, ``authenticate(scope)`` returns the ``Handshake`` of the connection or ``None`` for a refusal, and ``topic_socket(port, handshake, scope)`` returns the ``TopicSocket`` that serves it.
+An overridden ``topic_socket`` passes ``tunnel=self.tunnel(scope)`` and ``limits=self.limits`` to its socket, since a socket built without ``tunnel=`` answers every ``http`` frame with ``disabled``.
 An ``authenticate`` that raises is logged and closes the socket with ``1011``.
 
 ``TopicSocket`` knows nothing of ASGI.
 It reads frames from an async iterable and writes through a ``SocketPort``, which is two coroutines, ``send(text)`` and ``close(code)``.
 ``send`` raises ``OSError`` once the peer is gone, and ``close`` tolerates a peer that already left.
 A gateway on another server loads the ``Handshake`` of a session key with ``await Handshake.from_session(session_key)``, which ``WebSocketApp.authenticate`` uses too, and runs ``TopicSocket(port, handshake).serve(frames)``.
+A gateway that tunnels form actions passes ``tunnel=`` as well, a ``DjangoTunnel`` or its own ``Tunnel``.
 A gateway that takes the identity from elsewhere builds ``Handshake(session_key, user, expires_at)`` itself, with ``expires_at`` on the ``time.monotonic()`` clock or ``None``.
 ``expires_at`` is the moment of a forced session recheck, not of a close.
 The ``Handshake.session_key`` has to be the key the ticket was issued under.
 ``TopicSocket.catch_up(subscription, positions)`` and ``TopicSocket.tick`` are the hooks a subclass overrides, the first between the position read and ``hello`` and the second on each idle heartbeat.
+``TopicSocket.handle(upstream)`` and ``TopicSocket.access_check(claims, authorizer)`` are the hooks of `Upstream events`_.
 
 ``verify_ticket(token, session_key)`` returns the ``TicketClaims`` of a valid ticket and raises ``InvalidTicketError`` otherwise.
 ``resolve_claims(claims)`` imports the transform and the authorizer the claims name.
@@ -713,6 +914,15 @@ The ``count`` of a snapshot follows the rules of `Presence`_, one member for eve
    :members:
 
 .. autofunction:: next.realtime.application
+
+.. autoclass:: next.realtime.tunnel.DjangoTunnel
+   :members:
+
+.. autoclass:: next.realtime.tunnel.Tunnel
+   :members:
+
+.. autoclass:: next.realtime.tunnel.TunnelHints
+   :members:
 
 .. autoclass:: next.realtime.TopicSocket
    :members:
@@ -798,6 +1008,7 @@ Signals
 
 ``broker_backend_loaded`` fires when the lazy manager creates the configured backend, after the manager lock is released.
 ``message_published`` fires after the broker accepts a publication.
+``upstream_received`` fires before an upstream handler runs, with the ``Upstream`` it gets.
 See :doc:`signals` for their payloads and :doc:`/content/topics/signals` for receiver usage.
 
 System checks
@@ -809,7 +1020,8 @@ Deployment warnings flag an explicit ``"ws"`` transport without ``SessionMiddlew
 A ``WebSocketApp`` logs the session warnings itself when it is created, since ``manage.py check`` never sees a mounted socket.
 An error flags a routed ticket introspection endpoint that has no ``GATEWAY_TOKEN``.
 The checks run against the defaults when ``NEXT_FRAMEWORK`` has no ``REALTIME`` key.
-See :doc:`system-checks` for the ids ``next.E177`` to ``next.E196`` and ``next.W141`` to ``next.W144``.
+Errors flag invalid ``UPSTREAM`` and ``TUNNEL`` limits and upstream handlers that can never match.
+See :doc:`system-checks` for the ids ``next.E177`` to ``next.E199``, ``next.E201`` to ``next.E210``, and ``next.W141`` to ``next.W144`` and ``next.W146``.
 
 See also
 --------

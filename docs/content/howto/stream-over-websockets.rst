@@ -322,4 +322,6 @@ See :doc:`fan-out-across-processes-with-redis` for the setup.
 Delivery is best-effort, and clients recover gaps by requesting their guarded zones over HTTP.
 Use a durable outbox if the application needs guaranteed delivery after a database commit.
 
+The same socket carries events from the page to the server and form submissions, see :ref:`topics-realtime-upstream` and :ref:`topics-realtime-tunnel`.
+
 See :doc:`/content/topics/realtime` for topic delivery and recovery guarantees, :doc:`/content/ref/realtime` for the complete API and the frame specification, and :doc:`/content/deployment/wsgi-asgi` for ASGI deployment.

@@ -17,7 +17,7 @@ Every signal below is a Django ``Signal``.
 The ``sender`` column lists the value passed to ``Signal.send``.
 Receivers connected with a matching ``sender`` only fire for that sender.
 
-Every signal but ``settings_reloaded`` is sent with ``Signal.send``, so an exception from a receiver leaves the send and reaches the render, the dispatch, or the startup step that was under way, and the receivers connected behind it never run.
+Every signal but ``settings_reloaded`` is sent with ``Signal.send``, or ``Signal.asend`` for ``upstream_received``, so an exception from a receiver leaves the send and reaches the render, the dispatch, or the startup step that was under way, and the receivers connected behind it never run.
 ``settings_reloaded`` alone is sent with ``Signal.send_robust``, which runs the whole chain and re-raises the first error afterwards.
 A receiver body therefore guards itself, see :ref:`topics-signals` for the pattern.
 
@@ -92,6 +92,11 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - The realtime broker class
      - ``topic``, ``message``
      - After the broker accepts a publication.
+   * - ``upstream_received``
+     - The handler of the matched ``@realtime.on``
+     - ``upstream``
+     - Before the handler of an ``up`` frame runs, once the topic grant and the access recheck passed.
+       ``upstream`` is the ``Upstream`` the handler gets, and the signal goes out with ``asend``, so a raising receiver turns the ``ack`` into ``internal``.
    * - ``components_registered``
      - ``ComponentRegistry``
      - ``infos``

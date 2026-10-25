@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Transport, TransportSink } from "./stream";
-import { createWebSocketTransport } from "./ws";
+import { createWebSocketTransport, csrfSecret } from "./ws";
 import type { WebSocketAdapter } from "./ws";
 
 function harness() {
@@ -64,6 +64,12 @@ function grant(url = "/_next/ws/") {
     expires_in: 60,
   });
 }
+
+const MASKED = [
+  "fw062o3AibVzOUYtJtC0uP0MIDbY3wEs5fxT6MItQLn5l3tNjTQBXB3Rs6p5X4VE",
+  "QcrsoFV0mQwlcQhSwkUZBjSeSzOdaxTwGVYfs3ATUqYRJZMc6K8A45VjC22k45aI",
+] as const;
+const OTHER = "6Nu4CeRFMWSQZKRAnWfC6hw3MxglXkfR8xtBTuI2ShL2AkVzb319ii6nTbq84Gg4";
 
 afterEach(() => vi.useRealTimers());
 
@@ -771,5 +777,745 @@ describe("WebSocket stream transport", () => {
     await settle();
     made.sockets[0]!.message(JSON.stringify({ type: "error", code: "auth" }));
     expect(made.calls).toHaveLength(1);
+  });
+});
+
+async function subscribed(
+  topics: unknown = { room: {} },
+  limits: Record<string, unknown> = { tunnel: {} },
+) {
+  const made = harness();
+  made.fetch.mockImplementation(async () => grant());
+  const transport = createWebSocketTransport({
+    fallback: made.fallback,
+    fetch: made.fetch,
+    socket: made.socket,
+    origin: "https://example.test",
+    random: () => 0,
+  });
+  const control = transport.open("/stream/", made.sink);
+  await settle();
+  const socket = made.sockets[0]!;
+  socket.open();
+  socket.message(JSON.stringify({ type: "hello", topics, heartbeat: 0, ...limits }));
+  const last = (): Record<string, unknown> =>
+    JSON.parse(socket.sent[socket.sent.length - 1]!) as Record<string, unknown>;
+  const reply = (frame: Record<string, unknown>): void =>
+    socket.message(JSON.stringify({ id: last().id, ...frame }));
+  return { made, transport, control, socket, last, reply };
+}
+
+function formBody(entries: [string, string | Blob][]): FormData {
+  const body = new FormData();
+  for (const [key, value] of entries) body.append(key, value);
+  return body;
+}
+
+describe("WebSocket upstream events", () => {
+  it("sends an up frame and resolves with the ack", async () => {
+    const s = await subscribed();
+    const sent = s.transport.up("room", "typing", { user: 1 });
+    expect(s.last()).toEqual({
+      type: "up",
+      topic: "room",
+      name: "typing",
+      data: { user: 1 },
+      id: expect.any(String),
+    });
+    s.reply({ type: "ack", ok: true });
+    await expect(sent).resolves.toBe(true);
+    const refused = s.transport.up("room", "typing", null);
+    s.reply({ type: "ack", ok: false, error: "denied" });
+    await expect(refused).resolves.toBe(false);
+    s.control.close();
+  });
+
+  it("resolves false without a subscribed socket for the topic", async () => {
+    const made = harness();
+    const transport = createWebSocketTransport({
+      fallback: made.fallback,
+      fetch: made.fetch,
+      socket: made.socket,
+      origin: "https://example.test",
+    });
+    await expect(transport.up("room", "typing", {})).resolves.toBe(false);
+    const s = await subscribed();
+    await expect(s.transport.up("other", "typing", {})).resolves.toBe(false);
+    expect(s.socket.sent.map((body) => JSON.parse(body).type)).toEqual(["sub"]);
+    s.control.close();
+  });
+
+  it("takes no topics from a hello that lists none", async () => {
+    const s = await subscribed(["room"]);
+    await expect(s.transport.up("room", "typing", {})).resolves.toBe(false);
+    s.control.close();
+  });
+
+  it("resolves false when the ack does not come in time and ignores it later", async () => {
+    vi.useFakeTimers();
+    const s = await subscribed();
+    const sent = s.transport.up("room", "typing", {});
+    const id = s.last().id;
+    await vi.advanceTimersByTimeAsync(5000);
+    await expect(sent).resolves.toBe(false);
+    s.socket.message(JSON.stringify({ type: "ack", id, ok: true }));
+    s.socket.message(JSON.stringify({ type: "error", code: "limit" }));
+    expect(s.made.calls).toHaveLength(0);
+    s.control.close();
+  });
+
+  it("resolves false when the socket closes before the ack", async () => {
+    const s = await subscribed();
+    const sent = s.transport.up("room", "typing", {});
+    s.socket.close(1006);
+    await expect(sent).resolves.toBe(false);
+    await expect(s.transport.up("room", "typing", {})).resolves.toBe(false);
+    s.control.close();
+  });
+
+  it("resolves false for an event larger than an inbound frame", async () => {
+    const s = await subscribed();
+    await expect(s.transport.up("room", "typing", "x".repeat(65536))).resolves.toBe(
+      false,
+    );
+    expect(s.socket.sent).toHaveLength(1);
+    s.control.close();
+  });
+
+  it("ignores a hello and an ack that arrive before the socket opened", async () => {
+    const made = harness();
+    made.fetch.mockImplementation(async () => grant());
+    const transport = createWebSocketTransport({
+      fallback: made.fallback,
+      fetch: made.fetch,
+      socket: made.socket,
+      origin: "https://example.test",
+    });
+    const control = transport.open("/stream/", made.sink);
+    await settle();
+    made.sockets[0]!.message(JSON.stringify({ type: "hello", topics: { room: {} } }));
+    made.sockets[0]!.message(JSON.stringify({ type: "ack", id: "1", ok: true }));
+    await expect(transport.up("room", "typing", {})).resolves.toBe(false);
+    control.close();
+  });
+
+  it("drops the socket of a fallback, so events report false", async () => {
+    const s = await subscribed();
+    s.socket.message(JSON.stringify({ type: "error", code: "auth" }));
+    await expect(s.transport.up("room", "typing", {})).resolves.toBe(false);
+    s.control.close();
+  });
+
+  it("reconnects over WebSocket after a rate-limit close", async () => {
+    vi.useFakeTimers();
+    const s = await subscribed();
+    s.socket.close(4429);
+    expect(s.made.sink.closed).toHaveBeenCalledWith("transient");
+    await vi.advanceTimersByTimeAsync(151);
+    await settle();
+    expect(s.made.calls).toHaveLength(0);
+    expect(s.made.fetch).toHaveBeenCalledTimes(2);
+    expect(s.made.sockets).toHaveLength(2);
+    s.control.close();
+  });
+});
+
+describe("WebSocket request tunnel", () => {
+  const target = "https://example.test/_next/form/u1/?step=2";
+
+  it("sends a form post as an http frame with its tunnel headers", async () => {
+    const s = await subscribed();
+    const reply = s.transport.http(
+      target,
+      {
+        method: "POST",
+        headers: new Headers({
+          "X-Next-Request": "1",
+          "X-Next-Request-Id": "r1",
+          "X-CSRFToken": "tok",
+          Accept: "application/json",
+          "Content-Type": "multipart/form-data",
+        }),
+        body: formBody([
+          ["title", "a b&c"],
+          ["n", "1"],
+        ]),
+      },
+      "X-CSRFToken",
+    );
+    expect(s.last()).toEqual({
+      type: "http",
+      id: expect.any(String),
+      method: "POST",
+      path: "/_next/form/u1/?step=2",
+      headers: {
+        "x-next-request": "1",
+        "x-next-request-id": "r1",
+        "x-csrftoken": "tok",
+        accept: "application/json",
+        "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+      },
+      body: "title=a+b%26c&n=1",
+    });
+    s.reply({
+      type: "http",
+      status: 200,
+      headers: { "content-type": "application/vnd.next.patches+json" },
+      body: '{"ops":[]}',
+    });
+    const response = (await reply) as Response;
+    expect(response.status).toBe(200);
+    expect(response.redirected).toBe(false);
+    expect(response.headers.get("content-type")).toBe(
+      "application/vnd.next.patches+json",
+    );
+    await expect(response.text()).resolves.toBe('{"ops":[]}');
+    void s.transport.http(
+      target,
+      { method: "POST", headers: { "X-XSRF-Token": "xs" } },
+      "X-XSRF-TOKEN",
+    );
+    expect(s.last().headers).toEqual({ "x-xsrf-token": "xs" });
+    s.control.close();
+  });
+
+  it.each([
+    [{ Authorization: "secret" }, "X-CSRFToken"],
+    [{ "X-Other": "1", "X-Next-Request": "1" }, "X-CSRFToken"],
+    [{ "X-CSRFToken": "tok" }, "X-XSRF-TOKEN"],
+    [{ "X-CSRFToken": "tok" }, undefined],
+  ])(
+    "leaves a request with a foreign header %j to plain HTTP",
+    async (headers, csrf) => {
+      const s = await subscribed();
+      expect(
+        s.transport.http(target, { method: "POST", headers }, csrf),
+      ).toBeUndefined();
+      expect(s.socket.sent).toHaveLength(1);
+      s.control.close();
+    },
+  );
+
+  it("carries a text, url-encoded or empty body as it is", async () => {
+    const s = await subscribed();
+    void s.transport.http(target, { method: "POST", body: '{"a":1}' });
+    expect(s.last().body).toBe('{"a":1}');
+    expect(s.last().headers).toEqual({});
+    void s.transport.http(target, {
+      method: "POST",
+      body: new URLSearchParams([["a", "1"]]),
+    });
+    expect(s.last().body).toBe("a=1");
+    void s.transport.http(target, { method: "POST" });
+    expect(s.last().body).toBe("");
+    void s.transport.http(target, { method: "POST", body: null });
+    expect(s.last().body).toBe("");
+    s.control.close();
+  });
+
+  it("leaves files, binary and oversized bodies to plain HTTP", async () => {
+    const s = await subscribed();
+    const file = new File(["data"], "a.txt");
+    expect(
+      s.transport.http(target, { method: "POST", body: formBody([["f", file]]) }),
+    ).toBeUndefined();
+    expect(s.transport.http(target, { method: "POST", body: new Blob(["x"]) })).toBe(
+      undefined,
+    );
+    expect(
+      s.transport.http(target, { method: "POST", body: "x".repeat(65536) }),
+    ).toBeUndefined();
+    expect(s.socket.sent).toHaveLength(1);
+    s.control.close();
+  });
+
+  it("leaves a request to plain HTTP without an open socket", () => {
+    const made = harness();
+    const transport = createWebSocketTransport({
+      fallback: made.fallback,
+      fetch: made.fetch,
+      socket: made.socket,
+      origin: "https://example.test",
+    });
+    expect(transport.http(target, { method: "POST", body: "" })).toBeUndefined();
+  });
+
+  it("refuses a redirect off the origin like a same-origin fetch", async () => {
+    const s = await subscribed();
+    const reply = s.transport.http(target, { method: "POST", body: "" });
+    s.reply({
+      type: "http",
+      status: 302,
+      headers: { location: "https://evil.test/" },
+      body: "",
+    });
+    await expect(reply).rejects.toThrow(TypeError);
+    const local = s.transport.http(target, { method: "POST", body: "" });
+    s.reply({ type: "http", status: 303, headers: { location: "//example.test/x" } });
+    expect(((await local) as Response).url).toBe("https://example.test/x");
+    s.control.close();
+  });
+
+  it("marks a redirect so the wire navigates to its location", async () => {
+    const s = await subscribed();
+    const reply = s.transport.http(target, { method: "POST", body: "" });
+    s.reply({ type: "http", status: 302, headers: { location: "/done/" }, body: "" });
+    const response = (await reply) as Response;
+    expect(response.redirected).toBe(true);
+    expect(response.url).toBe("https://example.test/done/");
+    const moved = s.transport.http(target, { method: "POST", body: "" });
+    s.reply({ type: "http", status: 304 });
+    const unchanged = (await moved) as Response;
+    expect(unchanged.redirected).toBe(false);
+    await expect(unchanged.text()).resolves.toBe("");
+    const located = s.transport.http(target, { method: "POST", body: "" });
+    s.reply({ type: "http", status: 201, headers: { location: "/new/" } });
+    expect(((await located) as Response).redirected).toBe(false);
+    s.control.close();
+  });
+
+  it.each([
+    [{ status: 0, error: "http_only", retry: false }, "http_only"],
+    [{ status: 0, error: "timeout", retry: false }, "timeout"],
+    [{ status: 0, error: "limit" }, "limit"],
+  ])("names why a request the server ran got no reply %j", async (frame, reason) => {
+    const s = await subscribed();
+    const reply = s.transport.http(target, { method: "POST", body: "" });
+    s.reply({ type: "http", ...frame });
+    await expect(reply).resolves.toBe(reason);
+    s.control.close();
+  });
+
+  it.each([
+    [{ error: "unknown" }, "unknown"],
+    [{ status: 42 }, "range"],
+  ])("rejects a malformed reply %j", async (frame, error) => {
+    const s = await subscribed();
+    const reply = s.transport.http(target, { method: "POST", body: "" });
+    s.reply({ type: "http", ...frame });
+    await expect(reply).rejects.toThrow(error);
+    s.control.close();
+  });
+
+  it("names a socket that closed before the reply", async () => {
+    const s = await subscribed();
+    const reply = s.transport.http(target, { method: "POST", body: "" });
+    s.socket.close(1006);
+    await expect(reply).resolves.toBe("closed");
+    s.control.close();
+  });
+
+  it("ignores a reply with an id it never sent", async () => {
+    const s = await subscribed();
+    const reply = s.transport.http(target, { method: "POST", body: "" });
+    s.socket.message(JSON.stringify({ type: "http", id: "nope", status: 200 }));
+    s.control.close();
+    await expect(reply).resolves.toBe("closed");
+  });
+});
+
+describe("WebSocket tunnel refusals", () => {
+  const target = "https://example.test/_next/form/u1/";
+  const post = { method: "POST", body: "" };
+  const kinds = (socket: { sent: string[] }): unknown[] =>
+    socket.sent.map((body) => JSON.parse(body).type);
+
+  it.each(["limit", "transport", "path", "method", "headers", "body"])(
+    "leaves a request the server did not run to fetch on %s",
+    async (error) => {
+      const s = await subscribed();
+      const reply = s.transport.http(target, post);
+      s.reply({ type: "http", status: 0, error, retry: true });
+      await expect(reply).resolves.toBeUndefined();
+      expect(s.transport.http(target, post)).toBeInstanceOf(Promise);
+      expect(s.made.fetch).toHaveBeenCalledOnce();
+      s.control.close();
+    },
+  );
+
+  it("keeps a socket stale twice in a row on fetch without reconnecting again", async () => {
+    const s = await subscribed();
+    const first = s.transport.http(target, post);
+    s.reply({ type: "http", status: 0, error: "stale", retry: true });
+    await expect(first).resolves.toBeUndefined();
+    await settle();
+    const fresh = s.made.sockets[1]!;
+    fresh.open();
+    fresh.message(
+      JSON.stringify({ type: "hello", topics: { room: {} }, heartbeat: 0, tunnel: {} }),
+    );
+    const second = s.transport.http(target, post);
+    const id = (JSON.parse(fresh.sent[fresh.sent.length - 1]!) as { id: string }).id;
+    fresh.message(
+      JSON.stringify({ type: "http", id, status: 0, error: "stale", retry: true }),
+    );
+    await expect(second).resolves.toBeUndefined();
+    await settle();
+    expect(s.transport.http(target, post)).toBeUndefined();
+    expect(fresh.control.close).not.toHaveBeenCalled();
+    expect(s.made.sockets).toHaveLength(2);
+    expect(s.made.fetch).toHaveBeenCalledTimes(2);
+    s.control.close();
+  });
+
+  it("tunnels again once a stale-cut socket reconnects for another reason", async () => {
+    vi.useFakeTimers();
+    const s = await subscribed();
+    const first = s.transport.http(target, post);
+    s.reply({ type: "http", status: 0, error: "stale", retry: true });
+    await first;
+    await vi.advanceTimersByTimeAsync(0);
+    const fresh = s.made.sockets[1]!;
+    fresh.open();
+    fresh.message(
+      JSON.stringify({ type: "hello", topics: {}, heartbeat: 0, tunnel: {} }),
+    );
+    const second = s.transport.http(target, post);
+    const id = (JSON.parse(fresh.sent[fresh.sent.length - 1]!) as { id: string }).id;
+    fresh.message(
+      JSON.stringify({ type: "http", id, status: 0, error: "stale", retry: true }),
+    );
+    await second;
+    fresh.close(1006);
+    await vi.advanceTimersByTimeAsync(151);
+    const later = s.made.sockets[2]!;
+    later.open();
+    later.message(
+      JSON.stringify({ type: "hello", topics: {}, heartbeat: 0, tunnel: {} }),
+    );
+    void s.transport.http(target, post);
+    expect(JSON.parse(later.sent[later.sent.length - 1]!)).toMatchObject({
+      type: "http",
+    });
+    s.control.close();
+  });
+
+  it("sends nothing more through a socket that has the tunnel disabled", async () => {
+    const s = await subscribed();
+    const reply = s.transport.http(target, post);
+    s.reply({ type: "http", status: 0, error: "disabled", retry: true });
+    await expect(reply).resolves.toBeUndefined();
+    expect(s.transport.http(target, post)).toBeUndefined();
+    const event = s.transport.up("room", "typing", {});
+    s.reply({ type: "ack", ok: true });
+    await expect(event).resolves.toBe(true);
+    expect(kinds(s.socket)).toEqual(["sub", "http", "up"]);
+    expect(s.made.sockets).toHaveLength(1);
+    s.control.close();
+  });
+
+  it("reconnects a stale socket and routes requests to fetch until the new hello", async () => {
+    const s = await subscribed();
+    const reply = s.transport.http(target, post);
+    s.reply({ type: "http", status: 0, error: "stale", retry: true });
+    await expect(reply).resolves.toBeUndefined();
+    expect(s.socket.control.close).toHaveBeenCalledOnce();
+    expect(s.made.sink.closed).toHaveBeenCalledWith("transient");
+    expect(s.transport.http(target, post)).toBeUndefined();
+    await settle();
+    expect(s.made.fetch).toHaveBeenCalledTimes(2);
+    const next = s.made.sockets[1]!;
+    next.open();
+    expect(s.transport.http(target, post)).toBeUndefined();
+    next.message(
+      JSON.stringify({ type: "hello", topics: { room: {} }, heartbeat: 0, tunnel: {} }),
+    );
+    void s.transport.http(target, post);
+    expect(kinds(next)).toEqual(["sub", "http"]);
+    expect(s.made.calls).toHaveLength(0);
+    s.control.close();
+  });
+
+  it("waits for the pending replies of a stale socket before it reconnects", async () => {
+    const s = await subscribed();
+    const first = s.transport.http(target, post);
+    const firstId = s.last().id;
+    const event = s.transport.up("room", "typing", {});
+    const eventId = s.last().id;
+    const second = s.transport.http(target, post);
+    s.reply({ type: "http", status: 0, error: "stale", retry: true });
+    await expect(second).resolves.toBeUndefined();
+    expect(s.socket.control.close).not.toHaveBeenCalled();
+    s.socket.message(JSON.stringify({ type: "ack", id: eventId, ok: true }));
+    await expect(event).resolves.toBe(true);
+    expect(s.socket.control.close).not.toHaveBeenCalled();
+    s.socket.message(
+      JSON.stringify({ type: "http", id: firstId, status: 204, headers: {} }),
+    );
+    expect(((await first) as Response).status).toBe(204);
+    expect(s.socket.control.close).toHaveBeenCalledOnce();
+    s.control.close();
+  });
+
+  it("settles the replies of a stale socket that drops before they arrive", async () => {
+    const s = await subscribed();
+    const first = s.transport.http(target, post);
+    const second = s.transport.http(target, post);
+    s.reply({ type: "http", status: 0, error: "stale", retry: true });
+    await expect(second).resolves.toBeUndefined();
+    s.socket.close(1006);
+    await expect(first).resolves.toBe("closed");
+    s.control.close();
+  });
+
+  it("reconnects every socket once the CSRF cookie rotates", async () => {
+    const s = await subscribed();
+    const pending = s.transport.http(target, post);
+    s.transport.renew("rotated");
+    expect(s.socket.control.close).not.toHaveBeenCalled();
+    expect(s.transport.http(target, post)).toBeUndefined();
+    s.reply({ type: "http", status: 200, body: "ok" });
+    expect(((await pending) as Response).status).toBe(200);
+    expect(s.socket.control.close).toHaveBeenCalledOnce();
+    await settle();
+    const next = s.made.sockets[1]!;
+    next.open();
+    next.message(
+      JSON.stringify({ type: "hello", topics: { room: {} }, heartbeat: 0, tunnel: {} }),
+    );
+    expect(s.transport.http(target, post)).toBeInstanceOf(Promise);
+    expect(next.control.close).not.toHaveBeenCalled();
+    s.control.close();
+  });
+
+  it("reconnects a socket whose handshake predates a rotation once it says hello", async () => {
+    const made = harness();
+    made.fetch.mockImplementation(async () => grant());
+    const transport = createWebSocketTransport({
+      fallback: made.fallback,
+      fetch: made.fetch,
+      socket: made.socket,
+      origin: "https://example.test",
+    });
+    transport.renew("first");
+    const control = transport.open("/stream/", made.sink);
+    await settle();
+    made.sockets[0]!.open();
+    transport.renew("second");
+    made.sockets[0]!.message(
+      JSON.stringify({ type: "hello", topics: {}, heartbeat: 5 }),
+    );
+    expect(made.sockets[0]!.control.close).toHaveBeenCalledOnce();
+    expect(transport.http(target, post)).toBeUndefined();
+    await settle();
+    expect(made.sockets).toHaveLength(2);
+    control.close();
+  });
+
+  it("reconnects only for a token whose unmasked secret is new", async () => {
+    const made = harness();
+    made.fetch.mockImplementation(async () => grant());
+    const transport = createWebSocketTransport({
+      fallback: made.fallback,
+      fetch: made.fetch,
+      socket: made.socket,
+      origin: "https://example.test",
+      token: MASKED[0],
+    });
+    const control = transport.open("/stream/", made.sink);
+    await settle();
+    made.sockets[0]!.open();
+    made.sockets[0]!.message(JSON.stringify({ type: "hello", topics: {}, tunnel: {} }));
+    transport.renew(MASKED[1]);
+    transport.renew(undefined);
+    expect(transport.http(target, post)).toBeInstanceOf(Promise);
+    expect(made.sockets[0]!.control.close).not.toHaveBeenCalled();
+    transport.renew(OTHER);
+    expect(made.sockets[0]!.control.close).not.toHaveBeenCalled();
+    made.sockets[0]!.message(
+      JSON.stringify({ type: "http", id: "1", status: 204, headers: {} }),
+    );
+    await settle();
+    expect(made.sockets[0]!.control.close).toHaveBeenCalledOnce();
+    expect(made.sockets).toHaveLength(2);
+    control.close();
+  });
+
+  it("gives up on a reply after 35 seconds and ignores it later", async () => {
+    vi.useFakeTimers();
+    const s = await subscribed();
+    const reply = s.transport.http(target, post);
+    const id = s.last().id;
+    await vi.advanceTimersByTimeAsync(34999);
+    s.socket.message(JSON.stringify({ type: "ping" }));
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(reply).resolves.toBe("timeout");
+    s.socket.message(JSON.stringify({ type: "http", id, status: 200 }));
+    expect(s.made.calls).toHaveLength(0);
+    s.control.close();
+  });
+});
+
+describe("WebSocket fire-and-forget events", () => {
+  it("sends an up frame without an id and resolves true at once", async () => {
+    const s = await subscribed();
+    await expect(s.transport.up("room", "typing", { user: 1 }, false)).resolves.toBe(
+      true,
+    );
+    expect(s.last()).toEqual({
+      type: "up",
+      topic: "room",
+      name: "typing",
+      data: { user: 1 },
+    });
+    s.socket.message(JSON.stringify({ type: "error", code: "limit" }));
+    await expect(s.transport.up("other", "typing", {}, false)).resolves.toBe(false);
+    await expect(
+      s.transport.up("room", "typing", "x".repeat(65536), false),
+    ).resolves.toBe(false);
+    expect(s.socket.sent).toHaveLength(2);
+    s.control.close();
+  });
+});
+
+describe("WebSocket limits from the hello", () => {
+  const target = "https://example.test/_next/form/u1/";
+  const post = { method: "POST", body: "" };
+
+  it("keeps requests on fetch when the hello advertises no tunnel", async () => {
+    const s = await subscribed({ room: {} }, {});
+    expect(s.transport.http(target, post)).toBeUndefined();
+    const event = s.transport.up("room", "typing", {});
+    s.reply({ type: "ack", ok: true });
+    await expect(event).resolves.toBe(true);
+    s.control.close();
+  });
+
+  it("admits exactly the headers and the CSRF name the hello lists", async () => {
+    const s = await subscribed(
+      { room: {} },
+      { tunnel: { headers: ["accept"], prefixes: ["x-app-"], csrf: "x-token" } },
+    );
+    void s.transport.http(
+      target,
+      { ...post, headers: { Accept: "a", "X-App-Id": "1", "X-Token": "t" } },
+      "X-CSRFToken",
+    );
+    expect(s.last().headers).toEqual({ accept: "a", "x-app-id": "1", "x-token": "t" });
+    for (const headers of [
+      { "Content-Type": "text/plain" },
+      { "X-Next-Request": "1" },
+      { "X-CSRFToken": "t" },
+    ])
+      expect(s.transport.http(target, { ...post, headers }, "X-CSRFToken")).toBe(
+        undefined,
+      );
+    expect(s.socket.sent).toHaveLength(2);
+    s.control.close();
+  });
+
+  it("caps a tunneled request at the frame the hello names", async () => {
+    const s = await subscribed({ room: {} }, { tunnel: { frame: 200 } });
+    expect(s.transport.http(target, { method: "POST", body: "x".repeat(200) })).toBe(
+      undefined,
+    );
+    expect(s.transport.http(target, { method: "POST", body: "x" })).toBeInstanceOf(
+      Promise,
+    );
+    expect(s.socket.sent).toHaveLength(2);
+    s.control.close();
+  });
+
+  it("waits five seconds past the server timeout the hello names", async () => {
+    vi.useFakeTimers();
+    const s = await subscribed({ room: {} }, { tunnel: { timeout: 10 } });
+    const reply = s.transport.http(target, post);
+    let settled = false;
+    void reply?.then(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(14999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(reply).resolves.toBe("timeout");
+    s.control.close();
+  });
+
+  it("falls back to the defaults for malformed tunnel limits", async () => {
+    vi.useFakeTimers();
+    const s = await subscribed(
+      { room: {} },
+      {
+        tunnel: { timeout: "10", frame: -1, headers: "accept", prefixes: [1], csrf: 2 },
+      },
+    );
+    expect(
+      s.transport.http(
+        target,
+        { ...post, headers: { "Content-Type": "text/plain", "X-CSRFToken": "t" } },
+        "X-CSRFToken",
+      ),
+    ).toBeInstanceOf(Promise);
+    expect(s.transport.http(target, { ...post, headers: { "X-Next-Zone": "z" } })).toBe(
+      undefined,
+    );
+    const reply = s.transport.http(target, post);
+    await vi.advanceTimersByTimeAsync(34999);
+    s.socket.message(JSON.stringify({ type: "ping" }));
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(reply).resolves.toBe("timeout");
+    expect(s.transport.http(target, { method: "POST", body: "x".repeat(65536) })).toBe(
+      undefined,
+    );
+    s.control.close();
+  });
+
+  it("refuses an up frame that outgrows the upstream limit unsent", async () => {
+    const s = await subscribed({ room: {} }, { upstream: { frame: 64 } });
+    await expect(s.transport.up("room", "typing", "x".repeat(11), false)).resolves.toBe(
+      false,
+    );
+    await expect(s.transport.up("room", "typing", "é".repeat(6), false)).resolves.toBe(
+      false,
+    );
+    await expect(s.transport.up("room", "typing", "x".repeat(10))).resolves.toBe(false);
+    await expect(s.transport.up("room", "typing", "x".repeat(10), false)).resolves.toBe(
+      true,
+    );
+    await expect(s.transport.up("room", "typing", "é".repeat(5), false)).resolves.toBe(
+      true,
+    );
+    expect(s.socket.sent).toHaveLength(3);
+    s.control.close();
+  });
+
+  it("holds an up frame to 16 KiB without an upstream limit", async () => {
+    const s = await subscribed({ room: {} }, { upstream: { frame: 0 } });
+    await expect(
+      s.transport.up("room", "typing", "x".repeat(16331), false),
+    ).resolves.toBe(false);
+    await expect(
+      s.transport.up("room", "typing", "x".repeat(16330), false),
+    ).resolves.toBe(true);
+    expect(s.socket.sent).toHaveLength(2);
+    s.control.close();
+  });
+
+  it("resolves false on a receiver timeout and sends the event once", async () => {
+    const s = await subscribed({ room: {} });
+    const sent = s.transport.up("room", "typing", { user: 1 });
+    s.reply({ type: "ack", ok: false, error: "timeout" });
+    await expect(sent).resolves.toBe(false);
+    expect(s.socket.sent.filter((body) => body.includes('"up"'))).toHaveLength(1);
+    s.control.close();
+  });
+});
+
+describe("csrfSecret", () => {
+  const secret = "0THXeyP3IKCGHjFuKAoLDWdfUDoh4Irm";
+
+  it("unmasks every masking of one secret to that secret", () => {
+    expect(
+      csrfSecret("fw062o3AibVzOUYtJtC0uP0MIDbY3wEs5fxT6MItQLn5l3tNjTQBXB3Rs6p5X4VE"),
+    ).toBe(secret);
+    expect(
+      csrfSecret("QcrsoFV0mQwlcQhSwkUZBjSeSzOdaxTwGVYfs3ATUqYRJZMc6K8A45VjC22k45aI"),
+    ).toBe(secret);
+    expect(
+      csrfSecret("6Nu4CeRFMWSQZKRAnWfC6hw3MxglXkfR8xtBTuI2ShL2AkVzb319ii6nTbq84Gg4"),
+    ).toBe("cU9Hrq1xgv3mLKe9YhWHmbKuhOkXhwbn");
+  });
+
+  it("keeps a token of another length as it is", () => {
+    expect(csrfSecret(secret)).toBe(secret);
+    expect(csrfSecret(undefined)).toBeUndefined();
   });
 });

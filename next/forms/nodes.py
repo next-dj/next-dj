@@ -17,6 +17,7 @@ from next.forms.manager import (
     form_action_manager,
     resolve_component_anchor,
 )
+from next.forms.transport import TRANSPORT_ATTR
 from next.forms.uid import (
     FORM_ORIGIN_OVERRIDE_KEY,
     ORIGIN_FIELD_NAME,
@@ -160,13 +161,17 @@ class FormNode(template.Node):
         self,
         context: template.Context,
         action_url: str,
-        uid: str | None,
+        meta: "ActionMeta | None",
         form_instance: "django_forms.Form | None",
     ) -> str:
         """Build the opening form element with framework and extra attributes."""
         bits: list[str] = [format_html('<form action="{}" method="post"', action_url)]
+        uid = meta.get("uid") if meta is not None else None
         if uid:
             bits.append(format_html('data-next-action="{}"', uid))
+        transport = meta.get("transport") if meta is not None else None
+        if transport is not None:
+            bits.append(format_html('{}="{}"', TRANSPORT_ATTR, transport))
         bits.extend(
             format_html('{}="{}"', name, str(expr.resolve(context)))
             for name, expr in self.partial_attrs.items()
@@ -237,10 +242,7 @@ class FormNode(template.Node):
             )
 
         opening_tag = self._opening_tag(
-            context,
-            resolved_action_url,
-            meta.get("uid") if meta is not None else None,
-            form_instance,
+            context, resolved_action_url, meta, form_instance
         )
         hidden_inputs = self._build_hidden_inputs(context, request)
 

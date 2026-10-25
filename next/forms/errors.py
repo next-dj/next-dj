@@ -121,6 +121,13 @@ class FormActionNotFoundError(LookupError):
         return message
 
 
+class SessionRotationError(RuntimeError):
+    """Raised when a tunneled action rotates or flushes the session, before it writes.
+
+    A new session key reaches the browser only through a cookie, which a socket lacks.
+    """
+
+
 class UnstorableWizardValueError(ImproperlyConfigured):
     """Raised when a cleaned value does not fit the session wizard backend."""
 
@@ -171,6 +178,7 @@ class UnregisteredComponentError(LookupError):
 
 __all__ = [
     "FormActionNotFoundError",
+    "SessionRotationError",
     "UnregisteredComponentError",
     "UnstorableWizardValueError",
 ]

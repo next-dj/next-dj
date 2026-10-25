@@ -950,6 +950,58 @@ Errors
      - ``NEXT_FRAMEWORK['REALTIME']['PRESENCE']['MEMBER_BYTES']`` is not an integer from ``1`` to ``4096``.
        It caps the compact JSON of one member, and a larger member fails its join with ``InvalidMemberError``.
      - ``next.realtime.checks``
+   * - ``next.E197``
+     - ``NEXT_FRAMEWORK['REALTIME']['HANDLERS']`` is neither ``None`` nor a list of dotted module names.
+       ``None`` imports the ``realtime`` module of every installed app, a list imports only the modules it names, and ``[]`` imports none.
+     - ``next.realtime.checks``
+   * - ``next.E198``
+     - A ``@realtime.on`` handler names a topic pattern or an event name that can never match.
+       A pattern holds topic characters and distinct ``{name}`` placeholders outside the ``next:`` prefix, and the literal between two placeholders holds a ``:`` or a ``.``, so ``dm:{a}-{b}`` is refused as ambiguous.
+       An event name holds 1 to 100 topic characters.
+     - ``next.realtime.checks``
+   * - ``next.E199``
+     - Two different handlers register ``@realtime.on`` for the same topic pattern and event name.
+       Only the first one runs, and the same function defined again in a reloaded module replaces itself without the error.
+     - ``next.realtime.checks``
+   * - ``next.E200``
+     - An ``@action`` or a form class ``Meta`` declares a ``transport`` other than ``"http"`` and ``"any"``.
+       The action is registered for HTTP alone until the value is fixed.
+     - ``next.forms.checks``
+   * - ``next.E201``
+     - ``NEXT_FRAMEWORK['REALTIME']['UPSTREAM']`` is not a mapping.
+     - ``next.realtime.checks``
+   * - ``next.E202``
+     - ``NEXT_FRAMEWORK['REALTIME']['UPSTREAM']['RATE']`` is not a positive number of frames a second up to ``1000``.
+       The rate refills the token bucket every frame of a connection after ``sub`` draws from, ``pong`` and unsupported frames included.
+     - ``next.realtime.checks``
+   * - ``next.E203``
+     - ``NEXT_FRAMEWORK['REALTIME']['UPSTREAM']['BURST']`` is not an integer from ``1`` to ``1000``.
+       The burst is the size of the token bucket, the frames a fresh connection may send at once.
+     - ``next.realtime.checks``
+   * - ``next.E204``
+     - ``NEXT_FRAMEWORK['REALTIME']['UPSTREAM']['MAX_BYTES']`` is not an integer from ``1`` to ``65536``.
+       It caps the UTF-8 bytes of one ``up`` frame as it arrives.
+     - ``next.realtime.checks``
+   * - ``next.E205``
+     - ``NEXT_FRAMEWORK['REALTIME']['TUNNEL']`` is neither ``False`` nor a mapping.
+     - ``next.realtime.checks``
+   * - ``next.E206``
+     - ``NEXT_FRAMEWORK['REALTIME']['TUNNEL']['CONCURRENCY']`` is not an integer from ``1`` to ``64``.
+     - ``next.realtime.checks``
+   * - ``next.E207``
+     - ``NEXT_FRAMEWORK['REALTIME']['TUNNEL']['TIMEOUT']`` is not a positive number of seconds up to ``600``.
+     - ``next.realtime.checks``
+   * - ``next.E208``
+     - ``NEXT_FRAMEWORK['REALTIME']['TUNNEL']['MAX_REPLY_BYTES']`` is not an integer from ``1`` to ``67108864``.
+     - ``next.realtime.checks``
+   * - ``next.E209``
+     - ``NEXT_FRAMEWORK['REALTIME']['UPSTREAM']['CONCURRENCY']`` is not an integer from ``1`` to ``64``.
+       It caps the ``up`` events of one connection that run at once.
+     - ``next.realtime.checks``
+   * - ``next.E210``
+     - ``NEXT_FRAMEWORK['REALTIME']['UPSTREAM']['TIMEOUT']`` is not a positive number of seconds up to ``600``.
+       It bounds how long one ``up`` event waits for its handler.
+     - ``next.realtime.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -1344,6 +1396,18 @@ Warnings
      - ``NEXT_FRAMEWORK['REALTIME']['PRESENCE']`` is set while the configured broker class is no ``PresenceBroker``, so every stream that asks for presence fails to start.
        Implementing ``PresenceBroker`` on the broker, or dropping ``PRESENCE``, clears it.
      - ``next.realtime.checks``
+   * - ``next.W145``
+     - A form action admits ``transport="any"`` while ``MESSAGE_STORAGE`` keeps messages in a cookie, as ``CookieStorage`` and the default ``FallbackStorage`` do.
+       A message flashed over the WebSocket tunnel sets a cookie the socket cannot deliver, so the reply turns into ``http_only`` after the action ran.
+       It runs only with ``django.contrib.messages`` in ``INSTALLED_APPS``.
+       Setting ``MESSAGE_STORAGE`` to ``django.contrib.messages.storage.session.SessionStorage`` clears it.
+     - ``next.forms.checks``
+   * - ``next.W146``
+     - ``WebSocketApp(origins=[...])`` admits an origin that neither ``CSRF_TRUSTED_ORIGINS`` nor a host ``ALLOWED_HOSTS`` names in full covers while the tunnel is on, so a form action tunneled from it may fail the CSRF check.
+       A ``.example.com`` or ``*`` entry does not count, since the CSRF check compares the origin with the exact ``Host`` of the request.
+       ``WebSocketApp`` logs it when it is created, since ``manage.py check`` never sees the list.
+       Adding the origin to ``CSRF_TRUSTED_ORIGINS``, or setting ``REALTIME['TUNNEL']`` to ``False``, clears it.
+     - ``next.realtime.asgi``
 
 Codes are assigned per check and are not contiguous.
 

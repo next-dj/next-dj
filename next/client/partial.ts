@@ -25,7 +25,7 @@ import type { LinkLoader, SessionStore } from "./assets";
 import { createTriggers } from "./triggers";
 import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
 import type { EventSourceAdapter, Sse, SseFactory, VisibilityAdapter } from "./sse";
-import type { WebSocketAdapter, WsTransportFactory } from "./ws";
+import type { SocketTransport, WebSocketAdapter, WsTransportFactory } from "./ws";
 import { createCsrf } from "./csrf";
 import type { Csrf, CsrfMint } from "./csrf";
 import type { LazyModule } from "./chunks";
@@ -78,6 +78,15 @@ export interface PartialAdapters {
   visibility?: VisibilityAdapter;
 }
 
+export type StreamSurface = Sse & {
+  send(
+    topic: string,
+    name: string,
+    data: unknown,
+    options?: { ack?: boolean },
+  ): Promise<boolean>;
+};
+
 /** The public `Next.partial` surface plus its underscore-prefixed test seams. */
 export interface PartialSurface {
   apply(raw: unknown): Envelope;
@@ -92,9 +101,9 @@ export interface PartialSurface {
   /** Register a mount callback, returning a teardown that unregisters it. */
   onMount(selector: string, callback: (el: Element) => void): () => void;
   layers: LayerStack;
-  sse: Sse;
+  sse: StreamSurface;
   /** Transport-neutral stream API; `sse` remains an alias during the migration. */
-  stream: Sse;
+  stream: StreamSurface;
   /** Run the on-`ready` work, called by the core from the inline `_init`. */
   ready(): void;
   /** Configure the adapters and rebuild the wire and applier. */
@@ -137,12 +146,14 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   let assets = createAssets(assetsDeps());
   let history: HistoryAdapter = defaultHistory();
   let navigate: Navigate = defaultNavigate();
-  let csrf: Csrf = createCsrf({ mint: deps.csrf });
+  const rotated = (token: string | undefined): void => wsTransport?.renew(token);
+  let csrf: Csrf = createCsrf({ mint: deps.csrf, rotated });
   let navigation = createNavigation(navigationDeps());
   let layers = createLayers(layerDeps());
   let triggers = createTriggers(triggerDeps());
   // The SSE bridge once its chunk has loaded, built with the adapters configured last.
   let bridge: Sse | undefined;
+  let wsTransport: SocketTransport | undefined;
   let sseAdapters: PartialAdapters | undefined;
   // The request ids sent before the bridge is built. A stream that opens once its
   // chunk lands can still carry their echoes, so the bridge takes them over.
@@ -165,7 +176,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     } else loadStream();
   };
   // A page with no stream never fetches the bridge.
-  const sse: Sse = {
+  const sse: StreamSurface = {
     scan(root) {
       if (matching(root, `[${ATTR_SSE}], [${ATTR_STREAM}]`).length === 0) return;
       const started = epoch;
@@ -195,6 +206,9 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       };
     },
     meta: () => bridge?.meta(),
+    send: (topic, name, data, options) =>
+      wsTransport?.up(topic, name, data, options?.ack !== false) ??
+      Promise.resolve(false),
     _reset() {
       bridge?._reset();
       unbridged = [];
@@ -287,7 +301,12 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     const wsFactory = deps.ws?.get();
     return {
       ...streamAdapters,
-      ...(wsFactory === undefined ? {} : { websocket: wsFactory }),
+      ...(wsFactory === undefined
+        ? {}
+        : {
+            websocket: (options: Parameters<WsTransportFactory>[0]) =>
+              (wsTransport = wsFactory({ ...options, token: csrf.current()?.token })),
+          }),
       useWebSocket: realtime?.transports?.includes("ws") === true,
       ...(socket === undefined ? {} : { socket }),
       websocketFetch: adapters?.fetch ?? defaultFetch(),
@@ -319,13 +338,15 @@ export function createPartial(deps: PartialDeps): PartialSurface {
         const envelope = applier.apply(raw, { snapshot, key, page, owner });
         // A csrf meta rotates the token so the next mutation submits the fresh
         // one, not just the forms already in the document.
-        if (envelope.csrf) csrf.set(envelope.csrf);
+        if (envelope.csrf) surface.setCsrf(envelope.csrf);
       },
       version: () => assets.version(),
       csrf: { current: () => csrf.current(), ensure: () => csrf.ensure() },
       dirtySnapshot: () => dirty.snapshot(),
       // Feeds the ring id to the SSE bridge so the echo stream event drops.
       rememberRequestId: (id: string) => sse.remember(id),
+      tunnel: (target: string, init: RequestInit, header?: string) =>
+        wsTransport?.http(target, init, header),
     };
   }
 
@@ -344,6 +365,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     },
     setCsrf(next) {
       csrf.set(next);
+      rotated(next?.token);
     },
     mount(nodes) {
       mountNodes(nodes, { run: runMount });
@@ -400,12 +422,13 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       sse._reset();
       // The token outlives the rebuild, only the fetch seam it mints through changes.
       const token = csrf.current();
-      csrf = createCsrf({ ...adapters, mint: deps.csrf });
+      csrf = createCsrf({ ...adapters, mint: deps.csrf, rotated });
       csrf.set(token);
       navigation = createNavigation(navigationDeps(adapters));
       layers = createLayers(layerDeps(adapters));
       triggers = createTriggers(triggerDeps(adapters));
       bridge = undefined;
+      wsTransport = undefined;
       sseAdapters = adapters;
       applier = new Applier(applyDeps(adapters));
       wire = new Wire(wireDeps(adapters));

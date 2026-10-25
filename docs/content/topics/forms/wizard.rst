@@ -26,6 +26,7 @@ See :doc:`actions` for the anchor-file rule and the ``NEXT_FRAMEWORK["FORM_ANCHO
 The access guards also match plain forms.
 ``Meta.login_required`` and ``Meta.permission_required`` on the wizard class guard its endpoint, and the guard is enforced on every step submission, not only the final one.
 The keys are read through plain class-attribute lookup, so a wizard subclassing a guarded base while declaring its own ``Meta`` must extend the base ``Meta`` or re-declare the guard keys.
+``Meta.transport = "any"`` lets the wizard post through an open WebSocket like any other action, see :ref:`topics-forms-actions-transport`.
 See :ref:`topics-forms-actions-guards` for the semantics and the inheritance rule.
 
 A wizard also accepts the dynamic ``check_permissions`` classmethod for a per-request decision.

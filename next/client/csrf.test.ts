@@ -67,6 +67,23 @@ describe("the deferred token", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("reports a minted token, since its endpoint may have set the cookie", async () => {
+    const { fetch, release } = minting();
+    let rotations = 0;
+    const csrf = createCsrf({
+      mint: chunkModules.csrf,
+      fetch,
+      rotated: () => (rotations += 1),
+    });
+    csrf.set({ header: "X-CSRFToken", url: CSRF_URL });
+    const pending = csrf.ensure();
+    expect(rotations).toBe(0);
+    release();
+    await pending;
+    await csrf.ensure();
+    expect(rotations).toBe(1);
+  });
+
   it("answers an eager token or an absent payload without a request", async () => {
     const { fetch, calls } = minting();
     const csrf = createCsrf({ mint: chunkModules.csrf, fetch });

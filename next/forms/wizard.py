@@ -25,6 +25,7 @@ from .base import (
     _format_success_message,
     _meta_guard,
     _meta_requires_runtime,
+    _meta_transport,
     _registration_gate,
     _stamp_hook_flag,
     _to_snake_case,
@@ -308,6 +309,7 @@ def _auto_register_wizard_class(cls: "type[FormWizard]") -> None:
             wizard_class=cls,
             guard=_meta_guard(cls),
             requires_runtime=_meta_requires_runtime(cls),
+            transport=_meta_transport(cls),
         )
     )
 

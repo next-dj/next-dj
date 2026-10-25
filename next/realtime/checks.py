@@ -27,6 +27,30 @@ from next.conf.defaults import USER_SETTING
 from next.conf.scopes import scope_value
 
 from .backends import BrokerBackend, MemoryBroker
+from .frames import MAX_INBOUND_BYTES
+from .handlers import (
+    MAX_NAME_LENGTH,
+    MAX_PATTERN_LENGTH,
+    Binding,
+    handler_registry,
+    valid_modules,
+    valid_name,
+)
+from .limits import (
+    MAX_BURST,
+    MAX_CONCURRENCY,
+    MAX_RATE,
+    MAX_REPLY_BYTES,
+    MAX_TIMEOUT,
+    TUNNEL_KEYS,
+    UPSTREAM_KEYS,
+    valid_burst,
+    valid_concurrency,
+    valid_max_bytes,
+    valid_rate,
+    valid_reply_bytes,
+    valid_timeout,
+)
 from .redis import RedisBroker, valid_prefix
 from .replay import (
     MAX_SIZE,
@@ -63,6 +87,9 @@ _REALTIME_KEYS = frozenset(
         "GATEWAY_TOKEN",
         "REPLAY",
         "PRESENCE",
+        "HANDLERS",
+        "UPSTREAM",
+        "TUNNEL",
     }
 )
 _BROKER_OPTIONS = {
@@ -135,6 +162,9 @@ def check_realtime_settings(*args, **kwargs) -> list[CheckMessage]:
     errors.extend(_heartbeat_errors(realtime))
     errors.extend(_replay_errors(realtime))
     errors.extend(_presence_errors(realtime))
+    errors.extend(_handler_module_errors(realtime))
+    errors.extend(_upstream_errors(realtime))
+    errors.extend(_tunnel_errors(realtime))
     errors.extend(_broker_errors(broker))
     errors.extend(_presence_warnings(realtime, broker))
     errors.extend(_deployment_warnings(realtime))
@@ -242,6 +272,129 @@ def _presence_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
     return errors
 
 
+def _handler_module_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
+    """Require `HANDLERS` to be None or a list of dotted module names."""
+    modules = realtime.get("HANDLERS")
+    if modules is None or valid_modules(modules):
+        return []
+    return [
+        Error(
+            f"{_PREFIX}['HANDLERS'] must be None or a list of dotted module names.",
+            hint=(
+                "Leave it None to import the realtime module of every installed "
+                "app, or use [] to import none."
+            ),
+            obj=settings,
+            id="next.E197",
+        )
+    ]
+
+
+def _limit_errors(
+    section: str,
+    values: Mapping[str, object],
+    rules: Sequence[tuple[str, Callable[[object], bool], str, str]],
+) -> list[CheckMessage]:
+    """Report every present key of a limits mapping that its rule refuses."""
+    return [
+        Error(f"{_PREFIX}['{section}']['{key}'] must be {text}.", obj=settings, id=code)
+        for key, valid, text, code in rules
+        if key in values and not valid(values[key])
+    ]
+
+
+def _upstream_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
+    """Require an upstream mapping whose five limits all stay in range."""
+    if "UPSTREAM" not in realtime:
+        return []
+    upstream = realtime["UPSTREAM"]
+    prefix = f"{_PREFIX}['UPSTREAM']"
+    if not isinstance(upstream, Mapping):
+        return [Error(f"{prefix} must be a mapping.", obj=settings, id="next.E201")]
+    errors = errors_for_unknown_keys(
+        dict(upstream), allowed=UPSTREAM_KEYS, prefix=prefix
+    )
+    errors.extend(
+        _limit_errors(
+            "UPSTREAM",
+            upstream,
+            (
+                (
+                    "RATE",
+                    valid_rate,
+                    f"a positive number of frames a second up to {MAX_RATE}",
+                    "next.E202",
+                ),
+                (
+                    "BURST",
+                    valid_burst,
+                    f"an integer from 1 to {MAX_BURST}",
+                    "next.E203",
+                ),
+                (
+                    "MAX_BYTES",
+                    valid_max_bytes,
+                    f"an integer from 1 to {MAX_INBOUND_BYTES}",
+                    "next.E204",
+                ),
+                (
+                    "CONCURRENCY",
+                    valid_concurrency,
+                    f"an integer from 1 to {MAX_CONCURRENCY}",
+                    "next.E209",
+                ),
+                (
+                    "TIMEOUT",
+                    valid_timeout,
+                    f"a positive number of seconds up to {MAX_TIMEOUT}",
+                    "next.E210",
+                ),
+            ),
+        )
+    )
+    return errors
+
+
+def _tunnel_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
+    """Require the tunnel to be False or a mapping of bounded limits."""
+    tunnel = realtime.get("TUNNEL")
+    if "TUNNEL" not in realtime or tunnel is False:
+        return []
+    prefix = f"{_PREFIX}['TUNNEL']"
+    if not isinstance(tunnel, Mapping):
+        return [
+            Error(f"{prefix} must be False or a mapping.", obj=settings, id="next.E205")
+        ]
+    errors = errors_for_unknown_keys(dict(tunnel), allowed=TUNNEL_KEYS, prefix=prefix)
+    errors.extend(
+        _limit_errors(
+            "TUNNEL",
+            tunnel,
+            (
+                (
+                    "CONCURRENCY",
+                    valid_concurrency,
+                    f"an integer from 1 to {MAX_CONCURRENCY}",
+                    "next.E206",
+                ),
+                (
+                    "TIMEOUT",
+                    valid_timeout,
+                    f"a positive number of seconds up to {MAX_TIMEOUT}",
+                    "next.E207",
+                ),
+                (
+                    "MAX_REPLY_BYTES",
+                    valid_reply_bytes,
+                    f"an integer from 1 to {MAX_REPLY_BYTES}",
+                    "next.E208",
+                ),
+            ),
+        )
+    )
+    return errors
+
+
 def _presence_warnings(
     realtime: Mapping[str, object], broker: Mapping[str, object]
 ) -> list[CheckMessage]:
@@ -334,6 +487,25 @@ def websocket_deployment_messages() -> list[CheckMessage]:
             )
         )
     return messages
+
+
+def tunnel_origin_messages(origins: Sequence[str]) -> list[CheckMessage]:
+    """Warn about socket origins CSRF refuses, so their tunneled posts answer 403.
+
+    `WebSocketApp` reports this itself, since `manage.py check` never sees the list.
+    """
+    if not origins:
+        return []
+    return [
+        DjangoWarning(
+            f"WebSocketApp admits the origins {', '.join(map(repr, origins))}, which "
+            "neither CSRF_TRUSTED_ORIGINS nor a host ALLOWED_HOSTS names in full "
+            "covers, so a form action tunneled from them may fail the CSRF check.",
+            hint="Add them to CSRF_TRUSTED_ORIGINS or set REALTIME['TUNNEL'] to False.",
+            obj=settings,
+            id="next.W146",
+        )
+    ]
 
 
 def _signed_cookie_sessions() -> bool:
@@ -519,6 +691,51 @@ def _dependency_errors(
     return []
 
 
+@register(NEXT)
+def check_upstream_handlers(*args, **kwargs) -> list[CheckMessage]:
+    """Report handlers that can never match and pairs two handlers claim."""
+    messages: list[CheckMessage] = [
+        Error(_invalid_binding(entry), obj=_handler_label(entry), id="next.E198")
+        for entry in handler_registry
+        if not entry.valid
+    ]
+    messages.extend(
+        Error(
+            f"The upstream event {other.name!r} on {other.pattern!r} is registered "
+            f"by {_handler_label(held)} and {_handler_label(other)}, and only the "
+            "first one runs.",
+            hint="Rename the event or narrow the topic pattern of one of them.",
+            obj=_handler_label(other),
+            id="next.E199",
+        )
+        for held, other in handler_registry.duplicates()
+    )
+    return messages
+
+
+def _invalid_binding(entry: Binding) -> str:
+    """Describe why a binding can never match."""
+    if not valid_name(entry.name):
+        return (
+            f"The upstream event name {entry.name!r} of {_handler_label(entry)} is "
+            f"not 1 to {MAX_NAME_LENGTH} ASCII letters, digits, underscores, dots, "
+            "colons or hyphens."
+        )
+    return (
+        f"The topic pattern {entry.pattern!r} of {_handler_label(entry)} is not 1 to "
+        f"{MAX_PATTERN_LENGTH} topic characters with distinct {{name}} placeholders "
+        "outside the next: prefix, with a colon or a dot between two placeholders."
+    )
+
+
+def _handler_label(entry: Binding) -> str:
+    """Return the dotted name of a binding's handler."""
+    handler = entry.handler
+    module = getattr(handler, "__module__", None) or "?"
+    name = getattr(handler, "__qualname__", None) or repr(handler)
+    return f"{module}.{name}"
+
+
 @register(Tags.urls, NEXT)
 def check_ticket_introspection(*args, **kwargs) -> list[CheckMessage]:
     """Refuse a routed ticket introspection endpoint that no bearer token guards."""
@@ -573,5 +790,7 @@ def _default_access(view: Callable[..., object]) -> bool:
 __all__ = [
     "check_realtime_settings",
     "check_ticket_introspection",
+    "check_upstream_handlers",
+    "tunnel_origin_messages",
     "websocket_deployment_messages",
 ]

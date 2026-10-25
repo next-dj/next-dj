@@ -12,6 +12,7 @@ from .errors import (
     TopicPayloadError,
 )
 from .frames import Close
+from .handlers import Upstream, on
 from .messages import Message, Position
 from .redis import RedisBroker
 from .replay import Replay, ReplayingBroker
@@ -44,12 +45,14 @@ __all__ = [
     "TopicPayloadError",
     "TopicSocket",
     "TopicStream",
+    "Upstream",
     "WebSocketApp",
     "application",
     "apresence",
     "apublish",
     "checks",
     "frames",
+    "on",
     "presence",
     "publish",
     "signals",

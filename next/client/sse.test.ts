@@ -140,6 +140,9 @@ describe("createSse", () => {
       websocket: (deps) => {
         passed = deps;
         return {
+          up: vi.fn(),
+          http: vi.fn(),
+          renew: vi.fn(),
           name: "websocket",
           open: (_url, sink) => {
             sink.opened();
@@ -1579,6 +1582,9 @@ describe("createSse", () => {
       now: () => 1000,
       useWebSocket: true,
       websocket: () => ({
+        up: vi.fn(),
+        http: vi.fn(),
+        renew: vi.fn(),
         name: "websocket",
         open: (_url, opened, last) => {
           sink = opened;
@@ -1620,6 +1626,9 @@ describe("createSse", () => {
       visibility: manualVisibility(),
       useWebSocket: true,
       websocket: () => ({
+        up: vi.fn(),
+        http: vi.fn(),
+        renew: vi.fn(),
         name: "websocket",
         open: (_url, opened) => {
           sink = opened;

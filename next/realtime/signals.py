@@ -1,4 +1,4 @@
-"""Django signals emitted by realtime broker management."""
+"""Django signals emitted by realtime brokers and upstream handlers."""
 
 from django.dispatch import Signal
 
@@ -7,6 +7,7 @@ from .messages import Message
 
 broker_backend_loaded: Signal = Signal(use_caching=True)
 message_published: Signal = Signal(use_caching=True)
+upstream_received: Signal = Signal(use_caching=True)
 
 
 def published(broker: object, message: Message) -> Message:
@@ -15,4 +16,4 @@ def published(broker: object, message: Message) -> Message:
     return message
 
 
-__all__ = ["broker_backend_loaded", "message_published"]
+__all__ = ["broker_backend_loaded", "message_published", "upstream_received"]

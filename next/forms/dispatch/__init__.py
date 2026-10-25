@@ -15,12 +15,22 @@ from django.http import (
 
 from next.deps import REQUEST_DEP_CACHE_ATTR, UnboundObjectError
 from next.deps.resolver import current_resolver
+from next.forms.errors import SessionRotationError
 from next.forms.origin import resolve_origin
 from next.forms.signals import (
     action_dispatched,
     form_validation_failed,
     wizard_completed,
     wizard_step_submitted,
+)
+from next.forms.transport import (
+    TRANSPORT_HEADER,
+    http_only,
+    mark_dispatched,
+    pin_session,
+    roll_back,
+    rotation_refused,
+    tunneled,
 )
 from next.permissions.markers import OPEN
 
@@ -82,11 +92,55 @@ class FormActionDispatch:
     ) -> "HttpResponseBase":
         """Validate the form, run the handler, or re-render errors.
 
-        The posted origin page authorizes the request before anything renders it.
+        The posted origin page authorizes the request, a tunnel needs `transport="any"`.
         """
         if request.method != "POST":
             return HttpResponseNotAllowed(["POST"])
+        transport = meta.get("transport", "http")
+        if not tunneled(request):
+            response = FormActionDispatch._unbound(backend, request, action_name, meta)
+            if transport != "http":
+                response[TRANSPORT_HEADER] = transport
+            return response
+        mark_dispatched(request)
+        if transport == "http":
+            return http_only()
+        return FormActionDispatch._pinned(backend, request, action_name, meta)
 
+    @staticmethod
+    def _pinned(
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        action_name: str,
+        meta: "ActionMeta",
+    ) -> "HttpResponseBase":
+        """Run a tunneled action whose session key may not change.
+
+        A rotation stops it before the store writes, and `ATOMIC_REQUESTS` rolls back.
+        """
+        pin = pin_session(request)
+        try:
+            response = FormActionDispatch._unbound(backend, request, action_name, meta)
+        except SessionRotationError:
+            pass
+        else:
+            if not pin.rotated:
+                response[TRANSPORT_HEADER] = "any"
+                return response
+        roll_back(request)
+        logger.warning(
+            "action %r rotated the session over the tunnel and was refused", action_name
+        )
+        return rotation_refused()
+
+    @staticmethod
+    def _unbound(
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        action_name: str,
+        meta: "ActionMeta",
+    ) -> "HttpResponseBase":
+        """Admit the action, a 400 for an origin that lacks a URL kwarg it needs."""
         try:
             return FormActionDispatch._admitted(backend, request, action_name, meta)
         except UnboundObjectError as exc:

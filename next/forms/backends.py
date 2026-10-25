@@ -23,6 +23,7 @@ from .errors import FormActionNotFoundError
 from .registration import registration_diagnostics
 from .rendering import ErrorRenderParams, render_form_page_with_errors
 from .signals import action_registered
+from .transport import ACTION_KIND
 from .uid import URL_NAME_FORM_ACTION, reverse_form_action
 
 
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest, HttpResponse, HttpResponseBase
     from django.urls import URLPattern
 
+    from .transport import Transport
     from .wizard import FormWizard
 
 
@@ -140,6 +142,7 @@ class ActionMeta(_ActionIdentity, total=False):
     wizard_class: "type[FormWizard] | None"
     guard: ActionGuard | None
     requires_runtime: bool
+    transport: "Transport"
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +170,8 @@ class ActionRegistration:
     guard: ActionGuard | None = None
     requires_runtime: bool = False
     """Whether every form posting here submits through the client runtime."""
+    transport: "Transport" = "http"
+    """Whether the action also answers through a tunnel, `"any"`, or HTTP alone."""
     claims_name_binding: bool = False
     """Whether this registration takes over lookups that carry no page scope.
 
@@ -294,6 +299,8 @@ def _action_meta(registration: ActionRegistration, uid: str) -> ActionMeta:
         meta["guard"] = registration.guard
     if registration.requires_runtime:
         meta["requires_runtime"] = True
+    if registration.transport != "http":
+        meta["transport"] = registration.transport
     return meta
 
 
@@ -494,7 +501,7 @@ class RegistryFormActionBackend(FormActionBackend):
         `LoginRequiredMiddleware` passes it, because dispatch applies the page rule.
         """
         view = login_not_required(require_http_methods(["GET", "POST"])(self.dispatch))
-        cast("_DispatchView", view).next_access_kind = "action"
+        cast("_DispatchView", view).next_access_kind = ACTION_KIND
         return view
 
     def action_name(self, uid: str) -> str | None:

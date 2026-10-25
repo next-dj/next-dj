@@ -665,6 +665,62 @@ The flag changes no dispatch behaviour.
 It tells ``next.W115`` that a shared page rendering this form has accepted the JavaScript requirement, so the warning stays for a shared page whose other forms must still work without the runtime.
 Like the guard keys, it survives subclassing through the inherited ``Meta``.
 
+.. _topics-forms-actions-transport:
+
+Posting over the WebSocket tunnel
+---------------------------------
+
+A page that holds a realtime WebSocket can submit a form through it, see :ref:`topics-realtime`.
+An action answers over plain HTTP unless it opts in with ``transport="any"``.
+The default is ``"http"``, because a socket cannot set a cookie, so a tunneled login or logout is refused before the session rotates and the page reloads.
+
+.. code-block:: python
+   :caption: rooms/pages/rooms/[slug:code]/page.py
+
+   import next.forms
+   from next import action
+
+   class MessageForm(next.forms.Form):
+       body = next.forms.CharField()
+
+       class Meta:
+           transport = "any"
+
+   @action("clear_draft", transport="any")
+   def clear_draft(request):
+       ...
+
+``Meta.transport`` on a ``Form``, ``ModelForm``, or ``FormWizard``, and the ``transport`` keyword of ``@action``, take the same two values.
+Like the guard keys, ``Meta.transport`` survives subclassing through the inherited ``Meta``.
+Any other value registers the action for HTTP alone and is reported as ``next.E200``.
+
+The server enforces the flag.
+A tunneled request to an action that stays on ``"http"`` is answered with ``421`` and an ``X-Next-Transport: http`` header before the guards run, so nothing executes and the client repeats the request over ``fetch``.
+A response of an opted-in action carries ``X-Next-Transport: any``, the server-side mark by which the tunnel tells a reply of the action dispatch from one that middleware or another view produced.
+The tunnel refuses an unmarked reply, so the client never relies on the header itself.
+Uploads, wizard steps with files, and every action that sets a cookie belong on HTTP.
+A message flashed in a cookie turns the tunneled reply into an error after the action ran, so ``next.W145`` warns when an opted-in action meets a cookie-based ``MESSAGE_STORAGE``.
+
+The ``{% form %}`` tag writes ``data-next-transport="any"`` on the ``<form>`` of an opted-in action, and the client runtime reads the marker on submit and on inline validation.
+Only a ``<form>`` carries it.
+A hand-written form that posts to ``{% action_url %}`` goes out as a native submission, which the runtime never intercepts, so the WebSocket does not see it at all.
+``{% action_url %}`` is a value tag with no markup to attach a marker to, and it returns the same URL for every action.
+Script that posts through ``Next.partial.fetch`` opts in per request.
+
+.. code-block:: javascript
+   :caption: rooms/static/rooms/clear.js
+
+   Next.partial.fetch({
+     url: document.querySelector("#clear").dataset.url,
+     method: "POST",
+     body: new URLSearchParams({ room: "42" }),
+     transport: "any",
+   });
+
+The runtime sends the request through the socket only when the method is ``POST``, the body is text, and a socket is open.
+Otherwise it falls back to ``fetch`` with no change in the outcome.
+The server stays the source of truth, so a wrong marker on an HTTP action costs one ``421`` and a repeat.
+
 .. _topics-forms-actions-success:
 
 Success feedback

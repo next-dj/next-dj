@@ -331,6 +331,228 @@ A ``next:presence`` event carries no position, so its ``meta.seq`` is ``undefine
 ``Next.partial.sse`` remains an alias.
 The global event detail stays exactly as published.
 
+.. _topics-realtime-upstream:
+
+Upstream events
+---------------
+
+A topic stream is one-way by default, so the page learns what the server publishes and tells the server nothing back.
+Upstream events let a page send a small event to the server over the WebSocket it already holds.
+Typing indicators, cursor positions, and "I pulled this card" signals fit, because they are ephemeral and do not deserve an HTTP request and a database write.
+Over SSE there is no upstream channel, so a page treats an upstream event as an optional enhancement.
+
+Register a handler
+~~~~~~~~~~~~~~~~~~
+
+``@on(pattern, name)`` from ``next.realtime`` registers a synchronous or asynchronous function for the events called ``name`` on the topics ``pattern`` matches.
+The function takes one ``Upstream`` argument.
+
+.. code-block:: python
+   :caption: rooms/realtime.py
+
+   from next.partial import Patches
+   from next.realtime import Upstream, apublish, on
+
+   @on("room:{code}", "typing")
+   async def typing(upstream: Upstream) -> None:
+       who = str(upstream.user)
+       await apublish(upstream.topic, Patches(None).event("room:typing", {"who": who}))
+
+``pattern`` is a topic name in which a ``{placeholder}`` stands for exactly one segment of letters, digits, ``_``, and ``-``.
+A placeholder never crosses a colon or a dot, so ``room:{code}`` matches ``room:42`` and not ``room:42:chat``.
+The matched values reach the handler as the read-only mapping ``upstream.params``, here ``{"code": "42"}``.
+A pattern without placeholders matches one topic.
+When several patterns match, the one with the fewest placeholders wins, then the one registered first.
+A pattern may not start with ``next:`` and a name is 1 to 100 topic characters.
+``manage.py check`` reports a pattern or a name that can never match.
+
+``Upstream`` is a frozen dataclass with these fields.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Field
+     - Value
+   * - ``topic``
+     - The topic the event arrived on, always one of the topics in the connection's ticket.
+   * - ``name``
+     - The event name.
+   * - ``data``
+     - The decoded JSON the page sent, untrusted like any request input.
+   * - ``user``
+     - The user of the session behind the connection, possibly anonymous.
+   * - ``session_key``
+     - The session key the socket loaded at the handshake.
+   * - ``connection``
+     - An identifier of the sending connection.
+   * - ``params``
+     - What the placeholders of the pattern matched.
+
+A synchronous handler runs on a thread pool of its own and may use the ORM.
+An asynchronous handler runs on the event loop.
+A handler returns nothing, and an exception it raises is logged and reaches the sender as a failed acknowledgment.
+The ``upstream_received`` signal fires before each handler runs, with the handler as its sender.
+
+Discovery
+~~~~~~~~~
+
+Django imports the ``realtime`` module of every installed application at startup, the way the admin finds ``admin.py``, so handlers register by being defined there.
+``NEXT_FRAMEWORK["REALTIME"]["HANDLERS"]`` replaces that search with an explicit list of dotted module names, and an empty list imports nothing.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "REALTIME": {
+           "HANDLERS": ["rooms.realtime", "chat.events"],
+       },
+   }
+
+Registering a second function under the same pattern and name is reported by ``manage.py check``, and only the first one runs.
+A reloaded module that defines the same function again replaces its own entry without the report.
+:doc:`/content/ref/settings` lists the keys and :doc:`/content/ref/system-checks` the check ids.
+
+What a handler may rely on
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+An event reaches a handler only on a topic of the ticket that the page's own stream request issued, so a page cannot address a topic it was never granted.
+The ``authorize`` callback of the stream applies to upstream events too.
+Its recheck is throttled to once per heartbeat interval, so a revoked grant stops upstream events within one heartbeat.
+A failed recheck acknowledges the frame as ``denied`` and closes the socket like any other failed recheck.
+A handler still validates ``data`` and checks what the user may do, because the grant says only that the user may watch the topic.
+
+Each connection draws a token per frame from one bucket, set by ``REALTIME["UPSTREAM"]``.
+The defaults are ``10`` frames a second, a burst of ``20``, ``16384`` bytes per ``up`` frame, and ``10`` seconds for a handler before the ``ack`` answers ``timeout``.
+The same bucket serves the tunneled requests of `Form actions over WebSocket`_.
+A frame over the budget is refused with ``limit``, and three refusals in a row close the socket with ``4429``.
+A client that throttles its own sends, a typing indicator at most every few hundred milliseconds, never reaches that code.
+
+Send from the page
+~~~~~~~~~~~~~~~~~~
+
+``Next.partial.stream.send(topic, name, data, options?)`` returns a promise of a boolean.
+
+.. code-block:: javascript
+   :caption: rooms/static/rooms/typing.js
+
+   const input = document.querySelector("#message");
+   let last = 0;
+
+   input.addEventListener("input", () => {
+     const now = Date.now();
+     if (now - last < 400) return;
+     last = now;
+     Next.partial.stream.send("room:42", "typing", { typing: true }, { ack: false });
+   });
+
+   Next.partial.stream.on("room:42", "room:typing", (detail) => {
+     document.querySelector("#typing").textContent = `${detail.who} is typing`;
+   });
+
+By default the frame carries an id and the promise resolves to ``true`` when the handler ran to completion.
+It resolves to ``false`` when the handler is missing or failed, the bucket was empty, the topic is not open on a socket, no acknowledgment arrived within five seconds, or the socket dropped first.
+``{ack: false}`` sends the frame without an id and resolves to ``true`` as soon as it is queued, which suits events whose loss is harmless.
+A page on SSE has no WebSocket, so the promise resolves to ``false`` and nothing is sent.
+A frame over the ``upstream.frame`` limit of ``hello``, 16 KiB by default, resolves to ``false`` as well.
+
+.. _topics-realtime-tunnel:
+
+Form actions over WebSocket
+---------------------------
+
+A page that already holds a WebSocket can submit its forms through it instead of opening an HTTP request each time.
+The client sends the request as an ``http`` frame, and the server runs it through the same ASGI application that serves HTTP, so middleware, CSRF, sessions, and the action's guards run as they do for a browser request.
+The reply goes back as a frame, and the page applies the envelope it carries exactly as it applies a fetched one.
+
+The tunnel is opt-in per action.
+
+.. code-block:: python
+   :caption: rooms/pages/rooms/[slug:code]/page.py
+
+   from django.http import HttpRequest
+
+   import next.forms
+   from next.forms import redirect_to_origin
+
+   class MessageForm(next.forms.Form):
+       body = next.forms.CharField()
+
+       class Meta:
+           transport = "any"
+
+       def on_valid(self, request: HttpRequest):
+           Message.objects.create(body=self.cleaned_data["body"])
+           return redirect_to_origin(request)
+
+The default is ``"http"``.
+``@action(..., transport="any")`` sets the flag for a form-less action, and a ``FormWizard`` sets ``Meta.transport`` like a form, see :doc:`/content/topics/forms/actions`.
+The ``{% form %}`` tag marks an opted-in form with ``data-next-transport="any"``, and the client sends only marked submissions through the socket.
+An unknown value registers the action for HTTP alone, and ``manage.py check`` reports it.
+
+What goes through the tunnel
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The tunnel carries a ``POST`` with a ``application/x-www-form-urlencoded`` or JSON body.
+The request is built from the handshake of the socket, so the cookies, host, origin, and proxy headers are the ones the browser sent when the socket opened.
+The page contributes only ``content-type``, ``accept``, the CSRF header, and ``x-next-*`` headers.
+A request that carries any other header goes by ``fetch`` instead.
+
+These requests go by ``fetch`` and never reach the socket.
+
+- A multipart body, so every upload.
+  The tunnel takes text only.
+- A request while no socket is open, such as on a page served over SSE.
+- A body over the 64 KiB frame limit.
+- A request to an action that did not opt in.
+  The server answers ``421`` with ``X-Next-Transport: http`` before any guard runs, nothing executes, and the client repeats the same request over ``fetch``.
+
+The reply is the response Django produced, except for ``Set-Cookie``, because a script cannot apply a cookie that came through a frame.
+A cookie that repeats a request cookie with the same value is dropped silently.
+That covers the CSRF cookie that ``{% form %}`` re-emits and a session cookie that saves unchanged.
+Any other ``Set-Cookie`` replaces the reply with the ``http_only`` refusal.
+That covers a new cookie, a changed value, a deletion, a message stored in a cookie, and a language cookie, and the action has already run by then.
+
+A login, a logout, or any other rotation or flush of the session is refused earlier, when the action calls ``cycle_key()`` or ``flush()`` on ``request.session``.
+The call raises before the session store writes, so the stored session and its signed-in user stay intact, and the reply is ``http_only`` as well.
+With ``ATOMIC_REQUESTS`` the database work of the action rolls back, and without it whatever ran before the rotation stays, a ``user_logged_out`` receiver included.
+
+On ``http_only`` the client fires ``partial:error`` of kind ``undelivered`` with the reason ``http_only`` and then reloads the page, so the post is not repeated and the page shows the state the server holds.
+The event cannot be cancelled, and its listeners run before the reload.
+The other refusals that may follow a run, a dropped socket, and a client timeout fire ``undelivered`` without a reload, so a listener reads the state again rather than resending.
+An action whose page must not reload keeps the default ``transport="http"``, and so do login and logout.
+For flashed messages, set ``MESSAGE_STORAGE`` to the session storage with a server-side session engine, and ``next.W145`` flags a cookie-based storage next to an opted-in action.
+The signed-cookie engine rewrites its cookie on every session write, so a tunneled action that writes to the session ends in ``http_only`` there.
+
+The socket loads its cookies once, at the handshake.
+A request that finds no CSRF cookie in them is refused with ``stale`` before it runs.
+The client sends it over ``fetch`` and reconnects the socket with the fresh cookie.
+The client also reconnects after it mints a new CSRF token.
+A second ``stale`` on the reconnected socket makes the client stop tunneling on that connection.
+When the tunnel is off, the refusal is ``disabled``, and the client stops tunneling on that connection too.
+Both refusals mean the action did not run.
+A ``403`` or ``404`` that a guard or the action raises arrives as the reply, as over HTTP, and is not repeated.
+The refusals ``http_only``, ``too_big``, ``timeout``, ``encoding``, and ``internal`` mean it may have.
+:doc:`/content/ref/realtime` lists every refusal with its ``retry`` flag.
+
+``REALTIME["TUNNEL"]`` sets the limits of the tunnel.
+
+- ``CONCURRENCY``, 4 requests at once per connection by default, and a fifth is refused with ``limit`` and sent over ``fetch``.
+- ``TIMEOUT``, 30 seconds per request by default, after which the request is ended with ``http.disconnect`` and answered with ``timeout``, while a sync view keeps its slot until it returns.
+- ``MAX_REPLY_BYTES``, 1 MiB for the reply body by default.
+
+The frame bucket of `Upstream events`_ applies as well.
+``REALTIME["TUNNEL"] = False`` turns the tunnel off, and every submission goes by ``fetch``.
+
+Replace the tunnel
+~~~~~~~~~~~~~~~~~~
+
+``application()`` hands the tunnel the HTTP application it wraps.
+``WebSocketApp(http_app=...)`` runs the requests through another ASGI application.
+A subclass that overrides ``WebSocketApp.tunnel(scope)`` returns its own object with ``async __call__(request, *, connection)`` that answers with a ``Reply`` or a ``Refusal`` and ``hints()`` that names the headers it keeps.
+``DjangoTunnel`` keeps its header lists and limits in class attributes and decides each ``Set-Cookie`` in ``cookie_allowed``, so a subclass extends them without copying the class, and the ``hello`` frame tells the client the extended header list.
+The frame fields, the refusal table, and the signatures are in :doc:`/content/ref/realtime`.
+
 Manual streams
 --------------
 

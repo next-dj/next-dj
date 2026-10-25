@@ -18,11 +18,14 @@ from .messages import Message, Position
 
 MAX_INBOUND_BYTES: Final = 64 * 1024
 MAX_CURSOR_TOPICS: Final = 64
+MAX_ID_LENGTH: Final = 64
 SUB_TIMEOUT: Final = 5.0
 
 _TRANSPORTS: Final = ("ws", "sse")
 _SUBSCRIBE_KEYS: Final = frozenset({"type", "ticket", "last_seq"})
 _POSITION_KEYS: Final = frozenset({"epoch", "seq"})
+_UP_KEYS: Final = frozenset({"type", "topic", "name", "data", "id"})
+_REQUEST_KEYS: Final = frozenset({"type", "id", "method", "path", "headers", "body"})
 _SSE_LINE: Final = re.compile(r"\r\n|\r|\n")
 _EMPTY_CURSOR: Final[Mapping[str, Position | int]] = MappingProxyType({})
 
@@ -69,11 +72,98 @@ class Pong:
 
 
 @dataclass(frozen=True, slots=True)
+class Up:
+    """A client event on a granted topic, acknowledged only when it carries an `id`.
+
+    `size` counts the UTF-8 bytes of the frame as it arrived.
+    """
+
+    topic: str
+    name: str
+    data: object
+    id: str | None = None
+    size: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Request:
+    """An HTTP request the client asks the server to run on its behalf."""
+
+    id: str
+    method: str
+    path: str
+    headers: Mapping[str, str]
+    body: str
+
+
+@dataclass(frozen=True, slots=True)
 class Unsupported:
     """A JSON object frame whose type this server does not handle."""
 
 
-type Inbound = Subscribe | Pong | Unsupported
+type Inbound = Subscribe | Pong | Up | Request | Unsupported
+
+
+class UpstreamError(enum.StrEnum):
+    """Why an `up` frame was not delivered, the `error` of its `ack`."""
+
+    TOPIC = "topic"
+    DENIED = "denied"
+    UNKNOWN = "unknown"
+    LIMIT = "limit"
+    TOO_BIG = "too_big"
+    TIMEOUT = "timeout"
+    INTERNAL = "internal"
+
+
+class Refusal(enum.StrEnum):
+    """Why a tunneled request got no HTTP answer, the `error` of its `http` frame.
+
+    `retry` tells the client the request never ran, so it may resend it over HTTP.
+    """
+
+    DISABLED = "disabled"
+    LIMIT = "limit"
+    METHOD = "method"
+    PATH = "path"
+    HEADERS = "headers"
+    BODY = "body"
+    STALE = "stale"
+    TRANSPORT = "transport"
+    HTTP_ONLY = "http_only"
+    TOO_BIG = "too_big"
+    TIMEOUT = "timeout"
+    ENCODING = "encoding"
+    INTERNAL = "internal"
+
+    @property
+    def retry(self) -> bool:
+        """Whether the request never reached the application."""
+        return self in _UNSENT
+
+
+_UNSENT: Final = frozenset(
+    {
+        Refusal.DISABLED,
+        Refusal.LIMIT,
+        Refusal.METHOD,
+        Refusal.PATH,
+        Refusal.HEADERS,
+        Refusal.BODY,
+        Refusal.STALE,
+        Refusal.TRANSPORT,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class Reply:
+    """The HTTP answer to a tunneled request, its body decoded as UTF-8."""
+
+    status: int
+    headers: Mapping[str, str]
+    body: str
+
 
 _PONG: Final = Pong()
 _UNSUPPORTED: Final = Unsupported()
@@ -95,6 +185,8 @@ def parse(text: str | None, data: bytes | None = None) -> Inbound:
     if not isinstance(frame, dict):
         raise FrameError
     kind = frame.get("type")
+    if kind == "up":
+        return _up(frame, _utf8_length(text))
     reader = _READERS.get(kind) if isinstance(kind, str) else None
     if reader is None:
         return _UNSUPPORTED
@@ -108,6 +200,10 @@ def _oversized(text: str) -> bool:
     if len(text) * 4 <= MAX_INBOUND_BYTES:
         return False
     return len(text.encode(errors="surrogatepass")) > MAX_INBOUND_BYTES
+
+
+def _utf8_length(text: str) -> int:
+    return len(text) if text.isascii() else len(text.encode(errors="surrogatepass"))
 
 
 def _subscribe(frame: dict[str, object]) -> Subscribe:
@@ -125,8 +221,43 @@ def _pong(frame: dict[str, object]) -> Pong:
     return _PONG
 
 
+def _up(frame: dict[str, object], size: int) -> Up:
+    if not frame.keys() <= _UP_KEYS:
+        raise FrameError
+    topic, name = frame.get("topic"), frame.get("name")
+    if not isinstance(topic, str) or not isinstance(name, str):
+        raise FrameError
+    raw_id = frame.get("id")
+    frame_id = None if raw_id is None else _id(raw_id)
+    return Up(topic, name, frame.get("data"), frame_id, size)
+
+
+def _request(frame: dict[str, object]) -> Request:
+    if not frame.keys() <= _REQUEST_KEYS:
+        raise FrameError
+    method, path = frame.get("method"), frame.get("path")
+    headers, body = frame.get("headers", {}), frame.get("body", "")
+    if (
+        not isinstance(method, str)
+        or not isinstance(path, str)
+        or not isinstance(body, str)
+        or not isinstance(headers, dict)
+        or not all(isinstance(value, str) for value in headers.values())
+    ):
+        raise FrameError
+    return Request(
+        _id(frame.get("id")), method, path, MappingProxyType(dict(headers)), body
+    )
+
+
+def _id(value: object) -> str:
+    if not isinstance(value, str) or not 0 < len(value) <= MAX_ID_LENGTH:
+        raise FrameError
+    return value
+
+
 _READERS: Final[Mapping[str, Callable[[dict[str, object]], Inbound]]] = (
-    MappingProxyType({"sub": _subscribe, "pong": _pong})
+    MappingProxyType({"sub": _subscribe, "pong": _pong, "http": _request})
 )
 
 
@@ -161,12 +292,16 @@ def hello(
     *,
     heartbeat: float,
     server_time: int,
+    limits: Mapping[str, object] | None = None,
 ) -> str:
-    """Encode the frame that opens a live subscription with its starting positions."""
+    """Encode the frame that opens a live subscription with its starting positions.
+
+    `limits` adds the `upstream` and `tunnel` keys a client sizes its frames by.
+    """
     body = stream_hello(
         topics, positions, server_time=server_time, transports=_TRANSPORTS
     ).as_dict()
-    return _encode({"type": "hello", **body, "heartbeat": heartbeat})
+    return _encode({"type": "hello", **body, "heartbeat": heartbeat, **(limits or {})})
 
 
 def patches(
@@ -211,6 +346,36 @@ def error(code: str) -> str:
     return _encode({"type": "error", "code": code})
 
 
+def ack(frame_id: str, error: UpstreamError | None = None) -> str:
+    """Encode the acknowledgment of an `up` frame, failed when it names an error."""
+    if error is None:
+        return _encode({"type": "ack", "id": frame_id, "ok": True})
+    return _encode({"type": "ack", "id": frame_id, "ok": False, "error": error.value})
+
+
+def reply(frame_id: str, answer: Reply | Refusal) -> str:
+    """Encode the answer to an `http` frame, an HTTP reply or a refusal."""
+    if isinstance(answer, Refusal):
+        return _encode(
+            {
+                "type": "http",
+                "id": frame_id,
+                "status": 0,
+                "error": answer.value,
+                "retry": answer.retry,
+            }
+        )
+    return _encode(
+        {
+            "type": "http",
+            "id": frame_id,
+            "status": answer.status,
+            "headers": dict(answer.headers),
+            "body": answer.body,
+        }
+    )
+
+
 def _encode(frame: dict[str, Any]) -> str:
     return json.dumps(frame, separators=(",", ":"))
 
@@ -227,18 +392,26 @@ def _sse_data(frame: str) -> str | None:
 
 __all__ = [
     "MAX_CURSOR_TOPICS",
+    "MAX_ID_LENGTH",
     "MAX_INBOUND_BYTES",
     "SUB_TIMEOUT",
     "Close",
     "FrameError",
     "Inbound",
     "Pong",
+    "Refusal",
+    "Reply",
+    "Request",
     "Subscribe",
     "Unsupported",
+    "Up",
+    "UpstreamError",
+    "ack",
     "error",
     "hello",
     "parse",
     "patches",
     "ping",
+    "reply",
     "skip",
 ]

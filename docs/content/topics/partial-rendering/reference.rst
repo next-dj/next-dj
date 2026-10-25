@@ -513,6 +513,8 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
        ``{kind: "op", op, error, target?}`` is a thrown or unknown verb mid-apply, where ``op`` names the verb and ``target`` is the human-readable address of the patch, present only when the op carried a recognised target.
        ``{kind: "asset", error, url?}`` is a stylesheet that failed to load, a version mismatch surviving a reload, a reload target off the page's origin, or a runtime chunk that failed to load, where ``url`` is present on all but the first.
        ``{kind: "csrf", error, url?}`` is a deferred CSRF token the runtime could not fetch, where ``url`` names the mutation that never left.
+       ``{kind: "undelivered", url, reason}`` is a mutation the WebSocket tunnel ran or may have run whose reply never reached the page, where ``reason`` is the refusal code, ``closed`` for a dropped socket, or ``timeout`` for a wait that ran out.
+       The page re-reads its state rather than resending, and on ``http_only`` the runtime reloads it once the listeners ran, see :ref:`topics-realtime-tunnel`.
        The ``status`` and ``body`` fields belong to ``http`` alone, and ``body`` also to ``parse``, so a listener branches on ``kind`` before reading them.
        An ``AbortError`` never reaches this event.
    * - ``partial:layer-opened``

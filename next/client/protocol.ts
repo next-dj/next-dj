@@ -62,6 +62,15 @@ export const ATTR_KEY = "data-next-key";
 export const ATTR_SSE = "data-next-sse";
 export const ATTR_STREAM = "data-next-stream";
 export const ATTR_POLL = "data-next-poll";
+export const ATTR_TRANSPORT = "data-next-transport";
+
+/** The transport a request may ride, `any` letting a POST go over the open socket. */
+export type WireTransport = "http" | "any";
+
+/** The tunnel refusals the client acts on beyond reporting them. */
+export const REFUSAL_DISABLED = "disabled";
+export const REFUSAL_STALE = "stale";
+export const REFUSAL_HTTP_ONLY = "http_only";
 
 /** A partial:error, a discriminated union so a listener branches on kind. */
 export type PartialError =
@@ -70,7 +79,8 @@ export type PartialError =
   | { kind: "parse"; body: string; error: unknown }
   | { kind: "op"; op: string; target?: string; error: unknown }
   | { kind: "asset"; url?: string; error: unknown }
-  | { kind: "csrf"; url?: string; error: unknown };
+  | { kind: "csrf"; url?: string; error: unknown }
+  | { kind: "undelivered"; url: string; reason: string };
 
 /** The discriminant of PartialError, aliased for listeners that switch on it. */
 export type PartialErrorKind = PartialError["kind"];

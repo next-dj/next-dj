@@ -8,12 +8,13 @@ import {
   HEADER_REQUEST_ID,
   HEADER_VERSION,
   HEADER_ZONE,
+  REFUSAL_HTTP_ONLY,
   REQUEST_FLAG,
   newId,
   pageKey,
   sameOrigin,
 } from "./protocol";
-import type { PartialError } from "./protocol";
+import type { PartialError, WireTransport } from "./protocol";
 import { defaultFetch, defaultNavigate, defaultSession } from "./adapters";
 import type { SessionStore } from "./assets";
 
@@ -74,6 +75,8 @@ export interface WireRequest {
   key?: string;
   // The page a mutation was submitted from, which receives the meta op of the reply.
   owner?: string;
+  // `any` lets a POST ride the open WebSocket, absent or `http` keeps it on fetch.
+  transport?: WireTransport;
 }
 
 /**
@@ -111,6 +114,12 @@ export interface WireDeps {
   // Every mutating request stamps X-Next-Request-Id and reports it here so the
   // SSE echo ring drops the matching stream event. Absent, no id is stamped.
   rememberRequestId?: (id: string) => void;
+  // A string is why a request the server received got no reply, undefined means fetch.
+  tunnel?: (
+    target: string,
+    init: RequestInit,
+    csrf?: string,
+  ) => Promise<Response | string | undefined> | undefined;
 }
 
 function isAbortError(error: unknown): boolean {
@@ -129,6 +138,7 @@ export class Wire {
   readonly #csrf: CsrfSource;
   readonly #dirtySnapshot: () => number;
   readonly #rememberRequestId: (id: string) => void;
+  readonly #tunnel: NonNullable<WireDeps["tunnel"]>;
 
   // Latest-wins per-target GET queues and the per-uid mutation lock. A queue holds
   // only its in-flight request, so a key is removed once it settles or is aborted.
@@ -147,6 +157,7 @@ export class Wire {
     this.#csrf = deps.csrf;
     this.#dirtySnapshot = deps.dirtySnapshot ?? (() => 0);
     this.#rememberRequestId = deps.rememberRequestId ?? (() => undefined);
+    this.#tunnel = deps.tunnel ?? (() => undefined);
   }
 
   /** Abort every in-flight request and drop all state, for vitest isolation. */
@@ -280,13 +291,27 @@ export class Wire {
     // The body read runs inside the try too, since an abort or a dropped connection
     // can reject it after the headers arrived.
     try {
-      const response = await this.#fetch(target, init);
+      const tunneled =
+        request.transport === "any" && method === "POST"
+          ? await this.#tunnel(target, init, csrf?.header)
+          : undefined;
+      if (typeof tunneled === "string" && request.abortable !== true) {
+        this.#dispatch("partial:error", {
+          kind: "undelivered",
+          url: request.url,
+          reason: tunneled,
+        } satisfies PartialError);
+        if (tunneled === REFUSAL_HTTP_ONLY) this.#document.location.reload();
+        return;
+      }
+      const response =
+        tunneled instanceof Response ? tunneled : await this.#fetch(target, init);
       // A safe-GET response that a newer request superseded is dropped unreported.
       if (queueKey !== undefined && this.#queues.get(queueKey) !== entry) return;
       await this.#classify(request, target, method, response, snapshot);
     } catch (error) {
       // An AbortError means the request was superseded, so nothing is reported.
-      if (isAbortError(error)) return;
+      if (isAbortError(error) || entry?.signal.aborted === true) return;
       this.#dispatch("partial:error", {
         kind: "network",
         error,

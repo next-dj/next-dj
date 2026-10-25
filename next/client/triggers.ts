@@ -16,6 +16,7 @@ import {
   ATTR_ACTION,
   ATTR_POLL,
   ATTR_KEY,
+  ATTR_TRANSPORT,
   ATTR_ZONE,
   HEADER_MERGE,
   HEADER_ORIGIN,
@@ -23,7 +24,7 @@ import {
   currentUrl,
   matching,
 } from "./protocol";
-import type { Diagnostics } from "./protocol";
+import type { Diagnostics, WireTransport } from "./protocol";
 import type { VisibilityAdapter } from "./sse";
 import type { Clock } from "./wire";
 
@@ -60,6 +61,7 @@ export interface TriggerDeps {
     abortable?: boolean;
     key?: string;
     owner?: string;
+    transport?: WireTransport;
   }) => void;
   // Abort the in-flight request on a queue, so a submit cancels its own validation.
   abort: (key: string) => void;
@@ -96,6 +98,10 @@ export interface Triggers {
   // Activate lazy zones and arm sentinels in a freshly inserted subtree.
   scan(root: ParentNode): void;
   _reset(): void;
+}
+
+function transportOf(form: Element): WireTransport {
+  return form.getAttribute(ATTR_TRANSPORT) === "any" ? "any" : "http";
 }
 
 /** Build the trigger handlers over the given seams. */
@@ -244,6 +250,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       abortable: true,
       headers: { [HEADER_VALIDATE]: field },
       body: data,
+      transport: transportOf(form),
     });
   }
 
@@ -303,6 +310,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       ...(key !== null ? { key } : {}),
       ...(origin !== undefined ? { headers: { [HEADER_ORIGIN]: origin } } : {}),
       body,
+      transport: transportOf(form),
     });
   }
 

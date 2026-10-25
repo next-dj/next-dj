@@ -334,6 +334,7 @@ def test_hello_carries_positions_heartbeat_and_the_clock() -> None:
             },
             "transports": ["ws", "sse"],
             "heartbeat": 7.5,
+            "upstream": {"frame": 16384},
         }
         port.disconnect()
         await _finish(task)

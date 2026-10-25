@@ -28,7 +28,7 @@ Follow the ordering Django's :doc:`middleware reference <django:ref/middleware>`
 Framework specific surfaces
 ---------------------------
 
-The framework adds four surfaces that warrant attention.
+The framework adds five surfaces that warrant attention.
 
 File router input.
    Captured URL parameters and query values reach Python through the dependency resolver.
@@ -45,6 +45,10 @@ Co-located assets.
 Partial rendering endpoints.
    Zone GET requests and the SSE stream answer partial clients.
    See :doc:`/content/topics/partial-rendering/sse` for the streaming surface and `Access control`_ for the guard model of both.
+
+Realtime socket.
+   The WebSocket serves topic streams, upstream events, and, for actions that opt in, tunneled form requests.
+   See `The WebSocket tunnel`_ and :doc:`/content/topics/realtime`.
 
 Common threats
 --------------
@@ -204,6 +208,43 @@ Production hardening
 Every production setting the framework cares about is a stock Django one, and ``uv run python manage.py check --deploy`` reports each one that is unset or unsafe, so run it and resolve every warning against Django's :doc:`deployment checklist <django:howto/deployment/checklist>`.
 The one entry worth naming here is ``CSRF_TRUSTED_ORIGINS``, because the form dispatch path posts to ``/_next/form/<uid>/`` and a submission from another origin fails the middleware check without it, see :doc:`csrf-and-forms`.
 
+The WebSocket tunnel
+--------------------
+
+A form action that declares ``transport="any"`` can be posted through an open WebSocket, see :ref:`topics-forms-actions-transport`.
+The tunnel adds no second authorization model.
+Each frame becomes an ordinary ASGI request to the same Django application, so the middleware stack, CSRF check, sessions, authentication, and the action's guards run as they do for HTTP.
+An action that did not opt in answers ``421`` before its guards run, and the tunnel only reaches the form dispatch endpoint.
+A reply passes only for a request that reached the dispatch, so a middleware that swaps ``request.urlconf`` cannot route the socket to another view either.
+
+The request takes its cookies, host, origin, and proxy headers from the WebSocket handshake.
+The page cannot replace them, because the frame supplies only ``content-type``, ``accept``, the CSRF header, and ``x-next-*`` headers.
+Cookies are frozen at the handshake, so a session or a CSRF token that changes later leaves the socket holding old values.
+The tunnel refuses a request that finds no CSRF cookie with ``stale`` before it runs, and a ``403`` before the dispatch, such as the CSRF check refusing a token rotated after the handshake, answers ``stale`` too, so the client reconnects the socket and repeats the post over HTTP.
+A ``403`` or ``404`` of a guard or an action that the dispatch reached is the answer itself and is never repeated.
+Every tunneled request runs the access recheck of the stream first, the same throttled check an ``up`` event runs, so a revoked session or grant closes the socket with ``4401`` or ``4403`` within one heartbeat.
+The tunnel verifies no ticket of its own, the one the socket subscribed with covers it.
+
+A WebSocket cannot set a cookie, so the tunnel never applies one.
+A reply that repeats a request cookie with the same value loses that header.
+Any other ``Set-Cookie`` replaces the reply with the ``http_only`` refusal, and the action has already run.
+A session rotation is refused before it writes, since a new session key reaches the browser only as a cookie.
+In a tunneled action ``cycle_key()`` and ``flush()`` raise ``SessionRotationError``, so ``login()`` and ``logout()`` leave the stored session and its signed-in user intact, and the reply is ``http_only``.
+``ATOMIC_REQUESTS`` rolls back the database work of that action, and without it whatever ran before the rotation stays.
+On ``http_only`` the client reloads the page, so the post is never repeated and the page shows the server state.
+Login, logout, and every action that sets its own cookie stay on HTTP.
+The messages framework stores messages in a cookie by default, so a success message of a tunneled action turns the reply into ``http_only``.
+``next.W145`` reports that combination, and ``SessionStorage`` avoids it with the server-side session engines, while the signed-cookie engine changes its cookie on every write and turns that reply into ``http_only`` too.
+
+Limits apply per connection.
+One bucket serves every frame after ``sub`` at ``10`` a second with a burst of ``20`` by default, pongs and unsupported frames included.
+Three refusals in a row close the socket with ``4429``, and a reconnect starts a fresh bucket, so the close slows a flood down rather than banning the client.
+Sixteen upstream events run at once, each waiting at most ten seconds for its handler, and sync handlers run on a thread pool of their own, so a slow handler cannot starve the session loads of other sockets.
+Four tunneled requests run at once, each for at most 30 seconds, and a reply body is capped at 1 MiB.
+A synchronous view that outlives its timeout keeps its slot until it returns, so a socket never runs more views than the limit.
+Upstream events stay inside the topics of the ticket and the access recheck, so a revoked grant stops them within one heartbeat.
+A handler treats ``data`` as untrusted input.
+
 System checks
 -------------
 
@@ -215,6 +256,8 @@ The framework system checks cover configuration mistakes that affect security.
 - ``next.E046`` reports one shared action name declared by two different modules, where a lookup by bare name resolves to whichever module imported first.
 - ``next.W060`` reports an action that declares ``permission_required`` while ``django.contrib.auth`` is out of ``INSTALLED_APPS``, so the guard described under `Access control`_ cannot resolve users or permissions.
 - ``next.W061`` reports an action that declares ``Meta.success_message`` while the messages framework is not fully installed, which makes the submission raise ``MessageFailure``.
+- ``next.W145`` reports an action that opts in to the WebSocket tunnel while messages are stored in a cookie.
+- ``next.W146`` reports an explicit ``WebSocketApp`` origin that ``CSRF_TRUSTED_ORIGINS`` does not cover, whose tunneled posts fail the CSRF check.
 
 Run them with ``uv run python manage.py check``.
 
@@ -224,6 +267,7 @@ See also
 .. seealso::
 
    :doc:`csrf-and-forms` for the form pipeline.
+   :doc:`/content/topics/realtime` for upstream events and form actions over WebSocket.
    :doc:`sessions-and-auth` for the session and the authenticated user.
    :doc:`static-assets` for the static pipeline.
    :doc:`di-and-untrusted-input` for the dependency surface.

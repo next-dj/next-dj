@@ -25,16 +25,19 @@ from django.conf import settings
 from django.core.exceptions import DisallowedHost
 from django.core.handlers.asgi import ASGIHandler, get_script_prefix
 from django.http import HttpRequest
+from django.http.request import split_domain_port
 from django.utils.http import is_same_domain
 
 from . import frames
 from .access import cookie_session_key
-from .checks import websocket_deployment_messages
+from .checks import tunnel_origin_messages, websocket_deployment_messages
 from .frames import Close
+from .limits import SocketLimits
 from .manager import broker_manager
 from .socket import Handshake, SocketPort, TopicSocket
 from .tickets import websocket_path
 from .transports import announce_websocket
+from .tunnel import DjangoTunnel, Tunnel, cookie_header, scope_headers
 
 
 logger = logging.getLogger(__name__)
@@ -120,23 +123,9 @@ class _SocketRequest(HttpRequest):
         return self._socket_scheme
 
 
-def _header(scope: WebSocketScope, name: bytes) -> list[str]:
-    """Return every value the scope carries for one lowercase header name."""
-    return [
-        value.decode("latin1")
-        for key, value in scope.get("headers", ())
-        if key.lower() == name
-    ]
-
-
-def _cookie_header(scope: WebSocketScope) -> str:
-    """Join the cookie headers with a semicolon, which Django 5.2 does not do itself."""
-    return "; ".join(value.rstrip("; ") for value in _header(scope, b"cookie"))
-
-
 def _origin(scope: WebSocketScope) -> str | None:
     """Return the Origin header, joined the way Django joins a repeated header."""
-    return ",".join(_header(scope, b"origin")) or None
+    return ",".join(scope_headers(scope, b"origin")) or None
 
 
 def _request(scope: WebSocketScope) -> HttpRequest:
@@ -151,7 +140,7 @@ def _request(scope: WebSocketScope) -> HttpRequest:
         key = f"HTTP_{name.upper().replace('-', '_')}"
         if key != "HTTP_COOKIE":
             headers[key].append(raw_value.decode("latin1"))
-    cookies = _cookie_header(scope)
+    cookies = cookie_header(scope)
     if cookies:
         request.META["HTTP_COOKIE"] = cookies
     request.META.update({key: ",".join(value) for key, value in headers.items()})
@@ -230,14 +219,27 @@ async def _refuse(receive: ASGIReceiveCallable, send: ASGISendCallable) -> None:
 class WebSocketApp:
     """ASGI WebSocket endpoint that serves the realtime topic protocol.
 
-    Creating one marks this process as serving `ws`, wherever the app is mounted.
+    Creating one marks this process as serving `ws` and reads the limits once.
     """
 
-    def __init__(self, *, origins: Sequence[str] | None = None) -> None:
-        """Take an explicit Origin allowlist that replaces the CSRF-parity default."""
+    def __init__(
+        self,
+        *,
+        origins: Sequence[str] | None = None,
+        http_app: ASGI3Application | None = None,
+    ) -> None:
+        """Take an Origin allowlist and the app tunneled requests run through.
+
+        Without `http_app` the app `application()` serves is adopted through `bind`.
+        """
         self._origins = _explicit_origins(origins) if origins is not None else None
+        self._http_app = http_app
+        self.limits = SocketLimits.configured()
         announce_websocket()
-        for message in websocket_deployment_messages():
+        messages = websocket_deployment_messages()
+        if origins is not None and self.limits.tunnel is not None:
+            messages.extend(tunnel_origin_messages(_untrusted(origins)))
+        for message in messages:
             hint = f" {message.hint}" if message.hint else ""
             logger.warning("(%s) %s%s", message.id, message.msg, hint)
 
@@ -256,17 +258,33 @@ class WebSocketApp:
 
     async def authenticate(self, scope: WebSocketScope) -> Handshake | None:
         """Load the Django session named by the cookie, or None without one."""
-        session_key = cookie_session_key(_cookie_header(scope))
+        session_key = cookie_session_key(cookie_header(scope))
         if session_key is None:
             return None
         return await Handshake.from_session(session_key)
 
+    def bind(self, http_app: ASGI3Application) -> None:
+        """Adopt the app `application()` serves, unless one was given explicitly."""
+        if self._http_app is None:
+            self._http_app = http_app
+
+    def tunnel(self, scope: WebSocketScope) -> Tunnel | None:
+        """Build the request tunnel of a connection, None without an app or setting."""
+        limits = self.limits.tunnel
+        if self._http_app is None or limits is None:
+            return None
+        return DjangoTunnel(self._http_app, scope, limits)
+
     def topic_socket(
         self, port: SocketPort, handshake: Handshake, scope: WebSocketScope
     ) -> TopicSocket:
-        """Build the connection a subclass may swap for its own `TopicSocket`."""
-        del scope
-        return TopicSocket(port, handshake)
+        """Build the connection a subclass may swap for its own `TopicSocket`.
+
+        An override passes `tunnel=` and `limits=` on, or the socket runs no requests.
+        """
+        return TopicSocket(
+            port, handshake, tunnel=self.tunnel(scope), limits=self.limits
+        )
 
     async def __call__(
         self, scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable
@@ -380,6 +398,25 @@ async def _close_broker() -> (
     return {"type": "lifespan.shutdown.complete"}
 
 
+def _untrusted(origins: Sequence[str]) -> list[str]:
+    """Return the origins CSRF may refuse, outside `CSRF_TRUSTED_ORIGINS` and the hosts.
+
+    CSRF matches the request host exactly, so only a host named in full counts.
+    """
+    trusted = _trusted_origins()
+    hosts = {
+        host.lower()
+        for host in settings.ALLOWED_HOSTS
+        if host != "*" and not host.startswith(".")
+    }
+    return [
+        origin
+        for origin in origins
+        if origin not in trusted
+        and split_domain_port(urlsplit(origin).netloc)[0] not in hosts
+    ]
+
+
 def _path_info(scope: WebSocketScope) -> str:
     """Return the path below the script prefix, the way Django's ASGI request does."""
     path = scope["path"]
@@ -392,10 +429,13 @@ def _path_info(scope: WebSocketScope) -> str:
 def application(
     http_app: ASGI3Application, *, websocket: WebSocketApp | None = None
 ) -> ASGI3Application:
-    """Serve `http_app` and the realtime WebSocket at `REALTIME['WS_PATH']`."""
-    return _Application(
-        http_app, websocket if websocket is not None else WebSocketApp()
-    )
+    """Serve `http_app` and the realtime WebSocket at `REALTIME['WS_PATH']`.
+
+    The socket tunnels requests through the same `http_app`, all its wrappers included.
+    """
+    socket = websocket if websocket is not None else WebSocketApp()
+    socket.bind(http_app)
+    return _Application(http_app, socket)
 
 
 __all__ = ["WebSocketApp", "application", "forget_trusted_origins"]

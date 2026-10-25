@@ -44,6 +44,7 @@ On a wizard advance in a partial render the shaping layer sets the ``FORM_ORIGIN
 The ``data-next-action`` attribute carries the action UID, the registry identity that also names the dispatch URL.
 The tag emits it when the action meta is available, which makes the form addressable from client-side scripts without parsing the ``action`` URL.
 A backend whose meta stores no ``uid`` renders the form without the attribute.
+An action that opts in with ``transport="any"`` also gets ``data-next-transport="any"``, which lets the client runtime send the submission through an open WebSocket, see :ref:`topics-forms-actions-transport`.
 
 A multipart form gets ``enctype="multipart/form-data"`` automatically.
 The tag asks the form instance through ``is_multipart()``, so a ``FileField`` rendered with a stock widget or with ``ComponentFileWidget`` needs no extra argument.
@@ -249,6 +250,7 @@ It also supports ``as`` assignment for reuse, see :doc:`/content/ref/template-ta
    </form>
 
 An unknown action name raises ``FormActionNotFoundError`` at render time, the same error the ``{% form %}`` tag raises.
+The tag returns the same URL for every action and attaches no ``data-next-transport`` marker, see :ref:`topics-forms-actions-transport`.
 
 .. _topics-forms-templates-handwritten-views:
 

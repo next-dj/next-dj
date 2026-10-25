@@ -12,9 +12,10 @@ The runtime applies the patch envelopes the server authors, drives the ``data-ne
 It never invents a target or a swap strategy, so this page records what the runtime accepts rather than what it decides.
 
 The TypeScript sources live in ``next/client/`` and are not part of the installed package.
-``make build-js`` bundles, in one esbuild call, ``next/client/next.ts`` into ``next/static/next/next.min.js``, and each entry of ``next/client/entries/``, ``scripts.ts``, ``stream.ts``, ``csrf.ts``, ``poll.ts``, and ``dev.ts``, into ``next/static/next/next.<name>.min.js``, the six minified artefacts the wheel ships.
+``make build-js`` bundles, in one esbuild call, ``next/client/next.ts`` into ``next/static/next/next.min.js``, and each entry of ``next/client/entries/``, ``scripts.ts``, ``stream.ts``, ``ws.ts``, ``csrf.ts``, ``poll.ts``, and ``dev.ts``, into ``next/static/next/next.<name>.min.js``, the seven minified artefacts the wheel ships.
 The scripts chunk carries consent and third-party scripts, and the runtime fetches it only for a page that needs it, see :doc:`client-extras`.
 The stream chunk carries the shared stream state and SSE transport, fetched once a scan finds a ``data-next-stream`` or ``data-next-sse`` container.
+The ws chunk carries the WebSocket transport, its upstream events, and the request tunnel, fetched only when the server enables WebSockets for a stream.
 The csrf chunk carries the fetch of a deferred CSRF token, fetched on the first need of a page that shipped only the endpoint.
 The poll chunk carries the zone poller, fetched once a scan finds a ``data-next-poll`` zone.
 The dev chunk carries the diagnostics of a ``DEBUG`` render, and a production page never fetches it.
@@ -131,8 +132,10 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` element events fire
        ``ok`` is ``false`` when any op threw or named an unknown verb, so a listener tells a clean apply from a degraded one that still mounted what did change.
        ``nodes`` are the elements the ops inserted or morphed, the roots the mount pass ran over.
    * - ``partial:error``
-     - A ``PartialError``, discriminated on ``kind`` over ``network``, ``http``, ``parse``, ``op``, ``asset``, and ``csrf``.
+     - A ``PartialError``, discriminated on ``kind`` over ``network``, ``http``, ``parse``, ``op``, ``asset``, ``csrf``, and ``undelivered``.
        ``csrf`` means a deferred token could not be fetched, so the mutation never left.
+       ``undelivered`` carries ``url`` and ``reason`` and means a mutation sent over the WebSocket reached the server but its reply never came back, so the action may have run and the page should re-read its state rather than resend.
+       For the ``reason`` ``http_only`` the runtime reloads the page right after the event, and a listener runs before the reload but cannot cancel it.
        Each cause carries only its own fields, so a listener branches on ``kind`` before reading ``status`` or ``body``.
    * - ``partial:layer-opened``
      - ``{opener}``, the opening element, or ``null`` for a server-initiated open.
@@ -253,6 +256,8 @@ The partial surface
        Network, HTTP, and parse failures surface as ``partial:error`` rather than as a rejection.
        A zone GET refused with 403 or 404 publishes ``partial:error`` of kind ``http`` with the status and the body before the runtime navigates to the page, and a redirect to the login page navigates without the event.
        The request goes to an absolute URL on the page's own origin with ``mode: "same-origin"``, and a URL off that origin is refused unsent with a ``partial:error`` of kind ``network``.
+       ``transport`` is ``"http"`` or ``"any"``, and the triggers set it from the form's ``data-next-transport``.
+       A POST marked ``"any"`` rides the open WebSocket when one advertises the tunnel, see `The stream API`_, and anything else, or a request the socket cannot carry, goes over ``fetch``.
    * - ``defineOp(name: string, handler: OpHandler)``
      - ``void``
      - Register the client handler of a custom verb.
@@ -263,6 +268,7 @@ The partial surface
      - ``void``
      - Replace the header and the token, or the header and the endpoint URL of a deferred token, that the next mutation submits with, and clear it with ``undefined``.
        A deferred token is fetched once before the first unsafe request, and an envelope carrying a rotated token overwrites whatever was set here.
+       A token whose unmasked secret is new reconnects the open WebSockets once their pending replies settle, and a fresh masking of the same secret keeps them.
    * - ``onMount(selector: string, callback: (el: Element) => void)``
      - ``() => void``
      - Register a mount callback and receive the teardown that unregisters it.
@@ -328,6 +334,14 @@ The stream API
 ``on(topic, name, callback)`` calls ``callback(detail, meta)`` for each ``event`` patch of that name on that topic and returns the function that removes the listener.
 ``meta`` is a ``StreamMeta`` of ``topic``, ``epoch``, ``seq``, and ``serverTime``, and ``meta()`` returns the same object while a delivery runs and ``undefined`` outside it.
 ``now()`` adds the median ``offset()`` of the last five ``server_time`` samples to the local clock.
+``send(topic, name, data, options?)`` sends an upstream event over the WebSocket that carries ``topic`` and returns a ``Promise<boolean>``.
+``options`` is ``{ ack?: boolean }``, and ``ack`` defaults to ``true``.
+An ``up`` frame whose compact JSON, with its ``type``, ``topic``, ``name``, ``data``, and id, exceeds in UTF-8 bytes the ``upstream.frame`` limit of the socket's ``hello``, 16 KiB when the hello names none, resolves to ``false`` and is never sent.
+Without options the frame carries an id and the promise resolves to ``true`` once the server acknowledges that a handler ran, and to ``false`` for a refusal, five seconds without an acknowledgment, a dropped socket, or a topic no open socket carries.
+A ``timeout`` acknowledgment means the handler outlived the server's limit and may still have run, so it resolves to ``false`` and the event is not resent.
+``{ ack: false }`` sends the frame without an id and resolves to ``true`` as soon as it is queued.
+On an SSE connection there is no upstream channel, so the promise resolves to ``false`` and nothing is sent.
+See :ref:`topics-realtime` for handlers.
 
 Every change of a connection's state fires ``next:stream-state`` with ``url``, ``transport``, and ``state``.
 A connection is ``connecting`` while it opens and again while a dropped socket or ``EventSource`` waits to reconnect, ``open`` once the transport is up, and ``closed`` when it is paused, removed, or ended.
@@ -344,6 +358,15 @@ A socket that sends no ``hello`` within five seconds of opening is closed as a t
 The ``hello`` frame names the server's ``heartbeat`` in seconds, and a socket that receives no frame for two and a half heartbeats counts as dropped, is closed, and reconnects.
 A ``patches`` frame whose ``data`` is a string hands that text to the registered parse hook unchanged, the same text an ``EventSource`` would deliver.
 A ``patches`` frame whose ``data`` is an object is applied as is and skips the hook.
+
+A socket tunnels requests only once its ``hello`` carries the ``tunnel`` key, and without it every request of that socket goes over ``fetch``.
+``tunnel.timeout`` is the server's request timeout in seconds, and the client waits five seconds past it, 35 seconds when it is missing.
+``tunnel.frame`` caps a whole frame in bytes, 64 KiB when it is missing.
+``tunnel.headers`` and ``tunnel.prefixes`` list the request header names the tunnel accepts, and ``tunnel.csrf`` names the CSRF header, while a request carrying any other header goes over ``fetch``.
+A refusal the server marks ``retry`` resends the request over ``fetch`` once, and ``disabled`` stops the tunnel on that socket.
+Any other refusal ends a mutation in ``partial:error`` of kind ``undelivered`` whose ``reason`` is the refusal code, and a dropped socket or no reply in time does the same with ``closed`` or ``timeout``.
+``http_only`` marks a response the server keeps to plain HTTP, such as one that sets a cookie or rotates the session, and after its event the runtime reloads the page so it shows the server state under the session the browser still holds.
+An inline validation mutates nothing, so in each of these cases it resends over ``fetch`` instead.
 
 The attribute contract
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -484,7 +507,7 @@ A page written in TypeScript reaches them through the bundle's declaration outpu
    export type { ScriptStatus } from "./scripts";
    export type { StreamMeta } from "./sse";
 
-``PartialError`` is the discriminated union every ``partial:error`` payload inhabits, over the ``network``, ``http``, ``parse``, ``op``, ``asset``, and ``csrf`` kinds.
+``PartialError`` is the discriminated union every ``partial:error`` payload inhabits, over the ``network``, ``http``, ``parse``, ``op``, ``asset``, ``csrf``, and ``undelivered`` kinds.
 ``PartialErrorKind`` is its discriminant, aliased for a listener that switches on it.
 ``PartialSurface`` is declared in the partial module and not re-exported, so its name reaches a reader through this page rather than through an import.
 
