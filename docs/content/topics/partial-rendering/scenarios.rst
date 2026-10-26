@@ -297,7 +297,7 @@ The guarded stream page authorizes each subscriber and returns a ``TopicStream``
    def render(request: HttpRequest, poll: DPoll[Poll]) -> TopicStream:
        return TopicStream(request, f"poll:{poll.pk}", authorize=can_subscribe_topic)
 
-The vote page wraps its results in a zone and connects the negotiated stream endpoint with a ``data-next-sse`` element.
+The vote page wraps its results in a zone and connects the negotiated stream endpoint with a ``data-next-stream`` element.
 
 .. code-block:: jinja
    :caption: polls/[int:id]/template.djx
@@ -305,7 +305,7 @@ The vote page wraps its results in a zone and connects the negotiated stream end
    {% zone "poll-results" %}
      {% component "poll_chart" %}
    {% endzone %}
-   <div data-next-sse="/polls/{{ poll.pk }}/stream/"></div>
+   <div data-next-stream="/polls/{{ poll.pk }}/stream/"></div>
 
 The vote signal publishes a ``refresh`` patch through ``next.realtime.publish`` after the transaction commits.
 The framework adds the originating request id to the envelope, so the initiating tab drops its echo after its POST response already updated the zone.

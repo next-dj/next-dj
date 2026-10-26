@@ -35,8 +35,12 @@ Install the optional broker dependency, which needs ``redis`` 8 or newer, and se
        },
    }
 
+The ``max_connections`` value is an example to size from measurement, see :ref:`deployment-capacity`.
+
 Run ``manage.py check`` in each deployment environment before serving requests.
-The check validates the configured backend and its options, reports a missing Redis library as ``next.E179``, a negative, infinite, or non-numeric ``HEALTH_CHECK_INTERVAL`` as ``next.E186``, and a ``CLIENT`` option that is not a mapping of keyword names or that turns ``decode_responses`` off as ``next.E187``.
+The check validates the configured backend and its options.
+It reports a missing Redis library as ``next.E179`` and a negative, infinite, or non-numeric ``HEALTH_CHECK_INTERVAL`` as ``next.E186``.
+It reports a ``CLIENT`` option that is not a mapping of keyword names, or that turns ``decode_responses`` off, as ``next.E187``.
 
 Tune the Redis client
 ---------------------
@@ -47,10 +51,24 @@ The broker builds the options in three layers.
 Use it for ``max_connections``, timeouts, or TLS settings.
 
 Every open WebSocket and SSE stream holds one Redis connection for its subscription.
-The default pool size is the one redis-py picks, so a process with many open streams raises ``max_connections`` before it runs out.
+The default pool size is the one redis-py picks.
+A process with many open streams raises ``max_connections`` before it runs out.
 An exhausted pool ends the affected stream with ``BrokerConnectionError``, so the browser reconnects.
 The default pool raises ``MaxConnectionsError``, which the broker also logs as a warning on the ``next.realtime.redis`` logger.
 A ``BlockingConnectionPool`` raises a plain ``ConnectionError`` once its timeout runs out, so its exhaustion logs no such warning.
+
+Secure the broker
+-----------------
+
+Redis is a trust boundary.
+Anything able to write the broker keys can publish to any topic, and a published patch reaches every subscriber of that topic.
+Use a ``rediss://`` URL for TLS, so traffic to Redis is encrypted.
+Put a password or an ACL user in the same ``URL``, such as ``rediss://user:password@redis.internal:6379/0``, and read it from the environment.
+Keep Redis on a private network that only the web and worker processes reach.
+The ``CLIENT`` mapping carries any further redis-py connection keyword, such as the certificate options of the TLS connection.
+
+Use another client
+------------------
 
 A project that reaches Redis through Sentinel or Cluster overrides ``RedisBroker.create_client(url, options, *, asynchronous)`` in a subclass and selects the subclass as ``BACKEND``.
 The method returns the synchronous client when ``asynchronous`` is false and the asynchronous one otherwise, see :doc:`/content/howto/write-a-broker-backend`.

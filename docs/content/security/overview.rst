@@ -22,7 +22,8 @@ The framework does not bypass any standard :doc:`Django middleware <django:topic
 - Django template engine :doc:`auto escaping <django:ref/templates/language>` is active for every page and component template.
 
 A standard ``MIDDLEWARE`` block in ``settings.py`` inherits the middleware half of that baseline.
-The rest does not travel through middleware at all, template auto escaping being the largest part, and a middleware list can also hold every entry in the wrong order, which is the classic way a standard block still leaves a gap.
+The rest does not travel through middleware at all, template auto escaping being the largest part.
+A middleware list can also hold every entry in the wrong order, which is the classic way a standard block still leaves a gap.
 Follow the ordering Django's :doc:`middleware reference <django:ref/middleware>` prescribes and confirm the result with ``manage.py check --deploy``.
 
 Framework specific surfaces
@@ -62,6 +63,7 @@ XSS.
    Context functions that return ``mark_safe`` strings or HTML strings bypass escaping.
    Apply ``mark_safe`` only to values you fully control, and never to untrusted input as covered in :doc:`di-and-untrusted-input`.
    The framework escapes ``<``, ``>``, ``&``, U+2028, and U+2029 in the inline init payload, so a serialised value that contains ``</script>`` cannot break out of the tag.
+   The HTML carried by ``morph``, ``replace``, ``inner``, and ``append`` patches is inserted unescaped, so untrusted text must be escaped before it enters a patch, see :doc:`/content/ref/partial`.
    The remaining risk is that serialised values appear in the page source, so never mark a secret ``serialize=True``, see :doc:`static-assets`.
 
 SQL injection.
@@ -80,16 +82,9 @@ File uploads.
    See :doc:`file-uploads`.
 
 Origin spoofing.
-   The only page identity a form submission carries is the ``_next_form_origin`` URL path, which the dispatcher resolves through the URLconf with :func:`django.urls.resolve`.
-   Before it resolves anything a path-only rule refuses every absolute URL, this host's own included, along with a protocol-relative value such as ``//evil.example`` or ``/\evil.example`` and any value carrying a tab, a newline, or a carriage return, see :doc:`csrf-and-forms`.
-   The client never supplies a filesystem path, so an error re-render can target only pages that are reachable through the routing table anyway.
-   A value that does not resolve returns HTTP 400 on the paths that need the origin page, a validation failure, a wizard step, and a handler that returns ``None`` and so re-renders the origin in place.
-   Every POST reads the field all the same, because the page it names authorizes the request, and a handler that answers with a response of its own needs nothing further from it.
-   Substituting the origin of another routed page is contained by that page's own authorization, because the dispatcher resolves the origin and then asks the page it names whether it would serve this request, before any handler runs.
-   A page authorizes the submission when its ``render()`` returns no response, and a page with no ``render()`` at all authorizes every caller, exactly as its own view serves every caller.
-   A page that short-circuits answers the POST with its own response verbatim, so a substituted origin can only ever name a page the requester may already be served.
-   The page is asked against a request restated as a GET of the origin URL, carrying the user, the session and everything else a middleware attached, so a guard keyed on the shape of the request answers the submission as it answers a visit rather than refusing both or neither by accident.
-   A denial at this layer emits ``form_access_denied`` with ``layer="page"``, so an audit receiver sees it alongside the two hook layers.
+   The only page identity a form submission carries is the ``_next_form_origin`` URL path, which a path-only rule checks before the dispatcher resolves it through the URLconf, see :doc:`csrf-and-forms`.
+   A value that does not resolve returns HTTP 400 on the paths that need the origin page.
+   Substituting the origin of another routed page is contained by that page's own authorization, because the dispatcher asks the page the origin names whether it would serve the request before any handler runs, and a denial emits ``form_access_denied`` with ``layer="page"``.
    A guard written inside ``render()`` is therefore the supported page-level check on this path, see `Access control`_, :doc:`/content/topics/pages` and :doc:`/content/topics/forms/validation-rerender`.
 
 Caching and content negotiation.
@@ -173,15 +168,18 @@ Over WebSocket the ticket carries the dotted path of ``identify`` and the socket
 
 WebSocket negotiation issues a short-lived session-bound ticket through that guarded page.
 The ticket is sent in the first socket frame, never in the URL, and carries the stream's topics, transform, and authorizer reference.
+A ticket is signed from ``SECRET_KEY`` and stays reusable until ``REALTIME['TICKET_MAX_AGE']``, see :doc:`/content/ref/realtime`.
 If the stream cannot be represented by stable importable callbacks, negotiation falls back to SSE.
 The default binding needs a server-side session engine, because a signed-cookie session outlives logout and re-signs on every save, and ``next.W142`` reports it.
 ``SignedCookieBinding`` serves the signed-cookie engine, keeps an open socket running after logout, and ``next.W147`` reports it next to a server-side engine.
 A handler sees an opaque ``subject`` digest of the identity and never the session key or another credential.
 Under the default binding the socket loads its session from the cookie and reads it without writing, so rotating ``SECRET_KEY`` with ``SECRET_KEY_FALLBACKS`` does not log an open socket out.
 The WebSocket Origin check follows Django's CSRF rule, so the Origin has to name the validated ``Host`` or match ``CSRF_TRUSTED_ORIGINS``, and a connection with no Origin is refused, see :doc:`/content/deployment/wsgi-asgi`.
+The SSE GET carries no Origin check, so SSE access rests on the page guard, ``authorize=``, and SameSite cookies.
 
 The ticket introspection endpoint for gateways outside Python is off until a URLconf includes it.
-It accepts only a POST with the ``REALTIME['GATEWAY_TOKEN']`` bearer, compares the token in constant time, and answers every refusal with the same ``403`` body.
+It accepts only a POST with the ``REALTIME['GATEWAY_TOKEN']`` bearer and compares the token in constant time.
+A malformed body answers ``400`` after the bearer check, and a wrong caller or an invalid ticket gets the same single ``403`` body.
 See :doc:`/content/howto/stream-over-websockets`.
 
 Published topic operations must not carry rendered HTML.
@@ -213,38 +211,25 @@ The one entry worth naming here is ``CSRF_TRUSTED_ORIGINS``, because the form di
 The WebSocket tunnel
 --------------------
 
-A form action that declares ``transport="any"`` can be posted through an open WebSocket, see :ref:`topics-forms-actions-transport`.
+A form action that declares ``transport="any"`` can be posted through an open WebSocket, see :ref:`topics-forms-actions-transport` and :doc:`/content/topics/realtime`.
 The tunnel adds no second authorization model.
 Each frame becomes an ordinary ASGI request to the same Django application, so the middleware stack, CSRF check, sessions, authentication, and the action's guards run as they do for HTTP.
 An action that did not opt in answers ``421`` before its guards run, and the tunnel only reaches the form dispatch endpoint.
-A reply passes only for a request that reached the dispatch, so a middleware that swaps ``request.urlconf`` cannot route the socket to another view either.
 
-The request takes its cookies, host, origin, and proxy headers from the WebSocket handshake.
-The page cannot replace them, because the frame supplies only ``content-type``, ``accept``, the CSRF header, and ``x-next-*`` headers.
-Cookies are frozen at the handshake, so a session or a CSRF token that changes later leaves the socket holding old values.
-The tunnel refuses a request that finds no CSRF cookie with ``stale`` before it runs, and a ``403`` before the dispatch, such as the CSRF check refusing a token rotated after the handshake, answers ``stale`` too, so the client reconnects the socket and repeats the post over HTTP.
-A ``403`` or ``404`` of a guard or an action that the dispatch reached is the answer itself and is never repeated.
-Every tunneled request runs the access recheck of the stream first, the same throttled check an ``up`` event runs, so a revoked session or grant closes the socket with ``4401`` or ``4403`` within one heartbeat.
-The tunnel verifies no ticket of its own, the one the socket subscribed with covers it.
+The request takes its cookies, host, origin, and proxy headers from the WebSocket handshake, and the page cannot replace them.
+Cookies are frozen at the handshake, so a rotated session or CSRF token makes the reply ``stale`` and the client repeats the post over HTTP.
+Every tunneled request runs the access recheck of the stream first, so a revoked session or grant closes the socket with ``4401`` or ``4403`` within one heartbeat.
 
 A WebSocket cannot set a cookie, so the tunnel never applies one.
-A reply that repeats a request cookie with the same value loses that header.
-Any other ``Set-Cookie`` replaces the reply with the ``http_only`` refusal, and the action has already run.
-A session rotation is refused before it writes, since a new session key reaches the browser only as a cookie.
-In a tunneled action ``cycle_key()`` and ``flush()`` raise ``SessionRotationError``, so ``login()`` and ``logout()`` leave the stored session and its signed-in user intact, and the reply is ``http_only``.
-``ATOMIC_REQUESTS`` rolls back the database work of that action, and without it whatever ran before the rotation stays.
-On ``http_only`` the client reloads the page, so the post is never repeated and the page shows the server state.
+A reply that sets a cookie becomes the ``http_only`` refusal after the action has run, and ``cycle_key()`` and ``flush()`` raise ``SessionRotationError`` so ``login()`` and ``logout()`` leave the stored session intact.
 Login, logout, and every action that sets its own cookie stay on HTTP.
-The messages framework stores messages in a cookie by default, so a success message of a tunneled action turns the reply into ``http_only``.
-``next.W145`` reports that combination, and ``SessionStorage`` avoids it with the server-side session engines, while the signed-cookie engine changes its cookie on every write and turns that reply into ``http_only`` too.
+``next.W145`` reports the cookie message storage that turns a success message into ``http_only``.
 
-Limits apply per connection.
-One bucket serves every frame after ``sub`` at ``10`` a second with a burst of ``20`` by default, pongs and unsupported frames included.
-Three refusals in a row close the socket with ``4429``, and a reconnect starts a fresh bucket, so the close slows a flood down rather than banning the client.
-Sixteen upstream events run at once, each waiting at most ten seconds for its handler, and sync handlers run on a thread pool of their own, so a slow handler cannot starve the session loads of other sockets.
-Four tunneled requests run at once, each for at most 30 seconds, and a reply body is capped at 1 MiB.
-A synchronous view that outlives its timeout keeps its slot until it returns, so a socket never runs more views than the limit.
-Upstream events stay inside the topics of the ticket and the access recheck, so a revoked grant stops them within one heartbeat.
+The framework limits each connection and caps no number of open streams per user, address, or process.
+The proxy and the Redis ``maxclients`` and pool limits own that cap, see :ref:`deployment-capacity`.
+One bucket serves every frame after ``sub``, and three refusals in a row close the socket with ``4429``, so the close slows a flood down rather than banning the client.
+Upstream events, tunneled requests, and reply bodies carry their own concurrency, time, and size limits, see :doc:`/content/ref/realtime`.
+Upstream events stay inside the topics of the ticket and the access recheck.
 A handler treats ``data`` as untrusted input.
 
 System checks

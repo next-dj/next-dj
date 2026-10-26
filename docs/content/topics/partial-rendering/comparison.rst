@@ -4,9 +4,8 @@ Zones compared with htmx, Turbo, and Django Unicorn
 ===================================================
 
 Zones answer a question several mature projects already answer.
-htmx, Turbo, and Django Unicorn each ship a working partial-update model, each has a larger user base than next.dj, and for many projects one of them is the better choice.
+htmx, Turbo, and Django Unicorn each ship a working partial-update model, and for many projects one of them is the better choice.
 This page sets the models side by side on four axes that can be checked rather than argued, and then names where each alternative fits better.
-Claims about next.dj come from ``next/partial/`` and ``next/client/``.
 Claims about the alternatives stay inside the model each project describes as its own, with no version-specific detail.
 
 .. contents::
@@ -103,7 +102,7 @@ With JavaScript off
 -------------------
 
 next.dj switches to a partial response only when the request carries ``X-Next-Request``, and the runtime stamps that header.
-Without the runtime the same URL answers with the full document, byte for byte.
+Without the runtime the same URL answers with the full document.
 The runtime also intercepts only elements carrying a ``data-next-*`` attribute, so a plain link navigates and a plain form posts.
 A filter form stays a GET form, a paginating link stays a link to the next page, and a form written with the ``{% form %}`` tag falls back to the ``POST`` then ``303`` then ``GET`` cycle.
 
@@ -144,11 +143,6 @@ Reach for Turbo when accelerating whole-application navigation is the goal rathe
 next.dj intercepts only elements carrying a ``data-next-*`` attribute and ships no client router, so it never turns every link in the document into a partial navigation, which is exactly what Turbo Drive is for.
 Turbo is also the established choice for a project that already follows Hotwire idioms or wraps its web views in a native shell.
 
-Next.js offers intercepting routes that a client router applies to every matching link.
-In next.dj an intercepting route is opt-in per link.
-It takes a ``data-next-layer`` link plus an intercept directory, and the zone name on the link selects the page that renders in the modal, see :ref:`topics-file-router-intercepts`.
-The opt-in stays a ``data-next-*`` attribute, the address bar shows the honest URL, and there is no client router and no URL masking.
-
 Django Unicorn
 ~~~~~~~~~~~~~~
 
@@ -156,6 +150,21 @@ Reach for Unicorn when the natural unit is a stateful component whose state live
 A zone renders from the page context on every request, and next.dj keeps no per-component state between requests, so an interaction that needs remembered state puts it in the URL, the form, or the database.
 The one server-held exception is the multi-step wizard, which stores step drafts through its own backend, by default in the Django session, and that is a wizard rather than a general component-state mechanism.
 Unicorn is also the shorter path when a team wants reactive behaviour without writing an endpoint for each interaction.
+
+Next.js intercepting routes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Next.js offers intercepting routes that a client router applies to every matching link.
+In next.dj an intercepting route is opt-in per link.
+It takes a ``data-next-layer`` link plus an intercept directory, and the zone name on the link selects the page that renders in the modal, see :ref:`topics-file-router-intercepts`.
+The opt-in stays a ``data-next-*`` attribute, the address bar shows the honest URL, and there is no client router and no URL masking.
+
+Server push
+-----------
+
+This comparison covers request-driven partial updates.
+Pushing an update to a browser that asked for nothing is a separate concern, and next.dj answers it with topics, replay, and presence rather than with zones alone.
+See :doc:`/content/topics/realtime` and :doc:`sse`.
 
 When zones are the better fit
 -----------------------------

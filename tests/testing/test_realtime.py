@@ -13,13 +13,14 @@ from django.contrib.auth import (
 )
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sessions.backends.db import SessionStore
-from django.http import StreamingHttpResponse
+from django.http import HttpRequest, StreamingHttpResponse
 from django.test import override_settings
 
 from next.conf import next_framework_settings
 from next.partial import Patches
 from next.realtime import MemoryBroker, apublish, publish
-from next.realtime.binding import SessionBinding
+from next.realtime.binding import LiveIdentity, SessionBinding, TicketBinding
+from next.realtime.errors import InvalidTicketError
 from next.realtime.frames import Refusal, Reply
 from next.realtime.manager import broker_manager
 from next.realtime.socket import Handshake, TopicSocket
@@ -35,6 +36,7 @@ from next.testing import (
     capture_published,
     issue_socket_ticket,
     memory_broker,
+    override_next_settings,
 )
 from tests.support.realtime import ROOM_AUTHORIZER_REF
 
@@ -265,6 +267,24 @@ class TestMemoryPort:
         assert list(hello["topics"]) == ["room:1"]
 
 
+class TokenBinding(TicketBinding):
+    def issue(self, request: HttpRequest) -> str:
+        token = request.COOKIES.get("api_token")
+        if not token:
+            msg = "No api token."
+            raise InvalidTicketError(msg)
+        return f"token:{token}"
+
+    def credential(self, cookies: Mapping[str, str]) -> str | None:
+        return cookies.get("api_token")
+
+    def subject(self, credential: str) -> str | None:
+        return f"token:{credential}"
+
+    def live(self, credential: str) -> LiveIdentity | None:
+        return None
+
+
 @pytest.mark.django_db()
 class TestIssueSocketTicket:
     """The ticket helper signs through the negotiation path, never by hand."""
@@ -306,6 +326,21 @@ class TestIssueSocketTicket:
         claims = verify_ticket(bound.grant.token, session.session_key)
         assert claims.topics == ("room:2",)
         assert claims.transform_ref == "tests.support.realtime.refresh_envelope"
+
+    def test_cookies_reach_a_binding_that_reads_its_own_cookie(self) -> None:
+        with override_next_settings(
+            REALTIME={"TICKET_BINDING": "tests.testing.test_realtime.TokenBinding"}
+        ):
+            ticket = issue_socket_ticket(
+                ("room:1",),
+                authorizer_ref=ROOM_AUTHORIZER_REF,
+                cookies={"api_token": "abc"},
+            )
+            with pytest.raises(InvalidTicketError):
+                issue_socket_ticket(("room:1",), authorizer_ref=ROOM_AUTHORIZER_REF)
+        assert ticket.credential == "abc"
+        assert ticket.cookies["api_token"] == "abc"
+        assert verify_ticket(ticket.grant.token, "token:abc").topics == ("room:1",)
 
     def test_binds_to_a_given_session(self) -> None:
         session = SessionStore()

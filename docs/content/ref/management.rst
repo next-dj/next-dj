@@ -183,7 +183,7 @@ realtime
 --------
 
 ``manage.py realtime`` takes one action, and every action prints text by default and one JSON document with ``--json``.
-A refused topic, payload, cursor or broker raises ``ConsoleError`` from ``next.realtime.console``, which the command turns into a ``CommandError``, so it exits with status 1 and prints the reason.
+A refused topic, payload, cursor or broker raises ``ConsoleError`` from ``next.realtime.errors``, which the command turns into a ``CommandError``, so it exits with status 1 and prints the reason.
 
 .. code-block:: text
 

@@ -59,11 +59,26 @@ A subclass that overrides ``RedisBroker.create_client(url, options, *, asynchron
 A pool that raises ``redis.exceptions.MaxConnectionsError`` logs a warning on the ``next.realtime.redis`` logger.
 A ``BlockingConnectionPool`` raises a plain ``ConnectionError`` on timeout instead, so its exhaustion ends the stream with ``BrokerConnectionError`` and logs no warning.
 
-``RedisBroker.topic_key(kind, topic)`` names the keys of a topic, ``<PREFIX>:seq:{<topic>}`` for the counter and its epoch and ``<PREFIX>:log:{<topic>}`` for the replay log.
-The presence keys use the kinds ``presence``, ``members``, ``window``, ``identified``, ``attendees``, ``holders``, ``state``, and ``order`` in the same form.
-The braces are a Redis Cluster hash tag that puts the keys of a topic in one slot, since the publish script, the replay transaction, and the presence scripts touch them together.
+``RedisBroker.topic_key(kind, topic)`` names the keys of a topic as ``<PREFIX>:<kind>:{<topic>}``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Kind
+     - Holds
+   * - ``seq``
+     - The counter of the topic and its epoch.
+   * - ``log``
+     - The replay log.
+   * - Presence kinds
+     - Eight more kinds name the attendance keys, see `Presence`_.
+
+The braces are a Redis Cluster hash tag that puts the keys of a topic in one slot.
+The publish script, the replay transaction, and the presence scripts touch those keys together.
 An override keeps that property and returns a distinct key for each ``kind``.
-``PREFIX`` therefore needs a non-colon character and no ``{`` or ``}``, because a brace in it would move the hash tag off the topic name, and the broker raises ``ImproperlyConfigured`` for any other value, which ``manage.py check`` reports earlier as ``next.E192``.
+``PREFIX`` therefore needs a non-colon character and no ``{`` or ``}``, because a brace in it would move the hash tag off the topic name.
+The broker raises ``ImproperlyConfigured`` for any other value, which ``manage.py check`` reports earlier as ``next.E192``.
 The Pub/Sub channel stays ``<PREFIX>:topic:<topic>``.
 
 Broker contract
@@ -91,6 +106,9 @@ One instance serves the whole process, so every method is called from many reque
    * - ``asubscribe(topics, *, timeout)``
      - The asynchronous form of ``subscribe``, an async context manager over an async iterator.
        Leaving the context, cancellation included, releases the subscription and every task it started.
+   * - ``broadcast(topic, envelope)``
+     - Delivers the envelope to live subscribers only, unnumbered and never logged.
+       The default raises ``NotImplementedError``, and a broker that keeps presence overrides it.
    * - ``positions(topics)`` and ``apositions(topics)``
      - Return a ``Position`` per topic in one batched read.
        A topic never published answers ``Position(epoch="", seq=0)``.
@@ -213,12 +231,16 @@ The replay log
 ~~~~~~~~~~~~~~
 
 ``REALTIME['REPLAY']`` holds ``SIZE``, the number of newest messages kept per topic, and ``TTL``, the seconds the log of a topic lives after its last publication.
-The defaults are ``100`` and ``300``, ``SIZE`` set to ``0`` turns the log off, ``SIZE`` is capped at ``10000`` messages, and ``TTL`` is capped at ``31536000`` seconds, one year.
-A replay reads and copies the whole log of a topic, ``LRANGE`` over every entry on Redis and a copy under the broker lock in memory, so the size cap bounds that read and the memory a topic holds, about 10 MB at 1 KB a message.
+The defaults are ``100`` and ``300``.
+``SIZE`` set to ``0`` turns the log off.
+``SIZE`` is capped at ``10000`` messages, and ``TTL`` is capped at ``31536000`` seconds, one year.
+A replay reads and copies the whole log of a topic.
+That is ``LRANGE`` over every entry on Redis and a copy under the broker lock in memory, so the size cap bounds that read and the memory a topic holds.
 A broker reads the window once when it is created, so a settings reload rebuilds the broker with the new values.
 A ``replay`` keyword on either broker constructor takes the same mapping and wins over the setting, so a process without Django settings can build a broker.
 A window that is not a mapping, carries another key, or holds an invalid value raises ``ImproperlyConfigured`` when the broker is created.
-``manage.py check`` reports it earlier, a value that is not a mapping as ``next.E191``, another key as ``next.E035``, and an invalid ``SIZE`` or ``TTL`` as ``next.E189`` or ``next.E190``.
+``manage.py check`` reports it earlier.
+A value that is not a mapping is ``next.E191``, another key is ``next.E035``, and an invalid ``SIZE`` or ``TTL`` is ``next.E189`` or ``next.E190``.
 
 ``MemoryBroker`` keeps the newest ``SIZE`` messages of each topic in the process and drops the whole log once ``TTL`` seconds pass without a publication on the topic.
 A publication on a topic whose log has already expired starts a new log, as ``PEXPIRE`` does on Redis, and the first publication a ``TTL`` after the last sweep drops the expired logs of every topic.
@@ -421,18 +443,55 @@ The ``PresenceBroker`` contract
      - Return the attendance snapshot as a ``Presence`` and never an expired attendee.
 
 A transport failure raises ``BrokerConnectionError``.
-A broker keeps the coalescing itself with the helpers of ``next.realtime.roster``, namely the ``PresenceWindow`` mixin, ``presence_limits()``, ``PresenceSchedule``, ``announce()``, ``encode_member()``, and ``decode_member()``.
-``PresenceWindow`` holds ``presence_limits`` and ``presence_schedule``, and its schedule calls the ``announce_presence(topic)`` hook once a window closes.
-``announce(broker, topic)`` sends the snapshot through ``broker.broadcast``, whose default raises ``NotImplementedError``, because a snapshot must reach live subscribers unnumbered.
+A broker keeps the coalescing itself with the helpers of ``next.realtime.roster``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Helper
+     - Role
+   * - ``PresenceWindow``
+     - A mixin that holds ``presence_limits`` and ``presence_schedule``.
+       Its schedule calls the ``announce_presence(topic)`` hook once a window closes.
+   * - ``presence_limits()``
+     - Reads the ``PRESENCE`` limits.
+   * - ``PresenceSchedule``
+     - Coalesces the changes of a topic into one window.
+   * - ``announce(broker, topic)``
+     - Sends the snapshot through ``broker.broadcast``, because a snapshot must reach live subscribers unnumbered.
+   * - ``encode_member()`` and ``decode_member()``
+     - Convert a member mapping to and from its stored form.
+
 :doc:`/content/howto/write-a-broker-backend` builds one on top of ``RedisBroker``.
 
 ``MemoryBroker`` keeps a roster per topic and prunes by the earliest deadline, so a refresh costs the same on a large roster.
-``RedisBroker`` keeps eight keys per topic under the hash tag, the ``presence`` set for connections without a member, the ``members`` hash, the ``window`` lock, the ``state`` hash of the change version, and the ``identified``, ``attendees``, ``holders``, and ``order`` indexes for members.
+``RedisBroker`` keeps eight keys per topic under the hash tag.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Kind
+     - Holds
+   * - ``presence``
+     - The set of connections without a member.
+   * - ``members``
+     - The members hash.
+   * - ``window``
+     - The coalescing lock.
+   * - ``state``
+     - The hash of the change version.
+   * - ``identified``, ``attendees``, ``holders``, ``order``
+     - The indexes for members.
+
 A script extends a key to twice the time to live only once less than one time to live is left.
 Every script path leaves each of the eight keys with a time to live, so the keys of an emptied topic expire.
 Its Lua scripts read the Redis ``TIME``, so hosts with different clocks agree on every deadline.
 Both constructors take a ``presence`` keyword with the same mapping as the setting, and a broker reads it once when it is created.
-Both take a ``schedule`` keyword too, a callable that receives the ``announce_presence`` hook and returns the ``PresenceSchedule``, and an override of ``announce_presence`` observes or reroutes every snapshot.
+Both take a ``schedule`` keyword too.
+It is a callable that receives the ``announce_presence`` hook and returns the ``PresenceSchedule``.
+An override of ``announce_presence`` observes or reroutes every snapshot.
 
 The limits
 ~~~~~~~~~~
@@ -441,7 +500,8 @@ The limits
 The defaults are ``1.0``, ``100``, and ``512``.
 ``WINDOW`` is a positive number of seconds up to ``60``, ``SIZE`` an integer from ``0`` to ``1000``, and ``MEMBER_BYTES`` an integer from ``1`` to ``4096``.
 A mapping with another key or an invalid value raises ``ImproperlyConfigured`` when the broker is created.
-``manage.py check`` reports a value that is not a mapping as ``next.E193``, another key as ``next.E035``, and an invalid ``WINDOW``, ``SIZE``, or ``MEMBER_BYTES`` as ``next.E194``, ``next.E195``, or ``next.E196``.
+``manage.py check`` reports a value that is not a mapping as ``next.E193`` and another key as ``next.E035``.
+An invalid ``WINDOW``, ``SIZE``, or ``MEMBER_BYTES`` is ``next.E194``, ``next.E195``, or ``next.E196``.
 An explicit ``PRESENCE`` with a broker that is no ``PresenceBroker`` is ``next.W144``.
 
 Public API
@@ -484,6 +544,11 @@ Public API
 .. autofunction:: next.realtime.presence
 
 .. autofunction:: next.realtime.apresence
+
+.. autofunction:: next.realtime.on
+
+.. autoclass:: next.realtime.Upstream
+   :members:
 
 .. autoexception:: next.realtime.BrokerConnectionError
    :members:
@@ -780,7 +845,7 @@ An admitted ``up`` frame is checked in this order, and the first failure is the 
      - The session or the authorizer refuses the ticket on the throttled access recheck.
        The socket then closes as on any failed recheck, with ``4401`` or ``4403``.
    * - ``unknown``
-     - No ``@realtime.on`` handler serves the topic and the name.
+     - No ``@on`` handler serves the topic and the name.
    * - ``timeout``
      - The handler ran past ``UPSTREAM['TIMEOUT']``.
        The event may still take effect, since a sync handler keeps running in its thread, so a client does not resend it blindly.
@@ -796,7 +861,7 @@ Each admitted frame runs as its own task, so acks may arrive in another order th
 The recheck runs at most once per heartbeat, so an ``up`` frame may still reach its handler up to one heartbeat after the session or the grant is revoked.
 ``TopicSocket.access_check(claims, authorizer)`` builds that recheck, and an override with a shorter interval tightens it.
 A sync handler runs on a thread pool of its own, sized like the default executor, so a slow handler never queues the session loads and transforms of other sockets.
-``TopicSocket.handle(upstream)`` routes a granted event and returns whether anything served it, and an override replaces the ``@realtime.on`` registry with routing of its own.
+``TopicSocket.handle(upstream)`` routes a granted event and returns whether anything served it, and an override replaces the ``@on`` registry with routing of its own.
 
 Request tunnel
 ~~~~~~~~~~~~~~
@@ -894,11 +959,14 @@ A connection with no ``Origin`` header is refused, because only a browser carrie
 ``WebSocketApp(origins=[...])`` replaces the rule with an explicit list in the ``CSRF_TRUSTED_ORIGINS`` format and raises ``ValueError`` for an empty or malformed list.
 A ``*`` entry in ``ALLOWED_HOSTS`` is not an error, because the check compares the Origin with the validated ``Host``.
 
-The credential comes from the cookies of the handshake through the ticket binding, and the default binding reads the session named by the ``SESSION_COOKIE_NAME`` cookie through the configured ``SESSION_ENGINE`` on the shared thread pool.
+The credential comes from the cookies of the handshake through the ticket binding.
+The default binding reads the session named by the ``SESSION_COOKIE_NAME`` cookie through the configured ``SESSION_ENGINE`` on the shared thread pool.
 The load is read-only.
-A session whose hash only matches a ``SECRET_KEY_FALLBACKS`` entry keeps working, since rotating the key belongs to the next HTTP request and the socket has no response to carry a new cookie.
+A session whose hash only matches a ``SECRET_KEY_FALLBACKS`` entry keeps working.
+Rotating the key belongs to the next HTTP request, and the socket has no response to carry a new cookie.
 The ``db``, ``cache``, ``cached_db``, and ``file`` engines work.
-The signed-cookie engine re-signs its cookie on every session save, so a ticket issued before the save no longer matches the handshake cookie, and the socket closes with ``4401``, which ``next.W142`` reports.
+The signed-cookie engine re-signs its cookie on every session save.
+A ticket issued before the save then no longer matches the handshake cookie, and the socket closes with ``4401``, which ``next.W142`` reports.
 ``SignedCookieBinding`` removes that limit and needs no server-side session engine, see `Ticket binding`_.
 The ``file`` engine replaces an expired session with a new file when it loads one, and the socket turns that write into a no-op.
 Under the default binding the socket loads the session at the handshake and on each recheck, so a cache-backed store that evicts live sessions closes sockets with ``4401``.
@@ -906,7 +974,8 @@ Under the default binding the socket loads the session at the handshake and on e
 A recheck runs on every heartbeat and at the session's deadline, and it closes the socket only when the session is gone.
 A session renewed over HTTP, by ``SESSION_SAVE_EVERY_REQUEST`` or ``set_expiry``, moves the deadline and keeps its socket open.
 The deadline is the ``expire_date`` row of the ``db`` and ``cached_db`` engines, or an expiry date passed to ``set_expiry``.
-The ``cache`` and ``file`` engines keep no deadline the socket can read otherwise, so for them the heartbeat recheck alone notices an expired session.
+The ``cache`` and ``file`` engines keep no deadline the socket can read otherwise.
+For them the heartbeat recheck alone notices an expired session.
 
 Ticket binding
 ~~~~~~~~~~~~~~
@@ -917,7 +986,12 @@ The default ``next.realtime.SessionBinding`` binds the Django session key.
 ``next.realtime.SignedCookieBinding`` binds a signed-in user and a visitor cookie, and serves the signed-cookie ``SESSION_ENGINE``.
 A project class serves any other identity, see :doc:`/content/howto/bind-tickets-to-your-own-identity`.
 
-A binding answers five questions, and the framework calls them in this order.
+A ticket is a signed token bound to the session.
+The first handshake does not consume it, so it stays valid for every handshake until ``REALTIME['TICKET_MAX_AGE']`` elapses.
+It is signed from ``SECRET_KEY``, so rotating the key invalidates outstanding tickets unless the old key stays in ``SECRET_KEY_FALLBACKS``.
+
+A binding answers six questions.
+The framework calls the first four in this order for a WebSocket, and ``live_session`` serves SSE instead of ``live``.
 
 .. list-table::
    :header-rows: 1
@@ -947,23 +1021,31 @@ A binding answers five questions, and the framework calls them in this order.
        It calls ``stored_session`` by default and serves SSE only.
 
 The ticket carries a digest of the subject under ``SECRET_KEY``, and ``verify_ticket`` accepts a digest made under any of ``SECRET_KEY_FALLBACKS`` as well.
-``Handshake.credential`` holds the credential of the binding, which is the session key only under ``SessionBinding``, and it stays out of ``repr``.
+``Handshake.credential`` holds the credential of the binding and stays out of ``repr``.
+It is the session key only under ``SessionBinding``.
 A handler never sees it.
-``Handshake.subject`` and ``Upstream.subject`` hold a keyed digest of the subject the credential proves, which is stable across reconnects of one user or visitor, never yields the credential back, and is empty when the credential proves no subject.
+``Handshake.subject`` and ``Upstream.subject`` hold a keyed digest of the subject the credential proves.
+The digest is stable across reconnects of one user or visitor and never yields the credential back.
+It is empty when the credential proves no subject.
 The digest changes when ``SECRET_KEY`` rotates, and under ``SessionBinding`` it follows the session rather than the user, so a new login yields a new one.
 ``stored_session(session_key)`` returns the ``LiveIdentity`` of a stored session, ``session_user(store)`` loads the user of a session without writing to it, and ``session_alive(session_key)`` tells whether the stored session is live.
 A binding class is built once per dotted path and shared by every connection, so it keeps no per-connection state.
 
 ``SignedCookieBinding`` binds a signed-in user as ``user:<auth hash>:<pk>`` and an anonymous visitor as ``visitor:<id>``.
-The visitor id lives in the signed ``next_visitor`` cookie, which the negotiation reply sets and renews with the path, domain, ``Secure``, ``SameSite``, and lifetime of the session cookie and always ``HttpOnly``.
+The visitor id lives in the signed ``next_visitor`` cookie.
+The negotiation reply sets and renews it with the path, domain, ``Secure``, ``SameSite``, and lifetime of the session cookie, and always ``HttpOnly``.
 ``issue`` leaves the visitor id on ``request.META``, and ``respond`` writes the cookie from there, so a custom view calls ``ticket_binding().respond(request, response)`` on its reply.
 A view that forgets the call sets no cookie, and the handshake closes with ``4401``.
-A signed-in negotiation makes ``respond`` delete the ``next_visitor`` cookie, so a visitor that never negotiated while signed in survives a login and a logout, and the first anonymous negotiation after one that did issues a fresh visitor.
+A signed-in negotiation makes ``respond`` delete the ``next_visitor`` cookie.
+A visitor that never negotiated while signed in survives a login and a logout.
+The first anonymous negotiation after one that did issues a fresh visitor.
 A negotiation whose session holds a user that no longer loads, after a password change elsewhere, binds a visitor the same way.
-``live`` loads the user by pk and compares the auth hash, so a password change or an inactive user closes the socket, while a logout in another tab does not, because the binding keeps no stored session to delete.
+``live`` loads the user by pk and compares the auth hash.
+A password change or an inactive user closes the socket, while a logout in another tab does not, because the binding keeps no stored session to delete.
 ``live`` for a credential it does not recognise returns ``None``.
 A subclass changes ``cookie_name`` or ``salt``.
-The binding works under any ``SESSION_ENGINE``, and ``next.W147`` warns when a server-side engine runs next to it, because ``SessionBinding`` would recheck the stored session there.
+The binding works under any ``SESSION_ENGINE``.
+``next.W147`` warns when a server-side engine runs next to it, because ``SessionBinding`` would recheck the stored session there.
 
 .. autoclass:: next.realtime.TicketBinding
    :members:
@@ -988,7 +1070,8 @@ Serving the socket
 ~~~~~~~~~~~~~~~~~~
 
 ``WebSocketApp`` is a plain ASGI application for WebSocket scopes, so it mounts under any ASGI router.
-``application(http_app)`` is the ready default for a Django project.
+``application(http_app, *, websocket=None)`` is the ready default for a Django project.
+It builds a ``WebSocketApp`` unless ``websocket`` is given, so a project that overrides the extension points below passes an instance of its own ``WebSocketApp`` subclass.
 It sends HTTP to ``http_app``, serves the socket at ``REALTIME['WS_PATH']``, and closes any other WebSocket path before accepting it, since Django's own ASGI handler rejects WebSocket scopes.
 The path is compared below ``FORCE_SCRIPT_NAME`` or the ASGI ``root_path``, the way Django computes ``path_info``, and the ticket URL carries the same prefix.
 ``REALTIME['WS_PATH']`` is the only place the route is configured, because the ticket tells the client the same URL.
@@ -1040,6 +1123,9 @@ The ``count`` of a snapshot follows the rules of `Presence`_, one member for eve
    :members:
 
 .. autoclass:: next.realtime.TopicSocket
+   :members:
+
+.. autoclass:: next.realtime.attendance.Attendance
    :members:
 
 .. autoclass:: next.realtime.SocketPort

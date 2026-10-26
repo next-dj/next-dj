@@ -6,7 +6,7 @@ Wizard done choreographies
 A wizard inside a modal finishes on its last step.
 The request is created, the modal closes, and the list on the page beneath it has to refresh.
 There are two ways to drive that refresh.
-This page describes both and compares them honestly so the choice is informed.
+This page describes both and compares them so the choice is informed.
 
 The opening and the steps are identical for both, see :doc:`scenarios`.
 The two choreographies differ only in what ``done`` returns and how the list gets fresh data.
@@ -18,7 +18,7 @@ The two choreographies differ only in what ``done`` returns and how the list get
 Accept and re-GET
 -----------------
 
-The default.
+This is the default.
 The wizard closes the layer with a result, and the link that opened the modal re-fetches the zone it named in ``data-next-accepted``.
 The wizard does not know the list exists.
 
@@ -28,18 +28,19 @@ The list re-renders through its own page view, with its own guards and middlewar
 The wizard is portable.
 It sits on any page without a change, and ``data-next-accepted`` moves with the markup.
 
-This is the cycle of a redirect with reloaded props.
 The cost is one extra GET after the modal closes.
 
-Server OOB through page addressing
-----------------------------------
+The result a ``layer_close(result=...)`` carries reaches the page twice.
+The runtime fires ``partial:layer-accepted`` with the result, and the ``Outcome.envelope`` of the request that carried the close holds the same envelope, see :doc:`/content/ref/client`.
 
-The canonical server-driven done choreography.
+Page-addressed morph in the response
+------------------------------------
+
 The wizard puts the morph of the list's zone into its own response, so one envelope closes the layer, refreshes the list, and shows the toast.
 
 This addresses a zone of a foreign page through ``morph(page=, url_kwargs=)``, the one path the server takes to refresh a host-page zone from a ``done`` step.
 The builder takes ``page=`` and ``url_kwargs=`` alongside ``zone=``, and the request carries ``X-Next-Origin`` with the path and query string of the page that hosts the layer.
-``resolve_partial_origin`` is the thin helper that reads that header back into the ``page_path`` and ``url_kwargs`` the morph needs, nothing more.
+``resolve_partial_origin`` reads that header back into the ``page_path`` and ``url_kwargs`` the morph needs.
 
 .. code-block:: python
    :caption: request/[step]/page.py
@@ -88,12 +89,17 @@ The last step answers with all three operations in one envelope.
      ]
    }
 
-A ``morph(page=…)`` re-runs the foreign page's body resolution before rendering its zone, and a ``morph(zone=…)`` against the posted origin re-runs the body resolution of that page the same way.
+A ``morph(page=…)`` re-runs the foreign page's body resolution before rendering its zone.
+A ``morph(zone=…)`` against the posted origin re-runs the body resolution of that page the same way.
 The page's guards and redirects are honoured either way, so the list never travels in the response when the page would have denied the caller on its own request.
 A denial surfaces as ``ForeignPageNotAuthorizedError`` rather than an empty morph.
 
-This is the cycle of an out-of-band swap.
 One round trip closes everything at once.
+
+``morph(page=)`` emits no ``context`` patch, while ``morph(zone=)`` against the origin page does whenever the zone has values to ship.
+``Next.context`` therefore keeps the values it held for the host page after a page-addressed morph.
+An explicit ``.context(...)`` names providers that are validated against the origin page, so it fits when those providers belong to the origin.
+Otherwise the page re-GETs the zone, and the zone GET ships the context patch.
 
 The comparison
 --------------
@@ -104,7 +110,7 @@ The comparison
 
    * - Dimension
      - Accept and re-GET
-     - Server OOB through ``page=``
+     - Page-addressed morph through ``page=``
    * - Round trips after the last step
      - Two: the close, then the list GET
      - One
@@ -130,7 +136,7 @@ The comparison
 The recommendation is accept and re-GET as the default.
 The deciding argument is not the round trip but the authorization and the decoupling.
 The re-GET keeps the list's rights where they live, in the list's view, and leaves the wizard portable.
-Reach for server OOB when the one extra GET is genuinely visible and the wizard is dedicated to one host page.
+Reach for the page-addressed morph when the one extra GET is genuinely visible and the wizard is dedicated to one host page.
 
 See also
 --------

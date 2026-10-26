@@ -65,11 +65,13 @@ These keys are absent from ordinary HTTP response bodies and are not fields of `
      - ``code``, ``"auth"`` when the topic authorizer denied a grant.
        The client closes the stream and does not reconnect it.
        A revoked session sends no ``next-end``, so the reconnect goes through the page guard again.
+       Only an SSE stream carries it.
+       A WebSocket sends no end frame, and a denied grant there closes the socket with ``4403`` after an ``error`` frame, which sends that stream to SSE for good.
    * - ``next-patches``
      - The ordinary envelope plus ``server_time``, and on topic streams ``topic``, ``epoch``, and ``seq``.
 
 The control frames are compact JSON in this fixed schema whatever protocol backend is installed.
-A WebSocket carries the same frames as JSON objects with a ``type`` of ``hello``, ``skip``, or ``patches``, see :doc:`/content/ref/realtime`.
+A WebSocket carries the hello, skip, and patches frames as JSON objects with a ``type`` of ``hello``, ``skip``, or ``patches``, see :doc:`/content/ref/realtime`.
 
 The client keeps an ``(epoch, seq)`` cursor per topic and ignores duplicates.
 It requests the page's bound zones after a gap in the same epoch, an epoch different from the cursor, a nonzero sequence on the first hello, or a changed position on reconnect.
@@ -102,19 +104,23 @@ Pass ``request`` whenever one exists, so the asset URLs of the envelope stay sco
        The target names a zone or a form by uid.
        ``extract: true`` carries a whole document the client trims to the target, and ``morph_form(uid, html)`` is the builder route that sets it.
        ``morph(zone=, overrides=)`` merges a mapping into the zone's render context, so a handler can bind a value the zone body reads without registering a provider for it.
+       The ``html`` string is inserted as given and never escaped.
        ``morph(zone=)`` follows the morph with the ``context`` op a zone GET sends, ``context=`` merges a mapping of serialize-provider values over it, and ``context=False`` leaves the client context alone.
      - ``extract: false``
    * - ``replace``
      - ``replace()``
      - Replace the node wholesale, no morph.
+       The ``html`` string is inserted as given and never escaped.
      - none
    * - ``inner``
      - ``inner()``
      - Replace only the contents, no morph.
+       The ``html`` string is inserted as given and never escaped.
      - none
    * - ``append``
      - ``append()``
      - Add children at the end, dedup by ``data-next-key`` or ``id``.
+       The ``html`` string is inserted as given and never escaped.
      - ``dedupe: "key"``
    * - ``prepend``
      - ``prepend()``
@@ -172,6 +178,13 @@ Pass ``request`` whenever one exists, so the asset URLs of the envelope stay sco
        The tags belong to the page whose envelope carried them, and a ``meta`` for a URL that is neither the page nor an open layer is dropped, see :doc:`layers`.
      - none
 
+The ``html`` of ``morph``, ``replace``, ``inner``, ``append``, and ``prepend`` reaches the DOM as written.
+
+.. warning::
+
+   A handler escapes untrusted text before it passes it as ``html``, or renders the markup through a template that escapes.
+   Only ``toast`` sets its text as ``textContent``.
+
 A target carries exactly one address key, and the client resolves ``zone``, then ``form``, then ``field``, then ``css``.
 ``zone`` names a ``data-next-zone`` wrapper and ``form`` names an action uid.
 ``field`` is a ``[uid, name]`` pair addressing one named input of a form by its uid.
@@ -209,7 +222,7 @@ Asset manifest
 The ``assets`` key of an envelope lists the co-located assets the rendered targets registered.
 Each entry carries ``kind`` and ``url`` always, plus ``inline`` and ``load`` when they apply.
 A reference a zone body registers, through ``{% use_style %}``, ``{% use_script %}``, or a module-level list, is resolved by the same backend on both paths, so the ``url`` of an entry is the URL a full render prints for that asset.
-``Patches.add_asset(kind, url, inline=None)`` is the route by which a handler authors an entry of its own, and the ``url`` it takes passes that same resolution, so a logical name reaches the manifest as the URL a full render would have written, see :doc:`/content/topics/static-assets/name-resolution`.
+``Patches.add_asset(kind, url, *, inline=None)`` is the route by which a handler authors an entry of its own, and the ``url`` it takes passes that same resolution, so a logical name reaches the manifest as the URL a full render would have written, see :doc:`/content/topics/static-assets/name-resolution`.
 
 .. list-table::
    :header-rows: 1
@@ -285,6 +298,9 @@ A target off that origin is refused before any request leaves, with a ``partial:
    * - ``X-Next-Request-Id``
      - Every non-abortable mutation
      - The ring id used to suppress an SSE echo.
+   * - ``X-Next-Transport: ws``
+     - The GET of a stream URL while WebSockets are enabled
+     - Asks for a socket ticket in place of the stream, sent with ``Accept: application/json``, see :ref:`topics-realtime-tunnel` and :doc:`/content/ref/realtime`.
    * - ``X-Next-Origin``
      - Every layer request, the open GET, the accept re-GET, and a mutation submitted from a form inside the layer.
      - The path and query string of the page that hosts a layer, for a server-side morph of its zones.
@@ -328,6 +344,9 @@ Server to client.
    * - ``X-Next-Action``
      - An invalid form
      - The uid of the failed action.
+   * - ``X-Next-Transport``
+     - A tunneled request, and a reply of an action declared ``transport="any"``
+     - ``http`` on a ``421`` refusal of an action that answers over HTTP only, ``any`` on the reply of an opted-in action, and ``session`` on a ``421`` for an action that rotated or flushed the session, see :ref:`topics-forms-actions-transport`.
 
 Status codes
 ------------
@@ -358,6 +377,10 @@ Status codes
    * - 404
      - The request named a form uid the action registry does not hold, or the page answered a zone GET with 404, such as a ``DObject`` row outside the scope or a broken ``page.py`` over the page.
        On a safe method the runtime fires ``partial:error`` and then navigates fully, and on a mutation it stays in place after the event.
+   * - 421
+     - A tunneled request to an action that answers over HTTP only, or one that rotated or flushed the session.
+       For the first nothing ran, and the client repeats the request over ``fetch``.
+       For the second the runtime reloads the page, see :ref:`topics-forms-actions-transport`.
    * - 409
      - A version mismatch on a safe method, with an empty body.
        The runtime fully visits the URL the request was made against, which is the page that owns the zone rather than whatever the address bar holds.
@@ -402,6 +425,10 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
    * - ``data-next-action``
      - ``<form>``
      - The action uid, written by ``{% form %}``, enables submit interception.
+   * - ``data-next-transport``
+     - ``<form>``
+     - ``any``, written by ``{% form %}`` for an action declared ``transport="any"``.
+       The submission and the inline validation of the form may then ride the open WebSocket, see :ref:`topics-forms-actions-transport`.
    * - ``data-next-validate``
      - ``<form>``
      - Inline validation on blur, written from the ``validate=`` tag parameter.
@@ -441,10 +468,10 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
        On a repeated form it names the instance, written by the ``key=`` tag parameter, so a partial morph lands on the submitted form rather than the first.
    * - ``data-next-sse``
      - A container
-     - Compatibility alias for ``data-next-stream``.
+     - Alias of ``data-next-stream``.
    * - ``data-next-stream``
      - A container
-     - Subscribe to a patch stream at the URL.
+     - Subscribe to a patch stream at the URL, over WebSocket when the server enables it and over ``EventSource`` otherwise.
    * - ``data-next-busy``
      - Layer opener, layer zone container
      - Written during a layer open on the opener link and the layer's zone container, alongside ``aria-busy="true"``.
@@ -546,6 +573,13 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
      - Fired on the old element before one attribute changes.
        Detail ``{name, mutationType}``, where ``mutationType`` is ``"update"`` or ``"remove"``.
        ``preventDefault()`` skips that one attribute mutation.
+   * - ``next:stream-state``
+     - No
+     - ``{url, transport, state, code?}``, where ``transport`` is ``"sse"`` or ``"ws"`` and ``state`` is ``connecting``, ``open``, or ``closed``.
+       ``code`` is set when a ``next-end`` frame closes the stream, see :ref:`ref-client-stream`.
+   * - ``next:stream-gap``
+     - No
+     - ``{topic, from, to}``, fired for every gap or epoch change that triggers a zone resync.
    * - ``next:toast``
      - No
      - Detail ``{text, variant}``.

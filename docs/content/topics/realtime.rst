@@ -19,6 +19,8 @@ Pass ``using="analytics"`` when the mutation belongs to a non-default database, 
 The callback is process-local and is not a durable outbox.
 An ``apublish`` call publishes immediately through the backend's asynchronous API.
 Both return the numbered ``Message`` once they have published, and a deferred ``publish`` returns ``None``.
+A payload the topics reject raises ``TopicPayloadError``.
+A malformed topic name or a topic in the reserved ``next:`` namespace raises ``InvalidTopicError``.
 
 .. code-block:: python
    :caption: rooms/signals.py
@@ -95,13 +97,36 @@ The client then falls back to SSE, where the same rules apply, after one fresh n
 When the process mounts a ``WebSocketApp``, the client can negotiate a WebSocket through this same guarded stream URL.
 The signed ticket binds the current session to the topics, transform, and importable ``authorize`` callback chosen by the page.
 The client sends the ticket in its first WebSocket frame and never in the URL.
+The first handshake does not consume the ticket, so it stays valid for every handshake until ``REALTIME['TICKET_MAX_AGE']`` elapses.
+It is signed from ``SECRET_KEY``, so rotating the key invalidates outstanding tickets.
 The socket checks the request Origin before it accepts, and it rechecks the session and topic access before joining the broker and during the connection.
-WebSocket works best with a session engine that stores sessions on the server, and ``next.W142`` flags the signed-cookie engine under the default ticket binding, see `Known limitations`_.
+WebSocket works best with a session engine that stores sessions on the server, and ``next.W142`` flags the signed-cookie engine under the default ticket binding, see `The signed-cookie session engine`_.
 The socket loads its session from the cookie at the handshake and on every recheck, so a session cache that evicts live entries closes sockets with ``4401``.
 Size the session cache for the open connections, or use the ``db`` or ``cached_db`` engine.
 
 WebSocket is optional and SSE remains the fallback.
 A stream without a stable, importable ``authorize`` callback answers negotiation with ``406`` and stays on SSE.
+
+The signed-cookie session engine
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The signed-cookie session engine works with the default ticket binding only in part, and ``next.W142`` reports it.
+
+- A first visit without a session cookie cannot negotiate a ticket, since the engine has no session key before it saves one, and neither can a forged or expired signed cookie.
+  The negotiation answers ``503`` with ``session_unavailable`` and the client falls back to SSE after its retries.
+- Any HTTP response that saves the session re-signs the cookie, so a ticket issued before that save no longer matches the handshake cookie.
+  The socket closes with ``4401`` and the client continues over SSE.
+- A signed cookie stays valid after logout until ``SESSION_COOKIE_AGE`` passes, so logging out leaves an open socket running, and only a password change or an inactive user revokes its session.
+
+Setting ``NEXT_FRAMEWORK['REALTIME']['TICKET_BINDING']`` to ``"next.realtime.SignedCookieBinding"`` removes the first two limits.
+It binds a signed-in user by primary key and auth hash and an anonymous visitor by a signed cookie.
+Neither changes when the engine re-signs the session.
+The third limit stays, because the signed cookie holds nothing on the server to delete.
+The binding needs no server-side session engine.
+Next to one it never rechecks the stored session, so ``next.W147`` suggests ``SessionBinding`` there.
+A project with another source of identity writes a binding of its own, see :doc:`/content/howto/bind-tickets-to-your-own-identity`.
+
+The ``db``, ``cache``, ``cached_db``, and ``file`` engines avoid all three with the default binding.
 
 Sequences and epochs
 --------------------
@@ -196,22 +221,6 @@ Known limitations
 The browser client closes its streams while the tab is hidden and opens them again on return.
 Over SSE that is a new ``EventSource``, which sends no ``Last-Event-ID``, so a stream resumed after a visibility change resynchronises instead of replaying.
 
-The signed-cookie session engine works with the default ticket binding only in part, and ``next.W142`` reports it.
-
-- A first visit without a session cookie cannot negotiate a ticket, since the engine has no session key before it saves one, and neither can a forged or expired signed cookie.
-  The negotiation answers ``503`` with ``session_unavailable`` and the client falls back to SSE after its retries.
-- Any HTTP response that saves the session re-signs the cookie, so a ticket issued before that save no longer matches the handshake cookie.
-  The socket closes with ``4401`` and the client continues over SSE.
-- A signed cookie stays valid after logout until ``SESSION_COOKIE_AGE`` passes, so logging out leaves an open socket running, and only a password change or an inactive user revokes its session.
-
-Setting ``NEXT_FRAMEWORK['REALTIME']['TICKET_BINDING']`` to ``"next.realtime.SignedCookieBinding"`` removes the first two limits.
-It binds a signed-in user by primary key and auth hash and an anonymous visitor by a signed cookie, so neither changes when the engine re-signs the session.
-The third stays, because the signed cookie holds nothing on the server to delete.
-The binding needs no server-side session engine, yet next to one it never rechecks the stored session, so ``next.W147`` suggests ``SessionBinding`` there.
-A project with another source of identity writes a binding of its own, see :doc:`/content/howto/bind-tickets-to-your-own-identity`.
-
-The ``db``, ``cache``, ``cached_db``, and ``file`` engines avoid all three with the default binding.
-
 Presence
 --------
 
@@ -239,7 +248,8 @@ Every attendance snapshot of the topic reaches the page as the ``next:presence``
    });
 
 The detail always holds ``count``.
-It holds ``members`` only in the member mode, and only while at least one identified member attends and ``SIZE`` is above ``0``, so a page reads it as ``detail.members ?? []``.
+It holds ``members`` only in the member mode.
+It also needs at least one identified member and a ``SIZE`` above ``0``, so a page reads it as ``detail.members ?? []``.
 The client needs no new code, because the event is a plain ``event`` operation.
 
 A snapshot is not an ordinary publication.
@@ -341,7 +351,6 @@ A ``next:presence`` event carries no position, so its ``meta.seq`` is ``undefine
 ``Next.partial.stream.meta()`` is available during synchronous event delivery.
 ``stream.now()`` estimates server epoch time in milliseconds.
 ``stream.offset()`` returns the median of the last five server clock samples.
-``Next.partial.sse`` remains an alias.
 The global event detail stays exactly as published.
 
 .. _topics-realtime-upstream:
@@ -400,7 +409,8 @@ A pattern may not start with ``next:`` and a name is 1 to 100 topic characters.
        It is a keyed digest and never the session key, because a handler never sees the credential of the socket.
        It changes when ``SECRET_KEY`` rotates, and under ``SessionBinding`` it follows the session rather than the user, so a new login yields a new one.
    * - ``connection``
-     - An identifier of the sending connection.
+     - An identifier of the sending connection, the same id the WebSocket ``hello`` frame carries in ``connection``.
+       `Drop your own echo`_ shows how a handler uses it.
    * - ``params``
      - What the placeholders of the pattern matched.
 
@@ -442,6 +452,14 @@ The defaults are ``10`` frames a second, a burst of ``20``, ``16384`` bytes per 
 The same bucket serves the tunneled requests of `Form actions over WebSocket`_.
 A frame over the budget is refused with ``limit``, and three refusals in a row close the socket with ``4429``.
 A client that throttles its own sends, a typing indicator at most every few hundred milliseconds, never reaches that code.
+
+What the framework does not cap
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Frame size, frame count, upstream rate, and tunnel limits apply per connection.
+The number of open WebSocket and SSE connections per user, address, or process is not capped by next.dj.
+The proxy, the operating system limit on open file descriptors, and the connection limit of the broker own that bound.
+See :doc:`/content/security/overview` and :doc:`/content/deployment/wsgi-asgi`.
 
 Send from the page
 ~~~~~~~~~~~~~~~~~~
@@ -502,7 +520,9 @@ Form actions over WebSocket
 ---------------------------
 
 A page that already holds a WebSocket can submit its forms through it instead of opening an HTTP request each time.
-The client sends the request as an ``http`` frame, and the server runs it through the same ASGI application that serves HTTP, so middleware, CSRF, sessions, and the action's guards run as they do for a browser request.
+The client sends the request as an ``http`` frame.
+The server runs it through the same ASGI application that serves HTTP.
+Middleware, CSRF, sessions, and the action's guards run as they do for a browser request.
 The reply goes back as a frame, and the page applies the envelope it carries exactly as it applies a fetched one.
 
 The tunnel is opt-in per action.
@@ -596,7 +616,7 @@ The frame fields, the refusal table, and the signatures are in :doc:`/content/re
 Manual streams
 --------------
 
-``PatchEventStream`` remains available when an application needs a custom source.
+Use ``PatchEventStream`` when an application needs a custom source.
 Its source must match the server mode, a synchronous iterable under WSGI or an asynchronous iterable under ASGI.
 The page view still owns access checks, and the author owns source cleanup.
 

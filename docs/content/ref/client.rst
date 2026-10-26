@@ -11,20 +11,31 @@ It exposes one global, ``window.Next``, and every name it owns reaches an applic
 The runtime applies the patch envelopes the server authors, drives the ``data-next-*`` triggers, and publishes a lifecycle event stream a page subscribes to.
 It never invents a target or a swap strategy, so this page records what the runtime accepts rather than what it decides.
 
-The TypeScript sources live in ``next/client/`` and are not part of the installed package.
-``make build-js`` bundles, in one esbuild call, ``next/client/next.ts`` into ``next/static/next/next.min.js``, and each entry of ``next/client/entries/``, ``scripts.ts``, ``stream.ts``, ``ws.ts``, ``csrf.ts``, ``poll.ts``, and ``dev.ts``, into ``next/static/next/next.<name>.min.js``, the seven minified artefacts the wheel ships.
-The scripts chunk carries consent and third-party scripts, and the runtime fetches it only for a page that needs it, see :doc:`client-extras`.
-The stream chunk carries the shared stream state and SSE transport, fetched once a scan finds a ``data-next-stream`` or ``data-next-sse`` container.
-The ws chunk carries the WebSocket transport, its upstream events, and the request tunnel, fetched only when the server enables WebSockets for a stream.
-The csrf chunk carries the fetch of a deferred CSRF token, fetched on the first need of a page that shipped only the endpoint.
-The poll chunk carries the zone poller, fetched once a scan finds a ``data-next-poll`` zone.
-The dev chunk carries the diagnostics of a ``DEBUG`` render, and a production page never fetches it.
+The core bundle loads on every page, and six lazy chunks load only for a page that needs them.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 82
+
+   * - Chunk
+     - Carries and fetched when
+   * - ``scripts``
+     - Consent and third-party scripts, fetched only for a page that needs them, see :doc:`client-extras`.
+   * - ``stream``
+     - The shared stream state and the SSE transport, fetched once a scan finds a ``data-next-stream`` or ``data-next-sse`` container.
+   * - ``ws``
+     - The WebSocket transport, its upstream events, and the request tunnel, fetched only when the server enables WebSockets for a stream.
+   * - ``csrf``
+     - The fetch of a deferred CSRF token, fetched on the first need of a page that shipped only the endpoint.
+   * - ``poll``
+     - The zone poller, fetched once a scan finds a ``data-next-poll`` zone.
+   * - ``dev``
+     - The diagnostics of a ``DEBUG`` render, never fetched by a production page.
+
 A chunk that fails to load, or has not loaded within 15 seconds, fires ``partial:error`` of kind ``asset`` once and is fetched again on its next need, so a stalled request holds no ``Next.ready``, form submit, or stream for good.
 A chunk that lands after its timeout is still delivered to every subscriber that waited for it.
-``tests/static/test_chunk_sync.py`` holds the chunk lists of ``next.ts``, ``chunks.ts``, ``next/static/runtime.py``, ``package.json``, ``build_hooks.py``, and ``pyproject.toml`` to one another.
-The wheel excludes ``next/client/`` outright, so a project never imports the TypeScript and installs no Node toolchain to serve the runtime.
-The script builder publishes the bundle under the static path ``next/next.min.js``, which the active staticfiles storage fingerprints like any other asset.
-``next/static`` is the ``next.static`` Python package rather than an application static directory, so ``NextAppDirectoriesFinder`` keeps the framework app out of the app-directories scan and ``NextStaticFilesFinder`` is the finder that serves the bundle, see :doc:`static`.
+The TypeScript sources are not part of the installed package, so a project imports no TypeScript and installs no Node toolchain.
+:doc:`/content/contributing/quality-gates` describes how the bundles are built and budgeted, and :doc:`static` describes the finder that serves them.
 
 API tiers
 ---------
@@ -34,7 +45,7 @@ A member whose name starts with an underscore is a bootstrap or test seam rather
 
 Stable.
    ``Next.context``, ``Next.on``, ``Next.use``, ``Next.ready``, ``Next.navigation``, ``Next.consent``, ``Next.scripts``, ``Next.partial.onMount``, ``Next.partial.mount``, ``Next.partial.apply``, ``Next.partial.fetch``, ``Next.partial.submit``, ``Next.partial.setCsrf``, ``Next.partial.layers``, and ``Next.partial.stream``.
-   ``Next.partial.sse`` remains an alias for the stream API.
+   ``Next.partial.sse`` is an alias of ``Next.partial.stream``.
    The ``next:*`` events and the ``partial:*`` document events belong to the same tier.
    Use these from a co-located asset, an island adapter, or a page script.
 
@@ -44,9 +55,9 @@ Extension.
    See :doc:`/content/topics/partial-rendering/extending` for the server half of both recipes.
 
 Internal.
-   ``Next._init`` is the bootstrap the injected inline payload calls, ``Next._land`` is the handshake every lazy chunk calls as it evaluates and ignores a key the runtime does not know, and ``Next.partial._configure`` and ``Next.partial._reset`` are the harness seams the unit suite drives.
+   ``Next._init`` is the bootstrap the injected inline payload calls, ``Next._land`` is the handshake every lazy chunk calls as it evaluates and ignores a key the runtime does not know, ``Next.partial._current`` backs ``Next.navigation.current``, and ``Next.partial._configure`` and ``Next.partial._reset`` are the harness seams the unit suite drives.
    ``Next.partial.ready`` carries no underscore because the bootstrap calls it across a module boundary, and a page reaches for it only when it drives the runtime by hand.
-   None of the five is an application entry point.
+   None of the six is an application entry point.
 
 Public API
 ----------
@@ -106,7 +117,7 @@ Runtime events
 ~~~~~~~~~~~~~~
 
 ``NextEventMap`` is the exported interface that keys each bus payload by event name.
-The table below is its whole membership.
+The table below lists every event of the bus.
 The ``next:mounted``, ``next:removed``, and ``next:morph-*`` element events fire on the DOM instead and carry no entry here, see `Document and element events`_.
 
 .. list-table::
@@ -143,6 +154,10 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` element events fire
      - ``{result}``, the accept result the closing side passed.
    * - ``partial:layer-dismissed``
      - ``{reason}``, one of ``escape``, ``backdrop``, ``dialog``, ``popstate``, ``dismissed``, or the text a server dismiss carried.
+   * - ``next:stream-state``
+     - ``{url, transport, state, code?}``, on every change of a stream connection, see `Connection state events`_.
+   * - ``next:stream-gap``
+     - ``{topic, from, to}``, for every gap or epoch change that triggers a zone resync.
    * - ``next:toast``
      - ``{text, variant}``, fired alongside building the toast element.
    * - ``next:navigated``
@@ -153,7 +168,7 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` element events fire
    * - ``next:script-loaded``, ``next:script-error``
      - ``{name}`` and ``{name, url}``, for a script of the manifest.
 
-:doc:`client-extras` describes the last four.
+:doc:`client-extras` describes the last four of the consent and script events.
 One rule covers the channels.
 Every event of the table fires on the document as a ``CustomEvent`` and on the ``Next.on`` bus with the same payload, except ``ready`` and ``context-updated``, which reach the bus alone because the store is a runtime concern rather than a DOM one.
 The rule holds for every source, so a ``partial:error`` from the wire, the asset loader, a stream, a chunk that failed to load, or a lazy CSRF fetch reaches both channels as the ``op`` kind of the apply pipeline does.
@@ -191,6 +206,14 @@ A cancelable event is the only kind whose ``preventDefault()`` changes what the 
      - Yes
      - The morph engine before one attribute changes, with detail ``{name, mutationType}`` over ``update`` and ``remove``.
        A veto skips that one mutation.
+   * - ``next:stream-state``
+     - The document
+     - No
+     - The stream bridge, on every change of a connection state.
+   * - ``next:stream-gap``
+     - The document
+     - No
+     - The stream bridge, when a gap or epoch change triggers a zone resync.
    * - ``next:toast``
      - The document
      - No
@@ -236,7 +259,7 @@ The partial surface
 
 ``Next.partial`` is a ``PartialSurface``, one object built when the bundle evaluates and never replaced.
 ``layers``, ``stream``, and ``sse`` are getters over live sub-modules, so a held reference to the surface keeps reaching the current stack and registry.
-``stream`` is the transport-neutral API, and ``sse`` remains an alias.
+``stream`` is the transport-neutral API, and ``sse`` is an alias of it.
 
 .. list-table::
    :header-rows: 1
@@ -291,13 +314,14 @@ The partial surface
      - ``LayerStack``
      - The live stack of open layers, for driving a modal from script, see :doc:`/content/topics/partial-rendering/layers`.
    * - ``sse``
-     - ``Sse``
-     - Compatibility alias for ``stream``.
+     - ``StreamSurface``
+     - Alias of ``stream``.
    * - ``stream``
-     - ``Sse``
+     - ``StreamSurface``
      - The stream registry and clock API.
        ``on(topic, name, callback)`` adds a topic listener, and ``meta()`` reads metadata during synchronous delivery.
-       ``now()``/``offset()`` estimate server time.
+       ``send(topic, name, data, options?)`` sends an upstream event over the WebSocket.
+       ``now()`` and ``offset()`` estimate server time.
        See `The stream API`_ and :doc:`/content/topics/realtime`.
    * - ``mount(nodes: readonly Element[])``
      - ``void``
@@ -305,12 +329,60 @@ The partial surface
    * - ``ready()``
      - ``void``
      - Seed the asset registry from the document, run the mount callbacks over it, then arm the triggers.
+   * - ``_current()``
+     - ``NavigationState``
+     - The current URL, path, and title, the value ``Next.navigation.current()`` returns, a bootstrap seam.
    * - ``_configure(adapters: PartialAdapters)``
      - ``void``
      - Swap the platform seams and rebuild the sub-modules, a harness seam.
    * - ``_reset()``
      - ``void``
      - Tear down every registry, timer, observer, and open layer, a harness seam.
+
+WireRequest fields
+~~~~~~~~~~~~~~~~~~
+
+``fetch`` takes a ``WireRequest``, and only ``url`` is required.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Field
+     - Meaning
+   * - ``url``
+     - The target, an absolute URL or a path on the page's own origin.
+   * - ``method``
+     - The HTTP method.
+   * - ``uid``
+     - The form uid a mutation locks on.
+       Without it a mutation runs unlocked.
+   * - ``zone``
+     - The value of ``X-Next-Zone``, absent when the answer addresses the whole page.
+   * - ``queue``
+     - The queue and abort identity of a safe GET, defaulting to the zone.
+       A newer GET of the same queue aborts the older one.
+   * - ``headers``
+     - Extra request headers.
+   * - ``body``
+     - The request body, a ``BodyInit``.
+   * - ``abortable``
+     - Marks a POST that mutates nothing, such as an inline validation.
+       It joins the abortable queue and skips the mutation lock.
+   * - ``key``
+     - The ``data-next-key`` of the initiating form, threaded to the apply for a repeated form.
+   * - ``owner``
+     - The page a mutation was submitted from, which receives the ``meta`` op of the reply.
+   * - ``transport``
+     - ``"any"`` lets a POST ride the open WebSocket, and ``"http"`` or absent keeps it on ``fetch``.
+   * - ``wait``
+     - What a mutation does while its uid is locked.
+       Absent, it is dropped and resolves as ``dropped``.
+       ``true`` queues it behind the lock, and ``"latest"`` queues it and drops the older waiters.
+   * - ``navigate``
+     - ``false`` keeps the page on a redirect and resolves its URL in ``location``.
+
+.. _ref-client-outcome:
 
 Outcome
 ~~~~~~~
@@ -388,14 +460,22 @@ A body no hook claims and no envelope content type covers becomes a full navigat
      return { name: "msgpack-wire" };
    });
 
+.. _ref-client-stream:
+
 The stream API
 ~~~~~~~~~~~~~~
 
 ``Next.partial.stream`` keeps one connection per distinct ``data-next-stream`` URL and an ``(epoch, seq)`` cursor per topic on it.
+The sections below cover the listener API, the connection state events, the WebSocket negotiation, and the request tunnel.
+
+Listening and sending
+^^^^^^^^^^^^^^^^^^^^^
+
 ``on(topic, name, callback)`` calls ``callback(detail, meta)`` for each ``event`` patch of that name on that topic and returns the function that removes the listener.
 ``meta`` is a ``StreamMeta`` of ``topic``, ``epoch``, ``seq``, ``serverTime``, and ``connection``, and ``meta()`` returns the same object while a delivery runs and ``undefined`` outside it.
 ``connection`` is the opaque id the ``hello`` of the WebSocket carrying the topic names, the same id the server hands an upstream handler, so a listener can skip the echo of its own ``send``, and it is ``undefined`` on SSE.
 ``now()`` adds the median ``offset()`` of the last five ``server_time`` samples to the local clock.
+
 ``send(topic, name, data, options?)`` sends an upstream event over the WebSocket that carries ``topic`` and returns a ``Promise<boolean>``.
 ``options`` is ``{ ack?: boolean }``, and ``ack`` defaults to ``true``.
 An ``up`` frame whose compact JSON, with its ``type``, ``topic``, ``name``, ``data``, and id, exceeds in UTF-8 bytes the ``upstream.frame`` limit of the socket's ``hello``, 16 KiB when the hello names none, resolves to ``false`` and is never sent.
@@ -405,12 +485,20 @@ A ``timeout`` acknowledgment means the handler outlived the server's limit and m
 On an SSE connection there is no upstream channel, so the promise resolves to ``false`` and nothing is sent.
 See :ref:`topics-realtime` for handlers.
 
+Connection state events
+^^^^^^^^^^^^^^^^^^^^^^^
+
 Every change of a connection's state fires ``next:stream-state`` with ``url``, ``transport``, and ``state``.
 ``transport`` is ``"sse"`` or ``"ws"``, the names ``REALTIME['TRANSPORTS']``, the ``hello`` frame, and the ``stream_subscribed`` signal use.
 A connection is ``connecting`` while it opens and again while a dropped socket or ``EventSource`` waits to reconnect, ``open`` once the transport is up, and ``closed`` when it is paused, removed, or ended.
 A ``next-end`` frame, sent when the topic authorizer denies a grant, is terminal, so the connection closes for good, its ``next:stream-state`` detail also carries the frame's ``code``, and ``partial:error`` of kind ``network`` fires with that code as its ``error``.
+Only an SSE stream carries ``next-end``.
+A WebSocket has no end frame, and a denied grant there closes the socket with ``4403`` after an ``error`` frame, which sends the connection to SSE for good, where the authorizer answers with ``next-end``.
 A ``next:stream-gap`` event with ``topic``, ``from``, and ``to`` fires for every gap or epoch change that triggers a zone resync.
 A change between two non-empty epochs resets the cursor and resyncs, while a change from the empty epoch of a never-published topic is contiguous at ``seq`` ``1`` and a gap above it.
+
+WebSocket negotiation
+^^^^^^^^^^^^^^^^^^^^^
 
 With WebSockets enabled, the client first sends the stream URL a GET with ``X-Next-Transport: ws`` and ``Accept: application/json``.
 It opens the socket only for a ``200`` reply whose content type is ``application/json``.
@@ -426,21 +514,48 @@ The ``hello`` frame names the server's ``heartbeat`` in seconds, and a socket th
 A ``patches`` frame whose ``data`` is a string hands that text to the registered parse hook unchanged, the same text an ``EventSource`` would deliver.
 A ``patches`` frame whose ``data`` is an object is applied as is and skips the hook.
 
+The request tunnel
+^^^^^^^^^^^^^^^^^^
+
 A socket tunnels requests only once its ``hello`` carries the ``tunnel`` key, and without it every request of that socket goes over ``fetch``.
 ``tunnel.timeout`` is the server's request timeout in seconds, and the client waits five seconds past it, 35 seconds when it is missing.
 ``tunnel.frame`` caps a whole frame in bytes, 64 KiB when it is missing.
 ``tunnel.headers`` and ``tunnel.prefixes`` list the request header names the tunnel accepts, and ``tunnel.csrf`` names the CSRF header, while a request carrying any other header goes over ``fetch``.
-A refusal the server marks ``retry`` resends the request over ``fetch`` once, and ``disabled`` stops the tunnel on that socket.
-Any other refusal ends a mutation in ``partial:error`` of kind ``undelivered`` whose ``reason`` is the refusal code, and a dropped socket or no reply in time does the same with ``closed`` or ``timeout``.
-``http_only`` marks a response the server keeps to plain HTTP, such as one that sets a cookie or rotates the session, and after its event the runtime reloads the page so it shows the server state under the session the browser still holds.
+A body travels only as a string, ``URLSearchParams``, or ``FormData`` without files, and a body with a file goes over ``fetch``.
+
+A refusal the server marks ``retry`` never reached the application, so the client resends the request over ``fetch`` once.
+Any other refusal ends a mutation in ``partial:error`` of kind ``undelivered`` whose ``reason`` is the refusal code.
+The codes with a rule of their own are in the table.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Reason
+     - What the client does
+   * - ``disabled``
+     - Resends over ``fetch`` and stops the tunnel on that socket.
+   * - ``stale``
+     - Resends over ``fetch`` and reconnects the socket once for fresh cookies.
+       A second ``stale`` on the renewed socket stops the tunnel on it.
+   * - ``http_only``
+     - Ends the mutation in ``undelivered``, and after the event the runtime reloads the page.
+       The server marks a response it keeps to plain HTTP this way, such as one that sets a cookie or rotates the session, so the page shows the server state under the session the browser still holds.
+   * - ``closed``
+     - Raised by the client when the socket dropped before the reply came.
+   * - ``timeout``
+     - Raised by the client when no reply came in time.
+   * - any other code
+     - Ends the mutation in ``undelivered`` unless the server marked it ``retry``.
+
 An inline validation mutates nothing, so in each of these cases it resends over ``fetch`` instead.
 
 The attribute contract
 ~~~~~~~~~~~~~~~~~~~~~~
 
-The runtime reads one attribute namespace, ``data-next-*``, and twenty names make up the whole contract.
+The runtime reads one attribute namespace, ``data-next-*``, and twenty-one names make up the whole contract.
 They fall into authorship groups, and a reader needs the split to know which are theirs to write.
-The server writes five of them from ``{% zone %}`` and ``{% form %}`` parameters alone, the runtime writes four as styling and state hooks, and six are hand-authored on plain markup.
+The server writes six of them from ``{% zone %}`` and ``{% form %}`` alone, the runtime writes four as styling and state hooks, and seven are hand-authored on plain markup.
 The remaining four carry both authors, written by a ``{% form %}`` parameter on a form and by hand on the link or control that drives the same behaviour without one.
 ``{% form %}`` reserves the ``data-next-`` prefix and raises a template syntax error on a hand-written one, so a hand-authored attribute goes on a wrapper, a link, or a submit control rather than on the tag.
 
@@ -464,6 +579,9 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
    * - ``data-next-action``
      - ``{% form %}``
      - The triggers intercept a submit and lock on the uid, and the applier resolves a ``form`` target by it.
+   * - ``data-next-transport``
+     - ``{% form %}``, from the transport of the action
+     - The triggers, which let the submit and the inline validation of the form ride the open WebSocket when the action is declared ``transport="any"``, see :ref:`topics-forms-actions-transport`.
    * - ``data-next-target``
      - ``{% form zone= %}``, hand-written on a filter form or a pagination link
      - The triggers, which read the nearest ancestor carrying it to learn the zone a request addresses.
@@ -491,7 +609,7 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
      - The morph engine, which leaves the node and its subtree untouched so a mounted island root survives.
    * - ``data-next-sse``
      - Hand-written on a container
-     - Compatibility alias for ``data-next-stream``.
+     - Alias of ``data-next-stream``.
    * - ``data-next-stream``
      - Hand-written on a container
      - The stream bridge, which opens one stream per distinct URL, over WebSocket when negotiation succeeds and over ``EventSource`` otherwise, and rescans each inserted subtree.
@@ -519,15 +637,16 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
        It marks one toast item and its value is the variant.
 
 :doc:`/content/topics/partial-rendering/reference` records the accepted values, the closed value sets, and the dev warnings each attribute earns.
-:doc:`template-tags` records the ``{% zone %}`` and ``{% form %}`` parameters that compile to the nine names a tag can write.
+:doc:`template-tags` records the ``{% zone %}`` and ``{% form %}`` parameters that compile to the ten names a tag can write.
 
 Exported types
 ~~~~~~~~~~~~~~
 
-The entry module exports seventeen type names.
+The entry module exports nineteen type names.
 ``NextContext``, ``NextEventMap``, and ``NextChunks`` are its own, and ``PartialError`` and ``PartialErrorKind`` come from the protocol module, which is where the client and the server agree on the wire vocabulary.
 ``Envelope``, ``Patch``, ``Asset``, ``AssetLoad``, and ``FormMeta`` come from the apply module and type the envelope a parse hook or a ``partial:before-apply`` listener handles.
 ``NavigatedDetail``, ``NavigationState``, ``NavigationAction``, ``ConsentChange``, ``ScriptsChunk``, ``ScriptStatus``, and ``StreamMeta`` come from the navigation, consent, chunk, scripts, and stream modules, see :doc:`client-extras` and :doc:`/content/topics/realtime`.
+``Outcome`` comes from the wire module and types the result of ``fetch`` and ``submit``, and ``SubmitAction`` comes from the partial module and types the argument of ``submit``.
 A page written in TypeScript reaches them through the bundle's declaration output rather than by importing ``next/client/``.
 
 .. code-block:: typescript
@@ -574,6 +693,8 @@ A page written in TypeScript reaches them through the bundle's declaration outpu
    export type { ScriptsChunk } from "./chunks";
    export type { ScriptStatus } from "./scripts";
    export type { StreamMeta } from "./sse";
+   export type { Outcome } from "./wire";
+   export type { SubmitAction } from "./partial";
 
 ``PartialError`` is the discriminated union every ``partial:error`` payload inhabits, over the ``network``, ``http``, ``parse``, ``op``, ``asset``, ``csrf``, and ``undelivered`` kinds.
 ``PartialErrorKind`` is its discriminant, aliased for a listener that switches on it.
@@ -610,7 +731,13 @@ None of these modules is reachable from application code, so the names serve rea
    * - ``triggers.ts``
      - The delegated ``data-next-*`` handlers, lazy zone activation, the fetch of the poll chunk, and inline validation.
    * - ``sse.ts``
-     - The Server-Sent Events bridge, its echo ring of own request ids, and the pause and resume on tab visibility.
+     - The ``EventSource`` transport and the factory that builds the SSE side of a stream.
+   * - ``stream.ts``
+     - The transport-neutral stream state, the ``(epoch, seq)`` cursors, the zone resync, the topic listeners and their metadata, the echo ring of own request ids, and the pause and resume on tab visibility.
+   * - ``ws.ts``
+     - The WebSocket transport, its negotiation and ticket, the upstream frames, and the request tunnel, shipped in the ws chunk.
+   * - ``diagnostics.ts``
+     - The development diagnostics of a ``DEBUG`` render, shipped in the dev chunk.
    * - ``assets.ts``
      - The asset loader, the registry of URLs already on the page, and the asset version safeguard.
    * - ``dirty.ts``
@@ -643,9 +770,7 @@ Nothing configures the runtime from the browser side.
 ``JS_CONTEXT_SERIALIZER`` decides how a context value is encoded on its way into ``Next.context``.
 See :doc:`settings` for both keys and :doc:`/content/topics/static-assets/js-context` for the full option table.
 
-The runtime's dev channel follows Django ``DEBUG`` rather than a client switch.
-Under the ``auto`` policy a full render seeds the ``$dev`` key of the init payload while ``DEBUG`` is on, and ``_init`` opens the channel from that key before the first trigger scan.
-A production page carries no such key, so it carries neither the per-op performance measurements nor any of the console diagnostics.
+The dev channel follows Django ``DEBUG`` rather than a client switch, see :ref:`topics-partial-rendering-reference`.
 
 See also
 --------

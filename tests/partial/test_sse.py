@@ -75,6 +75,12 @@ class TestSyncStream:
         assert frames == [response._retry_frame()]
         assert not any(frame.startswith(b":") for frame in frames)
 
+    def test_sync_source_can_request_a_heartbeat(self, request_obj: object) -> None:
+        source: list[Patches | None] = [None, _patches()]
+        frames = _consume(PatchEventStream(request_obj, source))
+        assert frames[1] == b": heartbeat\n\n"
+        assert frames[2].startswith(b"event: next-patches")
+
     def test_echo_id_rides_the_event(self, request_obj: object) -> None:
         response = PatchEventStream(request_obj, [_patches(echo_of="r1")])
         frames = _consume(response)

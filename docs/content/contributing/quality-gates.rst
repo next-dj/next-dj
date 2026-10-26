@@ -312,7 +312,7 @@ That job checks the framework against the ecosystem packages a project is likely
 Client runtime
 --------------
 
-The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, checks formatting with Prettier, lints with ESLint, and builds the six bundles with esbuild.
+The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, checks formatting with Prettier, lints with ESLint, and builds the seven bundles with esbuild.
 
 .. list-table::
    :header-rows: 1
@@ -330,6 +330,9 @@ The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, ch
    * - ``next.stream.min.js``
      - ``next/client/entries/stream.ts``
      - Only once a scan finds a ``data-next-stream`` or ``data-next-sse`` container.
+   * - ``next.ws.min.js``
+     - ``next/client/entries/ws.ts``
+     - Only while the ``ws`` transport is active, for the WebSocket delivery of a stream.
    * - ``next.csrf.min.js``
      - ``next/client/entries/csrf.ts``
      - Only when a mutation or the first focus in an action form needs a deferred CSRF token, for the fetch that mints it.
@@ -340,15 +343,15 @@ The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, ch
      - ``next/client/entries/dev.ts``
      - Only under ``DEBUG``, when the payload carries ``$dev``, for the development diagnostics.
 
-The job then enforces a gzip budget on every bundle, 15360 bytes for ``next.min.js``, which ships on every page, and 3584, 3072, 768, 1024, and 2048 bytes for the scripts, stream, csrf, poll, and dev chunks, and that budget check runs in continuous integration only.
-Each of the six bundles has its own gzip budget, including the core bundle that every page loads.
+The job then enforces a gzip budget on every bundle, 15360 bytes for ``next.min.js``, which ships on every page, and 3584, 3072, 4096, 768, 1024, and 2048 bytes for the scripts, stream, ws, csrf, poll, and dev chunks, and that budget check runs in continuous integration only.
+Each of the seven bundles has its own gzip budget, including the core bundle that every page loads.
 Growth past a budget calls for a lazily loaded chunk rather than a larger core file.
 The job finishes with the vitest run and its coverage thresholds.
 
 ``next/client/next.ts`` is the entry point that mounts ``window.Next`` and pulls in the morph, apply, wire, layer, trigger, asset, and stream modules, and each chunk entry point hands itself to it when it evaluates.
 ``make build-js`` runs the same single esbuild call locally, minifying each bundle into ``next/static/next/`` with a source map beside it and targeting ES2022.
 The map is external and the bundle carries no ``sourceMappingURL`` comment, so browser devtools load the map only when a developer points them at it, while manifest storage finds no reference to rewrite at ``collectstatic`` time.
-``build_hooks.py`` reads all six bundles before packaging and raises on a missing one or one that carries the comment, and ``NEXT_DJ_SKIP_JS_BUILD=1`` skips the npm run and packages the bundle already on disk.
+``build_hooks.py`` reads all seven bundles before packaging and raises on a missing one or one that carries the comment, and ``NEXT_DJ_SKIP_JS_BUILD=1`` skips the npm run and packages the bundle already on disk.
 The compiled files are build products rather than tracked source files, and the packaging configuration lists them as build artefacts so a distribution carries them.
 
 Supply chain

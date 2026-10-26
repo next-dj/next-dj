@@ -104,6 +104,9 @@ The database stores only a digest of each token, so the credential is that diges
                return None
            return LiveIdentity(token.user, int((token.expires_at - now).total_seconds()))
 
+       def live_session(self, session_key: str) -> LiveIdentity | None:
+           return None
+
 .. code-block:: python
    :caption: config/settings.py
 
@@ -112,6 +115,12 @@ The database stores only a digest of each token, so the credential is that diges
            "TICKET_BINDING": "accounts.realtime.ApiTokenBinding",
        },
    }
+
+The ``live_session`` override suits a project whose pages carry no Django session.
+An SSE request has no handshake, so ``live_session`` receives only the session key of the request and never the ``api_token`` cookie.
+The inherited method would look that key up in the session store.
+With the override, a request that arrives with a session key is treated as anonymous until it holds a signed-in user.
+A stream on such a project names its audience with ``authorize=`` and does not rely on the binding for the SSE identity.
 
 ``manage.py check`` reports ``next.E211`` when the path does not name a concrete ``TicketBinding`` subclass.
 The framework builds one instance per path and shares it among all connections, so the class keeps no per-connection state.
@@ -146,10 +155,30 @@ A password change or an inactive user closes the socket with ``4401``.
 Projects on the ``db``, ``cache``, ``cached_db``, or ``file`` engine keep the default binding, which closes the socket on logout.
 
 A view that issues tickets without ``TopicStream`` calls ``ticket_binding().respond(request, response)`` on its response, so a binding that sets a cookie, such as the visitor cookie, still sets it.
-A signed-in negotiation under ``SignedCookieBinding`` deletes the visitor cookie there, so a visitor that never negotiated while signed in survives a login and a logout, and the first anonymous negotiation after one that did issues a fresh visitor.
+A signed-in negotiation under ``SignedCookieBinding`` deletes the visitor cookie there.
+A visitor that never negotiated while signed in therefore survives a login and a logout.
+The first anonymous negotiation after one that did negotiate while signed in issues a fresh visitor.
 
-The test helper ``issue_socket_ticket`` works with any binding.
+The test helper ``issue_socket_ticket`` negotiates on a ``RequestFactory`` request that carries the session cookie and the mapping passed as ``cookies``.
 It calls ``respond``, collects the cookies the reply sets, and stores the credential ``credential`` reads from them in ``SocketTicket.credential``.
+A binding whose ``issue`` reads another cookie, such as ``ApiTokenBinding``, receives that cookie through ``cookies``.
+Without it, ``issue`` raises ``InvalidTicketError``.
+
+.. code-block:: python
+   :caption: accounts/tests/test_realtime.py
+
+   from accounts.realtime import credential_of
+
+   from next.testing import issue_socket_ticket
+
+   def test_ticket_binds_the_token_digest(raw_token: str) -> None:
+       ticket = issue_socket_ticket(
+           ("user:7",),
+           authorizer_ref="accounts.realtime.can_follow",
+           cookies={"api_token": raw_token},
+       )
+       assert ticket.credential == credential_of(raw_token)
+
 See :doc:`/content/ref/testing`.
 
 See :doc:`/content/ref/realtime` for the contract of each method and :doc:`/content/ref/settings` for the key.

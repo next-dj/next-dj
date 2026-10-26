@@ -15,7 +15,7 @@ Check registration
 
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
-The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
+The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.realtime.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
 
 Each of these modules registers checks.
 ``next.pages.checks``, ``next.forms.checks``, ``next.partial.checks``, and ``next.seo.checks`` are packages rather than single modules, and importing the package imports every submodule that carries a check.
@@ -184,6 +184,14 @@ It also owns ``next.W130`` and ``next.W131`` for the ``LOGIN_REQUIRED`` setting.
 ``next.W129`` for an action nothing guards, ``next.E165`` for an action of a ``component.py`` whose permission names a context, ``next.E166`` for a ``page.py`` without a body whose declaration binds neither a page nor an action, and ``next.W128`` for a directory with no page and no action live in ``next.forms.checks.actions``, and ``next.E161`` for a zone under a ``{% has_perm %}`` or in the body of a component that decides what it shows lives in ``next.partial.checks.zones``, beside the other zone placement checks.
 
 .. automodule:: next.permissions.checks
+   :members:
+
+Realtime
+~~~~~~~~
+
+``next.realtime.checks`` validates the ``REALTIME`` settings mapping, the ticket binding, the broker capabilities, and the ``@on`` handlers that ``REALTIME['HANDLERS']`` imports.
+
+.. automodule:: next.realtime.checks
    :members:
 
 Apps
@@ -955,12 +963,13 @@ Errors
        ``None`` imports the ``realtime`` module of every installed app, a list imports only the modules it names, and ``[]`` imports none.
      - ``next.realtime.checks``
    * - ``next.E198``
-     - A ``@realtime.on`` handler names a topic pattern or an event name that can never match.
+     - An ``@on`` handler names a topic pattern or an event name that can never match.
        A pattern holds topic characters and distinct ``{name}`` placeholders outside the ``next:`` prefix, and the literal between two placeholders holds a ``:`` or a ``.``, so ``dm:{a}-{b}`` is refused as ambiguous.
+       A pattern is at most 200 characters long.
        An event name holds 1 to 100 topic characters.
      - ``next.realtime.checks``
    * - ``next.E199``
-     - Two different handlers register ``@realtime.on`` for the same topic pattern and event name.
+     - Two different handlers register ``@on`` for the same topic pattern and event name.
        Only the first one runs, and the same function defined again in a reloaded module replaces itself without the error.
      - ``next.realtime.checks``
    * - ``next.E200``
@@ -1383,14 +1392,14 @@ Warnings
    * - ``next.W141``
      - The WebSocket transport is enabled while ``TICKET_BINDING`` is ``SessionBinding`` or a subclass of it and ``MIDDLEWARE`` lists no ``SessionMiddleware``, so every negotiation answers ``503``.
        ``SignedCookieBinding`` binds a visitor without the middleware, and a custom binding answers for its own requirements, so neither raises it.
-       A ``WebSocketApp`` logs the same warning when it is created.
+       ``manage.py check`` raises it only when ``REALTIME['TRANSPORTS']`` lists ``ws``, while a ``WebSocketApp`` always logs it when it is created.
      - ``next.realtime.checks``
    * - ``next.W142``
      - The WebSocket transport is enabled while ``SESSION_ENGINE`` is the signed-cookie engine and ``TICKET_BINDING`` is ``SessionBinding`` or a subclass of it.
        That engine has no session key on a first visit and re-signs the key on every session save, so negotiation answers ``503`` or the handshake cookie stops matching the ticket and the socket closes with ``4401``.
        Setting ``TICKET_BINDING`` to ``next.realtime.SignedCookieBinding``, or switching to the ``db``, ``cache``, ``cached_db`` or ``file`` engine, clears it.
        A signed cookie still outlives logout until ``SESSION_COOKIE_AGE``, and only a password change or an inactive user revokes it.
-       A ``WebSocketApp`` logs the same warning when it is created.
+       ``manage.py check`` raises it only when ``REALTIME['TRANSPORTS']`` lists ``ws``, while a ``WebSocketApp`` always logs it when it is created.
      - ``next.realtime.checks``
    * - ``next.W143``
      - ``NEXT_FRAMEWORK['REALTIME']['REPLAY']['SIZE']`` is above zero while the configured broker class is no ``ReplayingBroker``, so every reconnect resynchronises from ``hello``.
@@ -1411,12 +1420,12 @@ Warnings
        A ``.example.com`` or ``*`` entry does not count, since the CSRF check compares the origin with the exact ``Host`` of the request.
        ``WebSocketApp`` logs it when it is created, since ``manage.py check`` never sees the list.
        Adding the origin to ``CSRF_TRUSTED_ORIGINS``, or setting ``REALTIME['TUNNEL']`` to ``False``, clears it.
-     - ``next.realtime.asgi``
+     - ``next.realtime.checks``
    * - ``next.W147``
      - ``TICKET_BINDING`` is ``SignedCookieBinding`` or a subclass of it while ``SESSION_ENGINE`` is a server-side engine.
        The binding reloads a signed-in user by pk and auth hash, so an open socket outlives logout and the expiry of the stored session.
        Setting ``TICKET_BINDING`` to ``next.realtime.SessionBinding``, which rechecks the stored session, clears it.
-       A ``WebSocketApp`` logs the same warning when it is created.
+       ``manage.py check`` raises it only when ``REALTIME['TRANSPORTS']`` lists ``ws``, while a ``WebSocketApp`` always logs it when it is created.
      - ``next.realtime.checks``
 
 Codes are assigned per check and are not contiguous.

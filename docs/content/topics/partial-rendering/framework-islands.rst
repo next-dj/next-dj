@@ -18,9 +18,11 @@ The two blocks below are the whole adapter, one for React and one for Vue.
 The mount and unmount pair
 --------------------------
 
-``next:mounted`` fires on every node a patch touches, after the operations apply.
+``next:mounted`` fires on the nodes a patch touches, after the operations apply.
+Those are the roots an op replaces or morphs and the rows a merge brings, not every descendant of a morphed zone.
 ``next:removed`` fires on a node immediately before it detaches, for every detach the runtime performs.
-Both bubble to the document, so one delegated listener catches every island, and the pair brackets the life of a node inside the document.
+Both bubble to the document, so one delegated listener sees every event.
+The pair brackets the life of a touched node inside the document.
 
 Mount through :ref:`Next.partial.onMount <topics-partial-rendering-co-located-js>`.
 The registry runs its callback over the matching elements present at load and over every matching element a later patch inserts, descendants included.

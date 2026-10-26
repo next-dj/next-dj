@@ -135,7 +135,7 @@ The realtime helpers cover both transports and the broker between them.
 
 ``memory_broker(**options)`` serves realtime from a fresh ``MemoryBroker`` for a block and yields it.
 ``options`` are its ``OPTIONS``, the other keys of the ``REALTIME`` mapping stay as configured, and the configured broker is built anew on its first use after the block.
-Every test that publishes starts inside it, so no message or sequence number leaks from one test into the next.
+Wrap every test that publishes in it, so no message or sequence number leaks from one test into the next.
 
 ``capture_published(*topics)`` records the messages that ``message_published`` reports, in publish order, and returns a ``PublishedMessages``.
 It is a context manager, ``messages`` lists the recorded ``Message`` objects of the requested topics, ``recorder`` is the ``SignalRecorder`` of ``message_published`` underneath, and it is iterable and sized.
@@ -182,10 +182,12 @@ Frames that arrive while a call waits for its own answer are held and handed out
 A close that arrives during such a wait is held too, a failed call leaves it for ``receive_close()``, and a repeated wait fails at once instead of timing out.
 ``Reply``, ``Refusal``, and ``UpstreamError`` live in ``next.realtime.frames``.
 
-``issue_socket_ticket(topics, *, authorizer_ref, transform_ref=None, presence=False, session=None)`` issues a ticket through the negotiation path of the configured ``TICKET_BINDING``.
+``issue_socket_ticket(topics, *, authorizer_ref, transform_ref=None, presence=False, session=None, cookies: Mapping[str, str] | None = None)`` issues a ticket through the negotiation path of the configured ``TICKET_BINDING``.
 Without a ``session`` it builds one from ``SESSION_ENGINE``, so a test that signs a user in passes the session it prepared.
+The optional ``cookies`` mapping of names to values is placed on the request before the binding runs and is carried in the cookie header of the returned ticket.
 The returned ``SocketTicket`` holds the ``grant``, the ``session``, the ``cookies`` the browser would present, and the ``credential`` the binding reads from them.
-Its ``cookie`` property is the ready ``cookie`` header pair for the handshake, ``subscribe_frame()`` builds the ``sub`` frame.
+Its ``cookie`` property is the ready ``cookie`` header pair for the handshake.
+``subscribe_frame()`` builds the ``sub`` frame.
 The ``credential`` is what a ``Handshake`` for the ticket carries.
 ``aissue_socket_ticket`` takes the same arguments and awaits the session work on a worker thread, so an async test issues a ticket inside its scenario without ``SynchronousOnlyOperation``, under ``django_db(transaction=True)`` as the socket itself needs.
 Under the default binding the credential is the session key, and under ``SignedCookieBinding`` it is the ``user:`` or ``visitor:`` credential of the binding.

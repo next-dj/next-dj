@@ -43,7 +43,9 @@ A form submit, an auto-submitting filter, a paginating link, a lazy zone enterin
    X-Next-Zone: catalog-results
 
 ``X-Next-Request`` is the switch the server reads to choose a partial response over the full page, and ``X-Next-Zone`` names the zones to render, comma-joined for a batch.
-The rest of the namespace carries the field names of a validate-only pass, the merge intent of a paginating request, the asset version the client holds, the request id a stream echo is matched against, and the page that hosts a layer.
+The rest of the namespace carries the request metadata.
+That covers the field names of a validate-only pass, the merge intent of a paginating request, and the asset version the client holds.
+It also carries the request id a stream echo is matched against and the page that hosts a layer.
 
 The envelope
 ------------
@@ -64,13 +66,20 @@ The server renders the named zone alone and serializes the result through the co
    }
 
 Every operation and every address is authored by the server, so the client is never asked to do anything the server did not name.
-``version`` is the asset version the envelope was built under, which the client compares against the version it already holds and answers with one full reload when the two disagree, see :doc:`reference`.
+``version`` is the asset version the envelope was built under.
+The client compares it against the version it already holds and answers with one full reload when the two disagree, see :doc:`reference`.
 :doc:`reference` lists the verbs, the addresses, the manifest fields, and the headers in tables.
 
 The view branches into that zone response before the page renders, so the layout chain is never rendered and no markup is produced only to be dropped.
 The addressed bodies still render against the page context, and a ``@context`` callable bound to another zone of the same page does not run for the batch.
 Data that is expensive to produce guards itself with ``zone_requested``, which keeps it off the full render too, and :doc:`scenarios` shows that guard in full.
 See :doc:`/content/internals/request-lifecycle` for where the view branches.
+
+.. note::
+
+   The HTML a patch carries is inserted as written and is not sanitized.
+   The client strips ``<script>`` elements and nothing else.
+   Authorization lives on the page that renders the patch, so escape user content before it reaches a patch.
 
 The apply
 ---------

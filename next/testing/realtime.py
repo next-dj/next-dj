@@ -345,16 +345,19 @@ def issue_socket_ticket(
     transform_ref: str | None = None,
     presence: bool | str = False,
     session: SessionBase | None = None,
+    cookies: Mapping[str, str] | None = None,
 ) -> SocketTicket:
     """Issue a WebSocket ticket through the negotiation path of any ticket binding.
 
-    The cookies are the session cookie and those the binding sets on the reply.
+    The ticket cookies are the session cookie, `cookies` and those the binding sets.
     """
+    extra = dict(cookies or {})
     if session is None:
         session = import_module(settings.SESSION_ENGINE).SessionStore()
     request = RequestFactory().get("/")
     if session.session_key is not None:
         request.COOKIES[settings.SESSION_COOKIE_NAME] = session.session_key
+    request.COOKIES.update(extra)
     request.session = session
     grant = issue_ticket(
         request,
@@ -366,14 +369,14 @@ def issue_socket_ticket(
     binding = ticket_binding()
     reply = HttpResponse()
     binding.respond(request, reply)
-    cookies = {name: morsel.value for name, morsel in reply.cookies.items()}
+    issued = {**extra, **{name: m.value for name, m in reply.cookies.items()}}
     if session.session_key is not None:
-        cookies = {settings.SESSION_COOKIE_NAME: session.session_key, **cookies}
-    credential = binding.credential(cookies)
+        issued = {settings.SESSION_COOKIE_NAME: session.session_key, **issued}
+    credential = binding.credential(issued)
     if credential is None:
         msg = "The ticket binding reads no credential from the negotiated cookies."
         raise AssertionError(msg)
-    return SocketTicket(session, grant, MappingProxyType(cookies), credential)
+    return SocketTicket(session, grant, MappingProxyType(issued), credential)
 
 
 async def aissue_socket_ticket(
@@ -383,6 +386,7 @@ async def aissue_socket_ticket(
     transform_ref: str | None = None,
     presence: bool | str = False,
     session: SessionBase | None = None,
+    cookies: Mapping[str, str] | None = None,
 ) -> SocketTicket:
     """Issue a WebSocket ticket from an event loop, the session work off it."""
     return await sync_to_async(issue_socket_ticket)(
@@ -391,6 +395,7 @@ async def aissue_socket_ticket(
         transform_ref=transform_ref,
         presence=presence,
         session=session,
+        cookies=cookies,
     )
 
 

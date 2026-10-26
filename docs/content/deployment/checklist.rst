@@ -17,7 +17,7 @@ Django settings
 - ``SECRET_KEY`` is unique to the environment and not committed.
 - ``DATABASES`` uses a production engine and a managed credential store.
 
-The transport and cookie settings below are the hardening set a next.dj project ships with, and :doc:`/content/security/overview` explains what each one defends against.
+The transport and cookie settings below are the hardening set a next.dj project turns on, and :doc:`/content/security/overview` explains what each one defends against.
 
 - ``SECURE_SSL_REDIRECT = True`` redirects every HTTP request to HTTPS.
 - ``SECURE_CONTENT_TYPE_NOSNIFF = True`` blocks MIME-type sniffing.
@@ -129,6 +129,7 @@ Review these when the project publishes ``TopicStream`` updates.
   Set ``REALTIME['TICKET_BINDING']`` to ``next.realtime.SignedCookieBinding`` to keep that engine, and note that logout then leaves an open socket running, which ``next.W147`` reports next to a server-side engine.
   Size a cache-backed session store for the open sockets, since an evicted session closes its socket with ``4401``.
 - Set ``REALTIME['GATEWAY_TOKEN']`` from the environment when a gateway outside Python calls the ticket introspection endpoint.
+- Run a load test against the shared broker before launch, with the process count, Redis pool, and replay and presence caps the deployment will use, see :ref:`deployment-capacity`.
 - Treat topic delivery as best-effort notification.
   Verify reconnect and guarded zone resync, and do not use it as durable event history.
   Send an event that must not be lost through an outbox table, see :doc:`/content/howto/deliver-events-durably`.
@@ -146,7 +147,7 @@ Server
 ------
 
 - Pick WSGI or ASGI based on whether the project uses streaming responses, SSE, or websockets.
-- Configure the worker count based on the expected concurrency.
+- Configure the worker count based on the expected concurrency and a load run, see :ref:`deployment-capacity`.
 - Set the worker timeout above the slowest expected handler.
 
 See :doc:`wsgi-asgi` for the server choice.
@@ -158,6 +159,7 @@ Monitoring
 - Forward ``form_validation_failed`` to alerting when failure rate exceeds the baseline.
 - Track ``router_reloaded`` if the project routes through a dynamic router.
 - Forward ``sse_stream_opened``, ``sse_stream_closed``, and ``zone_rendered`` when the project uses partial rendering.
+- Forward ``message_published``, ``upstream_received``, ``upstream_rejected``, ``stream_subscribed``, and ``stream_unsubscribed`` when the project publishes realtime streams, and watch the Redis connection count and the ``4401`` close rate beside them, see :ref:`deployment-capacity`.
 
 System checks
 -------------

@@ -3,9 +3,18 @@
 Stream updates over WebSockets
 ==============================
 
-Use this guide when an application already renders an authorized ``TopicStream`` and wants to add WebSocket delivery for deployments that run under ASGI.
-The same guarded page endpoint negotiates the transport, and an importable topic authorizer is checked before subscription and throughout the connection.
-The socket is part of the framework and runs on plain ASGI, so no extra package is needed beyond an ASGI server.
+Problem
+-------
+
+An application already renders an authorized ``TopicStream`` over SSE and needs WebSocket delivery for deployments that run under ASGI.
+
+Solution
+--------
+
+Wrap Django's ASGI application with ``next.realtime.application``.
+The same guarded page endpoint then negotiates the transport.
+An importable topic authorizer is checked before the subscription and throughout the connection.
+The socket is part of the framework and runs on plain ASGI, so an ASGI server is the only extra requirement.
 
 .. contents::
    :local:
@@ -16,7 +25,8 @@ Mount the socket
 
 The socket rechecks its session on the server while it stays open, so ``SESSION_ENGINE`` should store sessions on the server.
 The ``db``, ``cache``, ``cached_db``, and ``file`` engines work.
-The signed-cookie engine re-signs its cookie on every session save, which breaks the ticket of a socket that opens after the save, and ``manage.py check`` reports it as ``next.W142``, see :ref:`topics-realtime`.
+The signed-cookie engine re-signs its cookie on every session save, which breaks the ticket of a socket that opens after the save, and ``manage.py check`` reports it as ``next.W142``.
+See :ref:`topics-realtime` for the details.
 
 Wrap Django's HTTP ASGI application with ``next.realtime.application``.
 The helper serves the socket at ``REALTIME['WS_PATH']``, loads the Django session from the cookie, and validates the WebSocket Origin the way Django's CSRF check does.
@@ -43,11 +53,14 @@ The browser first performs its normal GET with ``X-Next-Transport: ws``.
 The response is ``application/json`` and contains a short-lived, session-bound ticket scoped to that stream's topics, transform, and authorizer.
 The client sends the ticket in its first WebSocket frame and never places it in the URL.
 A reply of any other content type, or no reply within five seconds, sends the client to SSE.
-When the handshake would treat the cookie as dead, because it names a session that no longer exists or an expired one, negotiation issues the ticket against a fresh session and the response rewrites the session cookie.
-The signed-cookie engine has no session to create there, so a forged or expired signed cookie gets the ``503`` a first visit gets, see :ref:`topics-realtime`.
+A cookie that names a missing or expired session would fail the handshake.
+In that case negotiation issues the ticket against a fresh session and the response rewrites the session cookie.
+The signed-cookie engine has no session to create there, so a forged or expired signed cookie gets the ``503`` that a first visit gets.
+See :ref:`topics-realtime` for the details.
 
 Once the socket opens, its ``hello`` must arrive within five seconds, or the client closes the socket as a transient failure and retries.
-The server sends ``hello`` only after the broker confirms the subscription, and ``RedisBroker`` waits up to five seconds for that confirmation.
+The server sends ``hello`` only after the broker confirms the subscription.
+``RedisBroker`` waits up to five seconds for that confirmation.
 A degraded broker can therefore push clients through repeated reconnects and, after three quick failures, onto SSE.
 See :ref:`ref-realtime-protocol` for every frame and close code.
 
@@ -68,11 +81,17 @@ See :ref:`ref-realtime-protocol` for every frame and close code.
        )
 
 The authorizer is a synchronous, importable function accepting ``(user, topic)`` and returning a boolean.
-The socket calls it before joining the broker and then at most once per heartbeat interval, together with a recheck of the session.
-A revocation closes the socket within about two heartbeat intervals plus the callback's own latency, with ``4401`` for a session problem and ``4403`` for a topic denial, each after an ``auth`` error frame.
-The client then falls back to SSE, where a revoked session reconnects through the page guard and a topic denial ends the stream for good.
+The ``polls.realtime.can_subscribe_topic`` above is an example of one that a project writes.
+Omitting ``authorize`` leaves the stream open to any visitor who can load the page.
+The socket calls the authorizer before joining the broker and then at most once per heartbeat interval, together with a recheck of the session.
+A revocation closes the socket within about two heartbeat intervals plus the callback's own latency.
+The close code is ``4401`` for a session problem and ``4403`` for a topic denial, each after an ``auth`` error frame.
+After ``4403`` the client falls back to SSE at once.
+After ``4401`` the client negotiates a fresh ticket once and falls back to SSE only when that fails.
+Over SSE a revoked session reconnects through the page guard and a topic denial ends the stream for good.
 The checks run on the shared thread pool rather than the single sync thread, so keep the callback's database work small.
-If no stable authorizer reference is available, WebSocket negotiation returns ``406`` and the client uses SSE.
+WebSocket negotiation returns ``406`` when the ``transform``, ``authorize``, or ``presence`` identify callback has no stable importable reference.
+The reply body names the cause in its ``reason`` field, and the client uses SSE.
 
 Keep sensitive page data out of published topic payloads.
 Publish a ``refresh`` operation for private zones.
@@ -112,6 +131,7 @@ The command caps inbound frames at 64 KiB and turns off the protocol ping of uvi
 See :doc:`/content/ref/management` for the options.
 
 Production runs several uvicorn workers, either through uvicorn itself or under gunicorn with the uvicorn worker class.
+The ``--workers`` value below is an example to size from measurement, see :ref:`deployment-capacity` for how to measure capacity.
 
 .. code-block:: bash
    :caption: shell
@@ -119,12 +139,15 @@ Production runs several uvicorn workers, either through uvicorn itself or under 
    uv run uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 4 --ws-max-size 65536
    uv run gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --workers 4
 
-The socket closes a larger inbound frame with ``1009`` anyway, and ``--ws-max-size 65536`` keeps uvicorn from buffering up to 16 MiB first.
+The socket closes a larger inbound frame with ``1009`` anyway.
+``--ws-max-size 65536`` keeps uvicorn from buffering up to 16 MiB first.
 Uvicorn pings every 20 seconds by default, which duplicates the heartbeat of the socket, so ``--ws-ping-interval`` is a deployment decision.
 Every worker imports ``config/asgi.py`` itself, so each one mounts the socket and offers ``ws``.
-The default ``MemoryBroker`` reaches subscribers in one process only, so use ``RedisBroker`` once there is more than one worker, see :doc:`fan-out-across-processes-with-redis`.
+The default ``MemoryBroker`` reaches subscribers in one process only.
+Use ``RedisBroker`` once there is more than one worker, see :doc:`fan-out-across-processes-with-redis`.
 
-The socket sends a ``ping`` frame every ``NEXT_FRAMEWORK["REALTIME"]["HEARTBEAT"]`` seconds, 25 by default, so keep that value below the idle timeout of every proxy in front of it.
+The socket sends a ``ping`` frame every ``NEXT_FRAMEWORK["REALTIME"]["HEARTBEAT"]`` seconds, 25 by default.
+Keep that value below the idle timeout of every proxy in front of it.
 The browser renews a ticket when it reconnects.
 Tests drive the socket and the SSE stream with the helpers of :doc:`/content/ref/testing`.
 A project on the signed-cookie session engine or another identity source binds tickets through :doc:`bind-tickets-to-your-own-identity`.
@@ -147,7 +170,8 @@ Pass it to the socket and hand the socket to ``application``.
 
 The entries follow the ``CSRF_TRUSTED_ORIGINS`` format, and an empty or malformed list raises ``ValueError`` at startup.
 
-A subclass overrides ``allow_origin`` for a rule of its own and ``authenticate`` to take the identity from somewhere other than the session cookie, such as a header set by a trusted proxy.
+A subclass overrides ``allow_origin`` for a rule of its own.
+It overrides ``authenticate`` to take the identity from somewhere other than the session cookie, such as a header set by a trusted proxy.
 ``authenticate`` returns a ``Handshake`` or ``None`` for a refusal, which closes the socket with ``4401``.
 The ``credential`` of the handshake has to be the one the ticket was issued under, because the ticket is bound to it and every recheck hands it back to the ticket binding.
 
@@ -174,6 +198,8 @@ The route path has to match ``REALTIME['WS_PATH']``, because the ticket tells th
 
 A project on Django Channels adds it to its own ``URLRouter``.
 The socket loads the session itself, so leave ``AuthMiddlewareStack`` out of that route.
+Pass the Django ASGI application as ``http_app``, because the socket runs tunneled requests through it.
+A bare mounted socket and a ``TopicSocket`` gateway run no tunneled requests.
 
 .. code-block:: python
    :caption: config/asgi.py
@@ -183,24 +209,28 @@ The socket loads the session itself, so leave ``AuthMiddlewareStack`` out of tha
 
    from next.realtime import WebSocketApp
 
+   socket = WebSocketApp(http_app=django_application)
    application = ProtocolTypeRouter(
        {
            "http": django_application,
-           "websocket": URLRouter([path("_next/ws/", WebSocketApp())]),
+           "websocket": URLRouter([path("_next/ws/", socket)]),
        }
    )
 
-A Starlette application mounts it as a WebSocket route.
+A Starlette application mounts it as a WebSocket route with the same ``http_app`` argument.
 
 .. code-block:: python
    :caption: app.py
 
+   from django.core.asgi import get_asgi_application
    from starlette.applications import Starlette
    from starlette.routing import WebSocketRoute
 
    from next.realtime import WebSocketApp
 
-   app = Starlette(routes=[WebSocketRoute("/_next/ws/", WebSocketApp())])
+   django_application = get_asgi_application()
+   socket = WebSocketApp(http_app=django_application)
+   app = Starlette(routes=[WebSocketRoute("/_next/ws/", socket)])
 
 Only ``application`` answers lifespan events and closes the broker on shutdown.
 A router that mounts the bare socket closes the broker through its own shutdown hook, which calls ``broker_manager.aclose()``.
@@ -259,13 +289,17 @@ The sketch below uses the ``websockets`` library.
        async with serve(handler, "0.0.0.0", 8765, origins=["https://example.com"]):
            await asyncio.get_running_loop().create_future()
 
+   asyncio.run(main())
+
 The gateway checks the Origin itself, here through the ``origins`` argument of ``serve``.
-It runs in a process of its own, so list ``"ws"`` in ``REALTIME['TRANSPORTS']`` in the project that renders the pages, and share ``SECRET_KEY``, the session store, and the broker with the gateway.
+It runs in a process of its own.
+List ``"ws"`` in ``REALTIME['TRANSPORTS']`` in the project that renders the pages, and share ``SECRET_KEY``, the session store, and the broker with the gateway.
 ``send`` has to raise ``OSError`` once the peer is gone, and ``close`` has to tolerate a peer that already left.
 ``Handshake.from_cookies`` asks the configured ticket binding for the credential of the cookies and loads its user on the shared thread pool without writing to the store.
 It returns ``None`` for no cookies or once the credential is gone.
 ``TopicSocket`` verifies the ticket from the ``sub`` frame against the handshake's ``credential`` itself, so the gateway never handles tickets.
-A gateway that takes the identity from elsewhere builds ``Handshake(credential, user, expires_at)`` directly, with the credential the ticket was issued under and ``expires_at`` on the ``time.monotonic()`` clock or ``None``.
+A gateway that takes the identity from elsewhere builds ``Handshake(credential, user, expires_at)`` directly.
+The credential is the one the ticket was issued under, and ``expires_at`` is on the ``time.monotonic()`` clock or ``None``.
 The handshake derives its opaque ``subject`` from the credential, and that digest is all a handler sees.
 At ``expires_at`` the socket rechecks the credential and stays open when HTTP requests have renewed it.
 
@@ -324,11 +358,16 @@ The gateway follows these steps for each connection.
 
    {"topics": ["poll:7"], "user": "42", "expires_in": 1209600}
 
-The reply names the user as a string primary key, or ``null`` for an anonymous visitor, and it never contains the session key or session data.
-It leaves ``expires_in`` out when the session store keeps no deadline the endpoint can read, as the ``cache`` engine does, and then the gateway picks its own interval for the ``1001`` close.
+The reply names the user as a string primary key, or ``null`` for an anonymous visitor.
+It never contains the session key or session data.
+It leaves ``expires_in`` out when the session store keeps no deadline the endpoint can read, as the ``cache`` engine does.
+The gateway then picks its own interval for the ``1001`` close.
+A ``presence`` field appears only when the ticket's stream reports attendance.
+It is ``"count"`` for a stream that shares the number of connections and ``"members"`` for one that also identifies its members.
 A wrong bearer, a bad ticket, a lost session or a refused topic answers ``403`` with ``{"error": "denied"}`` whatever the reason.
 An authorized call whose body is not JSON or lacks a string ``ticket`` or ``cookie`` answers ``400`` with ``{"error": "invalid"}``.
-The endpoint refuses a ticket whose stream uses a transform by default, because a gateway cannot run Python, so a stream that serves such a gateway publishes already-filtered topics.
+The endpoint refuses a ticket whose stream uses a transform by default, because a gateway cannot run Python.
+A stream that serves such a gateway publishes already-filtered topics.
 
 The default caller check is the bearer token.
 A subclass of ``TicketIntrospectionView`` overrides ``authorize(request)`` to check a client certificate header or a source address, and ``grant(claims, user, expires_in)`` to change the reply.

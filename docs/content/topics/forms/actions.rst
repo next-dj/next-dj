@@ -145,8 +145,10 @@ The method signature uses the same dependency-injection rules as any other DI-re
 
 .. code-block:: python
 
+   from django.http import HttpRequest, HttpResponse
+
    def on_valid(self, request: HttpRequest):
-       ...
+       return HttpResponse(status=204)
 
 ``self`` is the bound, validated form instance.
 ``request`` receives the current ``HttpRequest`` only when the parameter is annotated ``HttpRequest``, an unannotated ``request`` parameter resolves to ``None``.
@@ -677,6 +679,8 @@ The default is ``"http"``, because a socket cannot set a cookie, so a tunneled l
 .. code-block:: python
    :caption: rooms/pages/rooms/[slug:code]/page.py
 
+   from django.http import HttpResponse
+
    import next.forms
    from next import action
 
@@ -688,7 +692,7 @@ The default is ``"http"``, because a socket cannot set a cookie, so a tunneled l
 
    @action("clear_draft", transport="any")
    def clear_draft(request):
-       ...
+       return HttpResponse(status=204)
 
 ``Meta.transport`` on a ``Form``, ``ModelForm``, or ``FormWizard``, and the ``transport`` keyword of ``@action``, take the same two values.
 Like the guard keys, ``Meta.transport`` survives subclassing through the inherited ``Meta``.
@@ -705,7 +709,7 @@ The ``{% form %}`` tag writes ``data-next-transport="any"`` on the ``<form>`` of
 Only a ``<form>`` carries it.
 A hand-written form that posts to ``{% action_url %}`` goes out as a native submission, which the runtime never intercepts, so the WebSocket does not see it at all.
 ``{% action_url %}`` is a value tag with no markup to attach a marker to, and it returns the same URL for every action.
-Script that posts through ``Next.partial.fetch`` opts in per request.
+Script that posts through ``Next.partial.fetch`` or ``Next.partial.submit`` opts in per request.
 
 .. code-block:: javascript
    :caption: rooms/static/rooms/clear.js
@@ -717,8 +721,20 @@ Script that posts through ``Next.partial.fetch`` opts in per request.
      transport: "any",
    });
 
-The runtime sends the request through the socket only when the method is ``POST``, the body is text, and a socket is open.
-Otherwise it falls back to ``fetch`` with no change in the outcome.
+``Next.partial.submit`` takes the action URL and its fields, and resolves with an ``Outcome``, see :ref:`ref-client-outcome`.
+
+.. code-block:: javascript
+   :caption: rooms/static/rooms/clear.js
+
+   const outcome = await Next.partial.submit({
+     action: document.querySelector("#clear").dataset.url,
+     data: { room: "42" },
+     transport: "any",
+   });
+   if (outcome.status !== "ok") retryLater();
+
+The runtime sends the request through the socket only when the method is ``POST``, the body is a string, ``URLSearchParams``, or ``FormData`` without files, and a socket is open.
+A body with a file, and a request the socket cannot carry, goes over ``fetch`` with no change in the outcome.
 The server stays the source of truth, so a wrong marker on an HTTP action costs one ``421`` and a repeat.
 
 .. _topics-forms-actions-success:

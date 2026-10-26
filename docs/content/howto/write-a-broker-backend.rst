@@ -11,7 +11,9 @@ Topic messages have to travel through a message system the shipped brokers do no
 Solution
 --------
 
-Subclass ``BrokerBackend`` for a new transport and give it ``replay`` and ``areplay`` so reconnecting streams catch up from its log, and with the methods of ``PresenceBroker`` so streams can report who is attending.
+Subclass ``BrokerBackend`` for a new transport.
+Give it ``replay`` and ``areplay`` so reconnecting streams catch up from its log.
+Give it the methods of ``PresenceBroker`` so streams can report who is attending.
 For another way into Redis, subclass ``RedisBroker`` and override ``create_client`` and ``topic_key``.
 Select the class in ``NEXT_FRAMEWORK['REALTIME']['BROKER']['BACKEND']``.
 
@@ -103,7 +105,7 @@ Store that string as the identity of the member, because connections with an equ
 ``PresenceWindow`` is the mixin both shipped brokers share.
 ``keep_presence(limits, schedule, clock)`` reads ``REALTIME['PRESENCE']`` into ``self.presence_limits`` when ``limits`` is ``None`` and builds ``self.presence_schedule``, the ``PresenceSchedule`` that calls ``announce_presence(topic)`` on a daemon thread once a window closes.
 ``schedule`` is ``None`` for that default, or a callable that receives the hook and returns a schedule, which is how a test runs windows by hand.
-``announce_presence`` is the overridable hook, and ``announce(broker, topic)`` is its usual body, reading the current snapshot and sending it through ``broker.broadcast``.
+``announce_presence`` is the abstract hook that every presence broker implements, and ``announce(broker, topic)`` is its usual body, reading the current snapshot and sending it through ``broker.broadcast``.
 Override ``broadcast`` to deliver the snapshot to live subscribers without a sequence, since the default raises ``NotImplementedError`` and a snapshot never enters the replay log.
 
 A change claims the coalescing window of its topic, and the claim has to be atomic across processes, as a ``SET NX PX`` is on Redis.
@@ -204,7 +206,8 @@ The async twins call the synchronous methods, which suits a store that only touc
 The store methods above are the part a project writes, and each has to prune expired records and count each member once.
 ``Presence.count`` is the number of distinct members plus every connection without a member, and the list holds at most ``presence_limits.size`` of them.
 
-A subclass of ``RedisBroker`` inherits presence whole, and overrides ``announce_presence`` to observe or reroute each snapshot.
+A subclass of ``RedisBroker`` inherits presence whole.
+It overrides ``announce_presence`` to observe or reroute each snapshot.
 An override of ``topic_key`` has to return a distinct key for the kinds ``presence``, ``members``, ``window``, ``identified``, ``attendees``, ``holders``, ``state``, and ``order`` too, all under one hash tag, since the scripts touch them together.
 
 Without these methods a stream that passes ``presence`` fails to start with ``ImproperlyConfigured``, and ``presence()`` and ``apresence()`` raise it too.
@@ -216,7 +219,8 @@ Reach Redis another way
 ``RedisBroker`` needs the ``broker`` extra, which installs ``redis`` 8 or newer.
 It builds every client through ``create_client(url, options, *, asynchronous)``, once for the synchronous pool and once per running event loop for the asynchronous client.
 ``options`` holds the merged ``CLIENT`` keywords, ``decode_responses`` forced on, and an override passes them on to whatever it builds.
-``topic_key(kind, topic)`` names the ``seq`` key of the counter and the ``log`` key of the replay log.
+``topic_key(kind, topic)`` names every key of a topic.
+The kinds are ``seq`` for the counter and ``log`` for the replay log, and the presence kinds are listed in `Add presence`_.
 
 The subclass below reaches the primary through Sentinel and names its keys without the hash tag.
 
@@ -249,11 +253,13 @@ The subclass below reaches the primary through Sentinel and names its keys witho
 
 The default ``topic_key`` returns ``<PREFIX>:seq:{<topic>}`` and ``<PREFIX>:log:{<topic>}``.
 The braces are a Redis Cluster hash tag that keeps both keys of a topic in one slot, since the publish script and the replay transaction touch them together.
-The override drops the tag, which suits a single primary behind Sentinel and breaks the script on Cluster.
+The override drops the tag.
+That suits a single primary behind Sentinel and breaks the script on Cluster.
 An override for Cluster keeps ``{<topic>}`` in both keys and returns a distinct key per ``kind``.
 The broker refuses a ``PREFIX`` with ``{`` or ``}`` when it is created, since a brace would move the tag off the topic name.
 
 Every stream holds one pooled Redis connection, so size ``CLIENT['max_connections']`` for the open streams.
+The ``200`` in the registration below is an example value to size from measurement, see :ref:`deployment-capacity`.
 The default pool raises ``MaxConnectionsError`` when it runs out, and the broker logs a warning on ``next.realtime.redis`` for it.
 A ``BlockingConnectionPool`` raises a plain ``ConnectionError`` on timeout, so its exhaustion ends the stream with ``BrokerConnectionError`` and logs no warning.
 
@@ -269,7 +275,10 @@ Register the backend
                "BACKEND": "realtime.brokers.SentinelBroker",
                "OPTIONS": {
                    "PREFIX": "myapp:realtime",
-                   "SENTINELS": [["sentinel-1.internal", 26379], ["sentinel-2.internal", 26379]],
+                   "SENTINELS": [
+                       ["sentinel-1.internal", 26379],
+                       ["sentinel-2.internal", 26379],
+                   ],
                    "SERVICE": "realtime",
                    "CLIENT": {"max_connections": 200},
                },
@@ -278,7 +287,8 @@ Register the backend
        },
    }
 
-``manage.py check`` leaves the options of a ``RedisBroker`` subclass alone, so a missing ``SENTINELS`` or ``SERVICE`` raises ``KeyError`` when the broker is created.
+``manage.py check`` leaves the options of a ``RedisBroker`` subclass alone.
+A missing ``SENTINELS`` or ``SERVICE`` therefore raises ``KeyError`` when the broker is created.
 A publisher outside Django passes ``replay={"SIZE": 100, "TTL": 300}`` to the constructor, which then reads no replay setting.
 
 Verification

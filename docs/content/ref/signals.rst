@@ -96,14 +96,15 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - After the broker accepts a publication.
        ``ephemeral`` is ``True`` for an unnumbered message, a presence snapshot, whose ``message.numbered`` is ``False`` and which never enters the replay log.
    * - ``upstream_received``
-     - The handler of the matched ``@realtime.on``
+     - The handler of the matched ``@on``
      - ``upstream``
      - Before the handler of an ``up`` frame runs, once the topic grant and the access recheck passed.
        ``upstream`` is the ``Upstream`` the handler gets, and a raising receiver is logged while the handler still runs.
    * - ``upstream_rejected``
      - ``type(socket)``, so ``TopicSocket``
      - ``topic``, ``name``, ``reason``, ``connection``, ``subject``
-     - When an ``up`` frame is not delivered, before its ``ack`` or its ``error`` frame goes out.
+     - When an ``up`` frame is not delivered.
+       Every reason but ``limit`` is reported before the ``ack`` goes out, while a ``limit`` refusal sends its ``ack`` or ``error`` frame first and reports from a task.
        ``reason`` is the ``UpstreamError`` the ack carries, ``limit``, ``too_big``, ``topic``, ``denied``, ``unknown``, ``timeout``, or ``internal``, and an event without an ``id`` is reported too.
        ``topic`` and ``name`` are what the client sent, unchecked, so a receiver that labels metrics with them bounds their values first.
        ``connection`` and ``subject`` are the ``Upstream.connection`` and ``Upstream.subject`` a handler would have seen.
@@ -267,7 +268,7 @@ Each family owns its own signal rather than sharing one, so a receiver connected
    * - ``zone_registered``
      - The compiled page template class
      - ``template``, ``zone_name``, ``lazy``, ``poll``
-     - Once per compiled composed template, when its named zones are first read.
+     - Once per zone of a compiled composed template, when its named zones are first read.
        ``lazy`` is the trigger string or ``None``, ``poll`` the interval in milliseconds or ``None``.
    * - ``zone_rendered``
      - ``ZoneRenderResult``

@@ -29,8 +29,12 @@ One module graph sits behind the package facade, and the table below names the p
      - The frozen value objects of the wire contract, ``Envelope``, ``Patch``, ``Asset``, and ``FormMeta``, and their wire forms.
    * - ``errors``
      - Every exception the builder and the zone branch raise when a caller breaks a wire contract.
+   * - ``guards``
+     - The zones a standalone render refuses, read once for checks and the registry.
    * - ``headers``
      - The request and response header names, ``PartialIntent`` parsing, ``MergeMode``, and the ``Vary`` stamping.
+   * - ``intercept``
+     - The selection of the intercept page that serves a zone request over its target.
    * - ``keys``
      - The wire keys of the patch protocol, the one module the TypeScript runtime mirrors.
    * - ``manager``
@@ -50,9 +54,11 @@ One module graph sits behind the package facade, and the table below names the p
      - The pipeline that turns a form action outcome into an envelope, split across submodules behind the package address.
        ``shape_partial`` is its only entry on the curated ``next.partial`` surface.
    * - ``signals``
-     - The seven signals the subsystem emits.
+     - The eight signals the subsystem emits.
    * - ``sse``
      - The ``PatchEventStream`` bridge over the page render escape hatch.
+   * - ``stream``
+     - ``StreamMeta`` and the ``hello``, ``skip``, and ``end`` control frames of a streamed response.
    * - ``view``
      - The zone branch of the unified page view and its status short-circuits.
    * - ``zone``
@@ -128,6 +134,13 @@ Building patches
 ``Patches`` is the request-bound builder.
 Each method records one operation and returns ``self`` for chaining, and ``response`` finalises a ``PatchResponse`` or falls back to a redirect when the runtime is absent.
 ``Envelope``, ``Patch``, ``Asset``, and ``FormMeta`` are the frozen value objects the builder assembles, surfaced for a custom backend that serializes the wire format itself.
+``morph``, ``replace``, ``inner``, ``append``, and ``prepend`` take the markup as an ``html`` string.
+
+.. warning::
+
+   The builder inserts ``html`` into the DOM as given and never escapes it.
+   A caller escapes untrusted text before it reaches ``html``, or renders the markup through a template that escapes.
+
 ``add_asset(kind, url, *, inline=None)`` is the route by which a handler authors an asset reference of its own into the manifest, and the ``url`` it takes passes the same name resolution a full render performs, so a logical name a backend maps to a build output answers alike on both paths, see :doc:`/content/topics/static-assets/name-resolution`.
 
 .. autoclass:: next.partial.Patches
@@ -339,12 +352,12 @@ They guard the custom-verb contract, the event-name, context-key, and dedupe voc
 Signals
 -------
 
-See :doc:`signals` and :doc:`/content/topics/signals` for the partial signals (``zone_registered``, ``zone_rendered``, ``patch_op_registered``, ``field_validated``, ``sse_stream_opened``, ``sse_stream_closed``, ``partial_backend_loaded``).
+See :doc:`signals` and :doc:`/content/topics/signals` for the partial signals (``zone_registered``, ``zone_rendered``, ``patch_op_registered``, ``intercept_access_denied``, ``field_validated``, ``sse_stream_opened``, ``sse_stream_closed``, ``partial_backend_loaded``).
 
 System checks
 -------------
 
-See :doc:`system-checks` for the zone-placement, template-compile, custom-verb, context-binding, and backend-configuration checks (``next.E060`` through ``next.E067``, ``next.E072``, ``next.E073``, ``next.E078``, ``next.E090``, and ``next.W067`` through ``next.W071``).
+See :doc:`system-checks` for the zone-placement, template-compile, custom-verb, context-binding, and backend-configuration checks (``next.E060`` through ``next.E065``, ``next.E067``, ``next.E072``, ``next.E073``, ``next.E078``, ``next.E090``, ``next.E161``, ``next.E173``, ``next.E174``, ``next.W067`` through ``next.W071``, and ``next.W083``).
 
 See also
 --------

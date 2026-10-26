@@ -331,7 +331,7 @@ class PatchEventStream(PatchStreamWriter):
     def __init__(
         self,
         request: "HttpRequest",
-        source: "Iterable[Patches] | AsyncIterable[Patches]",
+        source: "Iterable[Patches | None] | AsyncIterable[Patches | None]",
         *,
         heartbeat_seconds: float | None = None,
         clock: "Callable[[], float] | None" = None,

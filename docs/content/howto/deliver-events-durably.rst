@@ -7,7 +7,9 @@ Problem
 -------
 
 A realtime publication is best-effort.
-The broker delivers a message at most once, a full subscriber queue drops its oldest message, and a publication after ``on_commit`` is lost when the broker is unreachable at that moment.
+The broker delivers a message at most once.
+A full subscriber queue drops its oldest message.
+A publication after ``on_commit`` is lost when the broker is unreachable at that moment.
 Some events must not vanish, such as "your export is ready" or a payment confirmation that a page waits for.
 
 Solution
@@ -56,7 +58,8 @@ Code that changes state records the event inside the same ``atomic`` block.
 
 The worker is a management command.
 It locks a batch of unpublished rows, publishes them in order, and marks them in one transaction.
-``select_for_update(skip_locked=True)`` lets several workers share the table without taking the same row, and it needs PostgreSQL, MySQL 8, or Oracle.
+``select_for_update(skip_locked=True)`` lets several workers share the table without taking the same row.
+Django raises ``NotSupportedError`` on a database that lacks it, see :meth:`~django.db.models.query.QuerySet.select_for_update` for the supported backends.
 
 .. code-block:: python
    :caption: outbox/management/commands/publish_outbox.py
@@ -99,7 +102,8 @@ It locks a batch of unpublished rows, publishes them in order, and marks them in
                    time.sleep(options["interval"])
 
 Run it as its own process next to the web workers with ``python manage.py publish_outbox``.
-The worker publishes with ``on_commit=False``, since its own transaction is the one that matters, and a broker error rolls the batch back so the rows stay pending.
+The worker publishes with ``on_commit=False``, since its own transaction is the one that matters.
+A broker error rolls the batch back, so the rows stay pending.
 Configure the same shared broker as the web workers, see :doc:`fan-out-across-processes-with-redis`.
 A worker on the default ``MemoryBroker`` publishes into its own process and reaches no browser.
 
@@ -112,11 +116,13 @@ A page that must act once remembers the ids it handled and ignores a repeat.
 
 Order holds per worker.
 Rows publish in ``id`` order, so one worker preserves the order of every topic.
-Several workers with ``skip_locked`` take different rows concurrently and may publish a later event before an earlier one, so run one worker or give each worker a fixed share of the topics.
+Several workers with ``skip_locked`` take different rows concurrently and may publish a later event before an earlier one.
+Run one worker or give each worker a fixed share of the topics.
 
 The outbox covers the step from the database to the broker.
 The step from the broker to a browser stays best-effort.
-A tab that is closed, offline, or slow when the event goes out does not receive it, and the replay log only recovers a short gap, bounded by ``REPLAY['SIZE']`` and ``REPLAY['TTL']``, and is gone after a broker restart.
+A tab that is closed, offline, or slow when the event goes out does not receive it.
+The replay log only recovers a short gap bounded by ``REPLAY['SIZE']`` and ``REPLAY['TTL']``, and it is gone after a broker restart.
 Replay is a catch-up, not a record, so a page that depends on an event reads the outcome from the database when it loads.
 The event then says that state changed, and the page fetches the current state through a guarded request, as in :doc:`stream-live-updates-with-sse`.
 

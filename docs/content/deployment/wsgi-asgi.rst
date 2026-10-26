@@ -57,8 +57,8 @@ Run with a production WSGI server such as ``gunicorn`` or ``uwsgi``.
 
    uv run gunicorn config.wsgi:application --workers 4 --bind 0.0.0.0:8000
 
-The example passes ``--workers 4``.
-Start from a heuristic such as ``(2 * num_cores) + 1`` and tune against the measured concurrency and request duration.
+The worker count in the command is a placeholder.
+Set it from a load run against the target hardware and the measured concurrency and request duration, see `Estimate capacity and scale out`_.
 
 ASGI configuration
 ------------------
@@ -90,14 +90,23 @@ A project that split its settings into a package keeps the ``config.settings.dev
 See :doc:`/content/howto/split-settings-per-environment`.
 
 Run with an ASGI server such as ``uvicorn``.
+Install ``uvicorn[standard]``, because the WebSocket transport needs a WebSocket library that the bare ``uvicorn`` package does not bring.
+Without one uvicorn refuses the upgrade, and the client falls back to SSE.
 
 .. code-block:: bash
    :caption: shell
 
-   uv run uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 4
+   uv run uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 4 --ws-max-size 65536
+
+The ``--workers`` value is a placeholder, see `Estimate capacity and scale out`_.
+The socket closes an inbound frame larger than 64 KiB with ``1009`` anyway, and ``--ws-max-size 65536`` keeps uvicorn from buffering up to 16 MiB first, as :doc:`/content/howto/stream-over-websockets` explains.
 
 Behind gunicorn, use the uvicorn worker class, ``gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker``.
 Every worker imports ``config/asgi.py`` itself, so each one mounts the socket and offers ``ws``.
+
+The development server needs no separate command.
+``manage.py runserver`` serves the ASGI application that ``ASGI_APPLICATION`` names once uvicorn is installed, and ``next`` has to sit above ``django.contrib.staticfiles`` in ``INSTALLED_APPS`` for its command to win.
+See :doc:`/content/ref/management` for the rule.
 
 Split deployments
 ~~~~~~~~~~~~~~~~~
@@ -184,6 +193,39 @@ A reconnect catches up from the broker's bounded replay log, and any gap the log
 A WebSocket loads its session from the cookie at the handshake and on every recheck.
 A recheck also runs at the session's deadline, so a session that ``SESSION_SAVE_EVERY_REQUEST`` renews keeps its socket open.
 Under load a session cache that evicts live entries closes sockets with ``4401``, so size the session cache for the open connections or use the ``db`` or ``cached_db`` engine.
+
+.. _deployment-capacity:
+
+Estimate capacity and scale out
+-------------------------------
+
+The framework fixes no capacity figure, because the number a process holds depends on the hardware, the broker, the proxy, and the work the pages do.
+Measure it on the install that serves the traffic.
+
+``make load`` runs the framework's own load harness from a repository checkout.
+It publishes and subscribes through the real broker and the real WebSocket and SSE paths, with ``PROFILE`` choosing the scenario, ``LOAD_DURATION`` the run length, and ``REDIS_URL`` the Redis to use.
+Point ``REDIS_URL`` at a Redis of the same kind as production and run it on the target hardware.
+The harness drives an app of the framework, not the pages of the project.
+It therefore measures the transport, meaning delivery latency, losses, and the cost of connections and replay, and it says nothing about how the project's own views, handlers, and queries behave.
+Measure those with a load tool of your own pointed at the deployed pages.
+:doc:`/content/contributing/quality-gates` describes the harness, its profiles, and its result file.
+
+Watch these signals during a run and in production.
+
+- Delivery latency from publish to the client and the count of lost or replayed messages.
+- Server CPU of every ASGI process, since the event loop is single threaded.
+- The Redis connection pool, because every open WebSocket and SSE stream holds one connection for its subscription, and an exhausted pool ends the stream and makes the browser reconnect.
+- The Redis ``maxclients`` limit, which all processes share.
+- The session cache, which closes sockets with ``4401`` when it evicts live sessions.
+- The handler thread pool, which runs sync upstream handlers and tunneled views and queues work when handlers are slow.
+- File descriptor limits of the process and connection limits of the proxy and load balancer.
+- Presence cost, which grows with the attendee count and the ``REALTIME['PRESENCE']['SIZE']`` member cap.
+- Replay cost, which grows with ``REALTIME['REPLAY']['SIZE']`` and the size of each message.
+
+Scale out with more ASGI processes behind one ``RedisBroker``, on one host or several.
+The broker carries every publication to the subscribers of every process, so no process needs to know where a client sits, and sticky sessions are not required.
+Raise ``OPTIONS['CLIENT']['max_connections']`` of the broker with the streams a process holds, and keep the sum across processes under the Redis ``maxclients``, see :doc:`/content/howto/fan-out-across-processes-with-redis`.
+Repeat the load run after each change of process count, pool size, or replay and presence caps, and run it before launch against the shared broker, see :doc:`checklist`.
 
 See also
 --------

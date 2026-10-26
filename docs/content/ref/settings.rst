@@ -38,7 +38,7 @@ The rule holds for every key, with no per-key exception.
 This is what Django does with its own configuration mappings.
 Defining :doc:`STORAGES <django:ref/settings>` overrides the default configuration rather than merging with it, and ``TEMPLATES``, ``DATABASES``, and ``CACHES`` each read the whole list or mapping the project wrote.
 Filling in what a single entry leaves out belongs to the code that consumes the entry, the same place Django fills a ``DATABASES`` alias with ``ATOMIC_REQUESTS`` or a ``TEMPLATES`` entry with ``APP_DIRS``.
-The scopes ``METADATA``, ``SITE``, ``SEO``, and ``CONSENT`` are such consumers, since every read goes through ``next.conf.scopes.scope_value``, which answers the default of a sub-key the project leaves out, see :doc:`conf`.
+The scopes ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, and ``CONSENT`` are such consumers, since every read goes through ``next.conf.scopes.scope_value``, which answers the default of a sub-key the project leaves out, see :doc:`conf`.
 A nested ``OPTIONS`` inside a scope still comes from the project alone once the project sets it.
 
 A single backend dict follows the rule like any other key.
@@ -298,12 +298,17 @@ A custom backend reads its own ``OPTIONS`` keys, which ``manage.py check`` leave
 A process that serves pages without mounting the socket, such as a WSGI worker next to a separate ASGI deployment, needs an explicit ``["ws", "sse"]`` to offer it.
 Set it to ``["sse"]`` to disable WebSocket negotiation.
 ``TICKET_MAX_AGE`` is the lifetime of a session-bound WebSocket grant in seconds and accepts values from 1 to 600.
+A ticket is signed from ``SECRET_KEY`` and stays reusable for every handshake until ``TICKET_MAX_AGE`` elapses.
 ``TICKET_BINDING`` is the dotted path of the ``TicketBinding`` subclass that decides what a WebSocket ticket is bound to, and ``next.E211`` reports any other value.
 The default ``next.realtime.SessionBinding`` binds the session key.
+Whatever the binding, the ticket is signed from ``SECRET_KEY`` and stays reusable for every handshake until ``TICKET_MAX_AGE`` elapses.
 ``next.realtime.SignedCookieBinding`` binds a signed-in user by its pk and session auth hash and an anonymous visitor by a ``next_visitor`` cookie, so it serves the signed-cookie ``SESSION_ENGINE``, a first visit without a session included.
 The negotiation reply sets that cookie with ``HttpOnly`` and the path, domain, ``Secure``, ``SameSite`` and lifetime of the session cookie, and renews it on every negotiation.
 Its socket rechecks the user by pk and auth hash without writing a cookie, so a password change or an inactive user closes it while a logout elsewhere does not, and ``next.W147`` warns when a server-side ``SESSION_ENGINE`` runs next to it.
 A subclass changes ``cookie_name`` or ``salt``, and a project binding implements ``issue``, ``credential``, ``subject`` and ``live``, with ``live_session`` for SSE and ``respond`` for what the negotiation reply carries, see :doc:`realtime` and :doc:`/content/howto/bind-tickets-to-your-own-identity`.
+``HANDLERS`` selects the modules that register ``@on`` upstream handlers.
+``None`` imports the ``realtime`` module of every installed app, a list of dotted module names imports only those modules, and ``[]`` imports none.
+Any other value is reported as ``next.E197``.
 ``WS_PATH`` sets the same-origin WebSocket route and defaults to ``/_next/ws/``, and it is the only place the route is configured.
 ``GATEWAY_TOKEN`` is the bearer secret of the ticket introspection endpoint, which stays off until a URLconf includes it.
 It defaults to ``None``, and a routed endpoint with no token refuses every caller and is reported as ``next.E188``.
@@ -338,7 +343,7 @@ See :doc:`realtime` for the snapshot semantics.
 ``UPSTREAM`` limits the frames a WebSocket client sends after ``sub``, the ``up`` events and the tunneled ``http`` requests alike.
 They draw on one token bucket per connection that holds ``BURST`` tokens and refills at ``RATE`` tokens a second.
 ``RATE`` is a positive number up to ``1000`` that ``next.E202`` enforces, and ``BURST`` is an integer from ``1`` to ``1000`` that ``next.E203`` enforces.
-The default lets a page send a typing indicator or a cursor ten times a second and absorbs a burst of twenty, such as several form posts in a row.
+The defaults suit a page that sends small, occasional events and a few form posts in a row, so raise them only for a page that streams input such as a cursor.
 ``MAX_BYTES`` caps one ``up`` frame in UTF-8 bytes as it arrives, an integer from ``1`` to ``65536`` that ``next.E204`` enforces, while a tunneled request is bounded by the 64 KiB frame limit alone.
 ``CONCURRENCY`` is the number of ``up`` events one connection runs at once, an integer from ``1`` to ``64`` that ``next.E209`` enforces, and an event past it is refused with ``limit`` without counting towards ``4429``.
 ``TIMEOUT`` is the seconds one ``up`` event waits for its handler before the ``ack`` answers ``timeout``, a positive number up to ``600`` that ``next.E210`` enforces.

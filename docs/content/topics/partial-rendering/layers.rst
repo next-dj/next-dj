@@ -13,13 +13,15 @@ A ``data-next-layer`` link opens one from the markup, ``Patches.layer_open`` ope
 Intercepting modals
 -------------------
 
-A ``data-next-layer`` link opens a modal over the current view and pushes the honest URL of the modal body.
+A ``data-next-layer`` link opens a modal over the current view and pushes the real URL of the modal body.
 The pushed URL is the real address of the body rather than a masked URL of the page beneath it.
 A refresh or a shared link resolves that URL as its own standalone page through its own ``page.py``, and Back closes the top layer.
 There is no client router and no URL masking.
+
 A single ``popstate`` handler closes the layer whose pushed URL the browser moved past.
 A layer whose push the browser refused has no history entry, so Back leaves it open.
-The URL is pushed as the modal opens, so Back closes it even while its body is still loading, and a layer whose body fails to load or that closes before the body arrives replaces the URL back to the page underneath.
+The URL is pushed as the modal opens, so Back closes it even while its body is still loading.
+A layer whose body fails to load, or that closes before the body arrives, replaces the URL back to the page underneath.
 
 ``data-next-confirm`` and ``data-next-layer`` combine on one link.
 The confirm gate is a capture-phase click handler, the layer opener is a bubble-phase one, so the confirm runs first regardless of install order.
@@ -27,8 +29,8 @@ A cancelled confirm stops the click before it reaches the opener, so the layer n
 An accepted confirm lets the click through and the layer opens.
 The same gate protects every click-driven trigger, so a prompt fronts a layer open the same way it fronts a pagination merge.
 
-Opening another page's zone over the honest URL
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Opening another page's zone over its own URL
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 An intercepting route lets a link open a different page in the modal while the address bar shows the honest URL of the link target, see :ref:`topics-file-router-intercepts` for the directory layout.
 The opt-in stays the link.
@@ -37,7 +39,7 @@ The client needs no extra attribute, and the zone name on ``data-next-layer`` st
 The markers ``(.)``, ``(..)``, and ``(...)`` of the directory name only the target and give the intercept its inherited layouts, context, access, and components.
 They do not restrict where the modal opens from, so any page can link with that zone.
 
-The selection runs on a GET or a HEAD and follows two rules.
+The selection runs on a GET or a HEAD only and follows two rules.
 The target keeps every zone it declares as a standalone zone itself.
 Otherwise the first intercept of the target, in file order, whose page declares every requested zone as a standalone zone serves the request.
 The zone sets come from the compiled template of each page, so the selection renders nothing.
@@ -75,7 +77,7 @@ An intercept that refuses on the form or action path answers 403, also for a log
 A broken chain of intercepts answers 403 too, except for the import error it shows under ``DEBUG``.
 ``Patches.morph_foreign_zone`` does not consult intercepts and raises ``UnknownZoneError`` for an intercept zone.
 The action owner and its guard protect a mutation, the modal does not.
-A wizard step inside a modal is not supported.
+A wizard step inside a modal posts the same way, and :doc:`done-choreographies` compares the two ways its last step refreshes the page beneath.
 
 Response order of a zone GET
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -104,17 +106,33 @@ The intercept declares its own access, and a check reports one that leaves a pub
 Titles under a layer
 --------------------
 
-Every layer keeps the head underneath it, the title, the description, the canonical link, and the robots meta, and restores them when it closes, whichever way it closes, by accept, dismiss, Back, or reset.
+Every layer keeps the head underneath it, the title, the description, the canonical link, and the robots meta.
+It restores them when it closes, whichever way it closes, by accept, dismiss, Back, or reset.
 A ``meta`` patch syncs the head of the page whose envelope carried it.
 
-A title from the layer's own page, carried by the layer body (the ``meta`` patch of an intercept page included, see `Opening another page's zone over the honest URL`_), a zone GET inside the layer, or a mutation fired from it, lasts as long as the layer.
-A title from the host page or a lower layer, carried by a poll of the base page, a lazy zone GET, or a stream the host subscribed, becomes the title the covering layer restores, so the newest title of the page underneath survives the close.
-That title shows at once when the covering layers set no title of their own, and otherwise the layer title stays in the tab until they close.
+Which page a title belongs to decides how long it lasts.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Title carried by
+     - Effect
+   * - The layer's own page, through the layer body, a zone GET inside the layer, or a mutation fired from it.
+       The ``meta`` patch of an intercept page is included, see `Opening another page's zone over its own URL`_.
+     - Lasts as long as the layer.
+   * - The host page or a lower layer, through a poll of the base page, a lazy zone GET, or a stream the host subscribed.
+     - Becomes the title the covering layer restores, so the newest title of the page underneath survives the close.
+       It shows at once when the covering layers set no title of their own.
+       Otherwise the layer title stays in the tab until they close.
+
 With nested layers each one restores the newest title of the layer below it.
 
-A mutation counts as the page its form sits in, the host page for a form outside every layer or inside a layer that pushed no URL, and the layer's own page for a form inside a layer that did.
+A mutation counts as the page its form sits in.
+That is the host page for a form outside every layer or inside a layer that pushed no URL, and the layer's own page for a form inside a layer that did.
 A programmatic ``Next.partial.apply()`` carries no page, so its title counts as the top layer's.
-A stream counts as the page that subscribed it only while that URL still matches the host or the pushed URL of a layer, and otherwise its title counts as the top layer's as well.
+A stream counts as the page that subscribed it only while that URL still matches the host or the pushed URL of a layer.
+Otherwise its title counts as the top layer's as well.
 
 .. _partial-server-layers:
 
@@ -126,7 +144,8 @@ Its signature is ``layer_open(*, zone=None, href=None)``, and the two keywords s
 
 A layer shows a zone of a page, uniformly.
 There is no separate mechanism for a whole page in a modal.
-A page that opens in a layer declares a zone with ``{% zone "name" %}``, and that name travels to ``layer_open`` or to ``data-next-layer``.
+A page that opens in a layer declares a zone with ``{% zone "name" %}``.
+That name travels to ``layer_open`` or to ``data-next-layer``.
 
 .. list-table::
    :header-rows: 1
@@ -160,16 +179,18 @@ A modal that shows a page's content takes the third form.
 An href without a zone raises ``LayerHrefWithoutZoneError``.
 A layer loads a zone, so an href that names no zone has nowhere to mount its content.
 To open a page in a layer, wrap the page content in a zone and pass the zone name.
-The href is validated same-site like every navigation sink, a cross-site value raises ``CrossSiteHrefError``.
+The href is validated same-site like every navigation sink.
+A cross-site value raises ``CrossSiteHrefError``.
 
-The client ``data-next-layer="record"`` opener and the server ``layer_open(href, zone)`` do the same work, both load a page zone into a layer.
+The client ``data-next-layer="record"`` opener and the server ``layer_open(href, zone)`` do the same work.
+Both load a page zone into a layer.
 
 Foreign-zone authorization
 --------------------------
 
 A modal body and a page-addressed zone ride ``X-Next-Origin`` so the server resolves the host page that owns the zone.
 The server authorizes the page behind every zone render whose own view did not run, the one the handler names and the one the origin names alike, raising ``ForeignPageNotAuthorizedError`` when that page may not be rendered for the requester.
-This keeps a page-addressed out-of-band render from reaching a zone the requester has no claim on.
+This keeps a page-addressed render in a response from reaching a zone the requester has no claim on.
 A foreign page whose module fails to import, or that sits under a ``page.py`` that fails to import, raises ``PageModuleImportError`` from the same authorization step in production too, rather than turning the in-flight request into a 404 and dropping the patches already queued for it.
 
 Styling layers and toasts
@@ -223,7 +244,6 @@ With Tailwind Play CDN ``@apply`` is available inside a ``<style type="text/tail
      }
    </style>
 
-The shared ``examples/_shared/static/shared/css/base.css`` file uses only the plain-CSS pattern shown above.
 The Tailwind ``@apply`` block is an alternative for a project that already runs Tailwind.
 
 See also

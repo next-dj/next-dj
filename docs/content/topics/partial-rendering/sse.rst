@@ -44,7 +44,8 @@ Each ``Patches`` the source yields becomes one ``next-patches`` event.
 The HTTP envelope shape is preserved and ``server_time`` is added only to the SSE data frame.
 Topic streams also add ``topic``, ``epoch``, and ``seq``.
 The active protocol backend owns the stream codec.
-A ``data-next-sse="/url/"`` element on the page opens the ``EventSource`` and routes each event into the same apply pipeline an HTTP response uses.
+A ``data-next-stream="/url/"`` element on the page opens an ``EventSource``, or the WebSocket when the server enables it, and routes each event into the same apply pipeline an HTTP response uses.
+``data-next-sse`` is an alias of the same attribute.
 
 The refresh fan-out
 -------------------
@@ -105,9 +106,25 @@ A mismatch raises :exc:`~django.core.exceptions.ImproperlyConfigured` when the r
 Without the guard the wrong-kind iterator buffers in full and hangs the stream before the first byte.
 Pair an async source with ASGI and a sync source with WSGI.
 
-A sync source under WSGI sends no heartbeat.
+A sync source under WSGI sends no heartbeat of its own.
 A blocked ``next()`` on a sync iterator has nothing to interrupt it without a thread, so a quiet sync stream stays quiet.
-A keepalive on a sync source is the source's own responsibility, for example a comment frame on a wait timeout.
+The source asks for a keepalive by yielding ``None``, and the stream writes a ``: heartbeat`` comment in its place.
+A sync source yields ``None`` whenever its wait times out.
+
+.. code-block:: python
+   :caption: stream/page.py
+
+   def patch_source(request: HttpRequest, poll_id: int) -> Iterator[Patches | None]:
+       """Yield one refresh per change and None on every quiet wait."""
+       while True:
+           change = broker.wait(poll_id, timeout=20)
+           if change is None:
+               yield None
+               continue
+           yield Patches(request, echo_of=change.request_id).refresh(zone="poll-results")
+
+An async source yields ``None`` the same way.
+The comment is not an envelope, so it does not count in ``envelopes_sent``.
 Under WSGI the stream also occupies one worker for the full life of the connection, so the recommendation is ASGI for any real workload.
 
 An async source under ASGI receives heartbeat comments.
@@ -123,10 +140,10 @@ One stream overrides the period with ``PatchEventStream(request, source, heartbe
      - Heartbeat
      - Worker cost
    * - Sync source, WSGI
-     - None, keepalive is the source's job
+     - None of its own, the source yields ``None`` for a keepalive
      - One worker per open connection
    * - Async source, ASGI
-     - Sent on a quiet period
+     - Sent on a quiet period, and on every ``None`` the source yields
      - One task per open connection
 
 To move a stream from sync to async, swap the broker's wake primitive for an async one and pass an async source to ``PatchEventStream``.

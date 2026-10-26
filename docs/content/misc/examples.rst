@@ -12,7 +12,8 @@ The ``kanban`` and ``live-polls`` folders add a Vite toolchain on top of that an
 Every application keeps its pages in ``pages/`` and its page-tree components in ``pages/_components/``, and every example registers a project-level ``DIRS`` root in ``PAGE_BACKENDS``.
 The ``admin`` example also serves the components at the root of its ``shadcn_admin`` application through ``COMPONENT_BACKENDS`` ``DIRS``.
 Three of them show realtime, ``live-polls``, ``kanban`` and ``observability``, and each one is described in its row below.
-Their streams run over SSE on any server, and the WebSocket transport needs an ASGI server, so install ``uvicorn`` and start the project with ``manage.py runserver``, whose ``next`` override serves the WebSocket upgrade.
+Their streams run over SSE on any server, and the WebSocket transport needs an ASGI server, so install ``uvicorn[standard]`` and start the project with ``manage.py runserver``, whose ``next`` override serves the WebSocket upgrade.
+That command wins only when ``next`` sits above ``django.contrib.staticfiles`` in ``INSTALLED_APPS``.
 The :repo:`examples README <blob/main/examples/README.md>` carries the run commands and the conventions every folder follows.
 
 Catalog
@@ -72,7 +73,7 @@ The table runs roughly in order of how much it assumes.
        Publishes to topics, replays the messages a reconnecting browser missed, and shows a presence count of the viewers.
        A staff host opens or closes polls and sets a deadline through Django admin.
        Server-side form validation enforces the deadline, and the live countdown uses the stream's estimated server clock.
-       The runtime opens the stream from ``data-next-sse``.
+       The runtime opens the stream from ``data-next-stream``.
        The locally bundled Vue component listens for context and topic events and uses a custom ``.vue`` asset kind.
        Titles the poll list with a ``metadata`` dict and each poll after its question through ``@page.metadata``.
        Serves each poll as an embeddable widget under a root layout with a document shell of its own.
