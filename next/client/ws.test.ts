@@ -1130,7 +1130,7 @@ describe("WebSocket close with replies in flight", () => {
   const target = "https://example.test/_next/form/u1/";
   const post = { method: "POST", body: "" };
 
-  it("keeps the socket until a tunneled reply lands and reads nothing else", async () => {
+  it("keeps the socket until a tunneled reply lands and only answers pings", async () => {
     const s = await subscribed();
     const reply = s.transport.http(target, post);
     const id = s.last().id;
@@ -1145,7 +1145,7 @@ describe("WebSocket close with replies in flight", () => {
     s.socket.message(JSON.stringify({ type: "http", id, status: 204 }));
     await expect(reply).resolves.toMatchObject({ status: 204 });
     expect(s.socket.control.close).toHaveBeenCalledOnce();
-    expect(s.socket.sent).toHaveLength(sent);
+    expect(s.socket.sent.slice(sent)).toEqual(['{"type":"pong"}']);
     expect(s.made.sink.patches).not.toHaveBeenCalled();
     expect(s.made.calls).toHaveLength(0);
     s.control.close();

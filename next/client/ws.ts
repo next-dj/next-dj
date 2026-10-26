@@ -349,10 +349,11 @@ export function createWebSocketTransport(
                 return;
               }
               if (!isRecord(frame)) return;
-              // A closed socket still draining its replies reads nothing else.
+              // A closed socket still draining its replies answers pings to stay alive.
               if (closed) {
                 if (frame.type === "ack" || frame.type === "http")
                   link?.replies.get(String(frame.id))?.(frame);
+                else if (frame.type === "ping") link?.send('{"type":"pong"}');
                 return;
               }
               if (frame.type === "hello") {

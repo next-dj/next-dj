@@ -493,7 +493,7 @@ The first ``connecting`` of a connection names the configured transport.
 A connection is ``connecting`` while it opens and again while a dropped socket or ``EventSource`` waits to reconnect, ``open`` once the transport is up, and ``closed`` when it is paused, removed, or ended.
 A page loaded in a hidden tab starts paused and opens its connections on the first show.
 A paused WebSocket reports ``closed`` at once but stays open until the tunneled requests and acknowledged ``up`` frames sent on it before the pause get their replies, each within its own timeout.
-While it drains, it ignores every frame except those replies.
+While it drains, it answers the server ping and ignores every other frame except those replies.
 A ``next-end`` frame, sent when the topic authorizer denies a grant, is terminal, so the connection closes for good, its ``next:stream-state`` detail also carries the frame's ``code``, and ``partial:error`` of kind ``network`` fires with that code as its ``error``.
 Only an SSE stream carries ``next-end``.
 A WebSocket has no end frame, and a denied grant there closes the socket with ``4403`` after an ``error`` frame, which sends that stream URL to SSE for the life of the page, where the authorizer answers with ``next-end``.
