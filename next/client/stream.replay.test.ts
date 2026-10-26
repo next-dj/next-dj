@@ -527,3 +527,40 @@ describe("sse event ids", () => {
     sse._reset();
   });
 });
+
+describe("stream cursor bounds", () => {
+  const cursors = (harness: Harness): unknown[] =>
+    harness.subs().map((sub) => Object.keys((sub as { last_seq: object }).last_seq));
+
+  it("drops the cursor of a topic a later hello no longer grants", async () => {
+    const harness = wsHarness();
+    const sse = start(harness);
+    sse.scan(document);
+    await harness.connect();
+    harness.hello({ room: { epoch: "e", seq: 0 }, gone: { epoch: "e", seq: 0 } });
+    harness.send({ ...frame(1), topic: "gone" });
+    await harness.drop();
+    await harness.connect();
+    harness.hello(position(0));
+    await harness.drop();
+    await harness.connect();
+    expect(cursors(harness)).toEqual([[], ["room", "gone"], ["room"]]);
+    sse._reset();
+  });
+
+  it("keeps the cursor of the newest topics within the server limit", async () => {
+    const harness = wsHarness();
+    const sse = start(harness);
+    sse.scan(document);
+    await harness.connect();
+    harness.hello(position(0));
+    for (let i = 0; i < 70; i += 1) harness.send({ ...frame(1), topic: `t${i}` });
+    await harness.drop();
+    await harness.connect();
+    const sent = cursors(harness)[1] as string[];
+    expect(sent).toHaveLength(64);
+    expect(sent[0]).toBe("t6");
+    expect(sent.at(-1)).toBe("t69");
+    sse._reset();
+  });
+});

@@ -533,6 +533,8 @@ def test_failing_app_is_internal(caplog: pytest.LogCaptureFixture) -> None:
         (b"csrftoken=secret; expires=whenever", False),
         (b"", False),
         (b"bad name=1", False),
+        (b"bad@name=1", False),
+        (b"csrftoken=secret, bad@name=1", False),
     ],
 )
 def test_set_cookie_passes_only_when_it_repeats_the_cookie(
@@ -569,6 +571,73 @@ def test_cookie_warning_names_cookies_never_values(
         "Realtime tunnel dropped a reply that sets cookies ['messages', 'sessionid'] "
         f"on POST {_ACTION}, status 200"
     )
+
+
+@pytest.mark.parametrize(
+    ("events", "refusal"),
+    [
+        ((_bare(403, (b"set-cookie", b"csrftoken=new")), _body()), Refusal.STALE),
+        (
+            (_bare(421, (b"x-next-transport", b"http"), (b"set-cookie", b"t=1")),),
+            Refusal.TRANSPORT,
+        ),
+        ((_bare(200, (b"set-cookie", b"theme=dark")), _body()), Refusal.TRANSPORT),
+    ],
+)
+def test_refusal_of_an_unserved_reply_wins_over_its_cookies(
+    events: tuple[dict[str, object], ...], refusal: Refusal
+) -> None:
+    assert _run(_App(*events), _request()) is refusal
+    assert refusal.retry is True
+
+
+class _SlowRouting(_Routed):
+    """A tunnel whose URL resolution waits on the test, as a cold URLconf import."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def routes_to_action(self, path_info: str) -> bool:
+        self.entered.set()
+        self.release.wait(5)
+        return True
+
+
+def test_a_request_still_routing_holds_its_slot() -> None:
+    async def scenario() -> list[Reply | Refusal]:
+        tunnel = _SlowRouting(
+            _App(), websocket_scope(_CSRF_COOKIE), _limits(concurrency=1)
+        )
+        first = asyncio.create_task(tunnel(_request(), connection="c"))
+        await asyncio.to_thread(tunnel.entered.wait, 5)
+        burst = await tunnel(_request(), connection="c")
+        tunnel.release.set()
+        return [burst, await first, await tunnel(_request(), connection="c")]
+
+    answers = asyncio.run(scenario())
+    assert answers == [
+        Refusal.LIMIT,
+        Reply(200, _MARKED, "ok"),
+        Reply(200, _MARKED, "ok"),
+    ]
+
+
+def test_a_cancelled_routing_frees_its_slot() -> None:
+    async def scenario() -> Reply | Refusal:
+        tunnel = _SlowRouting(
+            _App(), websocket_scope(_CSRF_COOKIE), _limits(concurrency=1)
+        )
+        first = asyncio.create_task(tunnel(_request(), connection="c"))
+        await asyncio.to_thread(tunnel.entered.wait, 5)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        tunnel.release.set()
+        return await tunnel(_request(), connection="c")
+
+    assert asyncio.run(scenario()) == Reply(200, _MARKED, "ok")
 
 
 class _Lingering(_App):

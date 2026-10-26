@@ -207,6 +207,8 @@ Stream telemetry
 It fires when the source is exhausted or the response closes its iterator.
 The count does not confirm network delivery after a disconnect.
 A blocked sync source cannot observe a disconnect until another item is yielded or the source returns.
+Both signals go out with ``send_robust``, or ``asend_robust`` from an async source, so a receiver that raises is logged and never ends the stream.
+Under ASGI a synchronous receiver runs off the event loop, so it may query the database, and an ``async def`` receiver is awaited.
 
 .. code-block:: python
    :caption: notes/signals.py

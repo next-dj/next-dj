@@ -36,6 +36,8 @@ from .tickets import import_callable
 
 
 _TOPIC_DENIED = StreamEnd("auth")
+_AUTH_MIDDLEWARE_MODULE = "django.contrib.auth.middleware"
+_AUTH_MIDDLEWARE_SETUP = "AuthenticationMiddleware.process_request."
 
 
 if TYPE_CHECKING:
@@ -282,7 +284,7 @@ class TopicStream(PatchStreamWriter):
         if message is None:
             return None
         if message.seq and self._transform is not None:
-            return self._item(message, transformed(message, self._transform(message)))
+            return self._item(message, transformed(message, self._transform))
         return self._item(message, message)
 
     async def _async_messages(
@@ -347,8 +349,8 @@ class TopicStream(PatchStreamWriter):
         if message is None:
             return None
         if message.seq and self._transform is not None:
-            output = await run_detached(self._transform, message)
-            return self._item(message, transformed(message, output))
+            result = await run_detached(transformed, message, self._transform)
+            return self._item(message, result)
         return self._item(message, message)
 
     def _item(self, message: Message, result: Message | None) -> Message | StreamSkip:
@@ -453,20 +455,31 @@ class _NoAsyncItems:
 
 
 def _stream_user(request: HttpRequest, session_key: str | None) -> object:
-    """Return the request's user, an unloaded lazy one swapped for the stored session's.
+    """Return the request's user, Django's unloaded lazy one swapped for the session's.
 
     The request gets the swap too, as loading Django's lazy user may rotate the key.
     """
     user = getattr(request, "user", None)
-    if (
-        session_key is None
-        or not isinstance(user, SimpleLazyObject)
-        or user._wrapped is not empty
-    ):
+    if session_key is None or not _unloaded_auth_user(user):
         return user
     baseline = SimpleLazyObject(partial(_stored_user, session_key))
     request.user = cast("AbstractBaseUser | AnonymousUser", baseline)
     return baseline
+
+
+def _unloaded_auth_user(user: object) -> bool:
+    """Whether `user` is the lazy user `AuthenticationMiddleware` set, still unloaded.
+
+    Another middleware's lazy user carries state of its own, so it is never replaced.
+    """
+    if not isinstance(user, SimpleLazyObject) or user._wrapped is not empty:
+        return False
+    setup = user._setupfunc
+    module = getattr(setup, "__module__", None)
+    qualname = getattr(setup, "__qualname__", "")
+    return module == _AUTH_MIDDLEWARE_MODULE and qualname.startswith(
+        _AUTH_MIDDLEWARE_SETUP
+    )
 
 
 def _stored_user(session_key: str) -> object:

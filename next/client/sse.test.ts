@@ -1744,6 +1744,66 @@ describe("createSse", () => {
       null,
     );
   });
+
+  it("opens a stream scanned in a background tab once on its first show", () => {
+    document.body.innerHTML =
+      '<div data-next-stream="/stream/"></div><div data-next-zone="z"></div>';
+    const { adapter, opened } = mockSource();
+    const visibility = manualVisibility();
+    visibility.setHidden(true);
+    let clock = 0;
+    const sse = makeSse(adapter, visibility, { now: () => clock });
+    sse.scan(document);
+    expect(opened).toHaveLength(0);
+    clock = 5000;
+    visibility.setHidden(false);
+    visibility.setHidden(false);
+    expect(opened).toHaveLength(1);
+    expect(fetched).toMatchObject([{ zone: "z" }]);
+    visibility.setHidden(true);
+    visibility.setHidden(true);
+    expect(opened[0]!.closed).toBe(true);
+    visibility.setHidden(false);
+    expect(opened).toHaveLength(2);
+    sse._reset();
+  });
+
+  it("reports the transport a websocket stream fell back to", () => {
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
+    let sink: TransportSink | undefined;
+    const control = { transport: "ws", close: () => undefined };
+    const sse = createSse({
+      apply: (raw) => applied.push(raw),
+      fetch: () => Promise.resolve(),
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      document,
+      visibility: manualVisibility(),
+      useWebSocket: true,
+      websocket: () => ({
+        up: vi.fn(),
+        http: vi.fn(),
+        renew: vi.fn(),
+        tag: vi.fn(),
+        name: "ws",
+        open: (_url, opened) => {
+          sink = opened;
+          return control;
+        },
+      }),
+    });
+    sse.scan(document);
+    control.transport = "sse";
+    sink!.opened();
+    expect(
+      dispatched
+        .filter((d) => d.event === "next:stream-state")
+        .map((d) => [d.detail.transport, d.detail.state]),
+    ).toEqual([
+      ["ws", "connecting"],
+      ["sse", "open"],
+    ]);
+    sse._reset();
+  });
 });
 
 describe("stream frame boundary", () => {

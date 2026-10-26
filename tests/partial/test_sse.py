@@ -128,7 +128,25 @@ class TestRetryOption:
         with _partial_backend_config(_NO_SSE_BACKEND):
             assert _retry_ms() == 3000
 
-    @pytest.mark.parametrize("value", ["fast", True], ids=["non_numeric", "bool"])
+    @pytest.mark.parametrize("value", [0, 1500], ids=["zero", "whole"])
+    def test_retry_keeps_a_whole_millisecond_value(
+        self, request_obj: object, value: int
+    ) -> None:
+        backend = [
+            {
+                "BACKEND": "next.partial.JsonPartialProtocolBackend",
+                "OPTIONS": {"SSE": {"RETRY_MS": value}},
+            }
+        ]
+        with _partial_backend_config(backend):
+            frames = _consume(PatchEventStream(request_obj, iter(())))
+        assert frames[0] == f"retry: {value}\n\n".encode()
+
+    @pytest.mark.parametrize(
+        "value",
+        ["fast", True, 0.5, 1500.0, -1],
+        ids=["non_numeric", "bool", "fraction", "float", "negative"],
+    )
     def test_retry_falls_back_on_a_value_that_is_no_interval(
         self, value: object
     ) -> None:
@@ -531,10 +549,108 @@ class TestOpenedSignalListeners:
         self, request_obj: object, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         sent: list[object] = []
-        monkeypatch.setattr(sse_stream_opened, "send", lambda **kw: sent.append(kw))
+        monkeypatch.setattr(
+            sse_stream_opened, "send_robust", lambda **kw: sent.append(kw)
+        )
         monkeypatch.setattr(sse_stream_opened, "has_listeners", lambda _s=None: False)
         _consume(PatchEventStream(request_obj, [_patches()]))
         assert sent == []
+
+
+def _in_event_loop() -> bool:
+    """Whether the calling thread runs an event loop."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
+async def _agen() -> AsyncIterator[Patches]:
+    yield _patches()
+
+
+_FAILED_RECEIVER = (
+    "Error calling _failing_receiver in Signal.send_robust() (observer broke)"
+)
+
+
+def _failing_receiver(**kwargs: object) -> None:
+    msg = "observer broke"
+    raise RuntimeError(msg)
+
+
+class TestSignalDelivery:
+    """Stream signals reach sync receivers off the loop and never break the stream."""
+
+    def test_async_stream_runs_sync_receivers_off_the_loop(
+        self, async_request_obj: object
+    ) -> None:
+        seen: list[tuple[str, bool]] = []
+
+        def opened(**kwargs: object) -> None:
+            seen.append(("opened", _in_event_loop()))
+
+        def closed(**kwargs: object) -> None:
+            seen.append(("closed", _in_event_loop()))
+
+        sse_stream_opened.connect(opened, weak=False)
+        sse_stream_closed.connect(closed, weak=False)
+        try:
+            asyncio.run(_aconsume(PatchEventStream(async_request_obj, _agen())))
+        finally:
+            sse_stream_opened.disconnect(opened)
+            sse_stream_closed.disconnect(closed)
+        assert seen == [("opened", False), ("closed", False)]
+
+    def test_async_stream_awaits_async_receivers(
+        self, async_request_obj: object
+    ) -> None:
+        heard: list[object] = []
+
+        async def opened(**kwargs: object) -> None:
+            heard.append(("opened", kwargs["request"]))
+
+        async def closed(**kwargs: object) -> None:
+            heard.append(("closed", kwargs["envelopes_sent"]))
+
+        sse_stream_opened.connect(opened, weak=False)
+        sse_stream_closed.connect(closed, weak=False)
+        try:
+            asyncio.run(_aconsume(PatchEventStream(async_request_obj, _agen())))
+        finally:
+            sse_stream_opened.disconnect(opened)
+            sse_stream_closed.disconnect(closed)
+        assert heard == [("opened", async_request_obj), ("closed", 1)]
+
+    def test_failing_receiver_leaves_the_sync_stream_whole(
+        self, request_obj: object, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        sse_stream_opened.connect(_failing_receiver, weak=False)
+        sse_stream_closed.connect(_failing_receiver, weak=False)
+        try:
+            frames = _consume(PatchEventStream(request_obj, [_patches()]))
+        finally:
+            sse_stream_opened.disconnect(_failing_receiver)
+            sse_stream_closed.disconnect(_failing_receiver)
+        assert frames[0] == b"retry: 3000\n\n"
+        assert frames[1].startswith(b"event: next-patches")
+        assert [r.getMessage() for r in caplog.records].count(_FAILED_RECEIVER) == 2
+
+    def test_failing_receiver_leaves_the_async_stream_whole(
+        self, async_request_obj: object, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        sse_stream_opened.connect(_failing_receiver, weak=False)
+        sse_stream_closed.connect(_failing_receiver, weak=False)
+        try:
+            response = PatchEventStream(async_request_obj, _agen())
+            frames = asyncio.run(_aconsume(response))
+        finally:
+            sse_stream_opened.disconnect(_failing_receiver)
+            sse_stream_closed.disconnect(_failing_receiver)
+        assert frames[0] == b"retry: 3000\n\n"
+        assert frames[1].startswith(b"event: next-patches")
+        assert [r.getMessage() for r in caplog.records].count(_FAILED_RECEIVER) == 2
 
 
 class TestTopicFrameMetadata:

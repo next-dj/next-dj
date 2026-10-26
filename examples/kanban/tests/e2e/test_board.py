@@ -3,7 +3,7 @@ from collections.abc import Callable
 import pytest
 from e2e_support.browser import PageProbe, expect_no_partial_request, wait_for_runtime
 from kanban.models import Board, Card, Column
-from playwright.sync_api import Locator, Page, Response, Route, expect
+from playwright.sync_api import Locator, Page, Request, Response, Route, expect
 
 
 pytestmark = pytest.mark.e2e
@@ -220,10 +220,48 @@ def test_a_card_over_the_wip_limit_is_rolled_back_and_the_badge_holds(
 
     add_card(page, in_progress, "One over the limit")
 
-    expect(page.locator(ALERT)).to_contain_text("Card rejected by server.")
+    expect(page.locator(ALERT)).to_contain_text("Column has reached its WIP limit.")
     expect(badge).to_have_text("2/2")
     expect(column_of(page, in_progress).locator(CARD)).to_have_count(2)
     assert Card.objects.filter(title="One over the limit").count() == 0
+
+
+DROP_WITHOUT_A_CARD = """
+(columnId) => {
+  const column = document.querySelector(`[data-kanban-column='${columnId}']`);
+  column.dispatchEvent(
+    new DragEvent("drop", { dataTransfer: new DataTransfer(), bubbles: true }),
+  );
+}
+"""
+
+
+def test_a_drop_that_carries_no_card_posts_nothing(
+    page: Page,
+    open_board: Callable[..., None],
+    base_url: str,
+    board: Board,
+    backlog: Column,
+    done: Column,
+) -> None:
+    open_board(page, base_url, board)
+    posts: list[str] = []
+
+    def record_post(request: Request) -> None:
+        if request.method == "POST":
+            posts.append(request.url)
+
+    page.on("request", record_post)
+    card = backlog.cards.get(title="Audit static pipeline")
+
+    page.evaluate(DROP_WITHOUT_A_CARD, done.pk)
+    move_card(page, card_of(page, card), column_of(page, done))
+
+    expect(column_of(page, done).locator(CARD)).to_have_count(2)
+    expect(page.locator(ALERT)).to_have_count(0)
+    assert len(posts) == 1
+    card.refresh_from_db()
+    assert card.column_id == done.pk
 
 
 def test_renaming_and_archiving_keep_the_header_count_agreed_everywhere(

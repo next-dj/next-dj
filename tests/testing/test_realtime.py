@@ -115,6 +115,43 @@ class TestWebSocketCommunicator:
 
         asyncio.run(scenario())
 
+    def test_disconnect_fails_on_an_app_that_outlives_the_timeout(self) -> None:
+        exited: list[bool] = []
+
+        async def hung(
+            scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable
+        ) -> None:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                exited.append(True)
+
+        async def scenario() -> float:
+            communicator = WebSocketCommunicator(hung, "/", timeout=0.05)
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            with pytest.raises(AssertionError, match=r"ran on 0\.05s after"):
+                await communicator.disconnect()
+            return loop.time() - started
+
+        assert asyncio.run(scenario()) < 1
+        assert exited == [True]
+
+    def test_disconnect_raises_the_error_the_app_exits_with(self) -> None:
+        async def failing(
+            scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable
+        ) -> None:
+            await receive()
+            msg = "app failed"
+            raise RuntimeError(msg)
+
+        async def scenario() -> None:
+            communicator = WebSocketCommunicator(failing, "/")
+            with pytest.raises(RuntimeError, match="app failed"):
+                await communicator.disconnect()
+
+        asyncio.run(scenario())
+
     def test_connect_rejects_an_unexpected_event(self) -> None:
         async def scenario() -> None:
             send = {"type": "websocket.send", "text": "early"}

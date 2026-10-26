@@ -5,7 +5,6 @@ from types import SimpleNamespace
 import pytest
 from django.contrib.auth.models import AnonymousUser
 
-from next.partial import Patches
 from next.realtime import WebSocketApp, socket as socket_module
 from next.realtime.attendance import Attendance
 from next.realtime.backends import BrokerBackend, MemoryBroker
@@ -46,13 +45,6 @@ def identify_guest(user: object, topic: str) -> dict[str, object]:
 
 def identify_visitor(user: object, topic: str, subject: str) -> dict[str, object]:
     return {"name": f"Guest {subject[:4]}"}
-
-
-def failing_transform(message: Message) -> Patches:
-    if message.envelope.ops[0].op == "event":
-        return Patches(None).event("room:update", {"seq": message.seq})
-    msg = "transform failed"
-    raise RuntimeError(msg)
 
 
 def _broker() -> MemoryBroker:
@@ -219,10 +211,19 @@ def test_cancelling_serve_leaves_the_roster() -> None:
     asyncio.run(scenario())
 
 
-def test_failing_transform_leaves_the_roster(caplog: pytest.LogCaptureFixture) -> None:
-    ticket = issue_session_ticket(
-        presence=True, transform_ref=f"{_HERE}.failing_transform"
-    )
+def test_a_failing_stream_leaves_the_roster(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ticket = issue_session_ticket(presence=True)
+    encode = socket_module.frames.patches
+
+    def failing_patches(message: Message, *args: object, **kwargs: object) -> str:
+        if message.seq:
+            msg = "encoding failed"
+            raise RuntimeError(msg)
+        return encode(message, *args, **kwargs)
+
+    monkeypatch.setattr(socket_module.frames, "patches", failing_patches)
 
     async def scenario() -> None:
         broker = _broker()

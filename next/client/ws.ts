@@ -8,6 +8,7 @@ import type { FetchAdapter } from "./wire";
 const NEGOTIATION_HEADER = "X-Next-Transport";
 const MAX_FAILURES = 3;
 const NEGOTIATION_MS = 5000;
+// Used until a hello names the server's upstream handler timeout.
 const ACK_MS = 5000;
 // Seconds, assumed until a hello names its own.
 const HEARTBEAT = 25;
@@ -36,8 +37,11 @@ interface Link {
   off: boolean;
   frame: number;
   up: number;
+  ack: number;
   renewed: boolean;
   renew: () => void;
+  // Set once the stream closed it, so the last reply in flight closes the socket.
+  closing?: () => void;
   connection?: string | undefined;
 }
 
@@ -91,8 +95,9 @@ export function createWebSocketTransport(
   let secret = csrfSecret(deps.token);
 
   const drain = (link: Link): void => {
-    if (link.born !== generation && link.replies.size === 0 && links.has(link))
-      link.renew();
+    if (link.replies.size > 0) return;
+    if (link.closing !== undefined) link.closing();
+    else if (link.born !== generation && links.has(link)) link.renew();
   };
 
   const ask = (
@@ -133,10 +138,11 @@ export function createWebSocketTransport(
       return meta;
     },
     up(topic, name, data, ack) {
+      const link = holder(topic);
       const reply = ask(
-        holder(topic),
+        link,
         { type: "up", topic, name, data },
-        ACK_MS,
+        link?.ack ?? ACK_MS,
         "up",
         ack,
       );
@@ -191,7 +197,10 @@ export function createWebSocketTransport(
       links.forEach(drain);
     },
     open(url, sink, cursor = new Map()): TransportControl {
-      if (denied.has(url)) return deps.fallback.open(url, sink);
+      if (denied.has(url)) {
+        const sse = deps.fallback.open(url, sink);
+        return { transport: deps.fallback.name, close: () => sse.close() };
+      }
       let closed = false;
       let fallbackMode = false;
       let failures = 0;
@@ -285,6 +294,10 @@ export function createWebSocketTransport(
           const born = generation;
           const ended = (code: number): void => {
             if (active !== opened) return;
+            if (closed) {
+              quiet();
+              return;
+            }
             if (code === 4401 && !reauthed) {
               reauthed = true;
               drop();
@@ -307,6 +320,7 @@ export function createWebSocketTransport(
                 off: true,
                 frame: MAX_FRAME,
                 up: MAX_UP,
+                ack: ACK_MS,
                 renewed: renewing,
                 renew: () => {
                   drop();
@@ -326,7 +340,7 @@ export function createWebSocketTransport(
               sink.opened();
             },
             (body) => {
-              if (stopped() || active !== opened || typeof body !== "string") return;
+              if (active !== opened || typeof body !== "string") return;
               let frame: unknown;
               try {
                 frame = JSON.parse(body);
@@ -335,6 +349,12 @@ export function createWebSocketTransport(
                 return;
               }
               if (!isRecord(frame)) return;
+              // A closed socket still draining its replies reads nothing else.
+              if (closed) {
+                if (frame.type === "ack" || frame.type === "http")
+                  link?.replies.get(String(frame.id))?.(frame);
+                return;
+              }
               if (frame.type === "hello") {
                 reauthed = false;
                 const beat = frame.heartbeat;
@@ -348,6 +368,10 @@ export function createWebSocketTransport(
                   const tunnel = frame.tunnel;
                   const upstream = isRecord(frame.upstream) ? frame.upstream : {};
                   link.up = positive(upstream.frame, MAX_UP);
+                  link.ack =
+                    typeof upstream.timeout === "number" && upstream.timeout > 0
+                      ? (upstream.timeout + MARGIN_S) * 1000
+                      : ACK_MS;
                   link.connection = asString(frame.connection);
                   if (isRecord(tunnel)) {
                     link.off = false;
@@ -397,13 +421,29 @@ export function createWebSocketTransport(
 
       void connect();
       return {
+        get transport() {
+          return fallbackMode ? deps.fallback.name : "ws";
+        },
         close() {
           if (closed) return;
           closed = true;
-          quiet();
           controller?.abort();
           clearTimeout(retry);
-          active?.close();
+          const gone = link;
+          const socketControl = active;
+          const finish = (): void => {
+            quiet();
+            socketControl?.close();
+          };
+          if (gone === undefined || gone.replies.size === 0) {
+            finish();
+            return;
+          }
+          // A sent request may have run on the server, so its reply is awaited first.
+          links.delete(gone);
+          clearTimeout(watchdog);
+          clearTimeout(healthy);
+          gone.closing = finish;
         },
       };
     },

@@ -1,6 +1,7 @@
 """Publish subscriber-safe patch envelopes to realtime topics and read who is there."""
 
 import json
+import logging
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Literal, overload
@@ -17,6 +18,8 @@ from .manager import broker_manager
 from .messages import Message, validate_topic
 from .roster import Presence, presence_broker
 
+
+logger = logging.getLogger(__name__)
 
 _ALLOWED_OPS = frozenset({"refresh", "event", "toast", "remove"})
 
@@ -64,11 +67,24 @@ def _validate_topic_payload(envelope: Envelope) -> Envelope:
     return Envelope.from_dict(snapshot)
 
 
-def transformed(message: Message, result: object) -> Message | None:
-    """Return the message carrying a subscriber transform's result, None for a skip."""
-    if result is None:
+def transformed(
+    message: Message, transform: Callable[[Message], object]
+) -> Message | None:
+    """Return the message a subscriber transform makes of it, None for a skip.
+
+    A transform that raises or returns an unsafe payload skips the message it failed on.
+    """
+    try:
+        result = transform(message)
+        envelope = None if result is None else _prepare(result)
+    except Exception:
+        logger.exception(
+            "Realtime transform failed on %s seq %s, skipping it",
+            message.topic,
+            message.seq,
+        )
         return None
-    return replace(message, envelope=_prepare(result))
+    return None if envelope is None else replace(message, envelope=envelope)
 
 
 def _publish_now(topic: str, envelope: Envelope) -> Message:

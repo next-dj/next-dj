@@ -36,6 +36,10 @@ class ExitedError(Exception):
     """Raised in place of `os._exit`, which would end the test process."""
 
 
+class ProjectCommand(Command):
+    """A project's own runserver built on the framework command."""
+
+
 @pytest.fixture(autouse=True)
 def _withdrawn_websocket() -> Generator[None, None, None]:
     with override_websocket_mount():
@@ -52,9 +56,11 @@ def uvicorn(monkeypatch) -> list[tuple[object, dict[str, object]]]:
     return calls
 
 
-def _run(*args: str, **options: object) -> tuple[str, str]:
+def _run(
+    *args: str, command: type[Command] = Command, **options: object
+) -> tuple[str, str]:
     out, err = StringIO(), StringIO()
-    call_command(Command(), "--noreload", *args, stdout=out, stderr=err, **options)
+    call_command(command(), "--noreload", *args, stdout=out, stderr=err, **options)
     return out.getvalue(), err.getvalue()
 
 
@@ -148,6 +154,13 @@ class TestUvicorn:
         _run("--insecure")
         assert isinstance(uvicorn[0][0], ASGIStaticFilesHandler)
 
+    @override_settings(DEBUG=True)
+    def test_a_subclass_keeps_the_static_options(self, uvicorn) -> None:
+        _run(command=ProjectCommand)
+        _run("--nostatic", command=ProjectCommand)
+        assert isinstance(uvicorn[0][0], ASGIStaticFilesHandler)
+        assert uvicorn[1][0] is named_app
+
     def test_warns_when_no_websocket_library_is_installed(
         self, uvicorn, monkeypatch
     ) -> None:
@@ -212,6 +225,13 @@ class TestWithoutUvicorn:
         addr, port, handler = wsgi[0]
         assert (addr, port) == ("127.0.0.1", 8000)
         assert isinstance(handler, StaticFilesHandler)
+
+    @override_settings(DEBUG=True)
+    def test_a_subclass_serves_wsgi_with_static_files(self, wsgi) -> None:
+        _run("--skip-checks", command=ProjectCommand)
+        _run("--skip-checks", "--nostatic", command=ProjectCommand)
+        assert isinstance(wsgi[0][2], StaticFilesHandler)
+        assert not isinstance(wsgi[1][2], StaticFilesHandler)
 
     @override_settings(DEBUG=True)
     def test_nostatic_serves_the_bare_handler(self, wsgi) -> None:

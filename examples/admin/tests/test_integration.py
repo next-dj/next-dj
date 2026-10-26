@@ -2527,8 +2527,7 @@ def quick_save(client: NextClient, book: Book, **fields: str):
         "admin:change",
         _book_payload(book, **fields),
         origin=change_url(book),
-        partial=True,
-        zones=QUICK_EDIT,
+        partial=QUICK_EDIT,
     )
 
 

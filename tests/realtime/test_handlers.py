@@ -1,7 +1,8 @@
 import asyncio
+import functools
 import threading
 import types
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import cast
 from unittest.mock import patch
 
@@ -47,6 +48,55 @@ def _first(upstream: Upstream) -> None:
 
 def _second(upstream: Upstream) -> None:
     del upstream
+
+
+def _shared[F: Callable[..., object]](handler: F) -> F:
+    """Wrap a handler the way a project-wide decorator with `functools.wraps` does."""
+
+    @functools.wraps(handler)
+    def wrapper(*args: object, **kwargs: object) -> object:
+        return handler(*args, **kwargs)
+
+    return cast("F", wrapper)
+
+
+def _unnamed[F: Callable[..., object]](handler: F) -> F:
+    """Wrap a handler without leaving a trace of it."""
+
+    def wrapper(*args: object, **kwargs: object) -> object:
+        return handler(*args, **kwargs)
+
+    return cast("F", wrapper)
+
+
+def _defined_in(filename: str, line: int = 1) -> Callable[[Upstream], None]:
+    """Return `_first` as if `def handle` stood at `line` of another module."""
+    code = _first.__code__.replace(
+        co_filename=filename,
+        co_firstlineno=line,
+        co_name="handle",
+        co_qualname="handle",
+    )
+    return types.FunctionType(code, globals(), "handle")
+
+
+class _Calling:
+    """A handler object whose `__call__` is a coroutine function."""
+
+    def __init__(self) -> None:
+        self.threads: list[threading.Thread] = []
+
+    async def __call__(self, upstream: Upstream) -> None:
+        self.threads.append(threading.current_thread())
+
+
+class _Slotted:
+    """A sync handler object no weak reference reaches."""
+
+    __slots__ = ()
+
+    def __call__(self, upstream: Upstream) -> None:
+        del upstream
 
 
 class TestPattern:
@@ -192,6 +242,40 @@ class TestRegistry:
         assert held.duplicates() == ((first, other),)
         assert held.version == 1
 
+    def test_a_shared_decorator_keeps_two_modules_apart(self) -> None:
+        held = HandlerRegistry()
+        first = held.add(Route.bind("a", "typing", _shared(_defined_in("one.py"))))
+        other = Route.bind("a", "typing", _shared(_defined_in("two.py")))
+        assert held.add(other) is first
+        assert held.duplicates() == ((first, other),)
+
+    def test_a_shared_decorator_over_a_redefinition_replaces_its_pair(self) -> None:
+        held = HandlerRegistry()
+        held.add(Route.bind("a", "typing", _shared(_defined_in("one.py"))))
+        again = held.add(Route.bind("a", "typing", _shared(_defined_in("one.py"))))
+        assert list(held) == [again]
+        assert held.duplicates() == ()
+
+    def test_two_definitions_in_one_file_are_duplicates(self) -> None:
+        held = HandlerRegistry()
+        held.add(Route.bind("a", "typing", _defined_in("one.py")))
+        held.add(Route.bind("a", "typing", _defined_in("one.py", line=9)))
+        assert len(held.duplicates()) == 1
+
+    def test_a_closure_without_wraps_is_a_duplicate(self) -> None:
+        held = HandlerRegistry()
+        held.add(Route.bind("a", "typing", _unnamed(_first)))
+        held.add(Route.bind("a", "typing", _unnamed(_second)))
+        assert len(held.duplicates()) == 1
+
+    def test_a_wrapper_cycle_is_a_duplicate(self) -> None:
+        looped = _shared(_first)
+        looped.__wrapped__ = looped
+        held = HandlerRegistry()
+        held.add(Route.bind("a", "typing", looped))
+        held.add(Route.bind("a", "typing", _shared(_first)))
+        assert len(held.duplicates()) == 1
+
     def test_a_handler_without_code_is_a_duplicate(self) -> None:
         held = HandlerRegistry()
         first = held.add(Route.bind("a", "typing", print))
@@ -279,6 +363,27 @@ class TestDispatch:
         assert threads[0] is not threading.main_thread()
         assert threads[0].name.startswith("next-handler")
 
+    def test_a_sync_wrapper_over_a_coroutine_is_awaited(
+        self, registry: HandlerRegistry
+    ) -> None:
+        done: list[str] = []
+
+        async def typing(event: Upstream) -> None:
+            await asyncio.sleep(0)
+            done.append(event.name)
+
+        realtime.on("lobby", "typing")(_shared(typing))
+        assert _send("lobby", "typing") is True
+        assert done == ["typing"]
+
+    def test_an_object_with_an_async_call_runs_on_the_loop(
+        self, registry: HandlerRegistry
+    ) -> None:
+        handler = _Calling()
+        realtime.on("lobby", "typing")(handler)
+        assert _send("lobby", "typing") is True
+        assert handler.threads == [threading.main_thread()]
+
     def test_the_decorator_returns_the_function(
         self, registry: HandlerRegistry
     ) -> None:
@@ -294,6 +399,16 @@ class TestDispatch:
         [event] = recorder.events
         assert event.sender is _first
         assert event.kwargs["upstream"].data == 1
+
+    def test_the_signal_names_a_handler_without_weak_references(
+        self, registry: HandlerRegistry
+    ) -> None:
+        handler = _Slotted()
+        realtime.on("lobby", "cursor")(handler)
+        with capture_signals(upstream_received) as recorder:
+            assert _send("lobby", "cursor") is True
+        [event] = recorder.events
+        assert event.sender is handler
 
     def test_a_handler_error_reaches_the_caller(
         self, registry: HandlerRegistry

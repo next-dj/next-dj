@@ -42,11 +42,6 @@ def _room_authorizer(_user: object, topic: str) -> bool:
     return _GRANTS["room"] and topic.startswith("room:")
 
 
-def _failing_transform(_message: Message) -> None:
-    msg = "transform failed"
-    raise RuntimeError(msg)
-
-
 @pytest.fixture(autouse=True)
 def _grants() -> Iterator[None]:
     _GRANTS["room"] = True
@@ -123,6 +118,38 @@ async def _async_drop() -> AsyncIterator[Message | None]:
     yield
 
 
+class _BreakingBroker(MemoryBroker):
+    """A memory broker whose live subscription raises an unexpected error after hello."""
+
+    def subscribe(self, topics, *, timeout):
+        return _broken()
+
+    def asubscribe(self, topics, *, timeout):
+        return _abroken()
+
+
+@contextmanager
+def _broken() -> Iterator[Iterator[Message | None]]:
+    yield _sync_break()
+
+
+def _sync_break() -> Iterator[Message | None]:
+    msg = "subscription failed"
+    raise RuntimeError(msg)
+    yield
+
+
+@asynccontextmanager
+async def _abroken() -> AsyncIterator[AsyncIterator[Message | None]]:
+    yield _async_break()
+
+
+async def _async_break() -> AsyncIterator[Message | None]:
+    msg = "subscription failed"
+    raise RuntimeError(msg)
+    yield
+
+
 class _Rechecking(TopicSocket):
     def access_check(
         self, claims: TicketClaims, authorizer: TopicAuthorizer | None
@@ -144,6 +171,14 @@ def _reasons(recorder: SignalRecorder) -> list[str]:
     return [
         event.kwargs["reason"] for event in recorder.events_for(stream_unsubscribed)
     ]
+
+
+async def _reported(recorder: SignalRecorder) -> None:
+    for _ in range(500):
+        if _reasons(recorder):
+            return
+        await asyncio.sleep(0.01)
+    pytest.fail("The subscription never reported its end within five seconds.")
 
 
 class TestAggregate:
@@ -286,19 +321,13 @@ class TestSyncStream:
         assert [type(item).__name__ for item in items] == ["StreamHello"]
         assert _reasons(recorder) == ["error"]
 
-    def test_a_failing_transform_is_an_error_that_propagates(
-        self, broker: MemoryBroker, recorder: SignalRecorder
+    def test_a_failing_subscription_is_an_error_that_propagates(
+        self, recorder: SignalRecorder
     ) -> None:
-        stream = TopicStream(
-            RequestFactory().get("/"),
-            "room:1",
-            transform=_failing_transform,
-            heartbeat_seconds=0.01,
-        )
-        source = stream._sync_messages(broker)
+        stream = TopicStream(RequestFactory().get("/"), "room:1")
+        source = stream._sync_messages(_BreakingBroker())
         assert type(next(source)).__name__ == "StreamHello"
-        publish("room:1", _refresh(), on_commit=False)
-        with pytest.raises(RuntimeError, match="transform failed"):
+        with pytest.raises(RuntimeError, match="subscription failed"):
             list(source)
         assert _reasons(recorder) == ["error"]
 
@@ -395,20 +424,14 @@ class TestAsyncStream:
         ]
         assert _reasons(recorder) == ["error"]
 
-    def test_a_failing_transform_is_an_error_that_propagates(
-        self, broker: MemoryBroker, recorder: SignalRecorder
+    def test_a_failing_subscription_is_an_error_that_propagates(
+        self, recorder: SignalRecorder
     ) -> None:
         async def scenario() -> None:
-            stream = TopicStream(
-                AsyncRequestFactory().get("/"),
-                "room:1",
-                transform=_failing_transform,
-                heartbeat_seconds=0.01,
-            )
-            source = stream._async_messages(broker)
+            stream = TopicStream(AsyncRequestFactory().get("/"), "room:1")
+            source = stream._async_messages(_BreakingBroker())
             assert type(await anext(source)).__name__ == "StreamHello"
-            await apublish("room:1", _refresh())
-            with pytest.raises(RuntimeError, match="transform failed"):
+            with pytest.raises(RuntimeError, match="subscription failed"):
                 await anext(source)
 
         asyncio.run(scenario())
@@ -621,7 +644,7 @@ class TestSocket:
         async def scenario() -> None:
             port = MemoryPort()
             task = await _serving(_socket(port, ticket, _EndingBroker()), port, ticket)
-            await asyncio.sleep(0)
+            await _reported(recorder)
             assert _reasons(recorder) == ["server"]
             port.disconnect()
             await task

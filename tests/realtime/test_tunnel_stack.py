@@ -422,7 +422,7 @@ def test_socket_without_an_app_is_disabled(
 
 
 def tenant_view(request: HttpRequest, uid: str) -> HttpResponse:
-    return HttpResponse(f"tenant {uid}")
+    return HttpResponse(f"tenant {uid}", content_type="text/plain")
 
 
 urlpatterns = [path("_next/form/<str:uid>/", tenant_view)]
@@ -580,7 +580,7 @@ def test_hello_tells_the_client_the_tunnel_contract(
         return hello
 
     hello = asyncio.run(scenario())
-    assert hello["upstream"] == {"frame": 16384}
+    assert hello["upstream"] == {"frame": 16384, "timeout": 10.0}
     assert hello["tunnel"] == {
         "timeout": 30.0,
         "frame": 65536,
@@ -605,7 +605,7 @@ def test_disabled_tunnel_leaves_its_hello_key_out(
 
     hello = asyncio.run(scenario())
     assert "tunnel" not in hello
-    assert hello["upstream"] == {"frame": 16384}
+    assert hello["upstream"] == {"frame": 16384, "timeout": 10.0}
 
 
 _ROTATED = {

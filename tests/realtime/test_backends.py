@@ -1,12 +1,13 @@
 import asyncio
 import threading
+import time
 from contextlib import ExitStack
 
 import pytest
 
 from next.realtime import InvalidTopicError, MemoryBroker, Position
 from next.realtime.backends import _AsyncSubscriber, _SyncSubscriber
-from tests.support.realtime import refresh_envelope
+from tests.support.realtime import PlainBroker, ServerClock, refresh_envelope
 
 
 def test_memory_publish_per_topic_numbers_sequences_and_epochs() -> None:
@@ -195,3 +196,44 @@ def test_backend_default_close_hooks_keep_broker_usable() -> None:
     with backend.subscribe(["poll:1"], timeout=0.01) as messages:
         published = backend.publish("poll:1", refresh_envelope())
         assert next(messages) == published
+
+
+def test_memory_broker_times_expiry_on_a_monotonic_clock() -> None:
+    broker = MemoryBroker()
+    assert broker.clock is time.monotonic
+    assert broker.presence_schedule._clock is time.monotonic
+    broker.close()
+
+
+def test_memory_broker_stamps_the_wall_clock_whatever_clock_it_times_on() -> None:
+    clock = ServerClock(5.0)
+    broker = MemoryBroker(clock=clock, replay={"SIZE": 10, "TTL": 5})
+    before = time.time()
+    first = broker.publish("poll:1", refresh_envelope())
+    clock.advance(4.9)
+    second = broker.broadcast("poll:1", refresh_envelope())
+    assert before <= first.published_at <= second.published_at <= time.time()
+    assert broker.replay("poll:1", Position(first.epoch, 0)).messages == (first,)
+    clock.advance(0.1)
+    assert broker.positions(["poll:1"])["poll:1"] == Position("", 0)
+    broker.close()
+
+
+class _ClosingBroker(PlainBroker):
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed_on_a_loop: list[bool] = []
+
+    def close(self) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            self.closed_on_a_loop.append(False)
+        else:
+            self.closed_on_a_loop.append(True)
+
+
+def test_backend_default_aclose_runs_close_off_the_event_loop() -> None:
+    backend = _ClosingBroker()
+    asyncio.run(backend.aclose())
+    assert backend.closed_on_a_loop == [False]

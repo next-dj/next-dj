@@ -17,6 +17,7 @@ from next.backends import (
 from next.conf import next_framework_settings
 from next.conf.frozen import FrozenDict, FrozenList
 from next.errors import (
+    AbstractBackendError,
     BackendImportError,
     BackendNotSubclassError,
     SettingImportError,
@@ -243,6 +244,19 @@ class TestAbstractFamilyRoot:
     def test_resolve_refuses_the_abstract_root_itself(self) -> None:
         with pytest.raises(ImproperlyConfigured, match="is abstract"):
             resolve_backend_class({"BACKEND": ABSTRACT}, base=AbstractFakeBackend)
+
+    def test_resolve_names_the_methods_an_abstract_class_leaves_open(self) -> None:
+        with pytest.raises(AbstractBackendError) as caught:
+            resolve_backend_class({"BACKEND": ABSTRACT}, base=AbstractFakeBackend)
+        assert caught.value.missing == ("run",)
+        assert str(caught.value).endswith("It does not implement run.")
+
+    def test_an_abstract_error_without_methods_names_none(self) -> None:
+        error = AbstractBackendError("pkg.Root")
+        assert error.missing == ()
+        assert str(error) == (
+            "Backend 'pkg.Root' is abstract, so it names no usable backend."
+        )
 
     def test_load_skips_an_entry_naming_the_abstract_root(self, caplog) -> None:
         with caplog.at_level(logging.ERROR, logger="next.backends"):

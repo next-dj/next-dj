@@ -19,7 +19,7 @@ from next.realtime import (
     Replay,
     ReplayingBroker,
 )
-from next.realtime.backends import _since_idle
+from next.realtime.backends import _Entry, _since_idle
 from next.realtime.replay import (
     INCOMPLETE,
     MAX_SIZE,
@@ -292,15 +292,15 @@ def test_memory_publish_between_sweeps_still_restarts_an_expired_log(
 
 
 def test_log_restarts_after_a_pause_of_exactly_the_ttl() -> None:
-    def message(seq: int, published_at: float) -> Message:
-        return Message("poll:1", seq, refresh_envelope(), published_at, EPOCH)
+    def entry(seq: int, at: float) -> _Entry:
+        return _Entry(Message("poll:1", seq, refresh_envelope(), 0.0, EPOCH), at)
 
-    first, second, third = message(1, 0.0), message(2, 5.0), message(3, 9.99)
-    assert _since_idle((first,), 4.99, 5) == (first,)
+    first, second, third = entry(1, 0.0), entry(2, 5.0), entry(3, 9.99)
+    assert _since_idle((first,), 4.99, 5) == (first.message,)
     assert _since_idle((first,), 5.0, 5) == ()
-    assert _since_idle((first, third), 9.99, 5) == (third,)
-    assert _since_idle((first, second), 5.0, 5.01) == (first, second)
-    assert _since_idle((first, second), 9.99, 5) == (second,)
+    assert _since_idle((first, third), 9.99, 5) == (third.message,)
+    assert _since_idle((first, second), 5.0, 5.01) == (first.message, second.message)
+    assert _since_idle((first, second), 9.99, 5) == (second.message,)
 
 
 def test_replay_size_zero_stores_nothing_and_never_replays(harness: _Harness) -> None:

@@ -223,8 +223,7 @@ class TestValidateInsideAZone:
             "zoned_rename_form",
             {"title": ""},
             origin="/board_settings/",
-            partial=True,
-            zones="rename-board",
+            partial="rename-board",
             **{_VALIDATE_HEADER: "title"},
         )
         envelope = envelope_of(response)
@@ -245,8 +244,7 @@ class TestValidateOnAWizardStep:
             "step_wizard",
             {"name": ""},
             origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
+            partial="wizard-zone",
             **{_VALIDATE_HEADER: "name"},
         )
         assert response.status_code == 200
@@ -258,8 +256,7 @@ class TestValidateOnAWizardStep:
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
+            partial="wizard-zone",
             **{_VALIDATE_HEADER: "name"},
         )
         html = envelope_of(response).html_for_zone("wizard-zone")
@@ -273,8 +270,7 @@ class TestValidateOnAWizardStep:
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
+            partial="wizard-zone",
             **{_VALIDATE_HEADER: "name"},
         )
         assert counting_wizard_backend.saves == 0

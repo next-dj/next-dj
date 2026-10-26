@@ -354,6 +354,62 @@ describe("Board", () => {
     ]);
   });
 
+  it("ends the drag on a drop into another column whose dragend never arrives", () => {
+    render(<Board />);
+    fireEvent.dragStart(cardIn(1, 10), { dataTransfer: { setData: () => {} } });
+    dropOn(2);
+    fireEvent.dragEnd(cardIn(2, 10));
+    expect(runtime.send.mock.calls).toEqual([
+      ["board:1", "dragging", { card: 10, active: true }, { ack: false }],
+      ["board:1", "dragging", { card: 10, active: false }, { ack: false }],
+    ]);
+  });
+
+  it("announces no drag end for a drop it never announced a start of", () => {
+    render(<Board />);
+    dropOn(2);
+    expect(runtime.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps the mark while another tab of the same member still holds the card", () => {
+    render(<Board />);
+    const ada = { name: "Ada Lovelace", initials: "AL", key: "ada" };
+    for (const from of ["first-tab", "second-tab"]) {
+      const detail = { card: 10, active: true, by: ada, from };
+      runtime.push("board:1", "board:dragging", detail);
+    }
+    runtime.push("board:1", "board:dragging", {
+      card: 10,
+      active: false,
+      by: ada,
+      from: "first-tab",
+    });
+    expect(cardIn(1, 10)).toHaveTextContent("Ada Lovelace is moving this card");
+    runtime.push("board:1", "board:dragging", {
+      card: 10,
+      active: false,
+      by: ada,
+      from: "second-tab",
+    });
+    expect(cardIn(1, 10)).not.toHaveTextContent("is moving this card");
+  });
+
+  it("clears the marks of a socket the server reports closed", () => {
+    render(<Board />);
+    const ada = { name: "Ada Lovelace", initials: "AL", key: "ada" };
+    runtime.push("board:1", "board:dragging", {
+      card: 10,
+      active: true,
+      by: ada,
+      from: "closed-tab",
+    });
+    runtime.push("board:1", "next:presence", { count: 1, members: [ada] });
+    runtime.push("board:1", "board:released", { from: "open-tab" });
+    expect(cardIn(1, 10)).toHaveTextContent("Ada Lovelace is moving this card");
+    runtime.push("board:1", "board:released", { from: "closed-tab" });
+    expect(cardIn(1, 10)).not.toHaveTextContent("is moving this card");
+  });
+
   it("skips the echo its own socket sent", () => {
     render(<Board />);
     runtime.push("board:1", "board:dragging", {
@@ -405,7 +461,7 @@ describe("Board", () => {
 
   it("releases every listener on unmount", () => {
     const { unmount } = render(<Board />);
-    expect(runtime.listeners()).toBe(3);
+    expect(runtime.listeners()).toBe(4);
     unmount();
     expect(runtime.listeners()).toBe(0);
   });
@@ -453,6 +509,41 @@ describe("Board", () => {
     expect(
       document.querySelector("[data-kanban-column='2'] [data-kanban-card]"),
     ).toBeNull();
+  });
+
+  it("shows the validation message an invalid create carries", async () => {
+    render(<Board />);
+    submitNewCard(2, "Over the limit");
+    await runtime.answer("invalid", {
+      errors: { __all__: ["Column has reached its WIP limit."] },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Column has reached its WIP limit.",
+    );
+  });
+
+  it("shows the reason a 400 refusal of the create names", async () => {
+    render(<Board />);
+    submitNewCard(2, "Over the limit");
+    await runtime.answer("error", {
+      error: { kind: "http", status: 400, body: "Column has reached its WIP limit.\n" },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /^Column has reached its WIP limit\.×$/,
+    );
+    expect(screen.queryByText("Over the limit")).toBeNull();
+  });
+
+  it("falls back to the network message for a blank 400 or a 500", async () => {
+    render(<Board />);
+    submitNewCard(2, "Blank refusal");
+    await runtime.answer("error", { error: { kind: "http", status: 400, body: " " } });
+    expect(screen.getByRole("alert")).toHaveTextContent(/Network error/);
+    submitNewCard(2, "Server failure");
+    await runtime.answer("error", {
+      error: { kind: "http", status: 500, body: "Server Error" },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(/Network error/);
   });
 
   it("ignores a drop of a card the board does not hold", () => {

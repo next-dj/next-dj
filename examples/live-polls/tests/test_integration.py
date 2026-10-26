@@ -282,8 +282,7 @@ class TestPartialVote:
             "vote_form",
             {"poll": poll.pk, "choice": choice.pk},
             origin=f"/polls/{poll.pk}/",
-            partial=True,
-            zones="poll-results",
+            partial="poll-results",
         )
         assert response.status_code == 200
         envelope = envelope_of(response)
@@ -300,8 +299,7 @@ class TestPartialVote:
             "vote_form",
             {"poll": poll.pk, "choice": choice.pk},
             origin=f"/polls/{poll.pk}/",
-            partial=True,
-            zones="poll-results",
+            partial="poll-results",
         )
         envelope = envelope_of(response)
         context_op = next(op for op in envelope.ops if op["op"] == "context")
@@ -328,8 +326,7 @@ class TestPartialVote:
             "vote_form",
             {"poll": poll.pk, "choice": foreign_choice.pk},
             origin=f"/polls/{poll.pk}/",
-            partial=True,
-            zones="poll-results",
+            partial="poll-results",
         )
         assert response.status_code == 200
         assert response["X-Next-Form"] == "invalid"
@@ -355,8 +352,7 @@ class TestPartialVote:
             "vote_form",
             {"poll": poll.pk, "choice": foreign_choice.pk},
             origin=f"/polls/{poll.pk}/",
-            partial=True,
-            zones="poll-results",
+            partial="poll-results",
         )
         envelope = envelope_of(response)
         html = envelope.html_for_zone("poll-results")
@@ -376,8 +372,7 @@ class TestZoneAssetsCarryInsertionVerbs:
                 "vote_form",
                 {"poll": poll.pk, "choice": choice.pk},
                 origin=f"/polls/{poll.pk}/",
-                partial=True,
-                zones="poll-results",
+                partial="poll-results",
             )
         )
 
@@ -441,8 +436,7 @@ class TestBroadcastReceiver:
                 "vote_form",
                 {"poll": poll.pk, "choice": choice.pk},
                 origin=f"/polls/{poll.pk}/",
-                partial=True,
-                zones="poll-results",
+                partial="poll-results",
                 headers={"X-Next-Request-Id": "vote-1"},
             )
         events = recorder.events_for(message_published)
@@ -681,8 +675,7 @@ class TestEmbedWidget:
             "vote_form",
             {"poll": poll.pk, "choice": choice.pk},
             origin=f"/polls/{poll.pk}/embed/",
-            partial=True,
-            zones="poll-results",
+            partial="poll-results",
         )
         assert response.status_code == 200
         assert envelope_of(response).zone_targets() == ["poll-results"]

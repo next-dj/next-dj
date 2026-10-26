@@ -155,7 +155,7 @@ The framework reserves four keys of the ``Next._init`` payload for this surface,
        The ``ws`` entry is listed only while the ``ws`` transport is active, and under ``DEBUG`` ``dev`` joins them, the URL of ``next.dev.min.js``.
    * - ``$realtime``
      - ``{protocol, transports, content_type}``, the stream protocol advertised by the server and the selected partial response content type used by registered stream parse hooks.
-       The key is left out while the transports are just ``sse`` and the partial content type is the stock one, and the runtime then assumes those defaults.
+       The key is left out while ``sse`` is the only transport and the partial content type is the stock one, and the runtime then assumes those defaults.
    * - ``$scripts``
      - The manifest, one ``{name, src?, init?, strategy, category, attrs, nonce?}`` per script the server did not write, in declaration order.
        The runtime drops an ``attrs`` name outside the set :doc:`/content/topics/scripts/declaring` lists.

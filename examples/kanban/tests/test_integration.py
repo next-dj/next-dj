@@ -2,6 +2,7 @@ import asyncio
 import base64
 import re
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -13,12 +14,14 @@ from kanban.demo import DEMO_PASSWORD
 from kanban.models import Board, BoardQuerySet, Card, Column
 from kanban.realtime import (
     GUEST,
+    board_pk,
     board_topic,
     can_watch_board,
     dragging,
     identify_member,
     public_profile,
 )
+from kanban.signals import release_socket_drags
 
 from next import realtime
 from next.realtime import Upstream, presence
@@ -754,6 +757,10 @@ class TestRealtimeAccess:
     def test_a_malformed_topic_is_refused(self, topic: str) -> None:
         assert can_watch_board(AnonymousUser(), topic) is False
 
+    def test_the_board_pk_is_read_back_from_its_topic(self) -> None:
+        assert board_pk(board_topic(7)) == 7
+        assert board_pk("poll:7") is None
+
     def test_an_existing_board_is_granted(self, board: Board) -> None:
         assert can_watch_board(AnonymousUser(), board_topic(board.pk)) is True
 
@@ -859,8 +866,7 @@ class TestBoardBroadcast:
                 "move_card_form",
                 {"card_id": card.pk, "target_column": done.pk, "target_position": "0"},
                 origin=f"/board/{board.pk}/",
-                partial=True,
-                zones="board",
+                partial="board",
                 headers={"X-Next-Request-Id": "move-1"},
             )
         envelope = envelope_of(response)
@@ -881,8 +887,7 @@ class TestBoardBroadcast:
                 "move_card_form",
                 {"card_id": "9999", "target_column": done.pk, "target_position": "0"},
                 origin=f"/board/{board.pk}/",
-                partial=True,
-                zones="board",
+                partial="board",
             )
         assert response["X-Next-Form"] == "invalid"
         morph, board_context = envelope_of(response).ops
@@ -921,6 +926,7 @@ class TestBoardBroadcast:
                 "create_card_form", {"column": progress.pk, "title": "Late"}
             )
         assert response.status_code == 400
+        assert response.content.decode() == "Column has reached its WIP limit."
         assert len(published) == 0
 
     def test_other_actions_publish_nothing(
@@ -1012,6 +1018,19 @@ class TestDraggingHandler:
         assert len(published) == 0
 
 
+class TestReleasedSocket:
+    """A closed socket tells each board it watched to drop the cards it held."""
+
+    def test_only_board_topics_hear_the_release(self) -> None:
+        connection = SimpleNamespace(connection_id="gone")
+        with memory_broker(), capture_published() as published:
+            release_socket_drags(connection=connection, topics=("board:3", "poll:3"))
+        (message,) = published.messages
+        assert message.topic == "board:3"
+        (op,) = message.envelope.as_dict()["ops"]
+        assert (op["name"], op["detail"]) == ("board:released", {"from": "gone"})
+
+
 @pytest.mark.django_db(transaction=True)
 def test_a_dragging_event_over_the_socket_reaches_the_board(demo_data: None) -> None:
     board = Board.objects.get(slug="engineering-roadmap")
@@ -1042,7 +1061,10 @@ def test_a_dragging_event_over_the_socket_reaches_the_board(demo_data: None) -> 
     ):
         ack, connection = asyncio.run(scenario())
     assert ack is None
-    (message,) = published.messages
-    detail = message.envelope.as_dict()["ops"][0]["detail"]
-    assert detail["from"] == connection
-    assert detail["by"]["name"].startswith("Guest ")
+    drag, release = (m.envelope.as_dict()["ops"][0] for m in published.messages)
+    assert drag["detail"]["from"] == connection
+    assert drag["detail"]["by"]["name"].startswith("Guest ")
+    assert (release["name"], release["detail"]) == (
+        "board:released",
+        {"from": connection},
+    )

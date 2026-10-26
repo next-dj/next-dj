@@ -519,7 +519,10 @@ class TopicSocket:
     def _hello_limits(self) -> dict[str, object]:
         """Return the frame limits hello tells the client, the tunnel only when on."""
         limits: dict[str, object] = {
-            "upstream": {"frame": self._limits.upstream.max_bytes}
+            "upstream": {
+                "frame": self._limits.upstream.max_bytes,
+                "timeout": self._limits.upstream.timeout,
+            }
         }
         tunnel, settings = self._tunnel, self._limits.tunnel
         if tunnel is not None and settings is not None:
@@ -605,7 +608,7 @@ class TopicSocket:
         A subscriber outside identify mode gets presence events without their members.
         """
         if message.seq and self._transform is not None:
-            result = transformed(message, await run_detached(self._transform, message))
+            result = await run_detached(transformed, message, self._transform)
             if result is None:
                 return frames.skip(message)
             message = result

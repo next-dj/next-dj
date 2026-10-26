@@ -1,7 +1,9 @@
 import json
 
 import pytest
+from django.test import override_settings
 
+from next.errors import AbstractBackendError
 from next.partial import (
     Envelope,
     JsonPartialProtocolBackend,
@@ -326,3 +328,28 @@ class TestBackendLoadedSignal:
         with capture_signals(partial_backend_loaded) as recorded:
             partial_backend_manager.get()
         assert len(recorded) == 0
+
+
+class _RetiredContractBackend(PartialProtocolBackend):
+    """A backend written against the retired `sse_event` contract."""
+
+    content_type = "text/plain"
+
+    def serialize_envelope(self, envelope: Envelope) -> bytes:
+        return b""
+
+    def sse_event(self, envelope: Envelope) -> str:
+        return ""
+
+    def deserialize_envelope(self, body: bytes) -> Envelope:
+        return Envelope(version=body.decode())
+
+
+@pytest.mark.usefixtures("uncached_backend_manager")
+def test_a_backend_on_the_retired_contract_fails_naming_stream_data() -> None:
+    entry = {"BACKEND": "tests.partial.test_backends._RetiredContractBackend"}
+    with (
+        override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": [entry]}),
+        pytest.raises(AbstractBackendError, match="does not implement stream_data"),
+    ):
+        partial_backend_manager.get()

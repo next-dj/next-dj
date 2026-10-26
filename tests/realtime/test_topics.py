@@ -4,6 +4,7 @@ import math
 import re
 import threading
 from contextlib import asynccontextmanager, contextmanager, nullcontext
+from functools import partial
 from unittest.mock import create_autospec
 
 import pytest
@@ -14,7 +15,7 @@ from django.contrib.auth import (
     SESSION_KEY,
     get_user_model,
 )
-from django.contrib.auth.middleware import get_user
+from django.contrib.auth.middleware import AuthenticationMiddleware
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sessions.backends.db import SessionStore
 from django.core.exceptions import ImproperlyConfigured
@@ -45,7 +46,7 @@ from next.realtime.errors import BrokerConnectionError, InvalidTicketError
 from next.realtime.messages import Position
 from next.realtime.signals import stream_subscribed
 from next.realtime.tickets import verify_ticket
-from next.testing import SseEvent, SseReader
+from next.testing import SseEvent, SseReader, capture_signals
 from next.testing.realtime import override_websocket_mount
 from tests.support.realtime import (
     LiveStreams,
@@ -1001,6 +1002,12 @@ def test_websocket_negotiation_falls_back_for_an_unstable_identify(
     assert _body(response) == {"transport": "sse", "reason": "presence"}
 
 
+def _django_lazy_user(request: object) -> object:
+    """Install the lazy user Django's `AuthenticationMiddleware` gives a request."""
+    AuthenticationMiddleware(lambda _request: JsonResponse({})).process_request(request)
+    return request.user
+
+
 _OLD_SECRET = "old-secret-" + "o" * 50
 _NEW_SECRET = "new-secret-" + "n" * 50
 
@@ -1022,7 +1029,7 @@ def test_fallback_secret_stream_never_loads_the_lazy_user_nor_cycles_the_key(
     factory = RequestFactory() if mode == "sync" else AsyncRequestFactory()
     request = factory.get("/polls/1/stream/")
     request.session = SessionStore(session_key=key)
-    request.user = original = SimpleLazyObject(lambda: get_user(request))
+    original = _django_lazy_user(request)
 
     def read_sync() -> list[str]:
         stream = TopicStream(request, "poll:1", authorize=authorizer)
@@ -1052,7 +1059,7 @@ def test_lazy_user_of_a_session_gone_at_open_streams_as_anonymous(
     memory_broker: MemoryBroker,
 ) -> None:
     request = _stale_anonymous_request(RequestFactory())
-    request.user = original = SimpleLazyObject(AnonymousUser)
+    original = _django_lazy_user(request)
     seen: list[bool] = []
 
     def authorizer(current: object, _topic: str) -> bool:
@@ -1073,16 +1080,10 @@ def test_subscribed_receiver_reads_the_stored_session_user_off_the_request(
 ) -> None:
     user, session = signed_in_session("subscriber")
     key = session.session_key
-    loads: list[int] = []
     factory = RequestFactory() if mode == "sync" else AsyncRequestFactory()
     request = factory.get("/polls/1/stream/")
     request.session = SessionStore(session_key=key)
-
-    def page_user() -> object:
-        loads.append(1)
-        return get_user(request)
-
-    request.user = original = SimpleLazyObject(page_user)
+    original = _django_lazy_user(request)
     heard: list[object] = []
 
     def receiver(**kwargs: object) -> None:
@@ -1105,7 +1106,6 @@ def test_subscribed_receiver_reads_the_stored_session_user_off_the_request(
         stream_subscribed.disconnect(receiver)
     assert hello == "next-hello"
     assert heard == [user.pk]
-    assert loads == []
     assert original._wrapped is empty
     assert request.user is not original
 
@@ -1118,18 +1118,55 @@ def test_user_the_page_guard_loaded_is_kept_as_is(memory_broker: MemoryBroker) -
     request.session = SessionStore(session_key=key)
     request.user = original = SimpleLazyObject(lambda: user)
     assert request.user.pk == user.pk
-    subscribed: list[object] = []
-
-    def receiver(**kwargs: object) -> None:
-        subscribed.append(kwargs["user"])
-
-    stream_subscribed.connect(receiver, weak=False)
-    try:
+    with capture_signals(stream_subscribed) as recorder:
         stream = TopicStream(request, "poll:1", heartbeat_seconds=60)
         with SseReader(stream) as events:
             assert next(events).event == "next-hello"
+    assert request.user is original
+    [subscribed] = recorder.events
+    assert subscribed.kwargs["user"] is original
+
+
+def _otp_user(inner: object) -> object:
+    """Resolve the inner user and mark it verified, as an OTP middleware does."""
+    inner.is_verified = lambda: True
+    return inner
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("mode", ["sync", "async"])
+def test_foreign_lazy_user_is_left_on_the_request_and_streamed(
+    memory_broker: MemoryBroker, mode: str
+) -> None:
+    user, session = signed_in_session("verified")
+    factory = RequestFactory() if mode == "sync" else AsyncRequestFactory()
+    request = factory.get("/polls/1/stream/")
+    request.session = SessionStore(session_key=session.session_key)
+    inner = _django_lazy_user(request)
+    request.user = original = SimpleLazyObject(partial(_otp_user, inner))
+    heard: list[tuple[object, object, bool]] = []
+
+    def receiver(**kwargs: object) -> None:
+        current = kwargs["user"]
+        heard.append((current, current.pk, current.is_verified()))
+
+    def read_sync() -> str:
+        stream = TopicStream(request, "poll:1", heartbeat_seconds=60)
+        assert request.user is original
+        with SseReader(stream) as events:
+            return next(events).event
+
+    async def read_async() -> str:
+        stream = TopicStream(request, "poll:1", heartbeat_seconds=60)
+        assert request.user is original
+        async with SseReader(stream) as events:
+            return (await anext(events)).event
+
+    stream_subscribed.connect(receiver, weak=False)
+    try:
+        hello = read_sync() if mode == "sync" else asyncio.run(read_async())
     finally:
         stream_subscribed.disconnect(receiver)
+    assert hello == "next-hello"
+    assert heard == [(original, user.pk, True)]
     assert request.user is original
-    assert subscribed == [original]
-    assert subscribed[0] is original

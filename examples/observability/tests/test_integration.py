@@ -107,8 +107,7 @@ def apply_window(next_client):
             "window_filter_form",
             {"window": window},
             origin="/stats/",
-            partial=True,
-            zones="live-totals",
+            partial="live-totals",
         )
 
     return apply

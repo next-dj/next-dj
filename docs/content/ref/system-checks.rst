@@ -884,7 +884,8 @@ Errors
        Targeting a page whose URL captures the kwarg, or moving the intercept out from under the brackets, clears it.
      - ``next.pages.checks.intercepts``
    * - ``next.E177``
-     - ``NEXT_FRAMEWORK['REALTIME']['BROKER']`` is not a mapping.
+     - ``NEXT_FRAMEWORK['REALTIME']['BROKER']`` is set to something other than a mapping, ``None`` included.
+       Leaving the key out keeps the default broker.
      - ``next.realtime.checks``
    * - ``next.E178``
      - The in-memory broker queue size is not a positive integer.
@@ -897,7 +898,7 @@ Errors
      - ``NEXT_FRAMEWORK['REALTIME']['BROKER']['OPTIONS']`` is not a mapping.
      - ``next.realtime.checks``
    * - ``next.E181``
-     - ``REALTIME['TRANSPORTS']`` is not a unique non-empty list of supported transports.
+     - ``REALTIME['TRANSPORTS']`` is not a unique non-empty list or tuple of supported transports.
      - ``next.realtime.checks``
    * - ``next.E182``
      - The WebSocket ticket lifetime is outside the supported range of 1 to 600 seconds.
@@ -972,6 +973,7 @@ Errors
    * - ``next.E199``
      - Two different handlers register ``@on`` for the same topic pattern and event name.
        Only the first one runs, and the same function defined again in a reloaded module replaces itself without the error.
+       A decorator with ``functools.wraps`` is looked through, so two handlers it wraps stay apart, and a wrapper without it is told apart only by identity.
      - ``next.realtime.checks``
    * - ``next.E200``
      - An ``@action`` or a form class ``Meta`` declares a ``transport`` other than ``"http"`` and ``"any"``.
@@ -1018,6 +1020,18 @@ Errors
    * - ``next.E212``
      - ``NEXT_FRAMEWORK['DEV_SERVER']`` names a path that does not import, or one that is no class with the ``run(app, **options)`` method of ``ASGIServer``.
      - ``next.server.checks``
+   * - ``next.E213``
+     - The ``URL`` option of ``RedisBroker`` is not a non-empty string.
+       The broker refuses it with ``ImproperlyConfigured`` when it is built, so the check reports it before the first request.
+     - ``next.realtime.checks``
+   * - ``next.E214``
+     - A ``PARTIAL_BACKENDS`` entry sets ``OPTIONS["SSE"]`` to something other than a dict, ``SSE.RETRY_MS`` to anything but an integer from ``0``, or ``SSE.HEARTBEAT_SECONDS`` to anything but a finite number above ``0``.
+       The stream replaces such a value by its default, so the check is the only report of it.
+     - ``next.partial.checks.backends``
+   * - ``next.E215``
+     - A ``PARTIAL_BACKENDS`` entry names a protocol backend still written to the retired ``sse_event(envelope)`` hook.
+       Such a class is abstract for want of ``stream_data(envelope, meta)``, or its ``sse_event`` override is never called, so the check names ``stream_data`` as the hook to implement.
+     - ``next.partial.checks.backends``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 

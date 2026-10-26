@@ -11,7 +11,12 @@ from next.checks import reset_check_caches
 from next.components import ComponentInfo, FileComponentsBackend
 from next.forms.backends import FormActionBackend, RegistryFormActionBackend
 from next.pages.manager import page
-from next.partial import checks
+from next.partial import (
+    Envelope,
+    JsonPartialProtocolBackend,
+    PartialProtocolBackend,
+    checks,
+)
 from next.partial.registry import register_patch_op
 from tests.pages.checks.metadata.trees import (
     component_template,
@@ -1018,3 +1023,106 @@ class TestComposedPagesMemo:
             checks.check_duplicate_zone_names()
             messages = checks.check_composed_templates_compile()
         assert [m.id for m in messages] == [checks.E_COMPOSED_TEMPLATE_SYNTAX]
+
+
+def _sse_entry(sse: object) -> dict[str, object]:
+    return {**_BACKEND_DICT, "OPTIONS": {"SSE": sse}}
+
+
+class TestSseOptionsCheck:
+    """`next.E214` fires on an SSE option the stream would replace by its default."""
+
+    @pytest.mark.parametrize(
+        "sse",
+        [
+            {"RETRY_MS": 0, "HEARTBEAT_SECONDS": 0.5},
+            {"RETRY_MS": 3000, "HEARTBEAT_SECONDS": 25},
+            {"RETRY_MS": None},
+            {},
+        ],
+        ids=["zero_retry", "defaults", "unset", "empty"],
+    )
+    def test_usable_options_are_silent(self, sse: object) -> None:
+        with _partial_backends([_sse_entry(sse)]):
+            assert checks.check_partial_backend_sse_options() == []
+
+    @pytest.mark.parametrize(
+        "configs",
+        [["x"], [_BACKEND_DICT], [{**_BACKEND_DICT, "OPTIONS": "x"}]],
+        ids=["non_dict_entry", "no_options", "options_not_a_dict"],
+    )
+    def test_entries_without_sse_options_are_silent(self, configs: object) -> None:
+        with _partial_backends(configs):
+            assert checks.check_partial_backend_sse_options() == []
+
+    @pytest.mark.parametrize(
+        ("sse", "count"),
+        [
+            ({"RETRY_MS": 0.5}, 1),
+            ({"RETRY_MS": True}, 1),
+            ({"RETRY_MS": -1}, 1),
+            ({"HEARTBEAT_SECONDS": 0}, 1),
+            ({"HEARTBEAT_SECONDS": "25"}, 1),
+            ({"RETRY_MS": "3000", "HEARTBEAT_SECONDS": float("inf")}, 2),
+            ("fast", 1),
+        ],
+        ids=[
+            "fraction",
+            "bool",
+            "negative",
+            "zero_heartbeat",
+            "text_heartbeat",
+            "both",
+            "not_a_dict",
+        ],
+    )
+    def test_unusable_options_error(self, sse: object, count: int) -> None:
+        with _partial_backends([_sse_entry(sse)]):
+            messages = checks.check_partial_backend_sse_options()
+        assert [m.id for m in messages] == [checks.E_SSE_OPTION_INVALID] * count
+        assert all(m.hint for m in messages)
+
+
+class _RetiredHookBackend(JsonPartialProtocolBackend):
+    """A JSON backend overriding the hook no stream calls any more."""
+
+    def sse_event(self, envelope: Envelope) -> str:
+        return ""
+
+
+class _MissingStreamBackend(PartialProtocolBackend):
+    """A backend on the retired contract, abstract for want of `stream_data`."""
+
+    content_type = "text/plain"
+
+    def serialize_envelope(self, envelope: Envelope) -> bytes:
+        return b""
+
+    def deserialize_envelope(self, body: bytes) -> Envelope:
+        return Envelope(version=body.decode())
+
+
+class TestStreamDataContractCheck:
+    """`next.E215` fires on a backend still written to the `sse_event` contract."""
+
+    @pytest.mark.parametrize("name", ["_RetiredHookBackend", "_MissingStreamBackend"])
+    def test_retired_contract_errors_with_a_hint(self, name: str) -> None:
+        entry = {"BACKEND": f"tests.partial.test_checks.{name}"}
+        with _partial_backends([entry]):
+            (message,) = checks.check_partial_backend_implements_stream_data()
+        assert message.id == checks.E_BACKEND_STALE_CONTRACT
+        assert "stream_data(envelope, meta)" in message.hint
+
+    @pytest.mark.parametrize(
+        "configs",
+        [
+            [_BACKEND_DICT],
+            ["x", {}],
+            [{"BACKEND": "tests.partial.missing.Backend"}],
+            [{"BACKEND": "next.partial.Envelope"}],
+        ],
+        ids=["stock", "no_backend", "unimportable", "not_a_backend"],
+    )
+    def test_current_or_unresolvable_entries_are_silent(self, configs: object) -> None:
+        with _partial_backends(configs):
+            assert checks.check_partial_backend_implements_stream_data() == []

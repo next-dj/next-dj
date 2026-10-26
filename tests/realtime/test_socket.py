@@ -297,7 +297,7 @@ def test_hello_carries_positions_heartbeat_and_the_clock(streams: LiveStreams) -
             "transports": ["ws", "sse"],
             "heartbeat": 7.5,
             "connection": socket.connection_id,
-            "upstream": {"frame": 16384},
+            "upstream": {"frame": 16384, "timeout": 10.0},
         }
         port.disconnect()
         await _finish(task)
@@ -473,7 +473,7 @@ def test_transform_skipping_a_message_sends_skip_with_epoch() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_failing_transform_logs_and_closes_internal(
+def test_failing_transform_skips_the_message_and_keeps_the_socket(
     caplog: pytest.LogCaptureFixture, streams: LiveStreams
 ) -> None:
     ticket = issue_session_ticket(transform_ref=f"{_HERE}._failing_transform")
@@ -482,13 +482,21 @@ def test_failing_transform_logs_and_closes_internal(
         broker = MemoryBroker()
         port = MemoryPort()
         task, _ = await _open(_socket(port, ticket, broker), port, ticket)
-        await broker.apublish("room:42", _envelope())
+        published = await broker.apublish("room:42", _envelope())
+        assert await _frame(port) == {
+            "type": "skip",
+            "topic": "room:42",
+            "epoch": published.epoch,
+            "seq": published.seq,
+        }
+        port.disconnect()
         await _finish(task)
-        assert port.close_code == Close.INTERNAL
+        assert port.close_code is None
         assert streams.live() == 0
 
     asyncio.run(scenario())
-    assert "Realtime WebSocket stream failed" in caplog.text
+    assert "Realtime transform failed on room:42 seq 1, skipping it" in caplog.text
+    assert "Realtime WebSocket stream failed" not in caplog.text
 
 
 @pytest.mark.django_db(transaction=True)

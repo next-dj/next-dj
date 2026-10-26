@@ -294,7 +294,7 @@ ignore = [
 "tests/pages/*" = ["INP001"]
 "tests/site_pages/*" = ["INP001"]
 "tests/forms/*" = ["INP001"]
-"**/{test*,conftest}.py" = [
+"{tests/**/*,examples/**/test*,examples/**/conftest}.py" = [
     "ANN001", "ANN201", "ANN202",
     "ARG001", "ARG002", "ARG003",
     "S101", "S105", "S106", "S108",

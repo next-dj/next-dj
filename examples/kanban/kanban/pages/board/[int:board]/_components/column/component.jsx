@@ -18,6 +18,7 @@ export function Column({ column, dragging = {}, onDrop, onCreate, onDragChange }
         e.preventDefault();
         setDropActive(false);
         const cardId = e.dataTransfer.getData("text/card-id");
+        if (!cardId) return;
         onDrop(cardId, column.id, column.cards.length);
       }}
       className={`kanban-column flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 w-64${dropActive ? " drop-active ring-2 ring-blue-400" : ""}`}

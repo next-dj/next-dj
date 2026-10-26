@@ -132,11 +132,7 @@ class TestPostActionPartialHeaders:
     def test_zones_header_reaches_the_request(self) -> None:
         client = NextClient(enforce_csrf_checks=False)
         response = client.post_action(
-            "simple_form",
-            {"name": ""},
-            origin="/",
-            partial=True,
-            zones=("alpha", "beta"),
+            "simple_form", {"name": ""}, origin="/", partial=("alpha", "beta")
         )
         assert response.wsgi_request.headers["X-Next-Zone"] == "alpha,beta"
 

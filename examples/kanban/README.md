@@ -119,7 +119,7 @@ class KanbanConfig(AppConfig):
         default_stems.register("template", "page")
 ```
 
-`render_module_tag` is the framework's built-in renderer for ES module assets, so jsx files reuse it without a custom renderer. Nothing else lives in `ready()`. The framework imports the `deps.py`, `forms.py`, `signals.py` and `realtime.py` of every installed app at startup, so [`kanban/deps.py`](kanban/deps.py) registers the `scope` dependency and the `DCard` provider, [`kanban/signals.py`](kanban/signals.py) wires the dev-mode `collector_finalized` receiver and the board broadcast, and [`kanban/realtime.py`](kanban/realtime.py) registers the `dragging` handler, without an import anywhere. No other integration point in the framework is touched.
+`render_module_tag` is the framework's built-in renderer for ES module assets, so jsx files reuse it without a custom renderer. Nothing else lives in `ready()`. The framework imports the `deps.py`, `forms.py`, `signals.py` and `realtime.py` of every installed app at startup, so [`kanban/deps.py`](kanban/deps.py) registers the `scope` dependency and the `DCard` provider, [`kanban/signals.py`](kanban/signals.py) wires the dev-mode `collector_finalized` receiver, the board broadcast and the drag release of a closed socket, and [`kanban/realtime.py`](kanban/realtime.py) registers the `dragging` handler, without an import anywhere. No other integration point in the framework is touched.
 
 ### 3. `ViteManifestBackend`
 
@@ -216,18 +216,18 @@ const { status } = await partial.submit({
 Creating a card has the same shape plus one extra problem. The action answers with a redirect and no body, so the client holds no id for the row it just drew. `CreateCardForm.on_valid()` therefore redirects to `/board/<id>/?created=<card_id>`, mirroring the `?moved=` convention, and the island asks `submit` for `navigate: false`, so the page stays in place and the redirect target arrives in `Outcome.location`. Until it does, the optimistic card lives under a client-side `pending-<n>` key, renders with `data-kanban-card-pending`, and is not draggable, because the server would not recognise that key. A confirmed id replaces the placeholder key in place. A post the server rejects, most often on a WIP limit, drops that one pending card and raises the error banner, so the client never keeps a card it cannot name. A `dropped` outcome means the runtime withdrew the post itself, so the pending card goes without a banner, and if the post did land the next refresh of the board brings the card back. The create path removes the pending card instead of restoring a snapshot the way the move path does, so a drag that landed while the post was in flight survives the rollback.
 
 ```javascript
-const { status, location } = await partial.submit({
+const outcome = await partial.submit({
   action: ctx.create_card_url,
   data: { column: columnId, title: text },
   navigate: false,
 });
 ```
 
-`ok` with a `location` that carries `created` names the card. Any other outcome drops the pending card, with the network banner for `error` and the rejection banner otherwise. CSRF and the request id come from the pipeline, so the island holds no token of its own.
+`ok` with a `location` that carries `created` names the card. Any other outcome drops the pending card and the banner names the reason. An `invalid` outcome carries the form errors in `Outcome.errors`, so the banner reads `Column has reached its WIP limit.` instead of a generic rejection. A `400` from the race check of section 8 resolves as `error`, and its plain-text body arrives in `Outcome.error.body`, so the banner shows that same sentence instead of a network error. Only a failure that names no reason falls back to the network banner for `error` and the rejection banner otherwise. CSRF and the request id come from the pipeline, so the island holds no token of its own.
 
 ### 8. WIP-limit invariant in two layers
 
-`CreateCardForm` binds its column through `ModelChoiceField`, so an unknown id fails on the field instead of in a hand-written lookup, and `clean()` performs a best-effort count check so common posts surface a friendly error before the save runs. The authoritative check sits inside `CreateCardForm.on_valid()` under `Column.objects.select_for_update()` and returns `HttpResponseBadRequest` if a concurrent post fills the slot between form validation and insertion. All seven form classes live in the app-level [`kanban/forms.py`](kanban/forms.py) picked up by autodiscover, because every one of them is shared across pages or components. The React layer reflects the limit live through the WIP badge that turns red when `cards.length` exceeds `wip_limit`, and a rejected create rolls its optimistic card back out.
+`CreateCardForm` binds its column through `ModelChoiceField`, so an unknown id fails on the field instead of in a hand-written lookup, and `clean()` performs a best-effort count check so common posts surface a friendly error before the save runs. The authoritative check sits inside `CreateCardForm.on_valid()` under `Column.objects.select_for_update()` and returns a plain-text `HttpResponseBadRequest` with the same `WIP_LIMIT_REACHED` sentence if a concurrent post fills the slot between form validation and insertion. All seven form classes live in the app-level [`kanban/forms.py`](kanban/forms.py) picked up by autodiscover, because every one of them is shared across pages or components. The React layer reflects the limit live through the WIP badge that turns red when `cards.length` exceeds `wip_limit`, and a rejected create rolls its optimistic card back out.
 
 ### 9. Every board through one scope
 
@@ -331,7 +331,7 @@ publish(board_topic(column.board_id), Patches(request).refresh(zone="board"))
 
 `Patches(request)` stamps the id of the submitting request, so the sender's tab drops its own echo. Every other tab GETs the `board` zone with its own cookies, the morph leaves the `data-next-keep` root alone, and the zone reply carries the page's serialisable context, so `context-updated` hands the island the fresh `board` and it re-renders the columns, keeping any card it is still creating. A created card publishes the same refresh. A move the form rejects publishes nothing.
 
-**Who holds a card.** Dragging is not worth a database write, so it travels as an upstream event. `Card` reports `dragstart` and `dragend` to `Board`, which calls `Next.partial.stream.send(topic, "dragging", {card, active}, {ack: false})`. The handler lives in `kanban/realtime.py`:
+**Who holds a card.** Dragging is not worth a database write, so it travels as an upstream event. `Card` reports `dragstart` and `dragend` to `Board`, which calls `Next.partial.stream.send(topic, "dragging", {card, active}, {ack: false})`. A drop into another column moves the card under another column key, React unmounts the node the drag started on, and its `dragend` fires on a detached node React no longer listens to. `moveCard` therefore sends `active: false` itself, and `Board` keeps the set of cards it announced, so the `dragend` of a drop inside one column does not send a second end. `Column` ignores a drop whose `dataTransfer` carries no card, such as a file or a text selection dragged in from outside, so no move with an empty `card_id` reaches the server. The handler lives in `kanban/realtime.py`:
 
 ```python
 @on("board:{id}", "dragging")
@@ -358,9 +358,23 @@ stream.on(topic, "board:dragging", (detail) => {
 });
 ```
 
-The id names a socket, not a person, so a second tab of the same member still sees the mark. A tab closed in the middle of a drag never sends `active: false`, so every `next:presence` event also drops the marks whose holder is no longer among the members, and the mark goes away as soon as the broker sees the socket leave. Over SSE there is no upstream channel, `send` resolves to `false`, and the board simply shows no marks.
+The id names a socket, not a person, so a second tab of the same member still sees the mark. `trackDragging` keeps the holders of each card keyed by that socket id, so one tab ending a drag never clears a mark another tab of the same member still holds. A tab closed in the middle of a drag never sends `active: false`, and presence cannot tell, because a member with a second tab open stays among the members. The `stream_unsubscribed` receiver in [`kanban/signals.py`](kanban/signals.py) covers that case:
 
-The integration tests cover the authorizer, the member and guest profiles, the stream with a signed-in and a guest watcher, the partial move reply with its context and its published refresh, the invalid reply that carries the board, and the handler both directly and through a real socket, where `from` equals the `connection` of the socket's `hello`. [`tests/e2e/test_realtime.py`](tests/e2e/test_realtime.py) serves the app under uvicorn through the shared `e2e_support.server.serve_realtime`, the one helper the three realtime examples share, and drives two browser contexts. Two guests see two `Guest` avatars without signing in. Signed in as Ada and Grace, both names show in both tabs, a card dragged in one tab lands in the other without a reload, without an HTTP post of the move and without a zone GET in the sender, a card picked up in one tab is marked in the other until it is dropped and never in the tab that holds it, and the mark goes away when the tab that holds the card leaves the board.
+```python
+@receiver(stream_unsubscribed, sender=TopicSocket)
+def release_socket_drags(
+    connection: TopicSocket, topics: tuple[str, ...] = (), **kwargs
+) -> None:
+    detail = {"from": connection.connection_id}
+    for topic in topics:
+        if board_pk(topic) is not None:
+            event = Patches(None).event("board:released", detail)
+            publish(topic, event, on_commit=False)
+```
+
+Every tab hears `board:released` and drops the marks of that one socket, whoever else of the same member still watches. A `next:presence` event that no longer lists a holder drops that holder's marks too. Over SSE there is no upstream channel, `send` resolves to `false`, and the board simply shows no marks.
+
+The integration tests cover the authorizer, the member and guest profiles, the stream with a signed-in and a guest watcher, the partial move reply with its context and its published refresh, the invalid reply that carries the board, and the handler both directly and through a real socket, where `from` equals the `connection` of the socket's `hello` and the closing socket publishes `board:released` under the same id. [`tests/e2e/test_realtime.py`](tests/e2e/test_realtime.py) serves the app under uvicorn through the shared `e2e_support.server.serve_realtime`, the one helper the three realtime examples share, and drives two browser contexts. Two guests see two `Guest` avatars without signing in. Signed in as Ada and Grace, both names show in both tabs, a card dragged in one tab lands in the other without a reload, without an HTTP post of the move and without a zone GET in the sender, a card picked up in one tab is marked in the other until it is dropped and never in the tab that holds it, the mark goes away when a drop lands the card in another column without a `dragend`, and it goes away when the tab that holds the card leaves the board, also while a second tab of the same member stays on it.
 
 ## Gotchas
 
@@ -383,7 +397,7 @@ The settings page hosts three independent `<form>` blocks. Each one posts to its
 - [`kanban/backends.py`](kanban/backends.py): `ViteManifestBackend` dev/prod URL routing.
 - [`kanban/deps.py`](kanban/deps.py): the `scope` dependency and the `DCard` marker with its `CardProvider`.
 - [`kanban/realtime.py`](kanban/realtime.py): the board topic, its authorizer, the presence profile, and the `dragging` upstream handler.
-- [`kanban/signals.py`](kanban/signals.py): the `action_dispatched` receiver that publishes the board refresh.
+- [`kanban/signals.py`](kanban/signals.py): the `action_dispatched` receiver that publishes the board refresh and the `stream_unsubscribed` receiver that releases a closed socket's drags.
 - [`docs/content/topics/realtime.rst`](../../docs/content/topics/realtime.rst): topics, presence, upstream events, and form actions over WebSocket.
 - [`vite.config.ts`](vite.config.ts): glob multi-entry build that discovers all co-located `.jsx` files.
 - [`vitest.config.ts`](vitest.config.ts): Vitest setup targeting `kanban/**/*.test.{jsx,tsx}`.

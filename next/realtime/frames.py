@@ -28,7 +28,7 @@ _EMPTY_CURSOR: Final[Mapping[str, Position | int]] = MappingProxyType({})
 class Close(enum.IntEnum):
     """Close codes of the realtime WebSocket protocol.
 
-    The client falls back to SSE on `SESSION` and `TOPIC_DENIED` and retries the rest.
+    A repeated `SESSION` and any `TOPIC_DENIED` fall back to SSE, the rest reconnect.
     """
 
     GOING_AWAY = 1001

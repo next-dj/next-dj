@@ -108,6 +108,7 @@ Store that string as the identity of the member, because connections with an equ
 ``keep_presence(limits, schedule, clock)`` reads ``REALTIME['PRESENCE']`` into ``self.presence_limits`` when ``limits`` is ``None`` and builds ``self.presence_schedule``, the ``PresenceSchedule`` that calls ``announce_presence(topic)`` on a daemon thread once a window closes.
 ``schedule`` is ``None`` for that default, or a callable that receives the hook and returns a schedule, which is how a test runs windows by hand.
 ``announce_presence`` is the abstract hook that every presence broker implements, and ``announce(broker, topic)`` is its usual body, reading the current snapshot and sending it through ``broker.broadcast``.
+``aannounce_presence`` is its asynchronous twin, which runs ``announce_presence`` on the shared thread pool by default, and a broker with an asynchronous client overrides it and awaits ``presence_schedule.aclose(self.aannounce_presence)`` in ``aclose``.
 Override ``broadcast`` to deliver the snapshot to live subscribers without a sequence, since the default raises ``NotImplementedError`` and a snapshot never enters the replay log.
 
 A change claims the coalescing window of its topic, and the claim has to be atomic across processes, as a ``SET NX PX`` is on Redis.

@@ -277,6 +277,10 @@ The hook must return the regular patch envelope with ``topic``, ``epoch``, ``seq
 The ``next-hello``, ``next-skip``, and ``next-end`` control frames are a fixed JSON schema that the client parses without the hook.
 ``sse_hello``, ``sse_skip``, and ``sse_end`` exist on the backend for completeness, and a backend leaves them alone, since a re-encoded control frame silently disables gap recovery.
 
+``stream_data`` is the one streaming hook, and no stream calls a method named ``sse_event``.
+A backend that defines ``sse_event`` or leaves ``stream_data`` unimplemented earns ``next.E215`` at ``manage.py check``, with a hint to implement ``stream_data(envelope, meta)`` in its place.
+Left unfixed, a backend without ``stream_data`` stays abstract, and the first render that reads the protocol backend raises ``AbstractBackendError`` naming ``stream_data``.
+
 See :doc:`/content/ref/partial` for the ``PartialProtocolBackend`` API.
 
 See also

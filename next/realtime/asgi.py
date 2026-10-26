@@ -339,9 +339,9 @@ class _Application:
     ) -> None:
         """Pass lifespan to an app that speaks it, else answer it, closing the broker.
 
-        An app that fails or returns before sending anything, like Django's, rejects it.
+        An app that fails or sends nothing rejects it, as plain Django is known to.
         """
-        if isinstance(self.http_app, ASGIHandler):
+        if type(self.http_app) is ASGIHandler:
             await _answer_lifespan(receive, send, None)
             return
         pending: ASGIReceiveEvent | None = None

@@ -203,11 +203,32 @@ def test_redis_async_scripts_are_bound_once_per_loop(server, clock) -> None:
     asyncio.run(scenario())
 
 
-def test_redis_leave_reports_a_refused_script_as_a_broker_failure(
-    server, clock, monkeypatch
+_CALLS: dict[str, tuple[str, tuple[object, ...]]] = {
+    "publish": ("publish", (refresh_envelope(),)),
+    "join": ("join", ("a", None, 30)),
+    "touch": ("touch", ("a", 30)),
+    "leave": ("leave", ("a",)),
+    "snapshot": ("presence", ()),
+    "announce": ("announce_presence", ()),
+}
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        redis.exceptions.ReadOnlyError("READONLY You can't write against a replica."),
+        redis.exceptions.OutOfMemoryError("OOM command not allowed"),
+        redis.exceptions.ClusterDownError("CLUSTERDOWN The cluster is down"),
+        redis.exceptions.TryAgainError("TRYAGAIN Multiple keys request"),
+    ],
+    ids=["readonly", "oom", "clusterdown", "tryagain"],
+)
+@pytest.mark.parametrize("script", sorted(_CALLS))
+def test_redis_reports_an_unavailable_server_as_a_broker_failure(
+    server, clock, monkeypatch, script: str, failure: Exception
 ) -> None:
     broker = _redis(server, clock)
-    failure = redis.ResponseError("READONLY")
+    method, args = _CALLS[script]
 
     def refuse(**_kwargs: object) -> None:
         raise failure
@@ -215,19 +236,36 @@ def test_redis_leave_reports_a_refused_script_as_a_broker_failure(
     async def arefuse(**_kwargs: object) -> None:
         raise failure
 
-    monkeypatch.setattr(broker, "_scripts", replace(broker._scripts, leave=refuse))
-    with pytest.raises(BrokerConnectionError, match="READONLY"):
-        broker.leave(TOPIC, "a")
+    monkeypatch.setattr(
+        broker, "_scripts", replace(broker._scripts, **{script: refuse})
+    )
+    with pytest.raises(BrokerConnectionError) as caught:
+        getattr(broker, method)(TOPIC, *args)
+    assert caught.value.__cause__ is failure
 
     async def scenario() -> None:
         entry = broker._loop_client()
         broker._async_clients[asyncio.get_running_loop()] = entry._replace(
-            scripts=replace(entry.scripts, leave=arefuse)
+            scripts=replace(entry.scripts, **{script: arefuse})
         )
-        with pytest.raises(BrokerConnectionError, match="READONLY"):
-            await broker.aleave(TOPIC, "a")
+        with pytest.raises(BrokerConnectionError) as caught:
+            await getattr(broker, f"a{method}")(TOPIC, *args)
+        assert caught.value.__cause__ is failure
 
     asyncio.run(scenario())
+    broker.close()
+
+
+def test_redis_leaves_a_script_error_untranslated(server, clock, monkeypatch) -> None:
+    broker = _redis(server, clock)
+    failure = redis.ResponseError("ERR user_script:1: Script attempted to access")
+
+    def refuse(**_kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(broker, "_scripts", replace(broker._scripts, leave=refuse))
+    with pytest.raises(redis.ResponseError):
+        broker.leave(TOPIC, "a")
     broker.close()
 
 

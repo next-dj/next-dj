@@ -5,11 +5,12 @@ from django.conf import settings
 from django.dispatch import receiver
 from django.http import HttpRequest
 
-from kanban.realtime import board_topic
+from kanban.realtime import board_pk, board_topic
 from next.conf import next_framework_settings
 from next.forms.signals import action_dispatched
 from next.partial import Patches
-from next.realtime import publish
+from next.realtime import TopicSocket, publish
+from next.signals import stream_unsubscribed
 from next.static import StaticAsset
 from next.static.signals import collector_finalized
 
@@ -34,6 +35,18 @@ def broadcast_board_change(
         return
     column = form.cleaned_data[field]
     publish(board_topic(column.board_id), Patches(request).refresh(zone="board"))
+
+
+@receiver(stream_unsubscribed, sender=TopicSocket)
+def release_socket_drags(
+    connection: TopicSocket, topics: tuple[str, ...] = (), **kwargs
+) -> None:
+    """Tell every board a closed socket watched to drop the cards it still held."""
+    detail = {"from": connection.connection_id}
+    for topic in topics:
+        if board_pk(topic) is not None:
+            event = Patches(None).event("board:released", detail)
+            publish(topic, event, on_commit=False)
 
 
 def _has_module_assets(collector: object) -> bool:

@@ -24,6 +24,7 @@ from next.urls import page_reverse, with_query
 
 BOARD_PAGE = "board/[int:board]"
 BOARD_SETTINGS_PAGE = "board/[int:board]/settings"
+WIP_LIMIT_REACHED = "Column has reached its WIP limit."
 
 
 def _is_full(column: Column) -> bool:
@@ -120,8 +121,7 @@ class CreateCardForm(Form):
         cleaned = super().clean() or {}
         column = cleaned.get("column")
         if column is not None and _is_full(column):
-            msg = "Column has reached its WIP limit."
-            raise django_forms.ValidationError(msg)
+            raise django_forms.ValidationError(WIP_LIMIT_REACHED)
         return cleaned
 
     def on_valid(self, request: HttpRequest) -> HttpResponse:
@@ -131,7 +131,9 @@ class CreateCardForm(Form):
             locked = Column.objects.select_for_update().get(pk=column.pk)
             count = locked.cards.count()
             if _is_full(locked):
-                return HttpResponseBadRequest("Column has reached its WIP limit.")
+                return HttpResponseBadRequest(
+                    WIP_LIMIT_REACHED, content_type="text/plain; charset=utf-8"
+                )
             card = Card.objects.create(
                 column=locked,
                 title=self.cleaned_data["title"],

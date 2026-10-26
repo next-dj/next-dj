@@ -184,6 +184,7 @@ An optional ``transform(message)`` runs for each subscriber and can return a saf
 ``transform``, ``authorize``, and ``presence`` each take a callable or its dotted path, such as ``"rooms.access.can_watch"``.
 A dotted path is imported when the stream is built and reaches a WebSocket ticket as written.
 Returning ``None`` suppresses the message for that subscriber.
+A transform that raises or returns an unsafe payload suppresses the message the same way and logs the topic and the ``seq`` on ``next.realtime.delivery``, on a live message and on a replayed one alike.
 Async streams run synchronous transforms in a worker thread.
 
 Topic publication carries JSON patch instructions only.
@@ -567,6 +568,7 @@ A handler still validates ``data`` and checks what the user may do, because the 
 
 Each connection draws a token per frame from one bucket, set by ``REALTIME["UPSTREAM"]``.
 The defaults are ``10`` frames a second, a burst of ``20``, ``16384`` bytes per ``up`` frame, and ``10`` seconds for a handler before the ``ack`` answers ``timeout``.
+``hello`` carries that handler timeout as ``upstream.timeout``, so the client waits for an ``ack`` as long as the server lets the handler run.
 The same bucket serves the tunneled requests of `Form actions over WebSocket`_.
 A frame over the budget is refused with ``limit``, and three refusals in a row close the socket with ``4429``.
 A client that throttles its own sends, a typing indicator at most every few hundred milliseconds, never reaches that code.
@@ -602,7 +604,7 @@ Send from the page
    });
 
 By default the frame carries an id and the promise resolves to ``true`` when the handler ran to completion.
-It resolves to ``false`` when the handler is missing or failed, the bucket was empty, the topic is not open on a socket, no acknowledgment arrived within five seconds, or the socket dropped first.
+It resolves to ``false`` when the handler is missing or failed, the bucket was empty, the topic is not open on a socket, no acknowledgment arrived within the ``upstream.timeout`` of ``hello`` plus a short margin, or the socket dropped first.
 ``{ack: false}`` sends the frame without an id and resolves to ``true`` as soon as it is queued, which suits events whose loss is harmless.
 A page on SSE has no WebSocket, so the promise resolves to ``false`` and nothing is sent.
 A frame over the ``upstream.frame`` limit of ``hello``, 16 KiB by default, resolves to ``false`` as well.

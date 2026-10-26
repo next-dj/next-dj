@@ -22,6 +22,8 @@ const RESUME_REVALIDATE_MS = 3000;
 // The cap on zones a connection tracks, so a long background sleep does not make
 // resume re-GET an unbounded backlog at once. A plain cap, not an LRU.
 const MAX_BOUND = 64;
+// The server refuses a subscribe frame whose cursor names more topics than this.
+const MAX_CURSOR = 64;
 // The placeholder control before a real socket exists, and the lasting control of
 // a connection registered while paused whose socket resume opens.
 /* v8 ignore next */
@@ -34,6 +36,8 @@ export type PatchesData = string | Record<string, unknown>;
 /** The handle returned by a transport and closed on teardown. */
 export interface TransportControl {
   close(): void;
+  // The transport actually carrying the stream, when it differs from the named one.
+  readonly transport?: string | undefined;
 }
 
 /** Messages a transport delivers to the shared stream protocol. */
@@ -163,9 +167,10 @@ export function createStream(deps: StreamDeps): Stream {
   // A ring of the last ECHO_LIMIT own ids, each mapped to the connection that
   // dropped its echo. A Map keeps insertion order, so its first key is the oldest.
   const echo = new Map<string, Connection | undefined>();
-  let paused = false;
+  // A tab loaded in the background starts paused, so its first show opens the sockets.
+  let paused = visibility.hidden();
   // The clock at the last pause, so resume measures the hidden span.
-  let pausedAt = 0;
+  let pausedAt = paused ? now() : 0;
   let detachVisibility: (() => void) | null = null;
   const offsets: number[] = [];
   const listeners = new Set<Listener>();
@@ -231,7 +236,7 @@ export function createStream(deps: StreamDeps): Stream {
     connection.state = state;
     deps.dispatch("next:stream-state", {
       url: connection.url,
-      transport: transport.name,
+      transport: connection.control.transport ?? transport.name,
       state,
       code,
     });
@@ -326,7 +331,7 @@ export function createStream(deps: StreamDeps): Stream {
   ): boolean {
     const previous = connection.cursor.get(topic);
     if (previous?.[0] === epoch && seq <= previous[1]) return false;
-    connection.cursor.set(topic, [epoch, seq]);
+    track(connection, topic, [epoch, seq]);
     const restarted =
       previous !== undefined && previous[0] !== epoch && previous[0] !== "";
     // A topic idle past the replay TTL restarts at seq 1, all of it seen live.
@@ -338,6 +343,17 @@ export function createStream(deps: StreamDeps): Stream {
     if (previous !== undefined && !adopted && (seq > previous[1] + 1 || restarted))
       resyncMany(connection, [{ topic, from: previous[1], to: seq }]);
     return true;
+  }
+
+  // Re-inserting keeps the map in recency order, so the oldest topic goes first.
+  function track(connection: Connection, topic: string, position: Cursor): void {
+    const cursor = connection.cursor;
+    cursor.delete(topic);
+    cursor.set(topic, position);
+    if (cursor.size <= MAX_CURSOR) return;
+    const oldest = cursor.keys().next().value;
+    /* v8 ignore next */
+    if (oldest !== undefined) cursor.delete(oldest);
   }
 
   function control(data: string): Record<string, unknown> | undefined {
@@ -362,6 +378,9 @@ export function createStream(deps: StreamDeps): Stream {
     sampleTime(raw[SERVER_TIME]);
     const topics = raw.topics;
     if (!isRecord(topics)) return;
+    // A hello lists every granted topic, so a cursor for any other is dead weight.
+    for (const topic of connection.cursor.keys())
+      if (!Object.hasOwn(topics, topic)) connection.cursor.delete(topic);
     const gaps: { topic: string; from: number; to: number }[] = [];
     for (const [topic, position] of Object.entries(topics)) {
       if (!isRecord(position)) continue;
@@ -370,7 +389,7 @@ export function createStream(deps: StreamDeps): Stream {
       const epoch = asString(position[EPOCH]) ?? "";
       const previous = connection.cursor.get(topic);
       if (previous?.[0] === epoch && previous[1] === seq) continue;
-      connection.cursor.set(topic, [epoch, seq]);
+      track(connection, topic, [epoch, seq]);
       if (previous !== undefined || seq > 0)
         gaps.push({ topic, from: previous?.[1] ?? 0, to: seq });
     }
@@ -577,6 +596,7 @@ export function createStream(deps: StreamDeps): Stream {
 
   // Pausing keeps the bound registry, so resume knows which zones to revalidate.
   function pause(): void {
+    if (paused) return;
     paused = true;
     pausedAt = now();
     for (const connection of connections.values()) {
@@ -588,6 +608,8 @@ export function createStream(deps: StreamDeps): Stream {
   // On returning visibility every paused connection reopens, and bound zones
   // re-GET only when the tab was hidden past the threshold.
   function resume(): void {
+    // A second visible event must not reopen live sockets over the open ones.
+    if (!paused) return;
     paused = false;
     const revalidate = now() - pausedAt >= RESUME_REVALIDATE_MS;
     const pending = [...connections.values()];

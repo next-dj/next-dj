@@ -106,8 +106,6 @@ def check_realtime_settings(*args, **kwargs) -> list[CheckMessage]:
         dict(realtime), allowed=_REALTIME_KEYS, prefix=_PREFIX
     )
     broker = realtime.get("BROKER", {})
-    if broker is None:
-        broker = {}
     if not isinstance(broker, Mapping):
         return [
             *errors,
@@ -415,12 +413,12 @@ def _presence_warnings(
 
 
 def _transport_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
-    """Validate the explicit transport list."""
+    """Validate the explicit transport list or tuple the runtime reads."""
     transports = realtime.get("TRANSPORTS")
     if transports is None:
         return []
     if (
-        not isinstance(transports, list)
+        not isinstance(transports, list | tuple)
         or not transports
         or any(
             not isinstance(item, str) or item not in {"sse", "ws"}
@@ -430,7 +428,7 @@ def _transport_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
     ):
         return [
             Error(
-                f"{_PREFIX}['TRANSPORTS'] must be a unique non-empty list containing "
+                f"{_PREFIX}['TRANSPORTS'] must be a unique non-empty list or tuple of "
                 "only 'sse' and 'ws'.",
                 obj=settings,
                 id="next.E181",
@@ -442,7 +440,7 @@ def _transport_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
 def _deployment_warnings(realtime: Mapping[str, object]) -> list[CheckMessage]:
     """Flag an explicit WebSocket transport on a deployment without server sessions."""
     transports = realtime.get("TRANSPORTS")
-    if not isinstance(transports, list) or "ws" not in transports:
+    if not isinstance(transports, list | tuple) or "ws" not in transports:
         return []
     return websocket_deployment_messages()
 

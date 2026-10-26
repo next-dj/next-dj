@@ -59,6 +59,8 @@ A subclass that overrides ``RedisBroker.create_client(url, options, *, asynchron
 A pool that raises ``redis.exceptions.MaxConnectionsError`` logs a warning on the ``next.realtime.redis.broker`` logger.
 The ``next.realtime.redis.broker`` and ``next.realtime.redis.pubsub`` loggers are children of ``next.realtime.redis``, so one handler on the parent catches both.
 A ``BlockingConnectionPool`` raises a plain ``ConnectionError`` on timeout instead, so its exhaustion ends the stream with ``BrokerConnectionError`` and logs no warning.
+Every ``RedisBroker`` operation raises ``BrokerConnectionError`` for a connection or timeout error and for the replies of a server that cannot serve now, ``READONLY``, ``OOM``, ``CLUSTERDOWN``, and ``TRYAGAIN``, so a stream ends as it does on a lost connection and the client retries.
+Any other error reply, such as a failing script, stays a ``redis.exceptions.ResponseError``.
 
 ``RedisBroker.topic_key(kind, topic)`` names the keys of a topic as ``<PREFIX>:<kind>:{<topic>}``.
 
@@ -115,7 +117,8 @@ One instance serves the whole process, so every method is called from many reque
        A topic never published answers ``Position(epoch="", seq=0)``.
    * - ``close()`` and ``aclose()``
      - Release connections and threads.
-       Both default to doing nothing, and ``aclose`` calls ``close``.
+       ``close`` defaults to doing nothing, and ``aclose`` runs ``close`` on the shared thread pool, so a blocking ``close`` never stalls the event loop.
+       ``MemoryBroker`` and ``RedisBroker`` override ``aclose`` to publish the pending presence snapshots through the asynchronous send of ``message_published``, so an async receiver runs on the loop and a sync one on the pool.
        The broker manager calls ``close`` when the framework settings reload.
 
 A stream enters the subscription first, reads the positions second, replays what its cursor missed third, and then sends ``hello``.
@@ -249,7 +252,7 @@ A publication on a topic whose log has already expired starts a new log, as ``PE
 An idle log therefore holds its memory for two ``TTL`` periods at most while the broker keeps publishing.
 A topic idle for ``TTL`` seconds reports the position ``("", 0)``, and its next publication opens a new epoch at ``seq`` ``1``.
 A live client adopts the first message of that new epoch without a resync, while a client that reconnects with a cursor that no longer matches the position resyncs its zones.
-Its ``clock`` keyword, ``time.time`` by default, stamps ``published_at`` and times the expiry from the same reading, so a test passes a fake one.
+Its ``clock`` keyword, ``time.monotonic`` by default, times the expiry and the presence windows, so a test passes a fake one, while ``published_at`` stays the ``time.time`` of the publication as on Redis.
 ``RedisBroker`` writes the log in the same Lua script that numbers and publishes a message, so the three steps are atomic, and the script publishes only after the log write.
 The log is a list trimmed to ``SIZE`` entries whose expiry each publication pushes out by ``TTL``, the sequence key expires with it, and the script deletes the log when the topic starts a new epoch.
 With ``SIZE`` set to ``0`` the script never touches the log key.
@@ -264,6 +267,7 @@ SSE and WebSocket run the same order for every connection.
 #. It reads the positions of its topics, the snapshot that ``hello`` announces.
 #. For each topic whose cursor trails the snapshot in the same epoch, it replays the messages after the cursor up to the snapshot position.
    Every replayed message passes through the same transform and the same access check as a live one, so a filtered message becomes a ``skip`` and a revoked grant ends the stream.
+   A transform that raises or returns no safe payload skips its message the same way, so a reconnect never fails again on a message the log still holds.
 #. It sends ``hello``.
 #. It sends live messages.
    A message published after the subscription waits in the subscription queue, and one already replayed arrives again for the client to drop by ``seq``.
@@ -418,7 +422,7 @@ Every change raises a version that the published snapshot records, and a join, a
 ``RedisBroker`` reads and publishes a snapshot in one script, so snapshots of one topic leave in the order of their changes.
 A leave that empties its topic while another process holds the window schedules the snapshot for the close of that window, since no later refresh would claim it.
 A failure to publish a snapshot is logged on ``next.realtime.roster`` and the topic is tried again a window later.
-``close()`` publishes the pending snapshots at once and stops the thread, and a forked child starts with a fresh schedule.
+``close()`` publishes the pending snapshots at once and stops the thread, ``aclose()`` does the same through ``aannounce_presence`` without blocking the event loop, and a forked child starts with a fresh schedule.
 
 The record of a connection lives ``Attendance.ttl_heartbeats`` heartbeat intervals, three by default, and every refresh pushes the deadline out.
 The scripts and the memory roster prune the expired records on a join, a refresh, and a leave, and a prune that removes a member claims a window.
@@ -437,7 +441,7 @@ The ``PresenceBroker`` contract
      - Contract
    * - ``join(topic, connection, member, ttl)`` and ``ajoin``
      - Record a connection until ``ttl`` seconds pass without a touch.
-       ``member`` is a mapping or ``None``, and a broker encodes it with ``encode_member`` from ``next.realtime.roster``, which raises ``InvalidMemberError`` for a member that is no mapping with string keys, holds a value JSON cannot carry, or exceeds ``MEMBER_BYTES``.
+       ``member`` is a mapping or ``None``, and a broker encodes it with ``encode_member`` from ``next.realtime.roster``, which raises ``InvalidMemberError`` for a member that is no mapping with string keys, holds a value JSON cannot carry or a string with a lone surrogate, or exceeds ``MEMBER_BYTES``.
        Joining a known connection replaces its member.
    * - ``touch(topic, connection, ttl)`` and ``atouch``
      - Push the deadline out and return ``False`` when the connection holds no record, so the caller joins again.
@@ -458,6 +462,7 @@ A broker keeps the coalescing itself with the helpers of ``next.realtime.roster`
    * - ``PresenceWindow``
      - A mixin that holds ``presence_limits`` and ``presence_schedule``.
        Its schedule calls the ``announce_presence(topic)`` hook once a window closes.
+       ``aannounce_presence(topic)`` is the hook ``aclose`` awaits for each pending topic, and it runs ``announce_presence`` on the shared thread pool unless a broker overrides it.
    * - ``presence_limits()``
      - Reads the ``PRESENCE`` limits.
    * - ``PresenceSchedule``
@@ -495,7 +500,7 @@ Its Lua scripts read the Redis ``TIME``, so hosts with different clocks agree on
 Both constructors take a ``presence`` keyword with the same mapping as the setting, and a broker reads it once when it is created.
 Both take a ``schedule`` keyword too.
 It is a callable that receives the ``announce_presence`` hook and returns the ``PresenceSchedule``.
-An override of ``announce_presence`` observes or reroutes every snapshot.
+An override of ``announce_presence`` observes or reroutes every snapshot the schedule publishes, and an override of ``aannounce_presence`` the snapshots ``aclose`` flushes.
 
 The limits
 ~~~~~~~~~~
@@ -670,7 +675,7 @@ Server frames
        A backend whose ``stream_data`` returns text sends that text as a string.
    * - ``skip``
      - ``{"type": "skip", "topic": "room:42", "epoch": "...", "seq": 18}``
-     - A message the subscriber transform filtered out, sent so the cursor still advances.
+     - A message the subscriber transform filtered out or failed on, sent so the cursor still advances.
    * - ``ping``
      - ``{"type": "ping", "server_time": 1761300000000}``
      - A heartbeat on an idle subscription, or a probe of a client silent for a whole heartbeat.
@@ -709,6 +714,9 @@ The WebSocket ``hello`` tells the client the limits it builds its frames by.
    * - ``upstream.frame``
      - ``UPSTREAM['MAX_BYTES']``, the largest ``up`` frame in UTF-8 bytes.
        Always present.
+   * - ``upstream.timeout``
+     - ``UPSTREAM['TIMEOUT']`` in seconds, after which the server acknowledges an ``up`` frame with ``timeout``.
+       Always present, so a client waits for the ``ack`` at least that long.
    * - ``tunnel.timeout``
      - ``TUNNEL['TIMEOUT']`` in seconds, after which the server answers ``timeout``.
    * - ``tunnel.frame``
@@ -721,7 +729,7 @@ The WebSocket ``hello`` tells the client the limits it builds its frames by.
      - The lowercase header ``CSRF_HEADER_NAME`` stands for, such as ``x-csrftoken``, or ``null`` when the setting names a plain ``META`` key.
 
 ``tunnel`` is present only when the socket has a tunnel and ``REALTIME['TUNNEL']`` is not ``False``, so its absence means every ``http`` frame answers ``disabled``.
-With the defaults the frame ends in ``"upstream":{"frame":16384},"tunnel":{"timeout":30.0,"frame":65536,"headers":["accept","content-type"],"prefixes":["x-next-"],"csrf":"x-csrftoken"}``.
+With the defaults the frame ends in ``"upstream":{"frame":16384,"timeout":10.0},"tunnel":{"timeout":30.0,"frame":65536,"headers":["accept","content-type"],"prefixes":["x-next-"],"csrf":"x-csrftoken"}``.
 A client sends a header outside ``headers``, ``prefixes``, and ``csrf`` over HTTP, since the tunnel drops it.
 
 A stock JSON backend returns the frame as JSON text from ``stream_data`` once a subclass sets its own ``content_type``.
@@ -871,6 +879,7 @@ Each admitted frame runs as its own task, so acks may arrive in another order th
 The recheck runs at most once per heartbeat, so an ``up`` frame may still reach its handler up to one heartbeat after the session or the grant is revoked.
 ``TopicSocket.access_check(claims, authorizer)`` builds that recheck, and an override with a shorter interval tightens it.
 A sync handler runs on a thread pool of its own, sized like the default executor, so a slow handler never queues the session loads and transforms of other sockets.
+An object whose ``__call__`` is a coroutine function runs on the event loop, and an awaitable a sync handler returns, as a sync decorator over an ``async def`` does, is awaited before the ``ack``.
 ``TopicSocket.handle(upstream)`` routes a granted event and returns whether anything served it, and an override replaces the ``@on`` registry with routing of its own.
 ``Upstream.user`` is the user the last access recheck loaded, not the one of the handshake, so a revoked permission reaches the handler after the next recheck.
 
@@ -899,6 +908,8 @@ Only a reply to a request that reached ``FormActionDispatch`` passes, so a middl
 Such a reply is the answer of the action, so a ``PermissionDenied`` or ``Http404`` raised by a guard or a handler arrives with its ``403`` or ``404`` as over HTTP.
 A redirect is not followed and arrives as its ``3xx`` with ``location``.
 A ``Set-Cookie`` that repeats a cookie of the handshake with the same value and no deletion is dropped, and any other ``Set-Cookie`` turns the reply into the ``http_only`` refusal, logged as a warning that names the cookies and never their values.
+A header the cookie parser rejects counts as such a cookie.
+A reply that never reached the dispatch, or the ``421`` of an HTTP-only action, maps to its refusal in the table below before any cookie is read, so a cookie a middleware sets on every response leaves ``stale`` and ``transport`` retryable.
 A ``set_expiry()`` call in a tunneled action moves the expiry the store keeps, while the browser cookie keeps its lifetime, so an action that changes how long the browser holds the session keeps ``transport="http"``.
 ``DjangoTunnel.cookie_allowed(name, morsel)`` decides each cookie, and an override admits a cookie the client does not need, such as an analytics marker.
 
@@ -959,6 +970,7 @@ A timeout or a closing socket ends the request with ``http.disconnect`` and wait
 The application is never cancelled, because a cancel inside Django's thread-sensitive context blocks the event loop until the view thread returns.
 A synchronous view keeps running in its thread after the disconnect, so a ``timeout`` or ``http_only`` request may have committed, and Django still sends ``request_finished`` once it ends.
 Such a request keeps its ``TUNNEL['CONCURRENCY']`` slot until the view returns, so a socket never runs more views at once than the limit.
+A request takes its slot before its path is resolved, so a burst of frames during a cold URLconf import counts against the limit too.
 ``WebSocketApp(http_app=...)`` runs the requests through another application, and a subclass that overrides ``WebSocketApp.tunnel(scope)`` returns its own ``Tunnel``, an object whose ``async __call__(request, *, connection)`` returns a ``Reply`` or a ``Refusal`` and whose ``hints()`` returns the ``TunnelHints`` of the ``hello`` frame.
 ``DjangoTunnel`` keeps its header lists in class attributes, so a subclass extends them without copying the class, and ``hello`` reports the extended lists.
 With messages kept in a cookie, ``next.W145`` warns that a flashed message turns a tunneled reply into ``http_only``.
@@ -1090,8 +1102,8 @@ It sends HTTP to ``http_app``, serves the socket at ``REALTIME['WS_PATH']``, and
 The path is compared below ``FORCE_SCRIPT_NAME`` or the ASGI ``root_path``, the way Django computes ``path_info``, and the ticket URL carries the same prefix.
 ``REALTIME['WS_PATH']`` is the only place the route is configured, because the ticket tells the client the same URL.
 
-Django's ASGI handler does not speak lifespan, so ``application`` answers it and closes the broker on shutdown.
-Another HTTP application gets the lifespan events, and the broker closes before its shutdown complete goes out.
+Django's ASGI handler does not speak lifespan, so for an ``http_app`` of exactly that class ``application`` answers it and closes the broker on shutdown.
+Any other HTTP application gets the lifespan events, a subclass of the handler that speaks lifespan included, and the broker closes before its shutdown complete goes out.
 An application that fails or returns before sending a lifespan event, such as a middleware around Django's handler, leaves the answer to ``application``.
 A broker that fails to close is logged and reported as ``lifespan.shutdown.failed``.
 Creating a ``WebSocketApp`` marks the process as serving ``ws``, which switches the default ``TRANSPORTS`` to ``["ws", "sse"]``.
@@ -1245,7 +1257,7 @@ A ``WebSocketApp`` logs the session warnings itself when it is created, since ``
 An error flags a routed ticket introspection endpoint that has no ``GATEWAY_TOKEN``.
 The checks run against the defaults when ``NEXT_FRAMEWORK`` has no ``REALTIME`` key.
 Errors flag invalid ``UPSTREAM`` and ``TUNNEL`` limits and upstream handlers that can never match.
-See :doc:`system-checks` for the ids ``next.E177`` to ``next.E199``, ``next.E201`` to ``next.E211``, and ``next.W141`` to ``next.W144``, ``next.W146``, and ``next.W147``.
+See :doc:`system-checks` for the ids ``next.E177`` to ``next.E199``, ``next.E201`` to ``next.E211``, ``next.E213``, and ``next.W141`` to ``next.W144``, ``next.W146``, and ``next.W147``.
 
 See also
 --------

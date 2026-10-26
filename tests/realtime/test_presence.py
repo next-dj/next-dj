@@ -1,4 +1,5 @@
 import asyncio
+import time
 from collections.abc import Callable, Iterator
 
 import fakeredis
@@ -11,7 +12,7 @@ from next.realtime import (
     Position,
     Presence,
 )
-from next.realtime.roster import EVENT, Member, PresenceSchedule
+from next.realtime.roster import EVENT, Member, PresenceSchedule, PresenceWindow
 from next.realtime.signals import message_published
 from next.testing import SignalRecorder, capture_signals
 from tests.support.realtime import (
@@ -182,6 +183,10 @@ def test_member_above_member_bytes_is_refused_and_not_recorded(build) -> None:
         api.join(TOPIC, "big", {"n": "x" * 25})
     with pytest.raises(InvalidMemberError, match="not a mapping"):
         api.join(TOPIC, "list", ["Ada"])
+    with pytest.raises(InvalidMemberError, match="lone surrogate"):
+        api.join(TOPIC, "surrogate", {"n": "\ud800"})
+    with pytest.raises(InvalidMemberError, match="lone surrogate"):
+        api.join(TOPIC, "surrogate", {"\udfff": 1})
     assert api.presence() == Presence(1, (exact,))
     assert not api.touch(TOPIC, "big")
 
@@ -569,3 +574,104 @@ def test_closing_the_broker_publishes_the_pending_snapshot(
     api.broker.close()
 
     assert _announced(snapshots) == [(TOPIC, {"count": 1})]
+
+
+def _on_a_loop() -> bool:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
+def _broker(kind: str, clock: ServerClock) -> MemoryBroker | FakeServerBroker:
+    limits = {"WINDOW": WINDOW}
+    schedule = manual_schedule(clock)
+    if kind == "memory":
+        return MemoryBroker(clock=clock, presence=limits, schedule=schedule)
+    return FakeServerBroker(
+        fakeredis.FakeServer(), presence=limits, clock=clock, schedule=schedule
+    )
+
+
+@pytest.mark.parametrize("kind", ["memory", "redis"])
+def test_aclose_announces_the_pending_snapshot_through_the_async_send(
+    kind: str, clock: ServerClock
+) -> None:
+    broker = _broker(kind, clock)
+    calls: list[tuple[str, object]] = []
+
+    async def areceiver(sender: object, topic: str, **kwargs: object) -> None:
+        calls.append(("async", topic))
+
+    def receiver(sender: object, topic: str, **kwargs: object) -> None:
+        calls.append(("sync", _on_a_loop()))
+
+    async def scenario() -> None:
+        await broker.ajoin(TOPIC, "a", None, 30)
+        assert broker.presence_schedule.pending() == (TOPIC,)
+        await broker.aclose()
+
+    message_published.connect(areceiver)
+    message_published.connect(receiver)
+    try:
+        asyncio.run(scenario())
+    finally:
+        message_published.disconnect(areceiver)
+        message_published.disconnect(receiver)
+    assert sorted(calls, key=str) == [("async", TOPIC), ("sync", False)]
+    assert broker.presence_schedule.pending() == ()
+
+
+@pytest.mark.parametrize("kind", ["memory", "redis"])
+def test_aclose_skips_a_pending_topic_already_announced(
+    kind: str, clock: ServerClock, snapshots
+) -> None:
+    broker = _broker(kind, clock)
+
+    async def scenario() -> None:
+        await broker.ajoin(TOPIC, "a", None, 30)
+        clock.advance(PAST_WINDOW)
+        broker.presence_schedule.run_due()
+        broker.presence_schedule.schedule(TOPIC, WINDOW)
+        await broker.aclose()
+
+    asyncio.run(scenario())
+    assert _announced(snapshots) == [(TOPIC, {"count": 1})]
+
+
+def test_aclose_logs_a_snapshot_that_fails_and_goes_on(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    published: list[str] = []
+    schedule = PresenceSchedule(published.append, threaded=False)
+    schedule.schedule("room:a", 1)
+    schedule.schedule("room:b", 2)
+
+    async def publish(topic: str) -> None:
+        if topic == "room:a":
+            raise ConnectionError
+        published.append(topic)
+
+    asyncio.run(schedule.aclose(publish))
+    assert published == ["room:b"]
+    assert (
+        caplog.records[0].getMessage() == "Could not publish the presence of 'room:a'."
+    )
+    schedule.schedule("room:c", 1)
+    assert schedule.pending() == ()
+
+
+class _SyncOnlyWindow(PresenceWindow):
+    def __init__(self) -> None:
+        self.announced: list[tuple[str, bool]] = []
+        self.keep_presence(None, None, time.monotonic)
+
+    def announce_presence(self, topic: str) -> None:
+        self.announced.append((topic, _on_a_loop()))
+
+
+def test_a_window_without_an_async_announce_runs_the_sync_one_off_the_loop() -> None:
+    window = _SyncOnlyWindow()
+    asyncio.run(window.aannounce_presence(TOPIC))
+    assert window.announced == [(TOPIC, False)]

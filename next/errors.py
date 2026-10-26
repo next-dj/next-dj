@@ -1,6 +1,12 @@
 """Exceptions a misconfigured project raises across every area."""
 
+from typing import TYPE_CHECKING
+
 from django.core.exceptions import ImproperlyConfigured
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 class InvalidDirsError(ImproperlyConfigured):
@@ -92,13 +98,18 @@ class SettingNotSubclassError(ImproperlyConfigured):
 
 
 class AbstractBackendError(ImproperlyConfigured):
-    """Raised when a settings entry names the abstract root of a backend family."""
+    """Raised when a settings entry names a backend class that is still abstract."""
 
-    def __init__(self, dotted: str) -> None:
-        """Store the abstract class the entry named."""
+    def __init__(self, dotted: str, missing: "Iterable[str]" = ()) -> None:
+        """Store the abstract class the entry named and the methods it leaves open."""
         self.dotted = dotted
+        self.missing = tuple(sorted(missing))
+        unimplemented = (
+            f" It does not implement {', '.join(self.missing)}." if self.missing else ""
+        )
         super().__init__(
             f"Backend {dotted!r} is abstract, so it names no usable backend."
+            f"{unimplemented}"
         )
 
 

@@ -1730,15 +1730,17 @@ describe("createPartial over an open WebSocket", () => {
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   }
 
-  function connected(transports: string[]) {
+  function connected(transports: string[], visibility = manualVisibility()) {
     const sent: string[] = [];
     const deliver: ((body: unknown) => void)[] = [];
     const opens: (() => void)[] = [];
+    const closes: number[] = [];
     const websocket: WebSocketAdapter = {
       open(_url, onOpen, onMessage) {
+        const index = opens.length;
         opens.push(() => onOpen((body) => sent.push(body)));
         deliver.push(onMessage);
-        return { close: () => undefined };
+        return { close: () => void closes.push(index) };
       },
     };
     const fetch = vi.fn(async (url: string) =>
@@ -1762,7 +1764,7 @@ describe("createPartial over an open WebSocket", () => {
       fetch,
       websocket,
       source: mockSource().adapter,
-      visibility: manualVisibility(),
+      visibility,
     });
     document.body.innerHTML = FORM;
     partial.stream.scan(document);
@@ -1770,8 +1772,46 @@ describe("createPartial over an open WebSocket", () => {
       deliver[socket]!(JSON.stringify(frame));
     const last = (): Record<string, unknown> =>
       JSON.parse(sent[sent.length - 1]!) as Record<string, unknown>;
-    return { partial, fetch, opens, message, last, sent };
+    return { partial, fetch, opens, message, last, sent, closes };
   }
+
+  it("delivers a tunneled submit a hidden tab sent before it hid", async () => {
+    const visibility = manualVisibility();
+    const c = connected(["ws", "sse"], visibility);
+    await flush();
+    c.opens[0]!();
+    c.message({ type: "hello", topics: {}, tunnel: {} });
+    const outcome = c.partial.submit(document.querySelector("form")!);
+    await flush();
+    const id = c.last().id;
+    visibility.setHidden(true);
+    expect(c.closes).toEqual([]);
+    c.message({
+      type: "http",
+      id,
+      status: 200,
+      headers: { "content-type": "application/vnd.next.patches+json" },
+      body: REPLY,
+    });
+    await expect(outcome).resolves.toMatchObject({ status: "ok", applied: true });
+    expect(c.closes).toEqual([0]);
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
+    c.partial._reset();
+  });
+
+  it("opens one socket on the first show of a tab loaded in the background", async () => {
+    const visibility = manualVisibility();
+    visibility.setHidden(true);
+    const c = connected(["ws", "sse"], visibility);
+    await flush();
+    expect(c.opens).toHaveLength(0);
+    visibility.setHidden(false);
+    visibility.setHidden(false);
+    await flush();
+    expect(c.opens).toHaveLength(1);
+    expect(c.closes).toEqual([]);
+    c.partial._reset();
+  });
 
   it("sends upstream events once the socket has said hello", async () => {
     const c = connected(["ws", "sse"]);
@@ -1998,16 +2038,18 @@ describe("createPartial after a mutation that got no reply", () => {
     ops: [{ op: "refresh", zone: "z" }],
   });
 
-  it("refreshes zones on the echo of a tunneled mutation a hidden tab cut off", async () => {
+  it("refreshes zones on the echo of a tunneled mutation a hidden tab's socket cut off", async () => {
     const sent: string[][] = [];
     const deliver: ((body: unknown) => void)[] = [];
     const opens: (() => void)[] = [];
+    const drops: ((code: number) => void)[] = [];
     const websocket: WebSocketAdapter = {
-      open(_url, onOpen, onMessage) {
+      open(_url, onOpen, onMessage, onClose) {
         const mine: string[] = [];
         sent.push(mine);
         opens.push(() => onOpen((body) => mine.push(body)));
         deliver.push(onMessage);
+        drops.push(onClose);
         return { close: () => undefined };
       },
     };
@@ -2056,6 +2098,7 @@ describe("createPartial after a mutation that got no reply", () => {
     const frame = JSON.parse(sent[0]!.at(-1)!) as { headers: Record<string, string> };
     const id = frame.headers["x-next-request-id"]!;
     visibility.setHidden(true);
+    drops[0]!(1006);
     await expect(outcome).resolves.toMatchObject({
       status: "error",
       error: { kind: "undelivered", reason: "closed" },

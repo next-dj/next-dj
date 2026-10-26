@@ -5,7 +5,7 @@ import itertools
 import json
 from collections import deque
 from collections.abc import AsyncIterator, Iterable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from types import MappingProxyType, TracebackType
 from typing import Self, cast
@@ -139,7 +139,7 @@ class WebSocketCommunicator(ApplicationCommunicator):
     async def send_up(
         self, topic: str, name: str, data: object = None
     ) -> UpstreamError | None:
-        """Send an `up` event and return the error its ack names, None once delivered."""
+        """Send an `up` event and return the error its ack names, or None."""
         frame_id = str(next(self._ids))
         frame = {"type": "up", "topic": topic, "name": name, "data": data}
         await self.send_json_to({**frame, "id": frame_id})
@@ -210,9 +210,21 @@ class WebSocketCommunicator(ApplicationCommunicator):
             _refuse_closed(output, kind)
 
     async def disconnect(self, code: int = 1000) -> None:
-        """Close the socket from the client and wait for the application to exit."""
+        """Close the socket, failing unless the application exits within `timeout`.
+
+        An error the application exits with is raised here, as `wait` raises it.
+        """
         await self.send_input({"type": "websocket.disconnect", "code": code})
-        await self.wait()
+        future = self.future
+        await asyncio.wait((future,), timeout=self.timeout)
+        if not future.done():
+            future.cancel()
+            with suppress(asyncio.CancelledError):
+                await future
+            msg = f"The application ran on {self.timeout}s after the disconnect."
+            raise AssertionError(msg)
+        with suppress(asyncio.CancelledError):
+            future.result()
 
 
 def _refuse_closed(output: dict[str, object], kind: str) -> None:
@@ -417,7 +429,7 @@ def override_websocket_mount(*, mounted: bool = False) -> Iterator[None]:
 
 @dataclass(frozen=True, slots=True)
 class SseEvent:
-    """One dispatched server-sent event, its data lines joined as an EventSource does."""
+    """One dispatched server-sent event, data lines joined as an EventSource does."""
 
     event: str
     data: str

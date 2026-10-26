@@ -8,7 +8,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from http import HTTPStatus
-from http.cookies import Morsel, SimpleCookie
+from http.cookies import CookieError, Morsel, SimpleCookie
 from typing import ClassVar, Final, Protocol, cast
 from urllib.parse import unquote
 
@@ -225,6 +225,7 @@ class DjangoTunnel:
         self._cookie = cookie_header(scope)
         self._cookies = parse_cookie(self._cookie)
         self._running: set[asyncio.Task[None]] = set()
+        self._routing = 0
 
     def hints(self) -> TunnelHints:
         """Return the request headers the frame may carry, the CSRF header included."""
@@ -240,11 +241,16 @@ class DjangoTunnel:
         if isinstance(prepared, Refusal):
             return prepared
         headers, body = prepared
-        if len(self._running) >= self._limits.concurrency:
+        if len(self._running) + self._routing >= self._limits.concurrency:
             return Refusal.LIMIT
         path, _, query = request.path.partition("?")
         path_info = unquote(path)[len(self._prefix()) :]
-        if not await run_detached(self.routes_to_action, path_info):
+        self._routing += 1
+        try:
+            routed = await run_detached(self.routes_to_action, path_info)
+        finally:
+            self._routing -= 1
+        if not routed:
             return Refusal.TRANSPORT
         mark = DispatchMark()
         scope = self.http_scope(path, query, headers)
@@ -445,12 +451,12 @@ class DjangoTunnel:
                 headers[name].append(value)
             elif name == "content-encoding":
                 return Refusal.ENCODING
-        if not self._harmless(cookies, request, status):
-            return Refusal.HTTP_ONLY
         joined = {name: ", ".join(values) for name, values in headers.items()}
         marker = joined.get(_MARKER)
         if marker in {"http", ROTATION} or (marker != "any" and not reached):
             return _unmarked(marker, status)
+        if not self._harmless(cookies, request, status):
+            return Refusal.HTTP_ONLY
         return Reply(status, joined, bytes(exchange.body).decode("utf-8", "replace"))
 
     def _harmless(self, cookies: list[str], request: Request, status: int) -> bool:
@@ -458,7 +464,10 @@ class DjangoTunnel:
         unsafe: list[str] = []
         for header in cookies:
             parsed: SimpleCookie = SimpleCookie()
-            parsed.load(header)
+            try:
+                parsed.load(header)
+            except CookieError:
+                parsed.clear()
             if not parsed:
                 unsafe.append("?")
             unsafe.extend(

@@ -21,6 +21,8 @@ Most signals are sent with ``Signal.send``, so an exception from a receiver leav
 The realtime signals ``message_published``, ``upstream_received``, ``upstream_rejected``, ``stream_subscribed``, and ``stream_unsubscribed`` are sent with ``Signal.send_robust``, or ``Signal.asend_robust`` from an event loop.
 From an event loop, and from ``apublish`` for ``message_published``, their synchronous receivers run on the shared thread pool wrapped in ``close_old_connections``, so a receiver that queries the database never holds a connection past its call.
 A receiver of theirs that raises is logged at ``ERROR`` on the ``next.realtime.signals`` logger, and the publication, the upstream event, or the stream goes on as `Stream lifecycle`_ describes.
+``sse_stream_opened`` and ``sse_stream_closed`` are sent with ``Signal.send_robust`` from a sync stream and with ``Signal.asend_robust`` from an async one, where Django runs their synchronous receivers on the request's thread, off the event loop.
+A receiver of theirs that raises is logged at ``ERROR`` on the ``django.dispatch`` logger, and the stream goes on.
 ``settings_reloaded`` is sent with ``Signal.send_robust`` too, and runs the whole chain before it re-raises the first error.
 A receiver body therefore guards itself, see :ref:`topics-signals` for the pattern.
 

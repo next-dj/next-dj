@@ -4,6 +4,7 @@ from types import ModuleType
 
 import pytest
 from django.core.checks import Error
+from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.test import override_settings
 from django.urls import URLPattern, include, path
@@ -16,7 +17,9 @@ from next.realtime import (
     TicketIntrospectionView,
 )
 from next.realtime.checks import check_realtime_settings, check_ticket_introspection
+from next.realtime.manager import BrokerManager
 from next.realtime.replay import MAX_SIZE, MAX_TTL
+from next.realtime.transports import active_transports
 
 
 class CustomBroker(MemoryBroker):
@@ -222,6 +225,11 @@ def test_check_warns_ws_without_session_middleware() -> None:
     assert _ids(NEXT_FRAMEWORK=_WS, MIDDLEWARE=[]) == {"next.W141"}
 
 
+def test_check_warns_a_ws_tuple_without_session_middleware() -> None:
+    config = {"REALTIME": {"TRANSPORTS": ("ws",)}}
+    assert _ids(NEXT_FRAMEWORK=config, MIDDLEWARE=[]) == {"next.W141"}
+
+
 @pytest.mark.parametrize(
     ("binding", "expected"),
     [
@@ -398,6 +406,25 @@ def test_check_accepts_a_redis_prefix(prefix: object) -> None:
     assert _ids(NEXT_FRAMEWORK=_redis(PREFIX=prefix)) == set()
 
 
+@pytest.mark.parametrize("url", ["", None, 6379])
+def test_check_rejects_a_redis_url_the_broker_refuses(url: object) -> None:
+    assert _ids(NEXT_FRAMEWORK=_redis(URL=url)) == {"next.E213"}
+
+
+def test_check_accepts_a_redis_url() -> None:
+    assert _ids(NEXT_FRAMEWORK=_redis(URL="redis://cache:6379/1")) == set()
+
+
+@pytest.mark.parametrize("transports", [("sse",), ("ws", "sse")])
+def test_check_accepts_a_transport_tuple_as_the_runtime_does(
+    transports: tuple[str, ...],
+) -> None:
+    config = {"REALTIME": {"TRANSPORTS": transports}}
+    assert "next.E181" not in _ids(NEXT_FRAMEWORK=config)
+    with override_settings(NEXT_FRAMEWORK=config):
+        assert active_transports()[0] == transports[0]
+
+
 @pytest.mark.parametrize(
     "client",
     [
@@ -422,8 +449,13 @@ def test_check_defaults_stay_quiet() -> None:
     assert _ids(NEXT_FRAMEWORK={}) == set()
 
 
-def test_check_treats_a_null_broker_as_the_default() -> None:
-    assert _ids(NEXT_FRAMEWORK={"REALTIME": {"BROKER": None}}) == set()
+def test_check_reports_a_null_broker_the_manager_refuses() -> None:
+    assert _ids(NEXT_FRAMEWORK={"REALTIME": {"BROKER": None}}) == {"next.E177"}
+    with (
+        override_settings(NEXT_FRAMEWORK={"REALTIME": {"BROKER": None}}),
+        pytest.raises(ImproperlyConfigured, match="must be a mapping"),
+    ):
+        BrokerManager().get()
 
 
 def test_check_skips_options_of_an_unresolvable_backend() -> None:

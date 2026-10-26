@@ -200,6 +200,56 @@ def test_a_card_someone_drags_is_marked_in_the_other_tab(
     expect(card_of(grace, card)).not_to_contain_text(MOVING)
 
 
+DROP_CARD = """
+([cardId, columnId]) => {
+  const column = document.querySelector(`[data-kanban-column='${columnId}']`);
+  const transfer = new DataTransfer();
+  transfer.setData("text/card-id", String(cardId));
+  column.dispatchEvent(new DragEvent("drop", { dataTransfer: transfer, bubbles: true }));
+}
+"""
+
+
+def test_a_card_dropped_into_another_column_clears_its_mark_without_a_dragend(
+    ada_and_grace: tuple[Page, Page], backlog: Column, done: Column
+) -> None:
+    ada, grace = ada_and_grace
+    card = backlog.cards.get(title="Audit static pipeline")
+    expect(watchers(ada)).to_have_count(2)
+    drag_event(ada, card, "dragstart")
+    expect(card_of(grace, card)).to_contain_text("Ada Lovelace is moving this card")
+
+    ada.evaluate(DROP_CARD, [card.pk, done.pk])
+
+    expect(column_of(grace, done).locator(CARD)).to_have_count(2)
+    expect(card_of(grace, card)).to_be_visible()
+    expect(card_of(grace, card)).not_to_contain_text(MOVING)
+    card.refresh_from_db()
+    assert card.column_id == done.pk
+
+
+def test_a_closed_tab_clears_its_mark_while_the_member_stays_in_another(
+    ada_and_grace: tuple[Page, Page],
+    asgi_server: str,
+    board: Board,
+    open_board: Callable[..., None],
+    backlog: Column,
+) -> None:
+    ada, grace = ada_and_grace
+    ada_again = ada.context.new_page()
+    open_board(ada_again, asgi_server, board, websocket=True)
+    card = backlog.cards.get(title="Audit static pipeline")
+    drag_event(ada_again, card, "dragstart")
+    expect(card_of(grace, card)).to_contain_text("Ada Lovelace is moving this card")
+
+    ada_again.goto("about:blank")
+
+    expect(card_of(grace, card)).not_to_contain_text(MOVING)
+    expect(watchers(grace)).to_have_count(2)
+    expect(grace.locator(PRESENCE)).to_contain_text("Ada Lovelace")
+    ada_again.close()
+
+
 def test_a_guest_drag_skips_its_own_echo_and_names_the_guest_elsewhere(
     two_guests: tuple[Page, Page], backlog: Column
 ) -> None:

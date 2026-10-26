@@ -81,11 +81,7 @@ def _post_step_unacknowledged(next_client, step: str, data: dict[str, str]):
 def _post_step_partial(next_client, step: str, data: dict[str, str]):
     payload = {**data, "policy_acknowledged": "on"}
     return next_client.post_action(
-        WIZARD_ACTION,
-        payload,
-        origin=f"/request/{step}/",
-        partial=True,
-        zones="access-wizard",
+        WIZARD_ACTION, payload, origin=f"/request/{step}/", partial="access-wizard"
     )
 
 
@@ -94,8 +90,7 @@ def _validate_field(next_client, step: str, field: str, data: dict[str, str]):
         WIZARD_ACTION,
         dict(data),
         origin=f"/request/{step}/",
-        partial=True,
-        zones="access-wizard",
+        partial="access-wizard",
         HTTP_X_NEXT_VALIDATE=field,
     )
 
@@ -654,8 +649,7 @@ class TestModalWizardFlagship:
             WIZARD_ACTION,
             dict(IDENTITY),
             origin="/request/identity/",
-            partial=True,
-            zones="access-wizard",
+            partial="access-wizard",
         )
         assert response.status_code == 403
         assert AccessRequest.objects.exists() is False

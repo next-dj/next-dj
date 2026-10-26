@@ -35,6 +35,11 @@ def _root_class[T](base: BackendRoot[T]) -> type[T]:
     return cast("type[T]", base)
 
 
+def _abstract_methods(klass: type) -> frozenset[str]:
+    """Return the abstract methods a class leaves unimplemented."""
+    return frozenset(getattr(klass, "__abstractmethods__", ()))
+
+
 def resolve_backend_class[T](
     config: Mapping[str, Any], *, base: BackendRoot[T], default: str | None = None
 ) -> type[T]:
@@ -48,7 +53,7 @@ def resolve_backend_class[T](
         raise BackendNotSubclassError(dotted, root.__name__)
     if inspect.isabstract(klass):
         # A settings entry most likely names an abstract root by mistake.
-        raise AbstractBackendError(dotted)
+        raise AbstractBackendError(dotted, _abstract_methods(klass))
     return klass
 
 
@@ -85,7 +90,7 @@ def resolve_setting_class[T](
     if not isinstance(klass, type) or not issubclass(klass, root):
         raise SettingNotSubclassError(setting, dotted, base_path, scope=scope)
     if inspect.isabstract(klass):
-        raise AbstractBackendError(str(dotted))
+        raise AbstractBackendError(str(dotted), _abstract_methods(klass))
     return klass
 
 

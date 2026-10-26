@@ -18,7 +18,8 @@ def board_topic(board_pk: int) -> str:
     return f"{TOPIC_PREFIX}:{board_pk}"
 
 
-def _board_pk(topic: str) -> int | None:
+def board_pk(topic: str) -> int | None:
+    """Return the board pk a board topic names, None for any other topic."""
     prefix, separator, raw_pk = topic.partition(":")
     if prefix != TOPIC_PREFIX or not separator or not raw_pk.isdecimal():
         return None
@@ -27,10 +28,10 @@ def _board_pk(topic: str) -> int | None:
 
 def can_watch_board(user: AbstractBaseUser | AnonymousUser, topic: str) -> bool:
     """Allow a board topic while the board exists and the visitor may see it."""
-    board_pk = _board_pk(topic)
-    if board_pk is None:
+    pk = board_pk(topic)
+    if pk is None:
         return False
-    return Board.objects.visible_to(user).filter(pk=board_pk).exists()
+    return Board.objects.visible_to(user).filter(pk=pk).exists()
 
 
 def public_profile(user: AbstractBaseUser) -> dict[str, str]:

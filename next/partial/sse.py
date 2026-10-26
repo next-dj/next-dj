@@ -5,7 +5,7 @@ import contextlib
 import math
 import time
 from collections.abc import AsyncIterable
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeGuard, cast
 
 from django.core.exceptions import ImproperlyConfigured
 from django.core.handlers.asgi import ASGIRequest
@@ -54,9 +54,9 @@ _EVENT_STREAM = "text/event-stream"
 _CACHE_CONTROL = "no-cache, no-transform"
 _ACCEL_BUFFERING = "X-Accel-Buffering"
 _HEARTBEAT_COMMENT = ": heartbeat\n\n"
-_RETRY_OPTION = "RETRY_MS"
-_HEARTBEAT_OPTION = "HEARTBEAT_SECONDS"
-_SSE_OPTION = "SSE"
+RETRY_OPTION = "RETRY_MS"
+HEARTBEAT_OPTION = "HEARTBEAT_SECONDS"
+SSE_OPTION = "SSE"
 _DEFAULT_RETRY_MS = 3000
 _DEFAULT_HEARTBEAT_SECONDS = 25.0
 _CONTROL_FRAMES = (StreamHello, StreamSkip, StreamEnd)
@@ -174,7 +174,7 @@ class PatchStreamWriter(StreamingHttpResponse):
         iterator = source.__aiter__()
         task: asyncio.Future[PatchItem] | None = None
         try:
-            self._announce_opened()
+            await self._aannounce_opened()
             yield self._retry_frame()
             while True:
                 if task is None:
@@ -200,7 +200,7 @@ class PatchStreamWriter(StreamingHttpResponse):
             try:
                 await self._cleanup_async(task, iterator)
             finally:
-                self._announce_closed(sent)
+                await self._aannounce_closed(sent)
 
     async def _cleanup_async(
         self,
@@ -279,10 +279,19 @@ class PatchStreamWriter(StreamingHttpResponse):
         return None
 
     def _announce_opened(self) -> None:
-        """Report that streaming starts when iteration produces its first frame."""
+        """Report that streaming starts when iteration produces its first frame.
+
+        A failing receiver is logged, so an observer never kills the stream it watches.
+        """
         sender = type(self)
         if sse_stream_opened.has_listeners(sender):
-            sse_stream_opened.send(sender=sender, request=self._request)
+            sse_stream_opened.send_robust(sender=sender, request=self._request)
+
+    async def _aannounce_opened(self) -> None:
+        """Report the stream opening from the event loop, sync receivers off it."""
+        sender = type(self)
+        if sse_stream_opened.has_listeners(sender):
+            await sse_stream_opened.asend_robust(sender=sender, request=self._request)
 
     def _retry_frame(self) -> bytes:
         """Return the leading SSE `retry` hint frame."""
@@ -291,32 +300,54 @@ class PatchStreamWriter(StreamingHttpResponse):
     def _announce_closed(self, sent: int) -> None:
         """Fire the close signal with the stream's duration and event count."""
         sender = type(self)
-        if not sse_stream_closed.has_listeners(sender):
-            return
-        duration_ms = (self._clock() - self._opened_at) * 1000
-        sse_stream_closed.send(
-            sender=sender,
-            request=self._request,
-            duration_ms=duration_ms,
-            envelopes_sent=sent,
-        )
+        if sse_stream_closed.has_listeners(sender):
+            sse_stream_closed.send_robust(sender=sender, **self._closed_kwargs(sent))
+
+    async def _aannounce_closed(self, sent: int) -> None:
+        """Fire the close signal from the event loop, sync receivers off it."""
+        sender = type(self)
+        if sse_stream_closed.has_listeners(sender):
+            await sse_stream_closed.asend_robust(
+                sender=sender, **self._closed_kwargs(sent)
+            )
+
+    def _closed_kwargs(self, sent: int) -> dict[str, object]:
+        """Return the close signal arguments, the duration measured now."""
+        return {
+            "request": self._request,
+            "duration_ms": (self._clock() - self._opened_at) * 1000,
+            "envelopes_sent": sent,
+        }
 
 
-def _sse_interval(option: str, default: float) -> float:
-    """Return one positive SSE option of the active backend, or its default."""
-    sse = partial_backend_manager.get().options.get(_SSE_OPTION)
-    value = sse.get(option, default) if isinstance(sse, dict) else default
-    return float(value) if positive_number(value, math.inf) else default
+def _sse_option(option: str) -> object:
+    """Return one raw SSE option of the active backend, or None when it is unset."""
+    sse = partial_backend_manager.get().options.get(SSE_OPTION)
+    return sse.get(option) if isinstance(sse, dict) else None
+
+
+def retry_ms_valid(value: object) -> TypeGuard[int]:
+    """Whether `value` is a usable `RETRY_MS`, a whole number of milliseconds from 0."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def heartbeat_seconds_valid(value: object) -> TypeGuard[float]:
+    """Whether `value` is a usable `HEARTBEAT_SECONDS`, a finite number above zero."""
+    return positive_number(value, math.inf)
 
 
 def _retry_ms() -> int:
-    """Return the EventSource retry hint from the active backend options."""
-    return int(_sse_interval(_RETRY_OPTION, _DEFAULT_RETRY_MS))
+    """Return the EventSource retry hint, the default for an invalid `RETRY_MS`."""
+    value = _sse_option(RETRY_OPTION)
+    return value if retry_ms_valid(value) else _DEFAULT_RETRY_MS
 
 
 def sse_heartbeat_seconds() -> float:
     """Return the SSE heartbeat interval from the active backend options."""
-    return _sse_interval(_HEARTBEAT_OPTION, _DEFAULT_HEARTBEAT_SECONDS)
+    value = _sse_option(HEARTBEAT_OPTION)
+    if heartbeat_seconds_valid(value):
+        return float(value)
+    return _DEFAULT_HEARTBEAT_SECONDS
 
 
 class PatchEventStream(PatchStreamWriter):
@@ -336,4 +367,13 @@ class PatchEventStream(PatchStreamWriter):
         )
 
 
-__all__ = ["PatchEventStream", "PatchStreamWriter", "sse_heartbeat_seconds"]
+__all__ = [
+    "HEARTBEAT_OPTION",
+    "RETRY_OPTION",
+    "SSE_OPTION",
+    "PatchEventStream",
+    "PatchStreamWriter",
+    "heartbeat_seconds_valid",
+    "retry_ms_valid",
+    "sse_heartbeat_seconds",
+]

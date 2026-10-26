@@ -19,8 +19,7 @@ class TestOneZoneRenderPerInvalidPost:
                 "zoned_rename_form",
                 {"title": ""},
                 origin="/board_settings/",
-                partial=True,
-                zones="rename-board",
+                partial="rename-board",
             )
         assert envelope_of(response).zone_targets() == ["rename-board"]
         assert spy.call_count == 1

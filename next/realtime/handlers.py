@@ -1,6 +1,7 @@
 """Registry of the upstream handlers a client event on a granted topic reaches."""
 
 import functools
+import inspect
 import os
 import re
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
@@ -98,13 +99,17 @@ after_fork(handler_pool.cache_clear)
 
 
 def _runner(handler: Handler) -> Callable[[Upstream], Awaitable[None]]:
-    """Return an awaitable call of the handler, a sync one on the handler pool."""
-    if iscoroutinefunction(handler):
+    """Return an awaitable call of the handler, a sync one on the handler pool.
+
+    A sync-looking handler that returns an awaitable is awaited, so `ok` means done.
+    """
+    if iscoroutinefunction(handler) or iscoroutinefunction(type(handler).__call__):
         return cast("Callable[[Upstream], Awaitable[None]]", handler)
-    blocking = cast("Callable[[Upstream], None]", handler)
 
     async def run(upstream: Upstream) -> None:
-        await run_pooled(handler_pool(), blocking, upstream)
+        outcome = await run_pooled(handler_pool(), handler, upstream)
+        if inspect.isawaitable(outcome):
+            await outcome
 
     return run
 
@@ -151,12 +156,19 @@ class Route:
         await self.run(upstream)
 
 
-def _origin(handler: Handler) -> tuple[str, str] | None:
-    """Return the file and the qualified name a function is defined under."""
-    code = getattr(handler, "__code__", None)
-    if not isinstance(code, CodeType):
+def _origin(handler: Handler) -> tuple[str, int, str] | None:
+    """Return where the function a handler wraps is defined, None for no stable site.
+
+    A closure answers None, since one shared wrapper code serves many handlers.
+    """
+    try:
+        defined = inspect.unwrap(handler)
+    except ValueError:
         return None
-    return code.co_filename, getattr(handler, "__qualname__", "")
+    code = getattr(defined, "__code__", None)
+    if not isinstance(code, CodeType) or code.co_freevars:
+        return None
+    return code.co_filename, code.co_firstlineno, code.co_qualname
 
 
 def _redefined(held: Handler, handler: Handler) -> bool:

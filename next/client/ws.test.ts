@@ -331,6 +331,28 @@ describe("WebSocket stream transport", () => {
     expect(made.sink.end).not.toHaveBeenCalled();
   });
 
+  it("names the transport that actually carries the stream", async () => {
+    const made = harness();
+    made.fetch.mockImplementation(async () => grant());
+    const transport = createWebSocketTransport({
+      fallback: made.fallback,
+      fetch: made.fetch,
+      socket: made.socket,
+      origin: "https://example.test",
+    });
+    const first = transport.open("/stream/", made.sink);
+    expect(first.transport).toBe("ws");
+    await settle();
+    made.sockets[0]!.open();
+    made.sockets[0]!.refuse(4403, "denied");
+    expect(first.transport).toBe("sse");
+    first.close();
+    const denied = transport.open("/stream/", made.sink);
+    expect(denied.transport).toBe("sse");
+    denied.close();
+    expect(made.calls).toHaveLength(2);
+  });
+
   it("reconnects after a 1013 close and counts it as a failed attempt", async () => {
     vi.useFakeTimers();
     const made = harness();
@@ -1032,6 +1054,22 @@ describe("WebSocket upstream events", () => {
     s.control.close();
   });
 
+  it("waits for an ack as long as the hello's upstream timeout plus a margin", async () => {
+    vi.useFakeTimers();
+    const s = await subscribed({ room: {} }, { upstream: { timeout: 10 } });
+    let done = false;
+    const sent = s.transport.up("room", "typing", {});
+    void sent.then(() => (done = true));
+    await vi.advanceTimersByTimeAsync(14999);
+    expect(done).toBe(false);
+    s.reply({ type: "ack", ok: true });
+    await expect(sent).resolves.toBe(true);
+    const late = s.transport.up("room", "typing", {});
+    await vi.advanceTimersByTimeAsync(15000);
+    await expect(late).resolves.toBe(false);
+    s.control.close();
+  });
+
   it("resolves false when the socket closes before the ack", async () => {
     const s = await subscribed();
     const sent = s.transport.up("room", "typing", {});
@@ -1085,6 +1123,62 @@ describe("WebSocket upstream events", () => {
     expect(s.made.fetch).toHaveBeenCalledTimes(2);
     expect(s.made.sockets).toHaveLength(2);
     s.control.close();
+  });
+});
+
+describe("WebSocket close with replies in flight", () => {
+  const target = "https://example.test/_next/form/u1/";
+  const post = { method: "POST", body: "" };
+
+  it("keeps the socket until a tunneled reply lands and reads nothing else", async () => {
+    const s = await subscribed();
+    const reply = s.transport.http(target, post);
+    const id = s.last().id;
+    const sent = s.socket.sent.length;
+    s.control.close();
+    expect(s.socket.control.close).not.toHaveBeenCalled();
+    expect(s.transport.http(target, post)).toBeUndefined();
+    await expect(s.transport.up("room", "typing", {})).resolves.toBe(false);
+    s.socket.message(JSON.stringify({ type: "patches", data: { seq: 1 } }));
+    s.socket.message(JSON.stringify({ type: "ping" }));
+    s.socket.message("{");
+    s.socket.message(JSON.stringify({ type: "http", id, status: 204 }));
+    await expect(reply).resolves.toMatchObject({ status: 204 });
+    expect(s.socket.control.close).toHaveBeenCalledOnce();
+    expect(s.socket.sent).toHaveLength(sent);
+    expect(s.made.sink.patches).not.toHaveBeenCalled();
+    expect(s.made.calls).toHaveLength(0);
+    s.control.close();
+    expect(s.socket.control.close).toHaveBeenCalledOnce();
+  });
+
+  it("drains a pending up ack before the socket goes", async () => {
+    const s = await subscribed();
+    const sent = s.transport.up("room", "typing", {});
+    const id = s.last().id;
+    s.control.close();
+    expect(s.socket.control.close).not.toHaveBeenCalled();
+    s.socket.message(JSON.stringify({ type: "ack", id, ok: true }));
+    await expect(sent).resolves.toBe(true);
+    expect(s.socket.control.close).toHaveBeenCalledOnce();
+  });
+
+  it("closes the socket once the tunnel timeout gives up on the reply", async () => {
+    vi.useFakeTimers();
+    const s = await subscribed({ room: {} }, { tunnel: { timeout: 2 } });
+    const reply = s.transport.http(target, post);
+    s.control.close();
+    await vi.advanceTimersByTimeAsync(6999);
+    expect(s.socket.control.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(reply).resolves.toBe("timeout");
+    expect(s.socket.control.close).toHaveBeenCalledOnce();
+  });
+
+  it("closes at once without a reply in flight", async () => {
+    const s = await subscribed();
+    s.control.close();
+    expect(s.socket.control.close).toHaveBeenCalledOnce();
   });
 });
 
@@ -1278,7 +1372,11 @@ describe("WebSocket request tunnel", () => {
     const reply = s.transport.http(target, { method: "POST", body: "" });
     s.socket.message(JSON.stringify({ type: "http", id: "nope", status: 200 }));
     s.control.close();
+    s.socket.message(JSON.stringify({ type: "http", id: "nope", status: 200 }));
+    expect(s.socket.control.close).not.toHaveBeenCalled();
+    s.socket.close(1006);
     await expect(reply).resolves.toBe("closed");
+    expect(s.socket.control.close).toHaveBeenCalledOnce();
   });
 });
 

@@ -388,8 +388,8 @@ Partial requests
 ~~~~~~~~~~~~~~~~
 
 The client stamps the partial switch, the zone list, and the client asset version for you.
-Pass ``partial=True`` and ``zones=`` to ``post_action`` to turn the POST into a patch request scoped to a zone.
-``zones`` accepts one name or a tuple of names.
+Pass ``partial=True`` to ``post_action`` to turn the POST into a patch request, or pass the zone names to scope it to them.
+``partial`` accepts one name or a tuple of names.
 
 .. code-block:: python
    :caption: tests/test_partial_action.py
@@ -400,8 +400,7 @@ Pass ``partial=True`` and ``zones=`` to ``post_action`` to turn the POST into a 
        response = NextClient().post_action(
            "create_note",
            {"title": "hi"},
-           partial=True,
-           zones="notes",
+           partial="notes",
        )
        envelope = envelope_of(response)
        assert "notes" in envelope.zone_targets()

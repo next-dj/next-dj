@@ -48,6 +48,17 @@ def skip_second(message: Message) -> Patches | None:
     return Patches(None).event("room:update", {"seq": message.seq})
 
 
+def fail_even(message: Message) -> Patches:
+    if message.seq % 2 == 0:
+        msg = "transform failed"
+        raise RuntimeError(msg)
+    return Patches(None).event("room:update", {"seq": message.seq})
+
+
+def unsafe_payload(_message: Message) -> str:
+    return "<p>not an envelope</p>"
+
+
 @pytest.fixture(autouse=True)
 def _grant_the_room() -> None:
     _GRANTS["room"] = True
@@ -154,6 +165,43 @@ def test_replayed_messages_pass_through_the_transform(
     assert replayed.seq == 3
     assert replayed.data["ops"][0]["name"] == "room:update"
     assert hello.trace == ("hello", 3)
+
+
+def test_a_failing_transform_skips_its_message_on_replay_and_live(
+    wire: WireOpener, replaying_broker: BrokerBackend, caplog: pytest.LogCaptureFixture
+) -> None:
+    epoch = published(replaying_broker, 3)
+    opening = wire(cursor=Position(epoch, 1), transform_ref=f"{_HERE}.fail_even")
+    frames = _resumed(opening, replaying_broker, 3, live=1)
+    assert [frame.trace for frame in frames] == [
+        ("skip", 2),
+        3,
+        ("hello", 3),
+        ("skip", 4),
+    ]
+    client = ResumingClient({ROOM_TOPIC: (epoch, 1)})
+    for frame in frames:
+        client.read(frame)
+    assert client.gaps == []
+    assert client.cursors == {ROOM_TOPIC: (epoch, 4)}
+    failures = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "next.realtime.delivery"
+    ]
+    assert failures == [
+        f"Realtime transform failed on {ROOM_TOPIC} seq 2, skipping it",
+        f"Realtime transform failed on {ROOM_TOPIC} seq 4, skipping it",
+    ]
+
+
+def test_an_unsafe_transform_payload_skips_its_message(
+    wire: WireOpener, replaying_broker: BrokerBackend
+) -> None:
+    epoch = published(replaying_broker, 2)
+    opening = wire(cursor=Position(epoch, 1), transform_ref=f"{_HERE}.unsafe_payload")
+    frames = _resumed(opening, replaying_broker, 2, live=1)
+    assert [frame.trace for frame in frames] == [("skip", 2), ("hello", 2), ("skip", 3)]
 
 
 def test_access_revoked_during_replay_ends_before_hello(

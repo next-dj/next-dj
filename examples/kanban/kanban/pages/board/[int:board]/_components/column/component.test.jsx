@@ -34,6 +34,16 @@ describe("Column", () => {
     expect(onDrop).toHaveBeenCalledWith("7", 1, 1);
   });
 
+  it("ignores a drop that carries no card", () => {
+    const onDrop = vi.fn();
+    render(<Column column={makeColumn()} onDrop={onDrop} />);
+    const colEl = document.querySelector("[data-kanban-column='1']");
+    fireEvent.dragOver(colEl);
+    fireEvent.drop(colEl, { dataTransfer: { getData: () => "" } });
+    expect(onDrop).not.toHaveBeenCalled();
+    expect(colEl.className).not.toContain("drop-active");
+  });
+
   it("adds drop-active class on dragover", () => {
     render(<Column column={makeColumn()} onDrop={vi.fn()} />);
     const colEl = document.querySelector("[data-kanban-column='1']");

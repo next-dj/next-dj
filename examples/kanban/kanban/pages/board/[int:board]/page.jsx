@@ -85,23 +85,43 @@ function withLocalChanges(serverCols, localCols, moves) {
   return cols;
 }
 
-function trackDragging(current, { card, active, by }) {
-  const next = { ...current };
-  if (active) next[card] = by;
-  else delete next[card];
+// Holders are keyed by socket, so one member's two tabs never clear each other's mark.
+function trackDragging(current, { card, active, by, from }) {
+  const holders = { ...current[card] };
+  if (active) holders[from] = by;
+  else delete holders[from];
+  const next = { ...current, [card]: holders };
+  if (Object.keys(holders).length === 0) delete next[card];
   return next;
+}
+
+function keepHolders(current, keep) {
+  let changed = false;
+  const next = {};
+  for (const [card, holders] of Object.entries(current)) {
+    const kept = Object.entries(holders).filter(([from, by]) => keep(from, by));
+    if (kept.length !== Object.keys(holders).length) changed = true;
+    if (kept.length > 0) next[card] = Object.fromEntries(kept);
+  }
+  return changed ? next : current;
 }
 
 const sameMember = (a, b) =>
   a.key === b.key && a.name === b.name && a.initials === b.initials;
 
-function keepPresentDraggers(current, members) {
-  const kept = Object.entries(current).filter(([, by]) =>
-    members.some((member) => sameMember(member, by)),
+const keepPresentDraggers = (current, members) =>
+  keepHolders(current, (_from, by) => members.some((member) => sameMember(member, by)));
+
+const releaseConnection = (current, connection) =>
+  keepHolders(current, (from) => from !== connection);
+
+function firstHolders(dragging) {
+  return Object.fromEntries(
+    Object.entries(dragging).map(([card, holders]) => [
+      card,
+      Object.values(holders)[0],
+    ]),
   );
-  return kept.length === Object.keys(current).length
-    ? current
-    : Object.fromEntries(kept);
 }
 
 // The create action answers with a redirect that carries the new row id, so the
@@ -111,6 +131,14 @@ function readCreatedId(responseUrl) {
   const raw = new URL(responseUrl, window.location.href).searchParams.get("created");
   const id = Number(raw);
   return raw && Number.isInteger(id) ? id : null;
+}
+
+// A refusal names its reason, field errors first and then the 400 body.
+function refusalMessage({ errors, error }) {
+  const [message] = Object.values(errors ?? {}).flat();
+  if (message) return message;
+  const body = error?.kind === "http" && error.status === 400 ? error.body.trim() : "";
+  return body || null;
 }
 
 const MOVE_FAILED = {
@@ -133,6 +161,7 @@ export function Board() {
   const pendingSeq = useRef(0);
   const serverColumns = useRef(ctx.columns ?? []);
   const movesInFlight = useRef(new Map());
+  const announced = useRef(new Set());
 
   useEffect(() => {
     const next = window.Next;
@@ -155,6 +184,9 @@ export function Board() {
           if (detail.from === stream.meta()?.connection) return;
           setDragging((current) => trackDragging(current, detail));
         }),
+        stream.on(topic, "board:released", ({ from }) => {
+          setDragging((current) => releaseConnection(current, from));
+        }),
       );
     }
     return () => {
@@ -164,6 +196,10 @@ export function Board() {
 
   function announceDrag(cardId, active) {
     if (!topic) return;
+    const held = announced.current.has(cardId);
+    if (active === held) return;
+    if (active) announced.current.add(cardId);
+    else announced.current.delete(cardId);
     window.Next?.partial?.stream?.send(
       topic,
       "dragging",
@@ -175,6 +211,8 @@ export function Board() {
   async function moveCard(cardId, targetColumnId, targetPosition) {
     const partial = window.Next?.partial;
     if (!ctx.move_card_url || !partial?.submit) return;
+    // A drop into another column remounts the card, so its dragend never reaches React.
+    announceDrag(Number(cardId), false);
     const move = { column: targetColumnId, position: targetPosition };
     movesInFlight.current.set(Number(cardId), move);
     setColumns((cols) =>
@@ -217,11 +255,12 @@ export function Board() {
       }),
     );
     setErrorMsg(null);
-    const { status, location } = await partial.submit({
+    const outcome = await partial.submit({
       action: ctx.create_card_url,
       data: { column: columnId, title: text },
       navigate: false,
     });
+    const { status, location } = outcome;
     const cardId = status === "ok" ? readCreatedId(location) : null;
     if (cardId !== null) {
       setColumns((cols) => namePendingCard(cols, pendingId, cardId));
@@ -229,8 +268,12 @@ export function Board() {
     }
     setColumns((cols) => dropCardLocally(cols, pendingId));
     if (status === "dropped") return;
-    setErrorMsg(CREATE_FAILED[status] ?? CREATE_FAILED.invalid);
+    setErrorMsg(
+      refusalMessage(outcome) ?? CREATE_FAILED[status] ?? CREATE_FAILED.invalid,
+    );
   }
+
+  const holders = firstHolders(dragging);
 
   return (
     <div className="space-y-3">
@@ -257,7 +300,7 @@ export function Board() {
           <Column
             key={col.id}
             column={col}
-            dragging={dragging}
+            dragging={holders}
             onDrop={moveCard}
             onCreate={createCard}
             onDragChange={announceDrag}

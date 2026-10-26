@@ -230,6 +230,7 @@ runserver
 
 ``manage.py runserver`` takes the arguments of Django's :doc:`runserver <django:ref/django-admin>`, ``addrport``, ``--ipv6``, ``--noreload``, ``--nothreading`` and ``--skip-checks``, and with ``django.contrib.staticfiles`` installed its ``--nostatic`` and ``--insecure``.
 ``--wsgi`` serves Django's WSGI handler even with an ASGI server installed.
+The command class extends the staticfiles ``runserver``, so a project command that subclasses ``next.management.commands.runserver.Command`` keeps the static options and the static serving too.
 
 With uvicorn installed it runs the system checks and the migration check as Django does, then serves the project over ASGI on the server ``NEXT_FRAMEWORK['DEV_SERVER']`` names, uvicorn by default.
 The checks run before the command resolves the server, so a ``DEV_SERVER`` that names no server stops it with ``next.E212``, and under ``--skip-checks`` with a ``CommandError`` that names the path and ``next.E212``.

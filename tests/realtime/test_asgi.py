@@ -700,6 +700,34 @@ def test_application_answers_lifespan_for_middleware_around_django(
     assert _lifespan_run(middleware, monkeypatch) == _ANSWERED
 
 
+class LifespanHandler(ASGIHandler):
+    """A Django handler that speaks lifespan, as django-asgi-lifespan's does."""
+
+    started = False
+
+    async def __call__(
+        self, scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable
+    ) -> None:
+        if scope["type"] != "lifespan":
+            await super().__call__(scope, receive, send)
+            return
+        while (await receive())["type"] != "lifespan.shutdown":
+            await send({"type": "lifespan.startup.complete"})
+            self.started = True
+        await send({"type": "lifespan.shutdown.complete"})
+
+
+@pytest.mark.parametrize(
+    "wrap", [lambda app: app, ASGIStaticFilesHandler], ids=["handler", "static"]
+)
+def test_application_passes_lifespan_to_a_handler_subclass_that_speaks_it(
+    wrap: Callable[[ASGIHandler], ASGIHandler], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    handler = LifespanHandler()
+    assert _lifespan_run(wrap(handler), monkeypatch) == _ANSWERED
+    assert handler.started
+
+
 def test_application_replays_the_startup_a_failing_app_consumed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

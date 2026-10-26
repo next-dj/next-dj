@@ -2,9 +2,10 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from typing import override
+from weakref import WeakKeyDictionary
 
 from asgiref.sync import sync_to_async
 from django.db import close_old_connections
@@ -55,11 +56,58 @@ def _fresh_links[**P, R](
     return call
 
 
+class _SenderCache(MutableMapping[object, object]):
+    """A receiver cache keyed weakly by sender, which skips a sender weakref misses.
+
+    Django's `WeakKeyDictionary` raises `TypeError` there, the miss looks up anew.
+    """
+
+    __slots__ = ("_held",)
+
+    def __init__(self) -> None:
+        self._held: WeakKeyDictionary[object, object] = WeakKeyDictionary()
+
+    @override
+    def __getitem__(self, sender: object) -> object:
+        try:
+            return self._held[sender]
+        except TypeError as exc:
+            raise KeyError(sender) from exc
+
+    @override
+    def __setitem__(self, sender: object, receivers: object) -> None:
+        try:
+            self._held[sender] = receivers
+        except TypeError:
+            return
+
+    @override
+    def __delitem__(self, sender: object) -> None:
+        try:
+            del self._held[sender]
+        except TypeError as exc:
+            raise KeyError(sender) from exc
+
+    @override
+    def __iter__(self) -> Iterator[object]:
+        return iter(self._held)
+
+    @override
+    def __len__(self) -> int:
+        return len(self._held)
+
+
 class PooledSignal(Signal):
     """A signal whose async send runs sync receivers on the shared pool, cleaned up.
 
     `Signal.asend_robust` queues every socket's sync receivers on one shared thread.
     """
+
+    def __init__(self, *, use_caching: bool = False) -> None:
+        """Build the signal, its receiver cache taking a sender with no weakref."""
+        super().__init__(use_caching=use_caching)
+        if use_caching:
+            self.sender_receivers_cache = _SenderCache()
 
     @override
     async def asend_robust(self, sender: object, **named: object) -> _Responses:

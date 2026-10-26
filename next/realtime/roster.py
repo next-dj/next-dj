@@ -8,11 +8,12 @@ import time
 import weakref
 from abc import ABC, abstractmethod
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import Protocol, runtime_checkable
 
+from asgiref.sync import sync_to_async
 from django.core.exceptions import ImproperlyConfigured
 
 from next.conf.merge import FROZEN_DEFAULTS
@@ -163,7 +164,11 @@ def encode_member(member: object, limit: int) -> str | None:
     except (TypeError, ValueError) as exc:
         reason = "it holds a value JSON cannot carry"
         raise InvalidMemberError(reason) from exc
-    size = len(encoded.encode())
+    try:
+        size = len(encoded.encode())
+    except UnicodeEncodeError as exc:
+        reason = "it holds a lone surrogate that UTF-8 cannot carry"
+        raise InvalidMemberError(reason) from exc
     if size > limit:
         reason = f"it encodes to {size} bytes, above the limit of {limit}"
         raise InvalidMemberError(reason)
@@ -382,17 +387,29 @@ class PresenceSchedule:
 
     def close(self) -> None:
         """Publish what is pending right away and let the thread exit at its wakeup."""
+        for topic in self._drain():
+            try:
+                self._publish(topic)
+            except Exception:
+                logger.exception("Could not publish the presence of %r.", topic)
+
+    async def aclose(self, publish: Callable[[str], Awaitable[object]]) -> None:
+        """Close from an event loop, awaiting `publish` for each pending topic."""
+        for topic in self._drain():
+            try:
+                await publish(topic)
+            except Exception:
+                logger.exception("Could not publish the presence of %r.", topic)
+
+    def _drain(self) -> tuple[str, ...]:
+        """Refuse new topics, wake the thread to exit and hand back the pending ones."""
         with self._condition:
             self._closed = True
             ripe = tuple(dict.fromkeys(topic for _, topic in sorted(self._due)))
             self._due.clear()
             self._queued.clear()
             self._condition.notify_all()
-        for topic in ripe:
-            try:
-                self._publish(topic)
-            except Exception:
-                logger.exception("Could not publish the presence of %r.", topic)
+        return ripe
 
     def _run(self) -> None:
         """Sleep until the soonest window closes, publish, and exit once idle."""
@@ -442,6 +459,10 @@ class PresenceWindow(ABC):
     @abstractmethod
     def announce_presence(self, topic: str) -> None:
         """Release the closed window of a topic and broadcast the snapshot it held."""
+
+    async def aannounce_presence(self, topic: str) -> None:
+        """Announce from an event loop, the sync announce run on the shared pool."""
+        await sync_to_async(self.announce_presence, thread_sensitive=False)(topic)
 
 
 _SCHEDULES: weakref.WeakSet[PresenceSchedule] = weakref.WeakSet()

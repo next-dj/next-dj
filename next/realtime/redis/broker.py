@@ -37,7 +37,7 @@ from next.conf.checks import errors_for_unknown_keys
 from next.partial.envelope import Envelope
 from next.realtime.backends import BROKER_OPTIONS, BrokerBackend
 from next.realtime.errors import BrokerConnectionError
-from next.realtime.lifecycle import published
+from next.realtime.lifecycle import apublished, published
 from next.realtime.messages import Message, Position, validate_topic, validate_topics
 from next.realtime.replay import INCOMPLETE, Replay, replay_after, replay_window
 from next.realtime.roster import (
@@ -119,6 +119,11 @@ class _LoopClient(NamedTuple):
     scripts: AsyncScripts
 
 
+def valid_url(value: object) -> TypeGuard[str]:
+    """Whether a `URL` is the non-empty string `Redis.from_url` parses."""
+    return isinstance(value, str) and bool(value)
+
+
 def valid_prefix(value: object) -> TypeGuard[str]:
     """Whether a `PREFIX` has a non-colon character and no brace that moves the tag."""
     return (
@@ -140,8 +145,23 @@ def valid_client(value: object) -> TypeGuard[Mapping[str, object]]:
     )
 
 
+def _transport_errors(exceptions: ModuleType) -> tuple[type[Exception], ...]:
+    """Return the Redis errors that mean the server cannot serve now, not a bad call.
+
+    A replica, a full memory or a cluster mid-failover replies with one of these.
+    """
+    return (
+        exceptions.ConnectionError,
+        exceptions.TimeoutError,
+        exceptions.ReadOnlyError,
+        exceptions.OutOfMemoryError,
+        exceptions.ClusterDownError,
+        exceptions.TryAgainError,
+    )
+
+
 class _TransportFailures:
-    """Re-raise a Redis connection or timeout error as a broker connection error."""
+    """Re-raise a Redis transport or server availability error as a broker error."""
 
     def __init__(
         self, errors: tuple[type[Exception], ...], exhausted: type[Exception]
@@ -199,7 +219,7 @@ class RedisBroker(BrokerBackend, PresenceWindow):
         interval = self.options.get(
             "HEALTH_CHECK_INTERVAL", _DEFAULT_HEALTH_CHECK_INTERVAL
         )
-        if not isinstance(url, str) or not url:
+        if not valid_url(url):
             msg = "REALTIME.BROKER.OPTIONS.URL must be a non-empty Redis URL."
             raise ImproperlyConfigured(msg)
         if not valid_prefix(prefix):
@@ -223,11 +243,8 @@ class RedisBroker(BrokerBackend, PresenceWindow):
         )
         self._client_options = self._merged_client_options(interval)
         self._modules: tuple[ModuleType, ModuleType] = (redis, redis_asyncio)
-        transport = (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError)
-        exhausted = redis.exceptions.MaxConnectionsError
-        self._failures = _TransportFailures(transport, exhausted)
-        self._leave_failures = _TransportFailures(
-            (*transport, redis.exceptions.ResponseError), exhausted
+        self._failures = _TransportFailures(
+            _transport_errors(redis.exceptions), redis.exceptions.MaxConnectionsError
         )
         client = cast(
             "_SyncClient",
@@ -246,7 +263,7 @@ class RedisBroker(BrokerBackend, PresenceWindow):
     @classmethod
     @override
     def check_options(cls, options: Mapping[str, object]) -> list[CheckMessage]:
-        """Check the dependency, prefix, interval and client keywords `__init__` reads.
+        """Check the dependency, URL, prefix, interval and client keywords it reads.
 
         A subclass may read keys of its own, so only this class reports unknown keys.
         """
@@ -265,6 +282,14 @@ class RedisBroker(BrokerBackend, PresenceWindow):
                     hint="Install next.dj[broker].",
                     obj=settings,
                     id="next.E179",
+                )
+            )
+        if not valid_url(options.get("URL", _DEFAULT_URL)):
+            errors.append(
+                Error(
+                    f"{BROKER_OPTIONS}['URL'] must be a non-empty Redis URL.",
+                    obj=settings,
+                    id="next.E213",
                 )
             )
         if "PREFIX" in options and not valid_prefix(options["PREFIX"]):
@@ -517,7 +542,7 @@ class RedisBroker(BrokerBackend, PresenceWindow):
     def leave(self, topic: str, connection: str) -> None:
         """Forget a connection in one script that also prunes and claims the window."""
         keys, args = self._leave_call(topic, connection)
-        with self._leave_failures:
+        with self._failures:
             row = self._scripts.leave(keys=keys, args=args)
         self._after_leave(topic, *cast("list[int]", row))
 
@@ -525,7 +550,7 @@ class RedisBroker(BrokerBackend, PresenceWindow):
         """Forget a connection through this loop's client."""
         keys, args = self._leave_call(topic, connection)
         scripts = self._loop_client().scripts
-        with self._leave_failures:
+        with self._failures:
             row = await scripts.leave(keys=keys, args=args)
         self._after_leave(topic, *cast("list[int]", row))
 
@@ -565,19 +590,36 @@ class RedisBroker(BrokerBackend, PresenceWindow):
         The script skips a topic whose last change some process already announced.
         """
         published_at = time.time()
+        keys, args = self._announce_call(topic, published_at)
+        with self._failures:
+            row = self._scripts.announce(keys=keys, args=args)
+        if row is not None:
+            snapshot = _snapshot(cast("list[Any]", row))
+            published(self, snapshot_message(topic, snapshot, published_at))
+
+    @override
+    async def aannounce_presence(self, topic: str) -> None:
+        """Announce through this loop's client, the sync receivers run off the loop."""
+        published_at = time.time()
+        keys, args = self._announce_call(topic, published_at)
+        scripts = self._loop_client().scripts
+        with self._failures:
+            row = await scripts.announce(keys=keys, args=args)
+        if row is not None:
+            snapshot = _snapshot(cast("list[Any]", row))
+            await apublished(self, snapshot_message(topic, snapshot, published_at))
+
+    def _announce_call(
+        self, topic: str, published_at: float
+    ) -> tuple[list[str], list[str]]:
+        """Split the snapshot frame around the detail the script fills in."""
         frame = snapshot_message(topic, Presence(0), published_at).as_dict()
         frame["envelope"] = presence_event(_HOLE).as_dict()
         head, _, tail = json.dumps(frame, separators=(",", ":")).partition(
             json.dumps(_HOLE)
         )
         args = [str(self.presence_limits.size), self._channel(topic), head, tail]
-        keys = [*self._snapshot_keys(topic), self.topic_key("state", topic)]
-        with self._failures:
-            row = self._scripts.announce(keys=keys, args=args)
-        if row is None:
-            return
-        snapshot = _snapshot(cast("list[Any]", row))
-        published(self, snapshot_message(topic, snapshot, published_at))
+        return [*self._snapshot_keys(topic), self.topic_key("state", topic)], args
 
     def _join_call(
         self, topic: str, connection: str, member: Member | None, ttl: float
@@ -628,6 +670,23 @@ class RedisBroker(BrokerBackend, PresenceWindow):
     def close(self) -> None:
         """Close the sync pool and schedule the close of clients on live loops."""
         self.presence_schedule.close()
+        self._release()
+
+    @override
+    async def aclose(self) -> None:
+        """Announce the pending snapshots and close this loop's client on the loop.
+
+        The clients of other loops and the sync pool are then released as `close` does.
+        """
+        await self.presence_schedule.aclose(self.aannounce_presence)
+        with self._async_lock:
+            entry = self._async_clients.pop(asyncio.get_running_loop(), None)
+        if entry is not None:
+            await entry.client.aclose()
+        self._release()
+
+    def _release(self) -> None:
+        """Schedule the close of the clients on live loops and close the sync pool."""
         with self._async_lock:
             clients = list(self._async_clients.items())
             self._async_clients.clear()
@@ -635,15 +694,6 @@ class RedisBroker(BrokerBackend, PresenceWindow):
             if loop.is_running():
                 asyncio.run_coroutine_threadsafe(entry.client.aclose(), loop)
         self._redis.close()
-
-    @override
-    async def aclose(self) -> None:
-        """Await the close of this loop's client, then release the rest."""
-        with self._async_lock:
-            entry = self._async_clients.pop(asyncio.get_running_loop(), None)
-        if entry is not None:
-            await entry.client.aclose()
-        self.close()
 
     def forget_clients(self) -> None:
         """Drop the async clients a forked child inherits from its parent's loops."""
@@ -754,4 +804,4 @@ def _forget_async_clients() -> None:
 after_fork(_forget_async_clients)
 
 
-__all__ = ["RedisBroker", "valid_client", "valid_interval", "valid_prefix"]
+__all__ = ["RedisBroker", "valid_client", "valid_interval", "valid_prefix", "valid_url"]

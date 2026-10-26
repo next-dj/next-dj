@@ -232,15 +232,14 @@ Both partial paths are reachable from the test client of :doc:`tutorial05`.
            "create_note_form",
            {"title": "From test", "body": "body"},
            origin="/",
-           partial=True,
-           zones="note-list",
+           partial="note-list",
        )
        envelope = envelope_of(response)
        assert envelope.zone_targets() == ["note-list"]
        assert Note.objects.filter(title="From test").exists()
 
 ``envelope_of`` refuses a response that is not a patch envelope, so a test that loses the partial switch fails on the decode rather than on a weaker assertion.
-Drop ``partial=True`` from the second call and the same submission takes the ``super().on_valid`` branch, which answers with a 302 to the origin, the status :doc:`tutorial05` asserts for the same form.
+Drop ``partial`` from the second call and the same submission takes the ``super().on_valid`` branch, which answers with a 302 to the origin, the status :doc:`tutorial05` asserts for the same form.
 
 How it degrades
 ~~~~~~~~~~~~~~~

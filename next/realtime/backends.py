@@ -25,6 +25,7 @@ from contextlib import (
 )
 from typing import Final, NamedTuple, Protocol, TypeGuard, override
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.checks import CheckMessage, Error
 
@@ -33,7 +34,7 @@ from next.conf.merge import FROZEN_DEFAULTS
 from next.partial.envelope import Envelope
 from next.utils import is_int
 
-from .lifecycle import published
+from .lifecycle import apublished, published
 from .messages import Message, Position, validate_topic, validate_topics
 from .replay import INCOMPLETE, Replay, replay_after, replay_window
 from .roster import (
@@ -121,8 +122,8 @@ class BrokerBackend(ABC):
         return
 
     async def aclose(self) -> None:
-        """Release backend resources from an event loop."""
-        self.close()
+        """Release backend resources from an event loop, `close` run on the pool."""
+        await sync_to_async(self.close, thread_sensitive=False)()
 
 
 class _Subscriber(Protocol):
@@ -130,9 +131,16 @@ class _Subscriber(Protocol):
 
 
 class _Logged(NamedTuple):
-    """The latest position of a topic and the moment it was published."""
+    """The latest position of a topic and the broker-clock moment it was published."""
 
     position: Position
+    at: float
+
+
+class _Entry(NamedTuple):
+    """A logged message and the broker-clock moment it was published."""
+
+    message: Message
     at: float
 
 
@@ -194,18 +202,20 @@ class _AsyncSubscriber:
 
 
 def _since_idle(
-    logged: tuple[Message, ...], now: float, ttl: float
+    logged: tuple[_Entry, ...], now: float, ttl: float
 ) -> tuple[Message, ...]:
     """Keep the messages written since the log last sat a whole TTL without a write.
 
     A write after such a pause restarts the log, as the expiry of a Redis key does.
     """
-    if not logged or now - logged[-1].published_at >= ttl:
+    if not logged or now - logged[-1].at >= ttl:
         return ()
+    start = 0
     for index in range(len(logged) - 1, 0, -1):
-        if logged[index].published_at - logged[index - 1].published_at >= ttl:
-            return logged[index:]
-    return logged
+        if logged[index].at - logged[index - 1].at >= ttl:
+            start = index
+            break
+    return tuple(entry.message for entry in logged[start:])
 
 
 class _Roster:
@@ -348,14 +358,14 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         self,
         config: Mapping[str, object] | None = None,
         *,
-        clock: Callable[[], float] = time.time,
+        clock: Callable[[], float] = time.monotonic,
         replay: Mapping[str, object] | None = None,
         presence: Mapping[str, object] | None = None,
         schedule: Scheduler | None = None,
     ) -> None:
         """Create the broker and validate its queue size, replay and presence limits.
 
-        `schedule` builds the presence schedule from the announce hook it is handed.
+        `clock` times expiry and presence, while `published_at` stays the wall clock.
         """
         super().__init__(config)
         size = self.options.get("QUEUE_SIZE", _QUEUE_SIZE)
@@ -367,7 +377,7 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         self.replay_size, self.replay_ttl = replay_window(replay)
         self._lock = threading.RLock()
         self._positions: dict[str, _Logged] = {}
-        self._logs: defaultdict[str, deque[Message]] = defaultdict(self._new_log)
+        self._logs: defaultdict[str, deque[_Entry]] = defaultdict(self._new_log)
         self._sweep_at = -math.inf
         self._subscribers: dict[str, set[_Subscriber]] = defaultdict(set)
         self._rosters: dict[str, _Roster] = {}
@@ -410,9 +420,11 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
                 else Position(current.epoch, current.seq + 1)
             )
             self._positions[topic] = _Logged(position, now)
-            message = Message(topic, position.seq, envelope, now, position.epoch)
+            message = Message(
+                topic, position.seq, envelope, time.time(), position.epoch
+            )
             if self.replay_size:
-                self._logs[topic].append(message)
+                self._logs[topic].append(_Entry(message, now))
             self._fan_out(topic, message)
         return message
 
@@ -421,7 +433,7 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         """Notify the local subscribers without numbering or logging the envelope."""
         envelope = self.validate_publication(topic, envelope)
         with self._lock:
-            message = Message(topic, 0, envelope, self.clock())
+            message = Message(topic, 0, envelope, time.time())
             self._fan_out(topic, message)
         return message
 
@@ -448,15 +460,11 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         }
         self._logs = defaultdict(
             self._new_log,
-            {
-                topic: log
-                for topic, log in self._logs.items()
-                if now - log[-1].published_at < ttl
-            },
+            {topic: log for topic, log in self._logs.items() if now - log[-1].at < ttl},
         )
         self._sweep_at = now + ttl
 
-    def _new_log(self) -> deque[Message]:
+    def _new_log(self) -> deque[_Entry]:
         """Start an empty topic log bounded by `REPLAY['SIZE']`."""
         return deque(maxlen=self.replay_size)
 
@@ -570,7 +578,20 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
 
     @override
     def announce_presence(self, topic: str) -> None:
-        """Release a closed window and broadcast the snapshot it coalesced.
+        """Release a closed window and broadcast the snapshot it coalesced."""
+        message = self._announcement(topic)
+        if message is not None:
+            published(self, message)
+
+    @override
+    async def aannounce_presence(self, topic: str) -> None:
+        """Announce from an event loop, its sync receivers run off the loop."""
+        message = self._announcement(topic)
+        if message is not None:
+            await apublished(self, message)
+
+    def _announcement(self, topic: str) -> Message | None:
+        """Broadcast the unannounced snapshot of a topic, None once it went out.
 
         The read and the fan-out share the lock, so snapshots leave in change order.
         """
@@ -579,18 +600,22 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
                 del self._windows[topic]
             roster = self._rosters.get(topic)
             if roster is None or roster.version == roster.published:
-                return
+                return None
             snapshot = self.presence(topic)
             roster.published = roster.version
             if not roster:
                 del self._rosters[topic]
-            message = self.broadcast(topic, presence_envelope(snapshot))
-        published(self, message)
+            return self.broadcast(topic, presence_envelope(snapshot))
 
     @override
     def close(self) -> None:
         """Broadcast the pending snapshots and stop the presence schedule."""
         self.presence_schedule.close()
+
+    @override
+    async def aclose(self) -> None:
+        """Announce the pending snapshots without blocking the loop, then stop."""
+        await self.presence_schedule.aclose(self.aannounce_presence)
 
     @override
     def subscribe(
