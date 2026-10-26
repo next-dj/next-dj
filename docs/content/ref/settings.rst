@@ -222,8 +222,9 @@ The resolved string is memoised for the life of the configuration, so a manifest
 A version that never changes leaves the version guard silent at runtime, so a deploy of new assets cannot ask a connected client to reload.
 ``PUSH_WIZARD_STEPS`` is the global default for pushing wizard steps to browser history, which a wizard's ``Meta.push_steps`` overrides per wizard.
 ``SSE.HEARTBEAT_SECONDS`` is the keepalive period in seconds of a ``PatchEventStream`` with an async source and of every ``TopicStream``, and ``SSE.RETRY_MS`` is the ``EventSource`` reconnect hint in milliseconds sent in the leading stream frame.
-The heartbeat is a finite number above ``0`` and the retry hint an integer from ``0``, and ``next.E214`` reports any other value, which the stream replaces by the default.
-A ``TopicStream`` takes its keepalive from the same option, and ``REALTIME['HEARTBEAT']`` times only the WebSocket ping, see `REALTIME`_.
+``SSE`` is a dict or ``None``, the heartbeat ``None`` or a finite number above ``0``, and the retry hint ``None`` or an integer from ``0`` that is not a bool.
+``None`` takes the default, and a wrong value falls back to the default at runtime while ``next.E214`` reports it.
+``REALTIME['HEARTBEAT']`` times only the WebSocket ping, see `REALTIME`_.
 
 See :doc:`/content/topics/partial-rendering/reference` for the wire protocol and :doc:`/content/topics/partial-rendering/sse` for the stream contract.
 

@@ -100,7 +100,7 @@ Add presence
 ``leave`` forgets the connection, and ``presence`` returns a ``Presence`` of the live connections without any expired one.
 
 The helpers live in ``next.realtime.roster``.
-``encode_member(member, limit)`` returns the canonical JSON to store, ``None`` for no member, and raises ``InvalidMemberError`` for a member that is too large or not JSON.
+``encode_member(member, limit)`` returns the canonical JSON to store, ``None`` for no member, and raises ``InvalidMemberError`` for a member that is not a mapping with string keys, holds a value JSON or UTF-8 cannot carry such as a lone surrogate, or encodes above ``limit`` bytes.
 Store that string as the identity of the member, because connections with an equal string are one member.
 ``decode_member`` reads it back and skips a malformed row.
 
@@ -210,7 +210,7 @@ The store methods above are the part a project writes, and each has to prune exp
 ``Presence.count`` is the number of distinct members plus every connection without a member, and the list holds at most ``presence_limits.size`` of them.
 
 A subclass of ``RedisBroker`` inherits presence whole.
-It overrides ``announce_presence`` to observe or reroute each snapshot.
+It overrides ``announce_presence`` to observe or reroute the snapshots the schedule publishes, and ``aannounce_presence`` for those ``aclose`` flushes.
 An override of ``topic_key`` has to return a distinct key for the kinds ``presence``, ``members``, ``window``, ``identified``, ``attendees``, ``holders``, ``state``, and ``order`` too, all under one hash tag, since the scripts touch them together.
 
 Without these methods a stream that passes ``presence`` fails to start with ``ImproperlyConfigured``, and ``presence()`` and ``apresence()`` raise it too.

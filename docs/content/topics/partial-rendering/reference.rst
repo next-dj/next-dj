@@ -645,12 +645,13 @@ The rest are ignored, multi-backend selection is not supported, and a list with 
        A wizard's ``Meta.push_steps`` overrides it per wizard.
    * - ``SSE.HEARTBEAT_SECONDS``
      - ``25``
-     - The heartbeat period for an async source, a finite number of seconds above ``0``.
+     - The heartbeat period of a ``PatchEventStream`` with an async source and of every ``TopicStream``, ``None`` or a finite number of seconds above ``0``.
    * - ``SSE.RETRY_MS``
      - ``3000``
-     - The ``EventSource`` reconnect hint, an integer of milliseconds from ``0``, where ``0`` asks the browser to reconnect at once.
+     - The ``EventSource`` reconnect hint, ``None`` or an integer of milliseconds from ``0`` that is not a bool, where ``0`` asks the browser to reconnect at once.
 
-A value of either option outside its range falls back to the default at runtime, and ``manage.py check`` reports it as ``next.E214``.
+``SSE`` itself is a dict or ``None``, and ``None`` in either option takes the default.
+A wrong value falls back to the default at runtime, and ``manage.py check`` reports it as ``next.E214``.
 
 See :doc:`/content/ref/settings` for every key inside ``NEXT_FRAMEWORK``.
 

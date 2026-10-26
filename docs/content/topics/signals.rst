@@ -227,7 +227,7 @@ Failure contract
 ~~~~~~~~~~~~~~~~
 
 A receiver that raises takes the sender down with it.
-Every signal in the catalog above but one is sent with ``Signal.send``, which offers a raising receiver no isolation, so the exception leaves the send and reaches whatever the framework was doing.
+Every signal in the catalog above but three is sent with ``Signal.send``, which offers a raising receiver no isolation, so the exception leaves the send and reaches whatever the framework was doing.
 An exception from a ``page_rendered`` receiver therefore surfaces as a failed page render, one from an ``action_dispatched`` receiver as a failed form dispatch, and one from a ``component_rendered`` receiver as a failed component.
 Django runs receivers in connection order and stops at the first failure, so a receiver that raises also keeps every receiver behind it from running.
 
@@ -253,9 +253,10 @@ A receiver is an observation point, and its failure should cost an observation r
        except (KeyError, OSError):
            logger.exception("page_rendered receiver failed")
 
-``settings_reloaded`` is the single exception.
-It is sent with ``Signal.send_robust``, so every receiver runs even after one raises, and the framework re-raises the first error once the chain is done.
+``settings_reloaded``, ``sse_stream_opened``, and ``sse_stream_closed`` are the exceptions.
+``settings_reloaded`` is sent with ``Signal.send_robust``, so every receiver runs even after one raises, and the framework re-raises the first error once the chain is done.
 A settings reload has to reach every manager that cached something from ``NEXT_FRAMEWORK``, and leaving the managers behind a failed receiver holding stale state would be worse than the error itself.
+The two stream signals go through ``Signal.send_robust``, or ``Signal.asend_robust`` on an asynchronous stream, and Django logs a raising receiver and drops its error, so an observer never ends the stream it watches.
 
 Disconnecting
 ~~~~~~~~~~~~~

@@ -362,7 +362,8 @@ A callable passed directly reaches a WebSocket ticket through its import path, a
 
 The stream joins after it read the topic positions and before it sends the replayed messages and ``hello``, and right after ``hello`` it sends the current snapshot of every topic.
 It refreshes its record once per heartbeat and leaves in the ``finally`` of the generator, on a disconnect, a cancellation, and a revoked grant alike.
-A broker failure on leave is logged on ``next.realtime.attendance``, the other topics are still left, and the time to live removes the record.
+A ``BrokerConnectionError`` on leave is logged on ``next.realtime.attendance``, the other topics are still left, and the time to live removes the record.
+Any other error, such as a Redis script ``ResponseError``, propagates and stops the leave.
 An asynchronous leave waits at most one heartbeat, so a broker that hangs never holds the close, and the time to live removes what it did not confirm.
 
 The identify callable
@@ -663,7 +664,7 @@ Server frames
      - Shape
      - Meaning
    * - ``hello``
-     - ``{"type": "hello", "protocol": 2, "server_time": 1761300000000, "topics": {"room:42": {"epoch": "9f2c41d07a3be851", "seq": 17}}, "transports": ["ws", "sse"], "heartbeat": 25.0, "connection": "kq3Vx0b9cE2mTnYfJw1sPA"}``
+     - ``{"type": "hello", "protocol": 2, "server_time": 1761300000000, "topics": {"room:42": {"epoch": "9f2c41d07a3be851", "seq": 17}}, "transports": ["ws", "sse"], "heartbeat": 25.0, "connection": "kq3Vx0b9cE2mTnYfJw1sPA", "upstream": {"frame": 16384, "timeout": 10.0}}``
      - The subscription is live.
        It carries the keys of the SSE ``next-hello`` frame plus ``type`` and ``heartbeat``, the server interval in seconds, ``connection``, and the ``upstream`` and ``tunnel`` limits below.
        A client sizes its missed-ping watchdog from ``heartbeat``.
@@ -779,7 +780,9 @@ Close codes
      - Three frames in a row found the token bucket empty, see `Upstream events`_.
        An ``error`` frame with the ``limit`` code precedes it.
 
-The browser client decides by the close code rather than the ``error`` frame before it, falling back to SSE for the life of the page on ``4403`` and negotiating a fresh ticket once on ``4401`` before it does.
+The browser client decides by the close code rather than the ``error`` frame before it.
+A ``4403`` sends the stream URL to SSE for the life of the page.
+A ``4401`` negotiates a fresh ticket once, and a second ``4401`` with no ``hello`` between the two sends the connection to SSE until the next resume reopens it.
 Every other close is transient.
 The client retries after ``150 * 2^(n-1)`` milliseconds plus up to 150 milliseconds of jitter, and it falls back to SSE after three failures in a row.
 A watchdog wakes once per heartbeat and drops a peer whose send has been blocked for longer than a heartbeat.

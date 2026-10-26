@@ -117,7 +117,8 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - Right after a stream enters its broker subscription.
        ``transport`` is ``"sse"`` or ``"ws"``, ``topics`` the tuple of topics the subscription joined, and ``connection`` the ``TopicStream`` or ``TopicSocket`` itself.
        An SSE stream carries its ``HttpRequest``, the ``user`` of that request, which is ``None`` without ``AuthenticationMiddleware``, and a ``subject`` of ``None``.
-       A lazy user nothing loaded yet is swapped for the user of the stored session on the request too, so a receiver reading ``request.user`` never loads Django's, which may rotate the session key.
+       When the request has a session key and its user is the lazy user of Django's ``AuthenticationMiddleware``, still unloaded, the stream swaps it for the user of the stored session on the request too, so a receiver reading ``request.user`` never loads Django's, which may rotate the session key.
+       A lazy user set by another middleware stays untouched.
        A WebSocket carries the opaque ``subject`` and the ``user`` of its handshake and a ``request`` of ``None``.
        No argument carries the credential, though ``connection`` is the ``TopicSocket``, so server code reaches ``connection.handshake.credential`` only on purpose.
        The request must not be retained past the receiver call.

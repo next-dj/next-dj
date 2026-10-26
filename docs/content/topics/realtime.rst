@@ -339,6 +339,8 @@ Known limitations
 ~~~~~~~~~~~~~~~~~
 
 The browser client closes its streams while the tab is hidden and opens them again on return.
+A WebSocket closes after a brief drain, once the tunneled requests and acknowledged ``up`` frames already sent on it get their replies.
+A page loaded in a hidden tab opens its streams on the first show.
 Over SSE that is a new ``EventSource``, which sends no ``Last-Event-ID``, so a stream resumed after a visibility change resynchronises instead of replaying.
 
 Presence
@@ -554,7 +556,7 @@ Django imports the ``realtime`` module of every installed application at startup
    }
 
 Registering a second function under the same pattern and name is reported by ``manage.py check``, and only the first one runs.
-A reloaded module that defines the same function again replaces its own entry without the report.
+A function counts as itself only at the same file, first line, and qualified name, so a reload that keeps the ``def`` in place replaces its own entry without the report, and a reload that moves the ``def`` is reported.
 :doc:`/content/ref/settings` lists the keys and :doc:`/content/ref/system-checks` the check ids.
 
 What a handler may rely on

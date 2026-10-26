@@ -180,6 +180,9 @@ An ``ack`` that names no known error raises ``AssertionError``.
 ``request(method, path, *, headers=None, body="")`` tunnels one HTTP request over the socket and returns a ``Reply`` with ``status``, ``headers``, and ``body``, or a ``Refusal``.
 Frames that arrive while a call waits for its own answer are held and handed out by the next ``receive_json_from``, so a ``patches`` frame published before the ``hello`` is not lost.
 A close that arrives during such a wait is held too, a failed call leaves it for ``receive_close()``, and a repeated wait fails at once instead of timing out.
+``disconnect(code=1000)`` closes the socket and waits for the application to exit within the constructor ``timeout``.
+An application still running past it is cancelled, and ``disconnect()`` raises ``AssertionError``.
+An error the application exits with is raised from ``disconnect()``.
 ``Reply``, ``Refusal``, and ``UpstreamError`` live in ``next.realtime.frames``.
 
 ``issue_socket_ticket(topics, *, authorizer_ref, transform_ref=None, presence=False, session=None, cookies: Mapping[str, str] | None = None)`` issues a ticket through the negotiation path of the configured ``TICKET_BINDING``.

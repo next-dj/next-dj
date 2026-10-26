@@ -192,6 +192,8 @@ Stream politeness
 * The leading ``retry`` hint comes from ``SSE.RETRY_MS`` so the browser's native reconnect uses the configured interval.
 
 On the client a background tab pauses the stream by closing the connection.
+A WebSocket connection closes after a brief drain, once the tunneled requests and acknowledged ``up`` frames already sent on it get their replies.
+A page loaded in a hidden tab opens its streams on the first show.
 When the tab becomes visible the runtime reconnects and re-fetches the zones the stream addressed since the connection opened.
 A tab hidden for less than three seconds reconnects the stream and skips the re-fetches.
 Each connection tracks at most 64 zones for the resume re-GET, so a long sleep cannot storm the server.

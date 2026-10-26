@@ -889,11 +889,11 @@ Errors
      - ``next.realtime.checks``
    * - ``next.E178``
      - The in-memory broker queue size is not a positive integer.
-     - ``next.realtime.checks``
+     - ``next.realtime.backends``
    * - ``next.E179``
      - ``RedisBroker`` is selected without the ``redis`` package installed.
        Installing the ``broker`` extra clears it.
-     - ``next.realtime.checks``
+     - ``next.realtime.redis.broker``
    * - ``next.E180``
      - ``NEXT_FRAMEWORK['REALTIME']['BROKER']['OPTIONS']`` is not a mapping.
      - ``next.realtime.checks``
@@ -972,7 +972,8 @@ Errors
      - ``next.realtime.checks``
    * - ``next.E199``
      - Two different handlers register ``@on`` for the same topic pattern and event name.
-       Only the first one runs, and the same function defined again in a reloaded module replaces itself without the error.
+       Only the first one runs.
+       A function counts as itself only at the same file, first line, and qualified name, so a reload that keeps the ``def`` in place replaces the handler without the error, and a reload that moves the ``def`` reports ``next.E199``.
        A decorator with ``functools.wraps`` is looked through, so two handlers it wraps stay apart, and a wrapper without it is told apart only by identity.
      - ``next.realtime.checks``
    * - ``next.E200``
@@ -1023,14 +1024,15 @@ Errors
    * - ``next.E213``
      - The ``URL`` option of ``RedisBroker`` is not a non-empty string.
        The broker refuses it with ``ImproperlyConfigured`` when it is built, so the check reports it before the first request.
-     - ``next.realtime.checks``
+     - ``next.realtime.redis.broker``
    * - ``next.E214``
-     - A ``PARTIAL_BACKENDS`` entry sets ``OPTIONS["SSE"]`` to something other than a dict, ``SSE.RETRY_MS`` to anything but an integer from ``0``, or ``SSE.HEARTBEAT_SECONDS`` to anything but a finite number above ``0``.
-       The stream replaces such a value by its default, so the check is the only report of it.
+     - A ``PARTIAL_BACKENDS`` entry sets ``OPTIONS["SSE"]`` to something other than a dict or ``None``, ``SSE.RETRY_MS`` to something other than ``None`` or an integer from ``0`` that is not a bool, or ``SSE.HEARTBEAT_SECONDS`` to something other than ``None`` or a finite number above ``0``.
+       ``None`` takes the default.
+       The stream replaces a wrong value by its default at runtime, so the check is the only report of it.
      - ``next.partial.checks.backends``
    * - ``next.E215``
-     - A ``PARTIAL_BACKENDS`` entry names a protocol backend still written to the retired ``sse_event(envelope)`` hook.
-       Such a class is abstract for want of ``stream_data(envelope, meta)``, or its ``sse_event`` override is never called, so the check names ``stream_data`` as the hook to implement.
+     - A ``PARTIAL_BACKENDS`` entry names a protocol backend that leaves ``stream_data(envelope, meta)`` abstract or defines an ``sse_event`` method.
+       Such a class cannot be built, or no stream calls its ``sse_event``, so the check names ``stream_data`` as the method to implement.
      - ``next.partial.checks.backends``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.

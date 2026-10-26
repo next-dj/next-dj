@@ -463,6 +463,7 @@ The stream API
 
 ``Next.partial.stream`` keeps one connection per distinct ``data-next-stream`` URL and an ``(epoch, seq)`` cursor per topic on it.
 The cursor keeps the topics the last ``hello`` granted, at most 64, the limit a subscribe frame may carry.
+Past 64 topics it drops the topic whose cursor advanced longest ago.
 The sections below cover the listener API, the connection state events, the WebSocket negotiation, and the request tunnel.
 
 Listening and sending
@@ -476,7 +477,8 @@ Listening and sending
 ``send(topic, name, data, options?)`` sends an upstream event over the WebSocket that carries ``topic`` and returns a ``Promise<boolean>``.
 ``options`` is ``{ ack?: boolean }``, and ``ack`` defaults to ``true``.
 An ``up`` frame whose compact JSON, with its ``type``, ``topic``, ``name``, ``data``, and id, exceeds in UTF-8 bytes the ``upstream.frame`` limit of the socket's ``hello``, 16 KiB when the hello names none, resolves to ``false`` and is never sent.
-Without options the frame carries an id and the promise resolves to ``true`` once the server acknowledges that a handler ran, and to ``false`` for a refusal, no acknowledgment within five seconds past the ``upstream.timeout`` of the socket's ``hello``, five seconds when the hello names none, a dropped socket, or a topic no open socket carries.
+Without options the frame carries an id and the promise resolves to ``true`` once the server acknowledges that a handler ran, and to ``false`` for a refusal, a missing acknowledgment, a dropped socket, or a topic no open socket carries.
+The client waits for the acknowledgment five seconds past the ``upstream.timeout`` of the socket's ``hello``, and five seconds when the hello names none.
 A ``timeout`` acknowledgment means the handler outlived the server's limit and may still have run, so it resolves to ``false`` and the event is not resent.
 ``{ ack: false }`` sends the frame without an id and resolves to ``true`` as soon as it is queued.
 On an SSE connection there is no upstream channel, so the promise resolves to ``false`` and nothing is sent.
@@ -486,10 +488,12 @@ Connection state events
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 Every change of a connection's state fires ``next:stream-state`` with ``url``, ``transport``, and ``state``.
-``transport`` is ``"sse"`` or ``"ws"``, the names ``REALTIME['TRANSPORTS']``, the ``hello`` frame, and the ``stream_subscribed`` signal use, and it names the transport actually carrying the connection, ``"sse"`` once a WebSocket connection fell back.
+``transport`` is ``"sse"`` or ``"ws"``, the names ``REALTIME['TRANSPORTS']``, the ``hello`` frame, and the ``stream_subscribed`` signal use, and from ``open`` on it names the transport actually carrying the connection, ``"sse"`` after a fallback.
+The first ``connecting`` of a connection names the configured transport.
 A connection is ``connecting`` while it opens and again while a dropped socket or ``EventSource`` waits to reconnect, ``open`` once the transport is up, and ``closed`` when it is paused, removed, or ended.
 A page loaded in a hidden tab starts paused and opens its connections on the first show.
-A paused WebSocket stays open until the tunneled requests and acknowledged ``up`` frames already sent on it get their replies, each within its own timeout.
+A paused WebSocket reports ``closed`` at once but stays open until the tunneled requests and acknowledged ``up`` frames sent on it before the pause get their replies, each within its own timeout.
+While it drains, it ignores every frame except those replies.
 A ``next-end`` frame, sent when the topic authorizer denies a grant, is terminal, so the connection closes for good, its ``next:stream-state`` detail also carries the frame's ``code``, and ``partial:error`` of kind ``network`` fires with that code as its ``error``.
 Only an SSE stream carries ``next-end``.
 A WebSocket has no end frame, and a denied grant there closes the socket with ``4403`` after an ``error`` frame, which sends that stream URL to SSE for the life of the page, where the authorizer answers with ``next-end``.
@@ -506,7 +510,7 @@ It opens the socket only for a ``200`` reply whose content type is ``application
 A ``401``, ``403``, or ``406`` reply, any other content type, no reply within five seconds, or three failed attempts in a row sends that connection to SSE until a resume reopens it, and a ``4403`` close sends its stream URL to SSE for the life of the page.
 The server sends an ``error`` frame before a ``4400``, ``4401``, or ``4403`` close, and the client decides by the close code, while an ``auth`` frame that no close follows within five seconds counts as a ``4401``.
 A ``4401`` close drops the connection once and negotiates again for a fresh ticket, since two negotiations on a first visit can issue different anonymous identities and the browser keeps the cookie of the last.
-A second ``4401`` with no ``hello`` between the two sends the connection to SSE for good, and each ``hello`` earns one such retry.
+A second ``4401`` with no ``hello`` between the two sends the connection to SSE until a resume reopens it, and each ``hello`` earns one such retry.
 The retry does not count as a failed attempt.
 
 The failure count resets only after a socket stayed open for one heartbeat past its ``hello``, so a server that drops every socket right after ``hello`` still ends on SSE.
