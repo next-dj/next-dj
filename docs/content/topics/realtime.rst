@@ -10,6 +10,121 @@ The browser loads current HTML through the page's normal guarded HTTP request.
    :local:
    :depth: 1
 
+What realtime is for
+--------------------
+
+A page that stays open goes stale when another user or a worker changes the data behind it.
+Realtime lets the server tell every open page of a topic that a part of it changed, in the form of small patch instructions such as a refresh of one zone.
+Each page then reloads that zone through its own guarded request, so a subscriber never receives HTML rendered for someone else.
+Over a WebSocket a page also sends small events and form submissions back to the server.
+
+How one update travels
+----------------------
+
+1. The page renders a ``{% zone %}`` and a ``data-next-stream`` element that points at a stream page.
+2. The client runtime requests the stream page, whose guard runs and whose ``render`` returns a ``TopicStream``.
+   A process that mounts ``WebSocketApp`` answers with a signed ticket and the client opens a WebSocket.
+   Otherwise, or when the socket fails, the same URL serves Server-Sent Events.
+3. The stream subscribes to the broker and sends ``next-hello`` with the current position of each topic.
+4. A mutation calls ``publish(topic, Patches(request).refresh(zone=...))``, and the broker receives the message once the transaction commits.
+5. The broker numbers the message and hands it to every stream subscribed to the topic, in one process with ``MemoryBroker`` or across processes with ``RedisBroker``.
+6. The client checks the message against its cursor, drops the echo of its own request, and applies the patches.
+   A ``refresh`` makes it fetch the zone through the page view with its own cookies and morph the fresh HTML in place.
+
+The reverse path exists over a WebSocket only.
+``Next.partial.stream.send`` sends an upstream event that a handler registered with ``@on`` receives, as `Upstream events`_ describes.
+A form whose action opts in with ``transport="any"`` submits through the same socket and runs the ordinary HTTP pipeline, as `Form actions over WebSocket`_ describes.
+
+.. mermaid::
+
+   sequenceDiagram
+       participant Tab as Browser tab
+       participant Page as Page view
+       participant Stream as TopicStream
+       participant Broker
+       Tab->>Stream: GET stream page, WebSocket or SSE
+       Stream->>Broker: subscribe to topic
+       Stream-->>Tab: next-hello
+       Page->>Broker: publish refresh after commit
+       Broker-->>Stream: numbered message
+       Stream-->>Tab: next-patches
+       Tab->>Page: zone GET with own cookies
+       Page-->>Tab: zone HTML
+       Tab->>Stream: upstream event or tunneled form, WebSocket only
+
+Terms
+-----
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 82
+
+   * - Term
+     - Meaning
+   * - topic
+     - A named channel such as ``room:42`` that a mutation publishes to and a stream subscribes to, see `Publish after a mutation`_.
+   * - broker
+     - The backend that numbers, stores, and fans out topic messages, ``MemoryBroker`` by default and ``RedisBroker`` across processes, see `Delivery guarantees`_.
+   * - stream
+     - One open connection from a page to its topics, over WebSocket or SSE, see `Subscribe from an authorized page`_.
+   * - ``TopicStream``
+     - The response a stream page returns to open a stream after its guard, see `Subscribe from an authorized page`_.
+   * - ticket
+     - A signed token that carries the stream's grant from the guarded page to the WebSocket, see `Access while a stream is open`_.
+   * - binding
+     - The rule that ties a ticket to the identity of the browser, ``SessionBinding`` by default, see `The signed-cookie session engine`_.
+   * - replay
+     - The bounded catch-up of messages a reconnecting stream missed, see `Replay after a reconnect`_.
+   * - presence
+     - The live count or member list of the streams open on a topic, see `Presence`_.
+   * - upstream
+     - A small event a page sends to the server over its WebSocket, see `Upstream events`_.
+   * - tunnel
+     - The path that carries a form action over the open WebSocket, see `Form actions over WebSocket`_.
+   * - zone
+     - A named region of a page template that the server renders on its own, see :doc:`/content/topics/partial-rendering/zones`.
+   * - patch
+     - One instruction of an envelope, such as ``refresh`` or ``event``, that the client applies, see :doc:`/content/topics/partial-rendering/how-it-works`.
+
+SSE, WebSocket, and Django Channels
+-----------------------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 39 39
+
+   * - Aspect
+     - SSE
+     - WebSocket
+   * - Server
+     - WSGI or ASGI, the development server included.
+     - ASGI with ``WebSocketApp`` mounted, for example through ``next.realtime.application``.
+   * - Direction
+     - Server to page.
+     - Both ways, with upstream events and tunneled form actions.
+   * - Requirements
+     - None beyond the stream page.
+     - An importable ``authorize`` callback, and with the default binding a session engine that stores sessions on the server, as `The signed-cookie session engine`_ explains.
+   * - Role
+     - The fallback every stream keeps.
+     - Preferred when the process mounts it, with SSE taking over when negotiation or the socket fails.
+
+Both transports carry the same frames, apply the same access rules, and share one broker, so a page does not choose between them in code.
+
+next.dj neither uses nor requires Django Channels.
+Its WebSocket runs on plain ASGI and loads the Django session itself, and topics travel through the next.dj broker rather than a channel layer.
+A project that already routes WebSockets with Channels mounts ``WebSocketApp`` as one route of its own router, as :ref:`howto-stream-over-websockets-router` shows.
+
+Where to start
+--------------
+
+1. :doc:`/content/howto/stream-live-updates-with-sse` builds a complete live page with a model, a vote form, a zone, and a stream page.
+   ``examples/live-polls`` is the same idea as a full project, see :doc:`/content/misc/examples`.
+2. `Access while a stream is open`_ covers the ``authorize`` callback, tickets, and revocation.
+3. :doc:`/content/howto/stream-over-websockets` mounts the socket and runs the server.
+4. :doc:`/content/howto/fan-out-across-processes-with-redis` shares topics between workers and hosts.
+5. `Presence`_ and `Upstream events`_ add who-is-watching counts and page-to-server events.
+
 Publish after a mutation
 ------------------------
 
@@ -54,10 +169,12 @@ The page's regular access checks and dependency resolution run before the stream
    from django.http import HttpRequest
 
    from next.realtime import TopicStream
+   from next.urls import DUrl
 
-   def render(request: HttpRequest, room: DRoom[Room]) -> TopicStream:
-       return TopicStream(request, f"room:{room.code}")
+   def render(request: HttpRequest, code: DUrl[str]) -> TopicStream:
+       return TopicStream(request, f"room:{code}")
 
+``DUrl[str]`` reads the ``code`` segment of the URL, see :doc:`/content/topics/dependency-injection`.
 The backend subscription is selected from the request's WSGI or ASGI type.
 The broker wait timeout is ``NEXT_FRAMEWORK['REALTIME']['HEARTBEAT']``, 25 seconds by default, and each timeout writes a heartbeat comment under WSGI and ASGI alike.
 Under WSGI, disconnect cleanup is best-effort at the next yield, write, or close.
@@ -234,9 +351,10 @@ Pass ``presence=True`` for a counter or an ``identify`` callable for a list of m
    from django.http import HttpRequest
 
    from next.realtime import TopicStream
+   from next.urls import DUrl
 
-   def render(request: HttpRequest, room: DRoom[Room]) -> TopicStream:
-       return TopicStream(request, f"room:{room.code}", presence=True)
+   def render(request: HttpRequest, code: DUrl[str]) -> TopicStream:
+       return TopicStream(request, f"room:{code}", presence=True)
 
 Every attendance snapshot of the topic reaches the page as the ``next:presence`` event, and the page subscribes to it like to any topic event.
 
@@ -281,10 +399,8 @@ It is empty when the request carries no session or visitor cookie, and ``identif
 .. code-block:: python
    :caption: rooms/pages/rooms/[slug:code]/stream/page.py
 
-   def render(request: HttpRequest, room: DRoom[Room]) -> TopicStream:
-       return TopicStream(
-           request, f"room:{room.code}", presence="rooms.presence.identify"
-       )
+   def render(request: HttpRequest, code: DUrl[str]) -> TopicStream:
+       return TopicStream(request, f"room:{code}", presence="rooms.presence.identify")
 
 Privacy rests on two rules, because no transform touches a snapshot.
 The ``members`` list reaches only subscribers that identify their own members, and the stream cuts it from every ``next:presence`` event it sends to any other subscriber, a counter stream or one without presence alike.

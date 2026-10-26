@@ -4,7 +4,7 @@ Project status
 ==============
 
 This page states what a project can rely on when it depends on next.dj.
-It covers the public API surface, the ``NEXT_FRAMEWORK`` settings contract, the supported Python and Django releases, what has to settle before the project leaves its current maturity classifier, who maintains it, the licence, and where a change reaches the reader.
+It covers the public API surface, the ``NEXT_FRAMEWORK`` settings contract, the supported Python and Django releases, who maintains it, the licence, and where a change reaches the reader.
 
 .. contents::
    :local:
@@ -22,24 +22,6 @@ Every merge carries 100 percent line and branch coverage over ``next/``, the sam
 Mypy runs strict over the whole package, Ruff runs with every rule selected, and a benchmark job fails a pull request whose median regresses past the gate it sets.
 The client runtime has a hard gzip budget, checked on every run because it ships on every page, and each lazy chunk carries a budget of its own.
 :doc:`/content/contributing/quality-gates` states the budget values, what each gate measures, and which command reproduces it.
-
-Road to 1.0
------------
-
-Three things have to settle before the classifier moves past Alpha.
-The public API has to freeze, which means the curated top-level ``next.*`` exports and the reference pages' ``automodule`` surface stop changing shape between releases.
-The ``NEXT_FRAMEWORK`` key set has to freeze with it, so an upgrade adds keys and renames none.
-The extension contracts have to freeze last, the backend base classes of every family and the ports in :doc:`/content/ref/ports`, because an extension written against them outlives the release it was written on.
-
-Four subsystems are still moving.
-Partial rendering carries the largest surface and the most open questions, and its own :doc:`/content/topics/partial-rendering/limitations` page states what the current model does not cover.
-The client runtime moves with it, since the two halves of the protocol change together.
-Realtime transport and broker integrations are also moving, and :doc:`/content/topics/realtime` states the current contract.
-The static pipeline is the fourth, where asset name resolution and the rules a custom backend inherits are the parts a project extending it reads from the reference page rather than from a recipe.
-Routing, pages, layouts, context, and form dispatch are the settled half of the tree.
-
-The criterion for leaving Alpha is therefore not a feature count.
-It is a run of releases in which none of the three contracts above breaks, which is what lets a project take an upgrade on the strength of the release alone rather than on the pull requests behind it.
 
 Who maintains next.dj
 ---------------------

@@ -288,14 +288,18 @@ The guarded stream page authorizes each subscriber and returns a ``TopicStream``
    :caption: polls/pages/polls/[int:id]/stream/page.py
 
    from django.http import HttpRequest
-   from polls.deps import DPoll
+   from django.shortcuts import get_object_or_404
    from polls.models import Poll
    from polls.realtime import can_subscribe_topic
 
    from next.realtime import TopicStream
+   from next.urls import DUrl
 
-   def render(request: HttpRequest, poll: DPoll[Poll]) -> TopicStream:
+   def render(request: HttpRequest, poll_id: DUrl["id", int]) -> TopicStream:
+       poll = get_object_or_404(Poll, pk=poll_id)
        return TopicStream(request, f"poll:{poll.pk}", authorize=can_subscribe_topic)
+
+``polls.realtime.can_subscribe_topic`` is the ``authorize`` callback that :doc:`/content/howto/stream-live-updates-with-sse` defines, together with the ``Poll`` model and the vote page.
 
 The vote page wraps its results in a zone and connects the negotiated stream endpoint with a ``data-next-stream`` element.
 
@@ -307,6 +311,7 @@ The vote page wraps its results in a zone and connects the negotiated stream end
    {% endzone %}
    <div data-next-stream="/polls/{{ poll.pk }}/stream/"></div>
 
+The ``poll_chart`` component, its Vue island, and the vote signal receiver come from ``examples/live-polls``, see :doc:`/content/misc/examples`.
 The vote signal publishes a ``refresh`` patch through ``next.realtime.publish`` after the transaction commits.
 The framework adds the originating request id to the envelope, so the initiating tab drops its echo after its POST response already updated the zone.
 Every other subscriber executes ``refresh`` and re-fetches the zone through its own guarded page request and cookies.

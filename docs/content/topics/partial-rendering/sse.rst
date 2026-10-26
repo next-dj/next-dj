@@ -18,26 +18,71 @@ For broker-backed topic delivery with automatic WSGI/ASGI selection, use :doc:`/
 There is no dedicated SSE endpoint and no new public URL.
 The page view authorizes the subscriber, the same as any other page.
 
+The source is any iterable the application owns.
+The feed below is a process-local example that fans each recorded change out to every open stream of the process, and a real project reads its own queue, table, or message bus in its place.
+
 .. code-block:: python
-   :caption: stream/page.py
+   :caption: polls/changes.py
+
+   import queue
+   import threading
+   from collections.abc import Iterator
+   from dataclasses import dataclass
+
+   @dataclass(frozen=True, slots=True)
+   class Change:
+       poll_id: int
+       request_id: str | None
+
+   _lock = threading.Lock()
+   _inboxes: set[queue.Queue[Change]] = set()
+
+   def record(change: Change) -> None:
+       with _lock:
+           for inbox in _inboxes:
+               inbox.put(change)
+
+   def changes(poll_id: int, timeout: float = 20) -> Iterator[Change | None]:
+       inbox: queue.Queue[Change] = queue.Queue()
+       with _lock:
+           _inboxes.add(inbox)
+       try:
+           while True:
+               try:
+                   change = inbox.get(timeout=timeout)
+               except queue.Empty:
+                   yield None
+                   continue
+               if change.poll_id == poll_id:
+                   yield change
+       finally:
+           with _lock:
+               _inboxes.discard(inbox)
+
+The mutation records a change with the request id of the request that made it, for example ``record(Change(poll.pk, request.headers.get("X-Next-Request-Id")))`` in a form's ``on_valid``.
+
+.. code-block:: python
+   :caption: polls/pages/polls/[int:id]/stream/page.py
 
    from collections.abc import Iterator
 
    from django.http import HttpRequest
-   from polls.broker import broker
-   from polls.deps import DPoll
+   from django.shortcuts import get_object_or_404
+   from polls.changes import changes
    from polls.models import Poll
 
    from next.partial import Patches, PatchEventStream
+   from next.urls import DUrl
 
-   def patch_source(request: HttpRequest, poll_id: int) -> Iterator[Patches]:
-       """Yield one refresh envelope for every poll change."""
-       for change in broker.changes(poll_id):
+   def patch_source(request: HttpRequest, poll_id: int) -> Iterator[Patches | None]:
+       for change in changes(poll_id):
+           if change is None:
+               yield None
+               continue
            yield Patches(request, echo_of=change.request_id).refresh(zone="poll-results")
 
-
-   def render(request: HttpRequest, poll: DPoll[Poll]) -> PatchEventStream:
-       """Open the patch event stream for one poll."""
+   def render(request: HttpRequest, poll_id: DUrl["id", int]) -> PatchEventStream:
+       poll = get_object_or_404(Poll, pk=poll_id)
        return PatchEventStream(request, patch_source(request, poll.pk))
 
 Each ``Patches`` the source yields becomes one ``next-patches`` event.
@@ -92,8 +137,9 @@ The builder carries ``echo_of`` into the envelope as its ``request_id``, and eve
 The client keeps the last 25 of its own ``X-Next-Request-Id`` values and drops an event whose id matches.
 Past 25 concurrent in-flight mutations the oldest id falls out of the ring and the subscriber applies one extra ``refresh``, which is safe.
 
-The framework does not smuggle the request id through the broker.
-A change event has to carry it, which the broker does by recording the request id of the mutation that produced it.
+The framework does not smuggle the request id through the application's channel.
+A change event has to carry it, which the ``Change`` above does by holding the request id of the mutation that produced it.
+``publish`` with a request-bound ``Patches`` builder attaches it automatically, see :doc:`/content/topics/realtime`.
 
 WSGI and ASGI
 -------------
@@ -109,19 +155,7 @@ Pair an async source with ASGI and a sync source with WSGI.
 A sync source under WSGI sends no heartbeat of its own.
 A blocked ``next()`` on a sync iterator has nothing to interrupt it without a thread, so a quiet sync stream stays quiet.
 The source asks for a keepalive by yielding ``None``, and the stream writes a ``: heartbeat`` comment in its place.
-A sync source yields ``None`` whenever its wait times out.
-
-.. code-block:: python
-   :caption: stream/page.py
-
-   def patch_source(request: HttpRequest, poll_id: int) -> Iterator[Patches | None]:
-       """Yield one refresh per change and None on every quiet wait."""
-       while True:
-           change = broker.wait(poll_id, timeout=20)
-           if change is None:
-               yield None
-               continue
-           yield Patches(request, echo_of=change.request_id).refresh(zone="poll-results")
+A sync source yields ``None`` whenever its wait times out, as ``patch_source`` in `The stream helper`_ does with the ``None`` that ``changes`` yields after each quiet ``timeout``.
 
 An async source yields ``None`` the same way.
 The comment is not an envelope, so it does not count in ``envelopes_sent``.
@@ -146,7 +180,7 @@ One stream overrides the period with ``PatchEventStream(request, source, heartbe
      - Sent on a quiet period, and on every ``None`` the source yields
      - One task per open connection
 
-To move a stream from sync to async, swap the broker's wake primitive for an async one and pass an async source to ``PatchEventStream``.
+To move a stream from sync to async, swap the feed's wake primitive for an async one and pass an async source to ``PatchEventStream``.
 The page module and the signal layer do not change.
 
 Stream politeness

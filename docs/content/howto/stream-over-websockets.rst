@@ -68,20 +68,19 @@ See :ref:`ref-realtime-protocol` for every frame and close code.
    :caption: polls/pages/polls/[int:id]/stream/page.py
 
    from django.http import HttpRequest
+   from django.shortcuts import get_object_or_404
    from polls.models import Poll
    from polls.realtime import can_subscribe_topic
 
    from next.realtime import TopicStream
+   from next.urls import DUrl
 
-   def render(request: HttpRequest, poll: Poll) -> TopicStream:
-       return TopicStream(
-           request,
-           f"poll:{poll.pk}",
-           authorize=can_subscribe_topic,
-       )
+   def render(request: HttpRequest, poll_id: DUrl["id", int]) -> TopicStream:
+       poll = get_object_or_404(Poll, pk=poll_id)
+       return TopicStream(request, f"poll:{poll.pk}", authorize=can_subscribe_topic)
 
 The authorizer is a synchronous, importable function accepting ``(user, topic)`` and returning a boolean.
-The ``polls.realtime.can_subscribe_topic`` above is an example of one that a project writes.
+The ``polls.realtime.can_subscribe_topic`` above is an example of one that a project writes, and :doc:`/content/howto/stream-live-updates-with-sse` defines it together with the rest of the page.
 Omitting ``authorize`` leaves the stream open to any visitor who can load the page.
 The socket calls the authorizer before joining the broker and then at most once per heartbeat interval, together with a recheck of the session.
 A revocation closes the socket within about two heartbeat intervals plus the callback's own latency.
@@ -189,6 +188,8 @@ The ``credential`` of the handshake has to be the one the ticket was issued unde
            )
 
 A subclass can also override ``topic_socket`` to return its own ``TopicSocket`` subclass.
+
+.. _howto-stream-over-websockets-router:
 
 Mount the socket inside another ASGI router
 -------------------------------------------
