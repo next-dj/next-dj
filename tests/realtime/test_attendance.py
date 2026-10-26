@@ -310,6 +310,24 @@ def test_sync_refresh_touches_once_a_heartbeat_has_passed(memory, clock) -> None
     assert touched > joined
 
 
+def test_async_refresh_touches_once_a_heartbeat_has_passed(memory, clock) -> None:
+    attendance = Attendance(memory, {"room:1": None}, heartbeat=1, clock=clock)
+
+    async def items():
+        yield "early"
+        clock.now += 2
+        yield "late"
+
+    async def scenario() -> list[str]:
+        await attendance.ajoin()
+        return [item async for item in attendance.arefreshed(items())]
+
+    joined_at = clock.now
+    assert asyncio.run(scenario()) == ["early", "late"]
+    (touched,) = memory._rosters["room:1"].anonymous.values()
+    assert touched > joined_at + attendance.ttl
+
+
 def test_sync_refresh_touches_exactly_when_a_heartbeat_is_due(memory, clock) -> None:
     touches: list[str] = []
     real_touch = memory.touch
