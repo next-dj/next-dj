@@ -18,16 +18,11 @@ class TestBenchPresence:
         broker = quiet_presence(any_broker)
         joined_connections(broker, count)
 
-        def leave() -> None:
+        def leave() -> tuple[tuple[object, ...], dict[str, object]]:
             broker.leave("room:1", "probe")
+            return ("room:1", "probe", {"id": "probe"}, 3600), {}
 
-        benchmark.pedantic(
-            broker.join,
-            args=("room:1", "probe", {"id": "probe"}, 3600),
-            setup=leave,
-            rounds=500,
-            warmup_rounds=5,
-        )
+        benchmark.pedantic(broker.join, setup=leave, rounds=500, warmup_rounds=5)
         assert broker.presence("room:1").count == count + 1
 
     @pytest.mark.parametrize("count", [1, 1000])

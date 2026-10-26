@@ -70,16 +70,13 @@ class TestBenchAsyncFanout:
             _subscribed(memory_broker, stack, subscribers)
         )
 
-        def drain() -> None:
+        def drain() -> tuple[tuple[object, ...], dict[str, object]]:
             bench_loop.run_until_complete(asyncio.sleep(0))
+            return ("room:1", envelope), {}
 
         try:
             benchmark.pedantic(
-                memory_broker.publish,
-                args=("room:1", envelope),
-                setup=drain,
-                rounds=200,
-                warmup_rounds=5,
+                memory_broker.publish, setup=drain, rounds=200, warmup_rounds=5
             )
             drain()
             received = bench_loop.run_until_complete(_first(streams))

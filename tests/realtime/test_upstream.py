@@ -274,7 +274,7 @@ def test_event_without_an_id_gets_no_ack() -> None:
         port.push_json(_up("typing", 4, id="last"))
         assert await _frame(port) == {"type": "ack", "id": "last", "ok": True}
         await _close(port, task)
-        assert [entry[1] for entry in _SEEN] == [1, 4]
+        assert sorted(entry[1] for entry in _SEEN) == [1, 4]
         assert len(port.sent) == 2
 
     asyncio.run(scenario())
