@@ -22,7 +22,7 @@ Partial rendering uses a single protocol backend, so only the first entry runs.
 A singular ``*_BACKEND`` key holds the one engine for a concern.
 A subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``, ``URL_``, ``TEMPLATE_``, ``JS_``, ``PARTIAL_``) groups related keys.
 ``NEXT_JS_OPTIONS`` stands outside the prefix scheme and configures the bundled client runtime.
-``METADATA``, ``SITE``, ``SEO``, and ``CONSENT`` stand outside it as the scopes of one concern each, and ``CSRF_DELIVERY`` and ``CSP_NONCE`` as single values.
+``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, and ``CONSENT`` stand outside it as the scopes of one concern each, and ``CSRF_DELIVERY``, ``CSP_NONCE``, and ``DEV_SERVER`` as single values.
 
 .. _ref-settings-merge:
 
@@ -224,7 +224,7 @@ A version that never changes leaves the version guard silent at runtime, so a de
 ``SSE.HEARTBEAT_SECONDS`` is the keepalive period in seconds of a ``PatchEventStream`` with an async source and of every ``TopicStream``, and ``SSE.RETRY_MS`` is the ``EventSource`` reconnect hint in milliseconds sent in the leading stream frame.
 ``SSE`` is a dict or ``None``, the heartbeat ``None`` or a finite number above ``0``, and the retry hint ``None`` or an integer from ``0`` that is not a bool.
 ``None`` takes the default, and a wrong value falls back to the default at runtime while ``next.E214`` reports it.
-``REALTIME['HEARTBEAT']`` times only the WebSocket ping, see `REALTIME`_.
+``REALTIME['HEARTBEAT']`` times the WebSocket ping and recheck instead, see `REALTIME`_.
 
 See :doc:`/content/topics/partial-rendering/reference` for the wire protocol and :doc:`/content/topics/partial-rendering/sse` for the stream contract.
 
@@ -289,29 +289,36 @@ Default value.
    * - ``next.realtime.RedisBroker``
      - ``CLIENT``, ``{}``
      - A mapping of keyword arguments passed whole to the Redis ``from_url`` call, for the synchronous and the asynchronous client alike.
-       It overrides ``health_check_interval`` and ``socket_keepalive``, and ``decode_responses`` stays on whatever it holds, so ``manage.py check`` rejects any other value as ``next.E187``.
+       Its entries override the ``health_check_interval`` and ``socket_keepalive`` the broker sets, while ``decode_responses`` is always forced on, so a ``CLIENT`` that sets it to anything but ``True`` is ``next.E187``.
        ``max_connections`` is the usual entry, see :doc:`/content/howto/fan-out-across-processes-with-redis`.
 
 ``MemoryBroker`` serves one process and does not coordinate sequence numbers across processes.
+``manage.py check --deploy`` reports a ``MemoryBroker`` or a subclass of it as ``next.W149``, and a deployment that runs one process lists the code in ``SILENCED_SYSTEM_CHECKS``.
 ``RedisBroker`` needs the ``broker`` extra, which installs ``redis`` 8 or newer.
-A custom backend reads its own ``OPTIONS`` keys, which ``manage.py check`` leaves alone.
+A custom backend validates its own ``OPTIONS`` keys in its ``check_options`` classmethod, which ``manage.py check`` calls, see :doc:`realtime`.
 
 ``TRANSPORTS`` defaults to ``None`` and selects ``["ws", "sse"]`` in a process that mounts a ``WebSocketApp``, or ``["sse"]`` otherwise.
 A process that serves pages without mounting the socket, such as a WSGI worker next to a separate ASGI deployment, needs an explicit ``["ws", "sse"]`` to offer it.
+An explicit list that names ``ws`` offers it whether or not the process mounts the socket, so the first negotiation in a process without one logs a warning on the ``next.realtime.transports`` logger, once per process.
 Set it to ``["sse"]`` to disable WebSocket negotiation.
-``TICKET_MAX_AGE`` is the lifetime of a session-bound WebSocket grant in seconds and accepts values from 1 to 600.
-A ticket is signed from ``SECRET_KEY`` and stays reusable for every handshake until ``TICKET_MAX_AGE`` elapses.
+
+``TICKET_MAX_AGE`` is the lifetime of a WebSocket ticket in seconds and accepts values from 1 to 600, which ``next.E182`` enforces.
+
 ``TICKET_BINDING`` is the dotted path of the ``TicketBinding`` subclass that decides what a WebSocket ticket is bound to, and ``next.E211`` reports any other value.
 The default ``next.realtime.SessionBinding`` binds the session key.
 Whatever the binding, the ticket is signed from ``SECRET_KEY`` and stays reusable for every handshake until ``TICKET_MAX_AGE`` elapses.
+
 ``next.realtime.SignedCookieBinding`` binds a signed-in user by its pk and session auth hash and an anonymous visitor by a ``next_visitor`` cookie, so it serves the signed-cookie ``SESSION_ENGINE``, a first visit without a session included.
 The negotiation reply sets that cookie with ``HttpOnly`` and the path, domain, ``Secure``, ``SameSite`` and lifetime of the session cookie, and renews it on every negotiation.
 Its socket rechecks the user by pk and auth hash without writing a cookie, so a password change or an inactive user closes it while a logout elsewhere does not, and ``next.W147`` warns when a server-side ``SESSION_ENGINE`` runs next to it.
 A subclass changes ``cookie_name`` or ``salt``, and a project binding implements ``issue``, ``credential``, ``subject`` and ``live``, with ``live_session`` for SSE and ``respond`` for what the negotiation reply carries, see :doc:`realtime` and :doc:`/content/howto/bind-tickets-to-your-own-identity`.
+
 ``HANDLERS`` selects the modules that register ``@on`` upstream handlers.
 ``None`` imports the ``realtime`` module of every installed app, a list of dotted module names imports only those modules, and ``[]`` imports none.
 Any other value is reported as ``next.E197``.
+
 ``WS_PATH`` sets the same-origin WebSocket route and defaults to ``/_next/ws/``, and it is the only place the route is configured.
+
 ``GATEWAY_TOKEN`` is the bearer secret of the ticket introspection endpoint, which stays off until a URLconf includes it.
 It defaults to ``None``, and a routed endpoint with no token refuses every caller and is reported as ``next.E188``.
 Read it from the environment rather than committing it.

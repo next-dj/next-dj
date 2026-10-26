@@ -23,7 +23,7 @@ from next.testing import override_next_settings, override_websocket_mount
 
 pytestmark = pytest.mark.django_db
 
-SOCKET = {"ws_max_size": MAX_INBOUND_BYTES, "ws_ping_interval": None}
+SOCKET = {"max_frame_bytes": MAX_INBOUND_BYTES, "ping_interval": None}
 NAMED_APP = "tests.management.commands.test_runserver.named_app"
 MISSING_SERVER = "tests.management.commands.test_runserver.MissingServer"
 

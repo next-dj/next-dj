@@ -26,11 +26,13 @@ API tier
 
 Advanced.
    ``BrokerBackend``, ``MemoryBroker``, ``RedisBroker``, ``ReplayingBroker``, ``Replay``, ``Message``, ``Position``, ``TopicStream``, ``publish``, ``apublish``, ``Presence``, ``PresenceBroker``, ``presence``, ``apresence``, ``BrokerConnectionError``, ``InvalidTopicError``, ``InvalidMemberError``, and ``TopicPayloadError`` are imported from ``next.realtime``.
-   The WebSocket side adds ``WebSocketApp``, ``application``, ``TopicSocket``, ``SocketPort``, ``Handshake``, ``TicketClaims``, ``verify_ticket``, ``InvalidTicketError``, ``Close``, and ``TicketIntrospectionView``.
+   The WebSocket side adds ``WebSocketApp``, ``application``, ``TopicSocket``, and ``InvalidTicketError``.
    Upstream events add ``on`` and ``Upstream``.
+   ``TicketBinding``, ``SessionBinding``, and ``SignedCookieBinding`` choose what a ticket is bound to, and ``LiveIdentity`` is the identity a binding returns.
+   ``stored_session``, ``session_user``, ``session_alive``, and ``ticket_binding`` live in ``next.realtime.binding`` for binding authors.
+   ``SocketPort`` and ``Handshake`` live in ``next.realtime.socket``, ``TicketClaims`` and ``verify_ticket`` in ``next.realtime.tickets``, ``Close`` in ``next.realtime.frames``, and ``TicketIntrospectionView`` in ``next.realtime.views``.
    ``DjangoTunnel``, ``Tunnel``, and ``TunnelHints`` live in ``next.realtime.tunnel`` for gateway and tunnel authors.
-   ``signals``, ``checks``, and ``frames`` are also available as submodules.
-   ``TicketBinding``, ``SessionBinding``, and ``SignedCookieBinding`` choose what a ticket is bound to, and ``LiveIdentity``, ``stored_session``, ``session_user``, ``session_alive``, and ``ticket_binding`` are the helpers a binding author uses.
+   The realtime signals are imported from ``next.signals``, and the checks live in ``next.realtime.checks``.
    ``resolve_claims`` and ``resolve_identify`` live in ``next.realtime.tickets`` for gateway authors.
    ``replay_window``, ``replay_after``, and ``INCOMPLETE`` live in ``next.realtime.replay`` for broker authors.
 
@@ -52,6 +54,7 @@ Without it, selecting the backend is reported by ``manage.py check`` as ``next.E
 
 The in-memory backend is process-local.
 A multi-process production deployment must use a shared backend such as Redis, because the framework does not infer process count from the server configuration.
+``manage.py check --deploy`` reports a ``MemoryBroker`` or a subclass of it as ``next.W149``, and a single-process deployment silences the code.
 
 ``OPTIONS.CLIENT`` is a mapping of keyword arguments passed whole to the Redis ``from_url`` call, for the synchronous and the asynchronous client.
 It overrides the defaults ``health_check_interval`` and ``socket_keepalive``, while ``decode_responses`` is always ``True``.
@@ -126,6 +129,7 @@ A message published after the subscription appears in the iterator and may also 
 A subscription that cannot guarantee delivery any more, after a reconnect or an unanswered liveness ping, raises ``BrokerConnectionError`` from its iterator.
 A backend also translates its own transport failures into ``BrokerConnectionError``, so a stream catches one error type.
 The SSE stream then ends without a terminal frame so the browser reconnects and receives a fresh ``hello``, and the WebSocket closes with ``1013``.
+A subscription iterator that ends on its own closes the WebSocket with ``1013`` too, so the client reconnects rather than keeping a socket that delivers nothing, and ``stream_unsubscribed`` reports the reason ``server``.
 
 Epochs
 ~~~~~~
@@ -199,6 +203,8 @@ The storage calls are left to the project, and ``self.store`` stands for whateve
            self, listener, timeout: float
        ) -> AsyncIterator[Message | None]:
            while True:
+               if listener.lost:
+                   raise BrokerConnectionError("The queue dropped the subscription.")
                payload = await listener.await_message(timeout)
                yield None if payload is None else Message.from_dict(payload)
 
@@ -301,6 +307,12 @@ The replaying broker contract
 
 The stream cuts a complete answer at its position snapshot, since later messages already wait in the subscription.
 
+.. autofunction:: next.realtime.replay.replay_window
+
+.. autofunction:: next.realtime.replay.replay_after
+
+.. autodata:: next.realtime.replay.INCOMPLETE
+
 Resuming over SSE
 ~~~~~~~~~~~~~~~~~
 
@@ -337,7 +349,8 @@ A stream that passes ``presence`` to ``TopicStream`` records its connection on e
 The ``presence`` parameter
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``TopicStream(request, *topics, transform=None, authorize=None, presence=False, heartbeat_seconds=None)`` takes ``presence`` as one of three values.
+``TopicStream(request, *topics, transform=None, authorize=None, presence=False, heartbeat_seconds=None, server_clock=None)`` takes ``presence`` as one of three values.
+``server_clock`` replaces the clock that stamps ``server_time``, so a test passes a fixed one.
 
 .. list-table::
    :header-rows: 1
@@ -359,6 +372,8 @@ The ``presence`` parameter
 A path that does not import or does not name a callable raises ``ImproperlyConfigured``, and so does a ``presence`` that is no bool, callable, or string, such as ``None`` or ``0``.
 A stream that asks for presence on a broker without it raises ``ImproperlyConfigured`` when it is built, under WSGI and ASGI alike.
 A callable passed directly reaches a WebSocket ticket through its import path, and one without a stable path such as a lambda keeps the stream on SSE with the reason ``transform``, ``authorization``, or ``presence``.
+A ``transform`` may be an ``async def`` function, which the WebSocket and the ASGI stream await on the event loop, so it skips the worker pool.
+A synchronous transform runs on the shared pool there, and a WSGI stream runs either kind in its own thread.
 
 The stream joins after it read the topic positions and before it sends the replayed messages and ``hello``, and right after ``hello`` it sends the current snapshot of every topic.
 It refreshes its record once per heartbeat and leaves in the ``finally`` of the generator, on a disconnect, a cancellation, and a revoked grant alike.
@@ -474,6 +489,20 @@ A broker keeps the coalescing itself with the helpers of ``next.realtime.roster`
      - Convert a member mapping to and from its stored form.
 
 :doc:`/content/howto/write-a-broker-backend` builds one on top of ``RedisBroker``.
+
+.. autoclass:: next.realtime.roster.PresenceWindow
+   :members:
+
+.. autoclass:: next.realtime.roster.PresenceSchedule
+   :members:
+
+.. autodata:: next.realtime.roster.Scheduler
+
+.. autofunction:: next.realtime.roster.encode_member
+
+.. autofunction:: next.realtime.roster.decode_member
+
+.. autofunction:: next.realtime.roster.announce
 
 ``MemoryBroker`` keeps a roster per topic and prunes by the earliest deadline, so a refresh costs the same on a large roster.
 ``RedisBroker`` keeps eight keys per topic under the hash tag.
@@ -763,7 +792,7 @@ Close codes
        The client reconnects with backoff.
    * - ``1013``
      - ``TRY_AGAIN``
-     - The broker subscription is lost.
+     - The broker subscription is lost or ends on its own.
        The client reconnects with backoff.
        A gateway may send it to a client that stopped reading, which the built-in socket drops without a close frame.
    * - ``4400``
@@ -844,6 +873,7 @@ Limits
 Upstream events
 ~~~~~~~~~~~~~~~
 
+Handlers register through ``@on`` in the modules ``REALTIME['HANDLERS']`` lists, or in the ``realtime`` module of every installed app when it is ``None``, see :doc:`/content/topics/realtime`.
 Every frame after ``sub`` draws one token from a bucket per connection, which holds ``UPSTREAM['BURST']`` tokens and refills at ``UPSTREAM['RATE']`` a second.
 A frame that finds the bucket empty is refused at once, an ``up`` with ``{"type": "ack", "ok": false, "error": "limit"}`` or, without an ``id``, with an ``error`` frame of the ``limit`` code, and an ``http`` with a ``limit`` refusal.
 Three refusals in a row with no admitted frame between them close the socket with ``4429``, ``TopicSocket.strikes`` in a subclass.
@@ -1006,183 +1036,6 @@ The deadline is the ``expire_date`` row of the ``db`` and ``cached_db`` engines,
 The ``cache`` and ``file`` engines keep no deadline the socket can read otherwise.
 For them the heartbeat recheck alone notices an expired session.
 
-Ticket binding
-~~~~~~~~~~~~~~
-
-A ticket proves that the browser which negotiated it is the one that opens the socket.
-``NEXT_FRAMEWORK['REALTIME']['TICKET_BINDING']`` names the ``TicketBinding`` subclass that decides what the ticket is bound to, as a dotted path.
-The default ``next.realtime.SessionBinding`` binds the Django session key.
-``next.realtime.SignedCookieBinding`` binds a signed-in user and a visitor cookie, and serves the signed-cookie ``SESSION_ENGINE``.
-A project class serves any other identity, see :doc:`/content/howto/bind-tickets-to-your-own-identity`.
-
-A ticket is a signed token bound to the session.
-The first handshake does not consume it, so it stays valid for every handshake until ``REALTIME['TICKET_MAX_AGE']`` elapses.
-It is signed from ``SECRET_KEY``, so rotating the key invalidates outstanding tickets unless the old key stays in ``SECRET_KEY_FALLBACKS``.
-
-A binding answers six questions.
-The framework calls the first four in this order for a WebSocket, and ``live_session`` serves SSE instead of ``live``.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 22 78
-
-   * - Method
-     - Contract
-   * - ``issue(request)``
-     - Runs while the ticket is negotiated and returns the subject string the ticket binds.
-       It raises ``InvalidTicketError`` when the request has nothing to bind, which answers the negotiation with ``503`` and ``session_unavailable``.
-   * - ``respond(request, response)``
-     - Sets the cookie a binding needs on a negotiation reply and does nothing by default.
-       It reads what ``issue`` left on the request and is idempotent, so a view that issues tickets without ``TopicStream`` calls ``ticket_binding().respond(request, response)`` on its own response.
-   * - ``credential(cookies)``
-     - Reads the credential from the cookies of the handshake or of an introspection call and returns ``None`` when they carry none.
-       It runs off the event loop, so it may read the session store.
-   * - ``subject(credential)``
-     - Returns the subject the credential proves, which ``verify_ticket`` compares with the one the ticket binds, or ``None`` when it proves none.
-       It runs on the event loop of the socket, so it is pure and never blocks, with no database, cache, or network access.
-   * - ``live(credential)``
-     - Returns a ``LiveIdentity`` of the user and the seconds left, or ``None`` once the credential is gone.
-       The seconds are ``None`` when the store keeps no deadline.
-       The handshake calls it, and so does every recheck, which is where a logout or a password change closes the socket.
-       It serves WebSockets only.
-   * - ``live_session(session_key)``
-     - Returns a ``LiveIdentity`` for the session key of an SSE request, or ``None`` once the session is gone.
-       It calls ``stored_session`` by default and serves SSE only.
-
-The ticket carries a digest of the subject under ``SECRET_KEY``, and ``verify_ticket`` accepts a digest made under any of ``SECRET_KEY_FALLBACKS`` as well.
-``Handshake.credential`` holds the credential of the binding and stays out of ``repr``.
-It is the session key only under ``SessionBinding``.
-A handler never sees it.
-``Handshake.subject`` and ``Upstream.subject`` hold a keyed digest of the subject the credential proves.
-The digest is stable across reconnects of one user or visitor and never yields the credential back.
-It is empty when the credential proves no subject.
-The digest changes when ``SECRET_KEY`` rotates, and under ``SessionBinding`` it follows the session rather than the user, so a new login yields a new one.
-``stored_session(session_key)`` returns the ``LiveIdentity`` of a stored session, ``session_user(store)`` loads the user of a session without writing to it, and ``session_alive(session_key)`` tells whether the stored session is live.
-A binding class is built once per dotted path and shared by every connection, so it keeps no per-connection state.
-
-``SignedCookieBinding`` binds a signed-in user as ``user:<auth hash>:<pk>`` and an anonymous visitor as ``visitor:<id>``.
-The visitor id lives in the signed ``next_visitor`` cookie.
-The negotiation reply sets and renews it with the path, domain, ``Secure``, ``SameSite``, and lifetime of the session cookie, and always ``HttpOnly``.
-``issue`` leaves the visitor id on ``request.META``, and ``respond`` writes the cookie from there, so a custom view calls ``ticket_binding().respond(request, response)`` on its reply.
-A view that forgets the call sets no cookie, and the handshake closes with ``4401``.
-A signed-in negotiation makes ``respond`` delete the ``next_visitor`` cookie.
-A visitor that never negotiated while signed in survives a login and a logout.
-The first anonymous negotiation after one that did issues a fresh visitor.
-A negotiation whose session holds a user that no longer loads, after a password change elsewhere, binds a visitor the same way.
-``live`` loads the user by pk and compares the auth hash.
-A password change or an inactive user closes the socket, while a logout in another tab does not, because the binding keeps no stored session to delete.
-``live`` for a credential it does not recognise returns ``None``.
-A subclass changes ``cookie_name`` or ``salt``.
-The binding works under any ``SESSION_ENGINE``.
-``next.W147`` warns when a server-side engine runs next to it, because ``SessionBinding`` would recheck the stored session there.
-
-.. autoclass:: next.realtime.TicketBinding
-   :members:
-
-.. autoclass:: next.realtime.SessionBinding
-   :members:
-
-.. autoclass:: next.realtime.SignedCookieBinding
-   :members:
-
-.. autoclass:: next.realtime.LiveIdentity
-
-.. autofunction:: next.realtime.stored_session
-
-.. autofunction:: next.realtime.session_user
-
-.. autofunction:: next.realtime.session_alive
-
-.. autofunction:: next.realtime.ticket_binding
-
-Serving the socket
-~~~~~~~~~~~~~~~~~~
-
-``WebSocketApp`` is a plain ASGI application for WebSocket scopes, so it mounts under any ASGI router.
-``application(http_app, *, websocket=None)`` is the ready default for a Django project.
-It builds a ``WebSocketApp`` unless ``websocket`` is given, so a project that overrides the extension points below passes an instance of its own ``WebSocketApp`` subclass.
-It sends HTTP to ``http_app``, serves the socket at ``REALTIME['WS_PATH']``, and closes any other WebSocket path before accepting it, since Django's own ASGI handler rejects WebSocket scopes.
-The path is compared below ``FORCE_SCRIPT_NAME`` or the ASGI ``root_path``, the way Django computes ``path_info``, and the ticket URL carries the same prefix.
-``REALTIME['WS_PATH']`` is the only place the route is configured, because the ticket tells the client the same URL.
-
-Django's ASGI handler does not speak lifespan, so for an ``http_app`` of exactly that class ``application`` answers it and closes the broker on shutdown.
-Any other HTTP application gets the lifespan events, a subclass of the handler that speaks lifespan included, and the broker closes before its shutdown complete goes out.
-An application that fails or returns before sending a lifespan event, such as a middleware around Django's handler, leaves the answer to ``application``.
-A broker that fails to close is logged and reported as ``lifespan.shutdown.failed``.
-Creating a ``WebSocketApp`` marks the process as serving ``ws``, which switches the default ``TRANSPORTS`` to ``["ws", "sse"]``.
-It also logs the session warnings of ``manage.py check`` as ``WARNING`` records on the ``next.realtime.asgi`` logger, and ``next.W146`` for an explicit origin CSRF refuses.
-It reads ``UPSTREAM`` and ``TUNNEL`` once, so a bad value raises ``ImproperlyConfigured`` when the application is built rather than on every connection, and ``WebSocketApp.limits`` holds the result.
-
-Three methods of ``WebSocketApp`` are the extension points of a subclass.
-``allow_origin(origin, scope)`` decides the Origin, ``authenticate(scope)`` returns the ``Handshake`` of the connection or ``None`` for a refusal, and ``topic_socket(port, handshake, scope)`` returns the ``TopicSocket`` that serves it.
-An overridden ``topic_socket`` passes ``tunnel=self.tunnel(scope)`` and ``limits=self.limits`` to its socket, since a socket built without ``tunnel=`` answers every ``http`` frame with ``disabled``.
-An ``authenticate`` that raises is logged and closes the socket with ``1011``.
-
-``TopicSocket`` knows nothing of ASGI.
-It reads frames from an async iterable and writes through a ``SocketPort``, which is two coroutines, ``send(text)`` and ``close(code)``.
-``send`` raises ``OSError`` once the peer is gone, and ``close`` tolerates a peer that already left.
-A gateway on another server loads the ``Handshake`` of the connection cookies with ``await Handshake.from_cookies(cookies)``, which ``WebSocketApp.authenticate`` uses too, and runs ``TopicSocket(port, handshake).serve(frames)``.
-The mapping comes from ``django.http.parse_cookie`` on the ``cookie`` header, and the method returns ``None`` for an empty mapping or a binding that finds no live credential.
-A gateway that tunnels form actions passes ``tunnel=`` as well, a ``DjangoTunnel`` or its own ``Tunnel``.
-A gateway that takes the identity from elsewhere builds ``Handshake(credential, user, expires_at)`` itself, with ``expires_at`` on the ``time.monotonic()`` clock or ``None``.
-``expires_at`` is the moment of a forced session recheck, not of a close.
-The ``Handshake.credential`` has to be the credential the ticket was issued under, and ``Handshake.subject`` is derived from it.
-``TopicSocket.catch_up(subscription, positions)`` and ``TopicSocket.tick`` are the hooks a subclass overrides, the first between the position read and ``hello`` and the second on each idle heartbeat.
-``TopicSocket.handle(upstream)`` and ``TopicSocket.access_check(claims, authorizer)`` are the hooks of `Upstream events`_.
-
-``verify_ticket(token, credential)`` returns the ``TicketClaims`` of a valid ticket and raises ``InvalidTicketError`` otherwise.
-``resolve_claims(claims)`` imports the transform and the authorizer the claims name.
-``TicketClaims.presence`` is ``False`` for a stream outside presence, ``True`` for a count, or the dotted path of the ``identify`` callable, and ``resolve_identify(claims)`` imports that callable or returns ``None``.
-A ``TopicSocket`` joins the presence of its ticket after the position read and before ``hello``, under its ``connection_id``, and leaves it on every way out, a cancellation and a watchdog drop included.
-A ticket without a ``presence`` key verifies as ``False``.
-The ``count`` of a snapshot follows the rules of `Presence`_, one member for every group of equal mappings in member mode and one per connection in count mode.
-
-.. autoclass:: next.realtime.WebSocketApp
-   :members:
-
-.. autofunction:: next.realtime.application
-
-.. autoclass:: next.realtime.tunnel.DjangoTunnel
-   :members:
-
-.. autoclass:: next.realtime.tunnel.Tunnel
-   :members:
-
-.. autoclass:: next.realtime.tunnel.TunnelHints
-   :members:
-
-.. autoclass:: next.realtime.TopicSocket
-   :members:
-
-.. autoclass:: next.realtime.attendance.Attendance
-   :members:
-
-.. autoclass:: next.realtime.SocketPort
-   :members:
-
-.. autoclass:: next.realtime.Handshake
-   :members:
-
-.. autoclass:: next.realtime.TicketClaims
-   :members:
-
-.. autofunction:: next.realtime.verify_ticket
-
-.. autofunction:: next.realtime.tickets.resolve_claims
-
-.. autofunction:: next.realtime.tickets.resolve_identify
-
-.. autoexception:: next.realtime.InvalidTicketError
-   :members:
-
-.. autoclass:: next.realtime.Close
-   :members:
-   :undoc-members:
-
-.. automodule:: next.realtime.frames
-   :members:
-   :exclude-members: Close
-
 Ticket introspection endpoint
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1230,8 +1083,191 @@ A subclass overrides ``authorize(request)`` for a caller check of its own, such 
 It returns ``None`` by default, which keeps the ``403``.
 A routed endpoint with the stock ``authorize`` and no ``GATEWAY_TOKEN`` is reported as ``next.E188``.
 
-.. autoclass:: next.realtime.TicketIntrospectionView
+.. autoclass:: next.realtime.views.TicketIntrospectionView
    :members:
+
+Ticket binding
+--------------
+
+A ticket proves that the browser which negotiated it is the one that opens the socket.
+``NEXT_FRAMEWORK['REALTIME']['TICKET_BINDING']`` names the ``TicketBinding`` subclass that decides what the ticket is bound to, as a dotted path.
+The default ``next.realtime.SessionBinding`` binds the Django session key.
+``next.realtime.SignedCookieBinding`` binds a signed-in user and a visitor cookie, and serves the signed-cookie ``SESSION_ENGINE``.
+A project class serves any other identity, see :doc:`/content/howto/bind-tickets-to-your-own-identity`.
+
+A ticket is a signed token bound to the session.
+The first handshake does not consume it, so it stays valid for every handshake until ``REALTIME['TICKET_MAX_AGE']`` elapses.
+It is signed from ``SECRET_KEY``, so rotating the key invalidates outstanding tickets unless the old key stays in ``SECRET_KEY_FALLBACKS``.
+
+A binding answers six questions.
+For a WebSocket the framework calls ``issue`` and ``respond`` at the negotiation, ``credential`` and ``live`` at the handshake, and ``subject`` when the ``sub`` frame arrives.
+``live_session`` serves SSE instead of ``live``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Method
+     - Contract
+   * - ``issue(request)``
+     - Runs while the ticket is negotiated and returns the subject string the ticket binds.
+       It raises ``InvalidTicketError`` when the request has nothing to bind, which answers the negotiation with ``503`` and ``session_unavailable``.
+   * - ``respond(request, response)``
+     - Sets the cookie a binding needs on a negotiation reply and does nothing by default.
+       It reads what ``issue`` left on the request and is idempotent, so a view that issues tickets without ``TopicStream`` calls ``ticket_binding().respond(request, response)`` on its own response.
+   * - ``credential(cookies)``
+     - Reads the credential from the cookies of the handshake or of an introspection call and returns ``None`` when they carry none.
+       It runs off the event loop, so it may read the session store.
+   * - ``live(credential)``
+     - Returns a ``LiveIdentity`` of the user and the seconds left, or ``None`` once the credential is gone.
+       The seconds are ``None`` when the store keeps no deadline.
+       The handshake calls it, and so does every recheck, which is where a logout or a password change closes the socket.
+       It serves WebSockets only.
+   * - ``subject(credential)``
+     - Returns the subject the credential proves, which ``verify_ticket`` compares with the one the ticket binds, or ``None`` when it proves none.
+       It runs on the event loop of the socket, so it is pure and never blocks, with no database, cache, or network access.
+   * - ``live_session(session_key)``
+     - Returns a ``LiveIdentity`` for the session key of an SSE request, or ``None`` once the session is gone.
+       It calls ``stored_session`` by default and serves SSE only.
+
+The ticket carries a digest of the subject under ``SECRET_KEY``, and ``verify_ticket`` accepts a digest made under any of ``SECRET_KEY_FALLBACKS`` as well.
+``Handshake.credential`` holds the credential of the binding and stays out of ``repr``.
+It is the session key only under ``SessionBinding``.
+A handler never sees it.
+``Handshake.subject`` and ``Upstream.subject`` hold a keyed digest of the subject the credential proves.
+The digest is stable across reconnects of one user or visitor and never yields the credential back.
+It is empty when the credential proves no subject.
+The digest changes when ``SECRET_KEY`` rotates, and under ``SessionBinding`` it follows the session rather than the user, so a new login yields a new one.
+``stored_session(session_key)`` returns the ``LiveIdentity`` of a stored session, ``session_user(store)`` loads the user of a session without writing to it, and ``session_alive(session_key)`` tells whether the stored session is live.
+A binding class is built once per dotted path and shared by every connection, so it keeps no per-connection state.
+
+``SignedCookieBinding`` binds a signed-in user as ``user:<auth hash>:<pk>`` and an anonymous visitor as ``visitor:<id>``.
+The visitor id lives in the signed ``next_visitor`` cookie.
+The negotiation reply sets and renews it with the path, domain, ``Secure``, ``SameSite``, and lifetime of the session cookie, and always ``HttpOnly``.
+``issue`` leaves the visitor id on ``request.META``, and ``respond`` writes the cookie from there, so a custom view calls ``ticket_binding().respond(request, response)`` on its reply.
+A view that forgets the call sets no cookie, and the handshake closes with ``4401``.
+A signed-in negotiation makes ``respond`` delete the ``next_visitor`` cookie.
+A visitor that never negotiated while signed in survives a login and a logout.
+The first anonymous negotiation after one that did issues a fresh visitor.
+A negotiation whose session holds a user that no longer loads, after a password change elsewhere, binds a visitor the same way.
+``live`` loads the user by pk and compares the auth hash.
+A password change or an inactive user closes the socket, while a logout in another tab does not, because the binding keeps no stored session to delete.
+``live`` for a credential it does not recognise returns ``None``.
+A subclass changes ``cookie_name`` or ``salt``.
+The binding works under any ``SESSION_ENGINE``.
+``next.W147`` warns when a server-side engine runs next to it, because ``SessionBinding`` would recheck the stored session there.
+
+.. autoclass:: next.realtime.TicketBinding
+   :members:
+
+.. autoclass:: next.realtime.SessionBinding
+   :members:
+
+.. autoclass:: next.realtime.SignedCookieBinding
+   :members:
+
+.. autoclass:: next.realtime.LiveIdentity
+
+.. autofunction:: next.realtime.binding.stored_session
+
+.. autofunction:: next.realtime.binding.session_user
+
+.. autofunction:: next.realtime.binding.session_alive
+
+.. autofunction:: next.realtime.binding.ticket_binding
+
+Serving the socket
+------------------
+
+``WebSocketApp`` is a plain ASGI application for WebSocket scopes, so it mounts under any ASGI router.
+``application(http_app, *, websocket=None)`` is the ready default for a Django project.
+It builds a ``WebSocketApp`` unless ``websocket`` is given, so a project that overrides the extension points below passes an instance of its own ``WebSocketApp`` subclass.
+It sends HTTP to ``http_app`` and serves the socket at ``REALTIME['WS_PATH']``.
+Any other WebSocket path goes to ``http_app`` as well, so a router wrapped around Django keeps its own sockets.
+For an ``http_app`` of exactly Django's ASGI handler class, which rejects WebSocket scopes, ``application`` closes any other path before accepting it.
+An ``http_app`` that raises before it sends anything, such as a middleware or ``ASGIStaticFilesHandler`` around Django's handler, gets the same close and a ``DEBUG`` record on the ``next.realtime.asgi`` logger, while an error after its first send propagates.
+The path is compared below ``FORCE_SCRIPT_NAME`` or the ASGI ``root_path``, the way Django computes ``path_info``, and the ticket URL carries the same prefix.
+``REALTIME['WS_PATH']`` is the only place the route is configured, because the ticket tells the client the same URL.
+
+Django's ASGI handler does not speak lifespan, so for an ``http_app`` of exactly that class ``application`` answers it and closes the broker on shutdown.
+Any other HTTP application gets the lifespan events, a subclass of the handler that speaks lifespan included, and the broker closes before its shutdown complete goes out.
+An application that fails or returns before sending a lifespan event, such as a middleware around Django's handler, leaves the answer to ``application``.
+Shutdown waits for the tunneled requests that closed sockets left running, for up to the ``TUNNEL`` timeout, and then closes the broker.
+A broker that fails to close is logged and reported as ``lifespan.shutdown.failed``.
+Creating a ``WebSocketApp`` marks the process as serving ``ws``, which switches the default ``TRANSPORTS`` to ``["ws", "sse"]``.
+It also logs the session warnings of ``manage.py check`` as ``WARNING`` records on the ``next.realtime.asgi`` logger, and ``next.W146`` when the tunnel is on and an explicit ``origins`` entry is one the CSRF check would refuse.
+An explicit ``TRANSPORTS`` that lists ``ws`` in a process that creates no ``WebSocketApp`` logs one warning on the ``next.realtime.transports`` logger at the first ticket negotiation.
+It reads ``UPSTREAM`` and ``TUNNEL`` once, so a bad value raises ``ImproperlyConfigured`` when the application is built rather than on every connection, and ``WebSocketApp.limits`` holds the result.
+
+Three methods of ``WebSocketApp`` are the extension points of a subclass.
+``allow_origin(origin, scope)`` decides the Origin, ``authenticate(scope)`` returns the ``Handshake`` of the connection or ``None`` for a refusal, and ``topic_socket(port, handshake, scope)`` returns the ``TopicSocket`` that serves it.
+An overridden ``topic_socket`` passes ``tunnel=self.tunnel(scope)`` and ``limits=self.limits`` to its socket, since a socket built without ``tunnel=`` answers every ``http`` frame with ``disabled``.
+An ``authenticate`` that raises is logged and closes the socket with ``1011``.
+
+``TopicSocket`` knows nothing of ASGI.
+It reads frames from an async iterable and writes through a ``SocketPort``, which is two coroutines, ``send(text)`` and ``close(code)``.
+``send`` raises ``OSError`` once the peer is gone, and ``close`` tolerates a peer that already left.
+A gateway on another server loads the ``Handshake`` of the connection cookies with ``await Handshake.from_cookies(cookies)``, which ``WebSocketApp.authenticate`` uses too, and runs ``TopicSocket(port, handshake).serve(frames)``.
+The mapping comes from ``django.http.parse_cookie`` on the ``cookie`` header, and the method returns ``None`` for an empty mapping or a binding that finds no live credential.
+A gateway that tunnels form actions passes ``tunnel=`` as well, a ``DjangoTunnel`` or its own ``Tunnel``.
+A gateway that takes the identity from elsewhere builds ``Handshake(credential, user, expires_at)`` itself, with ``expires_at`` on the ``time.monotonic()`` clock or ``None``.
+``expires_at`` is the moment of a forced session recheck, not of a close.
+The ``Handshake.credential`` has to be the credential the ticket was issued under, and ``Handshake.subject`` is derived from it.
+``TopicSocket.catch_up(subscription, positions)`` and ``TopicSocket.tick`` are the hooks a subclass overrides, the first between the position read and ``hello`` and the second on each idle heartbeat.
+``TopicSocket.handle(upstream)`` and ``TopicSocket.access_check(claims, authorizer)`` are the hooks of `Upstream events`_.
+
+``verify_ticket(token, credential)`` returns the ``TicketClaims`` of a valid ticket and raises ``InvalidTicketError`` otherwise.
+``resolve_claims(claims)`` imports the transform and the authorizer the claims name.
+``TicketClaims.presence`` is ``False`` for a stream outside presence, ``True`` for a count, or the dotted path of the ``identify`` callable, and ``resolve_identify(claims)`` imports that callable or returns ``None``.
+A ``TopicSocket`` joins the presence of its ticket after the position read and before ``hello``, under its ``connection_id``, and leaves it on every way out, a cancellation and a watchdog drop included.
+A ticket without a ``presence`` key verifies as ``False``.
+The ``count`` of a snapshot follows the rules of `Presence`_, one member for every group of equal mappings in member mode and one per connection in count mode.
+
+.. autoclass:: next.realtime.WebSocketApp
+   :members:
+
+.. autofunction:: next.realtime.application
+
+.. autoclass:: next.realtime.tunnel.DjangoTunnel
+   :members:
+
+.. autoclass:: next.realtime.tunnel.Tunnel
+   :members:
+
+.. autoclass:: next.realtime.tunnel.TunnelHints
+   :members:
+
+.. autoclass:: next.realtime.TopicSocket
+   :members:
+
+.. autoclass:: next.realtime.attendance.Attendance
+   :members:
+
+.. autoclass:: next.realtime.socket.SocketPort
+   :members:
+
+.. autoclass:: next.realtime.socket.Handshake
+   :members:
+
+.. autoclass:: next.realtime.tickets.TicketClaims
+   :members:
+
+.. autofunction:: next.realtime.tickets.verify_ticket
+
+.. autofunction:: next.realtime.tickets.resolve_claims
+
+.. autofunction:: next.realtime.tickets.resolve_identify
+
+.. autoexception:: next.realtime.InvalidTicketError
+   :members:
+
+.. autoclass:: next.realtime.frames.Close
+   :members:
+   :undoc-members:
+
+.. automodule:: next.realtime.frames
+   :members:
+   :exclude-members: Close
 
 Signals
 -------
@@ -1247,7 +1283,7 @@ See :doc:`signals` for their payloads and :doc:`/content/topics/signals` for rec
 Management command
 ------------------
 
-``manage.py realtime`` publishes to a topic and reads its positions, presence, and replay log from the shell, and ``manage.py runserver`` serves the project on uvicorn with the WebSocket mounted.
+``manage.py realtime`` publishes to a topic and reads its positions, presence, and replay log from the shell, and ``manage.py runserver`` serves the project over ASGI on the ``DEV_SERVER``, uvicorn by default, with the WebSocket mounted.
 See :doc:`management` for both.
 
 System checks
@@ -1255,12 +1291,13 @@ System checks
 
 Realtime checks validate the ``REALTIME`` keys, the transport list, the ticket age, the ticket binding, the WebSocket path, the heartbeat, the replay window, the presence limits, and the broker backend and its options, and report a missing ``redis`` dependency.
 A warning flags a nonzero ``REPLAY['SIZE']`` with a broker that keeps no replay log, and another flags an explicit ``PRESENCE`` with a broker that keeps no presence.
-Deployment warnings flag an explicit ``"ws"`` transport without ``SessionMiddleware`` or with signed-cookie sessions under the default ticket binding.
+Session warnings flag an explicit ``"ws"`` transport without ``SessionMiddleware``, with signed-cookie sessions under the default ticket binding, or with a server-side engine under ``SignedCookieBinding``.
+A deployment warning, run only by ``manage.py check --deploy``, flags a ``MemoryBroker`` or a subclass of it as process-local.
 A ``WebSocketApp`` logs the session warnings itself when it is created, since ``manage.py check`` never sees a mounted socket.
 An error flags a routed ticket introspection endpoint that has no ``GATEWAY_TOKEN``.
 The checks run against the defaults when ``NEXT_FRAMEWORK`` has no ``REALTIME`` key.
 Errors flag invalid ``UPSTREAM`` and ``TUNNEL`` limits and upstream handlers that can never match.
-See :doc:`system-checks` for the ids ``next.E177`` to ``next.E199``, ``next.E201`` to ``next.E211``, ``next.E213``, and ``next.W141`` to ``next.W144``, ``next.W146``, and ``next.W147``.
+See :doc:`system-checks` for the ids ``next.E177`` to ``next.E199``, ``next.E201`` to ``next.E211``, ``next.E213``, and ``next.W141`` to ``next.W144``, ``next.W146``, ``next.W147``, and ``next.W149``.
 
 See also
 --------

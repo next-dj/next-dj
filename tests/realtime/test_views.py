@@ -11,9 +11,9 @@ from django.test import Client, override_settings
 from django.urls import include, path, reverse
 from django.utils import timezone
 
-from next.realtime import TicketIntrospectionView
 from next.realtime.messages import Message
 from next.realtime.tickets import TicketClaims
+from next.realtime.views import TicketIntrospectionView
 from next.testing.realtime import SocketTicket, issue_socket_ticket
 from tests.support.realtime import (
     ROOM_AUTHORIZER_REF,

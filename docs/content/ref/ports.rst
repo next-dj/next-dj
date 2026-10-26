@@ -9,7 +9,7 @@ Module summary
 ``next.ports`` holds the narrow protocols one subsystem calls another through.
 Each port is a pair of a ``Protocol`` that states the method contract the caller depends on and a slot object that holds the one implementation composed at startup.
 The caller imports the slot instead of the implementing subsystem, so the two areas stay decoupled while the call still lands on real code.
-Each slot is bound once, in ``NextFrameworkConfig.ready()``, and nothing rebinds it afterwards, which is what separates it from the settings-driven backend managers in :doc:`backends` that rebuild themselves on a settings reload.
+Each slot is bound in ``NextFrameworkConfig.ready()`` and never rebuilt on a settings reload, which is what separates it from the settings-driven backend managers in :doc:`backends`.
 
 ``PortSlot`` is the shared holder every port uses.
 It is built with the subject its message names, and it starts unbound and raises :class:`~django.core.exceptions.ImproperlyConfigured` naming that subject when read before the app finished starting, which is the type the system checks already report as a configuration error.
@@ -44,7 +44,7 @@ The concat's cache token reads ``seo_routes_version`` in ``next.urls.manager``, 
 
 ``ActionOwners`` answers the ``page.py`` of every directory whose files declare an ``@action``, the file whose rule such an action answers to.
 The forms area imports ``next.pages``, so the body-source check ``next.E012`` reads ``action_owners_slot`` rather than importing ``next.forms`` back, and a ``page.py`` with no body that serves an action passes.
-``next.E166`` and ``next.W128`` read the same slot, so a replaced binding moves all three checks together.
+The intercept check ``next.E174`` reads the same slot, so a replaced binding moves both checks together, while ``next.E166`` and ``next.W128`` live in the forms area and read its registry directly.
 
 ``FormRoutes`` answers the URL patterns of every form backend.
 The forms area imports ``next.pages``, which loads the URL checks, so those checks read ``form_routes_slot`` rather than importing ``next.forms.manager`` back.

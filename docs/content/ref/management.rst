@@ -8,7 +8,7 @@ Module summary
 
 The ``next`` application ships five management commands, and ``manage.py help`` lists them under ``[next]``.
 ``routes`` prints the page routes, ``permissions`` prints the access rule of every endpoint, and ``showmetadata`` is a thin shell over the metadata of ``next.pages``.
-``realtime`` publishes to realtime topics and reads what the broker holds, and ``runserver`` serves the project on uvicorn with the realtime WebSocket once uvicorn is installed.
+``realtime`` publishes to realtime topics and reads what the broker holds, and ``runserver`` serves the project over ASGI with the realtime WebSocket once the ``DEV_SERVER`` it names is installed, uvicorn by default.
 Every command runs the system checks first like any Django command, so ``--skip-checks`` prints the table of a project whose checks fail.
 
 routes
@@ -241,7 +241,8 @@ Without the setting it is ``next.realtime.application`` over :func:`~django.core
 Under ``DEBUG``, or with ``--insecure``, static files under ``STATIC_URL`` come from the staticfiles finders through Django's ``ASGIStaticFilesHandler`` unless ``--nostatic`` is given, and a WebSocket passes through it.
 Django's autoreloader restarts the process, so the watch list of ``next.server`` applies as it does under WSGI and uvicorn runs without a reloader of its own, while ``--nothreading`` has no effect.
 A uvicorn that finds neither ``websockets`` nor ``wsproto`` cannot accept a WebSocket, so the command warns on stderr while the app mounts the socket, and the pages fall back to SSE.
-The command hands uvicorn ``ws_max_size`` set to the 64 KiB inbound frame limit and ``ws_ping_interval`` set to ``None``, because the socket pings after one ``HEARTBEAT`` with nothing to send or no frame from the client, however busy the topic, and drops a peer that sent nothing for more than two heartbeats after an unanswered ping, so a server-level ping is only an extra layer.
+The command hands the server ``max_frame_bytes`` set to the 64 KiB inbound frame limit and ``ping_interval`` set to ``None``, which ``UvicornServer`` passes to uvicorn as ``ws_max_size`` and ``ws_ping_interval``.
+The socket pings on its own after one ``HEARTBEAT`` without traffic and drops a peer silent for more than two heartbeats after an unanswered ping, so a server-level ping adds nothing.
 It leaves lifespan on uvicorn's ``auto``, since ``next.realtime.application`` answers lifespan itself and an app from ``ASGI_APPLICATION`` may not speak it.
 
 Without uvicorn, or with ``--wsgi``, the command is Django's ``runserver`` with the static serving of ``django.contrib.staticfiles``.
@@ -265,7 +266,7 @@ Use your own development server
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``NEXT_FRAMEWORK['DEV_SERVER']`` names the class the command serves on, see :doc:`settings`.
-The class is built without arguments, and ``run`` receives the app, ``host``, ``port``, and the ``ws_max_size`` and ``ws_ping_interval`` options of ``server_options()``, which it maps onto its own server or ignores.
+The class is built without arguments, and ``run`` receives the app, ``host``, ``port``, and the server-neutral ``max_frame_bytes`` and ``ping_interval`` options of ``server_options()``, which it maps onto its own server or ignores.
 Hypercorn stands in here as one example, and the framework depends on neither it nor uvicorn.
 
 .. code-block:: python
@@ -280,7 +281,7 @@ Hypercorn stands in here as one example, and the framework depends on neither it
        def run(self, app, *, host, port, **options):
            config = Config()
            config.bind = [f"{host}:{port}"]
-           config.websocket_max_message_size = options.get("ws_max_size", 65536)
+           config.websocket_max_message_size = options.get("max_frame_bytes", 65536)
            asyncio.run(serve(app, config))
 
 .. code-block:: python

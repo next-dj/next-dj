@@ -2,10 +2,11 @@
 
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
-from typing import Literal, overload
+from typing import Literal, cast, overload
 
+from asgiref.sync import async_to_sync, iscoroutinefunction
 from django.db import transaction
 
 from next.partial.envelope import Envelope
@@ -16,12 +17,14 @@ from .errors import TopicPayloadError
 from .lifecycle import apublished, published
 from .manager import broker_manager
 from .messages import Message, validate_topic
+from .pool import run_detached
 from .roster import Presence, presence_broker
 
 
 logger = logging.getLogger(__name__)
 
 _ALLOWED_OPS = frozenset({"refresh", "event", "toast", "remove"})
+_TRANSFORM_FAILED = "Realtime transform failed on %s seq %s, skipping it"
 
 
 def _prepare(patches: object) -> Envelope:
@@ -67,24 +70,51 @@ def _validate_topic_payload(envelope: Envelope) -> Envelope:
     return Envelope.from_dict(snapshot)
 
 
-def transformed(
-    message: Message, transform: Callable[[Message], object]
-) -> Message | None:
+type _Transform = Callable[[Message], object]
+type _AsyncTransform = Callable[[Message], Awaitable[object]]
+
+
+def _awaited(transform: _Transform) -> bool:
+    """Whether a transform is an `async def` function or an object with one."""
+    return iscoroutinefunction(transform) or iscoroutinefunction(
+        type(transform).__call__
+    )
+
+
+def _applied(message: Message, result: object) -> Message | None:
+    """Return the message carrying a transform result, None for a skip."""
+    return None if result is None else replace(message, envelope=_prepare(result))
+
+
+def transformed(message: Message, transform: _Transform) -> Message | None:
     """Return the message a subscriber transform makes of it, None for a skip.
 
     A transform that raises or returns an unsafe payload skips the message it failed on.
     """
     try:
-        result = transform(message)
-        envelope = None if result is None else _prepare(result)
+        if _awaited(transform):
+            result = async_to_sync(cast("_AsyncTransform", transform))(message)
+        else:
+            result = transform(message)
+        return _applied(message, result)
     except Exception:
-        logger.exception(
-            "Realtime transform failed on %s seq %s, skipping it",
-            message.topic,
-            message.seq,
-        )
+        logger.exception(_TRANSFORM_FAILED, message.topic, message.seq)
         return None
-    return None if envelope is None else replace(message, envelope=envelope)
+
+
+async def atransformed(message: Message, transform: _Transform) -> Message | None:
+    """Return the transformed message, awaiting an async transform on the event loop.
+
+    A sync transform runs on the shared pool, so it never blocks the loop.
+    """
+    if not _awaited(transform):
+        return await run_detached(transformed, message, transform)
+    try:
+        result = await cast("_AsyncTransform", transform)(message)
+        return _applied(message, result)
+    except Exception:
+        logger.exception(_TRANSFORM_FAILED, message.topic, message.seq)
+        return None
 
 
 def _publish_now(topic: str, envelope: Envelope) -> Message:
@@ -167,4 +197,11 @@ async def apresence(topic: str) -> Presence:
     return await broker.apresence(validate_topic(topic))
 
 
-__all__ = ["apresence", "apublish", "presence", "publish", "transformed"]
+__all__ = [
+    "apresence",
+    "apublish",
+    "atransformed",
+    "presence",
+    "publish",
+    "transformed",
+]

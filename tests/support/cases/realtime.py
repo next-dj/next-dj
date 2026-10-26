@@ -3,6 +3,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from next.partial import PartialProtocolBackend
+from next.realtime.frames import Inbound, Pong, Subscribe, Up
 from tests.support.codecs import (
     InstanceMimeJsonCodec,
     MimeJsonCodec,
@@ -82,4 +83,36 @@ TEXT_FRAME_CASES: tuple[TextFrameCase, ...] = (
     TextFrameCase("stream_data_override", TextDataJsonCodec()),
     TextFrameCase("custom_mime_type", MimeJsonCodec()),
     TextFrameCase("instance_mime_type", InstanceMimeJsonCodec()),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class InboundFrameCase:
+    """One client text frame the codec accepts and the frame type it decodes to."""
+
+    id: str
+    text: str
+    kind: type[Inbound]
+
+
+INBOUND_FRAME_CASES: tuple[InboundFrameCase, ...] = (
+    InboundFrameCase("pong", json.dumps({"type": "pong"}), Pong),
+    InboundFrameCase(
+        "subscribe",
+        json.dumps(
+            {
+                "type": "sub",
+                "ticket": "t" * 200,
+                "last_seq": {"room:1": {"epoch": "0123456789abcdef", "seq": 7}},
+            }
+        ),
+        Subscribe,
+    ),
+    InboundFrameCase(
+        "up",
+        json.dumps(
+            {"type": "up", "topic": "room:1", "name": "vote", "data": {"choice": 2}}
+        ),
+        Up,
+    ),
 )

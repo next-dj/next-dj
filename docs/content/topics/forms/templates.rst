@@ -32,8 +32,8 @@ The tag does the following.
 
 1. Looks up the action name against the nearest anchor, the enclosing ``component.py`` first when the template is a component's own, then the anchor the enclosing ``{% form %}`` tag resolved for its own action, then the current page's ``page.py``, then the shared registry.
 2. Resolves the stable dispatch URL for that action.
-3. Emits ``<form action="..." method="post" data-next-action="...">``, then the compiled partial ``data-next-*`` attributes, then an automatic ``enctype="multipart/form-data"`` for a multipart form, then the remaining attributes passed to the tag.
-4. Emits a hidden ``csrfmiddlewaretoken`` input.
+3. Emits ``<form action="..." method="post" data-next-action="...">``, then ``data-next-transport`` for an action that opts in to the WebSocket, then the compiled partial ``data-next-*`` attributes, then an automatic ``enctype="multipart/form-data"`` for a multipart form, then the remaining attributes passed to the tag.
+4. Emits a hidden ``csrfmiddlewaretoken`` input, except on a page whose CSRF token is deferred, where the client runtime sends the token in a header, see :ref:`security-csrf-and-forms`.
 5. Emits a hidden ``_next_form_origin`` input set to the URL the page was rendered under, query string included, used by ``redirect_to_origin`` on success and resolved through the URLconf on the error re-render.
 6. Publishes ``form`` inside the block body (see `The form variable`_ below).
 7. Publishes ``wizard`` alongside ``form`` when the action is a ``FormWizard``.
@@ -232,8 +232,9 @@ Render them inline or as a summary at the top.
 Manual CSRF
 -----------
 
-The tag emits ``csrfmiddlewaretoken`` automatically.
+The tag emits ``csrfmiddlewaretoken`` automatically on a page that renders its token eagerly, and leaves it out on a page that defers the token.
 Only add Django's ``{% csrf_token %}`` manually when you build the ``<form>`` element by hand and skip the tag entirely.
+A page that defers its token keeps ``{% csrf_token %}`` out of a hand-written form, because the token would then sit in HTML a shared cache keeps.
 A hand-crafted form must also include the ``_next_form_origin`` hidden field or the dispatcher cannot re-render on failure.
 Set it to the URL the page was rendered under with its query string, which ``{{ request.get_full_path }}`` produces, the same value the tag emits.
 
@@ -258,7 +259,7 @@ Forms in hand-written views
 ---------------------------
 
 A ``{% form %}`` tag also works inside a template rendered by an ordinary Django view, outside the file router.
-The success path needs nothing extra, the handler runs and its response is sent.
+The success path needs nothing extra, because the handler runs and its response is sent.
 The error re-render is different.
 The dispatcher resolves the posted origin to a view and reads the page source location from its ``next_page_path`` attribute, which the file router sets on every routed view and a hand-written view lacks.
 Without it an invalid submission returns HTTP 400 instead of re-rendering.

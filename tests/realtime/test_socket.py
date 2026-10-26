@@ -51,6 +51,7 @@ _AUTHORIZED: list[str] = []
 _BARRIER = threading.Barrier(2, timeout=5)
 _TRANSFORM_ENTERED = threading.Event()
 _TRANSFORM_RELEASE = threading.Event()
+_TRANSFORM_THREADS: list[threading.Thread] = []
 
 
 def _toggled_authorizer(_user: object, topic: str) -> bool:
@@ -68,6 +69,11 @@ def _user_authorizer(user: object, _topic: str) -> bool:
 
 def _event_transform(message: Message) -> Patches:
     return Patches(None).event("room:update", {"seq": message.seq})
+
+
+async def _async_event_transform(message: Message) -> Patches:
+    _TRANSFORM_THREADS.append(threading.current_thread())
+    return _event_transform(message)
 
 
 def _skip_transform(_message: Message) -> None:
@@ -449,6 +455,25 @@ def test_transform_rewrites_the_patches_off_the_event_loop() -> None:
         await _finish(task)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.django_db(transaction=True)
+def test_an_async_transform_runs_on_the_event_loop() -> None:
+    ticket = issue_session_ticket(transform_ref=f"{_HERE}._async_event_transform")
+    _TRANSFORM_THREADS.clear()
+
+    async def scenario() -> None:
+        broker = MemoryBroker()
+        port = MemoryPort()
+        task, _ = await _open(_socket(port, ticket, broker), port, ticket)
+        await broker.apublish("room:42", _envelope())
+        frame = await _frame(port)
+        assert frame["data"]["ops"][0]["name"] == "room:update"
+        port.disconnect()
+        await _finish(task)
+
+    asyncio.run(scenario())
+    assert list(_TRANSFORM_THREADS) == [threading.main_thread()]
 
 
 @pytest.mark.django_db(transaction=True)

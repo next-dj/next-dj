@@ -311,6 +311,28 @@ class TestRegistry:
         assert resolved is not None
         assert resolved[0] is narrow
 
+    def test_resolve_reads_only_the_routes_of_the_event_name(self) -> None:
+        held = HandlerRegistry()
+        cursor = held.add(Route.bind("{kind}:{code}", "cursor", _first))
+        typing = held.add(Route.bind("{kind}:{code}", "typing", _second))
+        assert held.resolve("room:abc", "typing") == (
+            typing,
+            {"kind": "room", "code": "abc"},
+        )
+        assert held.resolve("room:abc", "cursor") == (
+            cursor,
+            {"kind": "room", "code": "abc"},
+        )
+        assert held.resolve("room:abc", "scroll") is None
+
+    def test_a_replaced_pair_resolves_to_the_new_route(self) -> None:
+        held = HandlerRegistry()
+        held.add(Route.bind("room:{code}", "typing", _first))
+        again = held.add(Route.bind("room:{code}", "typing", _first))
+        resolved = held.resolve("room:abc", "typing")
+        assert resolved is not None
+        assert resolved[0] is again
+
     def test_reset_drops_everything(self) -> None:
         held = HandlerRegistry()
         held.add(Route.bind("a", "typing", _first))
@@ -318,6 +340,7 @@ class TestRegistry:
         held.reset()
         assert len(held) == 0
         assert held.duplicates() == ()
+        assert held.resolve("a", "typing") is None
         assert held.version == 2
 
 

@@ -69,7 +69,7 @@ Modules
 
 ``next.partial.patches``.
    The ``Patches`` builder and the ``PatchResponse`` it serialises into.
-   Every verb is a method: ``morph``, ``replace``, ``inner``, ``append``, ``prepend``, ``remove``, ``refresh``, ``toast``, ``event``, ``layer_open``, ``layer_close``, ``push_url``, ``replace_url``, ``redirect``, ``context``, and ``meta``.
+   Every verb has a method of its own, ``morph``, ``replace``, ``inner``, ``append``, ``prepend``, ``remove``, ``refresh``, ``toast``, ``event``, ``layer_open``, ``layer_close``, ``push_url``, ``replace_url``, ``redirect``, ``context``, and ``meta``.
    The builder also has ``morph_zone`` and ``morph_foreign_zone``, which render before recording.
    It has ``add_asset`` for an asset the render did not collect and ``op`` for a registered project verb.
 
@@ -100,10 +100,10 @@ Modules
    ``PartialShaperImpl``, the implementation behind the ``PartialShaper`` slot.
 
 ``next.partial.errors``.
-   The twelve exceptions a caller that breaks a wire contract meets, from ``UnknownZoneError`` and ``UnknownPatchOpError`` to ``ForeignPageNotAuthorizedError`` and ``CrossSiteHrefError``.
+   The thirteen exceptions a caller that breaks a wire contract meets, from ``UnknownZoneError`` and ``UnknownPatchOpError`` to ``ForeignPageNotAuthorizedError`` and ``CrossSiteHrefError``.
 
 ``next.partial.checks``.
-   The largest checks package in the framework, split into ``backends``, ``forms``, ``ops``, ``templates``, and ``zones``, with ``codes`` holding every identifier and ``nodes`` and ``pages`` holding the node walk and the one-compile-per-page memo the zone and form checks share.
+   The largest checks package in the framework, split into ``backends``, ``forms``, ``intercepts``, ``ops``, ``templates``, and ``zones``, with ``codes`` holding every identifier and ``nodes`` holding the node walk the zone and form checks share.
 
 Where the view branches
 -----------------------
@@ -188,7 +188,9 @@ Signals
 ``sse_stream_opened`` and ``sse_stream_closed`` bracket a patch stream, the second carrying the duration and the number of envelopes sent.
 ``partial_backend_loaded`` fires when the protocol backend is built from settings.
 
-``zone_registered`` and ``zone_rendered`` are sent plainly, so a raising receiver breaks the render that emitted them.
+``field_validated`` fires once per validate-only pass, with the action, the field names the pass checked, and the error count.
+``intercept_access_denied`` fires when an intercepting route refuses a zone request, with the served page, the target page, the status, and the reason.
+Only ``sse_stream_opened`` and ``sse_stream_closed`` are sent robustly, so a raising receiver of any other partial signal breaks the operation that emitted it.
 
 Extension points
 ----------------

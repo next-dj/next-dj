@@ -17,7 +17,7 @@ from .access import Access, AccessCheck, SocketAccessCheck
 from .attendance import Attendance, Identifier, aattend, aattending
 from .backends import BrokerBackend
 from .binding import opaque_subject, ticket_binding
-from .delivery import transformed
+from .delivery import atransformed
 from .errors import BrokerConnectionError, InvalidTicketError
 from .frames import (
     Close,
@@ -515,6 +515,7 @@ class TopicSocket:
                     else:
                         await self._writer.send(await self._frame_for(item))
         await self._lifecycle.aclose(UnsubscribeReason.SERVER)
+        raise _ClosedError(Close.TRY_AGAIN)
 
     def _hello_limits(self) -> dict[str, object]:
         """Return the frame limits hello tells the client, the tunnel only when on."""
@@ -603,12 +604,12 @@ class TopicSocket:
             await self._fail(_CLOSE_CODES[verdict])
 
     async def _frame_for(self, message: Message) -> str:
-        """Encode one message for this subscriber, transformed off the event loop.
+        """Encode one message for this subscriber, a sync transform run off the loop.
 
         A subscriber outside identify mode gets presence events without their members.
         """
         if message.seq and self._transform is not None:
-            result = await run_detached(transformed, message, self._transform)
+            result = await atransformed(message, self._transform)
             if result is None:
                 return frames.skip(message)
             message = result

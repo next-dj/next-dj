@@ -77,7 +77,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    ``next.partial`` for the patch builder, zones, SSE streams, and the protocol backend.
 
 :doc:`realtime`
-   ``next.realtime`` for topic names, broker backends, and published messages.
+   ``next.realtime`` for topics and publishing, broker backends, topic streams, the WebSocket application, ticket bindings, presence, upstream handlers, the form tunnel, and the wire protocol.
 
 :doc:`metadata`
    ``next.pages.metadata`` for the metadata dicts, value objects, renderer, and ``ld`` nodes.
@@ -144,7 +144,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    Django system checks that the framework contributes.
 
 :doc:`management`
-   The ``routes``, ``permissions``, and ``showmetadata`` management commands.
+   The ``routes``, ``permissions``, ``showmetadata``, ``realtime``, and ``runserver`` management commands.
 
 .. rubric:: Templates and decorators
 

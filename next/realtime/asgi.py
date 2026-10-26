@@ -36,7 +36,7 @@ from .manager import broker_manager
 from .socket import Handshake, SocketPort, TopicSocket
 from .tickets import websocket_path
 from .transports import announce_websocket
-from .tunnel import DjangoTunnel, Tunnel, cookie_header, scope_headers
+from .tunnel import DjangoTunnel, Tunnel, cookie_header, drain, scope_headers
 
 
 logger = logging.getLogger(__name__)
@@ -208,9 +208,13 @@ class _Inbound:
         return message.get("bytes") or b""
 
 
-async def _refuse(receive: ASGIReceiveCallable, send: ASGISendCallable) -> None:
+async def _refuse(
+    receive: ASGIReceiveCallable,
+    send: ASGISendCallable,
+    pending: ASGIReceiveEvent | None = None,
+) -> None:
     """Answer the handshake with a close, which the server turns into HTTP 403."""
-    message = await receive()
+    message = pending if pending is not None else await receive()
     if message["type"] == "websocket.connect":
         await send({"type": "websocket.close", "code": 1000, "reason": None})
 
@@ -329,10 +333,47 @@ class _Application:
         elif scope["type"] == "websocket":
             if _path_info(scope) == websocket_path():
                 await self.websocket(scope, receive, send)
-            else:
+            elif type(self.http_app) is ASGIHandler:
                 await _refuse(receive, send)
+            else:
+                await self._foreign_socket(scope, receive, send)
         else:
             await self._lifespan(scope, receive, send)
+
+    async def _foreign_socket(
+        self,
+        scope: WebSocketScope,
+        receive: ASGIReceiveCallable,
+        send: ASGISendCallable,
+    ) -> None:
+        """Pass another WebSocket path to the app, refused if it fails before a send.
+
+        Django under a middleware raises on the scope, so it is refused as without one.
+        """
+        pending: ASGIReceiveEvent | None = None
+        sent = False
+
+        async def receiving() -> ASGIReceiveEvent:
+            nonlocal pending
+            pending = await receive()
+            return pending
+
+        async def sending(message: ASGISendEvent) -> None:
+            nonlocal sent
+            sent = True
+            await send(message)
+
+        try:
+            await self.http_app(scope, receiving, sending)
+        except Exception:
+            if sent:
+                raise
+            logger.debug(
+                "The HTTP app rejected the WebSocket at %s",
+                scope["path"],
+                exc_info=True,
+            )
+            await _refuse(receive, send, pending)
 
     async def _lifespan(
         self, scope: LifespanScope, receive: ASGIReceiveCallable, send: ASGISendCallable
@@ -385,7 +426,8 @@ async def _answer_lifespan(
 async def _close_broker() -> (
     LifespanShutdownCompleteEvent | LifespanShutdownFailedEvent
 ):
-    """Close the broker and report the shutdown, failed if the broker raised."""
+    """Drain the tunneled apps, close the broker and report the shutdown."""
+    await drain()
     try:
         await broker_manager.aclose()
     except Exception:

@@ -78,9 +78,9 @@ See :ref:`ref-realtime-protocol` for every frame and close code.
        poll = get_object_or_404(Poll, pk=poll_id)
        return TopicStream(request, f"poll:{poll.pk}", authorize=can_subscribe_topic)
 
-The authorizer is a synchronous, importable function accepting ``(user, topic)`` and returning a boolean.
+The authorizer is a synchronous, importable function accepting ``(user, topic)`` that returns ``True`` to grant the topic, and any other value, a truthy one or an ``async def`` coroutine included, denies it.
 The ``polls.realtime.can_subscribe_topic`` above is an example of one that a project writes, and :doc:`/content/howto/stream-live-updates-with-sse` defines it together with the rest of the page.
-Omitting ``authorize`` leaves the stream open to any visitor who can load the page.
+A stream without ``authorize`` never upgrades, because negotiation answers ``406`` with ``reason`` set to ``authorization`` and the page stays on SSE, where any visitor who can load the page subscribes.
 The socket calls the authorizer before joining the broker and then at most once per heartbeat interval, together with a recheck of the session.
 A revocation closes the socket within about two heartbeat intervals plus the callback's own latency.
 The close code is ``4401`` for a session problem and ``4403`` for a topic denial, each after an ``auth`` error frame.
@@ -88,7 +88,7 @@ After ``4403`` the client falls back to SSE at once.
 After ``4401`` the client negotiates a fresh ticket once and falls back to SSE only when that fails.
 Over SSE a revoked session reconnects through the page guard and a topic denial ends the stream for good.
 The checks run on the shared thread pool rather than the single sync thread, so keep the callback's database work small.
-WebSocket negotiation returns ``406`` when the ``transform``, ``authorize``, or ``presence`` identify callback has no stable importable reference.
+WebSocket negotiation returns ``406`` when ``authorize`` is missing or when the ``transform``, ``authorize``, or ``presence`` identify callback has no stable importable reference.
 The reply body names the cause in its ``reason`` field, and the client uses SSE.
 
 Keep sensitive page data out of published topic payloads.
@@ -128,14 +128,15 @@ With ``staticfiles`` listed first, or without uvicorn, it is the WSGI ``runserve
 The command caps inbound frames at 64 KiB and turns off the protocol ping of uvicorn, because the socket checks the liveness of its peer itself.
 See :doc:`/content/ref/management` for the options.
 
-Production runs several uvicorn workers, either through uvicorn itself or under gunicorn with the uvicorn worker class.
+Production runs several uvicorn workers, either through uvicorn itself or under gunicorn with the worker class of the ``uvicorn-worker`` package.
+Several workers need a shared broker, see :ref:`howto-realtime-several-workers`.
 The ``--workers`` value below is an example to size from measurement, see :ref:`deployment-capacity` for how to measure capacity.
 
 .. code-block:: bash
    :caption: shell
 
    uv run uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 4 --ws-max-size 65536
-   uv run gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --workers 4
+   uv run gunicorn config.asgi:application -k uvicorn_worker.UvicornWorker --workers 4
 
 The socket closes a larger inbound frame with ``1009`` anyway.
 ``--ws-max-size 65536`` keeps uvicorn from buffering up to 16 MiB first.
@@ -147,6 +148,7 @@ Use ``RedisBroker`` once there is more than one worker, see :doc:`fan-out-across
 The socket sends a ``ping`` frame once a ``NEXT_FRAMEWORK["REALTIME"]["HEARTBEAT"]``, 25 seconds by default, passes with nothing to send or with no frame from the client, and any frame from the client answers it.
 A peer that sent nothing for more than two heartbeats after an unanswered ping is dropped without a close frame, leaves presence, and fires ``stream_unsubscribed`` with the reason ``client``.
 A busy topic does not hold the ping back, so a half-open peer is dropped before the send buffer of the kernel fills.
+A peer whose send stays blocked for longer than one heartbeat is dropped the same way, so a client that stopped reading never holds a busy topic back.
 Keep that value below the idle timeout of every proxy in front of it.
 The browser renews a ticket when it reconnects.
 Tests drive the socket and the SSE stream with the helpers of :doc:`/content/ref/testing`.
@@ -172,7 +174,7 @@ The entries follow the ``CSRF_TRUSTED_ORIGINS`` format, and an empty or malforme
 
 A subclass overrides ``allow_origin`` for a rule of its own.
 It overrides ``authenticate`` to take the identity from somewhere other than the session cookie, such as a header set by a trusted proxy.
-``authenticate`` returns a ``Handshake`` or ``None`` for a refusal, which closes the socket with ``4401``.
+``authenticate`` returns a ``next.realtime.socket.Handshake`` or ``None`` for a refusal, which closes the socket with ``4401``.
 The ``credential`` of the handshake has to be the one the ticket was issued under, because the ticket is bound to it and every recheck hands it back to the ticket binding.
 
 .. code-block:: python
@@ -188,14 +190,37 @@ The ``credential`` of the handshake has to be the one the ticket was issued unde
                origin, scope
            )
 
-A subclass can also override ``topic_socket`` to return its own ``TopicSocket`` subclass.
+A subclass can also override ``topic_socket(port, handshake, scope)`` to return its own ``TopicSocket`` subclass.
+The override passes ``tunnel=self.tunnel(scope)`` and ``limits=self.limits`` on, or the socket runs no tunneled requests.
 
 .. _howto-stream-over-websockets-router:
 
 Mount the socket inside another ASGI router
 -------------------------------------------
 
-``WebSocketApp`` is an ordinary ASGI application, so a project that already routes WebSockets mounts it as one route.
+The shortest route wraps the whole router in ``next.realtime.application``.
+It serves ``WS_PATH`` itself, passes every other WebSocket path and the lifespan to the router, and closes the broker on shutdown.
+
+.. code-block:: python
+   :caption: config/asgi.py
+
+   from channels.routing import ProtocolTypeRouter, URLRouter
+   from chat.consumers import ChatConsumer
+   from django.urls import path
+
+   from next.realtime import application as realtime_application
+
+   router = ProtocolTypeRouter(
+       {
+           "http": django_application,
+           "websocket": URLRouter([path("chat/", ChatConsumer.as_asgi())]),
+       }
+   )
+   application = realtime_application(router)
+
+A Starlette application is wrapped the same way.
+
+``WebSocketApp`` is also an ordinary ASGI application, so a project that already routes WebSockets can mount it as one route instead.
 The route path has to match ``REALTIME['WS_PATH']``, because the ticket tells the browser that URL.
 
 A project on Django Channels adds it to its own ``URLRouter``.
@@ -235,7 +260,17 @@ A Starlette application mounts it as a WebSocket route with the same ``http_app`
    app = Starlette(routes=[WebSocketRoute("/_next/ws/", socket)])
 
 Only ``application`` answers lifespan events and closes the broker on shutdown.
-A router that mounts the bare socket closes the broker through its own shutdown hook, which calls ``broker_manager.aclose()``.
+A router that mounts the bare socket runs the same steps in its own shutdown hook, which first waits for the tunneled requests still running and then closes the broker.
+
+.. code-block:: python
+   :caption: config/shutdown.py
+
+   from next.realtime.manager import broker_manager
+   from next.realtime.tunnel import drain
+
+   async def close_realtime() -> None:
+       await drain()
+       await broker_manager.aclose()
 
 Serve the protocol from a Python gateway
 ----------------------------------------
@@ -256,7 +291,9 @@ The sketch below uses the ``websockets`` library.
 
    django.setup()
 
-   from next.realtime import Handshake, TopicSocket, frames
+   from next.realtime import TopicSocket
+   from next.realtime.frames import Close, error
+   from next.realtime.socket import Handshake
 
    class Port:
        def __init__(self, connection: ServerConnection) -> None:
@@ -282,8 +319,8 @@ The sketch below uses the ``websockets`` library.
        cookies = parse_cookie(connection.request.headers.get("Cookie", ""))
        handshake = await Handshake.from_cookies(cookies)
        if handshake is None:
-           await connection.send(frames.error("auth"))
-           await connection.close(frames.Close.SESSION)
+           await connection.send(error("auth"))
+           await connection.close(Close.SESSION)
            return
        await TopicSocket(Port(connection), handshake).serve(inbound(connection))
 
@@ -296,6 +333,7 @@ The sketch below uses the ``websockets`` library.
 The gateway checks the Origin itself, here through the ``origins`` argument of ``serve``.
 It runs in a process of its own.
 List ``"ws"`` in ``REALTIME['TRANSPORTS']`` in the project that renders the pages, and share ``SECRET_KEY``, the session store, and the broker with the gateway.
+A process that lists ``ws`` without mounting the socket logs one warning on the ``next.realtime.transports`` logger at its first negotiation, which is expected when a gateway serves ``WS_PATH``, and a logging filter on that logger silences it.
 ``send`` has to raise ``OSError`` once the peer is gone, and ``close`` has to tolerate a peer that already left.
 ``Handshake.from_cookies`` asks the configured ticket binding for the credential of the cookies and loads its user on the shared thread pool without writing to the store.
 It returns ``None`` for no cookies or once the credential is gone.
@@ -372,7 +410,7 @@ The endpoint refuses a ticket whose stream uses a transform by default, because 
 A stream that serves such a gateway publishes already-filtered topics.
 
 The default caller check is the bearer token.
-A subclass of ``TicketIntrospectionView`` overrides ``authorize(request)`` to check a client certificate header or a source address, and ``grant(claims, user, expires_in)`` to change the reply.
+A subclass of ``next.realtime.views.TicketIntrospectionView`` overrides ``authorize(request)`` to check a client certificate header or a source address, and ``grant(claims, user, expires_in)`` to change the reply.
 A gateway that applies the transform itself gets a reply from an override of ``grant_transformed(claims, user, expires_in)``, which returns ``None`` by default and so keeps the ``403``.
 Mount the subclass on a path of its own with ``as_view()``.
 

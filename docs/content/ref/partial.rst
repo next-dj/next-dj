@@ -23,7 +23,7 @@ One module graph sits behind the package facade, and the table below names the p
    * - ``backends``
      - The ``PartialProtocolBackend`` contract and the shipped ``JsonPartialProtocolBackend``.
    * - ``checks``
-     - The startup validation of zone placement, custom verbs, repeated forms, and backend configuration.
+     - The startup validation of zone placement, intercept zones, context bindings, custom verbs, repeated forms, and backend configuration.
        A package whose submodules re-export through the package address.
    * - ``envelope``
      - The frozen value objects of the wire contract, ``Envelope``, ``Patch``, ``Asset``, and ``FormMeta``, and their wire forms.
@@ -58,7 +58,7 @@ One module graph sits behind the package facade, and the table below names the p
    * - ``sse``
      - The ``PatchEventStream`` bridge over the page render escape hatch.
    * - ``stream``
-     - ``StreamMeta`` and the ``hello``, ``skip``, and ``end`` control frames of a streamed response.
+     - ``StreamMeta``, the ``StreamPosition`` and ``TopicPosition`` Protocols, and the ``hello``, ``skip``, and ``end`` control frames of a streamed response.
    * - ``view``
      - The zone branch of the unified page view and its status short-circuits.
    * - ``zone``
@@ -82,6 +82,7 @@ Advanced.
    ``resolve_partial_origin`` stays in ``next.partial`` as a thin helper that reads the host page out of the ``X-Next-Origin`` header so a ``done`` step can pass it to ``morph(zone=, page=)``.
    ``OriginSource`` lives in ``next.partial.origin``.
    ``ZoneInfo`` and ``zones_of`` live in ``next.partial.registry``.
+   The stream control frames and position Protocols live in ``next.partial.stream``.
    The custom-verb exceptions live in ``next.partial.errors``.
 
    The ``signals`` submodule carries the partial telemetry.
@@ -278,9 +279,13 @@ A backend with another format overrides ``stream_data`` to carry ``meta`` in its
 
 The control frames are part of the protocol, not of the wire format.
 The client parses ``next-hello``, ``next-skip``, and ``next-end`` as JSON in the schema :doc:`/content/topics/partial-rendering/reference` lists, and WebSocket control frames bypass these hooks entirely, so a backend leaves the three hooks alone.
+``StreamPosition`` and ``TopicPosition`` are the Protocols a broker's own position type satisfies, and ``StreamHello``, ``StreamSkip``, ``StreamEnd``, and ``stream_hello`` build the control frames, all importable from ``next.partial.stream``.
 
 .. autoclass:: next.partial.StreamMeta
    :members:
+
+.. automodule:: next.partial.stream
+   :members: StreamPosition, TopicPosition, StreamHello, StreamSkip, StreamEnd, stream_hello
 
 .. autoclass:: next.partial.PartialProtocolBackend
    :members:
@@ -352,7 +357,7 @@ See :doc:`signals` and :doc:`/content/topics/signals` for the partial signals (`
 System checks
 -------------
 
-See :doc:`system-checks` for the zone-placement, template-compile, custom-verb, context-binding, and backend-configuration checks (``next.E060`` through ``next.E065``, ``next.E067``, ``next.E072``, ``next.E073``, ``next.E078``, ``next.E090``, ``next.E161``, ``next.E173``, ``next.E174``, ``next.W067`` through ``next.W071``, and ``next.W083``).
+See :doc:`system-checks` for the zone-placement, template-compile, intercept-zone, custom-verb, context-binding, and backend-configuration checks (``next.E060`` through ``next.E065``, ``next.E067``, ``next.E072``, ``next.E073``, ``next.E078``, ``next.E090``, ``next.E161``, ``next.E173``, ``next.E174``, ``next.E214``, ``next.E215``, ``next.W067`` through ``next.W071``, and ``next.W083``).
 
 See also
 --------

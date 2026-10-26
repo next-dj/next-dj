@@ -143,6 +143,24 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``partial_backend_loaded``
      - Partial
      - After the partial protocol backend is created from its configuration entry.
+   * - ``broker_backend_loaded``
+     - Realtime
+     - After the configured realtime broker is created on first use.
+   * - ``message_published``
+     - Realtime
+     - After the broker accepts a publication.
+   * - ``upstream_received``
+     - Realtime
+     - Before the handler of an upstream event runs, once the topic grant and the access recheck pass.
+   * - ``upstream_rejected``
+     - Realtime
+     - When an upstream event is not delivered to its handler.
+   * - ``stream_subscribed``
+     - Realtime
+     - Right after an SSE or WebSocket stream enters its broker subscription.
+   * - ``stream_unsubscribed``
+     - Realtime
+     - When a subscribed SSE or WebSocket stream leaves its topics.
    * - ``sitemap_backend_loaded``
      - SEO
      - After a sitemap backend is created from its configuration entry.
@@ -163,6 +181,7 @@ Every settings-driven backend family announces its load through a ``*_backend_lo
 
 The forms and static signals have dedicated topic pages with worked receiver examples, see :doc:`/content/topics/forms/signals` and :doc:`/content/topics/static-assets/signals`.
 The partial-rendering stream signals appear in context in :doc:`/content/topics/partial-rendering/sse`.
+The realtime stream signals and their payloads are covered in :ref:`ref-signals-stream-lifecycle`.
 
 Receiver patterns
 -----------------
@@ -227,7 +246,8 @@ Failure contract
 ~~~~~~~~~~~~~~~~
 
 A receiver that raises takes the sender down with it.
-Every signal in the catalog above but three is sent with ``Signal.send``, which offers a raising receiver no isolation, so the exception leaves the send and reaches whatever the framework was doing.
+Every signal in the catalog above is sent with ``Signal.send`` except ``settings_reloaded``, the two SSE stream signals, and the realtime signals ``message_published``, ``upstream_received``, ``upstream_rejected``, ``stream_subscribed``, and ``stream_unsubscribed``.
+``Signal.send`` offers a raising receiver no isolation, so the exception leaves the send and reaches whatever the framework was doing.
 An exception from a ``page_rendered`` receiver therefore surfaces as a failed page render, one from an ``action_dispatched`` receiver as a failed form dispatch, and one from a ``component_rendered`` receiver as a failed component.
 Django runs receivers in connection order and stops at the first failure, so a receiver that raises also keeps every receiver behind it from running.
 
@@ -253,10 +273,11 @@ A receiver is an observation point, and its failure should cost an observation r
        except (KeyError, OSError):
            logger.exception("page_rendered receiver failed")
 
-``settings_reloaded``, ``sse_stream_opened``, and ``sse_stream_closed`` are the exceptions.
+``settings_reloaded``, ``sse_stream_opened``, ``sse_stream_closed``, and the five realtime signals named above are the exceptions.
 ``settings_reloaded`` is sent with ``Signal.send_robust``, so every receiver runs even after one raises, and the framework re-raises the first error once the chain is done.
 A settings reload has to reach every manager that cached something from ``NEXT_FRAMEWORK``, and leaving the managers behind a failed receiver holding stale state would be worse than the error itself.
 The two stream signals go through ``Signal.send_robust``, or ``Signal.asend_robust`` on an asynchronous stream, and Django logs a raising receiver and drops its error, so an observer never ends the stream it watches.
+The five realtime signals go out with ``Signal.send_robust``, or ``Signal.asend_robust`` from an event loop, and a raising receiver is logged on the ``next.realtime.signals`` logger while the publication, the upstream event, or the stream goes on.
 
 Disconnecting
 ~~~~~~~~~~~~~

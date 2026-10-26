@@ -29,7 +29,7 @@ An entry ``load_backends`` skips announces nothing, because the send sits after 
 A family that passes no signal announces nothing at all.
 That is the shape a manager takes when it reloads with ``notify=False``, which builds the list exactly as a notifying reload does and hands the loader ``None`` in place of its signal, so a caller reloading from inside a receiver of that signal does not re-enter it.
 
-See :doc:`signals` for the payload the six signals share and :doc:`/content/topics/signals` for the receiver patterns.
+See :doc:`signals` for the payload the eight shared-loader signals share and :doc:`/content/topics/signals` for the receiver patterns.
 
 Public API
 ----------

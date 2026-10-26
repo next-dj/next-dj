@@ -74,6 +74,18 @@ class Tunnel(Protocol):
         """Return the request headers the tunnel keeps, for the client to filter by."""
 
 
+async def drain() -> None:
+    """Wait up to the tunnel timeout for the apps that closed sockets left running.
+
+    Lifespan shutdown runs it before the broker closes, so no app dies mid-write.
+    """
+    if not _LIVE:
+        return
+    limits = TunnelLimits.configured()
+    if limits is not None:
+        await asyncio.wait(set(_LIVE), timeout=limits.timeout)
+
+
 def scope_headers(scope: WebSocketScope, name: bytes) -> list[str]:
     """Return every value the scope carries for one lowercase header name."""
     return [
@@ -517,5 +529,6 @@ __all__ = [
     "TunnelHints",
     "cookie_header",
     "csrf_header",
+    "drain",
     "scope_headers",
 ]

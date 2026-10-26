@@ -23,12 +23,13 @@ A lazy zone is the one zone mode with no server-rendered fallback, and content t
 Realtime transports
 -------------------
 
-A process that mounts the ``WebSocketApp`` offers WebSocket first and Server-Sent Events as the fallback, and every other process offers Server-Sent Events alone.
+With ``TRANSPORTS`` left at ``None``, a process that mounts the ``WebSocketApp`` offers WebSocket first with Server-Sent Events as the fallback, and every other process offers Server-Sent Events alone.
+An explicit ``TRANSPORTS`` list decides on its own, and a list naming ``ws`` in a process that mounts no WebSocket logs one warning per process, see :doc:`/content/ref/settings`.
 The WebSocket setup is in :doc:`/content/howto/stream-over-websockets`.
 Server-Sent Events flow from the server to the browser only, and a client that needs to change state over that transport uses the same forms and actions every page already has.
 The WebSocket transport also carries upstream events and the form tunnel, see :ref:`topics-realtime-upstream`.
 Replay is a bounded catch-up from a per-topic log, and a reconnect the log cannot cover resynchronises its zones over HTTP, see :doc:`/content/topics/realtime`.
-Who is watching a topic is the job of presence, described in the Presence section of :doc:`/content/topics/realtime`.
+Who is watching a topic is the job of presence, see :ref:`topics-realtime-presence`.
 The bridge that opens the stream is the runtime, so a page without it never subscribes and sees whatever its last full render carried.
 
 Polling zones are client-timed
@@ -73,11 +74,13 @@ See :doc:`/content/security/static-assets` for the backend-side SRI recipe and :
 Zone placement has a boundary
 -----------------------------
 
-A standalone render does not see loop variables, the condition that gated a block, a permission block, or the bindings of a ``{% with %}``.
-A zone placed where it would need one is therefore undeclared for every user, and a system check reports the placement before a request reaches it.
+A standalone render does not see loop variables, the condition that gated a block, or a permission block, so a zone placed under one is undeclared for every user.
+A system check reports the placement before a request reaches it.
 ``next.E062`` and ``next.E063`` cover a zone under a ``{% for %}``, an ``{% if %}``, or a block tag from an outside module.
 ``next.E161`` covers a zone under a permission decision of the page or of a component, and ``next.E065`` covers a zone in a component template.
 A standalone request for such a zone answers 400 ``unknown zone``.
+
+A zone directly inside a ``{% with %}`` still renders standalone, without the bindings, which ``next.W067`` warns about.
 See :doc:`zones` for the rules and :doc:`/content/ref/system-checks` for the checks.
 
 A dynamic body answers 400 on a zone request

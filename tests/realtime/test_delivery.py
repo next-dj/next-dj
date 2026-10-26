@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import threading
 from collections.abc import Iterator
 
 import pytest
@@ -9,6 +10,7 @@ from django.test import RequestFactory, TestCase
 from next.partial import Envelope, Patch, Patches
 from next.partial.headers import REQUEST_ID
 from next.realtime import MemoryBroker, TopicPayloadError, apublish, delivery, publish
+from next.realtime.messages import Message
 from next.realtime.roster import announce
 from next.realtime.signals import message_published
 from next.testing import SignalRecorder
@@ -296,3 +298,58 @@ def test_presence_snapshot_is_ephemeral(memory_broker: MemoryBroker) -> None:
     (event,) = recorder
     assert event.kwargs["ephemeral"] is True
     assert event.kwargs["message"].numbered is False
+
+
+def _message() -> Message:
+    return Message("room:5", 1, Patches(None).refresh(zone="feed").envelope(), 0.0)
+
+
+async def _async_event(message: Message) -> Patches:
+    await asyncio.sleep(0)
+    return Patches(None).event("room:seen", {"seq": message.seq})
+
+
+async def _async_skip(_message: Message) -> None:
+    await asyncio.sleep(0)
+
+
+async def _async_failing(_message: Message) -> None:
+    msg = "async transform failed"
+    raise RuntimeError(msg)
+
+
+class _AsyncCallable:
+    async def __call__(self, message: Message) -> Patches:
+        return await _async_event(message)
+
+
+@pytest.mark.parametrize("transform", [_async_event, _AsyncCallable()])
+def test_an_async_transform_is_awaited_on_the_loop(transform: object) -> None:
+    threads: list[threading.Thread] = []
+
+    async def scenario() -> Message | None:
+        threads.append(threading.current_thread())
+        return await delivery.atransformed(_message(), transform)
+
+    result = asyncio.run(scenario())
+    assert result is not None
+    assert result.envelope.ops[0].extras["name"] == "room:seen"
+    assert threads == [threading.main_thread()]
+
+
+def test_an_async_transform_that_returns_none_skips_the_message() -> None:
+    assert asyncio.run(delivery.atransformed(_message(), _async_skip)) is None
+
+
+def test_a_failing_async_transform_skips_and_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("ERROR", "next.realtime.delivery"):
+        assert asyncio.run(delivery.atransformed(_message(), _async_failing)) is None
+    assert "Realtime transform failed on room:5 seq 1" in caplog.text
+
+
+def test_a_sync_stream_runs_an_async_transform_to_completion() -> None:
+    result = delivery.transformed(_message(), _async_event)
+    assert result is not None
+    assert result.envelope.ops[0].extras["name"] == "room:seen"

@@ -22,13 +22,12 @@ from next.utils import positive_number
 from .access import Access, AccessCheck, TopicAuthorizer
 from .attendance import Identifier, aattend, aattending, attend, attending
 from .binding import request_subject, session_user, ticket_binding
-from .delivery import transformed
+from .delivery import atransformed, transformed
 from .errors import BrokerConnectionError
 from .lifecycle import StreamLifecycle
 from .manager import broker_manager
 from .messages import validate_topics
 from .negotiation import negotiate, wants_websocket
-from .pool import run_detached
 from .replay import acatch_up, catch_up, format_event_id, parse_event_id
 from .roster import counted, presence_broker, require_presence, subscriber_snapshot
 from .signals import UnsubscribeReason
@@ -345,11 +344,14 @@ class TopicStream(PatchStreamWriter):
                     yield await self._async_item(message)
 
     async def _async_item(self, message: Message | None) -> Message | StreamSkip | None:
-        """Transform one message off the event loop, or acknowledge its skip."""
+        """Transform one message, or acknowledge its skip.
+
+        An async transform is awaited on the loop, a sync one runs on the shared pool.
+        """
         if message is None:
             return None
         if message.seq and self._transform is not None:
-            result = await run_detached(transformed, message, self._transform)
+            result = await atransformed(message, self._transform)
             return self._item(message, result)
         return self._item(message, message)
 

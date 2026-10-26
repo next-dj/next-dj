@@ -14,6 +14,7 @@ from next.realtime import TopicStream, apublish, pool as pool_module, publish
 from next.realtime.access import AccessCheck, SocketAccessCheck, TopicAuthorizer
 from next.realtime.backends import MemoryBroker
 from next.realtime.errors import BrokerConnectionError
+from next.realtime.frames import Close
 from next.realtime.lifecycle import StreamLifecycle
 from next.realtime.messages import Message
 from next.realtime.signals import (
@@ -171,14 +172,6 @@ def _reasons(recorder: SignalRecorder) -> list[str]:
     return [
         event.kwargs["reason"] for event in recorder.events_for(stream_unsubscribed)
     ]
-
-
-async def _reported(recorder: SignalRecorder) -> None:
-    for _ in range(500):
-        if _reasons(recorder):
-            return
-        await asyncio.sleep(0.01)
-    pytest.fail("The subscription never reported its end within five seconds.")
 
 
 class TestAggregate:
@@ -640,17 +633,16 @@ class TestSocket:
         self, recorder: SignalRecorder
     ) -> None:
         ticket = issue_session_ticket()
+        port = MemoryPort()
 
         async def scenario() -> None:
-            port = MemoryPort()
             task = await _serving(_socket(port, ticket, _EndingBroker()), port, ticket)
-            await _reported(recorder)
-            assert _reasons(recorder) == ["server"]
-            port.disconnect()
-            await task
+            async with asyncio.timeout(5):
+                await task
 
         asyncio.run(scenario())
         assert _reasons(recorder) == ["server"]
+        assert port.close_code == Close.TRY_AGAIN
 
     def test_a_refused_ticket_never_subscribes(self, recorder: SignalRecorder) -> None:
         ticket = issue_session_ticket()

@@ -89,7 +89,7 @@ Each ``Patches`` the source yields becomes one ``next-patches`` event.
 The HTTP envelope shape is preserved and ``server_time`` is added only to the SSE data frame.
 Topic streams also add ``topic``, ``epoch``, and ``seq``.
 The active protocol backend owns the stream codec.
-A ``data-next-stream="/url/"`` element on the page opens an ``EventSource``, or the WebSocket when the server enables it, and routes each event into the same apply pipeline an HTTP response uses.
+A ``data-next-stream="/url/"`` element on the page opens an ``EventSource`` and routes each event into the same apply pipeline an HTTP response uses, and only a ``TopicStream`` page can upgrade to a WebSocket.
 
 The refresh fan-out
 -------------------
@@ -118,7 +118,6 @@ The fan-out is built on ``refresh`` rather than a ``context`` patch on purpose.
 A ``context`` patch carries the value of a registered serialize provider, and the builder reads that value from the origin page of the request that creates it.
 A stream source has no page-render origin, so it cannot build a ``context`` patch from one.
 A stream that needs to push fresh context drives a ``refresh``, and the re-fetched zone delivers the new context through its own render.
-This is a documented limitation.
 The stream source addresses zones to refresh, not provider values to push directly.
 
 Echo suppression
@@ -145,22 +144,17 @@ WSGI and ASGI
 
 A stream holds a connection open, and how it stays alive when idle depends on the source and the server.
 
-The source kind and the server are paired by contract.
 An async patch source requires ASGI and a sync source requires WSGI.
-A mismatch raises :exc:`~django.core.exceptions.ImproperlyConfigured` when the response is built.
-Without the guard the wrong-kind iterator buffers in full and hangs the stream before the first byte.
-Pair an async source with ASGI and a sync source with WSGI.
+A mismatch raises :exc:`~django.core.exceptions.ImproperlyConfigured` when the response is built, because the wrong-kind iterator would buffer in full and hang the stream.
 
 A sync source under WSGI sends no heartbeat of its own.
 A blocked ``next()`` on a sync iterator has nothing to interrupt it without a thread, so a quiet sync stream stays quiet.
 The source asks for a keepalive by yielding ``None``, and the stream writes a ``: heartbeat`` comment in its place.
 A sync source yields ``None`` whenever its wait times out, as ``patch_source`` in `The stream helper`_ does with the ``None`` that ``changes`` yields after each quiet ``timeout``.
-
-An async source yields ``None`` the same way.
 The comment is not an envelope, so it does not count in ``envelopes_sent``.
 Under WSGI the stream also occupies one worker for the full life of the connection, so the recommendation is ASGI for any real workload.
 
-An async source under ASGI receives heartbeat comments.
+An async source yields ``None`` the same way, and under ASGI it also receives heartbeat comments of its own.
 The stream interleaves a heartbeat during a quiet period through :func:`asyncio.wait`, so a buffering proxy keeps the connection.
 The heartbeat period is ``SSE.HEARTBEAT_SECONDS`` in ``PARTIAL_BACKENDS``.
 One stream overrides the period with ``PatchEventStream(request, source, heartbeat_seconds=10)``, which leaves the backend default in place for every other stream.
@@ -203,7 +197,7 @@ The re-fetch brings the current state regardless of how many fan-outs were misse
 Stream telemetry
 ----------------
 
-``PatchEventStream`` announces its own life through two signals, both sent with the stream class as the sender.
+``PatchEventStream`` and ``TopicStream`` announce their life through two signals, each sent with the concrete stream class as the sender, so ``sender=`` tells a manual stream from a topic stream.
 ``sse_stream_opened`` carries the ``request`` and fires when iteration starts and the first frame is about to be sent.
 ``sse_stream_closed`` carries the ``request``, the ``duration_ms`` the connection lived, and the ``envelopes_sent`` count yielded to Django's response iterator.
 It fires when the source is exhausted or the response closes its iterator.

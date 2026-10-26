@@ -28,8 +28,12 @@ Terms used throughout the next.dj documentation.
       See :doc:`/content/topics/static-assets/name-resolution`.
 
    backend
-      A subsystem implementation registered through ``NEXT_FRAMEWORK``.
-      Used for the router, the components backend, the static backend chain, and the form action chain.
+      A subsystem implementation named by a dotted path in ``NEXT_FRAMEWORK``.
+      Used for the router, the components backend, the static backend chain, the form action chain, the form wizard drafts, the partial protocol, the sitemap sections, the consent store, the realtime broker, and the ticket binding.
+
+   broker
+      The realtime backend that numbers, stores, and fans out topic messages, ``MemoryBroker`` by default and ``RedisBroker`` across processes.
+      Selected through ``NEXT_FRAMEWORK["REALTIME"]["BROKER"]``, see :ref:`topics-realtime`.
 
    collector slot
       A named collection inside the static collector.
@@ -189,9 +193,41 @@ Terms used throughout the next.dj documentation.
       Carries the asset version, the ordered patch ops, the co-located assets of the rendered targets, and the machine-readable form meta.
 
    stream frame
-      The transport wrapper around a patch envelope.
-      Realtime frames add ``topic``, ``epoch``, ``seq``, and ``server_time`` beside the envelope, while SSE and WebSocket use different framing.
+      One message of a realtime stream, such as ``next-hello``, ``next-patches``, ``next-skip``, or ``next-end``.
+      A ``next-patches`` frame carries ``topic``, ``epoch``, ``seq``, and ``server_time`` beside the patch envelope, and SSE and WebSocket carry the same frames in their own wire framing.
       See :doc:`/content/topics/realtime`.
+
+   epoch
+      The random token a broker draws whenever the counter of a topic starts again, after a restart, an evicted key, or a flushed cache.
+      A ``seq`` is unique only within its epoch, and a new epoch tells the client to resync, see :ref:`topics-realtime`.
+
+   presence
+      The live count or member list of the streams open on a topic, which a broker that implements ``PresenceBroker`` maintains.
+      See :ref:`topics-realtime`.
+
+   replay
+      The bounded best-effort catch-up of the messages a reconnecting stream missed, which the broker keeps per topic.
+      See :ref:`topics-realtime`.
+
+   ticket
+      A signed token that carries the grant of a stream from the guarded page to the WebSocket handshake.
+      It is short-lived under ``NEXT_FRAMEWORK["REALTIME"]["TICKET_MAX_AGE"]``, see :ref:`topics-realtime`.
+
+   ticket binding
+      The rule that ties a ticket to the identity of the browser, a ``TicketBinding`` subclass named by ``NEXT_FRAMEWORK["REALTIME"]["TICKET_BINDING"]``.
+      ``SessionBinding`` is the default, see :ref:`topics-realtime`.
+
+   transport
+      The connection a realtime stream travels over, SSE or WebSocket, which the page negotiates from ``NEXT_FRAMEWORK["REALTIME"]["TRANSPORTS"]``.
+      Both carry the same frames, and SSE takes over when negotiation or the socket fails, see :ref:`topics-realtime`.
+
+   tunnel
+      The path that carries a form action over the open WebSocket for an action declared with ``transport="any"``.
+      See :ref:`topics-realtime-tunnel`.
+
+   upstream event
+      A small event a page sends to the server over its WebSocket, delivered to a handler registered with ``@on``.
+      See :ref:`topics-realtime-upstream`.
 
    realtime topic
       A named broker channel to which an application publishes safe patch operations or events.

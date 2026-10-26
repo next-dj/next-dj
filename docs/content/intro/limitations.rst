@@ -24,7 +24,7 @@ Every context function, component render, and form action runs inside a synchron
 An async workload lives outside the routed page tree, behind a task queue or an ordinary Django view.
 
 The one exception is the realtime layer.
-``TopicStream`` provides broker-backed delivery over SSE and WebSocket, and its upstream handlers may be async, while ``PatchEventStream`` remains the manual source escape hatch.
+``TopicStream`` provides broker-backed delivery over SSE and WebSocket, and its topic transforms and upstream handlers may be async, while ``PatchEventStream`` remains the manual source escape hatch.
 It refuses a sync source under ASGI and an async source under WSGI, because Django buffers a mismatched iterator fully before the first byte.
 See :doc:`/content/topics/partial-rendering/sse` for the source contract and the heartbeat options.
 
@@ -36,7 +36,7 @@ A ``lazy=`` zone fills through a later client round trip, and a ``poll=`` zone r
 A slow zone holds its response instead of streaming a placeholder, because there is no server-side suspense flush.
 Realtime offers WebSocket first when the process mounts the socket through the built-in ``WebSocketApp`` under ASGI, and SSE otherwise.
 Both transports carry server-authored notifications from server to client, and form actions remain the path for client mutations.
-The WebSocket also carries upstream events from the client to a registered handler and, for actions that opt in, a tunnel for form posts, while login, logout, and every action that sets a cookie stay on HTTP.
+The WebSocket also carries upstream events from the client to a registered handler and, for actions that opt in, a tunnel for form posts, so login, logout, and every action that sets a cookie keep the default ``transport="http"``.
 Replay is a bounded catch-up from a per-topic log, and a reconnect the log cannot cover resynchronises its zones over HTTP, see :doc:`/content/topics/realtime`.
 Presence is an attendance count, with member data only when the stream names an ``identify`` callable.
 

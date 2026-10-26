@@ -71,9 +71,10 @@ Test coverage
 The suite runs with ``--cov=next`` and ``--cov-fail-under=100``, so a single uncovered line in ``next/`` fails the run.
 The gate is identical locally and in continuous integration, which runs the suite against the installed wheel rather than the source tree.
 A ``[tool.coverage.paths]`` mapping collapses ``next/`` and ``*/site-packages/next/`` so the two runs report the same numbers.
+The ``test`` job starts a Redis service and sets ``REDIS_URL``, so ``tests/realtime/test_integration.py`` runs against a real server there, and a local run reaches it with ``REDIS_URL=redis://localhost:6379/0 make test``.
 
 Most system check modules are excluded from that gate.
-The ``omit`` list in ``pyproject.toml`` names ``next/checks/``, the ``checks.py`` of ``apps``, ``components``, ``conf``, and ``urls``, and the whole ``checks/`` package of ``forms``, ``pages``, and ``partial``.
+The ``omit`` list in ``pyproject.toml`` names ``next/checks/``, the ``checks.py`` of ``apps``, ``components``, ``conf``, ``consent``, ``realtime``, ``scripts``, ``server``, ``site``, and ``urls``, and the whole ``checks/`` package of ``forms``, ``pages``, ``partial``, and ``seo``.
 ``next/static/checks.py`` is not in that list and stays inside the gate, so a static check still carries its own tests.
 The generic ``*/settings.py`` entry lifts ``next/conf/settings.py`` out of the gate as well, which is why new configuration logic belongs in another module of the ``conf`` area.
 
@@ -110,11 +111,8 @@ The comparison runs on a single Python and Django combination so matrix noise st
 On ``main`` the workflow pushes the head numbers to the ``gh-pages`` branch with an informational alert threshold of 200 percent that never blocks.
 
 The realtime benchmarks live in ``tests/benchmarks/realtime/`` and need no running Redis.
-Only the ``realtime.publish``, ``realtime.fanout``, ``realtime.hello``, and ``realtime.presence`` groups touch a broker.
-``realtime.publish`` runs on both the in-process ``MemoryBroker`` and a ``RedisBroker`` backed by ``fakeredis``, and ``realtime.fanout`` runs on the memory broker alone.
-``realtime.presence`` runs on both of them as well.
-In ``realtime.hello`` only the position read goes to a broker, on both of them, while the handshake frame benchmark uses the memory broker in its setup and never calls a broker in the measured body.
-The other groups run without a broker.
+The ``realtime.publish``, ``realtime.hello``, ``realtime.presence``, and ``realtime.replay`` groups run on ``MemoryBroker`` and on a ``RedisBroker`` backed by ``fakeredis``, ``realtime.fanout`` runs on the memory broker alone, and the other groups touch no broker.
+The ``fakeredis`` rows measure the client and Lua script overhead on an in-process emulator, not the latency of a Redis server.
 Each benchmark checks its own result outside the measured body, so a call that degrades into an early exit fails the test instead of looking fast.
 Each group measures one step of the publish and delivery path.
 
@@ -127,25 +125,46 @@ Each group measures one step of the publish and delivery path.
    * - ``realtime.publish``
      - Numbering and storing one envelope on the memory and Redis brokers, and the public ``publish`` call through the configured broker with its validation, snapshot, and signal.
    * - ``realtime.fanout``
-     - One publish on the memory broker reaching 1, 100, and 1000 synchronous subscribers of the same topic.
+     - One publish on the memory broker reaching 1, 100, and 1000 synchronous subscribers of the same topic, and the same publish reaching asynchronous subscribers on one event loop.
+       The asynchronous cases measure an enqueue that schedules a loop wakeup per subscriber and one that finds the wakeup already queued.
+       Decoding one small or medium Redis Pub/Sub payload into a message sits in this group too.
    * - ``realtime.frame``
      - Serialising one small or medium envelope into an SSE event frame, and delivering one message as a WebSocket patches frame.
+   * - ``realtime.inbound``
+     - Decoding one client text frame with ``frames.parse``, for a heartbeat pong, a subscribe frame with a cursor, and an ``up`` frame.
+   * - ``realtime.upstream``
+     - Resolving the route of one upstream event in a fresh registry of 1 and of 100 routes, where the target event name holds one route and the rest sit under other names, and a miss on an event name no route serves.
+       Dispatching one event to a trivial async handler on the loop and to a trivial sync handler on the handler pool, the ``upstream_received`` signal included.
+   * - ``realtime.transform``
+     - Applying one subscriber's topic transform to a delivered message with ``atransformed``, an async transform awaited on the loop and a sync transform run on the shared pool.
    * - ``realtime.hello``
      - Reading the latest position of 1 or 64 topics in one batch, and building and serialising the handshake frame from positions read beforehand, without touching a broker while it measures.
    * - ``realtime.presence``
-     - Joining a fresh connection, refreshing the deadline of one connection on a roster of 1 and of 1000, and reading the attendance snapshot of 1 and of 1000 members, on the memory broker and on a Redis broker backed by ``fakeredis``.
+     - Joining one connection to a roster of 1 and of 1000, refreshing the deadline of one connection on a roster of the same sizes, and reading the attendance snapshot of 1 and of 1000 members, on the memory broker and on a Redis broker backed by ``fakeredis``.
+       The joining connection leaves again before each round, so every round measures the same roster size.
        The windows are not scheduled while it measures, so no background snapshot enters a timing.
+       Cutting the members from a presence message of 1 and of 100 members with ``counted``, and passing a message without a presence event through untouched, need no broker.
+   * - ``realtime.replay``
+     - Reading the log of one topic after a cursor 1 and 64 messages behind, and after a cursor from a stale epoch that reports the gap, on both brokers.
+       ``catch_up`` over 1 and 64 topics that each trail their snapshot by one message, and parsing a valid and a malformed ``Last-Event-ID``, complete the group.
    * - ``realtime.access``
      - Rechecking topic grants for one live connection with the synchronous ``check()``, inside the throttle window where the cached verdict answers and outside it where the authorizer runs again.
        Live connections under ASGI go through ``acheck()``, which this group does not measure.
    * - ``realtime.ticket``
      - Signing and verifying a session-bound WebSocket grant over 1 or 64 topics.
+   * - ``realtime.negotiation``
+     - Answering a request for a WebSocket ticket on a saved session over 1 or 64 topics, and the SSE fallback for an authorizer without an import-stable path.
+   * - ``realtime.tunnel``
+     - One ``http`` frame through ``DjangoTunnel``, from the frame checks and the URL routing on the shared pool to a trivial ASGI endpoint and the shaped reply.
    * - ``realtime.transports``
      - Resolving the transports a deployment offers, from the warm cache and cold after a cache clear that re-reads the settings and installed apps.
    * - ``partial.sse``
      - Draining a finite stream through ``PatchStreamWriter`` to its last byte.
        The cases are a stream of 50 heartbeat frames, a stream of 20 topic message frames that each carry the topic, sequence, epoch, and server time, and an empty stream that opens and closes.
        The benchmark lives in ``tests/benchmarks/partial/``.
+   * - ``forms.transport``
+     - Telling a tunneled form action from a plain one on a WSGI request, an ASGI request, and a tunneled request, and pinning the session of a tunneled action, cold on a fresh session and warm on one already pinned.
+       The benchmark lives in ``tests/benchmarks/forms/``.
 
 Documentation build
 -------------------
@@ -209,7 +228,6 @@ The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, ch
      - Only under ``DEBUG``, when the payload carries ``$dev``, for the development diagnostics.
 
 The job then enforces a gzip budget on every bundle, 16384 bytes for ``next.min.js``, which ships on every page, and 3584, 4096, 4096, 768, 1024, and 2048 bytes for the scripts, stream, ws, csrf, poll, and dev chunks, and that budget check runs in continuous integration only.
-Each of the seven bundles has its own gzip budget, including the core bundle that every page loads.
 Growth past a budget calls for a lazily loaded chunk rather than a larger core file.
 The job finishes with the vitest run and its coverage thresholds.
 

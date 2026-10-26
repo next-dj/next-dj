@@ -210,7 +210,7 @@ The store methods above are the part a project writes, and each has to prune exp
 ``Presence.count`` is the number of distinct members plus every connection without a member, and the list holds at most ``presence_limits.size`` of them.
 
 A subclass of ``RedisBroker`` inherits presence whole.
-It overrides ``announce_presence`` to observe or reroute the snapshots the schedule publishes, and ``aannounce_presence`` for those ``aclose`` flushes.
+An override of ``announce_presence`` observes or reroutes the snapshots the schedule publishes, and one of ``aannounce_presence`` those ``aclose`` flushes.
 An override of ``topic_key`` has to return a distinct key for the kinds ``presence``, ``members``, ``window``, ``identified``, ``attendees``, ``holders``, ``state``, and ``order`` too, all under one hash tag, since the scripts touch them together.
 
 Without these methods a stream that passes ``presence`` fails to start with ``ImproperlyConfigured``, and ``presence()`` and ``apresence()`` raise it too.
@@ -263,8 +263,7 @@ The broker refuses a ``PREFIX`` with ``{`` or ``}`` when it is created, since a 
 
 Every stream holds one pooled Redis connection, so size ``CLIENT['max_connections']`` for the open streams.
 The ``200`` in the registration below is an example value to size from measurement, see :ref:`deployment-capacity`.
-The default pool raises ``MaxConnectionsError`` when it runs out, and the broker logs a warning on ``next.realtime.redis.broker`` for it.
-A ``BlockingConnectionPool`` raises a plain ``ConnectionError`` on timeout, so its exhaustion ends the stream with ``BrokerConnectionError`` and logs no warning.
+An exhausted pool ends the stream with ``BrokerConnectionError``, see :ref:`ref-realtime` for the warning it logs.
 
 Register the backend
 ~~~~~~~~~~~~~~~~~~~~

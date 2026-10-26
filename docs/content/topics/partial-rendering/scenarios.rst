@@ -406,6 +406,14 @@ The default ``done`` closes the layer with a result and asks the opening link to
 .. code-block:: python
    :caption: request/[step]/page.py
 
+   from typing import Any
+
+   from access.models import AccessRequest
+   from django.http import HttpRequest, HttpResponse
+
+   from next.forms import FormWizard
+   from next.partial import Patches
+
    class AccessRequestWizard(FormWizard):
        def done(
            self, request: HttpRequest, cleaned_data: dict[str, Any]

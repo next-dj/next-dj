@@ -20,7 +20,7 @@ A ``{% zone %}`` block marks the slice of a page template the server can re-rend
    :caption: catalog/template.djx
 
    {% zone "catalog-results" %}
-     {% for product in page_obj.products %}
+     {% for product in page_obj %}
        <p data-next-key="{{ product.pk }}">{{ product.title }}</p>
      {% endfor %}
    {% endzone %}

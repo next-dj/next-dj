@@ -37,22 +37,35 @@ _HIDE_WARNING = "DJANGO_RUNSERVER_HIDE_WARNING"
 
 
 DEV_SERVER_KEY: Final = "DEV_SERVER"
+_UVICORN_OPTIONS: Final = {
+    "max_frame_bytes": "ws_max_size",
+    "ping_interval": "ws_ping_interval",
+}
 
 
 @runtime_checkable
 class ASGIServer(Protocol):
-    """A server that runs an ASGI app until it stops, the way `uvicorn.run` does."""
+    """A server that runs an ASGI app until it stops, the way `uvicorn.run` does.
+
+    `max_frame_bytes` and `ping_interval` arrive server-neutral, for it to map or drop.
+    """
 
     def run(self, app: ASGI3Application, **options: object) -> None:
-        """Serve `app` with the server's own options."""
+        """Serve `app` with the realtime socket options and the server's own."""
 
 
 class UvicornServer:
     """Runs the app on uvicorn, the development server `DEV_SERVER` names by default."""
 
     def run(self, app: ASGI3Application, **options: object) -> None:
-        """Serve `app` through `uvicorn.run`, imported here as uvicorn is optional."""
-        importlib.import_module("uvicorn").run(app, **options)
+        """Serve `app` through `uvicorn.run`, imported here as uvicorn is optional.
+
+        The socket options become uvicorn's `ws_max_size` and `ws_ping_interval`.
+        """
+        renamed = {
+            _UVICORN_OPTIONS.get(name, name): value for name, value in options.items()
+        }
+        importlib.import_module("uvicorn").run(app, **renamed)
 
 
 def server_class(path: str) -> type[ASGIServer]:
@@ -125,11 +138,11 @@ def development_application(*, static: bool) -> ASGI3Application:
 
 
 def server_options() -> dict[str, object]:
-    """Return the uvicorn options the realtime socket needs over uvicorn's defaults.
+    """Return the server-neutral options the realtime socket needs over the defaults.
 
     The socket refuses a larger frame anyway and drops a peer that stops answering.
     """
-    return {"ws_max_size": MAX_INBOUND_BYTES, "ws_ping_interval": None}
+    return {"max_frame_bytes": MAX_INBOUND_BYTES, "ping_interval": None}
 
 
 def serve(

@@ -158,6 +158,7 @@ if TYPE_CHECKING:
     )
     from next.realtime.checks import (
         check_realtime_settings,
+        check_shared_broker,
         check_ticket_introspection,
         check_upstream_handlers,
     )
@@ -364,6 +365,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
     ),
     "next.realtime.checks": (
         "check_realtime_settings",
+        "check_shared_broker",
         "check_ticket_introspection",
         "check_upstream_handlers",
     ),
@@ -580,6 +582,7 @@ __all__ = [
     "check_seo_sources_on_closed_site",
     "check_seo_text_files",
     "check_shared_action_name_collisions",
+    "check_shared_broker",
     "check_shared_page_forms",
     "check_shared_page_responses",
     "check_single_keyless_context",

@@ -1,3 +1,5 @@
+.. _howto-count-down-to-a-server-deadline:
+
 Count down to a server deadline
 ===============================
 
@@ -69,7 +71,7 @@ A new event cancels the previous timer, so repeated phase updates never stack lo
 
    const output = document.querySelector("[data-deadline]");
    let timer = 0;
-   const stop = Next.partial.stream.on(
+   Next.partial.stream.on(
      "auction:42",
      "auction:phase",
      ({ deadline }) => {

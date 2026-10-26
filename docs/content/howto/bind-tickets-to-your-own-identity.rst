@@ -134,14 +134,14 @@ It does no database, cache, or network access, and the credential carries everyt
 ``subject`` returns ``None`` for a credential it does not recognise.
 
 A ticket stores a digest of the subject under ``SECRET_KEY`` and is accepted under any ``SECRET_KEY_FALLBACKS`` entry too, so rotating the key does not strand a ticket for its short lifetime.
-Over SSE the default ``live_session`` hands the session key of the request to ``stored_session``, which ``next.realtime`` exports.
+Over SSE the default ``live_session`` hands the session key of the request to ``stored_session`` from ``next.realtime.binding``.
 A binding with no sessions overrides ``live_session`` to return ``None``, and one with its own SSE identity returns a ``LiveIdentity`` from it.
 
 Limits
 ~~~~~~
 
 A handler never sees the credential.
-``Handshake.credential`` holds the string that the ``credential`` method returned, stays out of ``repr``, and reaches only the rechecks.
+``Handshake.credential``, on ``next.realtime.socket.Handshake``, holds the string that the ``credential`` method returned, stays out of ``repr``, and reaches only the rechecks.
 ``Upstream.subject`` and ``Handshake.subject`` hold a keyed digest of what ``subject`` returns, stable across reconnects of one identity and empty when the credential proves none.
 The digest changes when ``SECRET_KEY`` rotates, and under ``SessionBinding`` it follows the session rather than the user.
 A handler that needs the identity reads ``upstream.user`` or ``upstream.subject``.

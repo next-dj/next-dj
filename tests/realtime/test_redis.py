@@ -717,6 +717,19 @@ def test_redis_aclose_without_async_client_closes_sync_pool(
     assert clients.created == []
 
 
+def test_redis_aclose_closes_the_sync_pool_off_the_event_loop(
+    clients, monkeypatch
+) -> None:
+    backend = RedisBroker()
+    threads: list[threading.Thread] = []
+    monkeypatch.setattr(
+        clients.sync, "close", lambda: threads.append(threading.current_thread())
+    )
+    asyncio.run(backend.aclose())
+    assert len(threads) == 1
+    assert threads[0] is not threading.main_thread()
+
+
 _TRANSPORT_ERRORS = [
     redis.ConnectionError("Connection closed by server."),
     redis.TimeoutError("Timeout reading from socket"),

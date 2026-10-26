@@ -28,6 +28,7 @@ A receiver body therefore guards itself, see :ref:`topics-signals` for the patte
 
 Most of the catalog is built with ``use_caching=True``, which makes Django key the receiver lookup on a weak reference to the sender.
 Code that sends one of those signals itself has to pass a weak-referenceable sender, so ``None``, a string, and an instance of a slots class without ``__weakref__`` all raise ``TypeError``.
+The realtime signals ``message_published``, ``upstream_received``, ``upstream_rejected``, ``stream_subscribed``, and ``stream_unsubscribed`` accept a sender without ``__weakref__``, because their receiver cache skips such a sender and looks its receivers up again.
 Four signals stay uncached and accept any sender.
 ``asset_registered`` sends the ``StaticAsset`` itself, which carries no ``__weakref__``, ``collector_finalized`` sends a collector built for a single render, and ``provider_registered`` and ``settings_reloaded`` fire rarely enough that the weak-key bookkeeping buys nothing.
 
@@ -280,6 +281,8 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``zone_name``, ``page_path``, ``request``, ``duration_ms``
      - After a zone body renders for a partial request.
        ``duration_ms`` times the zone render.
+
+.. _ref-signals-stream-lifecycle:
 
 Stream lifecycle
 ----------------

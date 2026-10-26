@@ -23,12 +23,10 @@ from django.test import RequestFactory, override_settings
 from django.test.utils import CaptureQueriesContext
 
 from next.realtime import (
-    Handshake,
     LiveIdentity,
     SessionBinding,
     SignedCookieBinding,
     TicketBinding,
-    TicketIntrospectionView,
     TopicStream,
     WebSocketApp,
     socket as socket_module,
@@ -38,7 +36,9 @@ from next.realtime.binding import binding_class, session_user, ticket_binding
 from next.realtime.errors import InvalidTicketError
 from next.realtime.frames import Close
 from next.realtime.manager import broker_manager
+from next.realtime.socket import Handshake
 from next.realtime.tickets import issue_ticket, verify_ticket
+from next.realtime.views import TicketIntrospectionView
 from next.testing import SseReader, override_next_settings
 from next.testing.realtime import WebSocketCommunicator, override_websocket_mount
 from tests.support.realtime import ROOM_AUTHORIZER_REF, websocket_scope

@@ -11,6 +11,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.core.handlers.asgi import ASGIRequest
 from django.http import StreamingHttpResponse
 
+from next.conf.merge import FROZEN_DEFAULTS
 from next.utils import positive_number
 
 from .envelope import Envelope
@@ -57,8 +58,9 @@ _HEARTBEAT_COMMENT = ": heartbeat\n\n"
 RETRY_OPTION = "RETRY_MS"
 HEARTBEAT_OPTION = "HEARTBEAT_SECONDS"
 SSE_OPTION = "SSE"
-_DEFAULT_RETRY_MS = 3000
-_DEFAULT_HEARTBEAT_SECONDS = 25.0
+_SSE_DEFAULTS = FROZEN_DEFAULTS["PARTIAL_BACKENDS"][0]["OPTIONS"][SSE_OPTION]
+_DEFAULT_RETRY_MS: int = _SSE_DEFAULTS[RETRY_OPTION]
+_DEFAULT_HEARTBEAT_SECONDS = float(_SSE_DEFAULTS[HEARTBEAT_OPTION])
 _CONTROL_FRAMES = (StreamHello, StreamSkip, StreamEnd)
 _UNSAFE_ID = frozenset("\r\n\0")
 

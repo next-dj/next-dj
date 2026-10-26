@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeGuard, cast
 
@@ -33,7 +33,8 @@ if TYPE_CHECKING:
     from .attendance import Identify
     from .messages import Message
 
-    type TopicTransform = Callable[[Message], Patches | Envelope | None]
+    type TopicPayload = Patches | Envelope | None
+    type TopicTransform = Callable[[Message], TopicPayload | Awaitable[TopicPayload]]
 
 
 _SALT = "next.realtime.websocket.ticket.v1"

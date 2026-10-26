@@ -105,12 +105,7 @@ Update ``notes/pages/page.py`` so the ``notes`` context honours ``q``, and publi
 
 Both callables read ``request.GET`` the same way, so the zone fetch and the full page agree on the filter.
 The ``query`` context only feeds the input value, and the ``notes`` context drives the list.
-See :doc:`/content/topics/context` for how a page publishes named values.
-The hand-parsed ``request.GET`` keeps the example explicit.
-The ``DQuery`` marker from ``next.urls`` reads the same query parameter declaratively, see :doc:`/content/topics/dependency-injection`.
-
-A context function bound with ``@context("notes", zone="note-list")`` is skipped only on a zone ``GET`` that asks for a different zone.
-A full page render passes no zone batch and still runs every callable, see :doc:`/content/topics/context`.
+The ``DQuery`` marker reads the same parameter declaratively, and ``zone=`` on ``@context`` skips a callable on a zone ``GET`` for another zone, see :doc:`/content/topics/context`.
 
 There is no handler and no JavaScript.
 Typing ``gro`` debounces, then sends one zone ``GET``.
@@ -140,7 +135,7 @@ The server re-renders only the ``note-list`` zone and answers with a single morp
      "form": null
    }
 
-The ``version`` field is the asset version the client compares against its own, and it stays ``"0"`` until the project runs a manifest staticfiles storage or pins a literal ``VERSION`` in the partial backend options, see :doc:`/content/ref/settings`.
+The ``version`` field is the asset version the client compares against its own, and it stays ``"0"`` until the project sets ``STATIC_VERSION``, runs a manifest staticfiles storage, or pins a literal ``VERSION`` in the partial backend options, see :doc:`/content/ref/settings`.
 The envelope also ships the co-located assets of the zone body, here the ``note_card`` styles and script.
 A page that publishes values to ``window.Next.context`` gets a ``context`` op alongside the morph, see :doc:`/content/topics/static-assets/js-context`.
 The runtime syncs the address bar with ``history.replaceState``, so ``/?q=gro`` stays shareable.
@@ -232,7 +227,7 @@ Both partial paths are reachable from the test client of :doc:`tutorial05`.
            "create_note_form",
            {"title": "From test", "body": "body"},
            origin="/",
-           partial="note-list",
+           partial=True,
        )
        envelope = envelope_of(response)
        assert envelope.zone_targets() == ["note-list"]
@@ -345,4 +340,4 @@ The Notes application is complete and live.
 
    :doc:`whatsnext` lists where to go next, by topic.
    :doc:`/content/topics/partial-rendering/index` covers zones, patches, modals, lazy zones, and the SSE bridge.
-   :doc:`/content/topics/partial-rendering/scenarios` walks six more partial-rendering tasks from markup to handler.
+   :doc:`/content/topics/partial-rendering/scenarios` walks seven partial-rendering tasks from markup to handler.

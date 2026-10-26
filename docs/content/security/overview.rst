@@ -222,7 +222,7 @@ Every tunneled request runs the access recheck of the stream first, so a revoked
 
 A WebSocket cannot set a cookie, so the tunnel never applies one.
 A reply that sets a cookie becomes the ``http_only`` refusal after the action has run, and ``cycle_key()`` and ``flush()`` raise ``SessionRotationError`` so ``login()`` and ``logout()`` leave the stored session intact.
-Login, logout, and every action that sets its own cookie stay on HTTP.
+Login, logout, and every action that sets its own cookie therefore keep the default ``transport="http"``.
 ``next.W145`` reports the cookie message storage that turns a success message into ``http_only``.
 
 The framework limits each connection and caps no number of open streams per user, address, or process.

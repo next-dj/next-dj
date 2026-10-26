@@ -114,6 +114,7 @@ Both transports carry the same frames, apply the same access rules, and share on
 next.dj neither uses nor requires Django Channels.
 Its WebSocket runs on plain ASGI and loads the Django session itself, and topics travel through the next.dj broker rather than a channel layer.
 A project that already routes WebSockets with Channels mounts ``WebSocketApp`` as one route of its own router, as :ref:`howto-stream-over-websockets-router` shows.
+It can instead wrap its whole router in ``next.realtime.application``, which serves ``WS_PATH`` itself and passes every other WebSocket path and the lifespan to the router.
 
 Where to start
 --------------
@@ -140,10 +141,14 @@ A malformed topic name or a topic in the reserved ``next:`` namespace raises ``I
 .. code-block:: python
    :caption: rooms/signals.py
 
+   from django.http import HttpRequest
+   from rooms.models import Room
+
    from next.partial import Patches
    from next.realtime import publish
 
-   publish(f"room:{room.code}", Patches(request).refresh(zone="scoreboard"))
+   def announce(request: HttpRequest, room: Room) -> None:
+       publish(f"room:{room.code}", Patches(request).refresh(zone="scoreboard"))
 
 The request ID from a request-bound ``Patches`` builder is attached automatically.
 This lets the browser ignore the update produced by its own successful action.
@@ -152,9 +157,10 @@ An explicit ``echo_of`` value on the builder takes precedence.
 Topics accept only ``refresh``, ``event``, ``toast``, and ``remove`` operations.
 The framework rejects HTML operations, custom operations, assets, form metadata, CSRF state, and values that cannot be serialized as JSON.
 Use ``refresh(zone=...)`` when a subscriber must load private or request-specific HTML.
+The browser then fetches that zone through its own guarded page request and session cookies.
 
 A deferred publication runs as a robust ``on_commit`` callback.
-When the broker fails after the commit, Django logs the exception with the topic in the callback's repr and the committed write still answers normally.
+When the broker fails after the commit, Django logs the exception under the callback's qualified name, which names the topic, and the committed write still answers normally.
 ``publish(..., on_commit=False)`` and ``apublish`` call the broker at once, return the ``Message``, and raise the broker error to the caller.
 
 Subscribe from an authorized page
@@ -177,6 +183,7 @@ The page's regular access checks and dependency resolution run before the stream
 ``DUrl[str]`` reads the ``code`` segment of the URL, see :doc:`/content/topics/dependency-injection`.
 The backend subscription is selected from the request's WSGI or ASGI type.
 The broker wait timeout is the ``SSE.HEARTBEAT_SECONDS`` option of the partial backend, 25 seconds by default, and each timeout writes a heartbeat comment under WSGI and ASGI alike.
+A WebSocket times its pings, access rechecks, and presence refreshes by ``REALTIME['HEARTBEAT']`` instead, 25 seconds by default, and every later mention of the heartbeat interval means the one of the stream's transport.
 Under WSGI, disconnect cleanup is best-effort at the next yield, write, or close.
 Closing the stream releases the broker subscription.
 
@@ -185,18 +192,16 @@ An optional ``transform(message)`` runs for each subscriber and can return a saf
 A dotted path is imported when the stream is built and reaches a WebSocket ticket as written.
 Returning ``None`` suppresses the message for that subscriber.
 A transform that raises or returns an unsafe payload suppresses the message the same way and logs the topic and the ``seq`` on ``next.realtime.delivery``, on a live message and on a replayed one alike.
-Async streams run synchronous transforms in a worker thread.
-
-Topic publication carries JSON patch instructions only.
-In particular, do not publish HTML for another subscriber to apply.
-Use ``refresh(zone=...)`` for private or request-specific content.
-The browser then fetches that zone through its own guarded page request and session cookies.
+``transform`` may be a plain function, an ``async def`` function, or an object whose ``__call__`` is either.
+An async stream or a WebSocket awaits an async transform on the event loop and runs a sync one on the shared thread pool.
+A sync stream under WSGI runs an async transform to completion through ``async_to_sync``.
 
 Access while a stream is open
 -----------------------------
 
 The page guard runs once, when the stream opens.
 An optional ``authorize(user, topic)`` callback on ``TopicStream`` keeps watching the grant afterwards on both transports.
+``authorize`` is a synchronous callable that returns ``True`` to grant the topic, and any other value, a truthy one or an ``async def`` coroutine included, denies it.
 Each live connection rechecks the session behind it and calls ``authorize`` for every topic at most once per heartbeat interval.
 The session counts as revoked when it was deleted, flushed, rotated, logged out, or now loads a different or inactive user.
 
@@ -216,7 +221,7 @@ When the process mounts a ``WebSocketApp``, the client can negotiate a WebSocket
 The signed ticket binds the current session to the topics, transform, and importable ``authorize`` callback chosen by the page.
 The client sends the ticket in its first WebSocket frame and never in the URL.
 The first handshake does not consume the ticket, so it stays valid for every handshake until ``REALTIME['TICKET_MAX_AGE']`` elapses.
-It is signed from ``SECRET_KEY``, so rotating the key invalidates outstanding tickets.
+It is signed from ``SECRET_KEY`` and also verifies under ``SECRET_KEY_FALLBACKS``, so a rotation that keeps the old key as a fallback leaves outstanding tickets valid, and dropping the old key invalidates them.
 The socket checks the request Origin before it accepts, and it rechecks the session and topic access before joining the broker and during the connection.
 WebSocket works best with a session engine that stores sessions on the server, and ``next.W142`` flags the signed-cookie engine under the default ticket binding, see `The signed-cookie session engine`_.
 The socket loads its session from the cookie at the handshake and on every recheck, so a session cache that evicts live entries closes sockets with ``4401``.
@@ -278,7 +283,7 @@ Delivery guarantees
 
 Delivery is at most once and best-effort.
 Bounded subscriber queues drop their oldest message when full, and a reconnect recovers only what the replay log still holds, see `Replay after a reconnect`_.
-The in-memory broker is process-local.
+The in-memory broker is process-local, and ``manage.py check --deploy`` reports ``MemoryBroker`` as ``next.W149``.
 Use ``RedisBroker`` for multiple workers or hosts, so they share publication and sequence state.
 An event that must not be lost goes through an outbox table, see :doc:`/content/howto/deliver-events-durably`.
 
@@ -343,6 +348,8 @@ A WebSocket closes after a brief drain, once the tunneled requests and acknowled
 A page loaded in a hidden tab opens its streams on the first show.
 Over SSE that is a new ``EventSource``, which sends no ``Last-Event-ID``, so a stream resumed after a visibility change resynchronises instead of replaying.
 
+.. _topics-realtime-presence:
+
 Presence
 --------
 
@@ -387,7 +394,7 @@ Members and privacy
 It runs once per topic when the connection opens, with the session user of the request, and under ASGI it runs on the shared worker pool, so it may query the database.
 ``subject`` is the opaque id of the browser's user or visitor, the same string ``Upstream.subject`` holds, so an anonymous visitor can be named too.
 It stays the same across reconnects and on both transports, and under ``SignedCookieBinding`` a guest keeps the visitor cookie's subject across reloads.
-It is empty when the request carries no session or visitor cookie, and ``identify(user, topic)`` without the third parameter keeps working.
+It is empty when the request carries no session or visitor cookie, and an ``identify`` that takes only ``(user, topic)`` is called without the subject.
 
 .. code-block:: python
    :caption: rooms/presence.py
@@ -539,6 +546,7 @@ A synchronous handler runs on a thread pool of its own and may use the ORM.
 An asynchronous handler runs on the event loop.
 A handler returns nothing, and an exception it raises is logged and reaches the sender as a failed acknowledgment.
 The ``upstream_received`` signal fires before each handler runs, with the handler as its sender, and ``upstream_rejected`` fires for an event refused before a handler finished.
+``stream_subscribed``, ``stream_unsubscribed``, and ``message_published`` report the life of every stream and publication, see :ref:`ref-signals-stream-lifecycle`.
 
 Discovery
 ~~~~~~~~~
@@ -569,10 +577,11 @@ A failed recheck acknowledges the frame as ``denied`` and closes the socket like
 A handler still validates ``data`` and checks what the user may do, because the grant says only that the user may watch the topic.
 
 Each connection draws a token per frame from one bucket, set by ``REALTIME["UPSTREAM"]``.
-The defaults are ``10`` frames a second, a burst of ``20``, ``16384`` bytes per ``up`` frame, and ``10`` seconds for a handler before the ``ack`` answers ``timeout``.
+The defaults are ``10`` frames a second, a burst of ``20``, ``16384`` bytes per ``up`` frame, ``16`` handlers running at once per connection under ``CONCURRENCY``, and ``10`` seconds for a handler before the ``ack`` answers ``timeout``.
 ``hello`` carries that handler timeout as ``upstream.timeout``, so the client waits for an ``ack`` as long as the server lets the handler run.
 The same bucket serves the tunneled requests of `Form actions over WebSocket`_.
 A frame over the budget is refused with ``limit``, and three refusals in a row close the socket with ``4429``.
+An event past ``CONCURRENCY`` is refused with ``limit`` as well and never counts toward ``4429``.
 A client that throttles its own sends, a typing indicator at most every few hundred milliseconds, never reaches that code.
 
 What the framework does not cap
@@ -653,6 +662,7 @@ The tunnel is opt-in per action.
    :caption: rooms/pages/rooms/[slug:code]/page.py
 
    from django.http import HttpRequest
+   from rooms.models import ChatMessage
 
    import next.forms
    from next.forms import redirect_to_origin
@@ -664,7 +674,7 @@ The tunnel is opt-in per action.
            transport = "any"
 
        def on_valid(self, request: HttpRequest):
-           Message.objects.create(body=self.cleaned_data["body"])
+           ChatMessage.objects.create(body=self.cleaned_data["body"])
            return redirect_to_origin(request)
 
 The default is ``"http"``.
@@ -731,8 +741,8 @@ Replace the tunnel
 
 ``application()`` hands the tunnel the HTTP application it wraps.
 ``WebSocketApp(http_app=...)`` runs the requests through another ASGI application.
-A subclass that overrides ``WebSocketApp.tunnel(scope)`` returns its own object with ``async __call__(request, *, connection)`` that answers with a ``Reply`` or a ``Refusal`` and ``hints()`` that names the headers it keeps.
-``DjangoTunnel`` keeps its header lists and limits in class attributes and decides each ``Set-Cookie`` in ``cookie_allowed``, so a subclass extends them without copying the class, and the ``hello`` frame tells the client the extended header list.
+A subclass that overrides ``WebSocketApp.tunnel(scope)`` returns its own object with ``async __call__(request, *, connection)`` that answers with a ``Reply`` or a ``Refusal`` from ``next.realtime.frames`` and ``hints()`` that names the headers it keeps.
+``next.realtime.tunnel.DjangoTunnel`` keeps its header lists and limits in class attributes and decides each ``Set-Cookie`` in ``cookie_allowed``, so a subclass extends them without copying the class, and the ``hello`` frame tells the client the extended header list.
 The frame fields, the refusal table, and the signatures are in :doc:`/content/ref/realtime`.
 
 Manual streams
@@ -741,6 +751,7 @@ Manual streams
 Use ``PatchEventStream`` when an application needs a custom source.
 Its source must match the server mode, a synchronous iterable under WSGI or an asynchronous iterable under ASGI.
 The page view still owns access checks, and the author owns source cleanup.
+A manual stream always travels over SSE, since only ``TopicStream`` answers WebSocket negotiation with a ticket.
 
 See also
 --------

@@ -68,9 +68,9 @@ In next.dj a zone request is the same URL as the page, and the unified page view
 A redirect, a login bounce, or a denial the page already performs therefore stands before any zone renders, without a second guard written for the partial path.
 
 A zone rendered for a page whose own view did not run carries the same check by another route.
-``Patches.morph_zone`` re-runs the body resolution of the page the origin names, and ``Patches.morph_foreign_zone`` does the same for the page the handler names, both raising ``ForeignPageNotAuthorizedError`` when the requester may not render it, before the zone renders.
-The ``X-Next-Origin`` header is validated same-site before it is trusted and resolved with its path decoded like ``request.path``, so a denial surfaces as that exception rather than a silent morph.
-A header that names no page falls back to the posted form origin.
+``Patches.morph_zone`` re-runs the body resolution of the page the posted form origin names, and ``Patches.morph_foreign_zone`` does the same for the page the handler names, both raising ``ForeignPageNotAuthorizedError`` when the requester may not render it, before the zone renders.
+``resolve_partial_origin`` validates the ``X-Next-Origin`` header same-site before it trusts it and resolves it with its path decoded like ``request.path``, and a header that names no page falls back to the posted form origin.
+The handler passes the page it returns to ``morph(page=, url_kwargs=)``, while ``morph(zone=)`` always renders against the posted form origin.
 
 htmx and Turbo place the same responsibility on the view the request reaches, which is the ordinary Django position and is neither better nor worse in itself.
 The difference is that the region to update is chosen in the template rather than derived from the page the server has already authorized.

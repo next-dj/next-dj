@@ -172,6 +172,30 @@ def test_topic_stream_negotiates_a_private_session_bound_websocket_ticket(
 
 
 @pytest.mark.django_db()
+def test_negotiation_warns_once_when_an_explicit_ws_has_no_socket_mounted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    request = RequestFactory().get("/polls/42/stream/", HTTP_X_NEXT_TRANSPORT="ws")
+    request.session = SessionStore()
+    transports._unmounted_warned.clear()
+
+    with (
+        override_websocket_mount(),
+        override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}),
+        caplog.at_level("WARNING", "next.realtime.transports"),
+    ):
+        _negotiate(request, "poll:42", authorize=_allow_topic)
+        response = _negotiate(request, "poll:42", authorize=_allow_topic)
+    transports._unmounted_warned.clear()
+
+    assert response.status_code == 200
+    warned = [
+        record for record in caplog.records if record.name == "next.realtime.transports"
+    ]
+    assert len(warned) == 1
+
+
+@pytest.mark.django_db()
 def test_websocket_negotiation_falls_back_without_stable_topic_authorizer(
     ws_available: None,
 ) -> None:
@@ -808,6 +832,32 @@ def test_async_topic_stream_revokes_on_a_message_and_runs_transform_off_loop(
 
     asyncio.run(scenario())
     assert threads == [False]
+
+
+def test_async_topic_stream_awaits_an_async_transform_on_the_loop(
+    memory_broker: MemoryBroker, streams: LiveStreams
+) -> None:
+    threads: list[bool] = []
+
+    async def transform(message):
+        threads.append(threading.current_thread() is threading.main_thread())
+        return Patches(None).event("poll:update", {"seq": message.seq})
+
+    async def scenario() -> None:
+        request = AsyncRequestFactory().get("/polls/1/stream/")
+        stream = TopicStream(
+            request, "poll:1", transform=transform, heartbeat_seconds=0.001
+        )
+        source = stream._async_messages(memory_broker)
+        assert isinstance(await anext(source), StreamHello)
+        await apublish("poll:1", Patches(None).refresh(zone="results"))
+        item = await anext_item(source)
+        assert item.envelope.ops[0].extras["name"] == "poll:update"
+        await source.aclose()
+
+    asyncio.run(scenario())
+    assert threads == [True]
+    assert streams.live() == 0
 
 
 class _DroppingBroker(MemoryBroker):

@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 from types import SimpleNamespace
 
@@ -416,6 +417,8 @@ def test_silent_peer_on_a_trickling_topic_is_pinged_and_dropped(
         clock.now += 0.001
         await _finish(task)
         trickle.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await trickle
         assert port.close_code is None
         assert broker.presence(_TOPIC).count == 0
 
@@ -440,6 +443,8 @@ def test_ponging_peer_on_a_trickling_topic_stays(clock: ServerClock) -> None:
         assert not task.done()
         assert broker.presence(_TOPIC).count == 1
         trickle.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await trickle
         port.disconnect()
         await _finish(task)
 

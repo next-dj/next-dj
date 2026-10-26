@@ -71,6 +71,9 @@ The test helpers of ``next.testing`` need the ``testing`` extra, which a project
 
    uv add --dev "next.dj[testing]"
 
+A project that shares realtime topics across processes adds the ``broker`` extra with ``uv add "next.dj[broker]"``, see :doc:`/content/howto/fan-out-across-processes-with-redis`.
+The WebSocket transport in development needs ``uv add "uvicorn[standard]"``, see :doc:`/content/howto/stream-over-websockets`.
+
 Create a Django project
 -----------------------
 
@@ -95,7 +98,7 @@ Add next.dj to INSTALLED_APPS
 .. note::
 
    ``next`` sits above ``django.contrib.staticfiles`` because both apps ship a ``runserver`` command and Django runs the one of the app listed first, as :ref:`django:overriding-commands` describes.
-   The ``runserver`` of ``next`` is the one that serves the project over ASGI with the realtime WebSocket.
+   The ``runserver`` of ``next`` serves the project over ASGI with the realtime WebSocket once uvicorn with a WebSocket library is installed, for example through ``uv add "uvicorn[standard]"``, and over WSGI otherwise.
    With ``django.contrib.staticfiles`` listed first the development server stays on WSGI and the pages silently speak SSE, which ``manage.py check`` reports as ``next.W148``.
 
 Open ``config/settings.py`` and register both ``next`` and your application in :doc:`INSTALLED_APPS <django:ref/settings>`.
@@ -239,7 +242,7 @@ The command exits with status zero, and every message it does print names both t
 The partial asset version needs no settings of its own, because it is derived from the staticfiles manifest when the project has one and falls back to a stable string when it does not, see :doc:`/content/ref/settings`.
 
 Among its reports ``next.E017`` names a ``page.py`` that raises while importing, ``next.E084`` names the same for a ``component.py``, and ``next.E072`` names a composed page template that fails to compile.
-Six other framework checks carry Django's ``deploy`` flag and stay silent until the deployment run asks for them.
+Seven other framework checks carry Django's ``deploy`` flag and stay silent until the deployment run asks for them.
 
 .. code-block:: bash
    :caption: shell

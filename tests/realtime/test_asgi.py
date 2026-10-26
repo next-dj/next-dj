@@ -527,7 +527,7 @@ def test_application_routes_only_the_configured_path(
 
     async def scenario() -> None:
         communicator = WebSocketCommunicator(
-            application(_http_ok, websocket=Recording()), path
+            application(ASGIHandler(), websocket=Recording()), path
         )
         communicator.scope["root_path"] = root_path
         if accepted:
@@ -538,6 +538,100 @@ def test_application_routes_only_the_configured_path(
 
     asyncio.run(scenario())
     assert calls == ([path] if accepted else [])
+
+
+async def _django_middleware(
+    scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    await ASGIHandler()(scope, receive, send)
+
+
+async def _reading_then_failing(
+    scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    await receive()
+    msg = "no route"
+    raise LookupError(msg)
+
+
+@pytest.mark.parametrize(
+    "http_app",
+    [
+        lambda: ASGIStaticFilesHandler(ASGIHandler()),
+        lambda: _django_middleware,
+        lambda: _reading_then_failing,
+    ],
+    ids=["static", "middleware", "read-first"],
+)
+def test_application_refuses_another_path_a_wrapped_django_rejects(
+    http_app: Callable[[], object], caplog: pytest.LogCaptureFixture
+) -> None:
+    async def scenario() -> None:
+        communicator = WebSocketCommunicator(application(http_app()), "/elsewhere/")
+        assert await communicator.connect() == (False, 1000)
+        await communicator.wait()
+
+    with caplog.at_level(logging.DEBUG, "next.realtime.asgi"):
+        asyncio.run(scenario())
+    (record,) = [r for r in caplog.records if r.name == "next.realtime.asgi"]
+    assert record.levelno == logging.DEBUG
+    assert "rejected the WebSocket at /elsewhere/" in record.getMessage()
+
+
+def test_application_reraises_an_app_that_failed_after_sending() -> None:
+    async def router(
+        scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable
+    ) -> None:
+        await receive()
+        await send({"type": "websocket.accept", "subprotocol": None, "headers": []})
+        msg = "broke after accept"
+        raise LookupError(msg)
+
+    async def send(message: object) -> None:
+        return None
+
+    scope = websocket_scope([])
+    scope["path"] = "/chat/"
+
+    async def receive() -> object:
+        return {"type": "websocket.connect"}
+
+    with pytest.raises(LookupError, match="broke after accept"):
+        asyncio.run(application(router)(scope, receive, send))
+
+
+def test_application_lets_a_custom_router_accept_another_path() -> None:
+    async def router(
+        scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable
+    ) -> None:
+        await receive()
+        await send({"type": "websocket.accept", "subprotocol": None, "headers": []})
+
+    async def scenario() -> None:
+        communicator = WebSocketCommunicator(application(router), "/chat/")
+        assert await communicator.connect() == (True, None)
+        await communicator.wait()
+
+    asyncio.run(scenario())
+
+
+def test_application_passes_other_socket_paths_to_a_wrapping_app() -> None:
+    seen: list[tuple[str, str]] = []
+
+    async def router(
+        scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable
+    ) -> None:
+        seen.append((scope["type"], scope["path"]))
+        await receive()
+        await send({"type": "websocket.close", "code": 4000, "reason": None})
+
+    async def scenario() -> None:
+        communicator = WebSocketCommunicator(application(router), "/chat/")
+        assert await communicator.connect() == (False, 4000)
+        await communicator.wait()
+
+    asyncio.run(scenario())
+    assert seen == [("websocket", "/chat/")]
 
 
 @pytest.mark.parametrize("route", ["/live", "/live/", "/"])
@@ -551,7 +645,7 @@ def test_application_routes_the_configured_websocket_path(route: str) -> None:
             calls.append(scope["path"])
 
     async def scenario() -> None:
-        router = application(_http_ok, websocket=Recording())
+        router = application(ASGIHandler(), websocket=Recording())
         await WebSocketCommunicator(router, route).wait()
         refused = WebSocketCommunicator(router, "/_next/ws/")
         assert await refused.connect() == (False, 1000)
@@ -596,7 +690,7 @@ def test_application_refuse_ignores_a_client_that_left_first() -> None:
 
     scope = websocket_scope([])
     scope["path"] = "/elsewhere/"
-    asyncio.run(application(_http_ok)(scope, _noop_receive, send))
+    asyncio.run(application(ASGIHandler())(scope, _noop_receive, send))
 
 
 @pytest.mark.parametrize(
@@ -671,7 +765,11 @@ def _lifespan_run(
         if fail_close:
             raise ConnectionError
 
+    async def drain() -> None:
+        log.append("drain")
+
     monkeypatch.setattr(asgi.broker_manager, "aclose", aclose)
+    monkeypatch.setattr(asgi, "drain", drain)
     events = iter([{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}])
 
     async def receive() -> object:
@@ -684,7 +782,12 @@ def _lifespan_run(
     return log
 
 
-_ANSWERED = ["lifespan.startup.complete", "broker", "lifespan.shutdown.complete"]
+_ANSWERED = [
+    "lifespan.startup.complete",
+    "drain",
+    "broker",
+    "lifespan.shutdown.complete",
+]
 
 
 def test_application_answers_lifespan_for_middleware_around_django(
@@ -769,7 +872,12 @@ def test_application_reports_a_broker_that_fails_to_close(
 ) -> None:
     with caplog.at_level(logging.ERROR, logger="next.realtime"):
         log = _lifespan_run(ASGIHandler(), monkeypatch, fail_close=True)
-    assert log == ["lifespan.startup.complete", "broker", "lifespan.shutdown.failed"]
+    assert log == [
+        "lifespan.startup.complete",
+        "drain",
+        "broker",
+        "lifespan.shutdown.failed",
+    ]
     assert (
         caplog.records[0].getMessage() == "Realtime broker failed to close on shutdown"
     )

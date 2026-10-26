@@ -101,11 +101,11 @@ Without one uvicorn refuses the upgrade, and the client falls back to SSE.
 The ``--workers`` value is a placeholder, see `Estimate capacity and scale out`_.
 The socket closes an inbound frame larger than 64 KiB with ``1009`` anyway, and ``--ws-max-size 65536`` keeps uvicorn from buffering up to 16 MiB first, as :doc:`/content/howto/stream-over-websockets` explains.
 
-Behind gunicorn, use the uvicorn worker class, ``gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker``.
+Behind gunicorn, use the uvicorn worker class from the ``uvicorn-worker`` package, ``gunicorn config.asgi:application -k uvicorn_worker.UvicornWorker``, which replaces the deprecated ``uvicorn.workers`` module.
 Every worker imports ``config/asgi.py`` itself, so each one mounts the socket and offers ``ws``.
 
 The development server needs no separate command.
-``manage.py runserver`` serves the ASGI application that ``ASGI_APPLICATION`` names once uvicorn is installed, and ``next`` has to sit above ``django.contrib.staticfiles`` in ``INSTALLED_APPS`` for its command to win.
+``manage.py runserver`` serves the ASGI application that ``ASGI_APPLICATION`` names once the configured ``DEV_SERVER``, uvicorn by default, is installed, and ``next`` has to sit above ``django.contrib.staticfiles`` in ``INSTALLED_APPS`` for its command to win.
 See :doc:`/content/ref/management` for the rule.
 
 Split deployments
@@ -114,6 +114,7 @@ Split deployments
 A project may serve its pages from a WSGI deployment and run the socket in a separate ASGI deployment, or put a gateway of its own in front.
 The process that renders the pages never mounts a ``WebSocketApp``, so the automatic selection keeps it on SSE.
 List ``"ws"`` in ``REALTIME['TRANSPORTS']`` there, which the framework trusts as written.
+The first ticket negotiation in such a process logs one warning on the ``next.realtime.transports`` logger that the process mounts no WebSocket, which a split deployment expects and a logging filter on that logger silences.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -125,7 +126,7 @@ List ``"ws"`` in ``REALTIME['TRANSPORTS']`` there, which the framework trusts as
    }
 
 Route ``WS_PATH`` to the ASGI deployment at the proxy, and share ``SECRET_KEY``, the session store, and the broker between both.
-The explicit list also makes ``manage.py check`` run the WebSocket deployment checks, ``next.W141`` and ``next.W142`` among them, in the WSGI project.
+The explicit list also makes ``manage.py check`` run the WebSocket session checks, ``next.W141`` and ``next.W142`` among them, in the WSGI project.
 Put ``"sse"`` alone in the list to turn WebSocket off whatever is mounted.
 
 Worker sizing
@@ -136,7 +137,7 @@ One worker handles one request at a time.
 Size the worker count proportional to the request rate and the average response time.
 
 ASGI workers can multiplex many connections through an event loop.
-A single worker handles many concurrent SSE or websocket connections.
+A single worker handles many concurrent SSE or WebSocket connections.
 A patch stream (see :doc:`/content/topics/partial-rendering/sse`) holds its connection open until the source ends or the client disconnects, which outlives any reasonable sync worker timeout.
 Serve those streams from ASGI workers rather than raising the WSGI worker timeout.
 
@@ -186,8 +187,8 @@ Hot reload through ``router_manager.reload`` updates the running worker.
 A multi worker deployment must trigger the reload from every worker or restart the process group.
 
 Realtime publication has the same process boundary.
-The default ``MemoryBroker`` reaches subscribers in one process only, so multi-worker deployments need a shared broker.
-Use ``RedisBroker`` from the ``broker`` extra.
+The default ``MemoryBroker`` reaches subscribers in one process only, so a deployment with several workers or hosts needs a shared broker such as ``RedisBroker``, and ``manage.py check --deploy`` reports ``next.W149`` until it has one.
+See :ref:`howto-realtime-several-workers` for the gunicorn and uvicorn commands, ``--preload``, and several hosts.
 A reconnect catches up from the broker's bounded replay log, and any gap the log cannot cover is repaired by a guarded HTTP zone resync.
 
 A WebSocket loads its session from the cookie at the handshake and on every recheck.

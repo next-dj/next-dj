@@ -9,12 +9,12 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from importlib import import_module
 from types import CodeType, MappingProxyType
-from typing import Final, cast
+from typing import Final, TypeGuard, cast
 
 from asgiref.sync import iscoroutinefunction
 from django.utils.module_loading import autodiscover_modules
 
-from next.conf import next_framework_settings
+from next.conf.scopes import scope_value
 from next.utils import after_fork
 
 from .lifecycle import areceived
@@ -187,6 +187,7 @@ class HandlerRegistry:
         """Start empty."""
         self._routes: list[Route] = []
         self._index: dict[tuple[str, str], Route] = {}
+        self._by_name: dict[str, list[Route]] = {}
         self._duplicates: dict[tuple[str, str], Route] = {}
         self._version = 0
 
@@ -199,10 +200,13 @@ class HandlerRegistry:
         """Register a route, the same function defined again replacing its pair."""
         key = (entry.pattern, entry.name)
         held = self._index.get(key)
+        named = self._by_name.setdefault(entry.name, [])
         if held is None:
             self._routes.append(entry)
+            named.append(entry)
         elif held.handler is entry.handler or _redefined(held.handler, entry.handler):
             self._routes[self._routes.index(held)] = entry
+            named[named.index(held)] = entry
         else:
             self._duplicates[key] = entry
             return held
@@ -216,7 +220,7 @@ class HandlerRegistry:
         The pattern with the fewest placeholders wins, then the one registered first.
         """
         best: tuple[Route, Mapping[str, str]] | None = None
-        for route in self._routes:
+        for route in self._by_name.get(name, ()):
             params = route.match(topic, name)
             if params is None:
                 continue
@@ -241,6 +245,7 @@ class HandlerRegistry:
         """Drop every route and every recorded duplicate."""
         self._routes.clear()
         self._index.clear()
+        self._by_name.clear()
         self._duplicates.clear()
         self._version += 1
 
@@ -282,7 +287,7 @@ def handler_modules() -> Sequence[str] | None:
 
     A value that is no list of module names imports nothing and fails its check.
     """
-    modules = next_framework_settings.REALTIME.get("HANDLERS")
+    modules = scope_value("REALTIME", "HANDLERS")
     if modules is None:
         return None
     if valid_modules(modules):
@@ -290,7 +295,7 @@ def handler_modules() -> Sequence[str] | None:
     return ()
 
 
-def valid_modules(modules: object) -> bool:
+def valid_modules(modules: object) -> TypeGuard[Sequence[str]]:
     """Whether a `HANDLERS` value is a list or a tuple of dotted module names."""
     return isinstance(modules, list | tuple) and all(
         isinstance(module, str) and all(map(str.isidentifier, module.split(".")))

@@ -18,7 +18,7 @@ from next.checks.common import errors_for_unknown_keys
 from next.conf.defaults import USER_SETTING
 from next.conf.scopes import scope_value
 
-from .backends import BrokerBackend
+from .backends import BrokerBackend, MemoryBroker
 from .binding import binding_class
 from .deployment import websocket_deployment_messages
 from .frames import MAX_INBOUND_BYTES
@@ -513,6 +513,31 @@ def _broker_class(broker: Mapping[str, object]) -> type[BrokerBackend] | None:
         return None
 
 
+@register(NEXT, deploy=True)
+def check_shared_broker(*args, **kwargs) -> list[CheckMessage]:
+    """Warn when the broker keeps topics inside one process (`next.W149`)."""
+    broker = scope_value("REALTIME", "BROKER")
+    if not isinstance(broker, Mapping):
+        return []
+    backend_class = _broker_class(broker)
+    if backend_class is None or not issubclass(backend_class, MemoryBroker):
+        return []
+    return [
+        DjangoWarning(
+            f"{backend_class.__qualname__} keeps topics inside one process, so with "
+            "several workers or hosts a publish reaches only the subscribers of the "
+            "publishing process.",
+            hint=(
+                "Select next.realtime.RedisBroker or another shared BrokerBackend, "
+                "or list next.W149 in SILENCED_SYSTEM_CHECKS for a single-process "
+                "deployment."
+            ),
+            obj=settings,
+            id="next.W149",
+        )
+    ]
+
+
 @register(NEXT)
 def check_upstream_handlers(*args, **kwargs) -> list[CheckMessage]:
     """Report handlers that can never match and pairs two handlers claim."""
@@ -611,6 +636,7 @@ def _default_access(view: Callable[..., object]) -> bool:
 
 __all__ = [
     "check_realtime_settings",
+    "check_shared_broker",
     "check_ticket_introspection",
     "check_upstream_handlers",
 ]

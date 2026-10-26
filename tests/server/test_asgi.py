@@ -74,6 +74,14 @@ class TestAsgiServer:
         UvicornServer().run(named_app, port=1)
         assert calls == [(named_app, {"port": 1})]
 
+    def test_the_uvicorn_server_maps_the_socket_options(self, monkeypatch) -> None:
+        calls: list[tuple[object, dict[str, object]]] = []
+        fake = ModuleType("uvicorn")
+        fake.run = lambda app, **options: calls.append((app, options))
+        monkeypatch.setitem(sys.modules, "uvicorn", fake)
+        UvicornServer().run(named_app, max_frame_bytes=1024, ping_interval=None)
+        assert calls == [(named_app, {"ws_max_size": 1024, "ws_ping_interval": None})]
+
     def test_builds_the_server_the_setting_names(self, monkeypatch) -> None:
         monkeypatch.setitem(sys.modules, "uvicorn", None)
         with override_next_settings(DEV_SERVER=f"{__name__}.RecordingServer"):
@@ -150,8 +158,8 @@ class TestServe:
                 {
                     "host": "::1",
                     "port": 8001,
-                    "ws_max_size": MAX_INBOUND_BYTES,
-                    "ws_ping_interval": None,
+                    "max_frame_bytes": MAX_INBOUND_BYTES,
+                    "ping_interval": None,
                 },
             )
         ]
@@ -163,13 +171,13 @@ class TestServe:
             named_app,
             host="::1",
             port=8001,
-            options={"ws_max_size": 1024, "log_level": "debug"},
+            options={"max_frame_bytes": 1024, "log_level": "debug"},
         )
         assert calls[0][1] == {
             "host": "::1",
             "port": 8001,
-            "ws_max_size": 1024,
-            "ws_ping_interval": None,
+            "max_frame_bytes": 1024,
+            "ping_interval": None,
             "log_level": "debug",
         }
 

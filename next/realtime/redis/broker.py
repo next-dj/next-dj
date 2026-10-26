@@ -676,24 +676,29 @@ class RedisBroker(BrokerBackend, PresenceWindow):
     async def aclose(self) -> None:
         """Announce the pending snapshots and close this loop's client on the loop.
 
-        The clients of other loops and the sync pool are then released as `close` does.
+        The clients of other loops close on theirs, the sync pool in a worker thread.
         """
         await self.presence_schedule.aclose(self.aannounce_presence)
         with self._async_lock:
             entry = self._async_clients.pop(asyncio.get_running_loop(), None)
         if entry is not None:
             await entry.client.aclose()
-        self._release()
+        self._release_loops()
+        await asyncio.to_thread(self._redis.close)
 
     def _release(self) -> None:
         """Schedule the close of the clients on live loops and close the sync pool."""
+        self._release_loops()
+        self._redis.close()
+
+    def _release_loops(self) -> None:
+        """Schedule the close of every async client on its loop, if it still runs."""
         with self._async_lock:
             clients = list(self._async_clients.items())
             self._async_clients.clear()
         for loop, entry in clients:
             if loop.is_running():
                 asyncio.run_coroutine_threadsafe(entry.client.aclose(), loop)
-        self._redis.close()
 
     def forget_clients(self) -> None:
         """Drop the async clients a forked child inherits from its parent's loops."""

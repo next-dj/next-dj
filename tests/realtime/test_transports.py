@@ -16,6 +16,13 @@ def unmounted() -> Iterator[None]:
         yield
 
 
+@pytest.fixture()
+def unwarned() -> Iterator[None]:
+    transports._unmounted_warned.clear()
+    yield
+    transports._unmounted_warned.clear()
+
+
 @pytest.mark.parametrize(
     ("mounted", "requested", "expected"),
     [
@@ -122,3 +129,37 @@ def test_override_websocket_mount_sets_the_flag_and_restores_it(
         assert ("ws" in transports.active_transports()) is (inside == "yes")
         transports.announce_websocket()
     assert ("ws" in transports.active_transports()) is (before == "yes")
+
+
+@pytest.mark.usefixtures("unwarned")
+def test_an_offered_ws_without_a_mounted_socket_warns_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING", "next.realtime.transports"):
+        transports.warn_unmounted_websocket()
+        transports.warn_unmounted_websocket()
+    (record,) = caplog.records
+    assert record.name == "next.realtime.transports"
+    assert "lists 'ws' but this process mounts no WebSocket" in record.getMessage()
+
+
+@pytest.mark.usefixtures("unwarned")
+def test_an_offered_ws_with_a_mounted_socket_stays_quiet(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    transports.announce_websocket()
+    with caplog.at_level("WARNING", "next.realtime.transports"):
+        transports.warn_unmounted_websocket()
+    assert caplog.records == []
+    assert not transports._unmounted_warned.is_set()
+
+
+@pytest.mark.usefixtures("unwarned")
+def test_a_second_thread_that_lost_the_race_stays_quiet(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with transports._warning_lock:
+        transports._unmounted_warned.set()
+    with caplog.at_level("WARNING", "next.realtime.transports"):
+        transports.warn_unmounted_websocket()
+    assert caplog.records == []

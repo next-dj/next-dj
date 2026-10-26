@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Iterator, Mapping
 
 import fakeredis
@@ -20,7 +21,10 @@ _CACHE_SESSIONS = "django.contrib.sessions.backends.cache"
 
 @pytest.fixture()
 def fake_redis(monkeypatch: pytest.MonkeyPatch) -> fakeredis.FakeRedis:
-    """Route every Redis client the broker builds to one in-process fake server."""
+    """Route every Redis client the broker builds to one in-process fake server.
+
+    The Redis rows measure client and Lua script overhead on an emulator, not a server.
+    """
     server = fakeredis.FakeServer()
     sync = fakeredis.FakeRedis(server=server, decode_responses=True)
     monkeypatch.setattr(redis.Redis, "from_url", lambda _url, **_kwargs: sync)
@@ -51,7 +55,7 @@ def memory_broker(replay: Mapping[str, object] | None) -> MemoryBroker:
 def redis_broker(
     fake_redis: fakeredis.FakeRedis, replay: Mapping[str, object] | None
 ) -> Iterator[RedisBroker]:
-    """Build a Redis broker backed by the fake server."""
+    """Build a Redis broker on fakeredis, so its rows time the emulator, not Redis."""
     broker = RedisBroker({"OPTIONS": {"URL": "redis://fake/1"}}, replay=replay)
     yield broker
     broker.close()
@@ -59,7 +63,7 @@ def redis_broker(
 
 @pytest.fixture(params=["memory", "redis"])
 def any_broker(request: pytest.FixtureRequest) -> MemoryBroker | RedisBroker:
-    """Provide each broker implementation in turn."""
+    """Provide each broker in turn, the Redis one on the in-process fakeredis server."""
     return request.getfixturevalue(f"{request.param}_broker")
 
 
@@ -67,7 +71,7 @@ def any_broker(request: pytest.FixtureRequest) -> MemoryBroker | RedisBroker:
 def configured_broker(
     request: pytest.FixtureRequest,
 ) -> Iterator[MemoryBroker | RedisBroker]:
-    """Select the broker through ``REALTIME.BROKER`` and yield the built instance."""
+    """Select the broker through ``REALTIME.BROKER``, the Redis one on fakeredis."""
     if request.param == "redis":
         request.getfixturevalue("fake_redis")
         config = {"BACKEND": _REDIS_BACKEND, "OPTIONS": {"URL": "redis://fake/1"}}
@@ -75,6 +79,15 @@ def configured_broker(
         config = {"BACKEND": _MEMORY_BACKEND}
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"BROKER": config}}):
         yield broker_manager.get()
+
+
+@pytest.fixture()
+def bench_loop() -> Iterator[asyncio.AbstractEventLoop]:
+    """Own one event loop a bench drives with `run_until_complete` between rounds."""
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.run_until_complete(loop.shutdown_default_executor())
+    loop.close()
 
 
 @pytest.fixture()

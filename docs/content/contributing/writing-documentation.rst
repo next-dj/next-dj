@@ -214,14 +214,26 @@ The table below lists the public package, its primary narrative page, and its re
      - :doc:`/content/topics/partial-rendering/index`
      - :doc:`/content/ref/partial`
    * - ``next.realtime``
-     - :doc:`/content/topics/realtime`, :doc:`/content/howto/stream-live-updates-with-sse`, :doc:`/content/howto/stream-over-websockets`
+     - :doc:`/content/topics/realtime`, :doc:`/content/howto/stream-live-updates-with-sse`, :doc:`/content/howto/stream-over-websockets`, :doc:`/content/howto/fan-out-across-processes-with-redis`, :doc:`/content/howto/bind-tickets-to-your-own-identity`, :doc:`/content/howto/deliver-events-durably`, :doc:`/content/howto/count-down-to-a-server-deadline`, :doc:`/content/howto/write-a-broker-backend`
      - :doc:`/content/ref/realtime`
    * - ``next.seo``
      - :doc:`/content/topics/seo/quickstart`, :doc:`/content/topics/seo/sitemaps`, :doc:`/content/topics/seo/robots`
      - :doc:`/content/ref/seo`
+   * - ``next.site``
+     - :doc:`/content/topics/seo/site`
+     - :doc:`/content/ref/site`
+   * - ``next.scripts``, ``next.consent``
+     - :doc:`/content/topics/scripts/index`
+     - :doc:`/content/ref/scripts`
+   * - ``next.csrf``
+     - :doc:`/content/security/csrf-and-forms`
+     - :doc:`/content/ref/csrf`
    * - ``next.deps``
      - :doc:`/content/topics/dependency-injection`
      - :doc:`/content/ref/deps`
+   * - ``next.permissions``
+     - :doc:`/content/topics/permissions`
+     - :doc:`/content/ref/permissions`
    * - ``next.conf``
      - :doc:`/content/topics/project-layout`
      - :doc:`/content/ref/conf`, :doc:`/content/ref/settings`
@@ -231,6 +243,9 @@ The table below lists the public package, its primary narrative page, and its re
    * - ``next.testing``
      - :doc:`/content/topics/testing`
      - :doc:`/content/ref/testing`
+   * - ``next.management``
+     - :doc:`/content/topics/testing`
+     - :doc:`/content/ref/management`
    * - ``next.apps``
      - :doc:`/content/internals/overview`
      - :doc:`/content/ref/apps`

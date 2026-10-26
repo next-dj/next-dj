@@ -12,7 +12,7 @@ from .binding import ticket_binding
 from .errors import InvalidTicketError, InvalidTopicError
 from .messages import MAX_TOPICS, validate_topics
 from .tickets import MAX_REFERENCE_LENGTH, issue_ticket
-from .transports import active_transports
+from .transports import active_transports, warn_unmounted_websocket
 
 
 type Callback = tuple[object, object]
@@ -61,6 +61,7 @@ def _reply(
         return HTTPStatus.METHOD_NOT_ALLOWED, {"error": "method"}, {"Allow": "GET"}
     if "ws" not in active_transports():
         return HTTPStatus.NOT_ACCEPTABLE, {"error": "transport_unavailable"}, {}
+    warn_unmounted_websocket()
     selected = _grantable_topics(topics)
     if selected is None:
         return HTTPStatus.BAD_REQUEST, {"error": "invalid_topics"}, {}

@@ -6,7 +6,8 @@ Fan out realtime updates across processes with Redis
 Problem
 -------
 
-The in-memory realtime broker cannot deliver a publication from one worker to a subscriber connected to another worker.
+The default ``MemoryBroker`` keeps topics, sequence numbers, the replay log, and presence inside one process.
+A deployment with several workers or hosts needs a broker every process shares, or a publication from one worker never reaches a subscriber connected to another.
 
 Solution
 --------
@@ -41,21 +42,110 @@ Run ``manage.py check`` in each deployment environment before serving requests.
 The check validates the configured backend and its options.
 It reports a missing Redis library as ``next.E179`` and a negative, infinite, or non-numeric ``HEALTH_CHECK_INTERVAL`` as ``next.E186``.
 It reports a ``CLIENT`` option that is not a mapping of keyword names, or that turns ``decode_responses`` off, as ``next.E187``.
+It reports an empty or non-string ``URL`` as ``next.E213``.
+
+.. _howto-realtime-several-workers:
+
+Run several workers or hosts
+----------------------------
+
+One process
+~~~~~~~~~~~
+
+``MemoryBroker`` is the default because one process needs nothing more.
+``manage.py runserver``, a single uvicorn process, or gunicorn with one worker holds every stream and every socket itself, so a publication reaches all of them.
+The state lives in memory, so a restart empties the replay log and presence, and reconnecting clients resynchronise from ``hello``.
+
+Several workers
+~~~~~~~~~~~~~~~
+
+A ``--workers`` value above one starts that many processes, and each builds a ``MemoryBroker`` of its own.
+Every connection lands on one of them, and a ``publish()`` in one worker reaches only the SSE streams and WebSockets that worker holds.
+Each worker also keeps its own counters, replay log, and presence, so presence counts the attendees of one worker and a reconnect that lands on another worker cannot replay what it missed.
+A process outside the server, such as a task queue worker or a cron job, reaches no subscriber at all, and ``manage.py realtime publish`` refuses ``MemoryBroker`` for that reason.
+The framework does not count the server processes, so it never switches brokers on its own.
+
+The usual multi-process commands all need the shared broker.
+
+.. code-block:: bash
+   :caption: shell
+
+   uv run gunicorn config.asgi:application -k uvicorn_worker.UvicornWorker --workers 4
+   uv run uvicorn config.asgi:application --workers 4
+   uv run gunicorn config.wsgi:application --workers 4
+
+The first two serve ASGI, with WebSocket and async SSE streams.
+``uvicorn_worker.UvicornWorker`` comes from the ``uvicorn-worker`` package, which replaces the deprecated ``uvicorn.workers`` module.
+The third serves WSGI with gunicorn sync workers, where SSE is the only transport and each open stream holds one worker, or one thread under ``--threads``, for its whole lifetime, see :ref:`deployment-wsgi-asgi`.
+The worker counts are placeholders to size from a load run, see :ref:`deployment-capacity`.
+
+Select ``RedisBroker`` in the settings every worker and every publishing process reads.
+The settings in `Solution`_ list every option, and a minimal entry needs only the URL.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   import os
+
+   NEXT_FRAMEWORK = {
+       "REALTIME": {
+           "BROKER": {
+               "BACKEND": "next.realtime.RedisBroker",
+               "OPTIONS": {"URL": os.environ["REDIS_URL"]},
+           },
+       },
+   }
+
+All processes of one project share the same ``URL`` and ``PREFIX``, since a different prefix puts them on separate topics.
+Two projects on one Redis database keep apart by giving each its own ``PREFIX``.
+
+Preload and fork
+~~~~~~~~~~~~~~~~
+
+``gunicorn --preload`` imports the application in the master process before it forks the workers.
+The broker is built on the first publish or subscription, not at import, so each worker normally builds its own.
+A ``RedisBroker`` the master already built stays usable in the children.
+The redis-py pool opens fresh connections in a forked process, and the framework drops the event-loop clients, the presence scheduler, and the handler thread pool a child inherits.
+``--preload`` therefore needs no extra setting.
+It does not make ``MemoryBroker`` shared either, because each child receives a copy of the master memory that diverges at the fork.
+
+Several hosts
+~~~~~~~~~~~~~
+
+Several hosts or containers behind a load balancer point at the same Redis ``URL`` and ``PREFIX``.
+Fan-out needs no sticky sessions, because Redis carries every publication to the subscribers of every process.
+The topic counters, the replay log, and presence live in Redis as well.
+A client that reconnects to another host therefore resumes from the same ``seq``, replays from the same log, and sees the same attendance.
+The hosts also share ``SECRET_KEY`` and the session store, as any Django deployment behind a load balancer does, because a WebSocket ticket and its session recheck may reach another host than the page that issued them.
+See :ref:`deployment-capacity` for the Redis pool and connection limits across processes.
+
+Check the deployment
+~~~~~~~~~~~~~~~~~~~~
+
+``manage.py check --deploy`` reports ``next.W149`` while the configured broker is ``MemoryBroker`` or a subclass of it.
+A plain ``manage.py check`` stays quiet, because a development server runs one process.
+A deployment that truly runs one process silences the warning.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   SILENCED_SYSTEM_CHECKS = ["next.W149"]
+
+A project whose infrastructure offers another shared message system, such as NATS or a database queue, writes a ``BrokerBackend`` for it instead of running Redis, see :doc:`/content/howto/write-a-broker-backend`.
+The warning clears for any broker that is not ``MemoryBroker``.
 
 Tune the Redis client
 ---------------------
 
 ``OPTIONS['CLIENT']`` is a mapping of keyword arguments that the broker passes whole to the Redis ``from_url`` call, for the synchronous and the asynchronous client alike.
 The broker builds the options in three layers.
-``health_check_interval`` from ``HEALTH_CHECK_INTERVAL`` and ``socket_keepalive`` set to ``True`` come first, then ``CLIENT`` overrides them, and ``decode_responses`` is forced to ``True`` last because the broker reads text.
+``health_check_interval`` from ``HEALTH_CHECK_INTERVAL`` and ``socket_keepalive`` set to ``True`` come first, then ``CLIENT`` overrides them, and ``decode_responses`` stays ``True``, since a ``CLIENT`` that turns it off is refused as ``next.E187``.
 Use it for ``max_connections``, timeouts, or TLS settings.
 
 Every open WebSocket and SSE stream holds one Redis connection for its subscription.
 The default pool size is the one redis-py picks.
 A process with many open streams raises ``max_connections`` before it runs out.
-An exhausted pool ends the affected stream with ``BrokerConnectionError``, so the browser reconnects.
-The default pool raises ``MaxConnectionsError``, which the broker also logs as a warning on the ``next.realtime.redis.broker`` logger, a child of ``next.realtime.redis``.
-A ``BlockingConnectionPool`` raises a plain ``ConnectionError`` once its timeout runs out, so its exhaustion logs no such warning.
+An exhausted pool ends the stream with ``BrokerConnectionError``, see :ref:`ref-realtime` for the warning it logs.
 
 Secure the broker
 -----------------

@@ -144,7 +144,7 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` element events fire
    * - ``partial:error``
      - A ``PartialError``, discriminated on ``kind`` over ``network``, ``http``, ``parse``, ``op``, ``asset``, ``csrf``, and ``undelivered``.
        ``csrf`` means a deferred token could not be fetched, so the mutation never left.
-       ``undelivered`` carries ``url`` and ``reason`` and means a mutation sent over the WebSocket reached the server but its reply never came back, so the action may have run and the page should re-read its state rather than resend.
+       ``undelivered`` carries ``url`` and ``reason`` and means a mutation sent over the WebSocket may have run on the server but its reply never came back, so the page should re-read its state rather than resend.
        For the ``reason`` ``http_only`` the runtime reloads the page right after the event, and a listener runs before the reload but cannot cancel it.
        Each cause carries only its own fields, so a listener branches on ``kind`` before reading ``status`` or ``body``.
    * - ``partial:layer-opened``
@@ -152,7 +152,7 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` element events fire
    * - ``partial:layer-accepted``
      - ``{result}``, the accept result the closing side passed.
    * - ``partial:layer-dismissed``
-     - ``{reason}``, one of ``escape``, ``backdrop``, ``dialog``, ``popstate``, ``dismissed``, or the text a server dismiss carried.
+     - ``{reason}``, one of ``escape``, ``backdrop``, ``popstate``, ``dismissed``, the ``returnValue`` of a ``<form method="dialog">`` close or ``dialog`` when it is empty, or the text a server dismiss carried.
    * - ``next:stream-state``
      - ``{url, transport, state, code?}``, on every change of a stream connection, see `Connection state events`_.
    * - ``next:stream-gap``
@@ -167,7 +167,7 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` element events fire
    * - ``next:script-loaded``, ``next:script-error``
      - ``{name}`` and ``{name, url}``, for a script of the manifest.
 
-:doc:`client-extras` describes the last four of the consent and script events.
+:doc:`client-extras` describes the navigation, consent, and script events in the last four rows.
 One rule covers the channels.
 Every event of the table fires on the document as a ``CustomEvent`` and on the ``Next.on`` bus with the same payload, except ``ready`` and ``context-updated``, which reach the bus alone because the store is a runtime concern rather than a DOM one.
 The rule holds for every source, so a ``partial:error`` from the wire, the asset loader, a stream, a chunk that failed to load, or a lazy CSRF fetch reaches both channels as the ``op`` kind of the apply pipeline does.
@@ -318,6 +318,7 @@ The partial surface
        ``on(topic, name, callback)`` adds a topic listener, and ``meta()`` reads metadata during synchronous delivery.
        ``send(topic, name, data, options?)`` sends an upstream event over the WebSocket.
        ``now()`` and ``offset()`` estimate server time.
+       ``scan``, ``remember``, ``forget``, ``size``, and ``_reset`` are the seams the apply pipeline and the harness drive, not application API.
        See `The stream API`_ and :doc:`/content/topics/realtime`.
    * - ``mount(nodes: readonly Element[])``
      - ``void``
@@ -492,7 +493,7 @@ Every change of a connection's state fires ``next:stream-state`` with ``url``, `
 The first ``connecting`` of a connection names the configured transport.
 A connection is ``connecting`` while it opens and again while a dropped socket or ``EventSource`` waits to reconnect, ``open`` once the transport is up, and ``closed`` when it is paused, removed, or ended.
 A page loaded in a hidden tab starts paused and opens its connections on the first show.
-A paused WebSocket reports ``closed`` at once but stays open until the tunneled requests and acknowledged ``up`` frames sent on it before the pause get their replies, each within its own timeout.
+A paused or removed WebSocket reports ``closed`` at once but stays open until the tunneled requests and acknowledged ``up`` frames sent on it before then get their replies, each within its own timeout.
 While it drains, it answers the server ping and ignores every other frame except those replies.
 A ``next-end`` frame, sent when the topic authorizer denies a grant, is terminal, so the connection closes for good, its ``next:stream-state`` detail also carries the frame's ``code``, and ``partial:error`` of kind ``network`` fires with that code as its ``error``.
 Only an SSE stream carries ``next-end``.
@@ -508,10 +509,13 @@ WebSocket negotiation
 With WebSockets enabled, the client first sends the stream URL a GET with ``X-Next-Transport: ws`` and ``Accept: application/json``.
 It opens the socket only for a ``200`` reply whose content type is ``application/json``.
 A ``401``, ``403``, or ``406`` reply, any other content type, no reply within five seconds, or three failed attempts in a row sends that connection to SSE until a resume reopens it, and a ``4403`` close sends its stream URL to SSE for the life of the page.
-The server sends an ``error`` frame before a ``4400``, ``4401``, or ``4403`` close, and the client decides by the close code, while an ``auth`` frame that no close follows within five seconds counts as a ``4401``.
+A grant whose ``protocol`` is not ``2``, whose ``ticket`` is empty, or whose ``url`` leaves the page origin sends the connection to SSE the same way.
+
+The server sends an ``error`` frame before a ``4400``, ``4401``, ``4403``, or ``4429`` close, and the client decides by the close code, while an ``error`` frame of code ``auth`` that no close follows within five seconds counts as a ``4401``.
 A ``4401`` close drops the connection once and negotiates again for a fresh ticket, since two negotiations on a first visit can issue different anonymous identities and the browser keeps the cookie of the last.
 A second ``4401`` with no ``hello`` between the two sends the connection to SSE until a resume reopens it, and each ``hello`` earns one such retry.
 The retry does not count as a failed attempt.
+Any other close, such as ``1013`` when the server's broker subscription ends, ``1011``, ``4400``, or ``4429``, counts as a failed attempt and reconnects with backoff.
 
 The failure count resets only after a socket stayed open for one heartbeat past its ``hello``, so a server that drops every socket right after ``hello`` still ends on SSE.
 A socket that sends no ``hello`` within five seconds of opening is closed as a transient failure.
@@ -559,9 +563,9 @@ An inline validation mutates nothing, so in each of these cases it resends over 
 The attribute contract
 ~~~~~~~~~~~~~~~~~~~~~~
 
-The runtime reads one attribute namespace, ``data-next-*``, and twenty-one names make up the whole contract.
+The runtime reads one attribute namespace, ``data-next-*``, and twenty-two names make up the whole contract.
 They fall into authorship groups, and a reader needs the split to know which are theirs to write.
-The server writes six of them from ``{% zone %}`` and ``{% form %}`` alone, the runtime writes four as styling and state hooks, and seven are hand-authored on plain markup.
+The server writes eight of them alone, six from ``{% zone %}`` and ``{% form %}``, one from ``{% #consented %}``, and one on every script tag it renders from ``scripts.py``, the runtime writes four as styling and state hooks, and six are hand-authored on plain markup.
 The remaining four carry both authors, written by a ``{% form %}`` parameter on a form and by hand on the link or control that drives the same behaviour without one.
 ``{% form %}`` reserves the ``data-next-`` prefix and raises a template syntax error on a hand-written one, so a hand-authored attribute goes on a wrapper, a link, or a submit control rather than on the tag.
 
@@ -623,6 +627,12 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
    * - ``data-next-accepted``
      - Hand-written on the opening ``<a>``
      - The layer stack, which re-fetches the named zone of the host page once the layer closes with a result.
+   * - ``data-next-consented``
+     - ``{% #consented %}``
+     - The scripts chunk, which swaps the inert ``<template>`` carrying it for its body once the named category is granted.
+   * - ``data-next-script``
+     - The server, on every script tag of ``scripts.py``
+     - The scripts chunk, which finds a script tag the server already rendered by it so the tag is not inserted twice and ``load()`` resolves on it.
    * - ``data-next-busy``
      - The runtime
      - The layer stack writes it on the opener and the target zone for the span of a request, alongside ``aria-busy="true"``, and reads it back as the double-click guard.
@@ -640,7 +650,7 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
        It marks one toast item and its value is the variant.
 
 :doc:`/content/topics/partial-rendering/reference` records the accepted values, the closed value sets, and the dev warnings each attribute earns.
-:doc:`template-tags` records the ``{% zone %}`` and ``{% form %}`` parameters that compile to the ten names a tag can write.
+:doc:`template-tags` records the ``{% zone %}``, ``{% form %}``, and ``{% #consented %}`` parameters that compile to the eleven names a template tag can write, and :doc:`/content/topics/scripts/declaring` covers the script tags that carry ``data-next-script``.
 
 Exported types
 ~~~~~~~~~~~~~~

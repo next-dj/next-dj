@@ -188,8 +188,9 @@ Both load a page zone into a layer.
 Foreign-zone authorization
 --------------------------
 
-A modal body and a page-addressed zone ride ``X-Next-Origin`` so the server resolves the host page that owns the zone.
-The server authorizes the page behind every zone render whose own view did not run, the one the handler names and the one the origin names alike, raising ``ForeignPageNotAuthorizedError`` when that page may not be rendered for the requester.
+The layer runtime sends ``X-Next-Origin`` with the host page on the modal body fetch, the accepted re-GET, and a mutation fired inside the layer, and a handler reads it back through ``resolve_partial_origin`` to address a zone of that page with ``morph(page=, url_kwargs=)``.
+``morph(zone=)`` always renders against the posted form origin and ignores the header.
+The server authorizes the page behind every zone render whose own view did not run, the one the handler names and the one the posted form origin names alike, raising ``ForeignPageNotAuthorizedError`` when that page may not be rendered for the requester.
 This keeps a page-addressed render in a response from reaching a zone the requester has no claim on.
 A foreign page whose module fails to import, or that sits under a ``page.py`` that fails to import, raises ``PageModuleImportError`` from the same authorization step in production too, rather than turning the in-flight request into a 404 and dropping the patches already queued for it.
 

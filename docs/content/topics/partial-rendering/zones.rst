@@ -6,7 +6,7 @@ Zones
 A zone is an optimisation, not required markup.
 Partial rendering works on pages with no zones at all.
 This page explains what a zone buys and what the default costs without one.
-It then covers zone assets, polling, the wrapper element, the keying rule for dynamic list rows, and the placements the checks reject.
+It then covers zone assets, lazy zones, polling, the wrapper element, the keying rule for dynamic list rows, and the placements the checks reject.
 The JSON examples on this page omit the empty ``assets`` and ``form`` keys, see :doc:`reference`.
 
 .. contents::
@@ -69,8 +69,7 @@ The envelope addresses the zone by name and the client morphs it in place.
      "form": {"uid": "ab12cd34", "valid": false, "errors": {"title": ["…"]}}
    }
 
-A zone GET and a ``morph(zone=)`` from a handler can follow the morph with a ``context`` op.
-It carries the page's ``serialize=True`` values, so the envelope above has a second op when the page publishes any.
+A page with ``serialize=True`` providers adds a ``context`` op after the morph, see `The context patch`_.
 
 The network payload shrinks from a page to a zone, and the server render shrinks with it.
 Reach for a zone when a page is heavy, when a form sits among expensive siblings, or when the response size matters.
@@ -101,11 +100,24 @@ A ``morph(zone=)`` from a handler ships it the same way.
 The :doc:`extending` page covers both.
 A zone declared inside the body of another renders as part of that body, so a standalone render of the outer zone also runs the context functions bound to the inner one.
 
-.. note::
+Lazy zones
+----------
 
-   The HTML a patch carries is inserted as written and is not sanitized.
-   The client strips ``<script>`` elements and nothing else.
-   Authorization lives on the page that renders the zone, so escape user content before it reaches a patch.
+A zone defers its body when the tag carries ``lazy="load"`` or ``lazy="revealed"``.
+The full render paints only the ``{% placeholder %}`` branch, and the wrapper carries ``data-next-lazy`` with the trigger.
+
+.. code-block:: jinja
+   :caption: a lazy zone
+
+   {% zone "audit-table" lazy="revealed" %}
+     {% include "audit/table.djx" %}
+   {% placeholder %}
+     <p>Loading the audit log</p>
+   {% endzone %}
+
+The ``load`` zones of a page arrive in one batched zone GET once the runtime is ready, and a ``revealed`` zone waits until it enters the viewport.
+The placeholder branch is required, and ``next.E064`` reports a lazy zone without one.
+The body of a lazy zone never renders on the full page, yet its providers still run there unless they guard themselves with ``zone_requested``, see :doc:`scenarios`.
 
 Poll a zone on an interval
 --------------------------
@@ -217,7 +229,7 @@ Zone rules the checks enforce
 
 A few placements break a standalone zone render, and a system check catches each one before a request reaches it.
 A standalone render does not see loop variables, the condition that gated a block, or a permission decision.
-At runtime every zone these rules report counts as undeclared for every user.
+At runtime every zone the ``next.E062``, ``next.E063``, and ``next.E161`` rules report counts as undeclared for every user.
 A standalone request answers 400 ``unknown zone`` and ``Patches.morph_zone`` raises ``UnknownZoneError``.
 
 .. list-table::

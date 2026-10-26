@@ -93,6 +93,7 @@ A ``morph(page=…)`` re-runs the foreign page's body resolution before renderin
 A ``morph(zone=…)`` against the posted origin re-runs the body resolution of that page the same way.
 The page's guards and redirects are honoured either way, so the list never travels in the response when the page would have denied the caller on its own request.
 A denial surfaces as ``ForeignPageNotAuthorizedError`` rather than an empty morph.
+A foreign page whose body resolves dynamically raises ``DynamicForeignPageError``, since it has no template to render the zone from.
 
 One round trip closes everything at once.
 
@@ -112,7 +113,7 @@ The comparison
      - Accept and re-GET
      - Page-addressed morph through ``page=``
    * - Round trips after the last step
-     - Two: the close, then the list GET
+     - Two, the close and then the list GET
      - One
    * - Coupling
      - ``done`` does not know the list, the opening link binds them

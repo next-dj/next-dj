@@ -54,10 +54,11 @@ ASGI server
 ~~~~~~~~~~~
 
 ``serve_development(server, *, host, port, static, announce=None, options=None)`` builds the app that ``ASGI_APPLICATION`` names, or ``next.realtime.application`` over Django's handler, calls ``announce`` once the app is mounted, and runs it on ``server``.
-``server`` is any object with the ``run(app, **options)`` method of ``ASGIServer``, which the uvicorn module satisfies.
+``server`` is any object with the ``run(app, **options)`` method of ``ASGIServer``, such as ``UvicornServer()``, and it receives the server-neutral socket options alongside ``host`` and ``port``.
 ``asgi_server()`` builds the class ``NEXT_FRAMEWORK['DEV_SERVER']`` names, ``UvicornServer`` by default, and answers ``None`` when that default finds no uvicorn.
 ``server_class(path)`` returns the class a path names and raises :exc:`~django.core.exceptions.ImproperlyConfigured` for a path that does not import or names no ``ASGIServer`` class.
-``server_options()`` returns the uvicorn options the realtime socket needs, and the ``options`` argument overrides them.
+``server_options()`` returns the server-neutral ``max_frame_bytes`` and ``ping_interval`` options the realtime socket needs, and the ``options`` argument overrides them.
+``UvicornServer`` maps them onto uvicorn's ``ws_max_size`` and ``ws_ping_interval``, and another ``ASGIServer`` maps them onto its own server or ignores them.
 A CLI of a project uses these to serve the same app as ``manage.py runserver`` without a Django command.
 
 .. automodule:: next.server.asgi

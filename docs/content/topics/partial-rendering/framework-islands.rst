@@ -34,6 +34,7 @@ A React island
 .. code-block:: javascript
    :caption: a React root that mounts on appear and unmounts on remove
 
+   import { createElement } from "react";
    import { createRoot } from "react-dom/client";
    import { Chart } from "./Chart.js";
 
@@ -42,7 +43,7 @@ A React island
    Next.partial.onMount("[data-chart]", (el) => {
      if (roots.has(el)) return;
      const root = createRoot(el);
-     root.render(Chart(JSON.parse(el.dataset.props ?? "{}")));
+     root.render(createElement(Chart, JSON.parse(el.dataset.props ?? "{}")));
      roots.set(el, root);
    });
 

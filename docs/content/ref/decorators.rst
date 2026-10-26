@@ -134,7 +134,8 @@ DForm
    :no-index:
 
 Type annotation that injects a form instance during action dispatch.
-``DForm[MyForm]`` names the class directly and ``DForm["MyForm"]`` names it as a string, which keeps a page free of an import it needs for nothing else.
+``DForm[MyForm]`` names the class directly.
+A string argument such as ``DForm["MyForm"]`` resolves only when ``MyForm`` is defined or imported in the same module, so it saves no import.
 
 DObject
 ~~~~~~~

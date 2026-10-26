@@ -17,13 +17,13 @@ from django.urls import path as route
 from django.utils import translation
 
 from next.forms.transport import ACTION_KIND, DISPATCHED_SCOPE_KEY, DispatchMark
-from next.realtime import application
+from next.realtime import application, tunnel as tunnel_module
 from next.realtime.asgi import WebSocketApp
 from next.realtime.backends import MemoryBroker
 from next.realtime.frames import Refusal, Reply, Request
 from next.realtime.limits import SocketLimits, TunnelLimits
 from next.realtime.socket import Handshake, TopicSocket
-from next.realtime.tunnel import DjangoTunnel, TunnelHints
+from next.realtime.tunnel import DjangoTunnel, TunnelHints, drain
 from next.testing.realtime import MemoryPort, SocketTicket, override_websocket_mount
 from tests.support.realtime import issue_session_ticket, websocket_scope
 
@@ -1078,3 +1078,58 @@ def test_disabled_tunnel_reports_no_origin(caplog: pytest.LogCaptureFixture) -> 
     with caplog.at_level(logging.WARNING, logger="next.realtime.asgi"):
         WebSocketApp(origins=["https://partner.example"])
     assert not [record for record in caplog.records if "W146" in record.getMessage()]
+
+
+class TestDrain:
+    """Lifespan shutdown waits for the apps that closed sockets left running."""
+
+    def test_waits_for_a_running_app(self) -> None:
+        finished: list[bool] = []
+
+        async def app() -> None:
+            await asyncio.sleep(0.01)
+            finished.append(True)
+
+        async def scenario() -> None:
+            task = asyncio.ensure_future(app())
+            tunnel_module._LIVE.add(task)
+            try:
+                await drain()
+            finally:
+                tunnel_module._LIVE.discard(task)
+
+        asyncio.run(scenario())
+        assert finished == [True]
+
+    def test_gives_up_after_the_tunnel_timeout(self) -> None:
+        async def scenario() -> bool:
+            task = asyncio.ensure_future(asyncio.sleep(5))
+            tunnel_module._LIVE.add(task)
+            try:
+                with override_settings(
+                    NEXT_FRAMEWORK={"REALTIME": {"TUNNEL": {"TIMEOUT": 0.01}}}
+                ):
+                    await drain()
+                return task.done()
+            finally:
+                tunnel_module._LIVE.discard(task)
+                task.cancel()
+
+        assert asyncio.run(scenario()) is False
+
+    def test_a_disabled_tunnel_waits_for_nothing(self) -> None:
+        async def scenario() -> bool:
+            task = asyncio.ensure_future(asyncio.sleep(5))
+            tunnel_module._LIVE.add(task)
+            try:
+                with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TUNNEL": False}}):
+                    await drain()
+                return task.done()
+            finally:
+                tunnel_module._LIVE.discard(task)
+                task.cancel()
+
+        assert asyncio.run(scenario()) is False
+
+    def test_no_running_app_returns_at_once(self) -> None:
+        asyncio.run(drain())

@@ -116,8 +116,9 @@ Realtime streams
 
 Review these when the project publishes ``TopicStream`` updates.
 
-- Use a shared broker across workers.
-  ``MemoryBroker`` is process-local, so choose ``RedisBroker``.
+- Use a shared broker across workers and hosts.
+  ``MemoryBroker`` is process-local, so choose ``RedisBroker`` or another shared ``BrokerBackend``, see :ref:`howto-realtime-several-workers`.
+  ``manage.py check --deploy`` reports ``next.W149`` while the broker is ``MemoryBroker``, and a deployment that truly runs one process lists it in ``SILENCED_SYSTEM_CHECKS``.
 - Under ASGI, keep the proxy upgrade enabled when a ``WebSocketApp`` is mounted and set read and send timeouts above the intended connection lifetime.
   Keep the SSE ``HEARTBEAT_SECONDS`` option of the partial backend and ``NEXT_FRAMEWORK["REALTIME"]["HEARTBEAT"]``, 25 seconds each by default, below the shortest intermediary idle timeout.
 - Keep SSE available as the fallback transport and verify a route through the production proxy.
@@ -146,7 +147,7 @@ Database
 Server
 ------
 
-- Pick WSGI or ASGI based on whether the project uses streaming responses, SSE, or websockets.
+- Pick WSGI or ASGI based on whether the project uses streaming responses, SSE, or WebSockets.
 - Configure the worker count based on the expected concurrency and a load run, see :ref:`deployment-capacity`.
 - Set the worker timeout above the slowest expected handler.
 
@@ -173,9 +174,9 @@ Run the framework system checks as part of CI and as part of the deployment scri
 
 A clean exit is required for the deployment to proceed.
 
-The ``--deploy`` flag is what matters here, because six framework checks are registered as deployment checks and a plain ``check`` never runs them.
+The ``--deploy`` flag is what matters here, because seven framework checks are registered as deployment checks and a plain ``check`` never runs them.
 A plain ``check`` already reports ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile, and the deployment run repeats them.
-``next.W083`` reports an asset version that never moves, ``next.W090`` a client runtime bundle or lazy chunk the static files storage cannot serve, ``next.W110`` and ``next.W122`` a missing ``SITE["URL"]``, ``next.W111`` a closed site that still publishes crawler documents, ``next.W118`` a script over plain HTTP, and ``next.W119`` an insecure consent cookie.
+``next.W083`` reports an asset version that never moves, ``next.W090`` a client runtime bundle or lazy chunk the static files storage cannot serve, ``next.W110`` and ``next.W122`` a missing ``SITE["URL"]``, ``next.W111`` a closed site that still publishes crawler documents, ``next.W118`` a script over plain HTTP, ``next.W119`` an insecure consent cookie, and ``next.W149`` a process-local realtime broker.
 
 See :ref:`ref-system-checks` for the full catalog.
 

@@ -4,6 +4,7 @@ from types import ModuleType
 
 import pytest
 from django.core.checks import Error
+from django.core.checks.registry import registry as check_registry
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.test import override_settings
@@ -14,12 +15,16 @@ from next.realtime import (
     SessionBinding,
     SignedCookieBinding,
     TicketBinding,
-    TicketIntrospectionView,
 )
-from next.realtime.checks import check_realtime_settings, check_ticket_introspection
+from next.realtime.checks import (
+    check_realtime_settings,
+    check_shared_broker,
+    check_ticket_introspection,
+)
 from next.realtime.manager import BrokerManager
 from next.realtime.replay import MAX_SIZE, MAX_TTL
 from next.realtime.transports import active_transports
+from next.realtime.views import TicketIntrospectionView
 
 
 class CustomBroker(MemoryBroker):
@@ -461,6 +466,49 @@ def test_check_reports_a_null_broker_the_manager_refuses() -> None:
 def test_check_skips_options_of_an_unresolvable_backend() -> None:
     config = {"REALTIME": {"BROKER": {"BACKEND": "x.Y", "OPTIONS": {"ANY": 1}}}}
     assert _ids(NEXT_FRAMEWORK=config) == {"next.E184"}
+
+
+def _shared_broker_ids(backend: object) -> set[str]:
+    config = {"REALTIME": {"BROKER": {"BACKEND": backend}}}
+    with override_settings(NEXT_FRAMEWORK=config):
+        return {message.id for message in check_shared_broker()}
+
+
+def test_check_w149_is_a_deployment_check() -> None:
+    assert check_shared_broker in check_registry.get_checks(
+        include_deployment_checks=True
+    )
+    assert check_shared_broker not in check_registry.get_checks()
+
+
+def test_check_w149_warns_the_default_memory_broker() -> None:
+    with override_settings(NEXT_FRAMEWORK={}):
+        [warning] = check_shared_broker()
+    assert warning.id == "next.W149"
+    assert "MemoryBroker keeps topics inside one process" in warning.msg
+    assert "next.realtime.RedisBroker" in str(warning.hint)
+    assert "SILENCED_SYSTEM_CHECKS" in str(warning.hint)
+
+
+def test_check_w149_warns_a_memory_broker_subclass() -> None:
+    backend = "tests.realtime.test_checks.CustomBroker"
+    with override_settings(
+        NEXT_FRAMEWORK={"REALTIME": {"BROKER": {"BACKEND": backend}}}
+    ):
+        [warning] = check_shared_broker()
+    assert warning.msg.startswith("CustomBroker keeps topics")
+
+
+@pytest.mark.parametrize(
+    "backend", ["next.realtime.RedisBroker", "next.realtime.BrokerBackend", "x.Y"]
+)
+def test_check_w149_stays_quiet_without_a_memory_broker(backend: str) -> None:
+    assert _shared_broker_ids(backend) == set()
+
+
+def test_check_w149_leaves_a_non_mapping_broker_to_e177() -> None:
+    with override_settings(NEXT_FRAMEWORK={"REALTIME": {"BROKER": None}}):
+        assert check_shared_broker() == []
 
 
 class HeaderTokenView(TicketIntrospectionView):
